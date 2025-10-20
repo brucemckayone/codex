@@ -1,0 +1,27 @@
+name = "queue-consumer"
+main = "src/index.ts"
+account_id = "your_account_id"
+workers_dev = true
+compatibility_date = "2025-10-19"
+
+kv_namespaces = [
+  { binding = "SESSIONS", id = "${SESSIONS_KV_ID}" }
+]
+
+r2_buckets = [
+  { binding = "BUCKET_NAME", bucket_name = "${BUCKET_NAME}" }
+]
+
+queues = [
+  { binding = "TASK_QUEUE", queue_name = "${TASK_QUEUE_NAME}" },
+  { binding = "NOTIFICATIONS", queue_name = "${NOTIFICATIONS_QUEUE_NAME}" }
+]
+
+[vars]
+PG_CONNECTION_STRING = "${PG_CONNECTION_STRING}"
+
+[env.dev]
+envPath = "../../.env.dev"
+
+[env.production]
+envPath = "../../.env.prod"

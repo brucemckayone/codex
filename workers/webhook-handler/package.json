@@ -1,0 +1,22 @@
+{
+  "name": "webhook-handler",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "MF_ENV=dev wrangler dev --local",
+    "dev:prod": "MF_ENV=prod wrangler dev --local",
+    "deploy": "wrangler publish --env production"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.18.3",
+  "devDependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "@types/node": "^24.8.1",
+    "miniflare": "^4.20251008.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.43.0"
+  }
+}

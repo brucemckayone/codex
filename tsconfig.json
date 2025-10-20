@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "lib": ["ESNext", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      // optional aliases if you add them later
+      // "@workers/*": ["workers/*/src"],
+      // "@apps/*": ["apps/*/src"],
+      // "@packages/*": ["packages/*/src"]
+    }
+  },
+  "include": ["workers/**/*", "apps/**/*", "packages/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

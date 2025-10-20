@@ -1,0 +1,115 @@
+# Codex Infrastructure - Cloudflare + Neon Architecture
+
+...@../../d2/theme
+
+direction: right
+
+# Frontend
+frontend: Frontend {
+  style.fill: ${color-nextjs}
+  style.stroke: ${stroke-nextjs}
+
+  pages: Cloudflare Pages {
+    sveltekit: SvelteKit SSR
+    api_routes: API Routes (+server.ts)
+  }
+}
+
+# Cloudflare Services
+cloudflare: Cloudflare Services {
+  style.fill: ${color-volume}
+  style.stroke: ${stroke-volume}
+
+  workers: Workers {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+
+    queue_consumer: Queue Consumer
+    webhook_handler: Webhook Handler
+  }
+
+  kv: KV Store {
+    style.fill: ${color-redis}
+    style.stroke: ${stroke-redis}
+
+    sessions: Sessions
+    cache: Cache
+  }
+
+  queues: Queues {
+    style.fill: ${color-redis}
+    style.stroke: ${stroke-redis}
+
+    video_queue: Video Processing
+    notify_queue: Notifications
+  }
+
+  r2: R2 Storage {
+    style.fill: ${color-r2}
+    style.stroke: ${stroke-r2}
+
+    videos: Videos (original)
+    transcoded: Transcoded outputs
+    thumbs: Thumbnails
+  }
+}
+
+# Database
+database: Database {
+  style.fill: ${color-postgres}
+  style.stroke: ${stroke-postgres}
+
+  neon: Neon Postgres {
+    users: Users
+    content: Content metadata
+    purchases: Purchases
+    sessions_db: Sessions (BetterAuth)
+  }
+}
+
+# External Services
+external: External Services {
+  style.fill: ${color-caddy}
+  style.stroke: ${stroke-caddy}
+
+  runpod: RunPod {
+    style.fill: ${color-go-sub}
+    style.stroke: ${stroke-go-sub}
+    gpu: GPU Processing
+  }
+
+  stripe: Stripe {
+    style.fill: ${color-stripe}
+    style.stroke: ${stroke-stripe}
+    payments: Payments API
+  }
+
+  resend: Resend {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+    email: Transactional Email
+  }
+}
+
+# User
+user: Customer {
+  style.fill: ${color-internet}
+  style.stroke: ${stroke-internet}
+  browser: Web Browser
+}
+
+# Connections
+user.browser -> frontend.pages: HTTPS {style.stroke: ${arrow-https}}
+frontend.pages.api_routes -> database.neon: SQL {style.stroke: ${arrow-sql}}
+frontend.pages.api_routes -> cloudflare.kv: Read/Write {style.stroke: ${arrow-cache}}
+frontend.pages.api_routes -> cloudflare.queues: Enqueue jobs {style.stroke: ${arrow-cache}}
+frontend.pages.api_routes -> cloudflare.r2: Upload/Download {style.stroke: ${arrow-file}}
+
+cloudflare.queues.video_queue -> cloudflare.workers.queue_consumer: Consume {style.stroke: ${arrow-cache}}
+cloudflare.workers.queue_consumer -> external.runpod.gpu: Dispatch job {style.stroke: ${arrow-external}}
+external.runpod.gpu -> cloudflare.workers.webhook_handler: Webhook callback {style.stroke: ${arrow-external}}
+cloudflare.workers.webhook_handler -> database.neon: Update metadata {style.stroke: ${arrow-sql}}
+cloudflare.workers.webhook_handler -> cloudflare.r2: Store outputs {style.stroke: ${arrow-file}}
+
+frontend.pages.api_routes -> external.stripe.payments: Process payment {style.stroke: ${arrow-external}}
+frontend.pages.api_routes -> external.resend.email: Send email {style.stroke: ${arrow-external}}

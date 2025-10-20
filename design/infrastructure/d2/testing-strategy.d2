@@ -1,0 +1,106 @@
+# Testing Strategy - Testing Pyramid
+
+...@../../d2/theme
+
+direction: down
+
+pyramid: Testing Pyramid {
+  style.fill: ${color-volume}
+  style.stroke: ${stroke-volume}
+
+  e2e: E2E Tests {
+    style.fill: ${color-redis}
+    style.stroke: ${stroke-redis}
+
+    playwright: Playwright
+    critical_flows: Critical user flows
+    cost: Slow, high confidence
+  }
+
+  integration: Integration Tests {
+    style.fill: ${color-r2}
+    style.stroke: ${stroke-r2}
+
+    vitest_int: Vitest
+    api_routes: API routes + DB
+    cost_int: Medium speed
+  }
+
+  unit: Unit Tests {
+    style.fill: ${color-caddy}
+    style.stroke: ${stroke-caddy}
+
+    vitest_unit: Vitest
+    components: Components, utils, logic
+    workers: Worker tests (Miniflare)
+    cost_unit: Fast, isolated
+  }
+}
+
+frameworks: Test Frameworks {
+  style.fill: ${color-nextjs}
+  style.stroke: ${stroke-nextjs}
+
+  sveltekit_tests: SvelteKit {
+    style.fill: ${color-nextjs-sub}
+    style.stroke: ${stroke-nextjs-sub}
+    vitest: Vitest + Testing Library
+    supertest: Supertest (API)
+  }
+
+  worker_tests: Workers {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+    vitest_w: Vitest
+    miniflare: Miniflare (runtime sim)
+  }
+
+  e2e_tests: E2E {
+    style.fill: ${color-go-sub}
+    style.stroke: ${stroke-go-sub}
+    pw: Playwright
+    browsers: Chromium
+  }
+}
+
+test_db: Test Database {
+  style.fill: ${color-postgres}
+  style.stroke: ${stroke-postgres}
+
+  docker_test: Docker Compose\n(test.yml)
+  postgres_test: Postgres :5433
+  neon_proxy_test: Neon Proxy :4445
+  tmpfs: In-memory for speed
+}
+
+mocks: External Service Mocks {
+  style.fill: ${color-stripe}
+  style.stroke: ${stroke-stripe}
+
+  stripe_mock: Stripe (vi.fn) {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+  }
+  runpod_mock: RunPod (vi.fn) {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+  }
+  resend_mock: Resend (vi.fn) {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+  }
+  r2_mock: R2 (Miniflare) {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+  }
+}
+
+# Connections
+pyramid.e2e -> frameworks.e2e_tests: {style.stroke: ${arrow-cache}}
+pyramid.integration -> frameworks.sveltekit_tests: {style.stroke: ${arrow-http}}
+pyramid.unit -> frameworks.sveltekit_tests: {style.stroke: ${arrow-http}}
+pyramid.unit -> frameworks.worker_tests: {style.stroke: ${arrow-http}}
+
+frameworks.sveltekit_tests -> test_db: {style.stroke: ${arrow-sql}}
+frameworks.sveltekit_tests -> mocks: {style.stroke: ${arrow-external}}
+frameworks.worker_tests -> mocks: {style.stroke: ${arrow-external}}

@@ -1,0 +1,94 @@
+# Environment Management Diagram
+
+...@../../d2/theme
+
+direction: down
+
+local: Local Development {
+  style.fill: ${color-caddy}
+  style.stroke: ${stroke-caddy}
+
+  docker: Docker Compose {
+    style.fill: ${color-volume}
+    style.stroke: ${stroke-volume}
+
+    postgres: Postgres 17\n:5432 {
+      style.fill: ${color-postgres}
+      style.stroke: ${stroke-postgres}
+    }
+    neon_proxy: Neon HTTP Proxy\n:4444 {
+      style.fill: ${color-go}
+      style.stroke: ${stroke-go}
+    }
+  }
+
+  sveltekit: SvelteKit\n:5173 {
+    style.fill: ${color-nextjs}
+    style.stroke: ${stroke-nextjs}
+  }
+
+  miniflare: Miniflare Workers {
+    style.fill: ${color-r2}
+    style.stroke: ${stroke-r2}
+
+    queue_consumer: queue-consumer {
+      style.fill: ${color-go}
+      style.stroke: ${stroke-go}
+    }
+    webhook_handler: webhook-handler {
+      style.fill: ${color-go}
+      style.stroke: ${stroke-go}
+    }
+  }
+}
+
+staging: Staging {
+  style.fill: ${color-go-sub}
+  style.stroke: ${stroke-go-sub}
+
+  pages_staging: Cloudflare Pages\n(develop branch) {
+    style.fill: ${color-nextjs}
+    style.stroke: ${stroke-nextjs}
+  }
+
+  neon_staging: Neon Staging Branch {
+    style.fill: ${color-postgres}
+    style.stroke: ${stroke-postgres}
+  }
+
+  workers_staging: Cloudflare Workers\n(test mode) {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+  }
+}
+
+production: Production {
+  style.fill: ${color-redis}
+  style.stroke: ${stroke-redis}
+
+  pages_prod: Cloudflare Pages\n(main branch) {
+    style.fill: ${color-nextjs}
+    style.stroke: ${stroke-nextjs}
+  }
+
+  neon_prod: Neon Production {
+    style.fill: ${color-postgres}
+    style.stroke: ${stroke-postgres}
+  }
+
+  workers_prod: Cloudflare Workers\n(production) {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+  }
+}
+
+# Connections
+local.sveltekit -> local.docker.neon_proxy: HTTP {style.stroke: ${arrow-http}}
+local.docker.neon_proxy -> local.docker.postgres: SQL {style.stroke: ${arrow-sql}}
+local.sveltekit -> local.miniflare: Queue jobs {style.stroke: ${arrow-cache}}
+
+staging.pages_staging -> staging.neon_staging: SQL {style.stroke: ${arrow-sql}}
+staging.pages_staging -> staging.workers_staging: Queue {style.stroke: ${arrow-cache}}
+
+production.pages_prod -> production.neon_prod: SQL {style.stroke: ${arrow-sql}}
+production.pages_prod -> production.workers_prod: Queue {style.stroke: ${arrow-cache}}

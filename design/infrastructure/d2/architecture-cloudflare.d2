@@ -1,0 +1,253 @@
+# Codex Platform - Cloudflare-First Architecture
+...@../../design/d2/theme
+
+direction: down
+
+title: Codex Platform - Cloudflare-First Architecture {
+  near: top-center
+  shape: text
+  style: {
+    font-size: 26
+    bold: true
+    underline: true
+  }
+}
+
+# User/Client
+user: User/Browser {
+  shape: person
+  style.fill: "#E3F2FD"
+  style.stroke: ${stroke-internet}
+}
+
+# Cloudflare Edge Network
+cloudflare: Cloudflare Edge Network {
+  style.stroke-dash: 3
+  style.fill: "#FFF8E1"
+  style.stroke: "#FFA726"
+
+  pages: Pages\nNext.js Hosting {
+    shape: rectangle
+    style.fill: ${color-nextjs}
+    style.stroke: ${stroke-nextjs}
+
+    features: "• SSR/SSG\n• Global CDN\n• Auto HTTPS" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+
+  workers: Workers\nAPI & Functions {
+    shape: rectangle
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+
+    apis: "• Auth\n• Uploads\n• Payments\n• Job Dispatch" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+
+  d1: D1\nSQL Database {
+    shape: cylinder
+    style.fill: ${color-postgres}
+    style.stroke: ${stroke-postgres}
+
+    data: "• Users\n• Content\n• Purchases\n• Access Control" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+
+  kv: KV\nKey-Value Store {
+    shape: cylinder
+    style.fill: "#E1BEE7"
+    style.stroke: "#BA68C8"
+
+    data: "• Sessions\n• Cache\n• Rate Limits\n• Tokens" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+
+  queues: Queues\nMessage Queue {
+    shape: queue
+    style.fill: "#FFECB3"
+    style.stroke: "#FFB74D"
+
+    jobs: "• Video Processing\n• Email Sends\n• Notifications" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+
+  r2: R2\nObject Storage {
+    shape: cylinder
+    style.fill: ${color-r2}
+    style.stroke: ${stroke-r2}
+
+    files: "• Original Videos\n• Transcoded Videos\n• Thumbnails\n• Subtitles" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+}
+
+# External Services
+external_services: External Services {
+  style.stroke-dash: 3
+  style.fill: "#FAFAFA"
+  style.stroke: "#9E9E9E"
+
+  runpod: RunPod Serverless\nGPU Processing {
+    shape: rectangle
+    style.fill: "#C5E1A5"
+    style.stroke: "#7CB342"
+
+    processing: "• Video Transcoding\n• Thumbnail Gen\n• Audio Transcription\n• Subtitle Gen" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+
+  stripe: Stripe\nPayments {
+    shape: rectangle
+    style.fill: ${color-stripe}
+    style.stroke: ${stroke-stripe}
+
+    features: "Payment Processing" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+
+  resend: Resend\nEmail {
+    shape: rectangle
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+
+    features: "Transactional Emails" {
+      shape: text
+      style.font-size: 10
+    }
+  }
+}
+
+# Connections - User to Cloudflare
+user -> cloudflare.pages: "HTTPS\nBrowse Site" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 3
+}
+
+user -> cloudflare.workers: "HTTPS\nAPI Calls" {
+  style.stroke: ${arrow-http}
+  style.stroke-width: 2
+}
+
+# Pages to Workers
+cloudflare.pages -> cloudflare.workers: "Function\nCalls" {
+  style.stroke: ${arrow-http}
+  style.stroke-width: 2
+}
+
+# Workers to Data Stores
+cloudflare.workers -> cloudflare.d1: "SQL\nQueries" {
+  style.stroke: ${arrow-sql}
+  style.stroke-width: 2
+}
+
+cloudflare.workers -> cloudflare.kv: "Read/Write\nSessions" {
+  style.stroke: ${arrow-cache}
+  style.stroke-width: 2
+}
+
+cloudflare.workers -> cloudflare.r2: "Upload/Download\nFiles" {
+  style.stroke: ${arrow-file}
+  style.stroke-width: 2
+}
+
+cloudflare.workers -> cloudflare.queues: "Send\nJobs" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 2
+}
+
+# Queue Consumer
+cloudflare.queues -> cloudflare.workers: "Consume\nJobs" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+# Workers to External Services
+cloudflare.workers -> external_services.runpod: "Dispatch\nGPU Jobs" {
+  style.stroke: "#7CB342"
+  style.stroke-width: 2
+}
+
+cloudflare.workers -> external_services.stripe: "Payment\nIntents" {
+  style.stroke: "#BA68C8"
+  style.stroke-width: 2
+}
+
+cloudflare.workers -> external_services.resend: "Send\nEmails" {
+  style.stroke: "#FF8A65"
+  style.stroke-width: 2
+}
+
+# External Services Back to Workers
+external_services.runpod -> cloudflare.workers: "Webhook\nCallback" {
+  style.stroke: "#7CB342"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+external_services.runpod -> cloudflare.r2: "Upload\nProcessed Files" {
+  style.stroke: "#FFB74D"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+external_services.stripe -> cloudflare.workers: "Webhook\nEvents" {
+  style.stroke: "#BA68C8"
+  style.stroke-width: 2
+  style.stroke-dash: 5
+}
+
+# Processing Flow Box
+processing_flow: Video Processing Flow {
+  near: bottom-left
+  style.fill: "#E8F5E9"
+  style.stroke: "#81C784"
+  style.stroke-dash: 3
+
+  flow: "1. Upload to R2\n2. Queue job\n3. RunPod processes\n4. Upload outputs to R2\n5. Webhook updates D1" {
+    shape: text
+    style.font-size: 11
+  }
+}
+
+# Cost Info
+cost_info: Estimated Monthly Cost {
+  near: bottom-right
+  style.fill: "#FFF9C4"
+  style.stroke: "#FFB74D"
+  style.stroke-dash: 3
+
+  breakdown: "Cloudflare: USD 20-50\nRunPod: USD 10-30\nStripe: Variable\nTotal: ~USD 30-80" {
+    shape: text
+    style.font-size: 11
+  }
+}
+
+# Benefits Box
+benefits: Why Cloudflare-First? {
+  near: top-right
+  style.fill: "#E1F5FE"
+  style.stroke: "#81D4FA"
+  style.stroke-dash: 3
+
+  reasons: "• Global Edge Network\n• No Cold Starts\n• R2 Zero Egress Fees\n• Integrated Stack\n• Low Cost\n• Simple Deploy" {
+    shape: text
+    style.font-size: 11
+  }
+}

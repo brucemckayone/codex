@@ -1,0 +1,114 @@
+# CI/CD Pipeline Diagram
+
+...@../../d2/theme
+
+direction: right
+
+git: Git Push {
+  style.fill: ${color-internet}
+  style.stroke: ${stroke-internet}
+}
+
+github: GitHub Actions {
+  style.fill: ${color-nextjs}
+  style.stroke: ${stroke-nextjs}
+
+  typecheck: Type Check {
+    style.fill: ${color-nextjs-sub}
+    style.stroke: ${stroke-nextjs-sub}
+  }
+  lint: Lint {
+    style.fill: ${color-nextjs-sub}
+    style.stroke: ${stroke-nextjs-sub}
+  }
+  unit: Unit Tests {
+    style.fill: ${color-nextjs-sub}
+    style.stroke: ${stroke-nextjs-sub}
+  }
+  integration: Integration Tests {
+    style.fill: ${color-nextjs-sub}
+    style.stroke: ${stroke-nextjs-sub}
+  }
+  e2e: E2E Tests {
+    style.fill: ${color-nextjs-sub}
+    style.stroke: ${stroke-nextjs-sub}
+  }
+}
+
+branch: Branch Strategy {
+  style.fill: ${color-volume}
+  style.stroke: ${stroke-volume}
+
+  feature: feature/* → Preview {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+  }
+  develop: develop → Staging {
+    style.fill: ${color-go-sub}
+    style.stroke: ${stroke-go-sub}
+  }
+  main: main → Production {
+    style.fill: ${color-redis}
+    style.stroke: ${stroke-redis}
+  }
+}
+
+cloudflare: Cloudflare Pages {
+  style.fill: ${color-r2}
+  style.stroke: ${stroke-r2}
+
+  preview: Preview Deploy\n(FREE) {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+  }
+  staging: Staging Deploy\n(FREE) {
+    style.fill: ${color-go-sub}
+    style.stroke: ${stroke-go-sub}
+  }
+  production: Production Deploy {
+    style.fill: ${color-redis}
+    style.stroke: ${stroke-redis}
+  }
+}
+
+workers: Deploy Workers {
+  style.fill: ${color-caddy}
+  style.stroke: ${stroke-caddy}
+
+  queue: queue-consumer {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+  }
+  webhook: webhook-handler {
+    style.fill: ${color-go}
+    style.stroke: ${stroke-go}
+  }
+}
+
+monitor: Monitoring {
+  style.fill: ${color-stripe}
+  style.stroke: ${stroke-stripe}
+
+  sentry: Sentry\n(FREE 5k/mo) {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+  }
+  cf_analytics: Cloudflare Analytics\n(FREE) {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+  }
+  uptime: UptimeRobot\n(FREE) {
+    style.fill: ${color-email}
+    style.stroke: ${stroke-email}
+  }
+}
+
+# Connections
+git -> github: {style.stroke: ${arrow-https}}
+github -> branch: {style.stroke: ${arrow-http}}
+branch.feature -> cloudflare.preview: {style.stroke: ${arrow-external}}
+branch.develop -> cloudflare.staging: {style.stroke: ${arrow-external}}
+branch.main -> cloudflare.production: {style.stroke: ${arrow-external}}
+branch.main -> workers: {style.stroke: ${arrow-external}}
+cloudflare -> monitor: {style.stroke: ${arrow-cache}}
+workers -> monitor: {style.stroke: ${arrow-cache}}

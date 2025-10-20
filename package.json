@@ -1,0 +1,30 @@
+{
+  "name": "Codex",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "dev:web": "pnpm --filter web dev",
+    "dev:worker": "pnpm --filter queue-consumer dev",
+    "dev": "concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm --filter web dev\" \"pnpm --filter queue-consumer dev\"",
+    "stop": "pnpm docker:down"
+  },
+  "devDependencies": {
+    "concurrently": "^7.0.0",
+    "dotenv": "^17.2.3",
+    "miniflare": "^4.20251008.0",
+    "pnpm": "^8.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "workers/*",
+    "packages/*"
+  ],
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.18.3"
+}
