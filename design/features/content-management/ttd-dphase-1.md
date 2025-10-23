@@ -2,13 +2,20 @@
 
 ## System Overview
 
-The content management system enables Platform Owners to upload, organize, and manage video and written content. Files are stored in Cloudflare R2 (S3-compatible object storage), metadata in Neon Postgres. Direct browser-to-R2 uploads via presigned URLs ensure scalability and performance.
+The content management system enables Creators to upload, organize, and manage video and audio content using a **media library pattern**. Media files (videos/audio) are stored separately from content metadata, allowing reusability across multiple content entities.
+
+**Key Architecture Decisions**:
+- **Media Library Pattern**: Separate `media_items` table for uploaded files, `content` table references media via `media_item_id`
+- **Bucket-Per-Creator**: Each creator gets isolated R2 buckets (`codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`)
+- **Reusable Resources**: PDF/workbooks stored once, attached to multiple content/offerings via `resource_attachments`
+- **Direct Upload Strategy**: Browser â†’ R2 uploads via presigned URLs (bypasses server)
+- **Transcoding Separation**: Video transcoding handled by separate Media Transcoding feature
 
 **Architecture**:
-- **Storage Layer**: Cloudflare R2 for media files
-- **Metadata Layer**: Neon Postgres for content records
-- **Upload Strategy**: Direct browser ’ R2 (bypasses server)
-- **Access Control**: Signed URLs for secure file access
+- **Storage Layer**: Cloudflare R2 (bucket-per-creator) for media files, resources, assets
+- **Metadata Layer**: Neon Postgres for `media_items`, `content`, `resources` records
+- **Upload Strategy**: Direct browser â†’ R2 (bypasses server, tracks progress)
+- **Access Control**: Presigned URLs for secure file access
 
 **Architecture Diagram**: See [Content Management Architecture](../_assets/content-architecture.png)
 
@@ -19,116 +26,107 @@ The content management system enables Platform Owners to upload, organize, and m
 ### Must Be Completed First
 
 1. **Drizzle ORM Setup** ([Infrastructure - Database Setup](../../infrastructure/DatabaseSetup.md))
-   - Database schema for content, categories, tags
-   - **Why**: Content metadata stored in database
+   - Database schema for `media_items`, `content`, `resources`, `resource_attachments`, `categories`, `tags`
+   - **Why**: All metadata stored in database
 
-2. **Cloudflare R2 Bucket** ([Infrastructure - Cloudflare Setup](../../infrastructure/CloudflareSetup.md))
-   - Bucket created: `codex-content`
+2. **Cloudflare R2 Buckets** ([Infrastructure - R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
+   - Bucket-per-creator architecture
+   - Platform bucket: `codex-platform`
+   - Creator buckets provisioned on signup: `codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`
    - R2 API credentials configured
-   - **Why**: Files stored in R2
+   - **Why**: Files stored in creator-specific R2 buckets
 
 3. **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md))
-   - `requireOwner()` guard implemented
-   - **Why**: Only Platform Owners can manage content
+   - `requireCreatorAccess()` guard implemented
+   - **Why**: Only Creators can manage their own content/media
+
+4. **Cloudflare Queue** ([Infrastructure - Cloudflare Setup](../../infrastructure/CloudflareSetup.md))
+   - `TRANSCODING_QUEUE` for video processing jobs
+   - **Why**: Enqueue transcoding after video upload
 
 ### Can Be Developed In Parallel
-- E-Commerce (content pricing integration happens later)
-- Content Access (access control uses content metadata)
+- **Media Transcoding** - Consumes media items uploaded by Content Management
+- **E-Commerce** - Content pricing integration happens later
+- **Content Access** - Access control uses content metadata
 
 ---
 
 ## Component List
 
-### 1. Content Service (`packages/web/src/lib/server/content/service.ts`)
+### 1. Media Items Service (`packages/web/src/lib/server/media/service.ts`)
 
-**Responsibility**: Business logic for content CRUD operations
+**Responsibility**: Manage media library (uploaded videos/audio)
 
 **Interface**:
 ```typescript
-export interface IContentService {
-  // Create
-  createContent(data: CreateContentInput): Promise<Content>;
+export interface IMediaItemsService {
+  // Create media item record after upload
+  createMediaItem(data: CreateMediaItemInput): Promise<MediaItem>;
 
   // Read
-  getContentById(id: string): Promise<Content | null>;
-  getContentList(filters: ContentFilters): Promise<PaginatedContent>;
+  getMediaItemById(id: string, ownerId: string): Promise<MediaItem | null>;
+  getMediaLibrary(ownerId: string, filters: MediaFilters): Promise<PaginatedMediaItems>;
 
   // Update
-  updateContent(id: string, data: UpdateContentInput): Promise<Content>;
-  publishContent(id: string): Promise<Content>;
-  archiveContent(id: string): Promise<Content>;
+  updateMediaItemStatus(id: string, status: MediaStatus): Promise<MediaItem>;
 
-  // Delete
-  deleteContent(id: string): Promise<void>;
+  // Delete (only if not referenced by content)
+  deleteMediaItem(id: string, ownerId: string): Promise<void>;
+}
+
+export type MediaStatus = 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed';
+
+export interface CreateMediaItemInput {
+  id: string;  // Generated upfront (UUID)
+  ownerId: string;
+  type: 'video' | 'audio';
+  bucketName: string;  // 'codex-media-{creatorId}'
+  fileKey: string;  // 'originals/{mediaId}/original.mp4'
+  filename: string;
+  fileSize: number;
+  mimeType: string;
 }
 ```
 
 **Implementation**:
 ```typescript
 import { db } from '$lib/server/db';
-import { content, categories, tags, contentTags } from '$lib/server/db/schema';
+import { mediaItems, content } from '$lib/server/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
-import { r2Service } from './r2';
 
-export class ContentService implements IContentService {
-  async createContent(data: CreateContentInput): Promise<Content> {
-    // 1. Validate category exists
-    const category = await db.query.categories.findFirst({
-      where: eq(categories.id, data.categoryId)
-    });
-
-    if (!category) {
-      throw new Error('Category not found');
-    }
-
-    // 2. Insert content record
-    const [newContent] = await db.insert(content).values({
-      title: data.title,
-      description: data.description,
-      contentType: data.contentType,
-      categoryId: data.categoryId,
-      price: data.price,
-      status: 'draft',
-      // File info (if uploaded)
-      fileKey: data.fileKey,  // R2 key
+export class MediaItemsService implements IMediaItemsService {
+  async createMediaItem(data: CreateMediaItemInput): Promise<MediaItem> {
+    // Insert media_items record
+    const [newMediaItem] = await db.insert(mediaItems).values({
+      id: data.id,
+      ownerId: data.ownerId,
+      type: data.type,
+      status: 'uploaded',  // Initial status
+      bucketName: data.bucketName,
+      fileKey: data.fileKey,
+      filename: data.filename,
       fileSize: data.fileSize,
-      fileMimeType: data.fileMimeType,
-      // Article content (if article type)
-      articleBody: data.articleBody
+      mimeType: data.mimeType
     }).returning();
 
-    // 3. Handle tags
-    if (data.tags && data.tags.length > 0) {
-      await this.addTags(newContent.id, data.tags);
-    }
-
-    return newContent;
+    return newMediaItem;
   }
 
-  async getContentList(filters: ContentFilters): Promise<PaginatedContent> {
-    const query = db.query.content.findMany({
+  async getMediaLibrary(ownerId: string, filters: MediaFilters): Promise<PaginatedMediaItems> {
+    const items = await db.query.mediaItems.findMany({
       where: and(
-        isNull(content.deletedAt),  // Exclude deleted
-        filters.status ? eq(content.status, filters.status) : undefined,
-        filters.categoryId ? eq(content.categoryId, filters.categoryId) : undefined
+        eq(mediaItems.ownerId, ownerId),
+        filters.type ? eq(mediaItems.type, filters.type) : undefined,
+        filters.status ? eq(mediaItems.status, filters.status) : undefined
       ),
-      with: {
-        category: true,
-        tags: {
-          with: {
-            tag: true
-          }
-        }
-      },
       limit: filters.limit || 20,
       offset: filters.offset || 0,
-      orderBy: (content, { desc }) => [desc(content.createdAt)]
+      orderBy: (mediaItems, { desc }) => [desc(mediaItems.createdAt)]
     });
 
-    const items = await query;
     const total = await db.select({ count: sql`count(*)` })
-      .from(content)
-      .where(isNull(content.deletedAt));
+      .from(mediaItems)
+      .where(eq(mediaItems.ownerId, ownerId));
 
     return {
       items,
@@ -138,20 +136,217 @@ export class ContentService implements IContentService {
     };
   }
 
-  async updateContent(id: string, data: UpdateContentInput): Promise<Content> {
+  async updateMediaItemStatus(id: string, status: MediaStatus): Promise<MediaItem> {
+    const [updated] = await db.update(mediaItems)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(mediaItems.id, id))
+      .returning();
+
+    return updated;
+  }
+
+  async deleteMediaItem(id: string, ownerId: string): Promise<void> {
+    // Check if media item is referenced by any content
+    const referencingContent = await db.query.content.findFirst({
+      where: and(
+        eq(content.mediaItemId, id),
+        isNull(content.deletedAt)
+      )
+    });
+
+    if (referencingContent) {
+      throw new Error('Cannot delete media item: referenced by content');
+    }
+
+    // Delete media item
+    await db.delete(mediaItems).where(
+      and(
+        eq(mediaItems.id, id),
+        eq(mediaItems.ownerId, ownerId)
+      )
+    );
+
+    // Note: R2 file deletion handled separately (manual cleanup or cron job)
+  }
+}
+
+export const mediaItemsService = new MediaItemsService();
+```
+
+---
+
+### 2. Content Service (`packages/web/src/lib/server/content/service.ts`)
+
+**Responsibility**: Business logic for content CRUD operations (references media library)
+
+**Interface**:
+```typescript
+export interface IContentService {
+  // Create content (references existing media item)
+  createContent(data: CreateContentInput, ownerId: string): Promise<Content>;
+
+  // Read
+  getContentById(id: string, ownerId: string): Promise<Content | null>;
+  getContentList(ownerId: string, filters: ContentFilters): Promise<PaginatedContent>;
+
+  // Update
+  updateContent(id: string, ownerId: string, data: UpdateContentInput): Promise<Content>;
+  publishContent(id: string, ownerId: string): Promise<Content>;
+  archiveContent(id: string, ownerId: string): Promise<Content>;
+
+  // Delete (soft delete)
+  deleteContent(id: string, ownerId: string): Promise<void>;
+}
+
+export interface CreateContentInput {
+  title: string;
+  description: string;
+  mediaItemId: string;  // Reference to media library
+  categoryId: string;
+  tags: string[];
+  price: number;
+  customThumbnailKey?: string;  // Optional custom thumbnail in R2
+}
+```
+
+**Implementation**:
+```typescript
+import { db } from '$lib/server/db';
+import { content, mediaItems, categories, tags, contentTags, resourceAttachments } from '$lib/server/db/schema';
+import { eq, and, isNull } from 'drizzle-orm';
+
+export class ContentService implements IContentService {
+  async createContent(data: CreateContentInput, ownerId: string): Promise<Content> {
+    // 1. Validate media item exists and belongs to creator
+    const mediaItem = await db.query.mediaItems.findFirst({
+      where: and(
+        eq(mediaItems.id, data.mediaItemId),
+        eq(mediaItems.ownerId, ownerId)
+      )
+    });
+
+    if (!mediaItem) {
+      throw new Error('Media item not found or access denied');
+    }
+
+    // 2. Validate media item is ready (transcoded)
+    if (mediaItem.type === 'video' && mediaItem.status !== 'ready') {
+      throw new Error('Media item not ready (still transcoding)');
+    }
+
+    // 3. Validate category exists
+    const category = await db.query.categories.findFirst({
+      where: eq(categories.id, data.categoryId)
+    });
+
+    if (!category) {
+      throw new Error('Category not found');
+    }
+
+    // 4. Insert content record
+    const [newContent] = await db.insert(content).values({
+      title: data.title,
+      description: data.description,
+      mediaItemId: data.mediaItemId,  // Reference to media library
+      categoryId: data.categoryId,
+      price: data.price,
+      status: 'draft',
+      ownerId,
+      customThumbnailKey: data.customThumbnailKey
+    }).returning();
+
+    // 5. Handle tags
+    if (data.tags && data.tags.length > 0) {
+      await this.addTags(newContent.id, data.tags);
+    }
+
+    return newContent;
+  }
+
+  async getContentList(ownerId: string, filters: ContentFilters): Promise<PaginatedContent> {
+    const items = await db.query.content.findMany({
+      where: and(
+        eq(content.ownerId, ownerId),
+        isNull(content.deletedAt),  // Exclude deleted
+        filters.status ? eq(content.status, filters.status) : undefined,
+        filters.categoryId ? eq(content.categoryId, filters.categoryId) : undefined
+      ),
+      with: {
+        mediaItem: true,  // Include media item details
+        category: true,
+        tags: {
+          with: {
+            tag: true
+          }
+        },
+        resourceAttachments: {  // Include attached resources
+          with: {
+            resource: true
+          }
+        }
+      },
+      limit: filters.limit || 20,
+      offset: filters.offset || 0,
+      orderBy: (content, { desc }) => [desc(content.createdAt)]
+    });
+
+    const total = await db.select({ count: sql`count(*)` })
+      .from(content)
+      .where(and(
+        eq(content.ownerId, ownerId),
+        isNull(content.deletedAt)
+      ));
+
+    return {
+      items,
+      total: Number(total[0].count),
+      page: Math.floor((filters.offset || 0) / (filters.limit || 20)) + 1,
+      pageSize: filters.limit || 20
+    };
+  }
+
+  async updateContent(id: string, ownerId: string, data: UpdateContentInput): Promise<Content> {
+    // Validate ownership
+    const existing = await db.query.content.findFirst({
+      where: and(
+        eq(content.id, id),
+        eq(content.ownerId, ownerId)
+      )
+    });
+
+    if (!existing) {
+      throw new Error('Content not found or access denied');
+    }
+
+    // If changing media item, validate new media item
+    if (data.mediaItemId && data.mediaItemId !== existing.mediaItemId) {
+      const mediaItem = await db.query.mediaItems.findFirst({
+        where: and(
+          eq(mediaItems.id, data.mediaItemId),
+          eq(mediaItems.ownerId, ownerId)
+        )
+      });
+
+      if (!mediaItem) {
+        throw new Error('Media item not found or access denied');
+      }
+    }
+
+    // Update content
     const [updated] = await db.update(content)
       .set({
         title: data.title,
         description: data.description,
+        mediaItemId: data.mediaItemId,
         price: data.price,
         categoryId: data.categoryId,
-        // If new file uploaded
-        fileKey: data.fileKey,
-        fileSize: data.fileSize,
-        fileMimeType: data.fileMimeType,
+        customThumbnailKey: data.customThumbnailKey,
         updatedAt: new Date()
       })
-      .where(eq(content.id, id))
+      .where(and(
+        eq(content.id, id),
+        eq(content.ownerId, ownerId)
+      ))
       .returning();
 
     // Update tags
@@ -159,28 +354,35 @@ export class ContentService implements IContentService {
       await this.replaceTags(id, data.tags);
     }
 
-    // If file replaced, delete old file from R2
-    if (data.oldFileKey && data.fileKey && data.oldFileKey !== data.fileKey) {
-      await r2Service.deleteFile(data.oldFileKey);
-    }
+    // If custom thumbnail replaced, old thumbnail should be deleted from R2
+    // (Handled by separate cleanup job or immediate R2Service call)
 
     return updated;
   }
 
-  async publishContent(id: string): Promise<Content> {
+  async publishContent(id: string, ownerId: string): Promise<Content> {
     const [published] = await db.update(content)
       .set({ status: 'published', publishedAt: new Date() })
-      .where(eq(content.id, id))
+      .where(and(
+        eq(content.id, id),
+        eq(content.ownerId, ownerId)
+      ))
       .returning();
 
     return published;
   }
 
-  async deleteContent(id: string): Promise<void> {
-    // Soft delete
+  async deleteContent(id: string, ownerId: string): Promise<void> {
+    // Soft delete content
     await db.update(content)
       .set({ deletedAt: new Date() })
-      .where(eq(content.id, id));
+      .where(and(
+        eq(content.id, id),
+        eq(content.ownerId, ownerId)
+      ));
+
+    // Note: Does NOT delete media item (may be used by other content)
+    // Note: Does NOT delete resource attachments (resources remain for other content)
   }
 
   // Tag management helpers
@@ -199,7 +401,7 @@ export class ContentService implements IContentService {
       await db.insert(contentTags).values({
         contentId,
         tagId: tag.id
-      });
+      }).onConflictDoNothing();  // Avoid duplicates
     }
   }
 
@@ -217,26 +419,194 @@ export const contentService = new ContentService();
 
 ---
 
-### 2. R2 Service (`packages/web/src/lib/server/content/r2.ts`)
+### 3. Resource Service (`packages/web/src/lib/server/resources/service.ts`)
 
-**Responsibility**: Interact with Cloudflare R2 for file storage
+**Responsibility**: Manage reusable resources (PDFs, workbooks) and attachments
+
+**Interface**:
+```typescript
+export interface IResourceService {
+  // Create resource record after upload
+  createResource(data: CreateResourceInput, ownerId: string): Promise<Resource>;
+
+  // Attach resource to content
+  attachResourceToContent(resourceId: string, contentId: string, label: string, ownerId: string): Promise<void>;
+
+  // Detach resource from content
+  detachResourceFromContent(resourceId: string, contentId: string, ownerId: string): Promise<void>;
+
+  // List resources owned by creator
+  getResourceLibrary(ownerId: string, filters: ResourceFilters): Promise<PaginatedResources>;
+
+  // Delete resource (only if not attached to any content)
+  deleteResource(id: string, ownerId: string): Promise<void>;
+}
+
+export interface CreateResourceInput {
+  id: string;  // Generated upfront (UUID)
+  ownerId: string;
+  bucketName: string;  // 'codex-resources-{creatorId}'
+  fileKey: string;  // '{resourceId}/filename.pdf'
+  filename: string;
+  fileSize: number;
+  mimeType: string;
+}
+```
 
 **Implementation**:
 ```typescript
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { db } from '$lib/server/db';
+import { resources, resourceAttachments, content } from '$lib/server/db/schema';
+import { eq, and } from 'drizzle-orm';
+
+export class ResourceService implements IResourceService {
+  async createResource(data: CreateResourceInput, ownerId: string): Promise<Resource> {
+    const [newResource] = await db.insert(resources).values({
+      id: data.id,
+      ownerId: data.ownerId,
+      bucketName: data.bucketName,
+      fileKey: data.fileKey,
+      filename: data.filename,
+      fileSize: data.fileSize,
+      mimeType: data.mimeType
+    }).returning();
+
+    return newResource;
+  }
+
+  async attachResourceToContent(
+    resourceId: string,
+    contentId: string,
+    label: string,
+    ownerId: string
+  ): Promise<void> {
+    // Validate resource ownership
+    const resource = await db.query.resources.findFirst({
+      where: and(
+        eq(resources.id, resourceId),
+        eq(resources.ownerId, ownerId)
+      )
+    });
+
+    if (!resource) {
+      throw new Error('Resource not found or access denied');
+    }
+
+    // Validate content ownership
+    const contentItem = await db.query.content.findFirst({
+      where: and(
+        eq(content.id, contentId),
+        eq(content.ownerId, ownerId)
+      )
+    });
+
+    if (!contentItem) {
+      throw new Error('Content not found or access denied');
+    }
+
+    // Create attachment
+    await db.insert(resourceAttachments).values({
+      resourceId,
+      entityType: 'content',
+      entityId: contentId,
+      attachmentLabel: label
+    }).onConflictDoNothing();  // Avoid duplicates
+  }
+
+  async detachResourceFromContent(
+    resourceId: string,
+    contentId: string,
+    ownerId: string
+  ): Promise<void> {
+    // Validate ownership via resource
+    const resource = await db.query.resources.findFirst({
+      where: and(
+        eq(resources.id, resourceId),
+        eq(resources.ownerId, ownerId)
+      )
+    });
+
+    if (!resource) {
+      throw new Error('Resource not found or access denied');
+    }
+
+    // Delete attachment
+    await db.delete(resourceAttachments).where(
+      and(
+        eq(resourceAttachments.resourceId, resourceId),
+        eq(resourceAttachments.entityType, 'content'),
+        eq(resourceAttachments.entityId, contentId)
+      )
+    );
+  }
+
+  async getResourceLibrary(ownerId: string, filters: ResourceFilters): Promise<PaginatedResources> {
+    const items = await db.query.resources.findMany({
+      where: eq(resources.ownerId, ownerId),
+      limit: filters.limit || 20,
+      offset: filters.offset || 0,
+      orderBy: (resources, { desc }) => [desc(resources.createdAt)]
+    });
+
+    const total = await db.select({ count: sql`count(*)` })
+      .from(resources)
+      .where(eq(resources.ownerId, ownerId));
+
+    return {
+      items,
+      total: Number(total[0].count),
+      page: Math.floor((filters.offset || 0) / (filters.limit || 20)) + 1,
+      pageSize: filters.limit || 20
+    };
+  }
+
+  async deleteResource(id: string, ownerId: string): Promise<void> {
+    // Check if resource is attached to any content
+    const attachments = await db.query.resourceAttachments.findFirst({
+      where: eq(resourceAttachments.resourceId, id)
+    });
+
+    if (attachments) {
+      throw new Error('Cannot delete resource: attached to content/offerings');
+    }
+
+    // Delete resource
+    await db.delete(resources).where(
+      and(
+        eq(resources.id, id),
+        eq(resources.ownerId, ownerId)
+      )
+    );
+
+    // Note: R2 file deletion handled separately
+  }
+}
+
+export const resourceService = new ResourceService();
+```
+
+---
+
+### 4. R2 Service (`packages/web/src/lib/server/r2/service.ts`)
+
+**Responsibility**: Interact with Cloudflare R2 for file storage (bucket-per-creator)
+
+**Implementation**:
+```typescript
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, CreateBucketCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export class R2Service {
   private client: S3Client;
-  private bucket: string;
+  private accountId: string;
 
   constructor() {
-    this.bucket = 'codex-content';
+    this.accountId = process.env.CLOUDFLARE_ACCOUNT_ID!;
 
     // R2 uses S3-compatible API
     this.client = new S3Client({
       region: 'auto',
-      endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      endpoint: `https://${this.accountId}.r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: process.env.R2_ACCESS_KEY_ID!,
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!
@@ -245,34 +615,68 @@ export class R2Service {
   }
 
   /**
-   * Generate presigned POST URL for direct browser upload
-   * Returns URL and fields for multipart form POST
+   * Provision creator buckets on signup
+   * Creates: codex-media-{creatorId}, codex-resources-{creatorId}, codex-assets-{creatorId}
    */
-  async getUploadUrl(fileKey: string, contentType: string): Promise<PresignedUploadUrl> {
+  async provisionCreatorBuckets(creatorId: string): Promise<void> {
+    const buckets = [
+      `codex-media-${creatorId}`,
+      `codex-resources-${creatorId}`,
+      `codex-assets-${creatorId}`
+    ];
+
+    for (const bucketName of buckets) {
+      try {
+        await this.client.send(new CreateBucketCommand({
+          Bucket: bucketName
+        }));
+
+        console.log(`Created bucket: ${bucketName}`);
+      } catch (error) {
+        // Bucket may already exist, ignore error
+        console.error(`Failed to create bucket ${bucketName}:`, error);
+      }
+    }
+
+    // Store bucket names in creator_buckets table (see Database Schema)
+  }
+
+  /**
+   * Generate presigned PUT URL for direct browser upload
+   */
+  async getUploadUrl(
+    bucketName: string,
+    fileKey: string,
+    contentType: string,
+    expiresIn: number = 900  // 15 minutes (large files)
+  ): Promise<PresignedUploadUrl> {
     const command = new PutObjectCommand({
-      Bucket: this.bucket,
+      Bucket: bucketName,
       Key: fileKey,
       ContentType: contentType
     });
 
-    const url = await getSignedUrl(this.client, command, {
-      expiresIn: 3600  // 1 hour
-    });
+    const url = await getSignedUrl(this.client, command, { expiresIn });
 
     return {
       url,
+      bucketName,
       fileKey,
-      expiresIn: 3600
+      expiresIn
     };
   }
 
   /**
    * Generate signed URL for downloading/viewing file
-   * Used for serving video/PDF to customers
+   * Used for serving video HLS streams, resources to customers
    */
-  async getDownloadUrl(fileKey: string, expiresIn: number = 3600): Promise<string> {
+  async getDownloadUrl(
+    bucketName: string,
+    fileKey: string,
+    expiresIn: number = 3600  // 1 hour
+  ): Promise<string> {
     const command = new GetObjectCommand({
-      Bucket: this.bucket,
+      Bucket: bucketName,
       Key: fileKey
     });
 
@@ -281,11 +685,10 @@ export class R2Service {
 
   /**
    * Delete file from R2
-   * Used when content deleted or file replaced
    */
-  async deleteFile(fileKey: string): Promise<void> {
+  async deleteFile(bucketName: string, fileKey: string): Promise<void> {
     const command = new DeleteObjectCommand({
-      Bucket: this.bucket,
+      Bucket: bucketName,
       Key: fileKey
     });
 
@@ -293,13 +696,21 @@ export class R2Service {
   }
 
   /**
-   * Generate unique file key for R2
-   * Format: content/{contentId}/{timestamp}-{filename}
+   * Generate unique file keys for R2
    */
-  generateFileKey(contentId: string, filename: string): string {
-    const timestamp = Date.now();
+  generateMediaKey(mediaId: string, filename: string): string {
     const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return `content/${contentId}/${timestamp}-${sanitized}`;
+    return `originals/${mediaId}/${sanitized}`;
+  }
+
+  generateResourceKey(resourceId: string, filename: string): string {
+    const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    return `${resourceId}/${sanitized}`;
+  }
+
+  generateThumbnailKey(entityType: string, entityId: string, filename: string): string {
+    const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    return `thumbnails/${entityType}/${entityId}/${sanitized}`;
   }
 }
 
@@ -308,149 +719,189 @@ export const r2Service = new R2Service();
 
 ---
 
-### 3. Upload Flow (Direct Browser ’ R2)
+### 5. Upload Flows
 
-**Responsibility**: Handle file uploads without passing through server
+#### A. Media Upload Flow (Video/Audio)
 
-**Backend API** (`packages/web/src/routes/api/content/upload-url/+server.ts`):
+**Backend API** (`packages/web/src/routes/api/media/presigned-upload/+server.ts`):
 ```typescript
-import { r2Service } from '$lib/server/content/r2';
-import { requireOwner } from '$lib/server/guards';
+import { r2Service } from '$lib/server/r2/service';
+import { requireCreatorAccess } from '$lib/server/guards';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-  // Require Platform Owner
-  requireOwner({ locals, url: request.url });
+  // Require Creator access
+  const user = requireCreatorAccess({ locals, url: request.url });
 
-  const { filename, contentType, contentId } = await request.json();
+  const { filename, contentType, mediaId } = await request.json();
 
   // Validate file type
   const allowedTypes = [
     'video/mp4',
     'video/webm',
-    'application/pdf',
-    'image/jpeg',
-    'image/png'
+    'video/quicktime',  // MOV
+    'audio/mpeg',       // MP3
+    'audio/mp4',        // M4A
+    'audio/wav'
   ];
 
   if (!allowedTypes.includes(contentType)) {
     return json({ error: 'Invalid file type' }, { status: 400 });
   }
 
-  // Generate unique file key
-  const fileKey = r2Service.generateFileKey(contentId, filename);
+  // Generate presigned URL for creator's media bucket
+  const bucketName = `codex-media-${user.id}`;
+  const fileKey = r2Service.generateMediaKey(mediaId, filename);
 
-  // Get presigned upload URL
-  const uploadUrl = await r2Service.getUploadUrl(fileKey, contentType);
+  const uploadUrl = await r2Service.getUploadUrl(bucketName, fileKey, contentType);
 
   return json({
     uploadUrl: uploadUrl.url,
+    bucketName: uploadUrl.bucketName,
     fileKey: uploadUrl.fileKey,
     expiresIn: uploadUrl.expiresIn
   });
 };
 ```
 
-**Frontend Upload** (`packages/web/src/lib/components/ContentUpload.svelte`):
+**Upload Complete API** (`packages/web/src/routes/api/media/upload-complete/+server.ts`):
 ```typescript
-<script lang="ts">
-  let file: File | null = null;
-  let uploadProgress = 0;
-  let uploading = false;
+import { mediaItemsService } from '$lib/server/media/service';
+import { requireCreatorAccess } from '$lib/server/guards';
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
 
-  async function handleUpload() {
-    if (!file) return;
+export const POST: RequestHandler = async ({ request, locals, platform }) => {
+  const user = requireCreatorAccess({ locals, url: request.url });
 
-    uploading = true;
+  const {
+    mediaId,
+    filename,
+    fileSize,
+    mimeType,
+    bucketName,
+    fileKey
+  } = await request.json();
 
-    try {
-      // 1. Request presigned URL from backend
-      const response = await fetch('/api/content/upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type,
-          contentId: crypto.randomUUID()  // Generate contentId upfront
-        })
-      });
+  // Create media_items record
+  const mediaItem = await mediaItemsService.createMediaItem({
+    id: mediaId,
+    ownerId: user.id,
+    type: mimeType.startsWith('video/') ? 'video' : 'audio',
+    bucketName,
+    fileKey,
+    filename,
+    fileSize,
+    mimeType
+  });
 
-      const { uploadUrl, fileKey } = await response.json();
-
-      // 2. Upload directly to R2
-      const xhr = new XMLHttpRequest();
-
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          uploadProgress = (e.loaded / e.total) * 100;
-        }
-      });
-
-      xhr.addEventListener('load', async () => {
-        if (xhr.status === 200) {
-          // 3. Notify backend of successful upload
-          await saveContentMetadata(fileKey, file.size, file.type);
-          uploading = false;
-          alert('Upload complete!');
-        }
-      });
-
-      xhr.open('PUT', uploadUrl);
-      xhr.setRequestHeader('Content-Type', file.type);
-      xhr.send(file);
-
-    } catch (error) {
-      console.error('Upload failed:', error);
-      uploading = false;
-    }
-  }
-
-  async function saveContentMetadata(fileKey: string, fileSize: number, mimeType: string) {
-    // Save content metadata to database
-    await fetch('/api/content', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: 'My Video',  // From form
-        description: '...',
-        fileKey,
-        fileSize,
-        fileMimeType: mimeType,
-        // ... other metadata
-      })
+  // If video, enqueue transcoding job
+  if (mediaItem.type === 'video') {
+    await platform.env.TRANSCODING_QUEUE.send({
+      mediaId: mediaItem.id,
+      inputBucket: bucketName,
+      inputKey: fileKey,
+      outputBucket: bucketName,
+      outputPrefix: `hls/${mediaId}/`
     });
+
+    // Update status to transcoding
+    await mediaItemsService.updateMediaItemStatus(mediaId, 'transcoding');
+  } else {
+    // Audio files are immediately ready
+    await mediaItemsService.updateMediaItemStatus(mediaId, 'ready');
   }
-</script>
 
-<input type="file" accept="video/*,.pdf" bind:files={file} />
-<button on:click={handleUpload} disabled={uploading}>
-  {uploading ? `Uploading... ${uploadProgress.toFixed(0)}%` : 'Upload'}
-</button>
+  return json(mediaItem, { status: 201 });
+};
+```
 
-{#if uploading}
-  <progress value={uploadProgress} max="100"></progress>
-{/if}
+#### B. Resource Upload Flow (PDFs, Workbooks)
+
+**Backend API** (`packages/web/src/routes/api/resources/presigned-upload/+server.ts`):
+```typescript
+export const POST: RequestHandler = async ({ request, locals }) => {
+  const user = requireCreatorAccess({ locals, url: request.url });
+
+  const { filename, contentType, resourceId } = await request.json();
+
+  // Validate file type
+  const allowedTypes = [
+    'application/pdf',
+    'application/zip',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // DOCX
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'  // XLSX
+  ];
+
+  if (!allowedTypes.includes(contentType)) {
+    return json({ error: 'Invalid file type' }, { status: 400 });
+  }
+
+  // Generate presigned URL for creator's resource bucket
+  const bucketName = `codex-resources-${user.id}`;
+  const fileKey = r2Service.generateResourceKey(resourceId, filename);
+
+  const uploadUrl = await r2Service.getUploadUrl(bucketName, fileKey, contentType);
+
+  return json({
+    uploadUrl: uploadUrl.url,
+    bucketName: uploadUrl.bucketName,
+    fileKey: uploadUrl.fileKey,
+    expiresIn: uploadUrl.expiresIn
+  });
+};
+```
+
+**Upload Complete API** (`packages/web/src/routes/api/resources/upload-complete/+server.ts`):
+```typescript
+import { resourceService } from '$lib/server/resources/service';
+
+export const POST: RequestHandler = async ({ request, locals }) => {
+  const user = requireCreatorAccess({ locals, url: request.url });
+
+  const {
+    resourceId,
+    filename,
+    fileSize,
+    mimeType,
+    bucketName,
+    fileKey
+  } = await request.json();
+
+  // Create resources record
+  const resource = await resourceService.createResource({
+    id: resourceId,
+    ownerId: user.id,
+    bucketName,
+    fileKey,
+    filename,
+    fileSize,
+    mimeType
+  }, user.id);
+
+  return json(resource, { status: 201 });
+};
 ```
 
 ---
 
-### 4. Content CRUD API Routes
+### 6. Content CRUD API Routes
 
 **Create Content** (`packages/web/src/routes/api/content/+server.ts`):
 ```typescript
 import { contentService } from '$lib/server/content/service';
-import { requireOwner } from '$lib/server/guards';
+import { requireCreatorAccess } from '$lib/server/guards';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-  requireOwner({ locals, url: request.url });
+  const user = requireCreatorAccess({ locals, url: request.url });
 
   const data = await request.json();
 
   try {
-    const content = await contentService.createContent(data);
+    const content = await contentService.createContent(data, user.id);
     return json(content, { status: 201 });
   } catch (error) {
     return json({ error: error.message }, { status: 400 });
@@ -458,7 +909,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 };
 
 export const GET: RequestHandler = async ({ url, locals }) => {
-  requireOwner({ locals, url: url.toString() });
+  const user = requireCreatorAccess({ locals, url: url.toString() });
 
   const filters = {
     status: url.searchParams.get('status'),
@@ -467,44 +918,42 @@ export const GET: RequestHandler = async ({ url, locals }) => {
     offset: Number(url.searchParams.get('offset') || 0)
   };
 
-  const result = await contentService.getContentList(filters);
+  const result = await contentService.getContentList(user.id, filters);
   return json(result);
 };
 ```
 
-**Update/Delete Content** (`packages/web/src/routes/api/content/[id]/+server.ts`):
+**Attach Resource to Content** (`packages/web/src/routes/api/content/[id]/resources/+server.ts`):
 ```typescript
-import { contentService } from '$lib/server/content/service';
-import { requireOwner } from '$lib/server/guards';
-import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
+import { resourceService } from '$lib/server/resources/service';
 
-export const PATCH: RequestHandler = async ({ request, params, locals }) => {
-  requireOwner({ locals, url: request.url });
+export const POST: RequestHandler = async ({ request, params, locals }) => {
+  const user = requireCreatorAccess({ locals, url: request.url });
 
-  const data = await request.json();
-  const content = await contentService.updateContent(params.id, data);
+  const { resourceId, label } = await request.json();
 
-  return json(content);
-};
-
-export const DELETE: RequestHandler = async ({ params, locals }) => {
-  requireOwner({ locals, url: request.url });
-
-  await contentService.deleteContent(params.id);
+  await resourceService.attachResourceToContent(
+    resourceId,
+    params.id,  // contentId
+    label,
+    user.id
+  );
 
   return json({ success: true });
 };
-```
 
-**Publish Content** (`packages/web/src/routes/api/content/[id]/publish/+server.ts`):
-```typescript
-export const POST: RequestHandler = async ({ params, locals }) => {
-  requireOwner({ locals, url: request.url });
+export const DELETE: RequestHandler = async ({ request, params, locals }) => {
+  const user = requireCreatorAccess({ locals, url: request.url });
 
-  const content = await contentService.publishContent(params.id);
+  const { resourceId } = await request.json();
 
-  return json(content);
+  await resourceService.detachResourceFromContent(
+    resourceId,
+    params.id,  // contentId
+    user.id
+  );
+
+  return json({ success: true });
 };
 ```
 
@@ -512,29 +961,66 @@ export const POST: RequestHandler = async ({ params, locals }) => {
 
 ## Data Models / Schema
 
+**Media Items Table** (`packages/web/src/lib/server/db/schema/media.ts`):
+```typescript
+import { pgTable, uuid, varchar, text, bigint, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+
+export const mediaTypeEnum = pgEnum('media_type', ['video', 'audio']);
+export const mediaStatusEnum = pgEnum('media_status', ['uploading', 'uploaded', 'transcoding', 'ready', 'failed']);
+
+export const mediaItems = pgTable('media_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // Ownership
+  ownerId: uuid('owner_id').references(() => users.id).notNull(),
+
+  // Type
+  type: mediaTypeEnum('type').notNull(),
+  status: mediaStatusEnum('status').default('uploading').notNull(),
+
+  // Storage (R2)
+  bucketName: varchar('bucket_name', { length: 100 }).notNull(),  // 'codex-media-{creatorId}'
+  fileKey: varchar('file_key', { length: 500 }).notNull(),  // 'originals/{mediaId}/original.mp4'
+  filename: varchar('filename', { length: 255 }).notNull(),
+  fileSize: bigint('file_size', { mode: 'number' }).notNull(),  // bytes
+  mimeType: varchar('mime_type', { length: 100 }).notNull(),
+
+  // HLS output (if video, populated after transcoding)
+  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }),  // 'hls/{mediaId}/master.m3u8'
+
+  // Metadata (extracted during transcoding)
+  durationSeconds: integer('duration_seconds'),
+  width: integer('width'),
+  height: integer('height'),
+
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull()
+});
+```
+
 **Content Table** (`packages/web/src/lib/server/db/schema/content.ts`):
 ```typescript
 import { pgTable, uuid, varchar, text, decimal, timestamp, pgEnum } from 'drizzle-orm/pg-core';
 
-export const contentTypeEnum = pgEnum('content_type', ['video', 'pdf', 'article']);
 export const contentStatusEnum = pgEnum('content_status', ['draft', 'published', 'archived']);
 
 export const content = pgTable('content', {
   id: uuid('id').primaryKey().defaultRandom(),
 
+  // Ownership
+  ownerId: uuid('owner_id').references(() => users.id).notNull(),
+
   // Metadata
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
-  contentType: contentTypeEnum('content_type').notNull(),
   status: contentStatusEnum('status').default('draft').notNull(),
 
-  // File info (for video/PDF)
-  fileKey: varchar('file_key', { length: 500 }),  // R2 key
-  fileSize: bigint('file_size', { mode: 'number' }),  // bytes
-  fileMimeType: varchar('file_mime_type', { length: 100 }),
+  // Media reference (media library)
+  mediaItemId: uuid('media_item_id').references(() => mediaItems.id).notNull(),
 
-  // Article content (for article type)
-  articleBody: text('article_body'),
+  // Custom thumbnail (optional, override auto-generated)
+  customThumbnailKey: varchar('custom_thumbnail_key', { length: 500 }),  // R2 key in assets bucket
 
   // Organization
   categoryId: uuid('category_id').references(() => categories.id).notNull(),
@@ -548,7 +1034,66 @@ export const content = pgTable('content', {
   publishedAt: timestamp('published_at'),
   deletedAt: timestamp('deleted_at')
 });
+```
 
+**Resources Table** (`packages/web/src/lib/server/db/schema/resources.ts`):
+```typescript
+export const resources = pgTable('resources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // Ownership
+  ownerId: uuid('owner_id').references(() => users.id).notNull(),
+
+  // Storage (R2)
+  bucketName: varchar('bucket_name', { length: 100 }).notNull(),  // 'codex-resources-{creatorId}'
+  fileKey: varchar('file_key', { length: 500 }).notNull(),  // '{resourceId}/filename.pdf'
+  filename: varchar('filename', { length: 255 }).notNull(),
+  fileSize: bigint('file_size', { mode: 'number' }).notNull(),
+  mimeType: varchar('mime_type', { length: 100 }).notNull(),
+
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull()
+});
+
+export const resourceAttachments = pgTable('resource_attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // Resource reference
+  resourceId: uuid('resource_id').references(() => resources.id, { onDelete: 'cascade' }).notNull(),
+
+  // Entity reference (content, offering, course, etc.)
+  entityType: varchar('entity_type', { length: 50 }).notNull(),  // 'content', 'offering', 'course'
+  entityId: uuid('entity_id').notNull(),
+
+  // Attachment metadata
+  attachmentLabel: varchar('attachment_label', { length: 100 }),  // e.g., "Workbook", "Bonus PDF"
+
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull()
+});
+
+// Unique constraint: one resource can only attach to same entity once
+export const resourceAttachmentsUnique = unique('resource_entity_unique')
+  .on(resourceAttachments.resourceId, resourceAttachments.entityType, resourceAttachments.entityId);
+```
+
+**Creator Buckets Table** (`packages/web/src/lib/server/db/schema/creator_buckets.ts`):
+```typescript
+export const creatorBuckets = pgTable('creator_buckets', {
+  creatorId: uuid('creator_id').primaryKey().references(() => users.id),
+
+  // Bucket names
+  mediaBucket: varchar('media_bucket', { length: 100 }).notNull(),      // 'codex-media-{creatorId}'
+  resourcesBucket: varchar('resources_bucket', { length: 100 }).notNull(),  // 'codex-resources-{creatorId}'
+  assetsBucket: varchar('assets_bucket', { length: 100 }).notNull(),    // 'codex-assets-{creatorId}'
+
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull()
+});
+```
+
+**Categories & Tags** (same as before):
+```typescript
 export const categories = pgTable('categories', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 100 }).unique().notNull(),
@@ -581,7 +1126,8 @@ R2_SECRET_ACCESS_KEY=your-r2-secret-key
 
 # Content settings
 MAX_VIDEO_SIZE=5368709120  # 5GB in bytes
-MAX_PDF_SIZE=104857600      # 100MB in bytes
+MAX_AUDIO_SIZE=524288000   # 500MB in bytes
+MAX_RESOURCE_SIZE=104857600  # 100MB in bytes
 ```
 
 ---
@@ -590,55 +1136,124 @@ MAX_PDF_SIZE=104857600      # 100MB in bytes
 
 ### Unit Tests
 
+**MediaItemsService**:
+```typescript
+describe('MediaItemsService', () => {
+  it('creates media item record', async () => {
+    const mediaItem = await mediaItemsService.createMediaItem({
+      id: 'media-uuid',
+      ownerId: 'creator-uuid',
+      type: 'video',
+      bucketName: 'codex-media-creator-uuid',
+      fileKey: 'originals/media-uuid/video.mp4',
+      filename: 'video.mp4',
+      fileSize: 1024000,
+      mimeType: 'video/mp4'
+    });
+
+    expect(mediaItem.id).toBe('media-uuid');
+    expect(mediaItem.status).toBe('uploaded');
+    expect(mediaItem.type).toBe('video');
+  });
+
+  it('prevents deletion if media referenced by content', async () => {
+    // Create content referencing media
+    await contentService.createContent({
+      title: 'Test',
+      mediaItemId: 'media-uuid',
+      // ...
+    }, 'creator-uuid');
+
+    // Attempt to delete media
+    await expect(
+      mediaItemsService.deleteMediaItem('media-uuid', 'creator-uuid')
+    ).rejects.toThrow('Cannot delete media item: referenced by content');
+  });
+});
+```
+
+**ContentService**:
 ```typescript
 describe('ContentService', () => {
-  it('creates content with metadata', async () => {
+  it('creates content referencing media item', async () => {
     const content = await contentService.createContent({
       title: 'Test Video',
       description: 'Test description',
-      contentType: 'video',
+      mediaItemId: 'media-uuid',
       categoryId: 'category-uuid',
-      price: 29.99,
-      fileKey: 'content/123/video.mp4',
-      fileSize: 1024000,
-      fileMimeType: 'video/mp4'
-    });
+      tags: ['test', 'video'],
+      price: 29.99
+    }, 'creator-uuid');
 
     expect(content.id).toBeDefined();
+    expect(content.mediaItemId).toBe('media-uuid');
     expect(content.status).toBe('draft');
-    expect(content.title).toBe('Test Video');
   });
+});
+```
 
-  it('publishes content', async () => {
-    const content = await contentService.publishContent('content-uuid');
+**ResourceService**:
+```typescript
+describe('ResourceService', () => {
+  it('attaches resource to multiple content items', async () => {
+    const resource = await resourceService.createResource({
+      id: 'resource-uuid',
+      ownerId: 'creator-uuid',
+      bucketName: 'codex-resources-creator-uuid',
+      fileKey: 'resource-uuid/workbook.pdf',
+      filename: 'workbook.pdf',
+      fileSize: 500000,
+      mimeType: 'application/pdf'
+    }, 'creator-uuid');
 
-    expect(content.status).toBe('published');
-    expect(content.publishedAt).toBeDefined();
+    // Attach to content A
+    await resourceService.attachResourceToContent(
+      'resource-uuid',
+      'content-a-uuid',
+      'Workbook',
+      'creator-uuid'
+    );
+
+    // Attach to content B
+    await resourceService.attachResourceToContent(
+      'resource-uuid',
+      'content-b-uuid',
+      'Workbook',
+      'creator-uuid'
+    );
+
+    // Verify attachments
+    const attachments = await db.query.resourceAttachments.findMany({
+      where: eq(resourceAttachments.resourceId, 'resource-uuid')
+    });
+
+    expect(attachments).toHaveLength(2);
   });
 });
 ```
 
 ### Integration Tests
 
+**Media Upload Flow**:
 ```typescript
-describe('Content API', () => {
-  it('POST /api/content creates content', async () => {
+describe('Media Upload API', () => {
+  it('generates presigned URL for media upload', async () => {
     const response = await POST({
-      request: new Request('http://localhost/api/content', {
+      request: new Request('http://localhost/api/media/presigned-upload', {
         method: 'POST',
         body: JSON.stringify({
-          title: 'Test',
-          contentType: 'video',
-          categoryId: 'cat-id',
-          price: 19.99
+          filename: 'video.mp4',
+          contentType: 'video/mp4',
+          mediaId: 'media-uuid'
         })
       }),
-      locals: { user: mockOwner() }
+      locals: { user: mockCreator() }
     });
 
-    expect(response.status).toBe(201);
-    const content = await response.json();
-    expect(content.title).toBe('Test');
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.uploadUrl).toBeDefined();
+    expect(data.fileKey).toBe('originals/media-uuid/video.mp4');
   });
 });
 ```
@@ -649,16 +1264,18 @@ describe('Content API', () => {
 
 - **PRD**: [Content Management PRD](./pdr-phase-1.md)
 - **Cross-Feature Dependencies**:
+  - [Media Transcoding TDD](../media-transcoding/ttd-dphase-1.md) - Video to HLS conversion
   - [E-Commerce TDD](../e-commerce/ttd-dphase-1.md) - Content pricing
   - [Content Access TDD](../content-access/ttd-dphase-1.md) - Access control
   - [Admin Dashboard TDD](../admin-dashboard/ttd-dphase-1.md) - Management UI
 - **Infrastructure**:
+  - [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md) - Bucket-per-creator architecture
   - [Database Schema](../../infrastructure/DatabaseSchema.md)
-  - [Cloudflare R2 Setup](../../infrastructure/CloudflareSetup.md)
+  - [Cloudflare Setup](../../infrastructure/CloudflareSetup.md)
   - [Testing Strategy](../../infrastructure/TestingStrategy.md)
 
 ---
 
-**Document Version**: 1.0
+**Document Version**: 2.0
 **Last Updated**: 2025-10-20
 **Status**: Draft - Awaiting Review
