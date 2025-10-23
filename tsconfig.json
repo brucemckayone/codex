@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM"],
     "strict": true,
     "esModuleInterop": true,
@@ -10,15 +10,26 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      // optional aliases if you add them later
-      // "@workers/*": ["workers/*/src"],
-      // "@apps/*": ["apps/*/src"],
-      // "@packages/*": ["packages/*/src"]
+      "@codex/database": ["packages/database/src/index.ts"],
+      "@codex/database/*": ["packages/database/src/*"],
+      "@codex/validation": ["packages/validation/src/index.ts"],
+      "@codex/validation/*": ["packages/validation/src/*"],
+      "@codex/cloudflare-clients": ["packages/cloudflare-clients/src/index.ts"],
+      "@codex/cloudflare-clients/*": ["packages/cloudflare-clients/src/*"],
+      "@codex/core-services": ["packages/core-services/src/index.ts"],
+      "@codex/core-services/*": ["packages/core-services/src/*"],
+      "@codex/auth": ["packages/auth/src/index.ts"],
+      "@codex/auth/*": ["packages/auth/src/*"],
+      "@codex/notifications": ["packages/notifications/src/index.ts"],
+      "@codex/notifications/*": ["packages/notifications/src/*"],
+      "@codex/test-utils": ["packages/test-utils/src/index.ts"],
+      "@codex/test-utils/*": ["packages/test-utils/src/*"]
     }
   },
   "include": ["workers/**/*", "apps/**/*", "packages/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "**/.svelte-kit"]
 }

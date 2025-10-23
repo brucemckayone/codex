@@ -1,25 +1,44 @@
-import { QueueMessage } from "packages/shared/types";
-import { transcode } from "./jobs/transcode";
-import { Env } from "./types";
+/**
+ * Queue Consumer Worker
+ *
+ * Processes media transcoding jobs from the queue
+ */
+
+export interface Env {
+  // Add bindings here as needed
+}
+
+export interface QueueMessage {
+  id: string;
+  type: 'video' | 'audio';
+  url: string;
+  contentId: string;
+}
 
 export default {
-  async fetch(req: Request, env: Env) {
-    if (req.method === "POST") {
-      const message: QueueMessage = await req.json();
+  async queue(
+    batch: MessageBatch<QueueMessage>,
+    env: Env
+  ): Promise<void> {
+    console.log(`Processing batch of ${batch.messages.length} messages`);
 
-      // You can optionally store some metadata in KV
-      await env.SESSIONS.put(`job:${message.jobId}`, JSON.stringify(message));
-
-      // Handle different job types
-      switch (message.jobType) {
-        case "transcode":
-          await transcode(message.jobId, message.r2Key, env);
-          break;
+    for (const message of batch.messages) {
+      try {
+        await processMessage(message.body);
+        message.ack();
+      } catch (error) {
+        console.error(`Failed to process message ${message.id}:`, error);
+        message.retry();
       }
-
-      return new Response("OK");
     }
-
-    return new Response("Worker running");
   },
 };
+
+async function processMessage(message: QueueMessage): Promise<void> {
+  console.log(`Processing ${message.type} for content ${message.contentId}`);
+
+  // Placeholder for actual transcoding logic
+  // This will integrate with RunPod API in the future
+
+  return Promise.resolve();
+}
