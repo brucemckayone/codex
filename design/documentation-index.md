@@ -142,7 +142,7 @@ This document serves as a central routing system to all Markdown documentation f
 *   **[R2 Bucket Structure](design/infrastructure/R2BucketStructure.md)**
     *   Details the Cloudflare R2 bucket organization, bucket-per-creator design, and access patterns.
 *   **[Testing](design/infrastructure/Testing.md)**
-    *   Complete testing setup guide for unit, integration, and E2E tests across the monorepo.
+    *   Complete testing framework guide - philosophy, implementation, and examples for unit, integration, and E2E tests across the monorepo.
 
 ## VI. Security
 

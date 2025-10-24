@@ -1,7 +1,18 @@
 import { Miniflare } from 'miniflare';
 import type { MiniflareOptions } from 'miniflare';
 import path from 'path';
-import { fileURLToPath } from 'url';
+
+// Re-export types for convenience
+export type { MiniflareOptions } from 'miniflare';
+
+// Miniflare returns its own implementations of these types
+// which are compatible but not identical to @cloudflare/workers-types
+// Using any here to avoid type conflicts between Miniflare and Workers types
+type MiniflareKVNamespace = any;
+type MiniflareD1Database = any;
+type MiniflareR2Bucket = any;
+type MiniflareQueue<Body = any> = any;
+type MiniflareWorker = any;
 
 /**
  * Helper class for managing Miniflare instances in integration tests.
@@ -27,7 +38,7 @@ export class MiniflareTestHelper {
     this.mf = new Miniflare({
       ...this.defaultOptions,
       ...options,
-    });
+    } as MiniflareOptions);
 
     // Wait for the server to be ready
     await this.mf.ready;
@@ -48,9 +59,11 @@ export class MiniflareTestHelper {
 
   /**
    * Dispatch a fetch request to the worker.
+   * Note: Type casting is needed due to differences between standard fetch types
+   * and Miniflare's internal types.
    */
   async fetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
-    return this.instance.dispatchFetch(input, init);
+    return this.instance.dispatchFetch(input as any, init as any) as unknown as Promise<Response>;
   }
 
   /**
@@ -63,35 +76,35 @@ export class MiniflareTestHelper {
   /**
    * Get a specific KV namespace binding.
    */
-  async getKVNamespace(bindingName: string): Promise<KVNamespace> {
+  async getKVNamespace(bindingName: string): Promise<MiniflareKVNamespace> {
     return this.instance.getKVNamespace(bindingName);
   }
 
   /**
    * Get a specific D1 database binding.
    */
-  async getD1Database(bindingName: string): Promise<D1Database> {
+  async getD1Database(bindingName: string): Promise<MiniflareD1Database> {
     return this.instance.getD1Database(bindingName);
   }
 
   /**
    * Get a specific R2 bucket binding.
    */
-  async getR2Bucket(bindingName: string): Promise<R2Bucket> {
+  async getR2Bucket(bindingName: string): Promise<MiniflareR2Bucket> {
     return this.instance.getR2Bucket(bindingName);
   }
 
   /**
    * Get a specific Queue producer binding.
    */
-  async getQueueProducer<Body = unknown>(bindingName: string): Promise<Queue<Body>> {
+  async getQueueProducer<Body = unknown>(bindingName: string): Promise<MiniflareQueue<Body>> {
     return this.instance.getQueueProducer<Body>(bindingName);
   }
 
   /**
    * Get a worker fetcher (for testing scheduled/queue events).
    */
-  async getWorker(): Promise<Fetcher> {
+  async getWorker(): Promise<MiniflareWorker> {
     return this.instance.getWorker();
   }
 
