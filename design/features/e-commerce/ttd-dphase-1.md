@@ -10,23 +10,25 @@ The e-commerce system facilitates one-time purchases of digital content using St
 - **Pending Purchase Record**: A `purchases` record with a `pending` status is created *before* the user is redirected to Stripe. This record is then updated to `completed` by the webhook, creating a clear audit trail.
 - **Idempotent Webhook Handler**: The webhook processor is designed to handle duplicate events from Stripe without creating duplicate purchases.
 
-**Architecture Diagram**: See [Direct Purchase Checkout Flow](../_assets/direct-checkout-flow.png)
+**Architecture Diagram**:
+
+![Direct Purchase Checkout Flow](./assets/direct-checkout-flow.png)
+
+The diagram illustrates the complete e-commerce flow: creating a pending purchase, redirecting to Stripe Checkout, webhook-driven fulfillment, and PCI-compliant payment processing.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#5-e-commerce) document for details on dependencies between features.
 
-1.  **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md)): The e-commerce flow requires an authenticated user to link purchases to an account.
-2.  **Content Management System** ([Content Management TDD](../content-management/ttd-dphase-1.md)): We need published content with an associated price to sell.
-3.  **Notification Service** ([Notifications TDD](../notifications/ttd-dphase-1.md)): Required for sending purchase receipts and refund confirmations.
+### Technical Prerequisites
+
+1.  **Auth System**: An authenticated user is required to link purchases to an account.
+2.  **Content Management System**: Published content with an associated price is needed to be sold.
+3.  **Notification Service**: Required for sending purchase receipts and refund confirmations.
 4.  **Database Schema**: The `purchases` table must be migrated.
 5.  **Stripe Account Setup**: A Stripe account with API keys and a configured webhook endpoint is necessary.
-
-### Can Be Developed In Parallel
-
-- **Content Access Feature**: This feature will consume the `purchases` table to verify access, but its development is not a blocker for implementing the purchase flow itself.
 
 ---
 

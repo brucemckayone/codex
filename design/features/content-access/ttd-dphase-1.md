@@ -10,31 +10,25 @@ The Content Access system provides secure, authenticated access to purchased med
 - **Unified Media Player**: A single Svelte component will handle both video and audio playback, adapting based on content type.
 - **Playback Progress Tracking**: User progress is saved to the database to enable seamless resume functionality.
 
-**Architecture Diagram**: See [Content Access Architecture](../_assets/content-access-architecture.png) (Placeholder for future diagram)
+**Architecture Diagram**:
+
+![Content Access Architecture](./assets/content-access-architecture.png)
+
+The diagram shows the secure content access flow including purchase verification, signed R2 URL generation, HLS streaming, and playback progress tracking.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#3-content-access) document for details on dependencies between features.
 
-1.  **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md)):
-    - `requireAuth()` guard for all protected routes.
-    - User authentication and session management.
-2.  **E-Commerce System** ([E-Commerce TDD](../e-commerce/ttd-dphase-1.md)):
-    - `purchases` table as the source of truth for completed transactions.
-    - The `purchases` table now uses `itemId` and `itemType` for polymorphic relationships.
-3.  **Content Management System** ([Content Management TDD](../content-management/ttd-dphase-1.md)):
-    - `content` table for content metadata (title, description, thumbnail).
-    - `media_items` table for media file details (HLS master playlist keys, waveform keys).
-4.  **Media Transcoding System** ([Media Transcoding TDD](../media-transcoding/ttd-dphase-1.md)):
-    - Provides HLS master playlists for both video and audio.
-    - Provides waveform JSON for audio.
-5.  **R2 Bucket Structure** ([Infrastructure - R2 Bucket Structure](../../infrastructure/R2BucketStructure.md)):
-    - Defines bucket naming conventions and file keys for media and assets.
+### Technical Prerequisites
 
-### Can Be Developed In Parallel
-- Admin Dashboard (displays content access analytics)
+1.  **Auth System**: The `requireAuth()` guard and session management must be implemented.
+2.  **E-Commerce System**: The `purchases` table must be available as the source of truth for access rights.
+3.  **Content Management System**: The `content` and `media_items` tables are needed for metadata.
+4.  **Media Transcoding System**: This feature relies on the HLS and waveform outputs from the transcoding process.
+5.  **R2 Bucket Structure**: The bucket naming conventions must be established.
 
 ---
 

@@ -62,22 +62,7 @@ Without a notification system:
 
 ## Cross-Feature Dependencies
 
-### Auth Feature (Phase 1)
-**Dependency**: Auth relies on notification service for transactional emails
-- Registration verification email
-- Password reset email
-- Password changed confirmation
-- See [Auth PRD](../auth/pdr-phase-1.md)
-
-### E-Commerce Feature (Phase 1)
-**Dependency**: E-Commerce uses notifications for purchase confirmations
-- Purchase receipt email
-- Payment confirmation
-- See [E-Commerce PRD](../e-commerce/pdr-phase-1.md)
-
-### Future: Content Access (Phase 1/2)
-**Future Use**: Notifications when content is unlocked or access granted
-- "Your content is ready" emails
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#7-notifications) document for details.
 
 ---
 
@@ -178,8 +163,8 @@ Without a notification system:
 - Zero direct calls to Resend API in business logic (Auth, E-Commerce, etc.)
 - All email sending goes through `notificationService.sendEmail()`
 - Switching providers requires changing only:
-  1. Adapter file (`adapters/resend.ts` ’ `adapters/sendgrid.ts`)
-  2. Configuration (`RESEND_API_KEY` ’ `SENDGRID_API_KEY`)
+  1. Adapter file (`adapters/resend.ts` ï¿½ `adapters/sendgrid.ts`)
+  2. Configuration (`RESEND_API_KEY` ï¿½ `SENDGRID_API_KEY`)
 - No changes to business logic (Auth, E-Commerce, etc.)
 
 ---
@@ -293,8 +278,8 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
 
 **Solution**: Abstraction layer isolates business logic from provider:
 ```
-Auth Service ’ Notification Service (Interface) ’ Resend Adapter ’ Resend API
-                                                ’ SendGrid Adapter ’ SendGrid API (swap)
+Auth Service ï¿½ Notification Service (Interface) ï¿½ Resend Adapter ï¿½ Resend API
+                                                ï¿½ SendGrid Adapter ï¿½ SendGrid API (swap)
 ```
 
 **Benefit**: Switch providers without touching Auth, E-Commerce, or other features.
@@ -304,7 +289,7 @@ Auth Service ’ Notification Service (Interface) ’ Resend Adapter ’ Resend API
 - **Generous Free Tier**: 100 emails/day (enough for dev/MVP)
 - **Domain Verification**: Easy setup
 - **Transactional Focus**: Built for transactional emails (vs marketing)
-- **Relatively New**: Could become unreliable ’ abstraction protects us
+- **Relatively New**: Could become unreliable ï¿½ abstraction protects us
 
 ### Email Templates
 Phase 1 uses **simple HTML templates** with variable interpolation:

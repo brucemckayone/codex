@@ -68,27 +68,7 @@ Without a functional admin dashboard, the Platform Owner cannot effectively oper
 
 ## Cross-Feature Dependencies
 
-### Auth Feature (Phase 1)
-**Dependency**: Access to the Admin Dashboard is restricted to users with the 'Platform Owner' role.
-- Relies on `requireOwner()` guard for all admin routes.
-
-### Content Management Feature (Phase 1)
-**Dependency**: Provides content data for listing and management.
-- Reads from `content` and `media_items` tables.
-- Links to content creation/editing UIs provided by Content Management.
-
-### E-Commerce Feature (Phase 1)
-**Dependency**: Provides purchase and revenue data for analytics and customer history.
-- Reads from `purchases` table.
-- Displays `amountPaid`, `purchasedAt`, etc.
-
-### Platform Settings Feature (Phase 1)
-**Dependency**: Provides the underlying data for basic branding and business information.
-- Reads and writes to the `platform_settings` table.
-
-### Customer Management (Implicit)
-**Dependency**: The dashboard will interact with user data to list and manage customers.
-- Reads from `users` table.
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#1-admin-dashboard) document for details.
 
 ---
 

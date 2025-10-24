@@ -1,0 +1,170 @@
+# Analytics Architecture - Phase 1 MVP
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Browser/Client Layer
+browser: {
+  label: "Browser / Client"
+  shape: rectangle
+
+  media_player: {
+    label: "Media Player\n(Video/Audio)"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  admin_dashboard: {
+    label: "Admin Dashboard\n(View Analytics)"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  tracking_script: {
+    label: "analytics.js\n(Track Events)"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  style: {
+    fill: "#FAFAFA"
+    stroke: "#BDBDBD"
+    stroke-width: 2
+  }
+}
+
+# Cloudflare Workers Layer
+workers: {
+  label: "Cloudflare Workers"
+  shape: rectangle
+
+  tracker_worker: {
+    label: "Tracker Worker\n(Write Events)\nPOST /track/view"
+    style: {
+      fill: ${color-worker}
+      stroke: ${stroke-worker}
+    }
+  }
+
+  query_worker: {
+    label: "Query Worker\n(Read Data)\nGET /api/analytics/*"
+    style: {
+      fill: ${color-worker}
+      stroke: ${stroke-worker}
+    }
+  }
+
+  aggregation_worker: {
+    label: "Aggregation Worker\n(Daily Cron)\nRollup to PostgreSQL"
+    style: {
+      fill: ${color-worker}
+      stroke: ${stroke-worker}
+    }
+  }
+
+  style: {
+    fill: "#F5F5F5"
+    stroke: "#9E9E9E"
+    stroke-width: 2
+  }
+}
+
+# Analytics Engine Layer
+analytics_engine: {
+  label: "Cloudflare Analytics Engine"
+  shape: rectangle
+
+  clickhouse: {
+    label: "ClickHouse Database\n(Time-Series)\n\n• 90 day retention\n• Automatic sampling\n• Blobs/Doubles/Indexes"
+    style: {
+      fill: ${color-clickhouse}
+      stroke: ${stroke-clickhouse}
+    }
+  }
+
+  style: {
+    fill: ${color-analytics-engine}
+    stroke: ${stroke-analytics-engine}
+    stroke-width: 3
+  }
+}
+
+# PostgreSQL Layer
+postgres: {
+  label: "PostgreSQL Database"
+  shape: cylinder
+
+  aggregated_tables: {
+    label: "Aggregated Analytics\n\n• 2+ year retention\n• Daily/weekly/monthly rollups\n• analytics_daily_content\n• analytics_daily_platform\n• analytics_daily_traffic"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# Connections - Event Tracking Flow
+browser.media_player -> browser.tracking_script: "play event" {
+  style.stroke: ${arrow-http}
+}
+
+browser.tracking_script -> workers.tracker_worker: "POST /track/view\n{event_type, content_id, ...}" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+workers.tracker_worker -> analytics_engine.clickhouse: "writeDataPoint()\nblobs, doubles, indexes" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 3
+}
+
+# Connections - Query Flow
+browser.admin_dashboard -> workers.query_worker: "GET /api/analytics/overview\n?timeRange=30d&creatorId=..." {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+workers.query_worker -> analytics_engine.clickhouse: "SQL Query\n(last 90 days)" {
+  style.stroke: ${arrow-sql}
+  style.stroke-width: 2
+}
+
+workers.query_worker -> postgres.aggregated_tables: "SQL Query\n(> 90 days old)" {
+  style.stroke: ${arrow-sql}
+  style.stroke-width: 2
+}
+
+# Connections - Aggregation Flow
+workers.aggregation_worker -> analytics_engine.clickhouse: "SELECT ... GROUP BY\n(yesterday's data)" {
+  style.stroke: ${arrow-sql}
+  style.stroke-dash: 3
+}
+
+workers.aggregation_worker -> postgres.aggregated_tables: "INSERT aggregated\nrollups" {
+  style.stroke: ${arrow-sql}
+  style.stroke-dash: 3
+}
+
+# Notes
+note_retention: {
+  label: "📊 Data Retention:\n• Raw events: 90 days (Analytics Engine)\n• Aggregated: 2+ years (PostgreSQL)\n• Daily job aggregates at 2 AM UTC"
+  shape: text
+}
+
+note_sampling: {
+  label: "🎲 Sampling Behavior:\n• < 100K events/month: No sampling (100%)\n• 100K-1M: Light sampling (~95%)\n• 1M-10M: Moderate (~90%)\n• 10M+: Heavier (~85%)"
+  shape: text
+}

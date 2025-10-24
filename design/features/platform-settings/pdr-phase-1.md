@@ -88,23 +88,7 @@ Without this feature, the platform would look generic and lack brand identity, m
 
 ## Cross-Feature Dependencies
 
-### Auth Feature (Phase 1)
-**Dependency**: Only Platform Owners can access and modify platform settings.
-- Relies on `requireOwner()` guard for the settings page.
-- Uses `event.locals.user.id` as `ownerId`.
-
-### Admin Dashboard Feature (Phase 1)
-**Dependency**: The settings page is part of the admin dashboard navigation.
-- Settings page is accessible via `/admin/settings`.
-
-### Notifications Feature (Phase 1)
-**Dependency**: Platform name and contact email are used in email templates.
-- Notification templates pull `platformName` and `contactEmail` from settings.
-
-### Content Management Feature (Phase 1)
-**Dependency**: Logo is stored in R2 using the same service and bucket strategy.
-- Uses `R2Service` for logo upload and retrieval.
-- Stores logo in `codex-assets-{ownerId}` bucket per R2 Bucket Structure spec.
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#8-platform-settings) document for details.
 
 ---
 
@@ -183,7 +167,7 @@ Without this feature, the platform would look generic and lack brand identity, m
    - Browser tab title (`<title>`)
    - Navigation header (next to logo)
    - Email subject lines ("Welcome to {platformName}")
-   - Email footers ("© 2025 {platformName}")
+   - Email footers ("ï¿½ 2025 {platformName}")
 
 **Acceptance Criteria:**
 - Platform name input accepts up to 100 characters.
@@ -213,7 +197,7 @@ Without this feature, the platform would look generic and lack brand identity, m
    - Site footer ("Contact us: {email}")
    - "Support" links (`mailto:{email}`)
 7. Business name appears in:
-   - Legal footers ("© 2025 {businessName}")
+   - Legal footers ("ï¿½ 2025 {businessName}")
    - Invoice headers
 8. Timezone is used for:
    - Timestamp displays (converts UTC to owner's timezone)

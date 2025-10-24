@@ -1,0 +1,176 @@
+# Admin Dashboard Architecture - Phase 1
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Browser Layer
+browser: {
+  label: "Platform Owner Browser"
+
+  admin_ui: {
+    label: "Admin Dashboard UI\n(SvelteKit SSR)\n\n• Dashboard Overview\n• Content Management\n• Customer List\n• Platform Settings"
+    style: {
+      fill: ${color-nextjs}
+      stroke: ${stroke-nextjs}
+    }
+  }
+
+  style: {
+    fill: "#FAFAFA"
+    stroke: "#BDBDBD"
+    stroke-width: 2
+  }
+}
+
+# SvelteKit Server Layer
+sveltekit: {
+  label: "SvelteKit Server (SSR)"
+
+  routes: {
+    label: "Admin Routes\n\n+layout.server.ts\n+page.server.ts\n(requireOwner guard)"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  admin_service: {
+    label: "Admin Dashboard Service\n\ngetAnalyticsSummary()\nmanuallyGrantAccess()"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  style: {
+    fill: ${color-nextjs}
+    stroke: ${stroke-nextjs}
+    stroke-width: 2
+  }
+}
+
+# Service Layer
+services: {
+  label: "Service Layer"
+
+  content_service: {
+    label: "Content Service\n\nlistContent()\nupdateStatus()\ndeleteContent()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  purchases_service: {
+    label: "Purchases Service\n\ngetRevenue()\nlistPurchases()\ngetTopContent()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  platform_settings: {
+    label: "Platform Settings\n\ngetSettings()\nupdateSettings()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  auth_service: {
+    label: "Auth Service\n\nrequireOwner()\ngetSession()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  style: {
+    fill: "#F5F5F5"
+    stroke: "#9E9E9E"
+    stroke-width: 2
+  }
+}
+
+# Database Layer
+database: {
+  label: "Neon PostgreSQL"
+  shape: cylinder
+
+  tables: {
+    label: "Database Tables\n\n• users\n• content\n• media_items\n• purchases\n• platform_settings\n• sessions"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# Connections - Browser to Server
+browser.admin_ui -> sveltekit.routes: "GET /admin/dashboard\n(authenticated request)" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+# Connections - Routes to Services
+sveltekit.routes -> sveltekit.admin_service: "load function\ncalls service" {
+  style.stroke: ${arrow-http}
+}
+
+sveltekit.routes -> services.auth_service: "requireOwner()\n(check role)" {
+  style.stroke: ${arrow-http}
+}
+
+# Connections - Admin Service to Other Services
+sveltekit.admin_service -> services.content_service: "fetch content list" {
+  style.stroke: ${arrow-http}
+}
+
+sveltekit.admin_service -> services.purchases_service: "fetch revenue,\ntop content" {
+  style.stroke: ${arrow-http}
+}
+
+sveltekit.admin_service -> services.platform_settings: "fetch platform\nconfig" {
+  style.stroke: ${arrow-http}
+}
+
+# Connections - Services to Database
+services.content_service -> database.tables: "SELECT * FROM content" {
+  style.stroke: ${arrow-sql}
+}
+
+services.purchases_service -> database.tables: "SELECT SUM(amount),\ntop purchases" {
+  style.stroke: ${arrow-sql}
+}
+
+services.platform_settings -> database.tables: "SELECT/UPDATE\nplatform_settings" {
+  style.stroke: ${arrow-sql}
+}
+
+services.auth_service -> database.tables: "SELECT FROM\nusers, sessions" {
+  style.stroke: ${arrow-sql}
+}
+
+# Response flow
+sveltekit.routes -> browser.admin_ui: "SSR HTML\n(analytics data)" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Notes
+note_rbac: {
+  label: "🔐 Role-Based Access Control:\n• All routes require 'Platform Owner' role\n• Server-side checks before rendering\n• No client-side access to admin APIs"
+  shape: text
+}
+
+note_ssr: {
+  label: "⚡ Server-Side Rendering:\n• All admin pages are SSR\n• Data fetched in +page.server.ts\n• Secure (no client-side API exposure)"
+  shape: text
+}

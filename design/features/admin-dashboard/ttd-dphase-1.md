@@ -10,26 +10,17 @@ The Admin Dashboard provides the Platform Owner with a secure, server-rendered i
 - **Service Layer Interaction**: The dashboard components and server functions will interact with dedicated service layers (e.g., `ContentService`, `PurchasesService`, `PlatformSettingsService`) to perform operations and fetch data.
 - **Modular UI**: Components are organized by function (e.g., `ContentList`, `CustomerList`, `AnalyticsSummary`).
 
-**Architecture Diagram**: See [Admin Dashboard Architecture](../_assets/admin-dashboard-architecture.png) (Placeholder for future diagram)
+**Architecture Diagram**:
+
+![Admin Dashboard Architecture](./assets/admin-dashboard-architecture.png)
+
+The diagram shows the complete flow from Platform Owner browser through SvelteKit SSR routes, service layer interaction, and database queries.
 
 ---
 
 ## Dependencies
 
-### Internal Dependencies (Phase 1)
-
-1.  **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md)):
-    - `requireOwner()` guard for all admin routes.
-    - User authentication and session management.
-2.  **Content Management System** ([Content Management TDD](../content-management/ttd-dphase-1.md)):
-    - `ContentService` for content listing, status updates, and deletion.
-    - `media_items` table for media details.
-3.  **E-Commerce System** ([E-Commerce TDD](../e-commerce/ttd-dphase-1.md)):
-    - `PurchasesService` for fetching purchase history and revenue data.
-    - `purchases` table for transaction records.
-4.  **Platform Settings System** ([Platform Settings TDD](../platform-settings/ttd-dphase-1.md)):
-    - `PlatformSettingsService` for reading and updating platform branding and business information.
-    - `platform_settings` table for configuration data.
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#1-admin-dashboard) document for details on dependencies between features.
 
 ### External Dependencies
 - **Neon Postgres**: Primary database for all data accessed by the dashboard.

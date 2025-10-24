@@ -19,37 +19,24 @@ The media transcoding system asynchronously converts uploaded videos to HLS form
 - **Storage Layer**: R2 for input/output files, waveforms, thumbnails
 - **Metadata Layer**: Neon Postgres for status tracking only (no waveform data)
 
-**Architecture Diagram**: See [Transcoding Architecture](../_assets/transcoding-architecture.png)
+**Architecture Diagram**:
+
+![Transcoding Architecture](./assets/transcoding-architecture.png)
+
+The diagram shows the complete transcoding pipeline: queue-based job management, Cloudflare Worker orchestration, Runpod GPU processing, and R2 storage integration.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#6-media-transcoding) document for details on dependencies between features.
 
-1. **Content Management Service** ([Content Management TDD](../content-management/ttd-dphase-1.md))
-   - Media upload flow implemented
-   - `media_items` table created
-   - **Why**: Transcoding consumes uploaded media items
+### Technical Prerequisites
 
-2. **Cloudflare Queue** ([Infrastructure - Cloudflare Setup](../../infrastructure/CloudflareSetup.md))
-   - `TRANSCODING_QUEUE` created
-   - Queue bindings configured in `wrangler.toml`
-   - **Why**: Job queue for async transcoding
-
-3. **Runpod Account & Endpoint** ([Infrastructure - Runpod Setup](../../infrastructure/RunpodSetup.md))
-   - Custom Docker image built and pushed to Docker Hub
-   - Serverless endpoint created pointing to Docker image
-   - API key configured
-   - **Why**: GPU processing for transcoding
-
-4. **R2 Buckets** ([Infrastructure - R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
-   - Creator buckets provisioned
-   - **Why**: Input and output storage
-
-### Can Be Developed In Parallel
-- **Content Access** - Will consume transcoded HLS/audio files
-- **Admin Dashboard** - Will display transcoding status
+1.  **Content Management Service**: The media upload flow and `media_items` table are required as inputs to the transcoding process.
+2.  **Cloudflare Queue**: The `TRANSCODING_QUEUE` must be set up for asynchronous job handling.
+3.  **Runpod Account & Endpoint**: A serverless GPU endpoint with the custom Docker image is necessary for processing.
+4.  **R2 Buckets**: Creator-specific buckets must be provisioned for input and output storage.
 
 ---
 

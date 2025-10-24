@@ -17,19 +17,13 @@ The Platform Settings system provides the Platform Owner with the ability to cus
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#8-platform-settings) document for details on dependencies between features.
 
-1. **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md)):
-   - `requireOwner()` guard for settings page access.
-   - `event.locals.user.id` for identifying the Platform Owner.
-2. **Content Management System** ([Content Management TDD](../content-management/ttd-dphase-1.md)):
-   - `R2Service` for logo upload and retrieval.
-   - `codex-assets-{ownerId}` bucket provisioned per R2 Bucket Structure.
-3. **Admin Dashboard System** ([Admin Dashboard TDD](../admin-dashboard/ttd-dphase-1.md)):
-   - Settings page is accessible via `/admin/settings` route.
+### Technical Prerequisites
 
-### Can Be Developed In Parallel
-- Notifications (will consume `platformName` and `contactEmail` once available)
+1.  **Auth System**: The `requireOwner()` guard is needed to protect the settings page.
+2.  **Content Management System**: The `R2Service` is required for logo uploads.
+3.  **Admin Dashboard System**: The settings page is part of the admin dashboard.
 
 ---
 

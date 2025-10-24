@@ -96,37 +96,7 @@ Without e-commerce:
 
 ## Cross-Feature Dependencies
 
-### Content Management Feature (Phase 1)
-**Dependency**: Content must be published before it can be sold
-- Content has `price` field (decimal, can be $0)
-- Only `status = 'published'` content appears in catalog
-- Purchase records reference `content.id`
-- See [Content Management PRD](../content-management/pdr-phase-1.md)
-
-### Content Access Feature (Phase 1)
-**Dependency**: Content Access verifies purchases before granting access
-- **Critical**: `purchases` table is source of truth for access rights
-- Content Access queries: `SELECT * FROM purchases WHERE userId = ? AND itemId = ? AND refundedAt IS NULL`
-- See [Content Access PRD](../content-access/pdr-phase-1.md)
-
-### Auth Feature (Phase 1)
-**Dependency**: Only authenticated customers can purchase
-- Checkout requires `user.email` for Stripe
-- Purchase records link to `users.id`
-- See [Auth PRD](../auth/pdr-phase-1.md)
-
-### Notifications Feature (Phase 1)
-**Dependency**: Send purchase and refund confirmation emails
-- Webhook triggers `purchase-receipt` email
-- Refund triggers `refund-confirmation` email
-- See [Notifications PRD](../notifications/pdr-phase-1.md)
-
-### Admin Dashboard (Phase 1)
-**Dependency**: Creators view sales/revenue, initiate refunds
-- Orders list for creator
-- Revenue summary (total sales)
-- Refund button on purchase details
-- See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#5-e-commerce) document for details.
 
 ---
 

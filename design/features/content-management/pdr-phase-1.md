@@ -108,38 +108,7 @@ Without content management:
 
 ## Cross-Feature Dependencies
 
-### Media Transcoding Feature (Phase 1)
-**Dependency**: Transcoding converts uploaded videos to HLS format for adaptive streaming
-- Media items uploaded via Content Management
-- Transcoding triggered automatically after upload
-- HLS streams stored in creator's media bucket
-- See [Media Transcoding PRD](../media-transcoding/pdr-phase-1.md)
-
-### E-Commerce Feature (Phase 1)
-**Dependency**: E-Commerce relies on content metadata for pricing and sales
-- Content has price field (can be $0 for free content)
-- Content linked to orders/purchases
-- See [E-Commerce PRD](../e-commerce/pdr-phase-1.md)
-
-### Content Access Feature (Phase 1)
-**Dependency**: Content Access controls who can view content
-- Published content available for purchase
-- Purchased content appears in customer library
-- Generates signed URLs for media playback and resource downloads
-- See [Content Access PRD](../content-access/pdr-phase-1.md)
-
-### Admin Dashboard (Phase 1)
-**Dependency**: Admin Dashboard displays content management UI
-- Media library view
-- Content list in admin area
-- Create/edit forms
-- See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
-
-### Auth Feature (Phase 1)
-**Dependency**: Only Creators can manage their content
-- Content routes protected by `requireCreatorAccess()` guard
-- Creators can only access their own content/media
-- See [Auth PRD](../auth/pdr-phase-1.md)
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#4-content-management) document for details.
 
 ---
 

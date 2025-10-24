@@ -114,26 +114,7 @@ Without transcoding:
 
 ## Cross-Feature Dependencies
 
-### Content Management Feature (Phase 1)
-**Dependency**: Content Management uploads media and enqueues transcoding jobs
-- Videos uploaded to `codex-media-{creatorId}/originals/{mediaId}/`
-- Audio uploaded to `codex-media-{creatorId}/audio/{mediaId}/`
-- Media item created with `status = 'uploaded'`
-- Transcoding job enqueued to `TRANSCODING_QUEUE`
-- See [Content Management PRD](../content-management/pdr-phase-1.md)
-
-### Content Access Feature (Phase 1)
-**Dependency**: Content Access serves HLS streams and audio files to customers
-- Customers access HLS master playlist via signed URLs (video)
-- Customers access HLS master playlist via signed URLs (audio)
-- Waveform JSON loaded for audio player visualization
-- See [Content Access PRD](../content-access/pdr-phase-1.md)
-
-### Admin Dashboard (Phase 1)
-**Dependency**: Admin Dashboard displays transcoding status
-- Media library shows status: "Transcoding...", "Ready", "Failed"
-- Waveform preview for audio files
-- See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#6-media-transcoding) document for details.
 
 ---
 

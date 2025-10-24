@@ -17,37 +17,24 @@ The content management system enables Creators to upload, organize, and manage v
 - **Upload Strategy**: Direct browser → R2 (bypasses server, tracks progress)
 - **Access Control**: Presigned URLs for secure file access
 
-**Architecture Diagram**: See [Content Management Architecture](../_assets/content-architecture.png)
+**Architecture Diagram**:
+
+![Content Management Architecture](./assets/content-management-architecture.png)
+
+The diagram illustrates the direct upload strategy (browser → R2 via presigned URLs), media library pattern, bucket-per-creator isolation, and transcoding queue integration.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#4-content-management) document for details on dependencies between features.
 
-1. **Drizzle ORM Setup** ([Infrastructure - Database Setup](../../infrastructure/DatabaseSetup.md))
-   - Database schema for `media_items`, `content`, `resources`, `resource_attachments`, `categories`, `tags`
-   - **Why**: All metadata stored in database
+### Technical Prerequisites
 
-2. **Cloudflare R2 Buckets** ([Infrastructure - R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
-   - Bucket-per-creator architecture
-   - Platform bucket: `codex-platform`
-   - Creator buckets provisioned on signup: `codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`
-   - R2 API credentials configured
-   - **Why**: Files stored in creator-specific R2 buckets
-
-3. **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md))
-   - `requireCreatorAccess()` guard implemented
-   - **Why**: Only Creators can manage their own content/media
-
-4. **Cloudflare Queue** ([Infrastructure - Cloudflare Setup](../../infrastructure/CloudflareSetup.md))
-   - `TRANSCODING_QUEUE` for video processing jobs
-   - **Why**: Enqueue transcoding after video upload
-
-### Can Be Developed In Parallel
-- **Media Transcoding** - Consumes media items uploaded by Content Management
-- **E-Commerce** - Content pricing integration happens later
-- **Content Access** - Access control uses content metadata
+1.  **Drizzle ORM Setup**: The database schema for content, media, and resources must be in place.
+2.  **Cloudflare R2 Buckets**: The bucket-per-creator architecture needs to be set up for file storage.
+3.  **Auth System**: The `requireCreatorAccess()` guard is necessary to protect content management routes.
+4.  **Cloudflare Queue**: The `TRANSCODING_QUEUE` is needed to handle video processing jobs.
 
 ---
 

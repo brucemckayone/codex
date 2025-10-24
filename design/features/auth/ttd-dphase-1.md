@@ -9,35 +9,23 @@ The authentication system provides secure user identity management using BetterA
 
 **Architecture**: BetterAuth handles authentication logic, Drizzle ORM manages database schema, Cloudflare KV caches sessions to avoid database queries on every request.
 
-**Architecture Diagram**: See [Auth System Architecture](../_assets/auth-architecture.png)
+**Architecture Diagram**:
+
+![Auth System Architecture](./assets/auth-architecture.png)
+
+The diagram illustrates the complete authentication flow including BetterAuth integration, session caching in Cloudflare KV, and the dual-storage strategy (Postgres + KV).
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#2-auth-authentication--authorization) document for details on dependencies between features.
 
-1. **Drizzle ORM Setup** ([Infrastructure - Database Setup](../../infrastructure/DatabaseSetup.md))
-   - Drizzle ORM configured with Neon Postgres
-   - Connection pooling established
-   - Migration system in place
-   - **Why**: BetterAuth requires Drizzle adapter to be configured
+### Technical Prerequisites
 
-2. **Cloudflare KV Namespace** ([Infrastructure - Cloudflare Setup](../../infrastructure/CloudflareSetup.md))
-   - KV namespace created: `AUTH_SESSION_KV`
-   - Bound to Cloudflare Pages project
-   - Available via `event.platform.env.AUTH_SESSION_KV`
-   - **Why**: Used for session caching to avoid DB queries
-
-3. **Notification Service** ([Notifications TDD](../notifications/ttd-dphase-1.md))
-   - Email abstraction layer implemented
-   - Templates for: verification, password reset, password changed
-   - **Why**: Auth needs to send transactional emails
-
-### Can Be Developed In Parallel
-
-- Content Management (doesn't depend on auth directly)
-- E-Commerce (requires auth guards, but auth interfaces can be mocked)
+1.  **Drizzle ORM Setup**: Drizzle must be configured with Neon Postgres, as BetterAuth requires a Drizzle adapter.
+2.  **Cloudflare KV Namespace**: The `AUTH_SESSION_KV` namespace must be created and bound for session caching.
+3.  **Notification Service**: The email abstraction layer must be implemented for sending transactional emails.
 
 ---
 

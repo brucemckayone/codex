@@ -1,0 +1,223 @@
+# Content Access Architecture - Phase 1
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Browser Layer
+browser: {
+  label: "Customer Browser"
+
+  library_page: {
+    label: "My Library Page\n\nLists all purchased\ncontent (video/audio)"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  media_player: {
+    label: "Unified Media Player\n(Svelte Component)\n\n• Video player (HLS)\n• Audio player (HLS)\n• Progress tracking"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  style: {
+    fill: "#FAFAFA"
+    stroke: "#BDBDBD"
+    stroke-width: 2
+  }
+}
+
+# SvelteKit Server Layer
+sveltekit: {
+  label: "SvelteKit Server"
+
+  library_route: {
+    label: "/library Route\n\n+page.server.ts\n• requireAuth()\n• Load user's content"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  content_route: {
+    label: "/content/[id] Route\n\n+page.server.ts\n• Check access\n• Generate signed URLs"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  progress_api: {
+    label: "Progress API\n\nPOST /api/progress\nSave playback position"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  style: {
+    fill: ${color-nextjs}
+    stroke: ${stroke-nextjs}
+    stroke-width: 2
+  }
+}
+
+# Service Layer
+services: {
+  label: "Service Layer"
+
+  content_access_service: {
+    label: "Content Access Service\n\ncheckAccess(userId, contentId)\ngenerateSignedMediaUrl()\ntrackProgress()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  auth_service: {
+    label: "Auth Service\n\nrequireAuth()\ngetCurrentUser()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  style: {
+    fill: "#F5F5F5"
+    stroke: "#9E9E9E"
+    stroke-width: 2
+  }
+}
+
+# Database Layer
+postgres: {
+  label: "Neon PostgreSQL"
+  shape: cylinder
+
+  tables: {
+    label: "Database Tables\n\n• content\n• media_items\n• purchases (access control)\n• playback_progress\n• users"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# R2 Storage Layer
+r2: {
+  label: "Cloudflare R2"
+
+  media_bucket: {
+    label: "Media Buckets\n\ncodex-media-{creatorId}\n\n• HLS master playlists\n• Video segments (.ts)\n• Audio files\n• Waveform data"
+    style: {
+      fill: ${color-r2}
+      stroke: ${stroke-r2}
+    }
+  }
+
+  assets_bucket: {
+    label: "Assets Bucket\n\ncodex-assets-{creatorId}\n\n• Thumbnails\n• Posters"
+    style: {
+      fill: ${color-r2}
+      stroke: ${stroke-r2}
+    }
+  }
+
+  style: {
+    fill: ${color-r2}
+    stroke: ${stroke-r2}
+    stroke-width: 2
+  }
+}
+
+# Connections - Library Page Load
+browser.library_page -> sveltekit.library_route: "GET /library\n(authenticated)" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+sveltekit.library_route -> services.auth_service: "requireAuth()" {
+  style.stroke: ${arrow-http}
+}
+
+sveltekit.library_route -> postgres.tables: "SELECT content\nJOIN purchases\nWHERE userId = ?" {
+  style.stroke: ${arrow-sql}
+}
+
+sveltekit.library_route -> browser.library_page: "SSR HTML\n(purchased content list)" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Connections - Content Access Flow
+browser.library_page -> sveltekit.content_route: "Click content\nGET /content/{id}" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+sveltekit.content_route -> services.content_access_service: "checkAccess(userId, contentId)" {
+  style.stroke: ${arrow-http}
+}
+
+services.content_access_service -> postgres.tables: "SELECT FROM purchases\nWHERE userId AND itemId" {
+  style.stroke: ${arrow-sql}
+}
+
+services.content_access_service -> services.content_access_service: "Access denied?\n→ 403 Forbidden" {
+  style.stroke: ${arrow-http}
+  style.stroke-dash: 3
+}
+
+services.content_access_service -> postgres.tables: "SELECT media_item\nFROM content" {
+  style.stroke: ${arrow-sql}
+}
+
+services.content_access_service -> r2.media_bucket: "Generate signed URL\n(15 min expiry)" {
+  style.stroke: ${arrow-external}
+}
+
+sveltekit.content_route -> browser.media_player: "SSR HTML\n(with signed URLs)" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Connections - Media Playback
+browser.media_player -> r2.media_bucket: "GET {signedUrl}\n(HLS master playlist)" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+r2.media_bucket -> browser.media_player: "Stream HLS segments" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Connections - Progress Tracking
+browser.media_player -> sveltekit.progress_api: "POST /api/progress\n{contentId, position}" {
+  style.stroke: ${arrow-https}
+}
+
+sveltekit.progress_api -> postgres.tables: "UPSERT playback_progress\n(userId, contentId, position)" {
+  style.stroke: ${arrow-sql}
+}
+
+# Notes
+note_access_control: {
+  label: "🔐 Access Control:\n1. Check purchases table for access\n2. If no purchase → 403 Forbidden\n3. If purchased → Generate signed R2 URLs\n4. URLs expire in 15 minutes (anti-hotlinking)"
+  shape: text
+}
+
+note_signed_urls: {
+  label: "🔑 Signed URLs:\n• Short-lived (15 min expiry)\n• Cannot be shared/cached\n• Prevents unauthorized access\n• Regenerated on each page load"
+  shape: text
+}

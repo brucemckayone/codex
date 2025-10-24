@@ -121,11 +121,7 @@ neon branches create --name staging --parent main
 **Trigger:** Every push, every PR
 
 **Jobs:**
-1. Type checking (~1 min)
-2. Linting (~30 sec)
-3. Unit tests (~2 min)
-4. Integration tests (~3 min)
-5. E2E tests (~5 min, staging/production branches only)
+The test workflow runs a series of jobs to ensure code quality, including type checking, linting, unit tests, integration tests, and end-to-end (E2E) tests. For a detailed breakdown of the testing strategy, environments, and commands, see the [Testing Guide](./Testing.md).
 
 **Total time: ~5 min for feature branches, ~12 min for staging/prod**
 

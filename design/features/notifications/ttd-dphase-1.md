@@ -9,14 +9,17 @@ The notification system provides email delivery with provider abstraction, ensur
 2. **Adapter Layer**: Provider-specific implementations (Resend, SendGrid, etc.)
 3. **Template Layer**: Email templates with data interpolation
 
-**Architecture Diagram**: See [Notification System Architecture](../_assets/notification-architecture.png)
+**Architecture Diagram**:
+
+![Notification System Architecture](./assets/notification-architecture.png)
+
+The diagram demonstrates the three-layer architecture: provider-agnostic service interface, email provider adapters (Resend), and template-based email rendering.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
-- None (notifications is a foundational service)
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#7-notifications) document for details on how other features depend on Notifications. As a foundational service, it has no feature dependencies itself.
 
 ### Environment Configuration
 - `RESEND_API_KEY`: Resend API key (dev and prod)

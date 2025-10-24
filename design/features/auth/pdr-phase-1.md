@@ -70,25 +70,7 @@ Without authentication, the platform cannot:
 
 ## Cross-Feature Dependencies
 
-### Notification System (Phase 1)
-**Dependency**: Auth relies on notification system for emails
-- Registration verification email
-- Password reset email
-- **Design Requirement**: Must use notification abstraction layer (not direct Resend calls)
-- **Interface**: `sendEmail(template, recipient, data)` via notification service
-- See [Notifications PRD](../notifications/pdr-phase-1.md) for email abstraction details
-
-### Admin Dashboard (Phase 1)
-**Dependency**: Admin routes protected by auth
-- Auth middleware protects `/admin/*` routes
-- Dashboard displays user role and profile
-- See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
-
-### Future: Multi-Creator (Phase 3)
-**Future Extensibility**: Role system must accommodate Media Owner
-- Database `users.role` enum includes `'creator'` (not used in Phase 1)
-- Middleware logic uses role checks that are extensible
-- See [Multi-Creator PRD](../multi-creator/pdr-phase-1.md) for future design
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#2-auth-authentication--authorization) document for details.
 
 ---
 
@@ -143,9 +125,9 @@ Without authentication, the platform cannot:
    - Set secure HTTP-only cookie with session ID
    - Populate `event.locals.user` with `{ id, email, name, role }`
    - Redirect based on role:
-     - `role: 'owner'` ’ `/admin`
-     - `role: 'customer'` ’ `/library`
-     - (Future) `role: 'creator'` ’ `/creator-dashboard` (Phase 3)
+     - `role: 'owner'` ï¿½ `/admin`
+     - `role: 'customer'` ï¿½ `/library`
+     - (Future) `role: 'creator'` ï¿½ `/creator-dashboard` (Phase 3)
 6. If invalid:
    - Show error: "Invalid email or password"
    - Do not reveal which field is incorrect (security)
@@ -355,7 +337,7 @@ See diagrams:
 ### Testing Requirements
 -  Unit tests for all authentication utilities
 -  Integration tests for all auth API routes
--  E2E test for registration ’ verification ’ login flow
+-  E2E test for registration ï¿½ verification ï¿½ login flow
 -  E2E test for password reset flow
 -  Security tests for protected routes
 -  Test coverage > 90% for auth module
@@ -421,7 +403,7 @@ await notificationService.sendEmail({
 ```
 
 **Benefits**:
-- Easy to switch email providers (Resend ’ SendGrid, Postmark, etc.)
+- Easy to switch email providers (Resend ï¿½ SendGrid, Postmark, etc.)
 - Centralized email logic (templates, logging, error handling)
 - Testable (mock notification service in tests)
 - See [Notifications TDD](../notifications/ttd-dphase-1.md) for implementation
