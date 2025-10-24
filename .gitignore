@@ -8,3 +8,7 @@ node_modules
 # Act (GitHub Actions local testing)
 .secrets
 .actrc.local
+
+# Coverage reports
+coverage/
+**/coverage/
