@@ -9,7 +9,7 @@ export default defineConfig({
       'packages/validation',
       'packages/cloudflare-clients',
       'packages/test-utils',
-      'workers/queue-consumer',
+      // 'workers/queue-consumer', // Disabled - Cloudflare not set up yet
     ],
 
     // Global coverage configuration (cannot be overridden in projects)
