@@ -2,19 +2,29 @@ import js from '@eslint/js';
 import ts from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 import svelte from 'eslint-plugin-svelte';
+import svelteParser from 'svelte-eslint-parser';
 import vitest from 'eslint-plugin-vitest';
 import prettier from 'eslint-config-prettier';
 
 export default [
   js.configs.recommended,
   {
-    files: ['**/*.{js,ts,svelte}'],
+    files: ['**/*.{js,ts}'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'module',
-        extraFileExtensions: ['.svelte'],
+      },
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        __dirname: 'readonly',
+        setTimeout: 'readonly',
+        RequestInfo: 'readonly',
+        RequestInit: 'readonly',
+        Response: 'readonly',
+        expect: 'readonly',
       },
     },
     plugins: {
@@ -31,14 +41,19 @@ export default [
         },
       ],
       '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-empty-object-type': 'off',
     },
   },
   {
     files: ['**/*.svelte'],
     languageOptions: {
-      parser: svelte.parser,
+      parser: svelteParser,
       parserOptions: {
         parser: tsParser,
+      },
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
       },
     },
     plugins: {

@@ -9,6 +9,7 @@ The Admin Dashboard provides the Platform Owner with a centralized interface to 
 ## Problem Statement
 
 The Platform Owner needs a way to:
+
 - Efficiently manage their uploaded content (videos, audio, written).
 - Oversee customer accounts and their purchase history.
 - Track key business metrics like revenue and sales performance.
@@ -19,12 +20,14 @@ Without a functional admin dashboard, the Platform Owner cannot effectively oper
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1.  **Content Management**: Enable Platform Owners to list, create, edit, publish, and delete content.
 2.  **Customer Management**: Provide tools to view customer details and their purchase history.
 3.  **Simple Analytics**: Display key business metrics (total revenue, customer count, top content).
 4.  **Basic Settings**: Allow customization of platform branding and business information.
 
 ### Success Metrics
+
 - Platform Owner can perform content CRUD operations in < 30 seconds.
 - Platform Owner can find a customer and view their purchase history in < 15 seconds.
 - Key analytics (total revenue) are visible within 5 seconds of logging in.
@@ -34,6 +37,7 @@ Without a functional admin dashboard, the Platform Owner cannot effectively oper
 ## Scope
 
 ### In Scope (Phase 1 MVP)
+
 - **Content Management Section**:
   - List all content (published, unpublished, processing) with basic filters (e.g., by status).
   - Link to content creation/upload flow (handled by Content Management feature).
@@ -59,6 +63,7 @@ Without a functional admin dashboard, the Platform Owner cannot effectively oper
   - Edit contact email and business name.
 
 ### Explicitly Out of Scope (Future Phases)
+
 - **Advanced Analytics & Reporting** (cohorts, funnels, detailed content performance) (Phase 2+)
 - **Multi-Creator Management** (inviting, revenue splits, content approval workflows) (Phase 3)
 - **Full Platform Settings** (SEO, integrations, custom domains) (Phase 3+)
@@ -75,49 +80,59 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ## User Stories & Use Cases
 
 ### US-ADMIN-001: View Content Overview
+
 **As a** Platform Owner,
 **I want to** see a list of all my content and its status,
 **so that** I can quickly understand my content library and identify items needing attention.
 
 **Acceptance Criteria:**
+
 - A dedicated section in the dashboard lists all content.
 - Each content item displays its title, type, status (draft, published, processing), and basic stats (e.g., purchase count).
 - Filters are available for content status.
 
 ### US-ADMIN-002: Manage Content Status
+
 **As a** Platform Owner,
 **I want to** easily publish, unpublish, or soft delete content,
 **so that** I can control what is visible and available on the platform.
 
 **Acceptance Criteria:**
+
 - Toggle buttons or actions are available for publishing/unpublishing content.
 - A "Delete" action initiates a soft delete with a confirmation prompt.
 
 ### US-ADMIN-003: View Customer List and Details
+
 **As a** Platform Owner,
 **I want to** see a list of all registered customers and their details,
 **so that** I can understand my user base and provide support.
 
 **Acceptance Criteria:**
+
 - A dedicated section lists all customers with their email and join date.
 - Clicking on a customer reveals their detailed profile, including total spent and a list of their purchases.
 
 ### US-ADMIN-004: View Simple Business Analytics
+
 **As a** Platform Owner,
 **I want to** see key business metrics at a glance,
 **so that** I can quickly assess the platform's performance.
 
 **Acceptance Criteria:**
+
 - The dashboard homepage displays total revenue (all-time and current month), total customer count, and total purchase count.
 - A list of the top 5 most purchased content items is visible.
 - A list of the last 10 purchases is displayed.
 
 ### US-ADMIN-005: Customize Basic Branding
+
 **As a** Platform Owner,
 **I want to** upload my platform logo and set a primary color,
 **so that** I can brand the platform to match my business identity.
 
 **Acceptance Criteria:**
+
 - A settings section allows uploading a logo image.
 - A color picker or input field allows setting the primary brand color.
 - The platform name can be edited.

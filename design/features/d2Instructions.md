@@ -13,6 +13,7 @@ We use a custom theme with pastel colors for readability:
 ### Color Palette
 
 **Containers:**
+
 - Caddy: Soft green (#C8E6C9)
 - Next.js: Light blue (#E1F5FE)
 - Go Worker: Mint/teal (#E0F2F1)
@@ -21,6 +22,7 @@ We use a custom theme with pastel colors for readability:
 - Storage: Pale yellow (#FFF9C4)
 
 **External Services:**
+
 - Internet: Very light blue (#E3F2FD)
 - Cloudflare R2: Peach (#FFE0B2)
 - Stripe: Light purple (#E1BEE7)
@@ -41,8 +43,9 @@ Compile all diagrams at once:
 ```
 
 This will:
+
 - Find all .d2 files in this directory
-- Skip utility files (theme.d2, _*.d2)
+- Skip utility files (theme.d2, \_\*.d2)
 - Compile to PNG in ../assets/
 - Show progress with colored output
 
@@ -155,20 +158,24 @@ d2 --theme=200 --dark-theme=201 diagram.d2 output.png
 ## 🛠️ Troubleshooting
 
 **Error: d2 not found**
+
 ```bash
 brew install d2
 ```
 
 **Build script not executable**
+
 ```bash
 chmod +x build.sh
 ```
 
 **Import errors**
+
 - Ensure theme.d2 exists in same directory
 - Use relative imports without file extension: `...@theme` not `...@theme.d2`
 
 **Color not working**
+
 - Check variable name matches theme.d2
 - Use `${variable-name}` syntax
 - Variable names are case-sensitive

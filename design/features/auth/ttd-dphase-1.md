@@ -3,6 +3,7 @@
 ## System Overview
 
 The authentication system provides secure user identity management using BetterAuth library with:
+
 - **Primary Storage**: Neon Postgres (user accounts, sessions)
 - **Session Caching**: Cloudflare KV (high-performance session lookups)
 - **Email Delivery**: Notification service abstraction (see [Notifications TDD](../notifications/ttd-dphase-1.md))
@@ -36,6 +37,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 **Responsibility**: Initialize and configure BetterAuth with Drizzle adapter and Cloudflare KV secondary storage
 
 **Configuration**:
+
 ```typescript
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
@@ -52,8 +54,8 @@ export const auth = betterAuth({
       // Map BetterAuth expected names to our schema
       user: schema.users,
       session: schema.sessions,
-      verification: schema.verificationTokens
-    }
+      verification: schema.verificationTokens,
+    },
   }),
 
   // Secondary Storage: Cloudflare KV for session caching
@@ -61,15 +63,15 @@ export const auth = betterAuth({
 
   // Session Configuration
   session: {
-    expiresIn: 60 * 60 * 24,           // 24 hours
-    updateAge: 60 * 60 * 24,            // Update session every 24 hours
+    expiresIn: 60 * 60 * 24, // 24 hours
+    updateAge: 60 * 60 * 24, // Update session every 24 hours
     cookieName: 'codex-session',
 
     // Cookie caching: store session data in signed cookie (fallback if KV unavailable)
     cookieCache: {
       enabled: true,
-      maxAge: 60 * 5                    // 5 minutes (short-lived)
-    }
+      maxAge: 60 * 5, // 5 minutes (short-lived)
+    },
   },
 
   // Email Sender: Use notification abstraction (NOT direct Resend)
@@ -83,8 +85,8 @@ export const auth = betterAuth({
         recipient: user.email,
         data: {
           userName: user.name,
-          verificationUrl: url
-        }
+          verificationUrl: url,
+        },
       });
     },
 
@@ -94,10 +96,10 @@ export const auth = betterAuth({
         recipient: user.email,
         data: {
           userName: user.name,
-          resetUrl: url
-        }
+          resetUrl: url,
+        },
       });
-    }
+    },
   },
 
   // User Schema: Extend with custom fields
@@ -108,16 +110,16 @@ export const auth = betterAuth({
         required: true,
         defaultValue: 'customer',
         // Enum: 'customer' | 'owner' | 'creator' (Phase 3)
-      }
-    }
+      },
+    },
   },
 
   // Security
-  secret: process.env.AUTH_SECRET,      // 32+ character random string
-  baseURL: process.env.AUTH_URL,        // http://localhost:5173 (dev) or https://yourdomain.com (prod)
+  secret: process.env.AUTH_SECRET, // 32+ character random string
+  baseURL: process.env.AUTH_URL, // http://localhost:5173 (dev) or https://yourdomain.com (prod)
 
   // Trusted origins (CORS)
-  trustedOrigins: [process.env.AUTH_URL]
+  trustedOrigins: [process.env.AUTH_URL],
 });
 
 // Export types for use in app
@@ -125,6 +127,7 @@ export type { Session, User } from 'better-auth';
 ```
 
 **Key Design Decisions**:
+
 -  **Drizzle Adapter**: Native integration with our ORM
 -  **Cookie Cache Fallback**: If KV unavailable, uses signed cookies (5min cache)
 -  **User Role Extension**: Add `role` field to BetterAuth's user schema
@@ -135,11 +138,13 @@ export type { Session, User } from 'better-auth';
 ### 2. Server Hooks Middleware (`packages/web/src/hooks.server.ts`)
 
 **Responsibility**:
+
 1. Mount BetterAuth handler
 2. Populate `event.locals` with session/user data
 3. Use Cloudflare KV for session caching
 
 **Implementation**:
+
 ```typescript
 import { auth } from '$lib/server/auth';
 import { sequence } from '@sveltejs/kit/hooks';
@@ -179,7 +184,7 @@ const sessionHandler: Handle = async ({ event, resolve }) => {
   // Cache miss (or KV unavailable): fetch from database via BetterAuth
   try {
     const session = await auth.api.getSession({
-      headers: event.request.headers
+      headers: event.request.headers,
     });
 
     if (session) {
@@ -188,7 +193,9 @@ const sessionHandler: Handle = async ({ event, resolve }) => {
 
       // Store in KV for next request (TTL = session expiry)
       if (kv) {
-        const ttl = Math.floor((new Date(session.expiresAt).getTime() - Date.now()) / 1000);
+        const ttl = Math.floor(
+          (new Date(session.expiresAt).getTime() - Date.now()) / 1000
+        );
         await kv.put(
           `session:${sessionCookie}`,
           JSON.stringify({ session, user: session.user }),
@@ -213,11 +220,13 @@ export const handle = sequence(authHandler, sessionHandler);
 ```
 
 **Performance**:
+
 - **Cache Hit** (KV): ~5-10ms (no DB query)
 - **Cache Miss**: ~50-100ms (DB query + cache population)
 - **Cache Hit Rate**: Expected >95% after warmup
 
 **Design Notes**:
+
 -  Cloudflare KV used as **read-through cache**
 -  Automatic cache invalidation via TTL (matches session expiry)
 -  Graceful degradation: works without KV (falls back to DB)
@@ -230,6 +239,7 @@ export const handle = sequence(authHandler, sessionHandler);
 **Responsibility**: Reusable authorization checks for protecting routes
 
 **Implementation**:
+
 ```typescript
 import { redirect } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
@@ -240,7 +250,10 @@ import type { RequestEvent } from '@sveltejs/kit';
  */
 export function requireAuth(event: RequestEvent) {
   if (!event.locals.user) {
-    throw redirect(303, `/login?redirect=${encodeURIComponent(event.url.pathname)}`);
+    throw redirect(
+      303,
+      `/login?redirect=${encodeURIComponent(event.url.pathname)}`
+    );
   }
   return event.locals.user;
 }
@@ -290,6 +303,7 @@ export function optionalAuth(event: RequestEvent) {
 ```
 
 **Usage in Route Handlers**:
+
 ```typescript
 // Example: Admin route
 // src/routes/admin/+page.server.ts
@@ -310,6 +324,7 @@ export async function load(event) {
 **Responsibility**: Reactive Svelte store for auth state (client-side)
 
 **Implementation**:
+
 ```typescript
 import { writable, derived } from 'svelte/store';
 import type { User, Session } from '$lib/server/auth';
@@ -325,7 +340,7 @@ function createAuthStore() {
   const { subscribe, set, update } = writable<AuthState>({
     user: null,
     session: null,
-    loading: true
+    loading: true,
   });
 
   return {
@@ -338,7 +353,7 @@ function createAuthStore() {
 
     // Update user data
     setUser(user: User | null) {
-      update(state => ({ ...state, user }));
+      update((state) => ({ ...state, user }));
     },
 
     // Clear auth state (logout)
@@ -348,7 +363,7 @@ function createAuthStore() {
 
     // Refresh session from server
     async refresh() {
-      update(state => ({ ...state, loading: true }));
+      update((state) => ({ ...state, loading: true }));
 
       try {
         const response = await fetch('/api/auth/session');
@@ -362,22 +377,32 @@ function createAuthStore() {
         console.error('Failed to refresh session:', error);
         set({ user: null, session: null, loading: false });
       }
-    }
+    },
   };
 }
 
 export const authStore = createAuthStore();
 
 // Derived stores for convenience
-export const user = derived(authStore, $auth => $auth.user);
-export const session = derived(authStore, $auth => $auth.session);
-export const isAuthenticated = derived(authStore, $auth => !!$auth.user);
-export const isOwner = derived(authStore, $auth => $auth.user?.role === 'owner');
-export const isCustomer = derived(authStore, $auth => $auth.user?.role === 'customer');
-export const isCreator = derived(authStore, $auth => $auth.user?.role === 'creator'); // Phase 3
+export const user = derived(authStore, ($auth) => $auth.user);
+export const session = derived(authStore, ($auth) => $auth.session);
+export const isAuthenticated = derived(authStore, ($auth) => !!$auth.user);
+export const isOwner = derived(
+  authStore,
+  ($auth) => $auth.user?.role === 'owner'
+);
+export const isCustomer = derived(
+  authStore,
+  ($auth) => $auth.user?.role === 'customer'
+);
+export const isCreator = derived(
+  authStore,
+  ($auth) => $auth.user?.role === 'creator'
+); // Phase 3
 ```
 
 **Usage in Components**:
+
 ```svelte
 <script>
   import { authStore, isAuthenticated, isOwner } from '$lib/stores/auth';
@@ -402,13 +427,14 @@ export const isCreator = derived(authStore, $auth => $auth.user?.role === 'creat
 ```
 
 **Root Layout** (`src/routes/+layout.server.ts`):
+
 ```typescript
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
   return {
     user: locals.user,
-    session: locals.session
+    session: locals.session,
   };
 };
 ```
@@ -453,7 +479,7 @@ export const actions: Actions = {
         email,
         password,
         name,
-        role: 'customer'  // Default role
+        role: 'customer', // Default role
       });
 
       // BetterAuth automatically:
@@ -469,20 +495,22 @@ export const actions: Actions = {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 30  // 30 days
+        maxAge: 60 * 60 * 24 * 30, // 30 days
       });
 
       // Redirect to verification prompt
       throw redirect(303, '/verify-email?new=true');
     } catch (error) {
       if (error.code === 'USER_EXISTS') {
-        return fail(400, { error: 'An account with this email already exists' });
+        return fail(400, {
+          error: 'An account with this email already exists',
+        });
       }
 
       console.error('Registration error:', error);
       return fail(500, { error: 'Registration failed. Please try again.' });
     }
-  }
+  },
 };
 ```
 
@@ -509,13 +537,13 @@ export const actions: Actions = {
       const ip = getClientAddress();
       const limitResult = await rateLimit(kv, ip, {
         limit: 5,
-        window: 900,  // 15 minutes
-        keyPrefix: 'rl:login:'
+        window: 900, // 15 minutes
+        keyPrefix: 'rl:login:',
       });
 
       if (!limitResult.allowed) {
         return fail(429, {
-          error: 'Too many login attempts. Please try again in 15 minutes.'
+          error: 'Too many login attempts. Please try again in 15 minutes.',
         });
       }
     }
@@ -528,27 +556,28 @@ export const actions: Actions = {
       // Authenticate via BetterAuth
       const result = await auth.api.signInEmail({
         email,
-        password
+        password,
       });
 
       // Set session cookie
-      const maxAge = rememberMe ? 60 * 60 * 24 * 30 : undefined;  // 30 days or session
+      const maxAge = rememberMe ? 60 * 60 * 24 * 30 : undefined; // 30 days or session
       cookies.set('codex-session', result.session.token, {
         path: '/',
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge
+        maxAge,
       });
 
       // Redirect based on role
-      const redirectTo = url.searchParams.get('redirect') || getDefaultRoute(result.user.role);
+      const redirectTo =
+        url.searchParams.get('redirect') || getDefaultRoute(result.user.role);
       throw redirect(303, redirectTo);
     } catch (error) {
       // Generic error (don't reveal if user exists)
       return fail(400, { error: 'Invalid email or password' });
     }
-  }
+  },
 };
 
 function getDefaultRoute(role: string): string {
@@ -556,7 +585,7 @@ function getDefaultRoute(role: string): string {
     case 'owner':
       return '/admin';
     case 'creator':
-      return '/creator-dashboard';  // Phase 3
+      return '/creator-dashboard'; // Phase 3
     case 'customer':
     default:
       return '/library';
@@ -590,16 +619,18 @@ export const actions: Actions = {
       // ALWAYS return success (prevent user enumeration)
       return {
         success: true,
-        message: 'If an account exists with this email, a password reset link has been sent.'
+        message:
+          'If an account exists with this email, a password reset link has been sent.',
       };
     } catch (error) {
       // Still return success (security)
       return {
         success: true,
-        message: 'If an account exists with this email, a password reset link has been sent.'
+        message:
+          'If an account exists with this email, a password reset link has been sent.',
       };
     }
-  }
+  },
 };
 ```
 
@@ -648,7 +679,7 @@ export const actions: Actions = {
       // 5. Invalidate all existing sessions
       await auth.api.resetPassword({
         token,
-        password
+        password,
       });
 
       // Invalidate KV session cache for this user
@@ -663,13 +694,15 @@ export const actions: Actions = {
       throw redirect(303, '/login?message=password-reset-success');
     } catch (error) {
       if (error.code === 'INVALID_TOKEN') {
-        return fail(400, { error: 'This password reset link is invalid or expired' });
+        return fail(400, {
+          error: 'This password reset link is invalid or expired',
+        });
       }
 
       console.error('Password reset error:', error);
       return fail(500, { error: 'Password reset failed. Please try again.' });
     }
-  }
+  },
 };
 ```
 
@@ -696,13 +729,13 @@ export const load: PageServerLoad = async ({ url }) => {
     if (error.code === 'INVALID_TOKEN') {
       return {
         error: 'This verification link is invalid or expired',
-        canResend: true
+        canResend: true,
       };
     }
 
     return {
       error: 'Verification failed. Please try again.',
-      canResend: true
+      canResend: true,
     };
   }
 };
@@ -720,14 +753,14 @@ export const actions: Actions = {
 
     try {
       await auth.api.sendVerificationEmail({
-        email: locals.user.email
+        email: locals.user.email,
       });
 
       return { success: true, message: 'Verification email sent' };
     } catch (error) {
       return fail(500, { error: 'Failed to send verification email' });
     }
-  }
+  },
 };
 ```
 
@@ -744,7 +777,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform }) => {
   if (sessionToken && locals.session) {
     // Invalidate session in database
     await auth.api.signOut({
-      sessionId: locals.session.id
+      sessionId: locals.session.id,
     });
 
     // Remove from KV cache
@@ -826,10 +859,21 @@ export {};
 **Schema Definition** (`packages/web/src/lib/server/db/schema/auth.ts`):
 
 ```typescript
-import { pgTable, uuid, varchar, boolean, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  varchar,
+  boolean,
+  timestamp,
+  pgEnum,
+} from 'drizzle-orm/pg-core';
 
 // User roles enum
-export const userRoleEnum = pgEnum('user_role', ['customer', 'owner', 'creator']);
+export const userRoleEnum = pgEnum('user_role', [
+  'customer',
+  'owner',
+  'creator',
+]);
 
 // Users table (extended by BetterAuth)
 export const users = pgTable('user', {
@@ -839,27 +883,31 @@ export const users = pgTable('user', {
   name: varchar('name', { length: 255 }).notNull(),
   role: userRoleEnum('role').default('customer').notNull(),
   createdAt: timestamp('createdAt').defaultNow().notNull(),
-  updatedAt: timestamp('updatedAt').defaultNow().notNull()
+  updatedAt: timestamp('updatedAt').defaultNow().notNull(),
 });
 
 // Sessions table (managed by BetterAuth)
 export const sessions = pgTable('session', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('userId').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('userId')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
   token: varchar('token', { length: 255 }).unique().notNull(),
   expiresAt: timestamp('expiresAt').notNull(),
   ipAddress: varchar('ipAddress', { length: 45 }),
   userAgent: varchar('userAgent', { length: 500 }),
-  createdAt: timestamp('createdAt').defaultNow().notNull()
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
 });
 
 // Verification tokens (managed by BetterAuth)
 export const verificationTokens = pgTable('verification', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('userId').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('userId')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
   token: varchar('token', { length: 255 }).unique().notNull(),
   expiresAt: timestamp('expiresAt').notNull(),
-  createdAt: timestamp('createdAt').defaultNow().notNull()
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
 });
 ```
 
@@ -870,11 +918,13 @@ export const verificationTokens = pgTable('verification', {
 ## Third-Party Integrations
 
 ### BetterAuth
+
 - **Version**: Latest (check compatibility with SvelteKit 2.x)
 - **Adapter**: Drizzle ORM
 - **Installation**: `pnpm add better-auth`
 
 ### Cloudflare KV
+
 - **Purpose**: Session caching (secondary storage)
 - **Namespace**: `AUTH_SESSION_KV`
 - **Key Format**: `session:{sessionToken}`
@@ -882,6 +932,7 @@ export const verificationTokens = pgTable('verification', {
 - **TTL**: Matches session expiry
 
 ### Notification Service
+
 - **Purpose**: Send transactional emails
 - **Integration**: Via abstraction layer
 - **See**: [Notifications TDD](../notifications/ttd-dphase-1.md)
@@ -891,20 +942,23 @@ export const verificationTokens = pgTable('verification', {
 ## Scaling / Reliability
 
 ### Session Performance
-| Scenario | Response Time | DB Queries |
-|----------|---------------|------------|
-| Cache Hit (KV) | ~5-10ms | 0 |
-| Cache Miss | ~50-100ms | 1 |
-| No Cache (fallback) | ~50-100ms | 1 |
+
+| Scenario            | Response Time | DB Queries |
+| ------------------- | ------------- | ---------- |
+| Cache Hit (KV)      | ~5-10ms       | 0          |
+| Cache Miss          | ~50-100ms     | 1          |
+| No Cache (fallback) | ~50-100ms     | 1          |
 
 **Expected Cache Hit Rate**: >95% after warmup
 
 ### Session Invalidation Strategy
+
 - **Logout**: Delete from DB + delete from KV
 - **Password Change**: BetterAuth invalidates all sessions in DB + KV entries expire naturally via TTL
 - **Session Expiry**: TTL in KV matches session expiry (automatic cleanup)
 
 ### High Availability
+
 - **Neon Postgres**: Automatic failover, connection pooling
 - **Cloudflare KV**: Globally distributed, no single point of failure
 - **Graceful Degradation**: If KV unavailable, falls back to database queries
@@ -938,13 +992,16 @@ describe('requireAuth', () => {
 // login.integration.test.ts
 describe('POST /login', () => {
   it('creates session on successful login', async () => {
-    await createTestUser({ email: 'test@example.com', password: 'Password123' });
+    await createTestUser({
+      email: 'test@example.com',
+      password: 'Password123',
+    });
 
     const response = await POST({
       request: new Request('http://localhost/login', {
         method: 'POST',
-        body: formData({ email: 'test@example.com', password: 'Password123' })
-      })
+        body: formData({ email: 'test@example.com', password: 'Password123' }),
+      }),
     });
 
     expect(response.status).toBe(303);
@@ -967,17 +1024,20 @@ test('user can register, verify, and login', async ({ page }) => {
 ## Security Considerations
 
 ### Session Security
+
 -  HTTP-only cookies (no JS access)
 -  Secure flag in production (HTTPS only)
 -  SameSite=Lax (CSRF protection)
 -  KV cache invalidation on logout/password change
 
 ### Rate Limiting
+
 -  Login: 5 attempts / 15 minutes
 -  Registration: 3 attempts / 1 hour
 -  See [Rate Limiting Strategy](../../security/RateLimiting.md)
 
 ### Password Security
+
 -  BetterAuth handles hashing (bcrypt/argon2)
 -  Minimum 8 characters, complexity requirements
 -  Never logged or displayed

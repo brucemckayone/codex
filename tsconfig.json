@@ -20,12 +20,6 @@
       "@codex/validation/*": ["packages/validation/src/*"],
       "@codex/cloudflare-clients": ["packages/cloudflare-clients/src/index.ts"],
       "@codex/cloudflare-clients/*": ["packages/cloudflare-clients/src/*"],
-      "@codex/core-services": ["packages/core-services/src/index.ts"],
-      "@codex/core-services/*": ["packages/core-services/src/*"],
-      "@codex/auth": ["packages/auth/src/index.ts"],
-      "@codex/auth/*": ["packages/auth/src/*"],
-      "@codex/notifications": ["packages/notifications/src/index.ts"],
-      "@codex/notifications/*": ["packages/notifications/src/*"],
       "@codex/test-utils": ["packages/test-utils/src/index.ts"],
       "@codex/test-utils/*": ["packages/test-utils/src/*"]
     }

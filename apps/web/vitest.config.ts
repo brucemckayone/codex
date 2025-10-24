@@ -39,15 +39,6 @@ export default defineProject({
         __dirname,
         '../../packages/cloudflare-clients/src'
       ),
-      '@codex/core-services': path.resolve(
-        __dirname,
-        '../../packages/core-services/src'
-      ),
-      '@codex/auth': path.resolve(__dirname, '../../packages/auth/src'),
-      '@codex/notifications': path.resolve(
-        __dirname,
-        '../../packages/notifications/src'
-      ),
       '@codex/test-utils': path.resolve(
         __dirname,
         '../../packages/test-utils/src'

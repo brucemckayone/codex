@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createMiniflareHelper, type MiniflareTestHelper } from '@codex/test-utils';
+import {
+  createMiniflareHelper,
+  type MiniflareTestHelper,
+} from '@codex/test-utils';
 import type { QueueMessage } from '../../src/index';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -76,9 +79,9 @@ describe('Queue Consumer Worker - Integration Tests', () => {
     ];
 
     // Mock the queue batch
-    const batch = {
+    const _batch = {
       queue: 'media-processing-queue',
-      messages: testMessages.map((body, idx) => ({
+      messages: testMessages.map((body) => ({
         id: body.id,
         timestamp: new Date(),
         body,
@@ -101,7 +104,7 @@ describe('Queue Consumer Worker - Integration Tests', () => {
     const worker = await helper.getWorker();
 
     // Test with empty batch
-    const batch = {
+    const _batch = {
       queue: 'media-processing-queue',
       messages: [],
     };

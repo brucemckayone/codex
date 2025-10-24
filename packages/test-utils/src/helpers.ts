@@ -22,6 +22,7 @@ export async function waitFor(
 /**
  * Create a mock function with call tracking
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createMockFn<T extends (...args: any[]) => any>() {
   const calls: Array<Parameters<T>> = [];
   const mockFn = ((...args: Parameters<T>) => {

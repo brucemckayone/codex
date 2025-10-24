@@ -9,6 +9,7 @@ This feature enables the Platform Owner to customize basic branding and business
 ## Problem Statement
 
 The Platform Owner needs to:
+
 - Brand the platform with their logo and color to create a professional, cohesive appearance.
 - Set the platform name that appears across the customer-facing site and emails.
 - Configure business contact information displayed to customers.
@@ -20,6 +21,7 @@ Without this feature, the platform would look generic and lack brand identity, m
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1. **Logo Management**: Enable Platform Owners to upload and display their logo across the platform.
 2. **Intelligent Color System**: Allow setting a single primary brand color that automatically generates a complete, accessible design system.
 3. **Platform Identity**: Configure the platform name used in navigation, page titles, and email communications.
@@ -28,6 +30,7 @@ Without this feature, the platform would look generic and lack brand identity, m
 6. **Future-Ready Architecture**: Database and code structure supports future multi-tenant expansion without breaking changes.
 
 ### Success Metrics
+
 - Platform Owner can upload a logo and see it reflected across the platform in < 2 minutes.
 - Brand color changes are visible immediately on all pages with proper contrast and accessibility.
 - Platform name appears consistently in navigation, email footers, and page titles.
@@ -38,6 +41,7 @@ Without this feature, the platform would look generic and lack brand identity, m
 ## Scope
 
 ### In Scope (Phase 1 MVP)
+
 - **Logo Upload & Display**:
   - Upload logo image (PNG, JPG, SVG) up to 2MB.
   - Logo stored in Cloudflare R2 (`codex-assets-{ownerId}/branding/logo.{ext}`).
@@ -68,6 +72,7 @@ Without this feature, the platform would look generic and lack brand identity, m
   - Settings loaded once per request and cached.
 
 ### Explicitly Out of Scope (Future Phases)
+
 - **Multiple Platform Owners (Multi-Tenant)** (Phase 3)
   - Path-based routing (`/[ownerSlug]/...`)
   - Per-tenant theme switching
@@ -95,11 +100,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ## User Stories & Use Cases
 
 ### US-SETTINGS-001: Upload Platform Logo
+
 **As a** Platform Owner,
 **I want to** upload my business logo,
 **so that** my platform has a professional branded appearance.
 
 **Flow:**
+
 1. Platform Owner navigates to `/admin/settings`.
 2. Sees current logo (or default placeholder) in Branding section.
 3. Clicks "Upload New Logo" button.
@@ -113,6 +120,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 11. Logo appears in all future email footers.
 
 **Acceptance Criteria:**
+
 - Accepts PNG, JPG, and SVG files up to 2MB.
 - Validates image dimensions (min 100x100px, max 2000x2000px recommended).
 - Logo preview shows before saving with realistic context (in navigation bar).
@@ -121,11 +129,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 - Logo appears correctly across all pages immediately after save.
 
 ### US-SETTINGS-002: Set Primary Brand Color
+
 **As a** Platform Owner,
 **I want to** select a single primary brand color and have the entire design system adapt to it,
 **so that** my platform matches my brand without worrying about which colors work together.
 
 **Flow:**
+
 1. Platform Owner navigates to `/admin/settings`.
 2. Sees current brand color displayed as a color swatch in Branding section.
 3. Clicks on color picker.
@@ -144,6 +154,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 9. All pages immediately reflect the new brand color system.
 
 **Acceptance Criteria:**
+
 - Color picker allows visual selection or direct hex input.
 - Real-time preview shows buttons, text, and backgrounds using generated palette.
 - System automatically ensures text has sufficient contrast (WCAG AA minimum).
@@ -153,11 +164,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 - Default color is used if none is set (e.g., `#3B82F6` - a neutral blue).
 
 ### US-SETTINGS-003: Configure Platform Name
+
 **As a** Platform Owner,
 **I want to** set my platform name,
 **so that** customers see my business name throughout the site and in communications.
 
 **Flow:**
+
 1. Platform Owner navigates to `/admin/settings`.
 2. Sees current platform name in "Platform Identity" section.
 3. Updates the platform name field (e.g., "Acme Meditation Hub").
@@ -170,6 +183,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
    - Email footers ("� 2025 {platformName}")
 
 **Acceptance Criteria:**
+
 - Platform name input accepts up to 100 characters.
 - Input validates against special characters that could break HTML/email formatting.
 - Name appears consistently in all specified locations.
@@ -177,11 +191,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 - Defaults to "Codex Platform" if not set.
 
 ### US-SETTINGS-004: Set Business Contact Information
+
 **As a** Platform Owner,
 **I want to** configure my business contact details,
 **so that** customers can reach me and see proper business information.
 
 **Flow:**
+
 1. Platform Owner navigates to `/admin/settings`.
 2. Sees "Business Information" section with fields:
    - Contact Email
@@ -204,6 +220,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
    - Scheduling interfaces (future: offerings)
 
 **Acceptance Criteria:**
+
 - Contact email is validated for proper email format.
 - Business name accepts up to 200 characters.
 - Timezone dropdown includes all standard IANA timezones.
@@ -212,11 +229,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 - Changes persist across sessions.
 
 ### US-SETTINGS-005: Preview Changes Before Saving
+
 **As a** Platform Owner,
 **I want to** preview how my branding changes will look,
 **so that** I can make sure they look good before applying them.
 
 **Flow:**
+
 1. Platform Owner makes changes to logo and/or color.
 2. Preview section on settings page shows:
    - Logo in navigation context (actual size and position)
@@ -227,6 +246,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 4. Only when "Save Changes" is clicked do changes apply site-wide.
 
 **Acceptance Criteria:**
+
 - Preview updates in real-time as changes are made.
 - Preview accurately represents how changes will look on the actual site.
 - Changes are not visible to customers until saved.
@@ -241,12 +261,14 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 From a single primary color (hex), the system generates:
 
 **1. HSL Conversion**
+
 ```
 Input: #3B82F6 (hex)
 Convert to: HSL(217, 91%, 60%)
 ```
 
 **2. Shade Generation (50-900 scale)**
+
 ```
 Primary-50:  HSL(217, 91%, 95%)  // Very light
 Primary-100: HSL(217, 91%, 90%)
@@ -261,6 +283,7 @@ Primary-900: HSL(217, 91%, 15%)  // Very dark
 ```
 
 **3. Functional Color Assignments**
+
 ```css
 /* Buttons */
 --button-bg: var(--primary-600);
@@ -285,6 +308,7 @@ Primary-900: HSL(217, 91%, 15%)  // Very dark
 ```
 
 **4. Contrast Checking (WCAG AA)**
+
 ```typescript
 // Ensure text on colored backgrounds meets 4.5:1 contrast ratio
 function getContrastingText(backgroundColor: HSL): string {
@@ -295,6 +319,7 @@ function getContrastingText(backgroundColor: HSL): string {
 ```
 
 This approach ensures:
+
 -  Cohesive color palette (all derived from one source)
 -  Accessible contrast ratios
 -  Predictable hover/active states
@@ -305,6 +330,7 @@ This approach ensures:
 ## Database Schema Extension Strategy
 
 ### Phase 1 Schema (Single Owner)
+
 ```sql
 CREATE TABLE platform_settings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -332,6 +358,7 @@ CREATE INDEX idx_platform_settings_owner_id ON platform_settings(owner_id);
 ```
 
 ### Phase 3 Extension (Multi-Tenant)
+
 No schema changes needed! To support multiple tenants:
 
 1. **Routing**: Add `owner_slug` column to `users` table
@@ -340,6 +367,7 @@ No schema changes needed! To support multiple tenants:
 4. **Theme Loading**: KV key becomes `theme:{ownerSlug}` instead of single theme
 
 **Why this works:**
+
 - `owner_id` column already exists
 - `UNIQUE` constraint ensures one settings record per owner
 - Index already exists for efficient queries

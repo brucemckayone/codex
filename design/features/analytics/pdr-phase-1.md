@@ -7,6 +7,7 @@ Real-time analytics system using Cloudflare Analytics Engine to track content pe
 ## Problem Statement
 
 The platform requires analytics to:
+
 - Show creators how their content is performing (views, plays, purchases)
 - Track revenue and sales patterns
 - Monitor platform health and performance
@@ -14,6 +15,7 @@ The platform requires analytics to:
 - Make data-driven decisions about content and features
 
 Without analytics, the platform cannot:
+
 - Answer "how many people watched my video?"
 - Show trending content
 - Identify revenue opportunities
@@ -23,6 +25,7 @@ Without analytics, the platform cannot:
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1. **Content Analytics** - Track views, plays, watch time for all media
 2. **Purchase Analytics** - Monitor sales, revenue, conversion rates
 3. **User Analytics** - Understand engagement patterns and behavior
@@ -31,6 +34,7 @@ Without analytics, the platform cannot:
 6. **Cost Effective** - Run on Cloudflare free tier for small creators
 
 ### Success Metrics
+
 - Events tracked within 5 seconds of occurrence
 - Dashboard queries return in < 2 seconds
 - 99.9% event capture rate (with sampling at scale)
@@ -45,6 +49,7 @@ Without analytics, the platform cannot:
 ### In Scope (Phase 1 MVP)
 
 **Content Analytics:**
+
 - Video/audio view counts
 - Play events (start, complete, abandoned)
 - Watch time / listen time
@@ -53,11 +58,13 @@ Without analytics, the platform cannot:
 - Referrer tracking
 
 **Purchase Analytics:**
+
 - Purchase events
 - Revenue tracking (by content, creator, time period)
 - Basic conversion metrics (views to purchases)
 
 **Platform Analytics:**
+
 - API endpoint performance
 - Worker execution times
 - Queue processing metrics
@@ -65,12 +72,14 @@ Without analytics, the platform cannot:
 - Database query performance
 
 **Dashboard Features:**
+
 - Metrics display (refreshed on page load)
 - Time-based filtering (7 days, 30 days, 90 days)
 - Export to CSV
 - Basic charts (line, bar, pie, table)
 
 ### Explicitly Out of Scope (Phase 1)
+
 - User journey tracking / funnels
 - A/B testing framework
 - Predictive analytics / ML
@@ -87,25 +96,33 @@ Without analytics, the platform cannot:
 ## Cross-Feature Dependencies
 
 ### Content Management (Phase 1)
+
 **Dependency**: Track views/plays of content
+
 - Analytics event triggered on media playback
 - Content ID associated with all events
 - See [Content Management PRD](../content-management/pdr-phase-1.md)
 
 ### E-Commerce (Phase 1)
+
 **Dependency**: Track purchases and revenue
+
 - Purchase events written to Analytics Engine
 - Revenue data aggregated by content/creator
 - See [E-Commerce PRD](../e-commerce/pdr-phase-1.md)
 
 ### Admin Dashboard (Phase 1)
+
 **Dependency**: Display analytics in admin UI
+
 - Dashboard queries Analytics Engine
 - Charts rendered in admin interface
 - See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
 
 ### Media Transcoding (Phase 1)
+
 **Dependency**: Track transcoding job metrics
+
 - Job duration, success rate tracked
 - Queue processing times monitored
 - See [Media Transcoding PRD](../media-transcoding/pdr-phase-1.md)
@@ -115,54 +132,64 @@ Without analytics, the platform cannot:
 ## User Stories & Use Cases
 
 ### US-ANALYTICS-001: Content View Tracking
+
 **As a** creator
 **I want to** see how many people have viewed my content
 **So that** I can understand my audience reach
 
 **Acceptance Criteria:**
+
 - View count increments when video/audio starts playing
 - Count displayed in admin dashboard
 - Historical view data available (daily, weekly, monthly)
 - Geographic breakdown shows top countries
 
 ### US-ANALYTICS-002: Revenue Tracking
+
 **As a** creator
 **I want to** see total revenue from my content
 **So that** I can track earnings and identify best-performing content
 
 **Acceptance Criteria:**
+
 - Purchase events tracked in real-time
 - Revenue totals calculated per content item
 - Time-based filtering (this month, last month, all time)
 - Breakdown by content type (video vs audio)
 
 ### US-ANALYTICS-003: Watch Time Analysis
+
 **As a** creator
 **I want to** know how long people watch my videos
 **So that** I can optimize content length and engagement
 
 **Acceptance Criteria:**
+
 - Watch time tracked per video
 - Average watch time calculated
 - Completion rate displayed (% who finish video)
 
 ### US-ANALYTICS-004: Platform Health Monitoring
+
 **As a** platform owner
 **I want to** monitor system performance
 **So that** I can identify and fix issues proactively
 
 **Acceptance Criteria:**
+
 - API response times tracked
 - Worker execution durations logged
 - Error rates monitored by endpoint
 - Queue processing delays visible
 
 ### US-ANALYTICS-005: Geographic Insights
+
 **As a** creator
 **I want to** see where my audience is located
 **So that** I can tailor content and timing to my audience
 
 **Acceptance Criteria:**
+
 - Country-level geographic data collected
 - City-level data for top locations
 - Map visualization in dashboard
@@ -173,11 +200,13 @@ Without analytics, the platform cannot:
 ## Functional Requirements
 
 ### FR-ANALYTICS-001: Event Tracking
+
 **Requirement**: System must track comprehensive analytics events across all platform activities
 
 **What We Track:**
 
 **Content Metrics:**
+
 - Video/audio views (unique and total)
 - Play events (start, pause, resume, complete)
 - Watch/listen time per session
@@ -186,6 +215,7 @@ Without analytics, the platform cannot:
 - Content type (video vs audio)
 
 **User Metrics:**
+
 - Anonymous user sessions (via session ID)
 - Authenticated user activity (via user ID)
 - Geographic location (country and city)
@@ -194,6 +224,7 @@ Without analytics, the platform cannot:
 - Referrer source
 
 **Purchase Metrics:**
+
 - Purchase events
 - Revenue amount and currency
 - Content purchased
@@ -202,6 +233,7 @@ Without analytics, the platform cannot:
 - Refund events
 
 **Platform Performance Metrics:**
+
 - API endpoint calls
 - Response times
 - HTTP status codes
@@ -210,6 +242,7 @@ Without analytics, the platform cannot:
 - Error rates by endpoint
 
 **Requirements:**
+
 - Support tracking of 10M+ events per month
 - Events must be captured within 5 seconds of occurrence
 - Track both anonymous and authenticated users separately
@@ -217,15 +250,18 @@ Without analytics, the platform cannot:
 - No personally identifiable information (PII) stored
 
 ### FR-ANALYTICS-002: Data Aggregation & Filtering
+
 **Requirement**: Dashboard must provide flexible data aggregation and filtering capabilities
 
 **Required Aggregations:**
+
 - Count (total views, purchases, events)
 - Sum (total revenue, watch time, response times)
 - Average (average watch time, average response time)
 - Group by content, creator, time period, geography, device
 
 **Required Filters:**
+
 - Time range (today, week, month, year, all-time, custom range)
 - Content ID or type
 - Creator ID
@@ -235,14 +271,17 @@ Without analytics, the platform cannot:
 - User authentication status (anonymous vs authenticated)
 
 **Performance Requirements:**
+
 - Query results returned in under 2 seconds
 - Support concurrent dashboard queries from multiple users
 - Handle datasets with 100M+ events
 
 ### FR-ANALYTICS-003: Dashboard Display
+
 **Requirement**: Admin interface must present analytics in clear, actionable format
 
 **Details:**
+
 - Real-time metric cards (total views, revenue, users)
 - Line charts for time-series data
 - Bar charts for comparisons
@@ -251,6 +290,7 @@ Without analytics, the platform cannot:
 - CSV export functionality
 
 **Dashboard Sections:**
+
 1. **Overview** - Key metrics at a glance
 2. **Content Performance** - Individual content analytics
 3. **Revenue** - Sales and earnings data
@@ -258,9 +298,11 @@ Without analytics, the platform cannot:
 5. **Platform Health** - System performance metrics
 
 ### FR-ANALYTICS-004: Privacy & Compliance
+
 **Requirement**: Analytics must respect user privacy and comply with regulations
 
 **Details:**
+
 - No PII collected without consent
 - IP addresses not stored (only country/city)
 - Cookie-less tracking option
@@ -269,9 +311,11 @@ Without analytics, the platform cannot:
 - Data deletion on request
 
 ### FR-ANALYTICS-005: Performance Tracking
+
 **Requirement**: System must self-monitor its own performance
 
 **Details:**
+
 - Track Analytics Engine write latency
 - Monitor query performance
 - Alert on anomalies
@@ -283,6 +327,7 @@ Without analytics, the platform cannot:
 ## Non-Functional Requirements
 
 ### NFR-ANALYTICS-001: Performance
+
 - Event ingestion: < 5 seconds from trigger to storage
 - Query response: < 2 seconds for dashboard loads
 - Dashboard page load: < 1 second
@@ -290,24 +335,28 @@ Without analytics, the platform cannot:
 - Handle 100K+ events per minute during traffic spikes
 
 ### NFR-ANALYTICS-002: Scalability
+
 - Scale to 100M+ events/month
 - No manual intervention for scaling
 - Automatic sampling when needed
 - Distributed across Cloudflare edge
 
 ### NFR-ANALYTICS-003: Reliability
+
 - 99.9% event capture rate
 - No data loss during failures
 - Graceful degradation under load
 - Self-healing if Analytics Engine unavailable
 
 ### NFR-ANALYTICS-004: Cost Efficiency
+
 - Free tier: Support 100K events/month ($0/month)
 - Low tier: Support 10M events/month ($5/month)
 - Scale tier: Support 100M events/month ($50/month)
 - No database costs (Analytics Engine handles storage)
 
 ### NFR-ANALYTICS-005: Data Retention
+
 - Raw events: 90 days
 - Aggregated data: 2 years
 - Automatic cleanup of old data
@@ -318,6 +367,7 @@ Without analytics, the platform cannot:
 ## User Experience
 
 ### Content Creator Flow
+
 1. **Login to Admin Dashboard**
 2. **Navigate to Analytics tab**
 3. **See Overview**: Total views, revenue, watch time
@@ -328,6 +378,7 @@ Without analytics, the platform cannot:
 8. **Export data**: Download CSV for external analysis
 
 ### Platform Owner Flow
+
 1. **Access Admin Dashboard**
 2. **View Platform Health section**
 3. **Check API performance**: Response times, error rates
@@ -351,6 +402,7 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 ### Why Cloudflare Analytics Engine?
 
 **Advantages:**
+
 - **Cost**: $5/month for 10M events (competitors: $50-100/month)
 - **Scale**: Handles spikes without configuration
 - **Integration**: Native Cloudflare Workers support
@@ -358,6 +410,7 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 - **Simplicity**: No database to manage
 
 **Limitations:**
+
 - **Sampling**: High-volume data may be sampled (affects accuracy at scale)
 - **Schema**: Fixed schema with three field types:
   - **Blobs** (strings): For dimensions/labels (browser, country, content_id, etc.)
@@ -370,6 +423,7 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 - **Non-blocking writes**: `writeDataPoint()` returns immediately (fire-and-forget)
 
 **Alternatives Considered:**
+
 - **Tinybird**: More features, 10x cost
 - **PostHog**: Open source, requires self-hosting
 - **Self-hosted ClickHouse**: Complex infrastructure
@@ -378,12 +432,14 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 ### Event Collection Strategy
 
 **Client-Side Events** (video views, plays):
+
 - JavaScript tracking snippet on player
 - Batches events to reduce requests
 - Respects Do Not Track
 - Falls back gracefully if blocked
 
 **Server-Side Events** (purchases, API calls):
+
 - Workers write directly to Analytics Engine
 - No client involvement
 - 100% capture rate
@@ -398,6 +454,7 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 ```
 
 **Write Path:**
+
 1. Event triggered (view, purchase, etc.)
 2. Worker receives event
 3. Validate and transform data
@@ -405,6 +462,7 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 5. Return success to client
 
 **Read Path:**
+
 1. Dashboard loads
 2. Query Analytics Engine via API
 3. Aggregate data (sums, averages, etc.)
@@ -414,12 +472,14 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 ### Data Accuracy
 
 **Sampling Behavior:**
+
 - < 100K events/month: No sampling (100% accurate)
 - 100K - 1M events/month: Light sampling (~95% accurate)
 - 1M - 10M events/month: Moderate sampling (~90% accurate)
 - 10M+ events/month: Heavier sampling (~85% accurate)
 
 **Deduplication:**
+
 - Session-based deduplication for views
 - Transaction IDs for purchases (no duplication)
 - Idempotent writes where possible
@@ -429,17 +489,20 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 ## Success Metrics (Measurable)
 
 ### Product Metrics
+
 - **Adoption**: 90% of creators view analytics weekly
 - **Engagement**: Average 5+ minutes per analytics session
 - **Export**: 20% of creators export data monthly
 
 ### Technical Metrics
+
 - **Latency**: P95 event ingestion < 5 seconds
 - **Query Performance**: P95 query response < 2 seconds
 - **Uptime**: 99.9% analytics availability
 - **Cost**: < $50/month for 100M events
 
 ### Business Metrics
+
 - **Creator Satisfaction**: 8/10 rating for analytics features
 - **Data-Driven Decisions**: Creators adjust content based on metrics
 - **Support Reduction**: 30% fewer "how many views?" questions
@@ -449,31 +512,39 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 ## Risks & Mitigations
 
 ### Risk: Analytics Engine Sampling
+
 **Impact**: Creators see approximate numbers, not exact counts
 **Mitigation**:
+
 - Clearly communicate sampling in UI
 - Show confidence intervals
 - Exact counts for purchases (critical data)
 - Upgrade plan for exact counts if needed
 
 ### Risk: Event Loss During Outages
+
 **Impact**: Missing analytics data during Cloudflare issues
 **Mitigation**:
+
 - Queue events in browser/worker if AE unavailable
 - Retry failed writes
 - Log dropped events for manual recovery
 
 ### Risk: Query Performance at Scale
+
 **Impact**: Slow dashboards with large datasets
 **Mitigation**:
+
 - Pre-aggregate common queries
 - Cache frequently accessed data
 - Limit query time ranges
 - Pagination for large result sets
 
 ### Risk: Privacy Violations
+
 **Impact**: Regulatory fines, user trust loss
 **Mitigation**:
+
 - No PII in events
 - Cookie consent for tracking
 - Easy opt-out mechanism
@@ -484,6 +555,7 @@ For the full architecture diagram and implementation details, see the [TDD](./tt
 ## Creator Analytics Needs & Minimum Viable Chart Set
 
 Based on the platform overview, creators in Phase 1 need analytics for:
+
 - **Content** (videos, audio)
 - **Monetization** (direct purchases)
 - **Audience understanding** (anonymous vs authenticated users)
@@ -491,6 +563,7 @@ Based on the platform overview, creators in Phase 1 need analytics for:
 ### What Creators Need to Understand
 
 #### 1. Content Performance Questions
+
 - "Which of my videos/audio are most popular?"
 - "How much watch time am I getting?"
 - "Are people finishing my content or dropping off?"
@@ -498,20 +571,24 @@ Based on the platform overview, creators in Phase 1 need analytics for:
 - "What devices are they using?"
 
 #### 2. Revenue Questions
+
 - "How much money did I make this week/month?"
 - "Which content generates the most revenue?"
 - "Is my revenue growing or declining?"
 
 #### 3. Engagement Questions
+
 - "How many people visited my platform?"
 - "What's my conversion rate (visitor → purchase)?"
 
 #### 4. Audience Questions
+
 - "Who is my audience (geography, devices)?"
 - "Anonymous vs logged-in traffic patterns?"
 - "What brings people to my platform (referrers)?"
 
 #### 5. Business Health Questions (Platform Owner)
+
 - "Is my platform performing well (API speed, errors)?"
 - "What are my platform-wide metrics?"
 
@@ -522,17 +599,20 @@ Based on these questions, here's the **essential chart set** that provides maxim
 #### **Overview Dashboard** (First thing creators see)
 
 **Metric Cards** (No charts, just big numbers)
+
 - Total views (last 30 days)
 - Total revenue (last 30 days)
 - Total purchases (last 30 days)
 - Total watch time (last 30 days)
 
 **Chart 1: Revenue Over Time** (Line Chart)
+
 - X-axis: Time (daily for last 30 days)
 - Y-axis: Revenue in USD
 - Why: Answers "Is my business growing?" at a glance
 
 **Chart 2: Views Over Time** (Line Chart)
+
 - X-axis: Time (daily)
 - Y-axis: Number of views
 - Why: Shows content engagement trends
@@ -540,18 +620,21 @@ Based on these questions, here's the **essential chart set** that provides maxim
 #### **Content Analytics** (Dedicated section)
 
 **Chart 3: Top Content by Views** (Horizontal Bar Chart)
+
 - X-axis: Number of views
 - Y-axis: Content titles (top 10)
 - Why: Quickly identify best-performing content
 - Clickable: Links to individual content detail page
 
 **Chart 4: Top Content by Revenue** (Horizontal Bar Chart)
+
 - X-axis: Revenue generated
 - Y-axis: Content titles (top 10)
 - Why: Shows which content makes money
 - Different from views - low-view, high-price content appears here
 
 **Data Table: All Content Performance**
+
 - Columns: Title, Type (video/audio/post), Views, Watch Time, Revenue, Purchases
 - Sortable by any column
 - Searchable/filterable
@@ -561,32 +644,38 @@ Based on these questions, here's the **essential chart set** that provides maxim
 #### **Audience Analytics** (Dedicated section)
 
 **Chart 5: Geographic Distribution** (Simple List/Table)
+
 - Shows: Top 10 countries with view counts and percentage
 - Why: Simple, clear data presentation
 
 **Chart 6: Device Breakdown** (Donut/Pie Chart)
+
 - Segments: Desktop, Mobile, Tablet
 - Shows percentages and counts
 - Why: Simple distribution visualization, useful for responsive design decisions
 
 **Data Table: Traffic Sources**
+
 - Columns: Referrer, Visits
 - Why: Understand where traffic comes from
 
 #### **Platform Health** (Platform Owner only)
 
 **Metric Cards**
+
 - Average API response time (last 24 hours)
 - Error rate (last 24 hours)
 - Total active users
 - Queue processing delay
 
 **Chart 7: API Response Times** (Line Chart)
+
 - X-axis: Time (hourly for 24 hours)
 - Y-axis: Response time in milliseconds
 - Why: Detect performance degradation
 
 **Data Table: Error Rates by Endpoint**
+
 - Columns: Endpoint, Total Calls, Errors, Error Rate
 - Why: Identify problematic endpoints quickly
 
@@ -619,6 +708,7 @@ Based on these questions, here's the **essential chart set** that provides maxim
 **Total unique chart types needed: 4** (Line, Bar, Pie, Table)
 
 **Explicitly NOT in Phase 1:**
+
 - ❌ Geographic maps
 - ❌ Heatmaps
 - ❌ Funnel visualizations
@@ -635,6 +725,7 @@ Based on these questions, here's the **essential chart set** that provides maxim
 ### Why This Chart Set?
 
 **Principles:**
+
 1. **Answers core questions** - Every chart directly answers a creator's key question
 2. **Actionable insights** - Data leads to decisions (what content to make more of, which offerings to promote)
 3. **Simple to implement** - 4 chart types, reusable components
@@ -642,6 +733,7 @@ Based on these questions, here's the **essential chart set** that provides maxim
 5. **Fast to load** - Minimal queries, pre-aggregated where possible
 
 **What creators can do with this data:**
+
 - Identify best content → create more like it
 - Find underperforming content → improve or remove
 - Understand audience → optimize content format
@@ -685,6 +777,7 @@ Based on these questions, here's the **essential chart set** that provides maxim
 ### Sample Event Payloads
 
 **Video View Event:**
+
 ```json
 {
   "timestamp": 1704067200000,
@@ -703,6 +796,7 @@ Based on these questions, here's the **essential chart set** that provides maxim
 ```
 
 **Purchase Event:**
+
 ```json
 {
   "timestamp": 1704067200000,
@@ -717,6 +811,7 @@ Based on these questions, here's the **essential chart set** that provides maxim
 ```
 
 **API Call Event:**
+
 ```json
 {
   "timestamp": 1704067200000,

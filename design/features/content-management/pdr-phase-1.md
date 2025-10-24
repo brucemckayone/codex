@@ -9,6 +9,7 @@ Content management system for Creators to upload, organize, and manage video and
 ## Problem Statement
 
 Creators need a way to:
+
 - Upload video content (MP4, WebM, MOV) for courses, tutorials, or media libraries
 - Upload audio content (MP3, M4A, WAV) for podcasts or audio lessons
 - Organize content with metadata (title, description, categories, tags)
@@ -18,6 +19,7 @@ Creators need a way to:
 - Attach downloadable resources (PDFs, workbooks) to content
 
 Without content management:
+
 - No way to add content to the platform
 - No inventory for e-commerce purchases
 - No content library for customers to access
@@ -26,6 +28,7 @@ Without content management:
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1. **Upload Video Content** - Creators can upload video files (MP4, WebM, MOV)
 2. **Upload Audio Content** - Creators can upload audio files (MP3, M4A, WAV)
 3. **Media Library Pattern** - Separate media storage from content metadata
@@ -36,6 +39,7 @@ Without content management:
 8. **Storage Integration** - Use Cloudflare R2 bucket-per-creator for scalable storage
 
 ### Success Metrics
+
 - Creator can upload 1GB video file in < 5 minutes
 - Uploaded media appears in media library immediately
 - Content can reference existing media items (no re-upload)
@@ -48,6 +52,7 @@ Without content management:
 ## Scope
 
 ### In Scope (Phase 1 MVP)
+
 - **Video Content**:
   - MP4, WebM, MOV formats
   - Direct upload to creator's R2 media bucket
@@ -93,6 +98,7 @@ Without content management:
   - Presigned URLs for secure file access
 
 ### Explicitly Out of Scope (Future Phases)
+
 - **Written articles/PDFs as content** - Phase 2 (Phase 1 is video + audio only)
 - **Video transcoding (HLS, multi-quality)** - Phase 1 but separate feature ([Media Transcoding](../media-transcoding/pdr-phase-1.md))
 - **Automatic thumbnail generation** - Phase 1 but handled in Media Transcoding feature
@@ -115,11 +121,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ## User Stories & Use Cases
 
 ### US-CONTENT-001: Upload Video to Media Library
+
 **As a** Creator
 **I want to** upload video files to my media library
 **So that** I can create content that references these videos
 
 **Flow:**
+
 1. Creator navigates to `/admin/media/upload`
 2. Creator clicks "Upload Video" button
 3. Creator selects MP4 file from computer (500MB)
@@ -144,6 +152,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 7. When transcoding completes, status updates to "Ready"
 
 **Acceptance Criteria:**
+
 - Video file uploaded to creator's R2 bucket successfully
 - Progress bar shows accurate upload percentage
 - `media_items` record created with correct metadata
@@ -155,11 +164,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ---
 
 ### US-CONTENT-002: Create Content from Media Library
+
 **As a** Creator
 **I want to** create content that references a video in my media library
 **So that** I can package media with pricing and metadata for sale
 
 **Flow:**
+
 1. Creator navigates to `/admin/content/new`
 2. Creator fills out form:
    - **Title**: "Introduction to TypeScript"
@@ -193,6 +204,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
    - Content now available for purchase in customer catalog
 
 **Acceptance Criteria:**
+
 - Content created successfully referencing existing media item
 - No video re-upload required (reuses media library)
 - Metadata stored correctly in `content` table
@@ -205,11 +217,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ---
 
 ### US-CONTENT-003: Upload Audio Content
+
 **As a** Creator
 **I want to** upload audio files (podcasts, audio lessons)
 **So that** I can create audio-based content for customers
 
 **Flow:**
+
 1. Creator navigates to `/admin/media/upload`
 2. Creator clicks "Upload Audio" button
 3. Creator selects MP3 file from computer (50MB)
@@ -220,6 +234,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 6. Creator creates content referencing audio media item (same flow as video)
 
 **Acceptance Criteria:**
+
 - Audio file uploaded to R2 successfully
 - `media_items` record created with type = 'audio'
 - No transcoding for audio (status immediately 'ready')
@@ -229,11 +244,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ---
 
 ### US-CONTENT-004: Reuse Media Across Multiple Content Items
+
 **As a** Creator
 **I want to** create multiple content items from the same video
 **So that** I can sell the same video in different packages/bundles
 
 **Flow:**
+
 1. Creator already uploaded "intro-video.mp4" to media library
 2. Creator creates Content A:
    - Title: "TypeScript Intro - Standalone"
@@ -247,6 +264,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 5. Video stored once in R2, served twice
 
 **Acceptance Criteria:**
+
 - Multiple content entities can reference same media item
 - No video duplication in R2
 - Each content has independent pricing and metadata
@@ -256,11 +274,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ---
 
 ### US-CONTENT-005: Attach Reusable Resources
+
 **As a** Creator
 **I want to** attach the same workbook to multiple content items
 **So that** I don't have to upload duplicates
 
 **Flow:**
+
 1. Creator uploads "workbook-v2.pdf" via resource manager:
    - Stored in `codex-resources-{creatorId}/{resourceId}/workbook-v2.pdf`
    - Creates `resources` record with `id = {resourceId}`
@@ -275,6 +295,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 5. Customers who purchase Content A or B can download the workbook
 
 **Acceptance Criteria:**
+
 - One resource file stored in R2
 - Multiple content items can attach same resource
 - `resource_attachments` table tracks many-to-many relationships
@@ -284,11 +305,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ---
 
 ### US-CONTENT-006: Edit Existing Content
+
 **As a** Creator
 **I want to** edit content after creation
 **So that** I can fix mistakes or update information
 
 **Flow:**
+
 1. Creator navigates to `/admin/content`
 2. Creator sees list of all their content
 3. Creator clicks "Edit" on a content item
@@ -307,6 +330,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 9. If thumbnail replaced, old thumbnail deleted from R2
 
 **Acceptance Criteria:**
+
 - All metadata fields editable
 - Media item reference can be changed (no file re-upload)
 - Old thumbnails deleted from R2 when replaced
@@ -317,11 +341,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ---
 
 ### US-CONTENT-007: Delete Content
+
 **As a** Creator
 **I want to** delete content
 **So that** I can remove outdated or unwanted items
 
 **Flow:**
+
 1. Creator navigates to `/admin/content`
 2. Creator clicks "Delete" on a content item
 3. System shows confirmation dialog:
@@ -337,6 +363,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 6. Creator sees success message
 
 **Acceptance Criteria:**
+
 - Soft delete (record remains in database with `deleted_at`)
 - Media items not deleted (may be referenced elsewhere)
 - Resource attachments removed but resources remain
@@ -347,11 +374,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ---
 
 ### US-CONTENT-008: Organize with Categories and Tags
+
 **As a** Creator
 **I want to** categorize and tag content
 **So that** customers can find relevant content easily
 
 **Flow:**
+
 1. Creator creates/edits content
 2. Creator selects category from dropdown:
    - Programming
@@ -365,6 +394,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 5. Customers can filter by category and search by tags (Content Access feature)
 
 **Acceptance Criteria:**
+
 - Each content has exactly one category
 - Content can have 0-10 tags
 - Categories managed separately (admin can create/edit categories)
@@ -376,6 +406,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ## User Flows (Visual)
 
 See diagrams:
+
 - [Content Upload Flow](../_assets/content-upload-flow.png)
 - [Media Library Pattern](../_assets/media-library-pattern.png)
 - [Content Lifecycle](../_assets/content-lifecycle.png)
@@ -385,6 +416,7 @@ See diagrams:
 ## Dependencies
 
 ### Internal Dependencies (Phase 1)
+
 - **Auth**: Content routes require `requireCreatorAccess()` guard
 - **Admin Dashboard**: UI for content and media management
 - **Media Transcoding**: Converts uploaded videos to HLS streams
@@ -392,6 +424,7 @@ See diagrams:
 - **Content Access**: Published content access control, signed URLs
 
 ### External Dependencies
+
 - **Cloudflare R2**: Object storage for media, resources, assets
   - Bucket-per-creator architecture (see [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
   - Buckets: `codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`
@@ -406,7 +439,9 @@ See diagrams:
   - `content_tags` join table
 
 ### Database Schema Dependencies
+
 See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
+
 - `media_items` table (videos/audio in media library)
 - `content` table (references media_items via `media_item_id`)
 - `resources` table (PDFs, workbooks)
@@ -420,6 +455,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 ## Acceptance Criteria (Feature-Level)
 
 ### Functional Requirements
+
 - Creator can upload video files (MP4, WebM, MOV, max 5GB)
 - Creator can upload audio files (MP3, M4A, WAV, max 500MB)
 - Uploads go to creator-specific R2 buckets (bucket-per-creator)
@@ -437,6 +473,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - Archived content hidden from everyone
 
 ### Storage Requirements
+
 - Files stored in creator-specific R2 buckets (isolation)
 - Metadata stored in Neon Postgres
 - Presigned URLs for secure file access (not public)
@@ -446,6 +483,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - Resources not deleted if attached to content
 
 ### Performance Requirements
+
 - Upload progress tracked and displayed
 - Large file uploads complete successfully (5GB)
 - Media library loads in < 500ms (p95)
@@ -453,6 +491,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - Content edit page loads in < 1s (p95)
 
 ### Security Requirements
+
 - Only Creators can access their own content/media
 - Creators cannot access other creators' buckets
 - R2 files not publicly accessible (presigned URLs only)
@@ -461,6 +500,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - CSRF protection on all content forms
 
 ### Testing Requirements
+
 - Unit tests for content CRUD operations
 - Integration tests for file uploads to R2
 - E2E tests for complete upload → publish flow
@@ -490,6 +530,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 ## Notes
 
 ### Why Media Library Pattern?
+
 - **Reusability**: One video → many content items (different pricing/bundles)
 - **Separation of Concerns**: Media storage/transcoding separate from content metadata
 - **Flexibility**: Swap media items without recreating content
@@ -497,6 +538,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - **Future-Proof**: Easier to add media management features (folders, galleries)
 
 ### Why Bucket-Per-Creator?
+
 - **Isolation**: Each creator's files physically separated
 - **Security**: Compromised creator doesn't affect others
 - **Permissions**: Easier creator-specific access control
@@ -504,19 +546,23 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - **Scale**: Cloudflare allows 1 million buckets
 
 ### Why Reusable Resources?
+
 - **Cost Efficiency**: Same workbook used across multiple offerings/content → stored once
 - **Consistency**: Update resource once, all attachments reflect change
 - **Flexibility**: Resources can attach to content, offerings, courses (extensible)
 
 ### Content vs Media Items vs Resources
-| Entity | Purpose | Storage | Reusability |
-|--------|---------|---------|-------------|
-| **Media Item** | Uploaded video/audio file | R2 (originals + HLS) | Yes - multiple content items |
-| **Content** | Sellable package (pricing + metadata) | Database (references media) | N/A |
-| **Resource** | Downloadable file (PDF, workbook) | R2 (resources bucket) | Yes - multiple content/offerings |
+
+| Entity         | Purpose                               | Storage                     | Reusability                      |
+| -------------- | ------------------------------------- | --------------------------- | -------------------------------- |
+| **Media Item** | Uploaded video/audio file             | R2 (originals + HLS)        | Yes - multiple content items     |
+| **Content**    | Sellable package (pricing + metadata) | Database (references media) | N/A                              |
+| **Resource**   | Downloadable file (PDF, workbook)     | R2 (resources bucket)       | Yes - multiple content/offerings |
 
 ### File Upload Strategy
+
 **Direct browser → R2 upload via presigned URL**:
+
 1. Browser requests upload URL from backend: `POST /api/media/presigned-upload`
 2. Backend generates R2 presigned PUT URL for creator's bucket
 3. Browser uploads directly to R2 (progress tracking)
@@ -524,6 +570,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 5. Backend creates `media_items` record and enqueues transcoding job
 
 **Benefits**:
+
 - No file passes through SvelteKit server (saves bandwidth)
 - Upload progress tracked client-side
 - Scalable (R2 handles upload load)

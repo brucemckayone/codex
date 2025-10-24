@@ -1,2 +1,2 @@
 // KV-specific types
-export interface dummy {}
+export interface KVDummy {}

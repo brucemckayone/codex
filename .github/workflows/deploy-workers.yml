@@ -3,14 +3,14 @@ name: Deploy Workers
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # Allow manual deployment
+  workflow_dispatch: # Allow manual deployment
 
 jobs:
   deploy-workers:
     name: Deploy Cloudflare Workers
     runs-on: ubuntu-latest
     # Only deploy if tests pass
-    needs: []  # Will be updated to depend on test workflow when needed
+    needs: [] # Will be updated to depend on test workflow when needed
 
     steps:
       - uses: actions/checkout@v4

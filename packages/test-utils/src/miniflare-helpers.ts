@@ -8,10 +8,15 @@ export type { MiniflareOptions } from 'miniflare';
 // Miniflare returns its own implementations of these types
 // which are compatible but not identical to @cloudflare/workers-types
 // Using any here to avoid type conflicts between Miniflare and Workers types
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MiniflareKVNamespace = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MiniflareD1Database = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MiniflareR2Bucket = any;
-type MiniflareQueue<Body = any> = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MiniflareQueue<_Body = any> = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MiniflareWorker = any;
 
 /**
@@ -32,7 +37,9 @@ export class MiniflareTestHelper {
    */
   async setup(options: MiniflareOptions): Promise<Miniflare> {
     if (this.mf) {
-      throw new Error('Miniflare instance already initialized. Call cleanup() first.');
+      throw new Error(
+        'Miniflare instance already initialized. Call cleanup() first.'
+      );
     }
 
     this.mf = new Miniflare({
@@ -52,7 +59,9 @@ export class MiniflareTestHelper {
    */
   get instance(): Miniflare {
     if (!this.mf) {
-      throw new Error('Miniflare instance not initialized. Call setup() first.');
+      throw new Error(
+        'Miniflare instance not initialized. Call setup() first.'
+      );
     }
     return this.mf;
   }
@@ -63,13 +72,19 @@ export class MiniflareTestHelper {
    * and Miniflare's internal types.
    */
   async fetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
-    return this.instance.dispatchFetch(input as any, init as any) as unknown as Promise<Response>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return this.instance.dispatchFetch(
+      input as any,
+      init as any
+    ) as unknown as Promise<Response>;
   }
 
   /**
    * Get all bindings for the worker.
    */
-  async getBindings<Env extends Record<string, unknown> = Record<string, unknown>>(): Promise<Env> {
+  async getBindings<
+    Env extends Record<string, unknown> = Record<string, unknown>,
+  >(): Promise<Env> {
     return this.instance.getBindings<Env>();
   }
 
@@ -97,7 +112,9 @@ export class MiniflareTestHelper {
   /**
    * Get a specific Queue producer binding.
    */
-  async getQueueProducer<Body = unknown>(bindingName: string): Promise<MiniflareQueue<Body>> {
+  async getQueueProducer<Body = unknown>(
+    bindingName: string
+  ): Promise<MiniflareQueue<Body>> {
     return this.instance.getQueueProducer<Body>(bindingName);
   }
 
@@ -143,7 +160,9 @@ export class MiniflareTestHelper {
 /**
  * Create a Miniflare test helper with common defaults for integration tests.
  */
-export function createMiniflareHelper(options: Partial<MiniflareOptions> = {}): MiniflareTestHelper {
+export function createMiniflareHelper(
+  options: Partial<MiniflareOptions> = {}
+): MiniflareTestHelper {
   return new MiniflareTestHelper({
     // Default to modules format
     modules: true,

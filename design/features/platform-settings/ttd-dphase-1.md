@@ -5,6 +5,7 @@
 The Platform Settings system provides the Platform Owner with the ability to customize branding (logo, color scheme) and configure business information (platform name, contact details, timezone). It implements an intelligent theming system that generates a complete, accessible design system from a single primary color choice, with results cached in Cloudflare KV for instant global availability.
 
 **Key Architecture Decisions**:
+
 - **Intelligent Color Generation**: From one primary color, mathematically derive a full palette using HSL color space transformations.
 - **Cloudflare KV for Theme Caching**: Store generated CSS custom properties in KV for edge-cached, instant loading.
 - **R2 for Logo Storage**: Use existing `codex-assets-{ownerId}` bucket (per R2 Bucket Structure) for logo files.
@@ -34,6 +35,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 **Responsibility**: Centralized business logic for reading and updating platform settings, generating themes, and managing logo uploads.
 
 **Interface**:
+
 ```typescript
 export interface IPlatformSettingsService {
   /**
@@ -49,7 +51,10 @@ export interface IPlatformSettingsService {
    * @param updates Partial settings to update.
    * @returns The updated platform settings.
    */
-  updateSettings(ownerId: string, updates: PlatformSettingsUpdate): Promise<PlatformSettings>;
+  updateSettings(
+    ownerId: string,
+    updates: PlatformSettingsUpdate
+  ): Promise<PlatformSettings>;
 
   /**
    * Generates a complete theme from a primary color.
@@ -65,7 +70,11 @@ export interface IPlatformSettingsService {
    * @param filename The original filename.
    * @returns The public URL of the uploaded logo.
    */
-  uploadLogo(ownerId: string, file: ArrayBuffer | Uint8Array, filename: string): Promise<string>;
+  uploadLogo(
+    ownerId: string,
+    file: ArrayBuffer | Uint8Array,
+    filename: string
+  ): Promise<string>;
 
   /**
    * Deletes the current logo from R2.
@@ -121,12 +130,12 @@ export interface ThemeColors {
 }
 
 export interface ColorScale {
-  50: string;   // HSL string
+  50: string; // HSL string
   100: string;
   200: string;
   300: string;
   400: string;
-  500: string;  // Original color
+  500: string; // Original color
   600: string;
   700: string;
   800: string;
@@ -134,26 +143,27 @@ export interface ColorScale {
 }
 
 export interface SurfaceColors {
-  base: string;      // white or near-white
-  muted: string;     // primary-50
-  hover: string;     // primary-100
+  base: string; // white or near-white
+  muted: string; // primary-50
+  hover: string; // primary-100
 }
 
 export interface TextColors {
-  primary: string;   // near-black
+  primary: string; // near-black
   secondary: string; // gray
-  muted: string;     // light gray
+  muted: string; // light gray
   onPrimary: string; // white or black (contrast-checked)
 }
 
 export interface BorderColors {
-  subtle: string;    // primary-200
-  default: string;   // primary-300
-  emphasis: string;  // primary-600
+  subtle: string; // primary-200
+  default: string; // primary-300
+  emphasis: string; // primary-600
 }
 ```
 
 **Implementation Notes**:
+
 - `getSettings`: Query `platform_settings` table by `owner_id`.
 - `updateSettings`: Update record in `platform_settings` table. If updating `primaryColorHex`, regenerate theme and cache in KV.
 - `generateTheme`: Implements color generation algorithm (detailed below).
@@ -168,6 +178,7 @@ export interface BorderColors {
 **Responsibility**: Contains the pure logic for generating a complete color system from a single hex color.
 
 **Implementation**:
+
 ```typescript
 import { hexToHSL, hslToHex, hslToString } from './color-utils';
 import { calculateContrast } from './contrast-utils';
@@ -189,7 +200,7 @@ export function generateTheme(primaryColorHex: string): ThemeColors {
     primary: primaryScale,
     surface,
     text,
-    border
+    border,
   });
 
   return {
@@ -198,8 +209,8 @@ export function generateTheme(primaryColorHex: string): ThemeColors {
       primary: primaryScale,
       surface,
       text,
-      border
-    }
+      border,
+    },
   };
 }
 
@@ -211,16 +222,16 @@ function generateColorScale(baseHSL: HSL): ColorScale {
   const { h, s, l } = baseHSL;
 
   return {
-    50:  hslToString({ h, s, l: 95 }),
+    50: hslToString({ h, s, l: 95 }),
     100: hslToString({ h, s, l: 90 }),
     200: hslToString({ h, s, l: 80 }),
     300: hslToString({ h, s, l: 70 }),
     400: hslToString({ h, s, l: 65 }),
-    500: hslToString({ h, s, l }),      // Original color
+    500: hslToString({ h, s, l }), // Original color
     600: hslToString({ h, s, l: Math.max(l - 10, 20) }),
     700: hslToString({ h, s, l: Math.max(l - 20, 15) }),
     800: hslToString({ h, s, l: Math.max(l - 30, 10) }),
-    900: hslToString({ h, s, l: Math.max(l - 40, 5) })
+    900: hslToString({ h, s, l: Math.max(l - 40, 5) }),
   };
 }
 
@@ -229,9 +240,9 @@ function generateColorScale(baseHSL: HSL): ColorScale {
  */
 function generateSurfaceColors(primaryScale: ColorScale): SurfaceColors {
   return {
-    base: 'hsl(0, 0%, 100%)',  // white
-    muted: primaryScale[50],    // very light primary
-    hover: primaryScale[100]    // light primary
+    base: 'hsl(0, 0%, 100%)', // white
+    muted: primaryScale[50], // very light primary
+    hover: primaryScale[100], // light primary
   };
 }
 
@@ -244,10 +255,10 @@ function generateTextColors(primaryScale: ColorScale): TextColors {
   const onPrimary = getContrastingTextColor(primary600HSL);
 
   return {
-    primary: 'hsl(0, 0%, 10%)',     // near-black
-    secondary: 'hsl(0, 0%, 40%)',   // gray
-    muted: 'hsl(0, 0%, 60%)',       // light gray
-    onPrimary                        // white or black
+    primary: 'hsl(0, 0%, 10%)', // near-black
+    secondary: 'hsl(0, 0%, 40%)', // gray
+    muted: 'hsl(0, 0%, 60%)', // light gray
+    onPrimary, // white or black
   };
 }
 
@@ -258,7 +269,7 @@ function generateBorderColors(primaryScale: ColorScale): BorderColors {
   return {
     subtle: primaryScale[200],
     default: primaryScale[300],
-    emphasis: primaryScale[600]
+    emphasis: primaryScale[600],
   };
 }
 
@@ -314,8 +325,16 @@ function buildCSSVariables(palette: ThemeColors['palette']): string {
  * Ensures WCAG AA compliance (4.5:1 contrast ratio).
  */
 function getContrastingTextColor(backgroundColor: HSL): string {
-  const whiteContrast = calculateContrast(backgroundColor, { h: 0, s: 0, l: 100 });
-  const blackContrast = calculateContrast(backgroundColor, { h: 0, s: 0, l: 0 });
+  const whiteContrast = calculateContrast(backgroundColor, {
+    h: 0,
+    s: 0,
+    l: 100,
+  });
+  const blackContrast = calculateContrast(backgroundColor, {
+    h: 0,
+    s: 0,
+    l: 0,
+  });
 
   return whiteContrast >= 4.5 ? 'hsl(0, 0%, 100%)' : 'hsl(0, 0%, 0%)';
 }
@@ -328,6 +347,7 @@ function getContrastingTextColor(backgroundColor: HSL): string {
 **Responsibility**: Pure utility functions for color conversion and manipulation.
 
 **Implementation**:
+
 ```typescript
 export interface HSL {
   h: number; // 0-360
@@ -375,7 +395,7 @@ export function hexToHSL(hex: string): HSL {
   return {
     h: Math.round(h * 360),
     s: Math.round(s * 100),
-    l: Math.round(l * 100)
+    l: Math.round(l * 100),
   };
 }
 
@@ -396,7 +416,7 @@ export function parseHSL(hslString: string): HSL {
   return {
     h: parseInt(match[1]),
     s: parseInt(match[2]),
-    l: parseInt(match[3])
+    l: parseInt(match[3]),
   };
 }
 ```
@@ -408,6 +428,7 @@ export function parseHSL(hslString: string): HSL {
 **Responsibility**: Calculate color contrast ratios for WCAG compliance.
 
 **Implementation**:
+
 ```typescript
 import { HSL } from './color-utils';
 
@@ -424,9 +445,12 @@ function getRelativeLuminance(hsl: HSL): number {
   const gsRGB = g / 255;
   const bsRGB = b / 255;
 
-  const r_linear = rsRGB <= 0.03928 ? rsRGB / 12.92 : Math.pow((rsRGB + 0.055) / 1.055, 2.4);
-  const g_linear = gsRGB <= 0.03928 ? gsRGB / 12.92 : Math.pow((gsRGB + 0.055) / 1.055, 2.4);
-  const b_linear = bsRGB <= 0.03928 ? bsRGB / 12.92 : Math.pow((bsRGB + 0.055) / 1.055, 2.4);
+  const r_linear =
+    rsRGB <= 0.03928 ? rsRGB / 12.92 : Math.pow((rsRGB + 0.055) / 1.055, 2.4);
+  const g_linear =
+    gsRGB <= 0.03928 ? gsRGB / 12.92 : Math.pow((gsRGB + 0.055) / 1.055, 2.4);
+  const b_linear =
+    bsRGB <= 0.03928 ? bsRGB / 12.92 : Math.pow((bsRGB + 0.055) / 1.055, 2.4);
 
   return 0.2126 * r_linear + 0.7152 * g_linear + 0.0722 * b_linear;
 }
@@ -462,24 +486,24 @@ function hslToRGB(hsl: HSL): { r: number; g: number; b: number } {
     const hue2rgb = (p: number, q: number, t: number) => {
       if (t < 0) t += 1;
       if (t > 1) t -= 1;
-      if (t < 1/6) return p + (q - p) * 6 * t;
-      if (t < 1/2) return q;
-      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
       return p;
     };
 
     const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
     const p = 2 * l - q;
 
-    r = hue2rgb(p, q, h + 1/3);
+    r = hue2rgb(p, q, h + 1 / 3);
     g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1/3);
+    b = hue2rgb(p, q, h - 1 / 3);
   }
 
   return {
     r: Math.round(r * 255),
     g: Math.round(g * 255),
-    b: Math.round(b * 255)
+    b: Math.round(b * 255),
   };
 }
 ```
@@ -491,6 +515,7 @@ function hslToRGB(hsl: HSL): { r: number; g: number; b: number } {
 **Responsibility**: Admin interface for updating platform settings.
 
 **`+page.server.ts` (Load Function & Form Actions)**:
+
 ```typescript
 import type { PageServerLoad, Actions } from './$types';
 import { requireOwner } from '$lib/server/auth/guards';
@@ -506,11 +531,14 @@ export const load: PageServerLoad = async (event) => {
 
   // If no settings exist, create defaults
   if (!settings) {
-    const defaultSettings = await platformSettingsService.updateSettings(owner.id, {
-      platformName: 'Codex Platform',
-      primaryColorHex: '#3B82F6',
-      timezone: 'UTC'
-    });
+    const defaultSettings = await platformSettingsService.updateSettings(
+      owner.id,
+      {
+        platformName: 'Codex Platform',
+        primaryColorHex: '#3B82F6',
+        timezone: 'UTC',
+      }
+    );
     return { settings: defaultSettings };
   }
 
@@ -527,11 +555,14 @@ export const actions: Actions = {
       primaryColorHex: formData.get('primaryColorHex') as string,
       contactEmail: formData.get('contactEmail') as string | null,
       businessName: formData.get('businessName') as string | null,
-      timezone: formData.get('timezone') as string
+      timezone: formData.get('timezone') as string,
     };
 
     // Validate color format
-    if (updates.primaryColorHex && !/^#[0-9A-Fa-f]{6}$/.test(updates.primaryColorHex)) {
+    if (
+      updates.primaryColorHex &&
+      !/^#[0-9A-Fa-f]{6}$/.test(updates.primaryColorHex)
+    ) {
       return fail(400, { error: 'Invalid color format' });
     }
 
@@ -553,7 +584,9 @@ export const actions: Actions = {
     // Validate file type
     const allowedTypes = ['image/png', 'image/jpeg', 'image/svg+xml'];
     if (!allowedTypes.includes(logoFile.type)) {
-      return fail(400, { error: 'Invalid file type. Only PNG, JPG, and SVG allowed.' });
+      return fail(400, {
+        error: 'Invalid file type. Only PNG, JPG, and SVG allowed.',
+      });
     }
 
     // Validate file size (2MB max)
@@ -581,11 +614,12 @@ export const actions: Actions = {
     await platformSettingsService.updateSettings(owner.id, { logoUrl });
 
     return { success: true, logoUrl };
-  }
+  },
 };
 ```
 
 **`+page.svelte` (Frontend Component)**:
+
 ```svelte
 <script lang="ts">
   import { enhance } from '$app/forms';
@@ -610,13 +644,23 @@ export const actions: Actions = {
   <section class="settings-section">
     <h2>Branding</h2>
 
-    <form method="POST" action="?/uploadLogo" enctype="multipart/form-data" use:enhance>
+    <form
+      method="POST"
+      action="?/uploadLogo"
+      enctype="multipart/form-data"
+      use:enhance
+    >
       <div class="form-group">
         <label for="logo">Platform Logo</label>
         {#if logoPreview}
           <img src={logoPreview} alt="Current logo" class="logo-preview" />
         {/if}
-        <input type="file" id="logo" name="logo" accept=".png,.jpg,.jpeg,.svg" />
+        <input
+          type="file"
+          id="logo"
+          name="logo"
+          accept=".png,.jpg,.jpeg,.svg"
+        />
         <button type="submit">Upload Logo</button>
       </div>
     </form>
@@ -728,6 +772,7 @@ export const actions: Actions = {
 **Responsibility**: Load platform settings and theme on every request, inject CSS variables into HTML.
 
 **Implementation**:
+
 ```typescript
 import type { LayoutServerLoad } from './$types';
 import { platformSettingsService } from '$lib/server/platform-settings/service';
@@ -755,12 +800,13 @@ export const load: LayoutServerLoad = async (event) => {
 
   return {
     theme: theme?.cssVariables || '',
-    platformSettings: settings
+    platformSettings: settings,
   };
 };
 ```
 
 **`src/routes/+layout.svelte`**:
+
 ```svelte
 <script lang="ts">
   import type { LayoutData } from './$types';
@@ -791,32 +837,50 @@ export const load: LayoutServerLoad = async (event) => {
 ### 1. `platform_settings` Table
 
 ```typescript
-import { pgTable, uuid, varchar, text, timestamp, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  timestamp,
+  index,
+} from 'drizzle-orm/pg-core';
 import { users } from './auth';
 
-export const platformSettings = pgTable('platform_settings', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  ownerId: uuid('owner_id').references(() => users.id).notNull().unique(),
+export const platformSettings = pgTable(
+  'platform_settings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerId: uuid('owner_id')
+      .references(() => users.id)
+      .notNull()
+      .unique(),
 
-  // Branding
-  logoUrl: text('logo_url'),
-  primaryColorHex: varchar('primary_color_hex', { length: 7 }).notNull().default('#3B82F6'),
+    // Branding
+    logoUrl: text('logo_url'),
+    primaryColorHex: varchar('primary_color_hex', { length: 7 })
+      .notNull()
+      .default('#3B82F6'),
 
-  // Identity
-  platformName: varchar('platform_name', { length: 100 }).notNull().default('Codex Platform'),
+    // Identity
+    platformName: varchar('platform_name', { length: 100 })
+      .notNull()
+      .default('Codex Platform'),
 
-  // Business Info
-  contactEmail: varchar('contact_email', { length: 255 }),
-  businessName: varchar('business_name', { length: 200 }),
-  timezone: varchar('timezone', { length: 100 }).notNull().default('UTC'),
+    // Business Info
+    contactEmail: varchar('contact_email', { length: 255 }),
+    businessName: varchar('business_name', { length: 200 }),
+    timezone: varchar('timezone', { length: 100 }).notNull().default('UTC'),
 
-  // Timestamps
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull()
-}, (table) => ({
-  // Index for efficient owner lookups (ready for multi-tenant)
-  ownerIdIdx: index('idx_platform_settings_owner_id').on(table.ownerId)
-}));
+    // Timestamps
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for efficient owner lookups (ready for multi-tenant)
+    ownerIdIdx: index('idx_platform_settings_owner_id').on(table.ownerId),
+  })
+);
 ```
 
 ---
@@ -826,6 +890,7 @@ export const platformSettings = pgTable('platform_settings', {
 ### KV Namespace Setup
 
 **`wrangler.toml`**:
+
 ```toml
 [[kv_namespaces]]
 binding = "THEMES_KV"
@@ -836,6 +901,7 @@ preview_id = "your-preview-kv-namespace-id"
 ### KV Operations
 
 **Storing Theme**:
+
 ```typescript
 // In PlatformSettingsService
 async cacheTheme(ownerId: string, theme: ThemeColors): Promise<void> {
@@ -847,6 +913,7 @@ async cacheTheme(ownerId: string, theme: ThemeColors): Promise<void> {
 ```
 
 **Retrieving Theme**:
+
 ```typescript
 async getCachedTheme(ownerId: string): Promise<ThemeColors | null> {
   const kvKey = `theme:${ownerId}`;
@@ -859,6 +926,7 @@ async getCachedTheme(ownerId: string): Promise<ThemeColors | null> {
 ```
 
 **Invalidating Cache on Update**:
+
 ```typescript
 async updateSettings(ownerId: string, updates: PlatformSettingsUpdate): Promise<PlatformSettings> {
   // Update database
@@ -929,16 +997,19 @@ function getContentType(ext: string): string {
 ## Testing Strategy
 
 ### Unit Tests
+
 - **Color Generation**: Test `generateTheme` with various input colors, verify palette correctness.
 - **Contrast Checking**: Test `calculateContrast` and `getContrastingTextColor` for WCAG compliance.
 - **Color Conversion**: Test `hexToHSL`, `hslToString`, `parseHSL` utilities.
 
 ### Integration Tests
+
 - **Settings CRUD**: Test `getSettings` and `updateSettings` with database.
 - **Logo Upload**: Test `uploadLogo` and `deleteLogo` with R2 mock.
 - **Theme Caching**: Test KV cache hit/miss scenarios.
 
 ### E2E Tests
+
 - **Settings Update Flow**: Platform Owner logs in → navigates to settings → changes color → saves → verifies color appears site-wide.
 - **Logo Upload Flow**: Upload logo → verify appears in navigation → upload new logo → verify old logo deleted from R2.
 
@@ -947,16 +1018,19 @@ function getContentType(ext: string): string {
 ## Performance Considerations
 
 ### Cloudflare KV Edge Caching
+
 - **Theme CSS** cached globally at Cloudflare edge locations.
 - **Cache hit**: Theme loads in <5ms (from edge).
 - **Cache miss**: Theme generated and cached, subsequent requests are fast.
 
 ### CSS Custom Properties
+
 - **No CSS file compilation** needed.
 - Variables injected in `<style>` tag in HTML `<head>`.
 - Browser-native, instant updates.
 
 ### R2 Logo Delivery
+
 - Logos served via Cloudflare CDN (R2 custom domain).
 - Cached at edge, fast global delivery.
 
@@ -965,12 +1039,14 @@ function getContentType(ext: string): string {
 ## Future Extensions (Phase 3 Multi-Tenant)
 
 ### What Changes:
+
 1. **Routing**: Extract `ownerSlug` from path (`/[ownerSlug]/...`).
 2. **Settings Query**: `WHERE owner_id = (SELECT id FROM users WHERE owner_slug = $1)`.
 3. **KV Key**: `theme:{ownerSlug}` instead of hardcoded owner ID.
 4. **Middleware**: Inject tenant-specific theme based on current path.
 
 ### What Stays the Same:
+
 - Database schema (no changes needed).
 - Theme generation logic.
 - Logo upload logic.

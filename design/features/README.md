@@ -100,9 +100,11 @@ features/
 ## Complete Feature Set
 
 ### Phase 1: MVP (Months 1-3)
+
 **Goal**: Platform Owner sells content to customers
 
 Features included:
+
 - ✅ Auth
 - ✅ Content Management (video, written)
 - ✅ E-Commerce (individual purchases)
@@ -112,9 +114,11 @@ Features included:
 - ✅ Platform Settings (basic branding)
 
 ### Phase 2: Enhanced Monetization (Months 4-6)
+
 **Goal**: Add subscription model and first offerings
 
 Features added/enhanced:
+
 - ✅ Subscriptions (recurring billing, tiers)
 - ✅ Credits (allocation, tracking, expiration)
 - ✅ Offerings (one-time events, basic portal)
@@ -123,9 +127,11 @@ Features added/enhanced:
 - ✅ Admin Dashboard (enhanced analytics)
 
 ### Phase 3: Multi-Creator Platform (Months 7-9)
+
 **Goal**: Support Media Owners and multiple offering types
 
 Features added/enhanced:
+
 - ✅ Multi-Creator (Media Owner role, invites, revenue sharing)
 - ✅ Offerings (all 6 types, advanced scheduling)
 - ✅ Offering Portals (complete portal system)
@@ -133,9 +139,11 @@ Features added/enhanced:
 - ✅ Notifications (in-app, advanced automation)
 
 ### Phase 4: Scale & Optimize (Months 10+)
+
 **Goal**: Professional platform features
 
 Features added/enhanced:
+
 - ✅ Analytics (predictive, forecasting, funnel analysis)
 - ✅ Notifications (marketing automation)
 - ✅ Platform Settings (white-label, multi-language)
@@ -146,9 +154,11 @@ Features added/enhanced:
 ## Feature Boundaries
 
 ### 1. Auth (All Phases)
+
 **Responsibility**: User authentication, registration, session management, password reset
 
 **Owns**:
+
 - User registration and email verification
 - Login/logout flows
 - Password reset
@@ -158,6 +168,7 @@ Features added/enhanced:
 **Dependencies**: None (foundational feature)
 
 **Exports**:
+
 - `useAuth()` hook
 - `requireAuth()` middleware
 - `checkPermission()` utility
@@ -166,9 +177,11 @@ Features added/enhanced:
 ---
 
 ### 2. Content Management
+
 **Responsibility**: Creating, editing, and organizing content (Platform Owner side)
 
 **Owns**:
+
 - Video upload flow (presigned R2 URLs)
 - Written content creation (rich text editor)
 - Content metadata management
@@ -177,10 +190,12 @@ Features added/enhanced:
 - Thumbnail generation
 
 **Dependencies**:
+
 - Auth (requires Platform Owner role)
 - Shared (database schema, types)
 
 **Exports**:
+
 - Content CRUD API
 - Upload utilities
 - Content type definitions
@@ -188,9 +203,11 @@ Features added/enhanced:
 ---
 
 ### 3. E-Commerce
+
 **Responsibility**: Purchases, payments, revenue tracking
 
 **Owns**:
+
 - Stripe Payment Intent creation
 - Checkout UI
 - Payment processing
@@ -200,11 +217,13 @@ Features added/enhanced:
 - Revenue calculations
 
 **Dependencies**:
+
 - Auth (requires authenticated user)
 - Content Management (purchases reference content)
 - Shared (database schema)
 
 **Exports**:
+
 - Purchase API
 - Stripe utilities
 - Payment components
@@ -212,9 +231,11 @@ Features added/enhanced:
 ---
 
 ### 4. Content Access
+
 **Responsibility**: Consuming purchased content (Customer side)
 
 **Owns**:
+
 - Video player with progress tracking
 - Written content reader
 - Customer library (purchased content)
@@ -223,11 +244,13 @@ Features added/enhanced:
 - Signed URL generation for video playback
 
 **Dependencies**:
+
 - Auth (requires authenticated user)
 - E-Commerce (checks purchase status)
 - Content Management (reads content data)
 
 **Exports**:
+
 - Player components
 - Access check utilities
 - Library UI
@@ -235,9 +258,11 @@ Features added/enhanced:
 ---
 
 ### 5. Admin Dashboard
+
 **Responsibility**: Platform Owner analytics and management
 
 **Owns**:
+
 - Revenue dashboard
 - Purchase list and management
 - Customer list
@@ -246,20 +271,24 @@ Features added/enhanced:
 - CSV exports
 
 **Dependencies**:
+
 - Auth (requires Platform Owner role)
 - E-Commerce (revenue data)
 - Content Management (content data)
 
 **Exports**:
+
 - Dashboard components
 - Analytics utilities
 
 ---
 
 ### 6. Platform Settings
+
 **Responsibility**: Platform configuration and branding
 
 **Owns**:
+
 - Logo and color customization
 - Homepage hero section
 - About page editor
@@ -268,10 +297,12 @@ Features added/enhanced:
 - Settings persistence
 
 **Dependencies**:
+
 - Auth (requires Platform Owner role)
 - Shared (database schema)
 
 **Exports**:
+
 - Settings API
 - Branding utilities
 - Public settings for frontend
@@ -279,9 +310,11 @@ Features added/enhanced:
 ---
 
 ### 7. Shared
+
 **Responsibility**: Common utilities, types, and schemas used across features
 
 **Contains**:
+
 - Database schema (complete)
 - TypeScript type definitions
 - API design conventions
@@ -299,6 +332,7 @@ Features added/enhanced:
 ## Development Approach
 
 ### 1. Bottom-Up Development
+
 Develop features in dependency order:
 
 1. **Shared** (database schema, types, utilities)
@@ -312,6 +346,7 @@ Develop features in dependency order:
 ### 2. Feature-Driven Workflow
 
 When working on a feature:
+
 1. Read the feature's `mvp.md` to understand scope
 2. Check dependencies in `README.md`
 3. Refer to `shared/` for database schema and types
@@ -322,6 +357,7 @@ When working on a feature:
 ### 3. Cross-Feature Communication
 
 Features communicate via:
+
 - **Database**: Shared schema in `shared/database-schema.md`
 - **API**: RESTful endpoints documented in each feature's `api.md`
 - **Types**: Shared TypeScript types in `shared/types.md`
@@ -330,6 +366,7 @@ Features communicate via:
 ### 4. Testing Strategy
 
 Each feature has:
+
 - **Unit tests**: Test feature logic in isolation
 - **Integration tests**: Test feature with dependencies
 - **E2E tests**: Test critical user flows across features
@@ -339,15 +376,18 @@ Each feature has:
 ## MVP Priority Order
 
 ### Phase 1: Foundation (Weeks 1-2)
+
 1. **Shared**: Database schema, types
 2. **Auth**: Registration, login, session management
 
 ### Phase 2: Core Value (Weeks 3-6)
+
 3. **Content Management**: Upload and manage content
 4. **E-Commerce**: Purchase flow
 5. **Content Access**: Video player and library
 
 ### Phase 3: Polish (Weeks 7-10)
+
 6. **Admin Dashboard**: Revenue and management
 7. **Platform Settings**: Branding and customization
 
@@ -358,23 +398,30 @@ Each feature has:
 When implementing features, always consider:
 
 ### 1. Multi-Creator Future
+
 Even though MVP is Platform Owner only:
+
 - Track `creator_id` on all content
 - Permission checks use role, not hard-coded assumptions
 - Revenue calculations have split logic (even if 100%/0% now)
 
 ### 2. Subscription Future
+
 Even though MVP is one-time purchases only:
+
 - Use `ContentAccess` table (not just Purchase check)
 - Access can have `expires_at` (null = permanent for now)
 - Revenue tracking separates subscription vs purchase
 
 ### 3. Offerings Future
+
 Even though MVP is content only:
+
 - Generic "Product" concept in checkout (content now, offerings later)
 - Access control flexible (content now, offering portals later)
 
 ### 4. API Versioning
+
 - Use semantic versioning for breaking changes
 - Keep backwards compatibility when possible
 - Document all breaking changes
@@ -411,6 +458,7 @@ Admin Dashboard
 ```
 
 **Legend**:
+
 - `→` depends on
 - Features can depend on multiple features
 - Circular dependencies are not allowed
@@ -420,6 +468,7 @@ Admin Dashboard
 ## Documentation Standards
 
 ### MVP Files Should Include:
+
 1. **Feature Overview**: What is this feature?
 2. **Scope**: What's in MVP vs Phase 2+
 3. **User Stories**: With acceptance criteria
@@ -429,6 +478,7 @@ Admin Dashboard
 7. **Testing Approach**: How to test this feature
 
 ### API Documentation Should Include:
+
 - Endpoint URL and method
 - Authentication requirements
 - Request parameters and body
@@ -437,6 +487,7 @@ Admin Dashboard
 - Example requests/responses
 
 ### Flow Documentation Should Include:
+
 - Diagrams (Mermaid or ASCII)
 - Step-by-step descriptions
 - Error/edge case handling
@@ -447,12 +498,14 @@ Admin Dashboard
 ## Quick Start
 
 To understand a feature:
+
 1. Read `mvp.md` for scope and user stories
 2. Read `api.md` for technical interface
 3. Check `shared/database-schema.md` for data model
 4. Review dependencies in this README
 
 To implement a feature:
+
 1. Ensure dependencies are complete
 2. Start with database schema (if not in shared)
 3. Implement API endpoints
@@ -465,6 +518,7 @@ To implement a feature:
 ## Questions?
 
 Refer to:
+
 - `/Design /Overview.md` for high-level requirements
 - `/Design /MVP-Definition.md` for overall MVP scope
 - Individual feature `mvp.md` files for specific requirements

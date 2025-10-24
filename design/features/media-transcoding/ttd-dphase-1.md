@@ -5,6 +5,7 @@
 The media transcoding system asynchronously converts uploaded videos to HLS format and audio files to HLS with waveform generation. Processing happens via Cloudflare Queue → Cloudflare Worker → Runpod GPU workers.
 
 **Key Architecture Decisions**:
+
 - **Asynchronous Processing**: Queue-based to avoid blocking uploads
 - **GPU Acceleration**: Runpod serverless for 10x faster transcoding
 - **Webhook Callbacks**: Runpod notifies when jobs complete
@@ -13,6 +14,7 @@ The media transcoding system asynchronously converts uploaded videos to HLS form
 - **Waveform in R2**: Waveform JSON stored in R2 (not database) to save DB costs
 
 **Architecture**:
+
 - **Queue Layer**: Cloudflare Queue for job management
 - **Worker Layer**: Cloudflare Worker processes queue messages, calls Runpod
 - **Processing Layer**: Runpod GPU workers (custom Docker image with ffmpeg + audiowaveform)
@@ -47,6 +49,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 **Responsibility**: Enqueue transcoding jobs and handle webhook callbacks
 
 **Interface**:
+
 ```typescript
 export interface ITranscodingService {
   // Enqueue transcoding job (called after media upload)
@@ -68,13 +71,13 @@ export interface TranscodingJobPayload {
   inputBucket: string;
   inputKey: string;
   outputBucket: string;
-  outputPrefix?: string;  // For video/audio HLS output
-  assetsBucket: string;   // For thumbnails/waveforms
-  attemptNumber: number;  // 1 or 2 (single retry)
+  outputPrefix?: string; // For video/audio HLS output
+  assetsBucket: string; // For thumbnails/waveforms
+  attemptNumber: number; // 1 or 2 (single retry)
 }
 
 export interface RunpodWebhookPayload {
-  id: string;  // Runpod job ID
+  id: string; // Runpod job ID
   status: 'completed' | 'failed';
   output?: {
     mediaId: string;
@@ -86,7 +89,7 @@ export interface RunpodWebhookPayload {
     width?: number;
     height?: number;
     // Audio-specific outputs
-    waveformKey?: string;  // R2 key: 'waveforms/{mediaId}/waveform.json'
+    waveformKey?: string; // R2 key: 'waveforms/{mediaId}/waveform.json'
     waveformImageKey?: string;
   };
   error?: string;
@@ -94,6 +97,7 @@ export interface RunpodWebhookPayload {
 ```
 
 **Implementation**:
+
 ```typescript
 import { db } from '$lib/server/db';
 import { mediaItems } from '$lib/server/db/schema';
@@ -107,7 +111,7 @@ export class TranscodingService implements ITranscodingService {
       inputBucket: mediaItem.bucketName,
       inputKey: mediaItem.fileKey,
       assetsBucket: `codex-assets-${mediaItem.ownerId}`,
-      attemptNumber: 1
+      attemptNumber: 1,
     };
 
     if (mediaItem.type === 'video') {
@@ -129,7 +133,8 @@ export class TranscodingService implements ITranscodingService {
     if (status === 'completed' && output) {
       // Success: Update media_items with output metadata
       if (output.type === 'video') {
-        await db.update(mediaItems)
+        await db
+          .update(mediaItems)
           .set({
             status: 'ready',
             hlsMasterPlaylistKey: output.hlsMasterPlaylistKey,
@@ -137,26 +142,27 @@ export class TranscodingService implements ITranscodingService {
             durationSeconds: output.durationSeconds,
             width: output.width,
             height: output.height,
-            updatedAt: new Date()
+            updatedAt: new Date(),
           })
           .where(eq(mediaItems.id, mediaId));
       } else {
         // Audio
-        await db.update(mediaItems)
+        await db
+          .update(mediaItems)
           .set({
             status: 'ready',
             hlsMasterPlaylistKey: output.hlsMasterPlaylistKey, // HLS master playlist for audio
-            waveformKey: output.waveformKey,  // R2 key to waveform JSON
+            waveformKey: output.waveformKey, // R2 key to waveform JSON
             waveformImageKey: output.waveformImageKey,
             durationSeconds: output.durationSeconds,
-            updatedAt: new Date()
+            updatedAt: new Date(),
           })
           .where(eq(mediaItems.id, mediaId));
       }
     } else if (status === 'failed') {
       // Failure: Check if this is first or second attempt
       const mediaItem = await db.query.mediaItems.findFirst({
-        where: eq(mediaItems.id, mediaId)
+        where: eq(mediaItems.id, mediaId),
       });
 
       if (!mediaItem) {
@@ -164,10 +170,11 @@ export class TranscodingService implements ITranscodingService {
       }
 
       // Store error message in media_items for debugging
-      await db.update(mediaItems)
+      await db
+        .update(mediaItems)
         .set({
           errorMessage: error || 'Unknown transcoding error',
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
         .where(eq(mediaItems.id, mediaId));
 
@@ -175,15 +182,18 @@ export class TranscodingService implements ITranscodingService {
       // For now, if already has errorMessage, this is 2nd failure
       if (mediaItem.errorMessage) {
         // Second failure: Mark as failed, will be cleaned up automatically
-        await db.update(mediaItems)
+        await db
+          .update(mediaItems)
           .set({
             status: 'failed',
             errorMessage: `Permanent failure: ${error}`,
-            updatedAt: new Date()
+            updatedAt: new Date(),
           })
           .where(eq(mediaItems.id, mediaId));
 
-        console.error(`Transcoding permanently failed for ${mediaId}: ${error}`);
+        console.error(
+          `Transcoding permanently failed for ${mediaId}: ${error}`
+        );
       } else {
         // First failure: Will be retried by queue consumer
         console.log(`Transcoding failed for ${mediaId}, will retry: ${error}`);
@@ -194,7 +204,7 @@ export class TranscodingService implements ITranscodingService {
   async retryTranscoding(mediaId: string): Promise<void> {
     // Manual retry triggered by creator from admin UI
     const mediaItem = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, mediaId)
+      where: eq(mediaItems.id, mediaId),
     });
 
     if (!mediaItem) {
@@ -206,11 +216,12 @@ export class TranscodingService implements ITranscodingService {
     }
 
     // Reset status and clear error
-    await db.update(mediaItems)
+    await db
+      .update(mediaItems)
       .set({
         status: 'transcoding',
         errorMessage: null,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(mediaItems.id, mediaId));
 
@@ -225,7 +236,7 @@ export class TranscodingService implements ITranscodingService {
       where: and(
         eq(mediaItems.status, 'failed'),
         lt(mediaItems.updatedAt, cutoff)
-      )
+      ),
     });
 
     for (const item of failedItems) {
@@ -252,6 +263,7 @@ export const transcodingService = new TranscodingService();
 **Responsibility**: Process Cloudflare Queue messages and call Runpod API
 
 **Implementation**:
+
 ```typescript
 import { Env } from './types';
 
@@ -268,8 +280,8 @@ export default {
         const response = await fetch(env.RUNPOD_ENDPOINT_URL, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${env.RUNPOD_API_KEY}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${env.RUNPOD_API_KEY}`,
+            'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             input: {
@@ -287,9 +299,9 @@ export default {
               r2SecretAccessKey: env.R2_SECRET_ACCESS_KEY,
               // Webhook URL for completion notification
               webhookUrl: `${env.APP_URL}/api/transcoding/webhook`,
-              webhookSecret: env.WEBHOOK_SECRET  // For signature verification
-            }
-          })
+              webhookSecret: env.WEBHOOK_SECRET, // For signature verification
+            },
+          }),
         });
 
         if (!response.ok) {
@@ -297,13 +309,17 @@ export default {
         }
 
         const result = await response.json();
-        console.log(`Runpod job started: ${result.id} for media ${job.mediaId}`);
+        console.log(
+          `Runpod job started: ${result.id} for media ${job.mediaId}`
+        );
 
         // ACK message (remove from queue)
         message.ack();
-
       } catch (error) {
-        console.error(`Failed to process transcoding job for ${job.mediaId}:`, error);
+        console.error(
+          `Failed to process transcoding job for ${job.mediaId}:`,
+          error
+        );
 
         // Single retry logic
         if (job.attemptNumber < 2) {
@@ -321,13 +337,13 @@ export default {
               id: 'internal-failure',
               status: 'failed',
               output: { mediaId: job.mediaId, type: job.type },
-              error: `Queue consumer error: ${error.message}`
-            })
+              error: `Queue consumer error: ${error.message}`,
+            }),
           });
         }
       }
     }
-  }
+  },
 };
 ```
 
@@ -338,6 +354,7 @@ export default {
 **Responsibility**: Receive completion notifications from Runpod
 
 **Implementation**:
+
 ```typescript
 import { transcodingService } from '$lib/server/transcoding/service';
 import { json } from '@sveltejs/kit';
@@ -357,14 +374,16 @@ export const POST: RequestHandler = async ({ request }) => {
     await transcodingService.handleWebhook(payload);
 
     return json({ success: true });
-
   } catch (error) {
     console.error('Webhook processing error:', error);
     return json({ error: error.message }, { status: 500 });
   }
 };
 
-function verifyWebhookSignature(payload: any, signature: string | null): boolean {
+function verifyWebhookSignature(
+  payload: any,
+  signature: string | null
+): boolean {
   if (!signature) return false;
 
   const secret = process.env.WEBHOOK_SECRET!;
@@ -385,12 +404,14 @@ function verifyWebhookSignature(payload: any, signature: string | null): boolean
 ### 4. Runpod Handler (Custom Docker Image)
 
 **Why Docker Image?**
+
 - Runpod serverless requires custom code execution
 - Preinstall ffmpeg (with NVIDIA GPU support) + audiowaveform
 - Package Python handler script
 - Deploy as reusable Docker image on Docker Hub
 
 **Dockerfile** (`infrastructure/runpod/Dockerfile`):
+
 ```dockerfile
 FROM nvidia/cuda:12.1.0-base-ubuntu22.04
 
@@ -414,6 +435,7 @@ CMD ["python3", "/handler.py"]
 ```
 
 **Handler Script** (`infrastructure/runpod/handler.py`):
+
 ```python
 import os
 import json
@@ -729,6 +751,7 @@ if __name__ == "__main__":
 ```
 
 **Building and Deploying Docker Image**:
+
 ```bash
 # Build image
 cd infrastructure/runpod
@@ -746,19 +769,20 @@ docker push your-dockerhub-username/codex-transcoder:latest
 ## Data Models / Schema
 
 **Update to Media Items Table** (add error tracking and waveform key):
+
 ```typescript
 // In packages/web/src/lib/server/db/schema/media.ts
 export const mediaItems = pgTable('media_items', {
   // ... existing fields ...
 
   // HLS output (if video or audio, populated after transcoding)
-  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }),  // 'hls/{mediaId}/master.m3u8' or 'hls-audio/{mediaId}/master.m3u8'
+  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }), // 'hls/{mediaId}/master.m3u8' or 'hls-audio/{mediaId}/master.m3u8'
 
   // Waveform data (R2 key, not stored in DB)
-  waveformKey: varchar('waveform_key', { length: 500 }),  // 'waveforms/{mediaId}/waveform.json'
+  waveformKey: varchar('waveform_key', { length: 500 }), // 'waveforms/{mediaId}/waveform.json'
 
   // Error tracking (for failed transcoding)
-  errorMessage: text('error_message')  // Null if successful, error string if failed
+  errorMessage: text('error_message'), // Null if successful, error string if failed
 });
 ```
 
@@ -789,6 +813,7 @@ export const GET: RequestHandler = async ({ request }) => {
 ```
 
 **Cloudflare Cron Trigger** (`wrangler.toml`):
+
 ```toml
 [triggers]
 crons = ["0 2 * * *"]  # Daily at 2am UTC
@@ -819,6 +844,7 @@ APP_URL=https://codex.example.com
 ```
 
 **wrangler.toml** (Queue Worker):
+
 ```toml
 name = "transcoding-queue-consumer"
 main = "workers/transcoding-queue-consumer/src/index.ts"
@@ -846,6 +872,7 @@ WEBHOOK_SECRET = "production-webhook-secret"
 ### Unit Tests
 
 **TranscodingService**:
+
 ```typescript
 describe('TranscodingService', () => {
   it('handles successful video webhook', async () => {
@@ -859,14 +886,14 @@ describe('TranscodingService', () => {
         thumbnailKey: 'thumbnails/media/media-uuid/auto-generated.jpg',
         durationSeconds: 120,
         width: 1920,
-        height: 1080
-      }
+        height: 1080,
+      },
     };
 
     await transcodingService.handleWebhook(webhook);
 
     const mediaItem = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, 'media-uuid')
+      where: eq(mediaItems.id, 'media-uuid'),
     });
 
     expect(mediaItem.status).toBe('ready');
@@ -881,16 +908,16 @@ describe('TranscodingService', () => {
         mediaId: 'audio-uuid',
         type: 'audio',
         normalizedAudioKey: 'audio/audio-uuid/normalized.mp3',
-        waveformKey: 'waveforms/audio-uuid/waveform.json',  // R2 key
+        waveformKey: 'waveforms/audio-uuid/waveform.json', // R2 key
         waveformImageKey: 'thumbnails/media/audio-uuid/waveform.png',
-        durationSeconds: 180
-      }
+        durationSeconds: 180,
+      },
     };
 
     await transcodingService.handleWebhook(webhook);
 
     const mediaItem = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, 'audio-uuid')
+      where: eq(mediaItems.id, 'audio-uuid'),
     });
 
     expect(mediaItem.status).toBe('ready');
@@ -903,13 +930,13 @@ describe('TranscodingService', () => {
       id: 'failed-uuid',
       status: 'failed',
       errorMessage: 'Test error',
-      updatedAt: new Date(Date.now() - 25 * 60 * 60 * 1000)
+      updatedAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
     });
 
     await transcodingService.cleanupFailedItems();
 
     const deleted = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, 'failed-uuid')
+      where: eq(mediaItems.id, 'failed-uuid'),
     });
 
     expect(deleted).toBeNull();

@@ -9,6 +9,7 @@ This feature provides customers with the interface to access and consume their p
 ## Problem Statement
 
 Once a customer purchases content, they need a clear, immediate, and reliable way to view it. The platform must:
+
 - Present all purchased content in an organized library.
 - Provide a high-quality streaming experience for video and audio that works on all devices.
 - Secure the content so that only the paying customer can access it.
@@ -19,6 +20,7 @@ Without this feature, a purchase is meaningless as the customer would have no wa
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1.  **Customer Content Library**: Provide a single page where customers can see and access all their purchased content.
 2.  **Secure Video Playback**: Implement a secure video player that streams HLS content from R2 using signed URLs.
 3.  **Audio Playback**: Implement a player for listening to purchased audio tracks.
@@ -26,6 +28,7 @@ Without this feature, a purchase is meaningless as the customer would have no wa
 5.  **Resume Playback**: Track and save a user's playback position in videos and audio so they can resume later.
 
 ### Success Metrics
+
 - 99.9% of access attempts by authorized users are successful.
 - 100% of access attempts by unauthorized users are blocked.
 - Video/audio playback starts in < 3 seconds on a standard broadband connection.
@@ -35,6 +38,7 @@ Without this feature, a purchase is meaningless as the customer would have no wa
 ## Scope
 
 ### In Scope (Phase 1 MVP)
+
 - **Customer Library Page**:
   - A grid/list view of all purchased content items.
   - Displays thumbnail, title, and description.
@@ -56,6 +60,7 @@ Without this feature, a purchase is meaningless as the customer would have no wa
   - The backend generates short-lived, signed URLs for Cloudflare R2 on demand.
 
 ### Explicitly Out of Scope (Future Phases)
+
 - **Content Comments & Ratings** (Phase 4)
 - **Downloading Content / Offline Access** (Phase 4)
 - **DRM Encryption** (Phase 4)
@@ -72,11 +77,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ## User Stories & Use Cases
 
 ### US-ACCESS-001: View Content Library
+
 **As a** Customer,
 **I want to** see all the content I have purchased in a single, organized library,
 **so that** I can easily find and access what I own.
 
 **Acceptance Criteria:**
+
 - A `/library` page exists and is only accessible to logged-in users.
 - The page displays a card for each piece of content for which a valid purchase record exists.
 - Each card shows the content thumbnail and title.
@@ -84,11 +91,13 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 - A search bar allows filtering the library by content title.
 
 ### US-ACCESS-002: Watch Purchased Video
+
 **As a** Customer,
 **I want to** watch the videos I have purchased in a high-quality player,
 **so that** I can consume the content I paid for.
 
 **Flow:**
+
 1.  Customer clicks on a video in their library.
 2.  They are navigated to `/content/[id]`.
 3.  The server checks if the user has a valid purchase for this `id`.
@@ -98,31 +107,37 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 7.  The player begins streaming the video.
 
 **Acceptance Criteria:**
+
 - Playback is smooth with adaptive bitrate streaming.
 - The player includes standard controls (play, pause, volume, fullscreen).
 - The direct `.m3u8` URL is not publicly exposed.
 
 ### US-ACCESS-003: Resume Playback
+
 **As a** Customer,
 **I want** the player to remember where I left off in a video,
 **so that** I can easily resume watching later.
 
 **Flow:**
+
 1.  While a user is watching a video, the frontend sends their current playback time to the backend every 15 seconds.
 2.  The backend saves this `position_seconds` in the `video_playback` table, linked to the `userId` and `contentId`.
 3.  When the user re-visits the video page, the server retrieves this last known position.
 4.  The player is initialized to start at the saved time.
 
 **Acceptance Criteria:**
+
 - Player automatically seeks to the last saved position on load.
 - A "Continue Watching" section could appear in the library for items with partial progress.
 
 ### US-ACCESS-004: Prevent Unauthorized Access
+
 **As a** System,
 **I want to** prevent users from accessing content they haven't purchased,
 **so that** the creator's content is protected.
 
 **Flow:**
+
 1.  A user attempts to navigate directly to `/content/[paid_content_id]`.
 2.  The server-side `load` function for the page executes.
 3.  It checks for an authenticated user. If none, redirect to `/login`.
@@ -131,6 +146,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 6.  If a record is found, the page is rendered.
 
 **Acceptance Criteria:**
+
 - A user cannot view a paid content page without a valid purchase.
 - A user who has had their purchase refunded can no longer access the content.
 

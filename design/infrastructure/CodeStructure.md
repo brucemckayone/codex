@@ -196,6 +196,7 @@ Codex/
 ### Test Organization
 
 **Packages & Workers** - Use `/tests` directory for organized test suites:
+
 ```
 packages/database/
 ├── src/
@@ -222,6 +223,7 @@ workers/queue-consumer/
 ```
 
 **SvelteKit App** - Feature-scoped testing:
+
 ```
 apps/web/
 ├── src/

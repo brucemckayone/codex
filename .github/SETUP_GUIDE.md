@@ -24,6 +24,7 @@ git push -u origin develop
 **Go to:** [Cloudflare Dashboard](https://dash.cloudflare.com/) → Pages → Create Project
 
 **Configuration:**
+
 ```yaml
 Project name: codex (or your choice)
 Build command: pnpm install && pnpm --filter web build
@@ -34,11 +35,13 @@ Production branch: main
 ```
 
 **Preview Branches:**
+
 - ✅ Enable "Automatic preview deployments" for all branches
 - Every branch push gets: `<branch-name>.codex.pages.dev`
 - FREE and unlimited
 
 **Branch Configuration:**
+
 - `main` → Production: `yourdomain.com` (or `codex.pages.dev`)
 - `develop` → Staging: `develop.codex.pages.dev`
 - `feature/*` → Preview: `feature-xyz.codex.pages.dev`
@@ -46,6 +49,7 @@ Production branch: main
 ### 3. Configure Environment Variables in Cloudflare Pages
 
 **Preview Environment (all non-production branches):**
+
 ```bash
 NODE_ENV=preview
 DATABASE_URL=<neon-staging-connection-string>
@@ -55,6 +59,7 @@ AUTH_SECRET=<generate-random-32-char-string>
 ```
 
 **Production Environment (main branch):**
+
 ```bash
 NODE_ENV=production
 DATABASE_URL=<neon-production-connection-string>
@@ -68,6 +73,7 @@ AUTH_SECRET=<generate-different-random-32-char-string>
 **Go to:** GitHub Repository → Settings → Secrets and variables → Actions
 
 **Add these secrets:**
+
 ```
 CLOUDFLARE_API_TOKEN - Get from Cloudflare Dashboard → My Profile → API Tokens
 CLOUDFLARE_ACCOUNT_ID - Get from Cloudflare Dashboard → Workers & Pages → Account ID
@@ -76,6 +82,7 @@ CODECOV_TOKEN - From codecov.io (optional)
 ```
 
 **To create Cloudflare API Token:**
+
 1. Cloudflare Dashboard → My Profile → API Tokens → Create Token
 2. Use template: "Edit Cloudflare Workers"
 3. Add permissions: Account → Cloudflare Pages → Edit
@@ -86,6 +93,7 @@ CODECOV_TOKEN - From codecov.io (optional)
 **Go to:** GitHub Repository → Settings → Branches → Add rule
 
 **For `main` branch:**
+
 ```
 Branch name pattern: main
 ✅ Require a pull request before merging
@@ -102,6 +110,7 @@ Branch name pattern: main
 ```
 
 **For `develop` branch:**
+
 ```
 Branch name pattern: develop
 ✅ Require status checks to pass before merging
@@ -137,6 +146,7 @@ git push -u origin feature/test-pipeline
 ```
 
 **Expected:**
+
 1. GitHub Actions runs: typecheck, lint, unit-tests in parallel (~3-5 min)
 2. Cloudflare Pages builds and deploys preview
 3. You get preview URL: `feature-test-pipeline.codex.pages.dev`
@@ -151,6 +161,7 @@ git push origin develop
 ```
 
 **Expected:**
+
 1. GitHub Actions runs: All jobs including E2E tests (~8-12 min)
 2. Cloudflare Pages deploys to: `develop.codex.pages.dev`
 3. Test on staging URL
@@ -167,6 +178,7 @@ git push origin main
 ```
 
 **Expected:**
+
 1. GitHub Actions runs: Full test suite
 2. GitHub Actions deploys: Cloudflare Workers
 3. Cloudflare Pages deploys to: Production domain
@@ -287,6 +299,7 @@ pnpm wrangler deploy --dry-run
 ## Next Steps
 
 After pipeline is working:
+
 - [ ] Fix TypeScript errors caught by CI
 - [ ] Add Sentry for error tracking
 - [ ] Set up UptimeRobot for monitoring
