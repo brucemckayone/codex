@@ -41,11 +41,27 @@ pnpm test:all          # Everything
 
 ## Current Status
 
-✅ **All tests passing**
+✅ **All tests passing** (5 test suites, 5 tests total)
 
-- 9 unit tests (8 packages + 1 worker)
-- 3 integration tests (1 worker)
-- 2 E2E tests
+**Active Test Suites:**
+- `@codex/database` - Database client tests
+- `@codex/validation` - User schema + example validation tests
+- `@codex/cloudflare-clients` - R2 client tests
+- `@codex/test-utils` - Helper function tests
+- `apps/web` - Web application tests
+
+**Disabled/Not Yet Implemented:**
+- `workers/queue-consumer` - Disabled (Cloudflare not set up yet)
+- Integration tests - Placeholder tests only
+- E2E tests - Placeholder tests only
+
+**Coverage Configuration:**
+- Coverage collection enabled (v8 provider)
+- Thresholds set to 0% (allows placeholder code during clean slate setup)
+- Coverage reports generated in `/coverage` directory
+- Placeholder files excluded from coverage
+
+**Note:** The project is in a clean slate state with placeholder code. As features are implemented, coverage thresholds should be increased and integration/E2E tests should be added.
 
 ## Test Organization
 

@@ -6,6 +6,34 @@ Continuous integration and deployment strategy for Codex monorepo using GitHub A
 
 ---
 
+## Current Implementation Status
+
+✅ **Fully Implemented & Working:**
+- GitHub Actions test workflow with parallel jobs (typecheck, lint, unit-tests, integration-tests, e2e-tests)
+- Act for local GitHub Actions testing (see [ACT_SETUP.md](../../.github/ACT_SETUP.md))
+- ESLint, Prettier, TypeScript configuration
+- Vitest with coverage reporting (thresholds disabled for clean slate)
+- 5 test suites passing (database, validation, cloudflare-clients, test-utils, web)
+- Coverage collection configured (thresholds set to 0% to allow placeholder code)
+
+🚧 **Not Yet Configured:**
+- Cloudflare Pages deployment (requires account setup)
+- Cloudflare Workers deployment (queue-consumer disabled, workflow disabled - see `.github/workflows/deploy-workers.yml.disabled`)
+- Neon Postgres production database (will use free tier)
+- Staging/preview deployments
+- Production deployments
+- Environment variable configuration in Cloudflare
+- Branch protection rules
+
+💡 **Current Approach:**
+Using only free services for CI testing. The test workflow runs successfully on GitHub Actions. Deployment workflows will be enabled when Cloudflare and Neon accounts are configured.
+
+**Disabled Components:**
+- `workers/queue-consumer` - Commented out in vitest.config.ts (Cloudflare not set up)
+- `.github/workflows/deploy-workers.yml` - Renamed to `.disabled` (will enable after Cloudflare setup)
+
+---
+
 ## Pipeline Overview
 
 ```
