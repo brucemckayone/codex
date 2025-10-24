@@ -72,11 +72,13 @@ export class MiniflareTestHelper {
    * and Miniflare's internal types.
    */
   async fetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // Type casting needed due to Miniflare's internal type differences
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     return this.instance.dispatchFetch(
       input as any,
       init as any
     ) as unknown as Promise<Response>;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   }
 
   /**
