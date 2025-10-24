@@ -5,28 +5,31 @@
 The e-commerce system facilitates one-time purchases of digital content using Stripe Checkout. The architecture is designed for security and reliability, ensuring that payment processing is handled by Stripe to minimize our PCI compliance scope, while our backend reliably tracks purchases to grant content access.
 
 **Key Architecture Decisions**:
+
 - **Stripe Checkout (Hosted)**: We will redirect users to a Stripe-hosted page for payment. This is the most secure approach, as sensitive card details never touch our servers.
 - **Webhook-Driven Fulfillment**: Content access is granted only after a verified webhook from Stripe confirms a successful payment. This prevents users from gaining access without a completed payment.
-- **Pending Purchase Record**: A `purchases` record with a `pending` status is created *before* the user is redirected to Stripe. This record is then updated to `completed` by the webhook, creating a clear audit trail.
+- **Pending Purchase Record**: A `purchases` record with a `pending` status is created _before_ the user is redirected to Stripe. This record is then updated to `completed` by the webhook, creating a clear audit trail.
 - **Idempotent Webhook Handler**: The webhook processor is designed to handle duplicate events from Stripe without creating duplicate purchases.
 
-**Architecture Diagram**: See [Direct Purchase Checkout Flow](../_assets/direct-checkout-flow.png)
+**Architecture Diagram**:
+
+![Direct Purchase Checkout Flow](./assets/direct-checkout-flow.png)
+
+The diagram illustrates the complete e-commerce flow: creating a pending purchase, redirecting to Stripe Checkout, webhook-driven fulfillment, and PCI-compliant payment processing.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#5-e-commerce) document for details on dependencies between features.
 
-1.  **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md)): The e-commerce flow requires an authenticated user to link purchases to an account.
-2.  **Content Management System** ([Content Management TDD](../content-management/ttd-dphase-1.md)): We need published content with an associated price to sell.
-3.  **Notification Service** ([Notifications TDD](../notifications/ttd-dphase-1.md)): Required for sending purchase receipts and refund confirmations.
+### Technical Prerequisites
+
+1.  **Auth System**: An authenticated user is required to link purchases to an account.
+2.  **Content Management System**: Published content with an associated price is needed to be sold.
+3.  **Notification Service**: Required for sending purchase receipts and refund confirmations.
 4.  **Database Schema**: The `purchases` table must be migrated.
 5.  **Stripe Account Setup**: A Stripe account with API keys and a configured webhook endpoint is necessary.
-
-### Can Be Developed In Parallel
-
-- **Content Access Feature**: This feature will consume the `purchases` table to verify access, but its development is not a blocker for implementing the purchase flow itself.
 
 ---
 
@@ -37,13 +40,18 @@ The e-commerce system facilitates one-time purchases of digital content using St
 **Responsibility**: Core business logic for creating checkouts, handling webhooks, and managing refunds.
 
 **Interface**:
+
 ```typescript
 export interface IPurchasesService {
   /**
    * Creates a Stripe Checkout session for a given user and a generic purchasable item.
    * Creates a 'pending' purchase record before returning the Stripe session URL.
    */
-  createCheckoutSession(userId: string, itemId: string, itemType: string): Promise<{ checkoutUrl: string }>;
+  createCheckoutSession(
+    userId: string,
+    itemId: string,
+    itemType: string
+  ): Promise<{ checkoutUrl: string }>;
 
   /**
    * Handles a 'checkout.session.completed' event from a Stripe webhook.
@@ -54,7 +62,11 @@ export interface IPurchasesService {
   /**
    * Instantly creates a 'completed' purchase record for a free item.
    */
-  grantFreeItemAccess(userId: string, itemId: string, itemType: string): Promise<void>;
+  grantFreeItemAccess(
+    userId: string,
+    itemId: string,
+    itemType: string
+  ): Promise<void>;
 
   /**
    * Initiates a refund via Stripe and updates the purchase record.
@@ -64,6 +76,7 @@ export interface IPurchasesService {
 ```
 
 **Implementation**:
+
 ```typescript
 import { db } from '$lib/server/db';
 import { content, purchases, users } from '$lib/server/db/schema';
@@ -73,8 +86,14 @@ import { notificationService } from '$lib/server/notifications';
 import { error } from '@sveltejs/kit';
 
 export class PurchasesService implements IPurchasesService {
-  async createCheckoutSession(userId: string, itemId: string, itemType: string): Promise<{ checkoutUrl: string }> {
-    const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  async createCheckoutSession(
+    userId: string,
+    itemId: string,
+    itemType: string
+  ): Promise<{ checkoutUrl: string }> {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
     if (!user) {
       throw error(404, 'User not found');
     }
@@ -83,7 +102,9 @@ export class PurchasesService implements IPurchasesService {
     let itemDetails;
     switch (itemType) {
       case 'content':
-        itemDetails = await db.query.content.findFirst({ where: eq(content.id, itemId) });
+        itemDetails = await db.query.content.findFirst({
+          where: eq(content.id, itemId),
+        });
         if (!itemDetails) throw error(404, 'Content not found');
         break;
       // Future cases for 'offering', 'subscription_tier', etc.
@@ -102,7 +123,7 @@ export class PurchasesService implements IPurchasesService {
         eq(purchases.itemId, itemId),
         eq(purchases.itemType, itemType),
         eq(purchases.status, 'completed')
-      )
+      ),
     });
     if (existingPurchase) {
       throw error(409, 'Item already purchased');
@@ -110,40 +131,45 @@ export class PurchasesService implements IPurchasesService {
 
     // 3. Handle free items separately
     if (itemDetails.price === 0) {
-        await this.grantFreeItemAccess(userId, itemId, itemType);
-        throw error(200, 'Free content access granted');
+      await this.grantFreeItemAccess(userId, itemId, itemType);
+      throw error(200, 'Free content access granted');
     }
 
     // Use a transaction to ensure atomicity
     return db.transaction(async (tx) => {
       // 4. Create a pending purchase record
-      const [pendingPurchase] = await tx.insert(purchases).values({
-        customerId: userId,
-        itemId: itemId,
-        itemType: itemType,
-        amountPaid: itemDetails.price,
-        currency: 'usd',
-        status: 'pending',
-        creatorId: itemDetails.ownerId, // Assumes 'ownerId' field exists on all purchasable models
-        platformFeeAmount: 0,
-        creatorPayoutAmount: itemDetails.price
-      }).returning();
+      const [pendingPurchase] = await tx
+        .insert(purchases)
+        .values({
+          customerId: userId,
+          itemId: itemId,
+          itemType: itemType,
+          amountPaid: itemDetails.price,
+          currency: 'usd',
+          status: 'pending',
+          creatorId: itemDetails.ownerId, // Assumes 'ownerId' field exists on all purchasable models
+          platformFeeAmount: 0,
+          creatorPayoutAmount: itemDetails.price,
+        })
+        .returning();
 
       // 5. Create Stripe Checkout Session
       const session = await stripe.checkout.sessions.create({
         customer_email: user.email,
         payment_method_types: ['card'],
-        line_items: [{
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: itemDetails.title,
-              description: itemDetails.description || undefined,
+        line_items: [
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: itemDetails.title,
+                description: itemDetails.description || undefined,
+              },
+              unit_amount: Math.round(itemDetails.price * 100), // Price in cents
             },
-            unit_amount: Math.round(itemDetails.price * 100), // Price in cents
+            quantity: 1,
           },
-          quantity: 1,
-        }],
+        ],
         mode: 'payment',
         success_url: `${process.env.AUTH_URL}/${itemType}/${itemId}?purchase_success=true`,
         cancel_url: `${process.env.AUTH_URL}/${itemType}/${itemId}`,
@@ -152,30 +178,35 @@ export class PurchasesService implements IPurchasesService {
           userId: userId,
           itemId: itemId,
           itemType: itemType,
-        }
+        },
       });
 
       if (!session.url) {
         // The transaction will be rolled back if we throw an error here
         throw error(500, 'Failed to create Stripe checkout session');
       }
-      
+
       // 6. Update purchase record with Stripe session ID
-      await tx.update(purchases)
-          .set({ stripeCheckoutSessionId: session.id })
-          .where(eq(purchases.id, pendingPurchase.id));
+      await tx
+        .update(purchases)
+        .set({ stripeCheckoutSessionId: session.id })
+        .where(eq(purchases.id, pendingPurchase.id));
 
       return { checkoutUrl: session.url };
     });
   }
 
-  async handleSuccessfulCheckout(session: Stripe.Checkout.Session): Promise<void> {
+  async handleSuccessfulCheckout(
+    session: Stripe.Checkout.Session
+  ): Promise<void> {
     const { purchaseId, itemType, itemId } = session.metadata;
     if (!purchaseId || !itemType || !itemId) {
       throw new Error('Missing required metadata in webhook');
     }
 
-    const purchase = await db.query.purchases.findFirst({ where: eq(purchases.id, purchaseId) });
+    const purchase = await db.query.purchases.findFirst({
+      where: eq(purchases.id, purchaseId),
+    });
 
     if (purchase?.status === 'completed') {
       console.log(`Purchase ${purchaseId} already completed.`);
@@ -183,26 +214,37 @@ export class PurchasesService implements IPurchasesService {
     }
 
     // Update purchase to 'completed'
-    const [updatedPurchase] = await db.update(purchases).set({
-      status: 'completed',
-      purchasedAt: new Date(),
-      stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
-    }).where(eq(purchases.id, purchaseId)).returning();
+    const [updatedPurchase] = await db
+      .update(purchases)
+      .set({
+        status: 'completed',
+        purchasedAt: new Date(),
+        stripePaymentIntentId:
+          typeof session.payment_intent === 'string'
+            ? session.payment_intent
+            : null,
+      })
+      .where(eq(purchases.id, purchaseId))
+      .returning();
 
     // Trigger access grant logic based on item type
-    switch(itemType) {
-        case 'content':
-            // This would create a record in a `content_access` table
-            console.log(`Granting access to content ${itemId} for user ${updatedPurchase.customerId}`);
-            break;
-        // Future cases
-        // case 'offering':
-        //    console.log(`Booking offering ${itemId} for user ${updatedPurchase.customerId}`);
-        //    break;
+    switch (itemType) {
+      case 'content':
+        // This would create a record in a `content_access` table
+        console.log(
+          `Granting access to content ${itemId} for user ${updatedPurchase.customerId}`
+        );
+        break;
+      // Future cases
+      // case 'offering':
+      //    console.log(`Booking offering ${itemId} for user ${updatedPurchase.customerId}`);
+      //    break;
     }
 
     // Send receipt email
-    const user = await db.query.users.findFirst({ where: eq(users.id, updatedPurchase.customerId) });
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, updatedPurchase.customerId),
+    });
     if (user) {
       await notificationService.sendEmail({
         template: 'purchase-receipt',
@@ -211,12 +253,16 @@ export class PurchasesService implements IPurchasesService {
           customerName: user.name,
           orderNumber: updatedPurchase.id,
           totalAmount: updatedPurchase.amountPaid,
-        }
+        },
       });
     }
   }
 
-  async grantFreeItemAccess(userId: string, itemId: string, itemType: string): Promise<void> {
+  async grantFreeItemAccess(
+    userId: string,
+    itemId: string,
+    itemType: string
+  ): Promise<void> {
     // Logic to grant access to free items
   }
 
@@ -247,10 +293,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   }
 
   try {
-    const { checkoutUrl } = await purchasesService.createCheckoutSession(user.id, itemId, itemType);
+    const { checkoutUrl } = await purchasesService.createCheckoutSession(
+      user.id,
+      itemId,
+      itemType
+    );
     return json({ checkoutUrl });
   } catch (e) {
-    return json({ error: e.body?.message || 'Failed to create checkout' }, { status: e.status || 500 });
+    return json(
+      { error: e.body?.message || 'Failed to create checkout' },
+      { status: e.status || 500 }
+    );
   }
 };
 ```
@@ -263,12 +316,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 For this worker to function, the `PurchasesService` (and any other shared business logic) must be located in a shared `packages/` directory within the monorepo (e.g., `packages/core-logic`). Both the SvelteKit app and this worker will import the service from that shared package. This avoids code duplication and ensures consistent business logic.
 
 **Worker Implementation (`workers/webhook-handler/src/index.ts`)**:
+
 ```typescript
 import { stripe } from './stripe'; // Worker-specific Stripe client initialization
 import { purchasesService } from '@codex/core-logic'; // Importing from shared package
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<Response> {
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
     }
@@ -302,7 +360,6 @@ export default {
 };
 ```
 
-
 ---
 
 ## Data Models / Schema
@@ -311,22 +368,39 @@ export default {
 This schema is based on the `database-schema.md` document and updated for future extensibility.
 
 ```typescript
-import { pgTable, uuid, varchar, text, decimal, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  decimal,
+  timestamp,
+  pgEnum,
+} from 'drizzle-orm/pg-core';
 import { users } from './auth';
 import { content } from './content';
 
-export const purchaseStatusEnum = pgEnum('purchase_status', ['pending', 'completed', 'refunded', 'failed']);
+export const purchaseStatusEnum = pgEnum('purchase_status', [
+  'pending',
+  'completed',
+  'refunded',
+  'failed',
+]);
 
 export const purchases = pgTable('purchases', {
   id: uuid('id').primaryKey().defaultRandom(),
-  customerId: uuid('customer_id').references(() => users.id).notNull(),
-  
+  customerId: uuid('customer_id')
+    .references(() => users.id)
+    .notNull(),
+
   // Polymorphic relationship to the purchased item
   itemId: uuid('item_id').notNull(),
   itemType: varchar('item_type', { length: 50 }).notNull(), // e.g., 'content', 'offering', 'subscription_tier'
 
   // Ownership for revenue tracking
-  creatorId: uuid('creator_id').references(() => users.id).notNull(),
+  creatorId: uuid('creator_id')
+    .references(() => users.id)
+    .notNull(),
 
   // Payment Details
   amountPaid: decimal('amount_paid', { precision: 10, scale: 2 }).notNull(),
@@ -334,12 +408,21 @@ export const purchases = pgTable('purchases', {
   status: purchaseStatusEnum('status').default('pending').notNull(),
 
   // Stripe IDs
-  stripeCheckoutSessionId: varchar('stripe_checkout_session_id', { length: 255 }).unique(),
-  stripePaymentIntentId: varchar('stripe_payment_intent_id', { length: 255 }).unique(),
+  stripeCheckoutSessionId: varchar('stripe_checkout_session_id', {
+    length: 255,
+  }).unique(),
+  stripePaymentIntentId: varchar('stripe_payment_intent_id', {
+    length: 255,
+  }).unique(),
 
   // Revenue Split (Phase 1: No split)
-  platformFeeAmount: decimal('platform_fee_amount', { precision: 10, scale: 2 }).default('0').notNull(),
-  creatorPayoutAmount: decimal('creator_payout_amount', { precision: 10, scale: 2 }).notNull(),
+  platformFeeAmount: decimal('platform_fee_amount', { precision: 10, scale: 2 })
+    .default('0')
+    .notNull(),
+  creatorPayoutAmount: decimal('creator_payout_amount', {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
 
   // Timestamps
   purchasedAt: timestamp('purchased_at'),
@@ -354,12 +437,13 @@ export const purchases = pgTable('purchases', {
 ## Third-Party Integrations
 
 ### Stripe
+
 - **SDK**: `stripe` npm package.
 - **Configuration**: API keys and webhook secret will be managed via environment variables.
 - **APIs Used**:
-    - `stripe.checkout.sessions.create`: To initiate the payment flow.
-    - `stripe.webhooks.constructEvent`: To securely verify incoming webhooks.
-    - `stripe.refunds.create`: For the admin refund functionality.
+  - `stripe.checkout.sessions.create`: To initiate the payment flow.
+  - `stripe.webhooks.constructEvent`: To securely verify incoming webhooks.
+  - `stripe.refunds.create`: For the admin refund functionality.
 - **Webhook Endpoint**: `/api/webhooks/stripe` will be configured in the Stripe Dashboard to listen for `checkout.session.completed` events.
 
 ---
@@ -376,15 +460,15 @@ export const purchases = pgTable('purchases', {
 ## Testing Strategy
 
 - **Unit Tests (Vitest)**:
-    - Test the `PurchasesService` logic in isolation.
-    - Mock the `stripe` SDK to simulate API calls (`checkout.sessions.create`, `refunds.create`).
-    - Test various scenarios: successful checkout, existing purchase, free content, etc.
+  - Test the `PurchasesService` logic in isolation.
+  - Mock the `stripe` SDK to simulate API calls (`checkout.sessions.create`, `refunds.create`).
+  - Test various scenarios: successful checkout, existing purchase, free content, etc.
 - **Integration Tests (Vitest)**:
-    - Test the `/api/checkout` and `/api/webhooks/stripe` endpoints.
-    - Use a real test database (cleared before each run).
-    - Use the **Stripe CLI** (`stripe listen --forward-to ...`) to send mock webhook events to the local development server to test the webhook handler end-to-end.
+  - Test the `/api/checkout` and `/api/webhooks/stripe` endpoints.
+  - Use a real test database (cleared before each run).
+  - Use the **Stripe CLI** (`stripe listen --forward-to ...`) to send mock webhook events to the local development server to test the webhook handler end-to-end.
 - **E2E Tests (Playwright)**:
-    - A full user journey: log in, navigate to content, click "Buy Now", interact with the Stripe Checkout test page (using test card numbers), and verify that access is granted upon returning to the site.
+  - A full user journey: log in, navigate to content, click "Buy Now", interact with the Stripe Checkout test page (using test card numbers), and verify that access is granted upon returning to the site.
 
 ---
 

@@ -19,9 +19,6 @@
     "@codex/database": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
-    "@codex/core-services": "workspace:*",
-    "@codex/auth": "workspace:*",
-    "@codex/notifications": "workspace:*",
     "happy-dom": "^20.0.8"
   },
   "devDependencies": {

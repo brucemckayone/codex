@@ -20,6 +20,7 @@ This document contains the **complete database schema** for all phases of the pl
 ## Core Tables
 
 ### User
+
 Stores all user accounts across all roles.
 
 ```sql
@@ -62,11 +63,13 @@ CREATE TABLE users (
 ```
 
 **Phase 1 Usage**:
+
 - `role`: 'platform_owner', 'customer'
 - Email verification required before purchase
 - Stripe customer ID for saved payment methods
 
 **Phase 3 Extensions**:
+
 - `role`: 'media_owner' enabled
 - `bio` used for creator profiles
 - `stripe_connect_account_id` for revenue sharing
@@ -74,6 +77,7 @@ CREATE TABLE users (
 ---
 
 ### Content
+
 Stores all content (video, audio, written) created by platform owner or media owners.
 
 ```sql
@@ -139,11 +143,13 @@ CREATE TABLE content (
 ```
 
 **Phase 1 MVP Fields**:
+
 - Basic fields, video + written only
 - Simple category string
 - creator_id always references platform_owner
 
 **Phase 2 Extensions**:
+
 - `content_type`: 'audio'
 - `series_id`: Content organization
 - `visibility`: 'members_only' for subscriptions
@@ -151,6 +157,7 @@ CREATE TABLE content (
 ---
 
 ### ContentSeries
+
 Groups related content into series/courses.
 
 ```sql
@@ -186,6 +193,7 @@ CREATE TABLE content_series (
 ---
 
 ### Purchase
+
 Records of content purchases (one-time).
 
 ```sql
@@ -232,17 +240,20 @@ CREATE TABLE purchases (
 ```
 
 **Phase 1 Usage**:
+
 - Simple one-time purchases
 - `platform_fee_amount` = 0 (no split)
 - `creator_payout_amount` = `amount_paid`
 
 **Phase 3 Extensions**:
+
 - Revenue splitting for media_owner content
 - Stripe Connect payout tracking
 
 ---
 
 ### ContentAccess
+
 Grants access to content (decoupled from Purchase for flexibility).
 
 ```sql
@@ -279,12 +290,14 @@ CREATE TABLE content_access (
 ```
 
 **Why Separate from Purchase?**:
+
 - Supports complimentary access (gifts, promos)
 - Supports subscription-based access (Phase 2)
 - Supports time-limited access (Phase 2)
 - Single source of truth for "does user have access?"
 
 **Phase 1 Usage**:
+
 - Created when Purchase.status = 'completed'
 - `access_type` = 'purchased'
 - `expires_at` = null (permanent)
@@ -292,6 +305,7 @@ CREATE TABLE content_access (
 ---
 
 ### VideoPlayback
+
 Tracks video watching progress for resume functionality.
 
 ```sql
@@ -318,6 +332,7 @@ CREATE TABLE video_playback (
 ```
 
 **Phase 1 Usage**:
+
 - Upsert on position change (every 10 seconds)
 - Resume watching from saved position
 - Track completion for analytics
@@ -325,6 +340,7 @@ CREATE TABLE video_playback (
 ---
 
 ### PlatformSettings
+
 Single-row table for platform configuration.
 
 ```sql
@@ -365,6 +381,7 @@ CREATE TABLE platform_settings (
 ```
 
 **Phase 1 Usage**:
+
 - Single settings row
 - Basic branding (logo, color, hero)
 - About page content
@@ -374,6 +391,7 @@ CREATE TABLE platform_settings (
 ## Subscription Tables (Phase 2)
 
 ### SubscriptionTier
+
 Defines subscription plans.
 
 ```sql
@@ -415,6 +433,7 @@ CREATE TABLE subscription_tiers (
 ---
 
 ### Subscription
+
 Customer subscription records.
 
 ```sql
@@ -454,6 +473,7 @@ CREATE TABLE subscriptions (
 ---
 
 ### CreditBalance
+
 Tracks customer credit balances.
 
 ```sql
@@ -479,6 +499,7 @@ CREATE TABLE credit_balances (
 ---
 
 ### CreditTransaction
+
 Ledger of credit transactions.
 
 ```sql
@@ -513,6 +534,7 @@ CREATE TABLE credit_transactions (
 ## Offering Tables (Phase 2-3)
 
 ### Offering
+
 The unified model for events, services, programs, retreats.
 
 ```sql
@@ -586,6 +608,7 @@ CREATE TABLE offerings (
 ---
 
 ### OfferingBooking
+
 Customer bookings/registrations for offerings.
 
 ```sql
@@ -626,6 +649,7 @@ CREATE TABLE offering_bookings (
 ---
 
 ### OfferingPortalAccess
+
 Grants access to offering portals.
 
 ```sql
@@ -655,6 +679,7 @@ CREATE TABLE offering_portal_access (
 ---
 
 ### OfferingResource
+
 Resources attached to offerings (content, files, etc.).
 
 ```sql
@@ -696,6 +721,7 @@ CREATE TABLE offering_resources (
 ## Notification Tables
 
 ### EmailLog
+
 Tracks sent emails for debugging.
 
 ```sql
@@ -730,12 +756,14 @@ CREATE TABLE email_logs (
 ```
 
 **Phase 1 Usage**:
+
 - Log all transactional emails
 - Debug email deliverability issues
 
 ---
 
 ### Notification (Phase 3)
+
 In-app notifications.
 
 ```sql
@@ -769,6 +797,7 @@ CREATE TABLE notifications (
 ## Analytics Tables (Phase 3-4)
 
 ### Event
+
 Event tracking for analytics.
 
 ```sql
@@ -813,6 +842,7 @@ Key indexes for performance:
 ## Migrations Strategy
 
 ### Phase 1 → Phase 2
+
 - Add `content_series` table
 - Add subscription tables
 - Add credit tables
@@ -820,6 +850,7 @@ Key indexes for performance:
 - Populate `content.series_id` (nullable)
 
 ### Phase 2 → Phase 3
+
 - Add media_owner role to users
 - Add offering portal tables
 - Add notification tables
@@ -827,6 +858,7 @@ Key indexes for performance:
 - Enable `content.creator_id` to reference media_owners
 
 ### Phase 3 → Phase 4
+
 - Add analytics aggregation tables
 - Add white-label settings
 - Add API key tables
@@ -854,6 +886,7 @@ Key indexes for performance:
 ---
 
 This schema is designed to evolve. When adding fields or tables, consider:
+
 - Can this be JSONB initially for flexibility?
 - Is this used in queries (needs index)?
 - Does this need to be normalized now or later?

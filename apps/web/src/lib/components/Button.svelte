@@ -2,18 +2,19 @@
   interface Props {
     variant?: 'primary' | 'secondary';
     disabled?: boolean;
-    onclick?: (event: MouseEvent) => void;
+    onclick?: () => void;
     children?: any;
   }
 
-  let { variant = 'primary', disabled = false, onclick, children }: Props = $props();
+  let {
+    variant = 'primary',
+    disabled = false,
+    onclick,
+    children,
+  }: Props = $props();
 </script>
 
-<button
-  class="btn btn-{variant}"
-  {disabled}
-  onclick={onclick}
->
+<button class="btn btn-{variant}" {disabled} {onclick}>
   {@render children?.()}
 </button>
 

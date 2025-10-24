@@ -7,6 +7,7 @@ Secure user authentication system using BetterAuth with email/password registrat
 ## Problem Statement
 
 The platform requires a secure, reliable authentication system that:
+
 - Allows users to create accounts and log in
 - Protects sensitive operations (content management, purchases, admin functions)
 - Differentiates between Platform Owners (admins) and Customers (end users)
@@ -14,6 +15,7 @@ The platform requires a secure, reliable authentication system that:
 - Maintains session state across requests
 
 Without authentication, the platform cannot:
+
 - Protect admin functionality from unauthorized access
 - Track content purchases and access rights
 - Provide personalized user experiences
@@ -22,6 +24,7 @@ Without authentication, the platform cannot:
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1. **Secure user registration** - Users can create accounts with email/password
 2. **Reliable login** - Users can authenticate and maintain sessions
 3. **Password recovery** - Users can reset forgotten passwords
@@ -30,6 +33,7 @@ Without authentication, the platform cannot:
 6. **Extensible design** - Role system accommodates future Media Owner role (Phase 3)
 
 ### Success Metrics
+
 -  User can register with email/password in < 30 seconds
 -  User can log in and see authenticated content immediately
 -  Password reset email arrives within 60 seconds
@@ -44,6 +48,7 @@ Without authentication, the platform cannot:
 ## Scope
 
 ### In Scope (Phase 1 MVP)
+
 -  Email/password registration
 -  Email verification (confirm email address) - See [Notifications PRD](../notifications/pdr-phase-1.md) for email abstraction
 -  Login with email/password
@@ -59,6 +64,7 @@ Without authentication, the platform cannot:
 -  Password strength requirements (min 8 chars, complexity)
 
 ### Explicitly Out of Scope (Future Phases)
+
 - L Social login (Google, Facebook, Apple) - Phase 2
 - L Two-factor authentication (2FA) - Phase 2
 - L Magic link authentication - Phase 2
@@ -70,36 +76,20 @@ Without authentication, the platform cannot:
 
 ## Cross-Feature Dependencies
 
-### Notification System (Phase 1)
-**Dependency**: Auth relies on notification system for emails
-- Registration verification email
-- Password reset email
-- **Design Requirement**: Must use notification abstraction layer (not direct Resend calls)
-- **Interface**: `sendEmail(template, recipient, data)` via notification service
-- See [Notifications PRD](../notifications/pdr-phase-1.md) for email abstraction details
-
-### Admin Dashboard (Phase 1)
-**Dependency**: Admin routes protected by auth
-- Auth middleware protects `/admin/*` routes
-- Dashboard displays user role and profile
-- See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
-
-### Future: Multi-Creator (Phase 3)
-**Future Extensibility**: Role system must accommodate Media Owner
-- Database `users.role` enum includes `'creator'` (not used in Phase 1)
-- Middleware logic uses role checks that are extensible
-- See [Multi-Creator PRD](../multi-creator/pdr-phase-1.md) for future design
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#2-auth-authentication--authorization) document for details.
 
 ---
 
 ## User Stories & Use Cases
 
 ### US-AUTH-001: User Registration
+
 **As a** visitor
 **I want to** create an account with my email and password
 **So that** I can access purchased content and make purchases
 
 **Flow:**
+
 1. User navigates to `/register`
 2. User fills form: email, password, confirm password, name
 3. User submits form
@@ -116,6 +106,7 @@ Without authentication, the platform cannot:
 10. User redirected to `/library` (or `/admin` if Platform Owner)
 
 **Acceptance Criteria:**
+
 - User record created in `users` table with correct role
 - Password hashed with bcrypt/argon2
 - Email verification token generated and stored
@@ -124,16 +115,19 @@ Without authentication, the platform cannot:
 - Duplicate email registration blocked with clear error message
 
 **Dependencies:**
+
 - [Notifications - Email Abstraction](../notifications/pdr-phase-1.md#email-service-abstraction)
 
 ---
 
 ### US-AUTH-002: User Login
+
 **As a** registered user
 **I want to** log in with my email and password
 **So that** I can access my account and purchased content
 
 **Flow:**
+
 1. User navigates to `/login`
 2. User fills form: email, password, "remember me" checkbox (optional)
 3. User submits form
@@ -143,14 +137,15 @@ Without authentication, the platform cannot:
    - Set secure HTTP-only cookie with session ID
    - Populate `event.locals.user` with `{ id, email, name, role }`
    - Redirect based on role:
-     - `role: 'owner'` ’ `/admin`
-     - `role: 'customer'` ’ `/library`
-     - (Future) `role: 'creator'` ’ `/creator-dashboard` (Phase 3)
+     - `role: 'owner'` ï¿½ `/admin`
+     - `role: 'customer'` ï¿½ `/library`
+     - (Future) `role: 'creator'` ï¿½ `/creator-dashboard` (Phase 3)
 6. If invalid:
    - Show error: "Invalid email or password"
    - Do not reveal which field is incorrect (security)
 
 **Acceptance Criteria:**
+
 - Successful login redirects to appropriate dashboard based on role
 - Session cookie is HTTP-only, Secure, SameSite=Lax
 - "Remember me" extends session to 30 days (default: session)
@@ -161,11 +156,13 @@ Without authentication, the platform cannot:
 ---
 
 ### US-AUTH-003: Password Reset
+
 **As a** registered user
 **I want to** reset my password if I forget it
 **So that** I can regain access to my account
 
 **Flow:**
+
 1. User clicks "Forgot password?" on `/login`
 2. User navigates to `/forgot-password`
 3. User enters email address
@@ -190,6 +187,7 @@ Without authentication, the platform cannot:
 12. User redirected to `/login` with success message
 
 **Acceptance Criteria:**
+
 - Reset email sent within 60 seconds via notification service
 - Reset link expires after 1 hour
 - Reset link single-use only (cannot reuse token)
@@ -199,16 +197,19 @@ Without authentication, the platform cannot:
 - Confirmation email sent after successful password change
 
 **Dependencies:**
+
 - [Notifications - Email Abstraction](../notifications/pdr-phase-1.md#email-service-abstraction)
 
 ---
 
 ### US-AUTH-004: Email Verification
+
 **As a** newly registered user
 **I want to** verify my email address
 **So that** the platform knows I own this email and can send me important notifications
 
 **Flow:**
+
 1. User registers (see US-AUTH-001)
 2. System calls **notification service** to send email with verification link: `/verify-email?token=<TOKEN>`
 3. User checks email and clicks link
@@ -218,6 +219,7 @@ Without authentication, the platform cannot:
 7. User redirected to `/library` with success message
 
 **Acceptance Criteria:**
+
 - Verification email sent immediately after registration
 - Token expires after 24 hours
 - Token is single-use
@@ -226,16 +228,19 @@ Without authentication, the platform cannot:
 - Certain actions (making purchases) may require verified email
 
 **Dependencies:**
+
 - [Notifications - Email Abstraction](../notifications/pdr-phase-1.md#email-service-abstraction)
 
 ---
 
 ### US-AUTH-005: Protected Routes
+
 **As a** Platform Owner
 **I want** admin routes to be inaccessible to regular customers
 **So that** only I can manage content and platform settings
 
 **Flow:**
+
 1. User (any role) attempts to access `/admin/*` route
 2. SvelteKit `hooks.server.ts` middleware runs:
    - Calls `BetterAuth.getSession()` to check authentication
@@ -248,6 +253,7 @@ Without authentication, the platform cannot:
    - Allow request to proceed
 
 **Acceptance Criteria:**
+
 - All `/admin/*` routes require authentication
 - All `/admin/*` routes require `role: 'owner'`
 - Unauthenticated users redirected to login with return URL
@@ -259,11 +265,13 @@ Without authentication, the platform cannot:
 ---
 
 ### US-AUTH-006: Logout
+
 **As a** logged-in user
 **I want to** log out of my account
 **So that** I can end my session on shared/public devices
 
 **Flow:**
+
 1. User clicks "Log out" button (in header/menu)
 2. System:
    - Calls BetterAuth logout method
@@ -272,6 +280,7 @@ Without authentication, the platform cannot:
 3. User redirected to `/` (homepage)
 
 **Acceptance Criteria:**
+
 - Session immediately invalidated
 - Session cookie removed from browser
 - User must re-authenticate to access protected routes
@@ -282,6 +291,7 @@ Without authentication, the platform cannot:
 ## User Flows (Visual)
 
 See diagrams:
+
 - [Auth Registration Flow](../_assets/auth-registration-flow.png)
 - [Auth Login Flow](../_assets/auth-login-flow.png)
 - [Auth Password Reset Flow](../_assets/auth-password-reset-flow.png)
@@ -291,6 +301,7 @@ See diagrams:
 ## Dependencies
 
 ### Internal Dependencies (Phase 1)
+
 - **Neon Postgres**: User and session storage
 - **Notification Service**: Email abstraction for verification and password reset
   - See [Notifications PRD](../notifications/pdr-phase-1.md)
@@ -298,6 +309,7 @@ See diagrams:
 - **SvelteKit**: Server-side rendering, form actions, hooks
 
 ### External Dependencies
+
 - **BetterAuth**: Authentication library
   - Handles password hashing
   - Session management
@@ -309,6 +321,7 @@ See diagrams:
   - Password change confirmations
 
 ### Database Schema Dependencies
+
 - `users` table:
   - `role` ENUM('customer', 'owner', 'creator') - Phase 1 uses 'customer' and 'owner', 'creator' reserved for Phase 3
 - `sessions` table (BetterAuth managed)
@@ -316,6 +329,7 @@ See diagrams:
 - See [Database Schema](../../infrastructure/DatabaseSchema.md) for full definitions
 
 ### Future Extensibility (Phase 3)
+
 - **Media Owner Role**: Database schema already supports `role: 'creator'`
 - **Multi-Creator Feature**: Auth system designed to add third role without migration
 - See [Multi-Creator PRD](../multi-creator/pdr-phase-1.md)
@@ -325,6 +339,7 @@ See diagrams:
 ## Acceptance Criteria (Feature-Level)
 
 ### Functional Requirements
+
 -  User can register with email/password
 -  User can log in with email/password
 -  User can reset password via email
@@ -336,6 +351,7 @@ See diagrams:
 -  Role system supports future `'creator'` role without schema migration
 
 ### Security Requirements
+
 -  Passwords hashed with modern algorithm (bcrypt/argon2)
 -  Session cookies are HTTP-only, Secure, SameSite
 -  Password reset tokens expire after 1 hour
@@ -346,6 +362,7 @@ See diagrams:
 -  Rate limiting on login attempts (5 attempts / 15 min)
 
 ### Performance Requirements
+
 -  Login response time < 500ms (p95)
 -  Registration response time < 1s (p95)
 -  Verification email sent < 60s
@@ -353,15 +370,17 @@ See diagrams:
 -  Session validation < 100ms (cached in locals)
 
 ### Testing Requirements
+
 -  Unit tests for all authentication utilities
 -  Integration tests for all auth API routes
--  E2E test for registration ’ verification ’ login flow
+-  E2E test for registration ï¿½ verification ï¿½ login flow
 -  E2E test for password reset flow
 -  Security tests for protected routes
 -  Test coverage > 90% for auth module
 -  Mock notification service in tests (use abstraction interface)
 
 ### Extensibility Requirements
+
 -  Role system supports adding `'creator'` role in Phase 3
 -  Middleware logic is extensible for role-based route protection
 -  No direct Resend calls (all via notification abstraction)
@@ -386,6 +405,7 @@ See diagrams:
 ## Notes
 
 ### Why BetterAuth?
+
 - Modern, secure authentication library for SvelteKit
 - Handles password hashing with secure algorithms
 - Built-in session management
@@ -394,6 +414,7 @@ See diagrams:
 - Less complex than Auth.js for our needs
 
 ### Why Email Verification?
+
 - Confirms user owns the email address
 - Reduces spam registrations
 - Enables password recovery
@@ -401,13 +422,16 @@ See diagrams:
 - Can be deferred (user can log in before verifying)
 
 ### Why Role Enum (Not Boolean)?
+
 - **Extensibility**: Can add `'creator'` role in Phase 3 without schema migration
 - **Clarity**: `role: 'owner'` is more explicit than `is_admin: true`
 - **Future-proof**: Easier to add more roles (e.g., `'moderator'`, `'support'`)
 
 ### Notification Abstraction (Critical Design Decision)
+
 **Problem**: Direct dependency on Resend creates vendor lock-in
 **Solution**: All email sending goes through notification service abstraction:
+
 ```typescript
 // L BAD: Direct Resend call
 await resend.emails.send({ to, subject, html });
@@ -416,17 +440,19 @@ await resend.emails.send({ to, subject, html });
 await notificationService.sendEmail({
   template: 'verification',
   recipient: user.email,
-  data: { verificationLink }
+  data: { verificationLink },
 });
 ```
 
 **Benefits**:
-- Easy to switch email providers (Resend ’ SendGrid, Postmark, etc.)
+
+- Easy to switch email providers (Resend ï¿½ SendGrid, Postmark, etc.)
 - Centralized email logic (templates, logging, error handling)
 - Testable (mock notification service in tests)
 - See [Notifications TDD](../notifications/ttd-dphase-1.md) for implementation
 
 ### Security Considerations
+
 - HTTPS required in production (Cloudflare Pages enforces)
 - Environment variable for `AUTH_SECRET` (32+ random chars)
 - Session expiration: 24 hours (session cookie) or 30 days (remember me)

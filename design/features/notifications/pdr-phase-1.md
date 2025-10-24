@@ -7,11 +7,13 @@ Email notification service with provider abstraction layer, enabling transaction
 ## Problem Statement
 
 The platform needs to send transactional emails for critical user flows:
+
 - **Authentication**: Email verification, password reset, account security alerts
 - **E-Commerce**: Purchase receipts, payment confirmations
 - **Content Access**: Content unlock notifications, access grants
 
 Without a notification system:
+
 - Users cannot verify email addresses (blocks password recovery)
 - Users don't receive purchase confirmations (poor UX, support burden)
 - Platform cannot send security alerts (password changes, suspicious activity)
@@ -21,6 +23,7 @@ Without a notification system:
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1. **Email Abstraction** - All email sending goes through a unified interface
 2. **Template Management** - Centralized email templates with data interpolation
 3. **Reliable Delivery** - 99%+ delivery rate for transactional emails
@@ -28,6 +31,7 @@ Without a notification system:
 5. **Error Handling** - Graceful failures, retry logic, logging
 
 ### Success Metrics
+
 -  100% of email calls use abstraction (zero direct Resend calls)
 -  Email delivery rate > 99%
 -  Email sent within 60 seconds of trigger event
@@ -38,6 +42,7 @@ Without a notification system:
 ## Scope
 
 ### In Scope (Phase 1 MVP)
+
 -  Email service abstraction layer (provider-agnostic interface)
 -  Resend adapter (default provider)
 -  Transactional email templates:
@@ -51,6 +56,7 @@ Without a notification system:
 -  Environment-based configuration (dev vs prod API keys)
 
 ### Explicitly Out of Scope (Future Phases)
+
 - L In-app notifications (bell icon, notification center) - Phase 2
 - L SMS notifications - Phase 3
 - L Push notifications (web push, mobile) - Phase 3
@@ -62,33 +68,20 @@ Without a notification system:
 
 ## Cross-Feature Dependencies
 
-### Auth Feature (Phase 1)
-**Dependency**: Auth relies on notification service for transactional emails
-- Registration verification email
-- Password reset email
-- Password changed confirmation
-- See [Auth PRD](../auth/pdr-phase-1.md)
-
-### E-Commerce Feature (Phase 1)
-**Dependency**: E-Commerce uses notifications for purchase confirmations
-- Purchase receipt email
-- Payment confirmation
-- See [E-Commerce PRD](../e-commerce/pdr-phase-1.md)
-
-### Future: Content Access (Phase 1/2)
-**Future Use**: Notifications when content is unlocked or access granted
-- "Your content is ready" emails
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#7-notifications) document for details.
 
 ---
 
 ## User Stories & Use Cases
 
 ### US-NOTIF-001: Send Email Verification (Auth Integration)
+
 **As a** system (triggered by Auth feature)
 **I want to** send an email verification link
 **So that** users can confirm their email address
 
 **Flow:**
+
 1. User registers on platform (see [Auth PRD - US-AUTH-001](../auth/pdr-phase-1.md))
 2. Auth service calls notification service:
    ```typescript
@@ -97,8 +90,8 @@ Without a notification system:
      recipient: user.email,
      data: {
        userName: user.name,
-       verificationUrl: 'https://example.com/verify-email?token=...'
-     }
+       verificationUrl: 'https://example.com/verify-email?token=...',
+     },
    });
    ```
 3. Notification service:
@@ -109,6 +102,7 @@ Without a notification system:
 5. User clicks link and verifies email
 
 **Acceptance Criteria:**
+
 - Email arrives within 60 seconds
 - Email contains correct verification link
 - Email is branded (platform name, logo)
@@ -119,11 +113,13 @@ Without a notification system:
 ---
 
 ### US-NOTIF-002: Send Password Reset Email (Auth Integration)
+
 **As a** system (triggered by Auth feature)
 **I want to** send a password reset link
 **So that** users can recover their accounts
 
 **Flow:**
+
 1. User requests password reset (see [Auth PRD - US-AUTH-003](../auth/pdr-phase-1.md))
 2. Auth service calls notification service:
    ```typescript
@@ -132,14 +128,15 @@ Without a notification system:
      recipient: user.email,
      data: {
        userName: user.name,
-       resetUrl: 'https://example.com/reset-password?token=...'
-     }
+       resetUrl: 'https://example.com/reset-password?token=...',
+     },
    });
    ```
 3. Notification service sends email via Resend adapter
 4. User receives email and clicks reset link
 
 **Acceptance Criteria:**
+
 - Email arrives within 60 seconds
 - Email contains correct reset link
 - Email includes security note ("If you didn't request this...")
@@ -148,19 +145,22 @@ Without a notification system:
 ---
 
 ### US-NOTIF-003: Provider Abstraction (Non-Functional Requirement)
+
 **As a** developer
 **I want** all email sending to use a unified interface
 **So that** I can easily switch email providers without changing business logic
 
 **Requirement:**
+
 - **Bad** (direct Resend call):
+
   ```typescript
   // L Direct Resend call - vendor lock-in
   await resend.emails.send({
     from: 'noreply@example.com',
     to: user.email,
     subject: 'Verify your email',
-    html: '<p>Click here...</p>'
+    html: '<p>Click here...</p>',
   });
   ```
 
@@ -170,26 +170,29 @@ Without a notification system:
   await notificationService.sendEmail({
     template: 'email-verification',
     recipient: user.email,
-    data: { userName: user.name, verificationUrl: '...' }
+    data: { userName: user.name, verificationUrl: '...' },
   });
   ```
 
 **Acceptance Criteria:**
+
 - Zero direct calls to Resend API in business logic (Auth, E-Commerce, etc.)
 - All email sending goes through `notificationService.sendEmail()`
 - Switching providers requires changing only:
-  1. Adapter file (`adapters/resend.ts` ’ `adapters/sendgrid.ts`)
-  2. Configuration (`RESEND_API_KEY` ’ `SENDGRID_API_KEY`)
+  1. Adapter file (`adapters/resend.ts` ï¿½ `adapters/sendgrid.ts`)
+  2. Configuration (`RESEND_API_KEY` ï¿½ `SENDGRID_API_KEY`)
 - No changes to business logic (Auth, E-Commerce, etc.)
 
 ---
 
 ### US-NOTIF-004: Purchase Receipt Email (E-Commerce Integration)
+
 **As a** system (triggered by E-Commerce feature)
 **I want to** send purchase receipt emails
 **So that** customers have proof of purchase
 
 **Flow:**
+
 1. User completes purchase (see [E-Commerce PRD](../e-commerce/pdr-phase-1.md))
 2. E-Commerce service calls notification service:
    ```typescript
@@ -201,14 +204,15 @@ Without a notification system:
        orderNumber: order.id,
        items: order.items,
        totalAmount: order.total,
-       receiptUrl: 'https://example.com/orders/123/receipt'
-     }
+       receiptUrl: 'https://example.com/orders/123/receipt',
+     },
    });
    ```
 3. Notification service sends email via Resend adapter
 4. Customer receives receipt email
 
 **Acceptance Criteria:**
+
 - Email arrives within 60 seconds of purchase
 - Email contains all purchase details
 - Email includes receipt PDF link
@@ -225,9 +229,11 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
 ## Dependencies
 
 ### Internal Dependencies
+
 - None (notifications is a foundational service used by other features)
 
 ### External Dependencies
+
 - **Resend API**: Email delivery provider (Phase 1)
   - API Key required: `RESEND_API_KEY`
   - Verified domain required for production
@@ -235,6 +241,7 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
   - SendGrid, Postmark, AWS SES, Mailgun, etc.
 
 ### Database Dependencies
+
 - **None required for Phase 1** (emails are fire-and-forget)
 - **Future (Phase 2)**: Optional `email_logs` table for delivery tracking
 
@@ -243,6 +250,7 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
 ## Acceptance Criteria (Feature-Level)
 
 ### Functional Requirements
+
 -  Notification service provides `sendEmail()` method
 -  Email templates support data interpolation
 -  All auth emails work end-to-end:
@@ -253,6 +261,7 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
 -  Errors are caught and logged (don't crash calling service)
 
 ### Non-Functional Requirements
+
 -  **Abstraction**: Zero direct Resend calls outside adapter
 -  **Provider Swap**: Can switch providers in < 1 hour
 -  **Performance**: Emails sent in < 5 seconds (p95)
@@ -260,6 +269,7 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
 -  **Logging**: All email attempts logged (success + failure)
 
 ### Testing Requirements
+
 -  Unit tests for notification service (mocked adapter)
 -  Unit tests for Resend adapter (mocked Resend API)
 -  Integration tests with real Resend (dev account)
@@ -284,7 +294,9 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
 ## Notes
 
 ### Why Abstraction Layer?
+
 **Problem**: Resend (or any provider) could:
+
 - Increase prices dramatically
 - Change API without notice
 - Experience prolonged outages
@@ -292,22 +304,26 @@ See diagram: [Notification Email Flow](../_assets/notification-email-flow.png)
 - Implement unfavorable terms
 
 **Solution**: Abstraction layer isolates business logic from provider:
+
 ```
-Auth Service ’ Notification Service (Interface) ’ Resend Adapter ’ Resend API
-                                                ’ SendGrid Adapter ’ SendGrid API (swap)
+Auth Service ï¿½ Notification Service (Interface) ï¿½ Resend Adapter ï¿½ Resend API
+                                                ï¿½ SendGrid Adapter ï¿½ SendGrid API (swap)
 ```
 
 **Benefit**: Switch providers without touching Auth, E-Commerce, or other features.
 
 ### Why Resend (Phase 1)?
+
 - **Developer-Friendly**: Modern API, good docs
 - **Generous Free Tier**: 100 emails/day (enough for dev/MVP)
 - **Domain Verification**: Easy setup
 - **Transactional Focus**: Built for transactional emails (vs marketing)
-- **Relatively New**: Could become unreliable ’ abstraction protects us
+- **Relatively New**: Could become unreliable ï¿½ abstraction protects us
 
 ### Email Templates
+
 Phase 1 uses **simple HTML templates** with variable interpolation:
+
 ```html
 <!-- templates/email-verification.html -->
 <p>Hi {{userName}},</p>
@@ -316,17 +332,21 @@ Phase 1 uses **simple HTML templates** with variable interpolation:
 ```
 
 **Future (Phase 2)**: Use proper template engine (MJML, React Email, etc.) for:
+
 - Complex layouts
 - Mobile responsiveness
 - Brand consistency
 
 ### Error Handling Philosophy
+
 **Emails are non-critical**: If an email fails, don't crash the calling service.
+
 - Log error with context
 - Retry once
 - Return error to caller (let them decide if it's critical)
 
 **Example**:
+
 ```typescript
 // Auth can continue even if verification email fails
 try {

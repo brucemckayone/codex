@@ -3,6 +3,7 @@
 ## Feature Summary
 
 Automated media transcoding system that:
+
 - **Videos**: Converts to HLS (HTTP Live Streaming) format with multiple quality variants
 - **Audio**: Converts to HLS (HTTP Live Streaming) format and generates waveform visualizations
 
@@ -13,6 +14,7 @@ Transcoding happens asynchronously using Runpod GPU workers, triggered via Cloud
 ## Problem Statement
 
 Creators need media transcoded for optimal streaming because:
+
 - **Videos**:
   - Raw uploads aren't streamable (single-quality MP4 doesn't support adaptive bitrate)
   - Large file sizes cause buffering on mobile/slow connections
@@ -24,6 +26,7 @@ Creators need media transcoded for optimal streaming because:
 - **Thumbnails**: Need automated thumbnail/preview generation
 
 Without transcoding:
+
 - Videos buffer and play poorly on mobile
 - Audio files inconsistent quality and format
 - No waveform visualization for audio players
@@ -33,6 +36,7 @@ Without transcoding:
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1. **Automatic Transcoding** - Media transcoded immediately after upload
 2. **Video**: Multi-quality HLS output (1080p, 720p, 480p, 360p)
 3. **Audio**: HLS output + waveform JSON generation
@@ -42,6 +46,7 @@ Without transcoding:
 7. **Error Handling** - Retry failed jobs once, notify creators of failures
 
 ### Success Metrics
+
 - 1GB video transcoded in < 10 minutes (p95)
 - 100MB audio transcoded + waveform in < 2 minutes (p95)
 - 95% transcoding success rate
@@ -55,6 +60,7 @@ Without transcoding:
 ### In Scope (Phase 1 MVP)
 
 #### Video Transcoding
+
 - **Automatic Trigger**: Via Cloudflare Queue after upload
 - **HLS Output**:
   - Master playlist (master.m3u8)
@@ -71,6 +77,7 @@ Without transcoding:
 - **Codecs**: H.264 video, AAC audio
 
 #### Audio Transcoding
+
 - **Automatic Trigger**: Via Cloudflare Queue after upload
 - **HLS Output**:
   - Master playlist (master.m3u8)
@@ -89,20 +96,24 @@ Without transcoding:
 - **Thumbnail**: Generate waveform preview image (1280x720 PNG)
 
 #### GPU Processing
+
 - Runpod serverless GPU workers (ffmpeg + hardware acceleration)
 - Cloudflare Queue for job management
 - Single retry on failure (serverless failures are deterministic)
 
 #### Status Tracking
+
 - Media item status: `uploaded` → `transcoding` → `ready` / `failed`
 - Real-time updates in admin UI
 
 #### Error Handling
+
 - Retry failed jobs once (exponential backoff: 5 minutes)
 - Log errors to database for debugging
 - Notify creator of permanent failures
 
 ### Explicitly Out of Scope (Future Phases)
+
 - **Custom quality settings** - Creator-defined bitrates/resolutions (Phase 2)
 - **Video editing** - Trim, crop, filters (Phase 3)
 - **Subtitle/caption extraction** - Phase 3
@@ -114,37 +125,20 @@ Without transcoding:
 
 ## Cross-Feature Dependencies
 
-### Content Management Feature (Phase 1)
-**Dependency**: Content Management uploads media and enqueues transcoding jobs
-- Videos uploaded to `codex-media-{creatorId}/originals/{mediaId}/`
-- Audio uploaded to `codex-media-{creatorId}/audio/{mediaId}/`
-- Media item created with `status = 'uploaded'`
-- Transcoding job enqueued to `TRANSCODING_QUEUE`
-- See [Content Management PRD](../content-management/pdr-phase-1.md)
-
-### Content Access Feature (Phase 1)
-**Dependency**: Content Access serves HLS streams and audio files to customers
-- Customers access HLS master playlist via signed URLs (video)
-- Customers access HLS master playlist via signed URLs (audio)
-- Waveform JSON loaded for audio player visualization
-- See [Content Access PRD](../content-access/pdr-phase-1.md)
-
-### Admin Dashboard (Phase 1)
-**Dependency**: Admin Dashboard displays transcoding status
-- Media library shows status: "Transcoding...", "Ready", "Failed"
-- Waveform preview for audio files
-- See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#6-media-transcoding) document for details.
 
 ---
 
 ## User Stories & Use Cases
 
 ### US-TRANSCODE-001: Automatic Video Transcoding After Upload
+
 **As a** Creator
 **I want** videos to be automatically transcoded to HLS after upload
 **So that** customers can stream videos smoothly on any device
 
 **Flow:**
+
 1. Creator uploads video via Content Management
 2. Video uploaded to `codex-media-{creatorId}/originals/{mediaId}/original.mp4`
 3. Backend enqueues transcoding job:
@@ -175,6 +169,7 @@ Without transcoding:
 9. Creator sees "Ready" status in media library
 
 **Acceptance Criteria:**
+
 - HLS variants stored in R2 with correct structure
 - Thumbnail auto-generated and stored
 - Video metadata extracted and saved
@@ -184,11 +179,13 @@ Without transcoding:
 ---
 
 ### US-TRANSCODE-002: Automatic Audio Transcoding + Waveform Generation
+
 **As a** Creator
 **I want** audio files converted to HLS and waveforms generated automatically
 **So that** customers have consistent audio quality, visual playback, and adaptive streaming
 
 **Flow:**
+
 1. Creator uploads audio file (e.g., WAV, 50MB)
 2. Audio uploaded to `codex-media-{creatorId}/audio/{mediaId}/original.wav`
 3. Backend enqueues transcoding job:
@@ -221,6 +218,7 @@ Without transcoding:
 8. Creator sees "Ready" status with waveform preview
 
 **Acceptance Criteria:**
+
 - Original audio converted to HLS audio streams.
 - Waveform JSON generated with 1000 data points.
 - Waveform preview image generated.
@@ -231,11 +229,13 @@ Without transcoding:
 ---
 
 ### US-TRANSCODE-003: Multi-Quality Adaptive Video Streaming
+
 **As a** Customer
 **I want** videos to stream smoothly on my device
 **So that** I don't experience buffering
 
 **Flow:**
+
 1. Customer plays video content
 2. Video player requests HLS master playlist
 3. Player downloads master playlist with variants:
@@ -259,6 +259,7 @@ Without transcoding:
 6. Customer experiences smooth playback
 
 **Acceptance Criteria:**
+
 - All quality variants available in master playlist
 - Player switches qualities seamlessly
 - No buffering on typical network conditions
@@ -266,11 +267,13 @@ Without transcoding:
 ---
 
 ### US-TRANSCODE-004: Audio Waveform Visualization
+
 **As a** Customer
 **I want** to see waveform visualization while playing HLS audio
 **So that** I can see playback progress and audio intensity
 
 **Flow:**
+
 1. Customer plays HLS audio content
 2. Frontend loads waveform JSON from R2
 3. Audio player renders waveform canvas:
@@ -281,6 +284,7 @@ Without transcoding:
 5. Playback jumps to clicked position
 
 **Acceptance Criteria:**
+
 - Waveform loads in < 500ms
 - Waveform accurately represents audio intensity
 - Customer can click to seek
@@ -290,11 +294,13 @@ Without transcoding:
 ---
 
 ### US-TRANSCODE-005: Handle Transcoding Failures with Single Retry
+
 **As a** Creator
 **I want** to be notified quickly if transcoding fails
 **So that** I can re-upload or troubleshoot without excessive delays
 
 **Flow:**
+
 1. Transcoding job fails (e.g., corrupted file, unsupported codec)
 2. Runpod sends error webhook with `status = 'failed'`
 3. Backend logs error to `transcoding_errors` table
@@ -311,6 +317,7 @@ Without transcoding:
    - Contact support if issue persists
 
 **Acceptance Criteria:**
+
 - Failed jobs retried once (not 3 times)
 - 5-minute delay before retry
 - Permanent failure after 2nd attempt
@@ -321,11 +328,13 @@ Without transcoding:
 ---
 
 ### US-TRANSCODE-006: Skip Lower Quality Variants for Low-Res Videos
+
 **As a** System
 **I want** to skip unnecessary quality variants
 **So that** processing time and storage are optimized
 
 **Flow:**
+
 1. Creator uploads 720p video
 2. Runpod detects source resolution: 1280x720
 3. System skips 1080p variant (can't upscale)
@@ -337,6 +346,7 @@ Without transcoding:
 6. Customers on fast connections get 720p (best available)
 
 **Acceptance Criteria:**
+
 - Source resolution detected before transcoding
 - No upscaling (quality loss, wasted storage)
 - At least 2 quality variants if source ≥ 480p
@@ -347,6 +357,7 @@ Without transcoding:
 ## User Flows (Visual)
 
 See diagrams:
+
 - [Video Transcoding Workflow](../_assets/video-transcoding-workflow.png)
 - [Audio Transcoding + Waveform](../_assets/audio-transcoding-workflow.png)
 - [Queue Processing Flow](../_assets/queue-processing-flow.png)
@@ -357,12 +368,14 @@ See diagrams:
 ## Dependencies
 
 ### Internal Dependencies (Phase 1)
+
 - **Content Management**: Uploads media, enqueues transcoding
 - **Content Access**: Serves HLS streams, audio files, waveforms
 - **Admin Dashboard**: Displays transcoding status, waveform previews
 - **Notifications**: Sends failure notifications (optional)
 
 ### External Dependencies
+
 - **Cloudflare Queue**: Job queue for transcoding tasks
   - Queue: `TRANSCODING_QUEUE`
   - Single retry on failure
@@ -386,6 +399,7 @@ See diagrams:
 ## Acceptance Criteria (Feature-Level)
 
 ### Functional Requirements
+
 - Video transcoding to HLS (4 quality variants)
 - Audio transcoding to HLS
 - Waveform JSON generation for all audio files
@@ -397,6 +411,7 @@ See diagrams:
 - Creators notified of permanent failures
 
 ### Quality Requirements
+
 - **Video**:
   - HLS segments: 6-second duration
   - H.264 codec, AAC audio
@@ -411,6 +426,7 @@ See diagrams:
 - **Waveform Images**: 1280x720 PNG, < 100KB
 
 ### Error Handling Requirements
+
 - Corrupted files fail gracefully with clear error
 - Unsupported codecs return descriptive error
 - Runpod API failures trigger single retry (5 min delay)
@@ -418,6 +434,7 @@ See diagrams:
 - All errors logged to database
 
 ### Testing Requirements
+
 - Unit tests for queue message processing
 - Integration tests for Runpod API calls
 - E2E tests for video and audio transcoding flows
@@ -445,6 +462,7 @@ See diagrams:
 ## Notes
 
 ### Why Transcode Audio?
+
 - **Format Consistency**: WAV, FLAC, M4A → HLS audio
 - **Loudness Normalization**: Consistent volume across all audio files
 - **Waveform Visualization**: Fun, useful playback feature
@@ -452,6 +470,7 @@ See diagrams:
 - **Quality**: Multiple bitrate options for optimal user experience.
 
 ### Quality Variant Selection Logic
+
 ```
 Source Resolution | Output Variants
 ------------------|------------------
@@ -459,6 +478,7 @@ Audio             | 128kbps, 64kbps AAC HLS
 ```
 
 ### Waveform JSON Format
+
 ```json
 {
   "version": 2,
@@ -470,11 +490,13 @@ Audio             | 128kbps, 64kbps AAC HLS
   "data": [0.5, 0.82, 0.61, 0.73, 0.45, ...]
 }
 ```
+
 - **1000 data points**: ~10 points per second for 100-second audio
 - **Amplitude range**: 0.0 (silence) to 1.0 (peak)
 - **Rendering**: Frontend draws canvas with data points
 
 ### Why Single Retry?
+
 - **Serverless Determinism**: If job fails once, likely same issue on retry
 - **Cost Control**: GPU time is expensive, avoid wasteful retries
 - **Fast Feedback**: Creator knows quickly if file is problematic
@@ -484,6 +506,7 @@ Audio             | 128kbps, 64kbps AAC HLS
   - Timeout/API error → Retry might help (hence 1 retry)
 
 ### Quality Variant Selection Logic
+
 ```
 Source Resolution | Output Variants
 ------------------|------------------
@@ -495,6 +518,7 @@ Source Resolution | Output Variants
 ```
 
 ### Transcoding Cost Estimates (Runpod)
+
 - **1GB video (10 min 1080p)**: ~2 min GPU time = ~$0.02
 - **100MB audio + waveform**: ~30 sec GPU time = ~$0.005
 - **10 videos/day + 20 audio/day**: ~$0.30/day = ~$9/month

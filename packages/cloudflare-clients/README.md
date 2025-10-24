@@ -15,7 +15,7 @@ import { R2Client, KVClient } from '@codex/cloudflare-clients';
 const r2 = new R2Client({
   accountId: env.R2_ACCOUNT_ID,
   accessKeyId: env.R2_ACCESS_KEY_ID,
-  secretAccessKey: env.R2_SECRET_ACCESS_KEY
+  secretAccessKey: env.R2_SECRET_ACCESS_KEY,
 });
 
 // Upload file

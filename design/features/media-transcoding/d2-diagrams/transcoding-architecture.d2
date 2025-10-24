@@ -1,0 +1,224 @@
+# Media Transcoding Architecture - Phase 1
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Content Management Trigger
+content_mgmt: {
+  label: "Content Management"
+
+  upload_confirm: {
+    label: "Upload Confirmed\n\nPOST /api/media/confirm\nVideo uploaded to R2"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  style: {
+    fill: ${color-nextjs}
+    stroke: ${stroke-nextjs}
+    stroke-width: 2
+  }
+}
+
+# Queue Layer
+queue: {
+  label: "Cloudflare Queue"
+
+  transcoding_queue: {
+    label: "TRANSCODING_QUEUE\n\nJob payload:\n• mediaItemId\n• inputKey\n• outputKeyPrefix\n• type (video/audio)"
+    style: {
+      fill: ${color-redis}
+      stroke: ${stroke-redis}
+    }
+  }
+
+  style: {
+    fill: "#FFEBEE"
+    stroke: "#EF9A9A"
+    stroke-width: 2
+  }
+}
+
+# Worker Layer
+worker: {
+  label: "Cloudflare Worker"
+
+  queue_consumer: {
+    label: "Queue Consumer\n(transcoding-worker)\n\nProcesses queue messages\nCalls Runpod API"
+    style: {
+      fill: ${color-worker}
+      stroke: ${stroke-worker}
+    }
+  }
+
+  webhook_handler: {
+    label: "Webhook Handler\n\nPOST /api/webhooks/runpod\nProcesses completion events"
+    style: {
+      fill: ${color-worker}
+      stroke: ${stroke-worker}
+    }
+  }
+
+  style: {
+    fill: ${color-worker}
+    stroke: ${stroke-worker}
+    stroke-width: 2
+  }
+}
+
+# Runpod GPU Processing
+runpod: {
+  label: "Runpod Serverless GPU"
+
+  endpoint: {
+    label: "Custom Docker Image\n\nffmpeg (video transcoding)\naudiowaveform (waveform gen)\n\nGPU-accelerated processing"
+    style: {
+      fill: "#E1BEE7"
+      stroke: "#BA68C8"
+    }
+  }
+
+  style: {
+    fill: "#F3E5F5"
+    stroke: "#BA68C8"
+    stroke-width: 2
+  }
+}
+
+# Storage Layer
+r2: {
+  label: "Cloudflare R2 (Creator Buckets)"
+
+  input_bucket: {
+    label: "Input Files\n\ncodex-media-{creatorId}\n\nOriginal video/audio uploads"
+    style: {
+      fill: ${color-r2}
+      stroke: ${stroke-r2}
+    }
+  }
+
+  output_bucket: {
+    label: "Transcoded Output\n\ncodex-media-{creatorId}\n\n• HLS master playlist\n• Video segments (.ts)\n• Audio HLS\n• Waveform JSON\n• Thumbnails"
+    style: {
+      fill: ${color-r2}
+      stroke: ${stroke-r2}
+    }
+  }
+
+  style: {
+    fill: ${color-r2}
+    stroke: ${stroke-r2}
+    stroke-width: 2
+  }
+}
+
+# Database Layer
+postgres: {
+  label: "Neon PostgreSQL"
+  shape: cylinder
+
+  tables: {
+    label: "Database Tables\n\n• media_items\n  (transcodingStatus:\n   pending/processing/\n   completed/failed)\n• transcoding_jobs\n  (runpodJobId, status)"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# Flow Step 1: Upload complete, enqueue job
+content_mgmt.upload_confirm -> queue.transcoding_queue: "1. Enqueue job\n{mediaItemId, inputKey, type}" {
+  style.stroke: ${arrow-cache}
+  style.stroke-width: 2
+}
+
+content_mgmt.upload_confirm -> postgres.tables: "UPDATE media_items\nSET transcodingStatus='pending'" {
+  style.stroke: ${arrow-sql}
+}
+
+# Flow Step 2: Worker consumes queue
+queue.transcoding_queue -> worker.queue_consumer: "2. Consume message\n(auto-triggered)" {
+  style.stroke: ${arrow-cache}
+  style.stroke-width: 2
+}
+
+worker.queue_consumer -> postgres.tables: "UPDATE transcodingStatus\n='processing'" {
+  style.stroke: ${arrow-sql}
+}
+
+# Flow Step 3: Call Runpod API
+worker.queue_consumer -> runpod.endpoint: "3. POST /run\n{input: s3Url,\n outputPrefix,\n type: video/audio}" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 3
+}
+
+runpod.endpoint -> worker.queue_consumer: "Return {jobId}" {
+  style.stroke: ${arrow-external}
+  style.stroke-dash: 3
+}
+
+worker.queue_consumer -> postgres.tables: "INSERT transcoding_jobs\n(runpodJobId, mediaItemId)" {
+  style.stroke: ${arrow-sql}
+}
+
+# Flow Step 4: Runpod processes video
+runpod.endpoint -> r2.input_bucket: "4. Download input file\n(via presigned URL)" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 2
+}
+
+runpod.endpoint -> runpod.endpoint: "Transcode:\nVideo → HLS (multiple resolutions)\nAudio → HLS + waveform JSON" {
+  style.stroke: "#BA68C8"
+  style.stroke-dash: 3
+}
+
+runpod.endpoint -> r2.output_bucket: "5. Upload outputs\n(HLS playlists,\nsegments, waveforms)" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 2
+}
+
+# Flow Step 5: Runpod sends webhook
+runpod.endpoint -> worker.webhook_handler: "6. POST /api/webhooks/runpod\n{jobId, status: completed/failed}" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 2
+}
+
+worker.webhook_handler -> postgres.tables: "UPDATE media_items\nSET transcodingStatus='completed'\nSET hlsMasterKey, waveformKey" {
+  style.stroke: ${arrow-sql}
+  style.stroke-width: 2
+}
+
+worker.webhook_handler -> postgres.tables: "UPDATE transcoding_jobs\nSET status='completed'" {
+  style.stroke: ${arrow-sql}
+}
+
+# Error flow
+worker.webhook_handler -> postgres.tables: "If failed:\nSET transcodingStatus='failed'\nSchedule retry (1 retry max)" {
+  style.stroke: ${arrow-sql}
+  style.stroke-dash: 3
+}
+
+# Notes
+note_async: {
+  label: "⚡ Async Processing:\n1. Upload completes → Enqueue job\n2. Worker consumes queue → Calls Runpod\n3. Runpod processes (GPU-accelerated)\n4. Runpod uploads outputs to R2\n5. Webhook → Update status to 'completed'"
+  shape: text
+}
+
+note_gpu: {
+  label: "🚀 GPU Acceleration:\n• Runpod serverless (pay-per-second)\n• 10x faster than CPU transcoding\n• Custom Docker image: ffmpeg + audiowaveform\n• Single retry on failure (cost control)"
+  shape: text
+}
+
+note_outputs: {
+  label: "📹 Transcoding Outputs:\n\nVideo:\n• HLS master playlist\n• Multiple resolutions (1080p, 720p, 480p)\n• Segmented .ts files\n• Thumbnails (extracted frames)\n\nAudio:\n• HLS playlist\n• Waveform JSON (for UI visualization)"
+  shape: text
+}

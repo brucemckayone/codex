@@ -1,0 +1,240 @@
+# Notification System Architecture - Phase 1
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Feature Services (Callers)
+features: {
+  label: "Feature Services (Callers)"
+
+  auth_service: {
+    label: "Auth Service\n\nEmail verification\nPassword reset"
+    style: {
+      fill: ${color-go-sub}
+      stroke: ${stroke-go-sub}
+    }
+  }
+
+  ecommerce_service: {
+    label: "E-Commerce Service\n\nPurchase receipts\nRefund confirmations"
+    style: {
+      fill: ${color-go-sub}
+      stroke: ${stroke-go-sub}
+    }
+  }
+
+  admin_service: {
+    label: "Admin Service\n\nManual notifications\nSystem alerts"
+    style: {
+      fill: ${color-go-sub}
+      stroke: ${stroke-go-sub}
+    }
+  }
+
+  style: {
+    fill: "#F5F5F5"
+    stroke: "#9E9E9E"
+    stroke-width: 2
+  }
+}
+
+# Notification Service Layer (Abstraction)
+notification_service: {
+  label: "Notification Service (Provider-Agnostic)"
+
+  service_interface: {
+    label: "INotificationService\n\nsendEmail(payload)\n\n• template: string\n• recipient: string\n• data: Record<string, any>"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  template_engine: {
+    label: "Template Engine\n\nInterpolate template data\nRender HTML/Text email"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  style: {
+    fill: ${color-go}
+    stroke: ${stroke-go}
+    stroke-width: 2
+  }
+}
+
+# Adapter Layer (Provider Implementations)
+adapters: {
+  label: "Email Provider Adapters"
+
+  resend_adapter: {
+    label: "Resend Adapter\n(Default Phase 1)\n\nImplements IEmailProvider\nCalls Resend API"
+    style: {
+      fill: ${color-email}
+      stroke: ${stroke-email}
+    }
+  }
+
+  sendgrid_adapter: {
+    label: "SendGrid Adapter\n(Future)\n\nNot implemented yet"
+    style: {
+      fill: "#E0E0E0"
+      stroke: "#9E9E9E"
+      stroke-dash: 3
+    }
+  }
+
+  style: {
+    fill: "#FFF3E0"
+    stroke: "#FFB74D"
+    stroke-width: 2
+  }
+}
+
+# Template Storage
+templates: {
+  label: "Email Templates"
+
+  template_files: {
+    label: "Template Files\n\n• email-verification.html\n• password-reset.html\n• purchase-receipt.html\n• refund-confirmation.html\n\nHandlebars syntax"
+    style: {
+      fill: ${color-volume}
+      stroke: ${stroke-volume}
+    }
+  }
+
+  style: {
+    fill: ${color-volume}
+    stroke: ${stroke-volume}
+    stroke-width: 2
+  }
+}
+
+# External Email Provider
+resend: {
+  label: "Resend API"
+
+  email_delivery: {
+    label: "Email Delivery Service\n\nSends transactional emails\nHandles SMTP, bounces, etc."
+    style: {
+      fill: ${color-email}
+      stroke: ${stroke-email}
+    }
+  }
+
+  style: {
+    fill: ${color-email}
+    stroke: ${stroke-email}
+    stroke-width: 2
+  }
+}
+
+# Database (Optional Logging)
+postgres: {
+  label: "Neon PostgreSQL"
+  shape: cylinder
+
+  email_log: {
+    label: "email_log (Optional)\n\nAudit trail:\n• recipient\n• template\n• sentAt\n• status"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# Email Recipient
+recipient: {
+  label: "Email Recipient"
+
+  inbox: {
+    label: "User Inbox\n\nReceives formatted email"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  style: {
+    fill: "#FAFAFA"
+    stroke: "#BDBDBD"
+    stroke-width: 2
+  }
+}
+
+# Flow: Feature calls notification service
+features.auth_service -> notification_service.service_interface: "sendEmail({\n  template: 'email-verification',\n  recipient: user.email,\n  data: {userName, verificationUrl}\n})" {
+  style.stroke: ${arrow-http}
+  style.stroke-width: 2
+}
+
+features.ecommerce_service -> notification_service.service_interface: "sendEmail({\n  template: 'purchase-receipt',\n  ...\n})" {
+  style.stroke: ${arrow-http}
+}
+
+features.admin_service -> notification_service.service_interface: "sendEmail(...)" {
+  style.stroke: ${arrow-http}
+}
+
+# Flow: Service loads template
+notification_service.service_interface -> notification_service.template_engine: "loadTemplate(templateName)" {
+  style.stroke: ${arrow-http}
+}
+
+notification_service.template_engine -> templates.template_files: "Read template file" {
+  style.stroke: ${arrow-file}
+}
+
+notification_service.template_engine -> notification_service.template_engine: "Interpolate data\n(Handlebars render)" {
+  style.stroke: ${arrow-http}
+  style.stroke-dash: 3
+}
+
+# Flow: Service calls adapter
+notification_service.service_interface -> adapters.resend_adapter: "send(recipient, subject,\n htmlBody, textBody)" {
+  style.stroke: ${arrow-http}
+  style.stroke-width: 2
+}
+
+# Flow: Adapter calls Resend API
+adapters.resend_adapter -> resend.email_delivery: "POST /emails\n{from, to, subject,\n html, text}" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 3
+}
+
+# Flow: Resend delivers email
+resend.email_delivery -> recipient.inbox: "Deliver email via SMTP" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 2
+}
+
+# Optional: Log email
+adapters.resend_adapter -> postgres.email_log: "INSERT INTO email_log\n(optional audit)" {
+  style.stroke: ${arrow-sql}
+  style.stroke-dash: 3
+}
+
+# Notes
+note_abstraction: {
+  label: "🔌 Provider Abstraction:\n• Features call INotificationService interface\n• Provider can be swapped (Resend → SendGrid)\n• No code changes in calling features\n• Easy A/B testing of providers"
+  shape: text
+}
+
+note_templates: {
+  label: "📧 Email Templates:\n• Handlebars syntax ({{ userName }})\n• HTML + Plain text versions\n• Reusable across features\n• Easy to update design"
+  shape: text
+}
+
+note_future: {
+  label: "🚀 Future Providers:\n• SendGrid adapter (easy to add)\n• Postmark adapter\n• AWS SES adapter\n• Same interface, different implementation"
+  shape: text
+}

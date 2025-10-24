@@ -2,52 +2,30 @@ name: Test
 
 on:
   push:
-    branches: [main, develop]
+    branches: ['**'] # Run on all branches
   pull_request:
-    branches: [main, develop]
+    branches: [develop, main]
 
 jobs:
-  test:
-    name: Test
+  # Fast feedback jobs that run on every branch
+  typecheck:
+    name: Type Check
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: codex_test
-          POSTGRES_PASSWORD: codex_test_password
-          POSTGRES_DB: codex_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - uses: pnpm/action-setup@v4
 
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
 
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -60,16 +38,116 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Lint
         run: pnpm lint
 
       - name: Format check
         run: pnpm format:check
 
-      - name: Run unit and integration tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests
+        run: pnpm test
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: codex_test
+          POSTGRES_PASSWORD: codex_test_password
+          POSTGRES_DB: codex_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run integration tests
         run: pnpm test:coverage
         env:
-          DATABASE_URL: postgresql://codex_test:codex_test_password@localhost:5433/codex_test
+          DATABASE_URL: postgresql://codex_test:codex_test_password@localhost:5432/codex_test
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
@@ -79,10 +157,10 @@ jobs:
           flags: unittests
           name: codecov-umbrella
 
-  e2e:
+  e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
-    # Only run E2E on main and develop branches to save CI time
+    # Only run E2E on staging (develop) and production (main) branches
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
 
     services:
@@ -93,7 +171,7 @@ jobs:
           POSTGRES_PASSWORD: codex_test_password
           POSTGRES_DB: codex_test
         ports:
-          - 5433:5432
+          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -101,18 +179,13 @@ jobs:
           --health-retries 5
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - uses: pnpm/action-setup@v4
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -123,7 +196,8 @@ jobs:
       - name: Run E2E tests
         run: pnpm test:e2e
         env:
-          DATABASE_URL: postgresql://codex_test:codex_test_password@localhost:5433/codex_test
+          DATABASE_URL: postgresql://codex_test:codex_test_password@localhost:5432/codex_test
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

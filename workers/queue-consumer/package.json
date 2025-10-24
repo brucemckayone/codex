@@ -14,8 +14,9 @@
     "@codex/validation": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241127.0",
+    "@cloudflare/workers-types": "^4.20251014.0",
     "@codex/test-utils": "workspace:*",
+    "@eslint/js": "^9.38.0",
     "typescript": "^5.6.3",
     "vitest": "^4.0.2",
     "wrangler": "^4.45.0"

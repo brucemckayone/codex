@@ -5,20 +5,25 @@
 The notification system provides email delivery with provider abstraction, ensuring business logic is decoupled from email service providers. Phase 1 implements Resend as the default provider but maintains flexibility for future provider changes.
 
 **Architecture**: Three-layer design:
+
 1. **Service Layer**: Provider-agnostic interface used by features
 2. **Adapter Layer**: Provider-specific implementations (Resend, SendGrid, etc.)
 3. **Template Layer**: Email templates with data interpolation
 
-**Architecture Diagram**: See [Notification System Architecture](../_assets/notification-architecture.png)
+**Architecture Diagram**:
+
+![Notification System Architecture](./assets/notification-architecture.png)
+
+The diagram demonstrates the three-layer architecture: provider-agnostic service interface, email provider adapters (Resend), and template-based email rendering.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
-- None (notifications is a foundational service)
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#7-notifications) document for details on how other features depend on Notifications. As a foundational service, it has no feature dependencies itself.
 
 ### Environment Configuration
+
 - `RESEND_API_KEY`: Resend API key (dev and prod)
 - `EMAIL_FROM_ADDRESS`: Sender email address (e.g., `noreply@yourdomain.com`)
 - `EMAIL_FROM_NAME`: Sender display name (e.g., `Codex Platform`)
@@ -32,6 +37,7 @@ The notification system provides email delivery with provider abstraction, ensur
 **Responsibility**: Provider-agnostic interface for sending emails
 
 **Interface Definition**:
+
 ```typescript
 /**
  * Email payload (provider-agnostic)
@@ -78,6 +84,7 @@ export interface INotificationService {
 ```
 
 **Implementation**:
+
 ```typescript
 import { loadTemplate, renderTemplate } from './templates';
 import { emailAdapter } from './adapters';
@@ -90,7 +97,10 @@ export class NotificationService implements INotificationService {
     try {
       // 1. Load and render template
       const templateContent = await loadTemplate(template);
-      const { subject, html, text } = await renderTemplate(templateContent, data);
+      const { subject, html, text } = await renderTemplate(
+        templateContent,
+        data
+      );
 
       // 2. Send via adapter (with retry)
       const result = await this.sendWithRetry({
@@ -98,14 +108,14 @@ export class NotificationService implements INotificationService {
         subject,
         html,
         text,
-        replyTo
+        replyTo,
       });
 
       // 3. Log success
       logger.info('Email sent successfully', {
         template,
         recipient: this.maskEmail(recipient),
-        emailId: result.emailId
+        emailId: result.emailId,
       });
 
       return result;
@@ -114,12 +124,12 @@ export class NotificationService implements INotificationService {
       logger.error('Email send failed', {
         template,
         recipient: this.maskEmail(recipient),
-        error: error.message
+        error: error.message,
       });
 
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -163,6 +173,7 @@ export const notificationService = new NotificationService();
 **Responsibility**: Define contract for email provider adapters
 
 **Interface Definition**:
+
 ```typescript
 /**
  * Raw email payload (provider-agnostic)
@@ -210,6 +221,7 @@ export interface IEmailAdapter {
 **Responsibility**: Implement Resend-specific email sending
 
 **Implementation**:
+
 ```typescript
 import { Resend } from 'resend';
 import type { IEmailAdapter, RawEmailPayload } from './interface';
@@ -239,12 +251,12 @@ export class ResendAdapter implements IEmailAdapter {
         subject: payload.subject,
         html: payload.html,
         text: payload.text,
-        reply_to: payload.replyTo
+        reply_to: payload.replyTo,
       });
 
       return {
         success: true,
-        emailId: result.data?.id
+        emailId: result.data?.id,
       };
     } catch (error) {
       throw new Error(`Resend API error: ${error.message}`);
@@ -272,6 +284,7 @@ export class ResendAdapter implements IEmailAdapter {
 **Responsibility**: Select and initialize the correct email adapter
 
 **Implementation**:
+
 ```typescript
 import type { IEmailAdapter } from './interface';
 import { ResendAdapter } from './resend';
@@ -309,6 +322,7 @@ export const emailAdapter = createEmailAdapter();
 ```
 
 **To Switch Providers**:
+
 1. Implement new adapter (e.g., `sendgrid.ts`)
 2. Add case to factory
 3. Set `EMAIL_PROVIDER=sendgrid` in environment
@@ -321,6 +335,7 @@ export const emailAdapter = createEmailAdapter();
 **Responsibility**: Load email templates from database (Cloudflare Workers compatible)
 
 **Database Schema** (`email_templates` table):
+
 ```sql
 CREATE TABLE email_templates (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -345,6 +360,7 @@ INSERT INTO email_templates (name, subject, html_body, text_body, description) V
 ```
 
 **Drizzle Schema** (`packages/web/src/lib/server/db/schema/notifications.ts`):
+
 ```typescript
 import { pgTable, uuid, varchar, text, timestamp } from 'drizzle-orm/pg-core';
 
@@ -356,11 +372,12 @@ export const emailTemplates = pgTable('email_templates', {
   textBody: text('text_body').notNull(),
   description: text('description'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull()
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 ```
 
 **Implementation**:
+
 ```typescript
 import { db } from '$lib/server/db';
 import { emailTemplates } from '$lib/server/db/schema/notifications';
@@ -384,9 +401,11 @@ export interface TemplateContent {
  * Load template from database
  * Works in Cloudflare Workers (no filesystem access required)
  */
-export async function loadTemplate(templateName: string): Promise<TemplateContent> {
+export async function loadTemplate(
+  templateName: string
+): Promise<TemplateContent> {
   const template = await db.query.emailTemplates.findFirst({
-    where: eq(emailTemplates.name, templateName)
+    where: eq(emailTemplates.name, templateName),
   });
 
   if (!template) {
@@ -396,12 +415,13 @@ export async function loadTemplate(templateName: string): Promise<TemplateConten
   return {
     subject: template.subject,
     html: template.htmlBody,
-    text: template.textBody
+    text: template.textBody,
   };
 }
 ```
 
 **Benefits of Database Storage**:
+
 - ✅ Works in Cloudflare Workers (no filesystem)
 - ✅ Templates can be updated without redeploying code
 - ✅ Can add admin UI to manage templates (Phase 2)
@@ -415,6 +435,7 @@ export async function loadTemplate(templateName: string): Promise<TemplateConten
 **Responsibility**: Interpolate data into template
 
 **Implementation**:
+
 ```typescript
 import type { TemplateContent } from './loader';
 
@@ -430,7 +451,7 @@ export async function renderTemplate(
   return {
     subject: interpolate(template.subject, data),
     html: interpolate(template.html, data),
-    text: interpolate(template.text, data)
+    text: interpolate(template.text, data),
   };
 }
 
@@ -458,7 +479,7 @@ function escapeHtml(text: string): string {
     '<': '&lt;',
     '>': '&gt;',
     '"': '&quot;',
-    "'": '&#039;'
+    "'": '&#039;',
   };
   return text.replace(/[&<>"']/g, (char) => map[char]);
 }
@@ -473,6 +494,7 @@ function escapeHtml(text: string): string {
 **Template Seeding** (`packages/web/src/lib/server/db/seeds/email-templates.ts`):
 
 Templates are seeded during initial database setup. Each template includes:
+
 - **name**: Unique identifier (e.g., `'email-verification'`)
 - **subject**: Email subject line with variable placeholders
 - **html_body**: Professional HTML email template
@@ -501,6 +523,7 @@ Templates are seeded during initial database setup. Each template includes:
    - Variables: `customerName`, `orderNumber`, `items`, `totalAmount`, `receiptUrl`
 
 **Template Management**:
+
 - Seeded via database migration or seed script
 - Can be updated directly in database (no code deployment required)
 - Future: Admin UI for template editing (Phase 2)
@@ -513,6 +536,7 @@ Templates are seeded during initial database setup. Each template includes:
 **Responsibility**: Decouple email sending from HTTP request/response cycle
 
 **Architecture**:
+
 ```
 User Action (Auth, E-Commerce)
   → Queue Message to Cloudflare Queue
@@ -527,12 +551,14 @@ Cloudflare Worker (Consumer)
 ```
 
 **Benefits**:
+
 - ✅ Fast HTTP responses (no waiting for email API)
 - ✅ Automatic retries (Queue handles failures)
 - ✅ Scales independently of web requests
 - ✅ Resilient (Queue persists messages if Worker crashes)
 
 **Queue Configuration** (`wrangler.toml`):
+
 ```toml
 [[queues.producers]]
   queue = "email-notifications"
@@ -547,6 +573,7 @@ Cloudflare Worker (Consumer)
 ```
 
 **Producer** (Push to Queue from Web App):
+
 ```typescript
 // packages/web/src/lib/server/notifications/queue.ts
 import type { EmailPayload } from './service';
@@ -561,12 +588,13 @@ export async function enqueueEmail(
 ): Promise<void> {
   await queue.send({
     type: 'send-email',
-    payload
+    payload,
   });
 }
 ```
 
 **Consumer** (Worker that processes queue):
+
 ```typescript
 // workers/email-worker/src/index.ts
 import { notificationService } from './notifications';
@@ -579,18 +607,19 @@ export default {
 
         if (type === 'send-email') {
           await notificationService.sendEmail(payload);
-          message.ack();  // Acknowledge success
+          message.ack(); // Acknowledge success
         }
       } catch (error) {
         console.error('Email send failed:', error);
-        message.retry();  // Retry (up to max_retries)
+        message.retry(); // Retry (up to max_retries)
       }
     }
-  }
+  },
 };
 ```
 
 **Usage from Auth** (enqueue instead of direct send):
+
 ```typescript
 import { enqueueEmail } from '$lib/server/notifications/queue';
 
@@ -601,7 +630,7 @@ const user = await createUser({ email, password, name });
 await enqueueEmail(event.platform.env.EMAIL_QUEUE, {
   template: 'email-verification',
   recipient: user.email,
-  data: { userName: user.name, verificationUrl: '...' }
+  data: { userName: user.name, verificationUrl: '...' },
 });
 
 // Return immediately (user doesn't wait for email)
@@ -609,6 +638,7 @@ return { success: true };
 ```
 
 **Phase 1 Decision**:
+
 - **Start Simple**: Phase 1 can use **synchronous email sending** (await notificationService.sendEmail)
 - **Phase 2**: Add Queue for async sending (improved performance)
 - Both approaches use the same `notificationService` interface (easy to migrate)
@@ -620,6 +650,7 @@ return { success: true };
 ### Phase 1: Synchronous Email Sending
 
 **From Auth Service** (wait for email to send):
+
 ```typescript
 import { notificationService } from '$lib/server/notifications';
 
@@ -631,8 +662,8 @@ await notificationService.sendEmail({
     userName: user.name,
     verificationUrl: `${AUTH_URL}/verify-email?token=${token}`,
     platformName: 'Codex Platform',
-    year: new Date().getFullYear()
-  }
+    year: new Date().getFullYear(),
+  },
 });
 ```
 
@@ -651,8 +682,8 @@ await notificationService.sendEmail({
     userName: user.name,
     verificationUrl: `${AUTH_URL}/verify-email?token=${token}`,
     platformName: 'Codex Platform',
-    year: new Date().getFullYear()
-  }
+    year: new Date().getFullYear(),
+  },
 });
 
 // Send password reset
@@ -663,8 +694,8 @@ await notificationService.sendEmail({
     userName: user.name,
     resetUrl: `${AUTH_URL}/reset-password?token=${token}`,
     platformName: 'Codex Platform',
-    year: new Date().getFullYear()
-  }
+    year: new Date().getFullYear(),
+  },
 });
 ```
 
@@ -680,12 +711,14 @@ await notificationService.sendEmail({
   data: {
     customerName: customer.name,
     orderNumber: order.id,
-    items: order.items.map(item => `${item.name} - $${item.price}`).join('\n'),
+    items: order.items
+      .map((item) => `${item.name} - $${item.price}`)
+      .join('\n'),
     totalAmount: order.total,
     receiptUrl: `${BASE_URL}/orders/${order.id}/receipt`,
     platformName: 'Codex Platform',
-    year: new Date().getFullYear()
-  }
+    year: new Date().getFullYear(),
+  },
 });
 ```
 
@@ -696,6 +729,7 @@ await notificationService.sendEmail({
 ### Unit Tests
 
 **Test Notification Service** (`service.test.ts`):
+
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
 import { NotificationService } from './service';
@@ -705,7 +739,7 @@ describe('NotificationService', () => {
   it('sends email successfully', async () => {
     const mockAdapter: IEmailAdapter = {
       send: vi.fn().mockResolvedValue({ success: true, emailId: '123' }),
-      verify: vi.fn().mockResolvedValue(true)
+      verify: vi.fn().mockResolvedValue(true),
     };
 
     const service = new NotificationService(mockAdapter);
@@ -713,7 +747,10 @@ describe('NotificationService', () => {
     const result = await service.sendEmail({
       template: 'email-verification',
       recipient: 'test@example.com',
-      data: { userName: 'Test User', verificationUrl: 'https://example.com/verify' }
+      data: {
+        userName: 'Test User',
+        verificationUrl: 'https://example.com/verify',
+      },
     });
 
     expect(result.success).toBe(true);
@@ -721,16 +758,17 @@ describe('NotificationService', () => {
       to: 'test@example.com',
       subject: expect.any(String),
       html: expect.stringContaining('Test User'),
-      text: expect.stringContaining('Test User')
+      text: expect.stringContaining('Test User'),
     });
   });
 
   it('retries on failure', async () => {
     const mockAdapter: IEmailAdapter = {
-      send: vi.fn()
-        .mockRejectedValueOnce(new Error('Network error'))  // First call fails
-        .mockResolvedValueOnce({ success: true, emailId: '123' }),  // Retry succeeds
-      verify: vi.fn().mockResolvedValue(true)
+      send: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Network error')) // First call fails
+        .mockResolvedValueOnce({ success: true, emailId: '123' }), // Retry succeeds
+      verify: vi.fn().mockResolvedValue(true),
     };
 
     const service = new NotificationService(mockAdapter);
@@ -738,17 +776,20 @@ describe('NotificationService', () => {
     const result = await service.sendEmail({
       template: 'email-verification',
       recipient: 'test@example.com',
-      data: { userName: 'Test User', verificationUrl: 'https://example.com/verify' }
+      data: {
+        userName: 'Test User',
+        verificationUrl: 'https://example.com/verify',
+      },
     });
 
     expect(result.success).toBe(true);
-    expect(mockAdapter.send).toHaveBeenCalledTimes(2);  // Called twice (retry)
+    expect(mockAdapter.send).toHaveBeenCalledTimes(2); // Called twice (retry)
   });
 
   it('returns error if template not found', async () => {
     const mockAdapter: IEmailAdapter = {
       send: vi.fn(),
-      verify: vi.fn().mockResolvedValue(true)
+      verify: vi.fn().mockResolvedValue(true),
     };
 
     const service = new NotificationService(mockAdapter);
@@ -756,7 +797,7 @@ describe('NotificationService', () => {
     const result = await service.sendEmail({
       template: 'non-existent-template',
       recipient: 'test@example.com',
-      data: {}
+      data: {},
     });
 
     expect(result.success).toBe(false);
@@ -766,6 +807,7 @@ describe('NotificationService', () => {
 ```
 
 **Test Resend Adapter** (`adapters/resend.test.ts`):
+
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
 import { ResendAdapter } from './resend';
@@ -774,12 +816,12 @@ import { ResendAdapter } from './resend';
 vi.mock('resend', () => ({
   Resend: vi.fn().mockImplementation(() => ({
     emails: {
-      send: vi.fn().mockResolvedValue({ data: { id: 'email-123' } })
+      send: vi.fn().mockResolvedValue({ data: { id: 'email-123' } }),
     },
     domains: {
-      list: vi.fn().mockResolvedValue({ data: [] })
-    }
-  }))
+      list: vi.fn().mockResolvedValue({ data: [] }),
+    },
+  })),
 }));
 
 describe('ResendAdapter', () => {
@@ -790,7 +832,7 @@ describe('ResendAdapter', () => {
       to: 'test@example.com',
       subject: 'Test Email',
       html: '<p>Test</p>',
-      text: 'Test'
+      text: 'Test',
     });
 
     expect(result.success).toBe(true);
@@ -810,6 +852,7 @@ describe('ResendAdapter', () => {
 ### Integration Tests
 
 **Test End-to-End Email Flow** (`integration.test.ts`):
+
 ```typescript
 import { describe, it, expect } from 'vitest';
 import { notificationService } from './service';
@@ -818,13 +861,13 @@ describe('Notification Integration', () => {
   it('sends email verification end-to-end', async () => {
     const result = await notificationService.sendEmail({
       template: 'email-verification',
-      recipient: 'test@example.com',  // Use test email account
+      recipient: 'test@example.com', // Use test email account
       data: {
         userName: 'Integration Test',
         verificationUrl: 'https://example.com/verify?token=test',
         platformName: 'Codex Platform',
-        year: 2025
-      }
+        year: 2025,
+      },
     });
 
     expect(result.success).toBe(true);
@@ -839,6 +882,7 @@ describe('Notification Integration', () => {
 ### E2E Tests
 
 **Test Email Delivery in E2E Tests** (`auth.spec.ts`):
+
 ```typescript
 import { test, expect } from '@playwright/test';
 
@@ -857,7 +901,10 @@ test('user receives verification email', async ({ page }) => {
   expect(emails[0].subject).toContain('Verify your email');
 
   // Extract verification link from email
-  const verificationLink = extractLinkFromEmail(emails[0].html, '/verify-email');
+  const verificationLink = extractLinkFromEmail(
+    emails[0].html,
+    '/verify-email'
+  );
   expect(verificationLink).toBeDefined();
 
   // Click verification link
@@ -904,6 +951,7 @@ EMAIL_PROVIDER=resend
 ### Example: Switch to SendGrid
 
 **1. Implement SendGrid Adapter** (`adapters/sendgrid.ts`):
+
 ```typescript
 import sgMail from '@sendgrid/mail';
 import type { IEmailAdapter, RawEmailPayload } from './interface';
@@ -924,17 +972,17 @@ export class SendGridAdapter implements IEmailAdapter {
         to: payload.to,
         from: {
           email: process.env.EMAIL_FROM_ADDRESS!,
-          name: process.env.EMAIL_FROM_NAME || 'Codex Platform'
+          name: process.env.EMAIL_FROM_NAME || 'Codex Platform',
         },
         subject: payload.subject,
         html: payload.html,
         text: payload.text,
-        replyTo: payload.replyTo
+        replyTo: payload.replyTo,
       });
 
       return {
         success: true,
-        emailId: result[0].headers['x-message-id']
+        emailId: result[0].headers['x-message-id'],
       };
     } catch (error) {
       throw new Error(`SendGrid API error: ${error.message}`);
@@ -949,6 +997,7 @@ export class SendGridAdapter implements IEmailAdapter {
 ```
 
 **2. Update Adapter Factory** (`adapters/index.ts`):
+
 ```typescript
 import { SendGridAdapter } from './sendgrid';
 
@@ -957,7 +1006,7 @@ function createEmailAdapter(): IEmailAdapter {
     case 'resend':
       return new ResendAdapter();
     case 'sendgrid':
-      return new SendGridAdapter();  // Add this case
+      return new SendGridAdapter(); // Add this case
     default:
       throw new Error(`Unknown email provider: ${EMAIL_PROVIDER}`);
   }
@@ -965,6 +1014,7 @@ function createEmailAdapter(): IEmailAdapter {
 ```
 
 **3. Update Environment Variables**:
+
 ```bash
 # Remove Resend, add SendGrid
 EMAIL_PROVIDER=sendgrid
@@ -978,11 +1028,13 @@ SENDGRID_API_KEY=SG.xxxxxxxxxxxxxxxxxxxxx
 ## Performance & Scalability
 
 ### Phase 1 Performance Targets
+
 - **Email send latency**: < 5 seconds (p95)
 - **Template rendering**: < 50ms
 - **Retry delay**: Immediate (no backoff in Phase 1)
 
 ### Future Optimizations (Phase 2+)
+
 - **Email Queue**: Use Cloudflare Queue to send emails asynchronously
 - **Batch Sending**: Support sending multiple emails in one API call
 - **Template Caching**: Cache rendered templates in KV or memory to reduce database queries
@@ -993,12 +1045,14 @@ SENDGRID_API_KEY=SG.xxxxxxxxxxxxxxxxxxxxx
 ## Security Considerations
 
 ### Email Security
+
 -  All emails sent over HTTPS (Resend API uses TLS)
 -  SPF/DKIM records configured for domain (prevent spoofing)
 -  HTML escaping in templates (prevent XSS)
 -  Email masking in logs (GDPR compliance)
 
 ### API Key Management
+
 -  API keys stored in environment variables (never in code)
 -  Different API keys for dev and prod
 -  Rotate API keys periodically

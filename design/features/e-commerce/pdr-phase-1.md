@@ -9,6 +9,7 @@ Payment processing system for selling digital content (videos, audio) and offeri
 ## Problem Statement
 
 Creators need a way to monetize content because:
+
 - **Revenue Generation**: Primary business model for the platform
 - **Secure Payments**: Must handle credit cards securely (PCI compliance)
 - **Purchase Tracking**: Need record of who bought what for content access control
@@ -17,6 +18,7 @@ Creators need a way to monetize content because:
 - **Creator Payouts**: Track revenue per creator for future payout system (Phase 3)
 
 Without e-commerce:
+
 - No way for creators to earn money
 - No purchase records to control content access
 - No platform business model
@@ -25,6 +27,7 @@ Without e-commerce:
 ## Goals / Success Criteria
 
 ### Primary Goals
+
 1. **Stripe Integration** - Accept credit card payments via Stripe Checkout
 2. **One-Time Purchases** - Direct "Buy Now" button (no shopping cart in Phase 1)
 3. **Purchase Tracking** - Record every purchase for content access verification
@@ -34,6 +37,7 @@ Without e-commerce:
 7. **Refund Management** - Admins can initiate refunds via Stripe API
 
 ### Success Metrics
+
 - 95% checkout completion rate (Stripe hosted checkout)
 - Payment confirmation within 5 seconds of successful payment
 - 100% webhook processing reliability (retries on failure)
@@ -45,6 +49,7 @@ Without e-commerce:
 ## Scope
 
 ### In Scope (Phase 1 MVP)
+
 - **Stripe Checkout**:
   - Hosted checkout (Stripe-hosted payment page)
   - Credit card, Apple Pay, Google Pay support
@@ -82,6 +87,7 @@ Without e-commerce:
   - Revenue displayed in admin dashboard
 
 ### Explicitly Out of Scope (Future Phases)
+
 - **Shopping Cart** - Multi-item purchases (Phase 2)
 - **Subscriptions** - Recurring payments (Phase 2)
 - **Bundles/Packages** - Multi-content discounts (Phase 2)
@@ -96,48 +102,20 @@ Without e-commerce:
 
 ## Cross-Feature Dependencies
 
-### Content Management Feature (Phase 1)
-**Dependency**: Content must be published before it can be sold
-- Content has `price` field (decimal, can be $0)
-- Only `status = 'published'` content appears in catalog
-- Purchase records reference `content.id`
-- See [Content Management PRD](../content-management/pdr-phase-1.md)
-
-### Content Access Feature (Phase 1)
-**Dependency**: Content Access verifies purchases before granting access
-- **Critical**: `purchases` table is source of truth for access rights
-- Content Access queries: `SELECT * FROM purchases WHERE userId = ? AND itemId = ? AND refundedAt IS NULL`
-- See [Content Access PRD](../content-access/pdr-phase-1.md)
-
-### Auth Feature (Phase 1)
-**Dependency**: Only authenticated customers can purchase
-- Checkout requires `user.email` for Stripe
-- Purchase records link to `users.id`
-- See [Auth PRD](../auth/pdr-phase-1.md)
-
-### Notifications Feature (Phase 1)
-**Dependency**: Send purchase and refund confirmation emails
-- Webhook triggers `purchase-receipt` email
-- Refund triggers `refund-confirmation` email
-- See [Notifications PRD](../notifications/pdr-phase-1.md)
-
-### Admin Dashboard (Phase 1)
-**Dependency**: Creators view sales/revenue, initiate refunds
-- Orders list for creator
-- Revenue summary (total sales)
-- Refund button on purchase details
-- See [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md)
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#5-e-commerce) document for details.
 
 ---
 
 ## User Stories & Use Cases
 
 ### US-ECOMMERCE-001: Direct Purchase with Stripe
+
 **As a** Customer
 **I want to** purchase content with one click
 **So that** I can access it immediately without cart complexity
 
 **Flow:**
+
 1. Customer browses content catalog (published content only)
 2. Content detail page shows:
    - Title: "TypeScript Basics"
@@ -157,27 +135,30 @@ Without e-commerce:
      ```typescript
      const session = await stripe.checkout.sessions.create({
        customer_email: user.email,
-       line_items: [{
-         price_data: {
-           currency: 'usd',
-           unit_amount: 2999,  // $29.99 in cents
-           product_data: {
-             name: 'TypeScript Basics',
-             description: content.description,
-             images: [content.thumbnailUrl]
-           }
+       line_items: [
+         {
+           price_data: {
+             currency: 'usd',
+             unit_amount: 2999, // $29.99 in cents
+             product_data: {
+               name: 'TypeScript Basics',
+               description: content.description,
+               images: [content.thumbnailUrl],
+             },
+           },
+           quantity: 1,
          },
-         quantity: 1
-       }],
+       ],
        mode: 'payment',
-       success_url: 'https://codex.example.com/checkout/success?session_id={CHECKOUT_SESSION_ID}',
+       success_url:
+         'https://codex.example.com/checkout/success?session_id={CHECKOUT_SESSION_ID}',
        cancel_url: 'https://codex.example.com/content/{contentId}',
        metadata: {
          purchaseId: '{purchaseId}',
          userId: '{userId}',
          itemType: 'content',
-         itemId: '{contentId}'
-       }
+         itemId: '{contentId}',
+       },
      });
      ```
    - Stores `stripeCheckoutSessionId` in purchase record
@@ -200,6 +181,7 @@ Without e-commerce:
 14. Customer sees: "Thank you for your purchase! Enjoy your content."
 
 **Acceptance Criteria:**
+
 - Stripe Checkout session created successfully
 - Customer redirected to Stripe-hosted checkout
 - Payment processed securely (PCI compliant)
@@ -211,11 +193,13 @@ Without e-commerce:
 ---
 
 ### US-ECOMMERCE-002: Free Content Access (No Payment)
+
 **As a** Customer
 **I want to** access free content without payment
 **So that** I can try content before purchasing paid items
 
 **Flow:**
+
 1. Customer browses catalog, finds free content (price = $0)
 2. Content detail page shows "Get Access" button (not "Buy Now")
 3. Customer clicks "Get Access"
@@ -227,13 +211,14 @@ Without e-commerce:
      - `itemType = 'content'`
      - `itemId = {contentId}`
      - `pricePaid = 0`
-     - `status = 'completed'`  // Immediate completion
+     - `status = 'completed'` // Immediate completion
      - `purchasedAt = NOW()`
    - No Stripe interaction
 5. Frontend redirects to content player (video/audio)
 6. Customer can access content immediately
 
 **Acceptance Criteria:**
+
 - Free content accessible without Stripe checkout
 - Purchase record created for free content (for access tracking)
 - "Get Access" button shows for free content (not "Buy Now")
@@ -243,11 +228,13 @@ Without e-commerce:
 ---
 
 ### US-ECOMMERCE-003: Handle Payment Failure
+
 **As a** Customer
 **I want to** be notified if payment fails
 **So that** I can retry with a different payment method
 
 **Flow:**
+
 1. Customer enters credit card on Stripe Checkout
 2. Payment declined (insufficient funds)
 3. Stripe shows error: "Your card was declined. Please try another payment method."
@@ -255,6 +242,7 @@ Without e-commerce:
 5. Webhook processes successful payment (same as US-ECOMMERCE-001)
 
 **Alternative: Customer Abandons Checkout**
+
 1. Customer opens Stripe Checkout
 2. Customer closes browser tab (abandons payment)
 3. Stripe sends webhook: `checkout.session.expired` (after 24 hours)
@@ -264,6 +252,7 @@ Without e-commerce:
 5. Customer can click "Buy Now" again to retry
 
 **Acceptance Criteria:**
+
 - Payment failures handled gracefully by Stripe (customer can retry)
 - Abandoned checkouts marked as `failed` after 24 hours
 - Failed purchases don't grant content access
@@ -272,14 +261,17 @@ Without e-commerce:
 ---
 
 ### US-ECOMMERCE-004: View Purchase History
+
 **As a** Customer
 **I want to** see my purchase history
 **So that** I can track my spending and access receipts
 
 **Flow:**
+
 1. Customer navigates to `/account/purchases`
 2. System queries `purchases` table for customer
 3. Page displays:
+
    ```
    Your Purchases
 
@@ -295,6 +287,7 @@ Without e-commerce:
    Free Audio Sample - $0.00
    [Access Content]
    ```
+
 4. Customer clicks "View Receipt"
 5. Receipt page shows:
    - Purchase ID
@@ -306,6 +299,7 @@ Without e-commerce:
    - Stripe receipt URL (if paid)
 
 **Acceptance Criteria:**
+
 - Purchase history shows all purchases (free and paid)
 - Purchases sorted by date (newest first)
 - Receipt accessible for each paid purchase
@@ -316,11 +310,13 @@ Without e-commerce:
 ---
 
 ### US-ECOMMERCE-005: Admin Refund Purchase
+
 **As a** Creator/Admin
 **I want to** refund a customer's purchase
 **So that** I can resolve customer issues
 
 **Flow:**
+
 1. Creator navigates to `/admin/purchases`
 2. Creator searches for customer email or purchase ID
 3. Purchase detail page shows:
@@ -346,6 +342,7 @@ Without e-commerce:
 9. Customer loses access to content (Content Access checks `refundedAt IS NULL`)
 
 **Acceptance Criteria:**
+
 - Admin can refund any purchase
 - Stripe API refund call succeeds
 - Purchase record updated with refund details
@@ -358,13 +355,16 @@ Without e-commerce:
 ---
 
 ### US-ECOMMERCE-006: Creator Views Revenue
+
 **As a** Creator
 **I want to** see my total sales revenue
 **So that** I can track my earnings
 
 **Flow:**
+
 1. Creator navigates to `/admin/dashboard`
 2. Dashboard shows:
+
    ```
    Revenue Summary
    Total Sales: $1,234.56 (42 purchases)
@@ -380,10 +380,12 @@ Without e-commerce:
    [Date: 2025-10-19] Customer: jane@example.com
    React Hooks Guide - $19.99 [View]
    ```
+
 3. Creator clicks "View All Purchases"
 4. Purchase list shows all purchases for creator's content
 
 **Acceptance Criteria:**
+
 - Revenue summary shows total sales and refunds
 - Net revenue calculated (sales - refunds)
 - Purchase list filterable by date range and status
@@ -396,6 +398,7 @@ Without e-commerce:
 ## User Flows (Visual)
 
 See diagrams:
+
 - [Direct Purchase Checkout Flow](../_assets/direct-checkout-flow.png)
 - [Webhook Processing](../_assets/webhook-processing-flow.png)
 - [Free Content Access](../_assets/free-content-flow.png)
@@ -406,6 +409,7 @@ See diagrams:
 ## Dependencies
 
 ### Internal Dependencies (Phase 1)
+
 - **Content Management**: Content pricing and publication status
 - **Content Access**: Verifies purchases before granting access
 - **Auth**: User authentication for checkout
@@ -413,6 +417,7 @@ See diagrams:
 - **Admin Dashboard**: Creator revenue display, refund management
 
 ### External Dependencies
+
 - **Stripe**: Payment processing
   - Stripe Checkout (hosted checkout page)
   - Stripe API (create sessions, verify payments, refunds)
@@ -426,6 +431,7 @@ See diagrams:
 ## Acceptance Criteria (Feature-Level)
 
 ### Functional Requirements
+
 - Customers can purchase content with "Buy Now" button
 - Checkout creates Stripe Checkout session
 - Stripe Checkout accepts credit cards, Apple Pay, Google Pay
@@ -438,6 +444,7 @@ See diagrams:
 - Refunded customers lose content access
 
 ### Payment Requirements
+
 - All payments processed via Stripe (PCI compliant)
 - Webhook signature verification (prevent fraud)
 - Idempotent webhook handling (no duplicate purchases)
@@ -446,6 +453,7 @@ See diagrams:
 - USD only in Phase 1
 
 ### Refund Requirements
+
 - Admins can refund any completed purchase
 - Refund processed via Stripe API
 - Customer receives funds in 5-10 business days
@@ -455,6 +463,7 @@ See diagrams:
 - Revenue adjusted for refunds
 
 ### Performance Requirements
+
 - Checkout session created in < 2 seconds
 - Webhook processed in < 5 seconds
 - Purchase record updated within 10 seconds of payment
@@ -462,6 +471,7 @@ See diagrams:
 - Refund processed in < 1 minute
 
 ### Security Requirements
+
 - Stripe API keys stored securely (environment variables)
 - Webhook signature verification (prevent unauthorized webhooks)
 - Only authenticated users can purchase
@@ -469,6 +479,7 @@ See diagrams:
 - Purchase records immutable (except status/refund fields)
 
 ### Testing Requirements
+
 - Unit tests for purchase creation logic
 - Integration tests for Stripe API calls (checkout, refunds)
 - E2E tests for complete purchase flow
@@ -496,6 +507,7 @@ See diagrams:
 ## Notes
 
 ### Why No Shopping Cart in Phase 1?
+
 - **Simplicity**: Single-item purchases reduce complexity
 - **Faster Checkout**: Fewer steps = higher conversion
 - **Technical Simplicity**: No cart state management, no cart expiration
@@ -503,6 +515,7 @@ See diagrams:
 - **Phase 2**: Add cart for multi-item purchases if needed
 
 ### Why Stripe?
+
 - **Industry Standard**: Most trusted payment processor
 - **PCI Compliance**: Stripe handles card security (we never touch card data)
 - **Hosted Checkout**: Reduces frontend complexity and abandonment
@@ -512,18 +525,21 @@ See diagrams:
 - **Pricing**: 2.9% + $0.30 per transaction (standard)
 
 ### Purchase Record as Source of Truth
+
 - **Critical for Content Access**: `purchases` table determines who can access what
 - **Simple Query**: `SELECT * FROM purchases WHERE userId = ? AND itemId = ? AND refundedAt IS NULL`
 - **Refunds**: Setting `refundedAt` revokes access immediately
 - **Audit Trail**: Never delete purchases (audit/analytics)
 
 ### Webhook Reliability
+
 - **Stripe Retry Logic**: Automatically retries webhooks up to 3 days
 - **Idempotency**: Check if purchase already completed before updating
 - **Signature Verification**: Prevent fake webhooks (HMAC SHA-256)
 - **Logging**: Log all webhook events for debugging
 
 ### Refund Handling
+
 - **Stripe API**: Full refund via `stripe.refunds.create()`
 - **Partial Refunds**: Phase 2 (Phase 1 is full refunds only)
 - **Access Revocation**: Immediate (Content Access checks `refundedAt IS NULL`)
@@ -531,11 +547,13 @@ See diagrams:
 - **Customer Experience**: Funds returned in 5-10 business days (Stripe standard)
 
 ### Revenue Tracking (Phase 1)
+
 - Track revenue per creator for future payout system
 - Phase 1: Display only (no automatic payouts)
 - Phase 3: Stripe Connect for creator payouts (platform fee + creator transfer)
 
 ### State Management (TDD Note)
+
 - Client-side state management critical for snappy UX
 - Consider: Zustand, TanStack Query, or SvelteKit stores
 - Cache purchase status to avoid repeated API calls

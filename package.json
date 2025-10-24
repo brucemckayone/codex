@@ -28,10 +28,15 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "act:list": "act -l",
+    "act:test": "act -j test",
+    "act:test:verbose": "act -j test --verbose",
+    "act:dry": "act -n"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",
+    "@eslint/js": "^9.38.0",
     "@playwright/test": "^1.56.1",
     "@sveltejs/mcp": "^0.1.9",
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
@@ -54,6 +59,8 @@
     "prettier": "^3.6.2",
     "prettier-plugin-svelte": "^3.4.0",
     "svelte": "^5.41.2",
+    "svelte-eslint-parser": "^1.4.0",
+    "typescript": "^5.7.3",
     "vite": "^6.4.1",
     "vitest": "^4.0.2",
     "wrangler": "^4.45.0"
