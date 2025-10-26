@@ -2,6 +2,8 @@
 .env.*
 **/.env
 **/.env.*
+env.dev
+env.prod
 node_modules
 *.png
 

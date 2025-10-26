@@ -17,9 +17,7 @@ Codex/
 │   ├── database/               # Shared database schema & client
 │   ├── validation/             # Shared Zod schemas
 │   ├── cloudflare-clients/     # Shared Cloudflare service clients (R2, KV)
-│   ├── core-services/          # Shared business logic (Purchases, Content Access, etc.)
-│   ├── auth/                   # ✅ NEW - Shared auth logic
-│   └── notifications/          # ✅ NEW - Shared notification service
+│   └── test-utils/             # Shared testing utilities
 ├── scripts/                    # Build & deployment scripts
 └── infrastructure/             # Docker Compose, etc.
 ```
@@ -29,70 +27,7 @@ Codex/
 - **`packages/database`**: Single source of truth for database schema (Drizzle) and the database client.
 - **`packages/validation`**: Shared Zod schemas for type-safe validation across the stack.
 - **`packages/cloudflare-clients`**: Framework-agnostic clients for interacting with Cloudflare services like R2 and KV.
-- **`packages/core-services`**: Shared business logic for core features like e-commerce and content access.
-- **`packages/auth`**: Shared, framework-agnostic authentication logic (BetterAuth).
-- **`packages/notifications`**: Shared service for sending transactional emails via an abstracted provider.
-
-## Shared Packages
-
-### packages/auth
-
-**Purpose**: Contains the shared, framework-agnostic authentication logic powered by BetterAuth. This allows both the web app and workers to validate sessions and user roles.
-
-```
-packages/auth/
-├── src/
-│   ├── index.ts
-│   ├── service.ts      # BetterAuth instance configuration
-│   └── types.ts
-└── package.json
-```
-
-### packages/notifications
-
-**Purpose**: Provides a provider-agnostic service for sending transactional emails. This ensures that any part of the system (web app or workers) can send emails without being locked into a specific provider like Resend.
-
-```
-packages/notifications/
-├── src/
-│   ├── index.ts
-│   ├── service.ts
-│   ├── types.ts
-│   ├── adapters/       # Resend, SendGrid, etc.
-│   └── templates/      # Email template loader/renderer
-└── package.json
-```
-
-### packages/core-services
-
-**Purpose**: Shared business logic services that operate on data and implement domain rules. Used by the SvelteKit app and workers.
-
-```
-packages/core-services/
-├── src/
-│   ├── index.ts
-│   ├── purchases/
-│   ├── content-access/
-│   └── platform-settings/
-└── package.json
-```
-
-### packages/cloudflare-clients
-
-**Purpose**: Shared, framework-agnostic clients for Cloudflare services (R2, KV).
-
-```
-packages/cloudflare-clients/
-├── src/
-│   ├── index.ts
-│   ├── r2/
-│   └── kv/
-└── package.json
-```
-
-### packages/database & validation
-
-These packages contain the shared database schema/client and Zod validation schemas, respectively, and are used by all other packages and apps.
+- **`packages/test-utils`**: Shared testing utilities, including helpers for Miniflare.
 
 ## SvelteKit App Structure (apps/web)
 
@@ -119,9 +54,6 @@ import { SomeComponent } from '$lib/features/some-feature/components';
 
 // Use package imports for shared packages
 import { db } from '@codex/database';
-import { auth } from '@codex/auth';
-import { notificationService } from '@codex/notifications';
-import { purchasesService } from '@codex/core-services';
 import { R2Client } from '@codex/cloudflare-clients';
 ```
 
@@ -130,9 +62,6 @@ import { R2Client } from '@codex/cloudflare-clients';
 ```typescript
 // Package imports are the ONLY way to share code with workers
 import { db } from '@codex/database';
-import { auth } from '@codex/auth';
-import { notificationService } from '@codex/notifications';
-import { purchasesService } from '@codex/core-services';
 ```
 
 ### Import Rules

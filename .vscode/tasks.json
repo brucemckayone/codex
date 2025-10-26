@@ -1,0 +1,186 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: Full Stack",
+      "type": "shell",
+      "command": "pnpm dev",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "detail": "Start Docker + Web + Queue Consumer (uses pnpm dev)"
+    },
+    {
+      "label": "Dev: Web Only",
+      "type": "shell",
+      "command": "pnpm dev:web",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "detail": "Start SvelteKit dev server only (localhost:5173)"
+    },
+    {
+      "label": "Dev: Worker Only",
+      "type": "shell",
+      "command": "pnpm dev:worker",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "detail": "Start queue-consumer worker with Miniflare"
+    },
+    {
+      "label": "Docker: Start",
+      "type": "shell",
+      "command": "pnpm docker:up",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Start Postgres + Neon HTTP Proxy (docker-compose up)"
+    },
+    {
+      "label": "Docker: Stop",
+      "type": "shell",
+      "command": "pnpm docker:down",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Stop Docker services (docker-compose down)"
+    },
+    {
+      "label": "Cloudflare Tunnel: Start",
+      "type": "shell",
+      "command": "cloudflared tunnel --config infrastructure/cloudflare-tunnel/config.yml run codex-local",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "detail": "Expose local dev at https://local.revelations.studio"
+    },
+    {
+      "label": "Test: All",
+      "type": "shell",
+      "command": "pnpm test:all",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Run all tests (unit + e2e)"
+    },
+    {
+      "label": "Test: Watch",
+      "type": "shell",
+      "command": "pnpm test:watch",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "detail": "Run tests in watch mode"
+    },
+    {
+      "label": "Test: E2E",
+      "type": "shell",
+      "command": "pnpm test:e2e",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Run Playwright E2E tests"
+    },
+    {
+      "label": "Test: E2E UI",
+      "type": "shell",
+      "command": "pnpm test:e2e:ui",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Run E2E tests with Playwright UI"
+    },
+    {
+      "label": "Lint: Check",
+      "type": "shell",
+      "command": "pnpm lint",
+      "problemMatcher": ["$eslint-stylish"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Run ESLint"
+    },
+    {
+      "label": "Lint: Fix",
+      "type": "shell",
+      "command": "pnpm lint:fix",
+      "problemMatcher": ["$eslint-stylish"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Run ESLint with --fix"
+    },
+    {
+      "label": "Format: Check",
+      "type": "shell",
+      "command": "pnpm format:check",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Check formatting with Prettier"
+    },
+    {
+      "label": "Format: Write",
+      "type": "shell",
+      "command": "pnpm format",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Format all files with Prettier"
+    },
+    {
+      "label": "TypeCheck",
+      "type": "shell",
+      "command": "pnpm typecheck",
+      "problemMatcher": ["$tsc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Run TypeScript type checking"
+    }
+  ]
+}

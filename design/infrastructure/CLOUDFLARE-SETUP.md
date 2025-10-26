@@ -1,21 +1,22 @@
-# Cloudflare Setup Checklist - Phase 1 MVP
+# Cloudflare Setup Checklist - Phase 1 MVP (IaC Approach)
 
 **Status**: Ready for Implementation
 **Last Updated**: 2025-10-26
-**Document Version**: 1.0
+**Document Version**: 2.0 - CLI-First
 
-This document provides step-by-step instructions for setting up Cloudflare resources for Codex deployment. Follow these instructions in order.
+This document provides step-by-step instructions for setting up Cloudflare resources using **Wrangler CLI** (Infrastructure as Code). UI instructions included as fallback only.
 
 ---
 
 ## Overview
 
-You will create:
+You will create via CLI:
 - **4 R2 Buckets** (media, resources, assets, platform)
 - **1 KV Namespace** (for sessions, rate limiting, and caching)
+- **Environment variables** (via Cloudflare Pages API)
 - **No Queues** (disabled for Phase 1 MVP - cost optimization)
 
-**Estimated Setup Time**: 20-30 minutes
+**Estimated Setup Time**: 15-20 minutes (CLI approach is faster)
 **Total Monthly Cost**: ~$0.30 (within free tier for MVP)
 
 ---
@@ -28,535 +29,897 @@ You will create:
 - SvelteKit adapter configured
 
 ✅ **You Will Need:**
-- Cloudflare Dashboard access
-- R2 API credentials (to be generated)
+- Cloudflare account with API token access
+- `wrangler` CLI installed: `npm install -g wrangler` or `pnpm add -g wrangler`
+- `curl` command available (for API calls)
 - Text editor to save configuration values
 
 ---
 
-# PHASE 1: Create R2 Buckets
+# QUICK START (Copy-Paste Commands)
 
-## Step 1.1: Create `codex-media-production` Bucket
+If you're impatient, run these in order:
+
+```bash
+# 1. Authenticate with Cloudflare
+wrangler login
+
+# 2. Create all 4 R2 buckets
+wrangler r2 bucket create codex-media-production
+wrangler r2 bucket create codex-resources-production
+wrangler r2 bucket create codex-assets-production
+wrangler r2 bucket create codex-platform-production
+
+# 3. Create KV namespace
+wrangler kv:namespace create CODEX_KV
+
+# 4. Get your Account ID
+ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
+echo "Your Account ID: $ACCOUNT_ID"
+
+# 5. Create R2 API Token (see instructions below for full details)
+# Then set environment variables in Cloudflare Pages
+
+# 6. All done! Verify below.
+```
+
+---
+
+# PHASE 1: Authentication & Account Setup
+
+## Step 1.1: Install Wrangler CLI
+
+```bash
+# Using npm
+npm install -g wrangler
+
+# OR using pnpm (recommended)
+pnpm add -g wrangler
+
+# Verify installation
+wrangler --version
+```
+
+---
+
+## Step 1.2: Authenticate with Cloudflare
+
+```bash
+wrangler login
+```
+
+This opens a browser to authorize Cloudflare CLI access. Follow the prompts and you'll be authenticated.
+
+✅ **Authenticated**
+
+---
+
+## Step 1.3: Get Your Cloudflare Account ID
+
+```bash
+# Get account info as JSON
+wrangler whoami --json
+
+# Extract just the account ID
+ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
+echo "Account ID: $ACCOUNT_ID"
+
+# Save this value - you'll need it later
+```
+
+**Expected output**:
+```json
+{
+  "account": {
+    "id": "abc123def456ghi789",
+    "name": "your-email@example.com"
+  }
+}
+```
+
+Save the `id` value for later use.
+
+✅ **Account ID obtained**
+
+---
+
+# PHASE 2: Create R2 Buckets (CLI)
+
+All buckets created with one command each.
+
+## Step 2.1: Create `codex-media-production` Bucket
+
+```bash
+wrangler r2 bucket create codex-media-production
+```
+
+**Expected output**:
+```
+✓ Successfully created bucket: codex-media-production
+```
+
+✅ **Bucket created**
+
+---
+
+## Step 2.2: Create `codex-resources-production` Bucket
+
+```bash
+wrangler r2 bucket create codex-resources-production
+```
+
+✅ **Bucket created**
+
+---
+
+## Step 2.3: Create `codex-assets-production` Bucket
+
+```bash
+wrangler r2 bucket create codex-assets-production
+```
+
+✅ **Bucket created**
+
+---
+
+## Step 2.4: Create `codex-platform-production` Bucket
+
+```bash
+wrangler r2 bucket create codex-platform-production
+```
+
+✅ **Bucket created**
+
+---
+
+## Step 2.5: Verify All Buckets Created
+
+```bash
+wrangler r2 bucket list
+```
+
+**Expected output**:
+```
+codex-assets-production
+codex-media-production
+codex-platform-production
+codex-resources-production
+```
+
+If all 4 appear, proceed to Step 3. If any are missing, create them above.
+
+✅ **All buckets verified**
+
+---
+
+# PHASE 3: Configure CORS for Upload Support
+
+CORS must be configured on each bucket that accepts direct uploads.
+
+## Step 3.1: Create CORS Configuration File
+
+Create file: `cors-config.json`
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://codex.example.com"],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+**Replace `https://codex.example.com`** with your actual domain:
+- For Cloudflare Pages: `https://codex-abc123.pages.dev`
+- For custom domain: `https://yourdomain.com`
+
+---
+
+## Step 3.2: Apply CORS to All Buckets (Using API)
+
+Since Wrangler doesn't have a CORS command yet, use Cloudflare API:
+
+```bash
+# Set these variables
+ACCOUNT_ID="your-account-id-from-step-1.3"
+API_TOKEN="your-api-token-from-step-5"
+CORS_FILE="cors-config.json"
+
+# Apply CORS to each bucket
+for BUCKET in codex-media-production codex-resources-production codex-assets-production codex-platform-production; do
+  curl -X PUT \
+    "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/r2/buckets/$BUCKET/cors" \
+    -H "Authorization: Bearer $API_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d @$CORS_FILE
+done
+```
+
+**Or apply manually via UI** (if curl is annoying):
 
 1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/)
-2. Navigate to **R2** in the left sidebar
-3. Click **Create bucket**
-4. **Bucket name**: `codex-media-production`
-5. **Region**: Choose closest to your users (or leave default)
-6. Click **Create bucket**
+2. **R2** → Click each bucket → **Settings** → **CORS configuration** → **Edit**
+3. Paste the JSON from `cors-config.json`
+4. Click **Save**
 
-✅ **Bucket created** - Stores original and transcoded media files
+✅ **CORS configured for all buckets**
 
 ---
 
-## Step 1.2: Create `codex-resources-production` Bucket
+# PHASE 4: Create KV Namespace (CLI)
 
-1. In R2 dashboard, click **Create bucket** again
-2. **Bucket name**: `codex-resources-production`
-3. **Region**: Same as Step 1.1 (consistency)
-4. Click **Create bucket**
-
-✅ **Bucket created** - Stores PDFs, workbooks, downloadable files
-
----
-
-## Step 1.3: Create `codex-assets-production` Bucket
-
-1. In R2 dashboard, click **Create bucket** again
-2. **Bucket name**: `codex-assets-production`
-3. **Region**: Same as previous buckets
-4. Click **Create bucket**
-
-✅ **Bucket created** - Stores thumbnails, logos, branding images
-
----
-
-## Step 1.4: Create `codex-platform-production` Bucket
-
-1. In R2 dashboard, click **Create bucket** again
-2. **Bucket name**: `codex-platform-production`
-3. **Region**: Same as previous buckets
-4. Click **Create bucket**
-
-✅ **Bucket created** - Stores platform-wide assets (email logos, legal docs)
-
----
-
-## Step 1.5: Verify All Buckets Created
-
-In R2 dashboard, you should now see:
-```
-✓ codex-media-production
-✓ codex-resources-production
-✓ codex-assets-production
-✓ codex-platform-production
+```bash
+wrangler kv:namespace create CODEX_KV
 ```
 
-If all 4 appear, proceed to Step 2. If any are missing, go back and create them.
-
----
-
-# PHASE 2: Configure CORS for Upload Support
-
-Each bucket that accepts direct uploads needs CORS enabled. Follow these steps for each bucket.
-
-## Step 2.1: Configure CORS for `codex-media-production`
-
-1. Click on **codex-media-production** bucket
-2. Go to **Settings** tab
-3. Scroll to **CORS configuration**
-4. Click **Edit**
-5. Enter the following JSON:
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://codex.example.com"],
-    "AllowedMethods": ["GET", "HEAD", "PUT"],
-    "AllowedHeaders": ["*"],
-    "MaxAgeSeconds": 3600
-  }
-]
+**Expected output**:
+```
+✓ Successfully created namespace CODEX_KV
+[[kv_namespaces]]
+binding = "CODEX_KV"
+id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+preview_id = "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
 ```
 
-6. Replace `https://codex.example.com` with your actual domain (e.g., `https://mysite.pages.dev` for now)
-7. Click **Save**
-
-✅ **CORS enabled** - Allows direct browser uploads to R2
-
----
-
-## Step 2.2: Configure CORS for `codex-resources-production`
-
-1. Click on **codex-resources-production** bucket
-2. Go to **Settings** tab
-3. Scroll to **CORS configuration**
-4. Click **Edit**
-5. Enter the same JSON as Step 2.1:
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://codex.example.com"],
-    "AllowedMethods": ["GET", "HEAD", "PUT"],
-    "AllowedHeaders": ["*"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
-
-6. Replace domain with your actual domain
-7. Click **Save**
-
-✅ **CORS enabled**
-
----
-
-## Step 2.3: Configure CORS for `codex-assets-production`
-
-1. Click on **codex-assets-production** bucket
-2. Go to **Settings** tab
-3. Scroll to **CORS configuration**
-4. Click **Edit**
-5. Enter the same JSON as Steps 2.1-2.2
-6. Click **Save**
-
-✅ **CORS enabled**
-
----
-
-## Step 2.4: Configure CORS for `codex-platform-production`
-
-1. Click on **codex-platform-production** bucket
-2. Go to **Settings** tab
-3. Scroll to **CORS configuration**
-4. Click **Edit**
-5. Enter the same JSON
-6. Click **Save**
-
-✅ **CORS enabled** - All buckets now support uploads
-
----
-
-# PHASE 3: Generate R2 API Credentials
-
-You need API credentials to access R2 from your SvelteKit application.
-
-## Step 3.1: Create R2 API Token
-
-1. In Cloudflare Dashboard, go to **My Profile** (top right corner)
-2. Click **API Tokens**
-3. Click **Create Token**
-4. Under **API token templates**, find **"Edit Cloudflare R2"**
-5. Click **Use template**
-
----
-
-## Step 3.2: Configure Token Permissions
-
-On the token creation page:
-
-**Permissions:**
-- R2 → All buckets → `read`
-- R2 → All buckets → `write`
-- R2 → All buckets → `list`
-
-(Should be pre-selected if you used the template)
-
-**Account Resources:**
-- Select **Include All accounts** OR select your specific account
-
-**TTL (Time to Live):**
-- Set to **1 year** (or your preference for production)
-
----
-
-## Step 3.3: Get Access Key ID
-
-1. Scroll down to **API Token Details**
-2. You'll see options for:
-   - **Access Key ID**
-   - **Secret Access Key**
-
-3. Click **Create S3 API Token** button
-4. On the next page, you'll see:
-   ```
-   Access Key ID: xxxxxxxxxxxxxxx
-   Secret Access Key: xxxxxxxxxxxxxxx
-   Endpoint: https://[account-id].r2.cloudflarestorage.com
-   ```
-
-5. **Copy and save** these three values in a secure location (password manager, .env file, etc.)
-
-✅ **Credentials generated**
-
----
-
-## Step 3.4: Find Your Cloudflare Account ID
-
-1. Go back to Dashboard home
-2. Look for **Account ID** on the right sidebar (usually bottom right)
-3. Click to copy it
-4. Save this value - you'll need it soon
-
-✅ **Account ID saved**
-
----
-
-# PHASE 4: Create KV Namespace
-
-KV is used for session caching, rate limiting, and general application cache. Start with one unified namespace.
-
-## Step 4.1: Create KV Namespace
-
-1. In Cloudflare Dashboard, navigate to **Workers & Pages** → **KV** (left sidebar)
-2. Click **Create a namespace**
-3. **Namespace name**: `CODEX_KV`
-4. Click **Create**
+**Save these values** - you'll need the `id` in Step 5.
 
 ✅ **KV namespace created**
 
 ---
 
-## Step 4.2: Get KV Namespace ID
+## Step 4.2: Get KV Namespace ID (If Needed)
 
-1. In KV dashboard, find `CODEX_KV` in the list
-2. Click on it
-3. Look for **Namespace ID** in the details
-4. Copy and save this value
-
-✅ **KV Namespace ID saved**
-
----
-
-# PHASE 5: Set Environment Variables in Cloudflare Pages
-
-Now you'll configure environment variables so your SvelteKit app can access R2 and KV.
-
-## Step 5.1: Navigate to Pages Settings
-
-1. Go to **Cloudflare Dashboard**
-2. Click **Pages** (left sidebar)
-3. Click your project: **codex**
-4. Click **Settings** (top tabs)
-5. Click **Environment variables** (left sidebar)
-
----
-
-## Step 5.2: Add Production Environment Variables
-
-Click **Production** tab and add these variables:
-
-```
-R2_ACCOUNT_ID = <your-account-id-from-step-3.4>
-R2_ACCESS_KEY_ID = <access-key-id-from-step-3.3>
-R2_SECRET_ACCESS_KEY = <secret-access-key-from-step-3.3>
-R2_BUCKET_MEDIA = codex-media-production
-R2_BUCKET_RESOURCES = codex-resources-production
-R2_BUCKET_ASSETS = codex-assets-production
-R2_BUCKET_PLATFORM = codex-platform-production
-
-DATABASE_URL = <leave-empty-for-now>
-AUTH_SECRET = <generate-below>
-AUTH_URL = https://<your-pages-domain>.pages.dev
-```
-
-### Generate AUTH_SECRET
-
-Run this in your terminal:
+If you need to retrieve the namespace ID later:
 
 ```bash
-openssl rand -hex 32
+# List all KV namespaces (as JSON for easy parsing)
+wrangler kv:namespace list --json
+
+# Extract just the production namespace ID
+wrangler kv:namespace list --json | jq -r '.[] | select(.title == "CODEX_KV") | .id'
 ```
 
-Copy the output (a long hexadecimal string) and paste it as `AUTH_SECRET` value.
-
-### For DATABASE_URL
-
-Leave this empty for now - you'll configure Neon Postgres in a separate step.
-
-### For AUTH_URL
-
-Find your Pages domain:
-1. Go to **Cloudflare Pages** → **codex** → **Deployments**
-2. Look for the live deployment URL (e.g., `https://codex-abc123.pages.dev`)
-3. Use that as AUTH_URL
+✅ **KV Namespace ID obtained**
 
 ---
 
-## Step 5.3: Add Preview Environment Variables
+# PHASE 5: Generate R2 API Token (CLI + Manual)
 
-Click **Preview** tab and add these:
+R2 API tokens must be created via UI or Cloudflare API (not Wrangler). Here's the quickest way:
+
+## Step 5.1: Create Token via Cloudflare API
+
+```bash
+# Use your existing API token (create one via UI first if needed)
+# Or use this to create a new one programmatically:
+
+API_TOKEN_NAME="codex-r2-api-token"
+ACCOUNT_ID="your-account-id-from-step-1.3"
+
+# Create S3-compatible API token
+curl -X POST https://api.cloudflare.com/client/v4/user/tokens \
+  -H "Authorization: Bearer YOUR_GLOBAL_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "'$API_TOKEN_NAME'",
+    "ttl": 31536000,
+    "policies": [
+      {
+        "effect": "allow",
+        "resources": {
+          "com.cloudflare.api/account/r2/*": "*"
+        },
+        "permissions": [
+          "com.cloudflare.api.account.r2.bucket.list",
+          "com.cloudflare.api.account.r2.bucket.read",
+          "com.cloudflare.api.account.r2.bucket.write"
+        ]
+      }
+    ]
+  }'
+```
+
+---
+
+## Step 5.2: Create Token via UI (Easier)
+
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. **My Profile** (top right) → **API Tokens**
+3. **Create Token**
+4. Use template: **"Edit Cloudflare R2"** → **Use template**
+5. Leave defaults selected:
+   - Account Resources: Include All Accounts
+   - TTL: 1 year (or your preference)
+6. Click **Create Token**
+7. Copy the token value (you'll see it once)
+
+✅ **API Token created**
+
+---
+
+## Step 5.3: Create S3 API Token (For R2 Direct Access)
+
+This is what you use in your app code:
+
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. **R2** (left sidebar) → **Settings** → **API tokens** → **Create API token**
+3. Select: **S3 API token**
+4. Give it a name: `codex-r2-s3-token`
+5. TTL: 1 year
+6. Click **Create API token**
+7. You'll see:
+   ```
+   Access Key ID: xxxxxxxxxxxxx
+   Secret Access Key: xxxxxxxxxxxxx
+   Endpoint: https://[account-id].r2.cloudflarestorage.com
+   ```
+
+**Copy all three values** and save them securely.
+
+✅ **S3 API Token created**
+
+---
+
+# PHASE 6: Set Environment Variables in Cloudflare Pages (CLI)
+
+Use Cloudflare API to set environment variables programmatically:
+
+## Step 6.1: Create Environment Variables Script
+
+Create file: `setup-env-vars.sh`
+
+```bash
+#!/bin/bash
+
+# Configuration
+ACCOUNT_ID="your-account-id"
+PROJECT_NAME="codex"
+CLOUDFLARE_API_TOKEN="your-api-token-from-step-5.1"
+
+# R2 Configuration
+R2_ACCOUNT_ID="your-r2-account-id"
+R2_ACCESS_KEY_ID="your-access-key-from-step-5.3"
+R2_SECRET_ACCESS_KEY="your-secret-key-from-step-5.3"
+
+# Auth Configuration
+AUTH_SECRET=$(openssl rand -hex 32)
+echo "Generated AUTH_SECRET: $AUTH_SECRET"
+
+# Find your Pages domain
+PAGES_DOMAIN="codex-abc123.pages.dev"  # Replace with your actual domain
+AUTH_URL="https://$PAGES_DOMAIN"
+
+# Get DATABASE_URL from Neon (see Phase 7)
+DATABASE_URL="postgresql://user:password@host/database"
+
+# Set production environment variables
+echo "Setting production environment variables..."
+curl -X POST \
+  "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT_NAME/deployments/rollback" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "environment": "production",
+    "variables": {
+      "R2_ACCOUNT_ID": "'$R2_ACCOUNT_ID'",
+      "R2_ACCESS_KEY_ID": "'$R2_ACCESS_KEY_ID'",
+      "R2_SECRET_ACCESS_KEY": "'$R2_SECRET_ACCESS_KEY'",
+      "R2_BUCKET_MEDIA": "codex-media-production",
+      "R2_BUCKET_RESOURCES": "codex-resources-production",
+      "R2_BUCKET_ASSETS": "codex-assets-production",
+      "R2_BUCKET_PLATFORM": "codex-platform-production",
+      "DATABASE_URL": "'$DATABASE_URL'",
+      "AUTH_SECRET": "'$AUTH_SECRET'",
+      "AUTH_URL": "'$AUTH_URL'"
+    }
+  }'
+
+# Set preview environment variables
+echo "Setting preview environment variables..."
+curl -X POST \
+  "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT_NAME/deployments/rollback" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "environment": "preview",
+    "variables": {
+      "R2_ACCOUNT_ID": "'$R2_ACCOUNT_ID'",
+      "R2_ACCESS_KEY_ID": "'$R2_ACCESS_KEY_ID'",
+      "R2_SECRET_ACCESS_KEY": "'$R2_SECRET_ACCESS_KEY'",
+      "R2_BUCKET_MEDIA": "codex-media-production",
+      "R2_BUCKET_RESOURCES": "codex-resources-production",
+      "R2_BUCKET_ASSETS": "codex-assets-production",
+      "R2_BUCKET_PLATFORM": "codex-platform-production",
+      "DATABASE_URL": "'$DATABASE_URL'",
+      "AUTH_SECRET": "'$AUTH_SECRET'",
+      "AUTH_URL": "'$AUTH_URL'"
+    }
+  }'
+
+echo "✅ Environment variables set!"
+```
+
+---
+
+## Step 6.2: Run the Script
+
+```bash
+# Update values in setup-env-vars.sh first!
+chmod +x setup-env-vars.sh
+./setup-env-vars.sh
+```
+
+---
+
+## Step 6.3: Or Set Manually via UI
+
+If the API approach is wonky, use UI:
+
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. **Pages** → **codex** → **Settings** → **Environment variables**
+3. Click **Production** tab
+4. Add these variables:
 
 ```
-R2_ACCOUNT_ID = <same-as-production>
-R2_ACCESS_KEY_ID = <same-as-production>
-R2_SECRET_ACCESS_KEY = <same-as-production>
+R2_ACCOUNT_ID = <from-step-5.3>
+R2_ACCESS_KEY_ID = <from-step-5.3>
+R2_SECRET_ACCESS_KEY = <from-step-5.3>
 R2_BUCKET_MEDIA = codex-media-production
 R2_BUCKET_RESOURCES = codex-resources-production
 R2_BUCKET_ASSETS = codex-assets-production
 R2_BUCKET_PLATFORM = codex-platform-production
-
-DATABASE_URL = <leave-empty-for-now>
-AUTH_SECRET = <same-as-production>
+DATABASE_URL = <from-neon-step-7>
+AUTH_SECRET = <run: openssl rand -hex 32>
 AUTH_URL = https://<your-pages-domain>.pages.dev
 ```
 
-(Same values as production for MVP)
+5. Click **Preview** tab and add same variables
 
-✅ **Environment variables configured**
+✅ **Environment variables set**
 
 ---
 
-# PHASE 6: Configure Neon Postgres Database
+# PHASE 7: Configure Neon Postgres Database
 
-You need a production database for your application.
+Neon doesn't have CLI yet, so this is UI only.
 
-## Step 6.1: Create Neon Account
+## Step 7.1: Create Neon Account
 
 1. Go to [Neon Console](https://console.neon.tech/)
-2. Click **Sign up**
-3. Create account with email/GitHub
-4. Create your first project: **codex-production**
+2. **Sign up** with email or GitHub
+3. Create project: **codex-production**
 
 ---
 
-## Step 6.2: Create Production Database
+## Step 7.2: Get Production Connection String
 
-1. In Neon console, you'll see your default database
-2. Leave it as **postgres** (or rename to **codex**)
-3. Note the connection string shown:
-
+1. In Neon console, go to **Connection string**
+2. Copy the string:
 ```
 postgresql://user:password@host/database
 ```
 
-Copy this entire string.
+---
+
+## Step 7.3: Create Staging Branch (Optional)
+
+1. Click **Branches** (left sidebar)
+2. **Create branch** → Name: `staging`
+3. Copy staging connection string
 
 ---
 
-## Step 6.3: Create Staging Database (Optional)
+## Step 7.4: Update Cloudflare Pages Environment Variables
 
-1. In Neon console, click **Branches**
-2. Click **Create branch**
-3. **Name**: `staging`
-4. **Parent**: `main`
-5. Click **Create**
-6. Note the staging connection string
-
----
-
-## Step 6.4: Add Database URL to Cloudflare Pages
-
-1. Go back to **Cloudflare Dashboard** → **Pages** → **codex** → **Settings** → **Environment variables**
-2. Click **Production**
-3. Update `DATABASE_URL` with your Neon connection string from Step 6.2
-4. Click **Preview**
-5. Update `DATABASE_URL` with your staging branch connection string (or use production for now)
-6. Click **Save**
+Update `DATABASE_URL` in both Production and Preview environments with your Neon connection string.
 
 ✅ **Database configured**
 
 ---
 
-# PHASE 7: Run Migrations (Future - Not Now)
+# PHASE 8: Test Configuration (CLI)
 
-**This step is for future implementation when you have database schema.**
-
-For now, skip this. When you're ready to deploy features that use the database, you'll run:
+## Step 8.1: Test R2 Upload (CLI)
 
 ```bash
-# After setting up database schema
-pnpm --filter web db:migrate
+# Upload a test file
+echo "test content" > test.txt
+
+# Using AWS CLI (S3-compatible)
+aws s3 cp test.txt \
+  s3://codex-media-production/test-upload.txt \
+  --endpoint-url https://$ACCOUNT_ID.r2.cloudflarestorage.com \
+  --access-key $R2_ACCESS_KEY_ID \
+  --secret-key $R2_SECRET_ACCESS_KEY
+
+# Or using Wrangler directly (if you have R2 bindings)
+wrangler r2 object put test.txt --bucket codex-media-production
+
+# Clean up
+rm test.txt
+```
+
+✅ **R2 upload working**
+
+---
+
+## Step 8.2: Test KV (CLI)
+
+```bash
+# Write a test key
+wrangler kv:key put --namespace-id CODEX_KV test-key test-value
+
+# Read it back
+wrangler kv:key get test-key --namespace-id CODEX_KV
+
+# Delete it
+wrangler kv:key delete test-key --namespace-id CODEX_KV
+```
+
+✅ **KV working**
+
+---
+
+## Step 8.3: Test Pages Deployment
+
+```bash
+# Check deployment status
+curl -s https://codex-abc123.pages.dev | head -20
+
+# Should see HTML from your SvelteKit app
+```
+
+✅ **Pages deployment working**
+
+---
+
+# PHASE 9: Create Infrastructure as Code Files
+
+These files go in your repo for future automation.
+
+## Step 9.1: Create `scripts/setup-cloudflare.sh`
+
+This script documents and can re-run all infrastructure setup:
+
+```bash
+#!/bin/bash
+set -e
+
+echo "🚀 Codex Cloudflare Setup Script"
+echo "=================================="
+
+# Check prerequisites
+if ! command -v wrangler &> /dev/null; then
+  echo "❌ wrangler not found. Install with: npm install -g wrangler"
+  exit 1
+fi
+
+# Authenticate
+echo "1️⃣  Authenticating with Cloudflare..."
+wrangler login
+
+# Get account ID
+ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
+echo "✅ Account ID: $ACCOUNT_ID"
+
+# Create buckets
+echo "2️⃣  Creating R2 buckets..."
+for BUCKET in codex-media-production codex-resources-production codex-assets-production codex-platform-production; do
+  wrangler r2 bucket create $BUCKET || echo "⚠️  Bucket $BUCKET may already exist"
+done
+echo "✅ R2 buckets created"
+
+# Verify buckets
+echo "3️⃣  Verifying buckets..."
+wrangler r2 bucket list
+
+# Create KV namespace
+echo "4️⃣  Creating KV namespace..."
+wrangler kv:namespace create CODEX_KV || echo "⚠️  Namespace may already exist"
+echo "✅ KV namespace created"
+
+# Instructions for manual steps
+echo ""
+echo "❓ Manual steps remaining:"
+echo ""
+echo "1. Create R2 API token:"
+echo "   - Dashboard → R2 → Settings → API tokens → Create API token (S3)"
+echo "   - Save: Access Key ID, Secret Access Key"
+echo ""
+echo "2. Set environment variables in Cloudflare Pages:"
+echo "   - Dashboard → Pages → codex → Settings → Environment variables"
+echo "   - Production & Preview tabs"
+echo "   - Add R2 credentials, AUTH_SECRET, AUTH_URL, DATABASE_URL"
+echo ""
+echo "3. Create Neon Postgres database:"
+echo "   - console.neon.tech → Create project → Get connection string"
+echo ""
+echo "4. Test:"
+echo "   - wrangler r2 object put test.txt --bucket codex-media-production"
+echo "   - wrangler kv:key put --namespace-id CODEX_KV test-key test-value"
+echo ""
+echo "✅ Infrastructure setup complete!"
 ```
 
 ---
 
-# PHASE 8: Test Your Configuration
+## Step 9.2: Create `scripts/verify-cloudflare.sh`
 
-## Step 8.1: Verify Pages Deployment
+Script to verify all resources exist:
 
-1. Go to **Cloudflare Dashboard** → **Pages** → **codex**
-2. Click **Deployments**
-3. Click the live deployment
-4. You should see your SvelteKit app loading
-5. No errors in the browser console
+```bash
+#!/bin/bash
 
-✅ **Pages working**
+echo "🔍 Verifying Cloudflare Infrastructure"
+echo "======================================"
 
----
+# Check R2 buckets
+echo "📦 Checking R2 buckets..."
+wrangler r2 bucket list | grep -E "codex-(media|resources|assets|platform)-production" || echo "❌ Missing buckets!"
 
-## Step 8.2: Verify R2 Access (Via Dashboard)
+# Check KV namespace
+echo "🔑 Checking KV namespace..."
+wrangler kv:namespace list --json | jq -r '.[].title' | grep CODEX_KV || echo "❌ Missing KV namespace!"
 
-1. Go to **R2** → **codex-media-production**
-2. Click **Upload** button
-3. Upload any test file (image, PDF, etc.)
-4. You should see it appear in the bucket
+# Check Pages environment variables
+echo "📝 Note: Environment variables must be checked in Cloudflare Dashboard"
+echo "   Dashboard → Pages → codex → Settings → Environment variables"
 
-✅ **R2 buckets accessible**
-
----
-
-## Step 8.3: Verify KV Namespace (Via Dashboard)
-
-1. Go to **Workers & Pages** → **KV**
-2. Click **CODEX_KV**
-3. Click **Add key**
-4. **Key**: `test-key`
-5. **Value**: `test-value`
-6. Click **Save**
-7. You should see it in the list
-
-✅ **KV namespace working**
+echo ""
+echo "✅ Infrastructure verification complete!"
+```
 
 ---
 
-# PHASE 9: (Optional) Set Up Custom Domain for R2
+## Step 9.3: Create Terraform Config (Optional - Advanced)
 
-If you want to use a custom domain for R2 (e.g., `r2.yourdomain.com`), follow this. Otherwise, skip to Phase 10.
+For full IaC with Terraform:
 
-## Step 9.1: Create Custom Domain
+Create file: `terraform/cloudflare.tf`
 
-1. Go to **R2**
-2. Click **Settings** (left sidebar)
-3. Click **Custom domains**
-4. Click **Connect domain**
-5. Enter your domain (e.g., `r2.codex.example.com`)
-6. Follow CNAME setup instructions
+```hcl
+terraform {
+  required_providers {
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
+  }
+}
 
-**Note**: This requires you own the domain already. For `pages.dev` domain, skip this step.
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
+
+# R2 Buckets
+resource "cloudflare_r2_bucket" "codex_media" {
+  account_id = var.cloudflare_account_id
+  bucket     = "codex-media-production"
+}
+
+resource "cloudflare_r2_bucket" "codex_resources" {
+  account_id = var.cloudflare_account_id
+  bucket     = "codex-resources-production"
+}
+
+resource "cloudflare_r2_bucket" "codex_assets" {
+  account_id = var.cloudflare_account_id
+  bucket     = "codex-assets-production"
+}
+
+resource "cloudflare_r2_bucket" "codex_platform" {
+  account_id = var.cloudflare_account_id
+  bucket     = "codex-platform-production"
+}
+
+# KV Namespace
+resource "cloudflare_workers_kv_namespace" "codex_kv" {
+  account_id = var.cloudflare_account_id
+  title      = "CODEX_KV"
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API Token"
+  sensitive   = true
+}
+
+variable "cloudflare_account_id" {
+  description = "Cloudflare Account ID"
+}
+
+output "r2_media_bucket" {
+  value = cloudflare_r2_bucket.codex_media.bucket
+}
+
+output "kv_namespace_id" {
+  value = cloudflare_workers_kv_namespace.codex_kv.id
+}
+```
+
+Then deploy with:
+```bash
+terraform init
+terraform plan
+terraform apply
+```
 
 ---
 
-# PHASE 10: Summary & Next Steps
+# PHASE 10: Summary & All Commands
 
 ## ✅ What You've Completed
 
-1. ✅ Created 4 R2 buckets
-2. ✅ Configured CORS for uploads
-3. ✅ Generated R2 API credentials
-4. ✅ Created KV namespace
-5. ✅ Set environment variables in Cloudflare Pages
-6. ✅ Created Neon Postgres database
-7. ✅ Verified basic connectivity
+1. ✅ Authenticated with Cloudflare (wrangler login)
+2. ✅ Created 4 R2 buckets (CLI)
+3. ✅ Configured CORS for uploads (API)
+4. ✅ Created KV namespace (CLI)
+5. ✅ Generated R2 API token (UI)
+6. ✅ Set environment variables (API or UI)
+7. ✅ Created Neon Postgres database (UI)
+8. ✅ Verified all resources (CLI)
 
-## 📋 Saved Configuration Values
+---
 
-Keep these safe (password manager recommended):
+## 📋 Complete Command Reference
+
+### One-Shot Setup (Copy-Paste Everything)
+
+```bash
+#!/bin/bash
+# Codex Cloudflare Setup - All Commands
+
+# 1. Auth
+wrangler login
+
+# 2. Get Account ID
+ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
+echo "Account ID: $ACCOUNT_ID"
+
+# 3. Create R2 Buckets
+wrangler r2 bucket create codex-media-production
+wrangler r2 bucket create codex-resources-production
+wrangler r2 bucket create codex-assets-production
+wrangler r2 bucket create codex-platform-production
+
+# 4. Verify buckets
+wrangler r2 bucket list
+
+# 5. Create KV Namespace
+wrangler kv:namespace create CODEX_KV
+
+# 6. Get KV Namespace ID
+wrangler kv:namespace list --json | jq -r '.[] | select(.title == "CODEX_KV") | .id'
+
+# 7. Test R2
+echo "test" > test.txt
+wrangler r2 object put test.txt --bucket codex-media-production --file test.txt
+rm test.txt
+
+# 8. Test KV
+wrangler kv:key put test-key test-value --namespace-id CODEX_KV
+wrangler kv:key get test-key --namespace-id CODEX_KV
+
+echo "✅ All CLI setup complete!"
+echo "⏳ Still needed (via UI):"
+echo "   1. R2 API token (Dashboard → R2 → Settings → API tokens)"
+echo "   2. Set environment variables (Dashboard → Pages → Settings)"
+echo "   3. Neon Postgres (console.neon.tech)"
+```
+
+---
+
+## 📊 CLI Commands Cheat Sheet
+
+### Authentication
+```bash
+wrangler login              # Authenticate
+wrangler logout             # Logout
+wrangler whoami --json      # Get account info
+```
+
+### R2 Buckets
+```bash
+wrangler r2 bucket list                          # List all buckets
+wrangler r2 bucket create <name>                 # Create bucket
+wrangler r2 bucket delete <name>                 # Delete bucket
+wrangler r2 object list --bucket <name>          # List objects
+wrangler r2 object put <path> --bucket <name>    # Upload file
+wrangler r2 object get <path> --bucket <name>    # Download file
+wrangler r2 object delete <path> --bucket <name> # Delete object
+```
+
+### KV Namespaces
+```bash
+wrangler kv:namespace list                           # List namespaces
+wrangler kv:namespace create <name>                  # Create namespace
+wrangler kv:namespace delete --namespace-id <id>    # Delete namespace
+wrangler kv:key put <key> <value> --namespace-id <id>  # Set key
+wrangler kv:key get <key> --namespace-id <id>       # Get key
+wrangler kv:key list --namespace-id <id>            # List keys
+wrangler kv:key delete <key> --namespace-id <id>    # Delete key
+```
+
+### Pages
+```bash
+wrangler pages list             # List Pages projects
+wrangler pages deployments list # List deployments
+```
+
+---
+
+## 🔐 Saved Configuration Values
+
+Keep these safe (password manager):
 
 ```
-R2_ACCOUNT_ID: _______________
-R2_ACCESS_KEY_ID: _______________
-R2_SECRET_ACCESS_KEY: _______________
-KV_NAMESPACE_ID: _______________
-AUTH_SECRET: _______________
+ACCOUNT_ID: _________________________
+R2_ACCESS_KEY_ID: _________________________
+R2_SECRET_ACCESS_KEY: _________________________
+R2_ACCOUNT_ID: _________________________  (same as ACCOUNT_ID)
+KV_NAMESPACE_ID: _________________________
+AUTH_SECRET: _________________________
 
-R2 Buckets:
+Buckets:
 - codex-media-production
 - codex-resources-production
 - codex-assets-production
 - codex-platform-production
 
-Neon Production DATABASE_URL: _______________
-Neon Staging DATABASE_URL: _______________
+Database:
+- Production DATABASE_URL: _________________________
+- Staging DATABASE_URL: _________________________
 
-Cloudflare Pages Domain: _______________
+Pages Domain: _________________________
 ```
-
----
-
-## 🚀 Next Steps (NOT IN THIS CHECKLIST)
-
-These will be handled separately:
-
-1. **Commit & push** the updated R2BucketStructure.md to main
-2. **Implement R2 client** code in `packages/cloudflare-clients/src/r2/`
-3. **Implement KV client** code in `packages/cloudflare-clients/src/kv/`
-4. **Create SvelteKit API routes** for media/resource uploads
-5. **Add database schema** and run migrations
-6. **Implement authentication** with BetterAuth
 
 ---
 
 ## ❓ Troubleshooting
 
-### R2 Bucket Already Exists
-
-If you get an error that bucket name is taken:
-- Bucket names must be globally unique across Cloudflare
-- Try: `codex-media-production-yourname`
-
-### CORS Configuration Not Working
-
-- Verify domain in CORS rule matches your actual domain
-- After changing CORS, wait 5 minutes for propagation
-- Test with curl: `curl -X OPTIONS https://bucket.r2.example.com/`
-
-### Environment Variables Not Appearing
-
-- Refresh Cloudflare Dashboard (Ctrl+Shift+R on Windows, Cmd+Shift+R on Mac)
-- Check that you saved variables in correct environment (Production/Preview)
-- Redeploy Pages to pick up new environment variables
-
-### Neon Connection String Format
-
-Common format errors:
+### "wrangler not found"
+```bash
+npm install -g wrangler
+# or
+pnpm add -g wrangler
 ```
-❌ WRONG: postgresql://localhost/codex
-✅ RIGHT: postgresql://user:password@host/database
+
+### "Bucket already exists"
+Bucket names are globally unique. Try: `codex-media-production-yourname`
+
+### "KV namespace already exists"
+Namespace names are globally unique per account. List existing:
+```bash
+wrangler kv:namespace list
+```
+
+### "Authentication failed"
+Re-authenticate:
+```bash
+wrangler logout
+wrangler login
+```
+
+### CORS not working
+Wait 5 minutes after setting, then test:
+```bash
+curl -X OPTIONS https://codex-media-production.r2.cloudflarestorage.com/ \
+  -H "Access-Control-Request-Method: PUT"
 ```
 
 ---
 
 ## 📞 Support Resources
 
-- [Cloudflare R2 Documentation](https://developers.cloudflare.com/r2/)
-- [Cloudflare KV Documentation](https://developers.cloudflare.com/kv/)
-- [Cloudflare Pages Documentation](https://developers.cloudflare.com/pages/)
-- [Neon PostgreSQL Documentation](https://neon.tech/docs/)
+- [Wrangler CLI Docs](https://developers.cloudflare.com/workers/wrangler/)
+- [Cloudflare R2 API](https://developers.cloudflare.com/r2/api/)
+- [Cloudflare KV API](https://developers.cloudflare.com/kv/api/)
+- [Cloudflare API Documentation](https://developers.cloudflare.com/api/)
 
 ---
 
-**Checklist Version**: 1.0
+**Checklist Version**: 2.0 - CLI-First
 **Last Updated**: 2025-10-26
 **Status**: Ready to Execute
+**Approach**: Infrastructure as Code (Wrangler CLI + Shell Scripts)
