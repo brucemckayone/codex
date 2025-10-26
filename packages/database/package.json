@@ -18,13 +18,15 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "drizzle-orm": "^0.36.3",
-    "@neondatabase/serverless": "^0.10.3",
+    "@neondatabase/serverless": "^0.10.4",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.36.4",
     "postgres": "^3.4.5"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.29.1",
     "@types/node": "^22.0.0",
+    "drizzle-kit": "^0.29.1",
+    "tsx": "^4.20.6",
     "typescript": "^5.6.3",
     "vitest": "^4.0.2"
   }

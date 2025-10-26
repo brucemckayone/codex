@@ -107,11 +107,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17
         env:
-          POSTGRES_USER: codex_test
-          POSTGRES_PASSWORD: codex_test_password
-          POSTGRES_DB: codex_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: main
         ports:
           - 5432:5432
         options: >-
@@ -119,6 +119,13 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy:main
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/main
+        ports:
+          - 4444:4444
 
     steps:
       - uses: actions/checkout@v4
@@ -144,10 +151,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Wait for Neon HTTP Proxy
+        run: |
+          echo "Waiting for Neon HTTP Proxy to be ready..."
+          max_attempts=30
+          attempt=0
+          until curl -f http://localhost:4444/sql -X POST -d '{"query":"SELECT 1"}' -H "Content-Type: application/json" 2>/dev/null || [ $attempt -eq $max_attempts ]; do
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts..."
+            sleep 2
+          done
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Neon HTTP Proxy failed to start"
+            exit 1
+          fi
+          echo "Neon HTTP Proxy is ready!"
+
       - name: Run integration tests
         run: pnpm test:coverage
         env:
-          DATABASE_URL: postgresql://codex_test:codex_test_password@localhost:5432/codex_test
+          PG_CONNECTION_STRING: postgresql://postgres:postgres@db.localtest.me:5432/main
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
@@ -165,11 +188,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17
         env:
-          POSTGRES_USER: codex_test
-          POSTGRES_PASSWORD: codex_test_password
-          POSTGRES_DB: codex_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: main
         ports:
           - 5432:5432
         options: >-
@@ -177,6 +200,13 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy:main
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/main
+        ports:
+          - 4444:4444
 
     steps:
       - uses: actions/checkout@v4
@@ -190,13 +220,29 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Wait for Neon HTTP Proxy
+        run: |
+          echo "Waiting for Neon HTTP Proxy to be ready..."
+          max_attempts=30
+          attempt=0
+          until curl -f http://localhost:4444/sql -X POST -d '{"query":"SELECT 1"}' -H "Content-Type: application/json" 2>/dev/null || [ $attempt -eq $max_attempts ]; do
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts..."
+            sleep 2
+          done
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Neon HTTP Proxy failed to start"
+            exit 1
+          fi
+          echo "Neon HTTP Proxy is ready!"
+
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
       - name: Run E2E tests
         run: pnpm test:e2e
         env:
-          DATABASE_URL: postgresql://codex_test:codex_test_password@localhost:5432/codex_test
+          PG_CONNECTION_STRING: postgresql://postgres:postgres@db.localtest.me:5432/main
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
 
       - name: Upload Playwright report

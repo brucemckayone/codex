@@ -54,7 +54,7 @@ wrangler r2 bucket create codex-platform-production
 wrangler kv:namespace create CODEX_KV
 
 # 4. Get your Account ID
-ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
+ACCOUNT_ID=$(wrangler whoami --json | jq -r ".account.id")
 echo "Your Account ID: $ACCOUNT_ID"
 
 # 5. Create R2 API Token (see instructions below for full details)
@@ -101,7 +101,7 @@ This opens a browser to authorize Cloudflare CLI access. Follow the prompts and 
 wrangler whoami --json
 
 # Extract just the account ID
-ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
+ACCOUNT_ID=$(wrangler whoami --json | jq -r ".account.id")
 echo "Account ID: $ACCOUNT_ID"
 
 # Save this value - you'll need it later
@@ -302,7 +302,7 @@ ACCOUNT_ID="your-account-id-from-step-1.3"
 curl -X POST https://api.cloudflare.com/client/v4/user/tokens \
   -H "Authorization: Bearer YOUR_GLOBAL_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
+  -d '{ 
     "name": "'$API_TOKEN_NAME'",
     "ttl": 31536000,
     "policies": [
@@ -400,7 +400,7 @@ curl -X POST \
   "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT_NAME/deployments/rollback" \
   -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
+  -d '{ 
     "environment": "production",
     "variables": {
       "R2_ACCOUNT_ID": "'$R2_ACCOUNT_ID'",
@@ -422,7 +422,7 @@ curl -X POST \
   "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT_NAME/deployments/rollback" \
   -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
+  -d '{ 
     "environment": "preview",
     "variables": {
       "R2_ACCOUNT_ID": "'$R2_ACCOUNT_ID'",
@@ -601,7 +601,7 @@ echo "1️⃣  Authenticating with Cloudflare..."
 wrangler login
 
 # Get account ID
-ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
+ACCOUNT_ID=$(wrangler whoami --json | jq -r ".account.id")
 echo "✅ Account ID: $ACCOUNT_ID"
 
 # Create buckets
@@ -653,273 +653,4 @@ Script to verify all resources exist:
 #!/bin/bash
 
 echo "🔍 Verifying Cloudflare Infrastructure"
-echo "======================================"
-
-# Check R2 buckets
-echo "📦 Checking R2 buckets..."
-wrangler r2 bucket list | grep -E "codex-(media|resources|assets|platform)-production" || echo "❌ Missing buckets!"
-
-# Check KV namespace
-echo "🔑 Checking KV namespace..."
-wrangler kv:namespace list --json | jq -r '.[].title' | grep CODEX_KV || echo "❌ Missing KV namespace!"
-
-# Check Pages environment variables
-echo "📝 Note: Environment variables must be checked in Cloudflare Dashboard"
-echo "   Dashboard → Pages → codex → Settings → Environment variables"
-
-echo ""
-echo "✅ Infrastructure verification complete!"
-```
-
----
-
-## Step 9.3: Create Terraform Config (Optional - Advanced)
-
-For full IaC with Terraform:
-
-Create file: `terraform/cloudflare.tf`
-
-```hcl
-terraform {
-  required_providers {
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "~> 4.0"
-    }
-  }
-}
-
-provider "cloudflare" {
-  api_token = var.cloudflare_api_token
-}
-
-# R2 Buckets
-resource "cloudflare_r2_bucket" "codex_media" {
-  account_id = var.cloudflare_account_id
-  bucket     = "codex-media-production"
-}
-
-resource "cloudflare_r2_bucket" "codex_resources" {
-  account_id = var.cloudflare_account_id
-  bucket     = "codex-resources-production"
-}
-
-resource "cloudflare_r2_bucket" "codex_assets" {
-  account_id = var.cloudflare_account_id
-  bucket     = "codex-assets-production"
-}
-
-resource "cloudflare_r2_bucket" "codex_platform" {
-  account_id = var.cloudflare_account_id
-  bucket     = "codex-platform-production"
-}
-
-# KV Namespace
-resource "cloudflare_workers_kv_namespace" "codex_kv" {
-  account_id = var.cloudflare_account_id
-  title      = "CODEX_KV"
-}
-
-variable "cloudflare_api_token" {
-  description = "Cloudflare API Token"
-  sensitive   = true
-}
-
-variable "cloudflare_account_id" {
-  description = "Cloudflare Account ID"
-}
-
-output "r2_media_bucket" {
-  value = cloudflare_r2_bucket.codex_media.bucket
-}
-
-output "kv_namespace_id" {
-  value = cloudflare_workers_kv_namespace.codex_kv.id
-}
-```
-
-Then deploy with:
-```bash
-terraform init
-terraform plan
-terraform apply
-```
-
----
-
-# PHASE 10: Summary & All Commands
-
-## ✅ What You've Completed
-
-1. ✅ Authenticated with Cloudflare (wrangler login)
-2. ✅ Created 4 R2 buckets (CLI)
-3. ✅ Configured CORS for uploads (API)
-4. ✅ Created KV namespace (CLI)
-5. ✅ Generated R2 API token (UI)
-6. ✅ Set environment variables (API or UI)
-7. ✅ Created Neon Postgres database (UI)
-8. ✅ Verified all resources (CLI)
-
----
-
-## 📋 Complete Command Reference
-
-### One-Shot Setup (Copy-Paste Everything)
-
-```bash
-#!/bin/bash
-# Codex Cloudflare Setup - All Commands
-
-# 1. Auth
-wrangler login
-
-# 2. Get Account ID
-ACCOUNT_ID=$(wrangler whoami --json | jq -r '.account.id')
-echo "Account ID: $ACCOUNT_ID"
-
-# 3. Create R2 Buckets
-wrangler r2 bucket create codex-media-production
-wrangler r2 bucket create codex-resources-production
-wrangler r2 bucket create codex-assets-production
-wrangler r2 bucket create codex-platform-production
-
-# 4. Verify buckets
-wrangler r2 bucket list
-
-# 5. Create KV Namespace
-wrangler kv:namespace create CODEX_KV
-
-# 6. Get KV Namespace ID
-wrangler kv:namespace list --json | jq -r '.[] | select(.title == "CODEX_KV") | .id'
-
-# 7. Test R2
-echo "test" > test.txt
-wrangler r2 object put test.txt --bucket codex-media-production --file test.txt
-rm test.txt
-
-# 8. Test KV
-wrangler kv:key put test-key test-value --namespace-id CODEX_KV
-wrangler kv:key get test-key --namespace-id CODEX_KV
-
-echo "✅ All CLI setup complete!"
-echo "⏳ Still needed (via UI):"
-echo "   1. R2 API token (Dashboard → R2 → Settings → API tokens)"
-echo "   2. Set environment variables (Dashboard → Pages → Settings)"
-echo "   3. Neon Postgres (console.neon.tech)"
-```
-
----
-
-## 📊 CLI Commands Cheat Sheet
-
-### Authentication
-```bash
-wrangler login              # Authenticate
-wrangler logout             # Logout
-wrangler whoami --json      # Get account info
-```
-
-### R2 Buckets
-```bash
-wrangler r2 bucket list                          # List all buckets
-wrangler r2 bucket create <name>                 # Create bucket
-wrangler r2 bucket delete <name>                 # Delete bucket
-wrangler r2 object list --bucket <name>          # List objects
-wrangler r2 object put <path> --bucket <name>    # Upload file
-wrangler r2 object get <path> --bucket <name>    # Download file
-wrangler r2 object delete <path> --bucket <name> # Delete object
-```
-
-### KV Namespaces
-```bash
-wrangler kv:namespace list                           # List namespaces
-wrangler kv:namespace create <name>                  # Create namespace
-wrangler kv:namespace delete --namespace-id <id>    # Delete namespace
-wrangler kv:key put <key> <value> --namespace-id <id>  # Set key
-wrangler kv:key get <key> --namespace-id <id>       # Get key
-wrangler kv:key list --namespace-id <id>            # List keys
-wrangler kv:key delete <key> --namespace-id <id>    # Delete key
-```
-
-### Pages
-```bash
-wrangler pages list             # List Pages projects
-wrangler pages deployments list # List deployments
-```
-
----
-
-## 🔐 Saved Configuration Values
-
-Keep these safe (password manager):
-
-```
-ACCOUNT_ID: _________________________
-R2_ACCESS_KEY_ID: _________________________
-R2_SECRET_ACCESS_KEY: _________________________
-R2_ACCOUNT_ID: _________________________  (same as ACCOUNT_ID)
-KV_NAMESPACE_ID: _________________________
-AUTH_SECRET: _________________________
-
-Buckets:
-- codex-media-production
-- codex-resources-production
-- codex-assets-production
-- codex-platform-production
-
-Database:
-- Production DATABASE_URL: _________________________
-- Staging DATABASE_URL: _________________________
-
-Pages Domain: _________________________
-```
-
----
-
-## ❓ Troubleshooting
-
-### "wrangler not found"
-```bash
-npm install -g wrangler
-# or
-pnpm add -g wrangler
-```
-
-### "Bucket already exists"
-Bucket names are globally unique. Try: `codex-media-production-yourname`
-
-### "KV namespace already exists"
-Namespace names are globally unique per account. List existing:
-```bash
-wrangler kv:namespace list
-```
-
-### "Authentication failed"
-Re-authenticate:
-```bash
-wrangler logout
-wrangler login
-```
-
-### CORS not working
-Wait 5 minutes after setting, then test:
-```bash
-curl -X OPTIONS https://codex-media-production.r2.cloudflarestorage.com/ \
-  -H "Access-Control-Request-Method: PUT"
-```
-
----
-
-## 📞 Support Resources
-
-- [Wrangler CLI Docs](https://developers.cloudflare.com/workers/wrangler/)
-- [Cloudflare R2 API](https://developers.cloudflare.com/r2/api/)
-- [Cloudflare KV API](https://developers.cloudflare.com/kv/api/)
-- [Cloudflare API Documentation](https://developers.cloudflare.com/api/)
-
----
-
-**Checklist Version**: 2.0 - CLI-First
-**Last Updated**: 2025-10-26
-**Status**: Ready to Execute
-**Approach**: Infrastructure as Code (Wrangler CLI + Shell Scripts)
+echo "======================================

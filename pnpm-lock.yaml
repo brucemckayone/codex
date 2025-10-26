@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@neondatabase/serverless':
+        specifier: ^0.10.4
+        version: 0.10.4
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@types/pg@8.15.5)(kysely@0.28.8)(postgres@3.4.7)(react@18.3.1)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.10.0
@@ -22,13 +29,13 @@ importers:
         version: 0.1.9(typescript@5.9.3)
       '@sveltejs/vite-plugin-svelte':
         specifier: ^5.1.1
-        version: 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+        version: 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
       '@testing-library/svelte':
         specifier: ^5.2.8
-        version: 5.2.8(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))(vitest@4.0.2)
+        version: 5.2.8(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))(vitest@4.0.2)
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.46.2
         version: 8.46.2(@typescript-eslint/parser@8.46.2(eslint@9.38.0)(typescript@5.9.3))(eslint@9.38.0)(typescript@5.9.3)
@@ -47,6 +54,9 @@ importers:
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
+      drizzle-kit:
+        specifier: ^0.29.1
+        version: 0.29.1
       eslint:
         specifier: ^9.38.0
         version: 9.38.0
@@ -83,15 +93,18 @@ importers:
       svelte-eslint-parser:
         specifier: ^1.4.0
         version: 1.4.0(svelte@5.41.2)
+      tsx:
+        specifier: ^4.20.6
+        version: 4.20.6
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
       vite:
         specifier: ^6.4.1
-        version: 6.4.1(@types/node@24.8.1)
+        version: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
       vitest:
         specifier: ^4.0.2
-        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
       wait-on:
         specifier: ^9.0.1
         version: 9.0.1
@@ -119,22 +132,22 @@ importers:
         version: 1.56.1
       '@sveltejs/adapter-auto':
         specifier: ^3.0.0
-        version: 3.3.1(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))
+        version: 3.3.1(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))
       '@sveltejs/adapter-cloudflare':
         specifier: ^7.2.4
-        version: 7.2.4(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(wrangler@4.45.0(@cloudflare/workers-types@4.20251014.0))
+        version: 7.2.4(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(wrangler@4.45.0(@cloudflare/workers-types@4.20251014.0))
       '@sveltejs/kit':
         specifier: ^2.0.0
-        version: 2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+        version: 2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       '@sveltejs/vite-plugin-svelte':
         specifier: ^5.0.0
-        version: 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+        version: 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
       '@testing-library/svelte':
         specifier: ^5.2.8
-        version: 5.2.8(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))(vitest@4.0.2)
+        version: 5.2.8(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))(vitest@4.0.2)
       svelte:
         specifier: ^5.0.0
         version: 5.41.2
@@ -146,10 +159,10 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^6.0.0
-        version: 6.4.1(@types/node@24.8.1)
+        version: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
       vitest:
         specifier: ^4.0.2
-        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   packages/cloudflare-clients:
     dependencies:
@@ -171,15 +184,18 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.2
-        version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+        version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   packages/database:
     dependencies:
       '@neondatabase/serverless':
-        specifier: ^0.10.3
+        specifier: ^0.10.4
         version: 0.10.4
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
       drizzle-orm:
-        specifier: ^0.36.3
+        specifier: ^0.36.4
         version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@types/pg@8.15.5)(kysely@0.28.8)(postgres@3.4.7)(react@18.3.1)
       postgres:
         specifier: ^3.4.5
@@ -191,12 +207,15 @@ importers:
       drizzle-kit:
         specifier: ^0.29.1
         version: 0.29.1
+      tsx:
+        specifier: ^4.20.6
+        version: 4.20.6
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
       vitest:
         specifier: ^4.0.2
-        version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+        version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   packages/test-utils:
     dependencies:
@@ -215,7 +234,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.2
-        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   packages/validation:
     dependencies:
@@ -231,7 +250,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.2
-        version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+        version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   workers/queue-consumer:
     dependencies:
@@ -256,7 +275,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.2
-        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+        version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
       wrangler:
         specifier: ^4.45.0
         version: 4.45.0(@cloudflare/workers-types@4.20251014.0)
@@ -3355,6 +3374,11 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
+  tsx@4.20.6:
+    resolution: {integrity: sha512-ytQKuwgmrrkDTFP4LjR0ToE2nqgy886GpvRSpU0JAnrdBYppuY5rLkRUYPU1yCryb24SsKBTL/hlDQAEFVwtZg==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+
   type-check@0.4.0:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
     engines: {node: '>= 0.8.0'}
@@ -4180,7 +4204,7 @@ snapshots:
       devalue: 5.4.2
       miniflare: 4.20251011.1
       semver: 7.7.3
-      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
       wrangler: 4.45.0(@cloudflare/workers-types@4.20251014.0)
       zod: 3.25.76
     transitivePeerDependencies:
@@ -5190,23 +5214,23 @@ snapshots:
     dependencies:
       acorn: 8.15.0
 
-  '@sveltejs/adapter-auto@3.3.1(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))':
+  '@sveltejs/adapter-auto@3.3.1(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))':
     dependencies:
-      '@sveltejs/kit': 2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+      '@sveltejs/kit': 2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       import-meta-resolve: 4.2.0
 
-  '@sveltejs/adapter-cloudflare@7.2.4(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(wrangler@4.45.0(@cloudflare/workers-types@4.20251014.0))':
+  '@sveltejs/adapter-cloudflare@7.2.4(@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(wrangler@4.45.0(@cloudflare/workers-types@4.20251014.0))':
     dependencies:
       '@cloudflare/workers-types': 4.20251014.0
-      '@sveltejs/kit': 2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+      '@sveltejs/kit': 2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       worktop: 0.8.0-next.18
       wrangler: 4.45.0(@cloudflare/workers-types@4.20251014.0)
 
-  '@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))':
+  '@sveltejs/kit@2.47.3(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))':
     dependencies:
       '@standard-schema/spec': 1.0.0
       '@sveltejs/acorn-typescript': 1.0.6(acorn@8.15.0)
-      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       '@types/cookie': 0.6.0
       acorn: 8.15.0
       cookie: 0.6.0
@@ -5219,7 +5243,7 @@ snapshots:
       set-cookie-parser: 2.7.1
       sirv: 3.0.2
       svelte: 5.41.2
-      vite: 6.4.1(@types/node@24.8.1)
+      vite: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
 
   '@sveltejs/mcp@0.1.9(typescript@5.9.3)':
     dependencies:
@@ -5230,25 +5254,25 @@ snapshots:
       - supports-color
       - typescript
 
-  '@sveltejs/vite-plugin-svelte-inspector@4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))':
+  '@sveltejs/vite-plugin-svelte-inspector@4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       debug: 4.4.3
       svelte: 5.41.2
-      vite: 6.4.1(@types/node@24.8.1)
+      vite: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
     transitivePeerDependencies:
       - supports-color
 
-  '@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))':
+  '@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))
+      '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)))(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       debug: 4.4.3
       deepmerge: 4.3.1
       kleur: 4.1.5
       magic-string: 0.30.19
       svelte: 5.41.2
-      vite: 6.4.1(@types/node@24.8.1)
-      vitefu: 1.1.1(vite@6.4.1(@types/node@24.8.1))
+      vite: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
+      vitefu: 1.1.1(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
     transitivePeerDependencies:
       - supports-color
 
@@ -5272,13 +5296,13 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
 
-  '@testing-library/svelte@5.2.8(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1))(vitest@4.0.2)':
+  '@testing-library/svelte@5.2.8(svelte@5.41.2)(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))(vitest@4.0.2)':
     dependencies:
       '@testing-library/dom': 10.4.1
       svelte: 5.41.2
     optionalDependencies:
-      vite: 6.4.1(@types/node@24.8.1)
-      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+      vite: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
+      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   '@types/aria-query@5.0.4': {}
 
@@ -5467,7 +5491,7 @@ snapshots:
       magicast: 0.3.5
       std-env: 3.10.0
       tinyrainbow: 3.0.3
-      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -5480,13 +5504,21 @@ snapshots:
       chai: 6.2.0
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@24.8.1))':
+  '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.18.11)(tsx@4.20.6))':
     dependencies:
       '@vitest/spy': 4.0.2
       estree-walker: 3.0.3
       magic-string: 0.30.19
     optionalDependencies:
-      vite: 6.4.1(@types/node@24.8.1)
+      vite: 6.4.1(@types/node@22.18.11)(tsx@4.20.6)
+
+  '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))':
+    dependencies:
+      '@vitest/spy': 4.0.2
+      estree-walker: 3.0.3
+      magic-string: 0.30.19
+    optionalDependencies:
+      vite: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
 
   '@vitest/pretty-format@4.0.2':
     dependencies:
@@ -5514,7 +5546,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+      vitest: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   '@vitest/utils@4.0.2':
     dependencies:
@@ -5935,7 +5967,7 @@ snapshots:
       eslint: 9.38.0
     optionalDependencies:
       '@typescript-eslint/eslint-plugin': 8.46.2(@typescript-eslint/parser@8.46.2(eslint@9.38.0)(typescript@5.9.3))(eslint@9.38.0)(typescript@5.9.3)
-      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))
+      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -6873,6 +6905,13 @@ snapshots:
 
   tslib@2.8.1: {}
 
+  tsx@4.20.6:
+    dependencies:
+      esbuild: 0.25.11
+      get-tsconfig: 4.13.0
+    optionalDependencies:
+      fsevents: 2.3.3
+
   type-check@0.4.0:
     dependencies:
       prelude-ls: 1.2.1
@@ -6912,7 +6951,7 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
-  vite@6.4.1(@types/node@22.18.11):
+  vite@6.4.1(@types/node@22.18.11)(tsx@4.20.6):
     dependencies:
       esbuild: 0.25.11
       fdir: 6.5.0(picomatch@4.0.3)
@@ -6923,8 +6962,9 @@ snapshots:
     optionalDependencies:
       '@types/node': 22.18.11
       fsevents: 2.3.3
+      tsx: 4.20.6
 
-  vite@6.4.1(@types/node@24.8.1):
+  vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6):
     dependencies:
       esbuild: 0.25.11
       fdir: 6.5.0(picomatch@4.0.3)
@@ -6935,15 +6975,16 @@ snapshots:
     optionalDependencies:
       '@types/node': 24.8.1
       fsevents: 2.3.3
+      tsx: 4.20.6
 
-  vitefu@1.1.1(vite@6.4.1(@types/node@24.8.1)):
+  vitefu@1.1.1(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6)):
     optionalDependencies:
-      vite: 6.4.1(@types/node@24.8.1)
+      vite: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
 
-  vitest@4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6)):
+  vitest@4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6):
     dependencies:
       '@vitest/expect': 4.0.2
-      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@24.8.1))
+      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@22.18.11)(tsx@4.20.6))
       '@vitest/pretty-format': 4.0.2
       '@vitest/runner': 4.0.2
       '@vitest/snapshot': 4.0.2
@@ -6960,7 +7001,7 @@ snapshots:
       tinyexec: 0.3.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 6.4.1(@types/node@22.18.11)
+      vite: 6.4.1(@types/node@22.18.11)(tsx@4.20.6)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.18.11
@@ -6981,10 +7022,10 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6)):
+  vitest@4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6):
     dependencies:
       '@vitest/expect': 4.0.2
-      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@24.8.1))
+      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       '@vitest/pretty-format': 4.0.2
       '@vitest/runner': 4.0.2
       '@vitest/snapshot': 4.0.2
@@ -7001,7 +7042,7 @@ snapshots:
       tinyexec: 0.3.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 6.4.1(@types/node@24.8.1)
+      vite: 6.4.1(@types/node@24.8.1)(tsx@4.20.6)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.8.1
