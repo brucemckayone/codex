@@ -414,12 +414,19 @@ jobs:
 **Cloudflare Dashboard → Pages → Settings:**
 
 ```yaml
-Build command: pnpm install && pnpm --filter web build
-Build output directory: apps/web/build
+Framework preset: SvelteKit
+Build command: pnpm --filter web build
+Build output directory: (leave empty - auto-detected by SvelteKit adapter)
 Root directory: /
 Node version: 20
-Branch: main
+Production branch: main
 ```
+
+**Important Notes:**
+- pnpm is pre-installed on Cloudflare Pages, no need for `pnpm install`
+- SvelteKit adapter outputs to `.svelte-kit/cloudflare` (auto-detected)
+- DO NOT specify `apps/web/build` - this is incorrect for Cloudflare adapter
+- Framework preset "SvelteKit" enables automatic configuration
 
 **Preview deployments (automatic):**
 
