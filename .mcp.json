@@ -23,7 +23,11 @@
     },
     "cloudflare-observability": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://observability.mcp.cloudflare.com/mcp"]
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://observability.mcp.cloudflare.com/mcp"
+      ]
     }
   }
 }
