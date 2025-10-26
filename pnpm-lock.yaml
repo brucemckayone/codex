@@ -7,13 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      '@neondatabase/serverless':
-        specifier: ^0.10.4
-        version: 0.10.4
-      drizzle-orm:
-        specifier: ^0.36.4
-        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@types/pg@8.15.5)(kysely@0.28.8)(postgres@3.4.7)(react@18.3.1)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.10.0
@@ -54,9 +47,6 @@ importers:
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
-      drizzle-kit:
-        specifier: ^0.29.1
-        version: 0.29.1
       eslint:
         specifier: ^9.38.0
         version: 9.38.0
@@ -5504,14 +5494,6 @@ snapshots:
       chai: 6.2.0
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.18.11)(tsx@4.20.6))':
-    dependencies:
-      '@vitest/spy': 4.0.2
-      estree-walker: 3.0.3
-      magic-string: 0.30.19
-    optionalDependencies:
-      vite: 6.4.1(@types/node@22.18.11)(tsx@4.20.6)
-
   '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))':
     dependencies:
       '@vitest/spy': 4.0.2
@@ -5546,7 +5528,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vitest: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
+      vitest: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)
 
   '@vitest/utils@4.0.2':
     dependencies:
@@ -6984,7 +6966,7 @@ snapshots:
   vitest@4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6):
     dependencies:
       '@vitest/expect': 4.0.2
-      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@22.18.11)(tsx@4.20.6))
+      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@24.8.1)(tsx@4.20.6))
       '@vitest/pretty-format': 4.0.2
       '@vitest/runner': 4.0.2
       '@vitest/snapshot': 4.0.2
