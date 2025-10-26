@@ -36,13 +36,22 @@ This is a monorepo with feature-based organization:
 
 ### Packages
 
+**Active Packages:**
+
 - `packages/database` - Drizzle ORM schemas and migrations
 - `packages/validation` - Zod schemas for validation
 - `packages/cloudflare-clients` - R2 and KV clients
-- `packages/auth` - Authentication service (Better Auth)
-- `packages/notifications` - Email notifications (Resend)
-- `packages/core-services` - Business logic services
-- `packages/test-utils` - Shared testing utilities
+- `packages/test-utils` - Shared testing utilities (includes Miniflare helpers)
+
+**Deleted Packages:**
+
+- `packages/auth` - Deleted (will use Better Auth directly in web app)
+- `packages/notifications` - Deleted (will implement email/notifications when needed)
+- `packages/core-services` - Deleted (business logic will live in web app features)
+
+### Workers
+
+- `workers/queue-consumer` - Currently disabled (Cloudflare not set up yet, will enable in Phase 2)
 
 ### Testing Strategy
 

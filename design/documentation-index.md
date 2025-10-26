@@ -147,6 +147,8 @@ This document serves as a central routing system to all Markdown documentation f
   - Guide for local development setup, staging, and production environment configurations.
 - **[Infrastructure Plan](design/infrastructure/infraplan.md)**
   - Overall infrastructure architecture, core services stack (Cloudflare, Neon, RunPod), data flow examples, and cost estimation.
+- **[MCP Setup](design/infrastructure/MCP-Setup.md)**
+  - Guide for setting up Model Context Protocol servers with Claude Desktop to enhance development workflow with AI assistance.
 - **[R2 Bucket Structure](design/infrastructure/R2BucketStructure.md)**
   - Details the Cloudflare R2 bucket organization, bucket-per-creator design, and access patterns.
 - **[Testing](design/infrastructure/Testing.md)**
