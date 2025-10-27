@@ -12,8 +12,6 @@ export default defineProject({
     // Note: coverage is configured at root level
   },
   resolve: {
-    alias: {
-      '@codex/database': path.resolve(__dirname, './src'),
-    },
+    conditions: ['node'],
   },
 });

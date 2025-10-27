@@ -87,6 +87,8 @@ export default [
       '**/coverage',
       'playwright-report',
       'test-results',
+      '.wrangler',
+      '**/.wrangler',
     ],
   },
 ];
