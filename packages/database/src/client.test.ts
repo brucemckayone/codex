@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { db, testConnection } from './client';
+import { sql } from 'drizzle-orm';
 
 describe('@codex/database', () => {
   describe('Database Client', () => {
@@ -38,11 +39,12 @@ describe('@codex/database', () => {
     it.skipIf(skipIntegration)(
       'should execute a simple query',
       async () => {
-        const result = await db.execute('SELECT 1 as value');
+        const result = await (db as any).execute(sql`SELECT 1 as value`);
+
         expect(result).toBeDefined();
-        expect(result.rows).toBeDefined();
-        expect(result.rows.length).toBeGreaterThan(0);
-        expect(result.rows[0].value).toBe(1);
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        expect(result[0].value).toBe(1);
       },
       10000
     );

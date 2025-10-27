@@ -18,6 +18,7 @@ import {
 import { drizzle as drizzlePostgres } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import * as schema from './schema';
+import { SQL } from 'drizzle-orm';
 
 // Lazy initialization to avoid throwing errors on import when testing
 let _sql: NeonQueryFunction<boolean, boolean> | null = null;
@@ -93,7 +94,21 @@ function initializeClient() {
 // Lazy-loaded db instance - only initializes when actually used
 export const db = new Proxy({} as NeonHttpDatabase<typeof schema>, {
   get(_target, prop) {
-    const { db: actualDb } = initializeClient();
+    const { db: actualDb, driverType } = initializeClient();
+
+    if (prop === 'execute') {
+      if (driverType === 'postgres') {
+        // postgres-js driver returns an array of rows directly
+        return (query: SQL) => (actualDb as any).execute(query);
+      } else {
+        // neon-http driver returns an object with a rows property
+        return async (query: SQL) => {
+          const result = await (actualDb as any).run(query);
+          return result.rows;
+        };
+      }
+    }
+
     return actualDb[prop as keyof typeof actualDb];
   },
 });
