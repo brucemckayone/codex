@@ -11,9 +11,45 @@
     "typescriptreact",
     "svelte"
   ],
-  "vitest.enable": true,
-  "vitest.commandLine": "pnpm vitest",
   "[svelte]": {
     "editor.defaultFormatter": "svelte.svelte-vscode"
-  }
+  },
+
+  // Vitest Extension Configuration
+  "vitest.enable": true,
+  "vitest.commandLine": "pnpm vitest",
+
+  // Search for config files in the monorepo
+  "vitest.configSearchPatternInclude": "**/*{vite,vitest}*.config*.{ts,js,mjs,cjs,cts,mts}",
+  "vitest.configSearchPatternExclude": "{**/node_modules/**,**/.*/**,*.d.ts}",
+
+  // Use static AST collection for better performance (experimental but recommended)
+  "vitest.experimentalStaticAstCollect": true,
+
+  // Environment variables for tests (includes database connection for integration tests)
+  "vitest.nodeEnv": {
+    "PG_CONNECTION_STRING": "postgresql://postgres:postgres@db.localtest.me:5432/main"
+  },
+
+  // Testing view behavior - keep results panel open only on failures
+  "testing.automaticallyOpenTestResults": "openOnTestFailure",
+
+  // Show diagnostics (squiggly lines) for test failures
+  "vitest.applyDiagnostic": true,
+
+  // Log level for debugging extension issues
+  "vitest.logLevel": "info",
+
+  // Maximum configs to load (good for monorepos)
+  "vitest.maximumConfigs": 10,
+
+  // File watcher pattern
+  "vitest.filesWatcherInclude": "**/*",
+
+  // Debugging configuration
+  "vitest.debugExclude": ["<node_internals>/**", "**/node_modules/**"],
+  "vitest.debugOutFiles": [
+    "${workspaceFolder}/**/*.(m|c|)js",
+    "!**/node_modules/**"
+  ]
 }
