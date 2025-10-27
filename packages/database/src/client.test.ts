@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 
 describe('Database Client', () => {
   it('should connect and execute a query', async () => {
-    const result = await (db as any).execute(sql`SELECT 1 as value`);
+    const result = await db.execute(sql`SELECT 1 as value`);
     expect(result).toBeDefined();
     expect(Array.isArray(result)).toBe(true);
     expect(result.length).toBeGreaterThan(0);
