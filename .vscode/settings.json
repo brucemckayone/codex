@@ -19,6 +19,9 @@
   "vitest.enable": true,
   "vitest.commandLine": "pnpm vitest",
 
+  // Use workspace config for monorepo (recommended approach)
+  "vitest.workspaceConfig": "./vitest.workspace.ts",
+
   // Search for config files in the monorepo
   "vitest.configSearchPatternInclude": "**/*{vite,vitest}*.config*.{ts,js,mjs,cjs,cts,mts}",
   "vitest.configSearchPatternExclude": "{**/node_modules/**,**/.*/**,*.d.ts}",
