@@ -6,13 +6,13 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "docker:up": "docker-compose -f infrastructure/docker-compose.dev.yml up -d",
-    "docker:down": "docker-compose -f infrastructure/docker-compose.dev.yml down",
-    "docker:test:up": "docker-compose -f docker-compose.test.yml up -d",
-    "docker:test:down": "docker-compose -f docker-compose.test.yml down",
+    "docker:up": "docker-compose -f infrastructure/neon/docker-compose.dev.local.yml --env-file .env.dev up -d",
+    "docker:up:ephemeral": "docker-compose -f infrastructure/neon/docker-compose.dev.ephemeral.yml --env-file .env.dev up -d",
+    "docker:down": "docker-compose -f infrastructure/neon/docker-compose.dev.local.yml down",
+    "docker:down:ephemeral": "docker-compose -f infrastructure/neon/docker-compose.dev.ephemeral.yml down",
     "dev:web": "pnpm --filter web dev",
     "dev:worker": "pnpm --filter queue-consumer dev",
-    "dev": "concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm --filter web dev\" \"pnpm --filter queue-consumer dev\"",
+    "dev": "concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm --filter web dev\" \"pnpm --filter stripe-webhook-handler dev\"",
     "stop": "pnpm docker:down",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -32,7 +32,9 @@
     "act:list": "act -l",
     "act:test": "act -j test",
     "act:test:verbose": "act -j test --verbose",
-    "act:dry": "act -n"
+    "act:dry": "act -n",
+    "db:gen": "cd packages/database && npx drizzle-kit generate --config ./drizzle.config.ts",
+    "db:push": "cd packages/database && npx drizzle-kit push --config ./drizzle.config.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

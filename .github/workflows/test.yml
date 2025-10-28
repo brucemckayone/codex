@@ -100,25 +100,12 @@ jobs:
 
       - name: Run unit tests
         run: pnpm test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/main
 
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: main
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -144,11 +131,37 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Docker client
+        run: |
+          apt-get update && apt-get install -y docker.io
+
+      - name: Start Neon Local
+        run: |
+          docker run -d \
+            -p 5432:5432 \
+            -e NEON_API_KEY=${{ secrets.NEON_API_KEY }} \
+            -e NEON_PROJECT_ID=${{ secrets.NEON_PROJECT_ID }} \
+            -e PARENT_BRANCH_ID=${{ secrets.NEON_PARENT_BRANCH_ID }} \
+            --name neon-local-instance \
+            neondatabase/neon_local:latest
+
+      - name: Wait for DB services to be ready
+        run: |
+          apt-get update && apt-get install -y netcat-traditional curl
+          for i in {1..20}; do
+            nc -z localhost 5432 && exit 0
+            echo "Waiting for neon-local service..."
+            sleep 3
+          done
+          echo "Timed out waiting for neon-local service on localhost:5432" >&2
+          exit 1
+
       - name: Run integration tests
         run: pnpm test:coverage
         env:
-          # Use direct Postgres connection in CI (Neon driver automatically adapts)
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/main
+          NODE_ENV: test
+          DATABASE_URL_PROXY: postgres://neon:npg@localhost:5432/neondb
+          DB_METHOD: EPHEMERAL
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
