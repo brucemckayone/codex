@@ -78,5 +78,8 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.18.3",
-  "dependencies": {}
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "mysql2": "^3.15.3"
+  }
 }

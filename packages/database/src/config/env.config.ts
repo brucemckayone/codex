@@ -1,54 +1,57 @@
-import { neonConfig } from '@neondatabase/serverless';
+// Don't import '@neondatabase/serverless' (fix TS2307)
+// Type all function params explicitly (fix TS7006)
+// Keep rest of API the same
+
+import type { NeonConfig } from '@neondatabase/serverless';
 import { URL } from 'url';
 
+// Utility function to check for production environment
 function isProd(): boolean {
-  return process.env.NODE_ENV! === 'production';
+  return process.env.NODE_ENV === 'production';
 }
 
+// Utility function to determine DB URL based on environment
 function getDbUrl(): string {
-  switch (process.env.DB_METHOD!) {
+  switch (process.env.DB_METHOD) {
     case 'LOCAL_PROXY': {
       if (!isProd()) {
         return process.env.DATABASE_URL_LOCAL_PROXY!;
       } else {
         throw new Error(
-          `Attempting set use Local Database in production enviroment: ${process.env.NODE_ENV!}`
+          `Attempting to use Local Database in production environment: ${process.env.NODE_ENV!}`
         );
       }
     }
-
     case 'EPHEMERAL': {
       if (!isProd()) {
         return process.env.DATABASE_URL_PROXY!;
       } else {
         throw new Error(
-          `Attempting set use Ephemeral Database in production enviroment: ${process.env.NODE_ENV!}`
+          `Attempting to use Ephemeral Database in production environment: ${process.env.NODE_ENV!}`
         );
       }
     }
-
     case 'BRANCH': {
       return process.env.DATABASE_URL_BRANCH!;
     }
+    default:
+      throw new Error('Invalid Environment Variable database setup');
   }
-
-  throw new Error('Invalid Enviroment Variable database set up');
 }
 
-// New function to apply neonConfig
-function applyNeonConfig(neonConfigInstance: typeof neonConfig) {
+// Function allowing configuration of Neon
+function applyNeonConfig(neonConfigInstance: NeonConfig) {
   switch (DbEnvConfig.method) {
     case 'LOCAL_PROXY': {
       if (!isProd()) {
-        neonConfigInstance.fetchEndpoint = (host) => {
+        neonConfigInstance.fetchEndpoint = (host: string): string => {
           const [protocol, port] =
             host === 'db.localtest.me' ? ['http', 4444] : ['https', 443];
           return `${protocol}://${host}:${port}/sql`;
         };
-
         neonConfigInstance.useSecureWebSocket =
           new URL(DbEnvConfig.getDbUrl()).hostname !== 'db.localtest.me';
-        neonConfigInstance.wsProxy = (host) =>
+        neonConfigInstance.wsProxy = (host: string): string =>
           host === 'db.localtest.me' ? `${host}:4444/v2` : `${host}/v2`;
       }
       break;
@@ -61,7 +64,10 @@ function applyNeonConfig(neonConfigInstance: typeof neonConfig) {
 
         // WebSocket Mode (for real-time applications)
         neonConfigInstance.useSecureWebSocket = false; // Local proxy doesn't use SSL
-        neonConfigInstance.wsProxy = (_host, _port) => 'localhost:5432'; // Routes WebSocket connections to local proxy
+        neonConfigInstance.wsProxy = (
+          _host: string,
+          _port: string | number
+        ): string => 'localhost:5432'; // Routes WebSocket connections to local proxy
         neonConfigInstance.pipelineConnect = false; // Required for authentication to work
       } else {
         throw new Error(
@@ -72,15 +78,16 @@ function applyNeonConfig(neonConfigInstance: typeof neonConfig) {
     }
     case 'BRANCH':
     default:
-      // No specific neonConfig modifications for BRANCH in client.ts, so nothing to do here.
+      // No specific neonConfig modifications for BRANCH
       break;
   }
 }
 
+// Main exported value for config/env logic
 export const DbEnvConfig = {
   rootEnvPath: '../../.env.dev',
-  isProd: isProd,
-  getDbUrl: getDbUrl,
+  isProd,
+  getDbUrl,
   method: process.env.DB_METHOD!,
   out: './src/migrations',
   schema: './src/schema/index.ts',
@@ -90,5 +97,5 @@ export const DbEnvConfig = {
     | 'sqlite'
     | 'turso'
     | 'singlestore',
-  applyNeonConfig: applyNeonConfig,
+  applyNeonConfig,
 };
