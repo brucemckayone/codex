@@ -11,8 +11,8 @@ export default defineProject({
     globals: true,
     environment: 'node',
     include: ['src/**/*.{test,spec}.{js,ts}'],
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    testTimeout: 60000,
+    hookTimeout: 60000,
     // Note: coverage is configured at root level
   },
 });

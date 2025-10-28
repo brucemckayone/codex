@@ -1,0 +1,176 @@
+name: PR and Push CI (Neon ephemeral DB)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches-ignore:
+      - 'main'
+      - 'develop'
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  # Set how long to keep the branch (RFC3339).
+  EXPIRES_IN_DAYS: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  create-neon-branch:
+    runs-on: ubuntu-latest
+    outputs:
+      db_url: ${{ steps.create-branch.outputs.db_url }}
+      db_url_pooled: ${{ steps.create-branch.outputs.db_url_pooled }}
+      branch_id: ${{ steps.create-branch.outputs.branch_id }}
+    steps:
+      - name: Generate Neon Branch Name
+        id: branch-name
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "name=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
+          else
+            SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+            echo "name=push-${SANITIZED_REF_NAME}-${SHORT_SHA}" | cut -c1-63 >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set expiry timestamp
+        id: expires
+        run: |
+          echo "EXPIRES_AT=$(date -u --date "+${{ env.EXPIRES_IN_DAYS }} days" +'''%Y-%m-%dT%H:%M:%SZ''')" >> $GITHUB_ENV
+
+      - name: Create Neon branch
+        id: create-branch
+        uses: neondatabase/create-branch-action@v6
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: ${{ steps.branch-name.outputs.name }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          expires_at: ${{ env.EXPIRES_AT }}
+
+  test:
+    needs: create-neon-branch
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20]
+    env:
+      DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+                DB_METHOD: NEON_BRANCH
+                # Pass Neon credentials to the test environment      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+      NEON_PARENT_BRANCH_ID: ${{ vars.NEON_PARENT_BRANCH_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Use Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Filter changed packages
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            database:
+              - '''packages/database/**'''
+            validation:
+              - '''packages/validation/**'''
+            cloudflare-clients:
+              - '''packages/cloudflare-clients/**'''
+            test-utils:
+              - '''packages/test-utils/**'''
+            web:
+              - '''apps/web/**'''
+            auth-worker:
+              - '''workers/auth/**'''
+            stripe-webhook-handler:
+              - '''workers/stripe-webhook-handler/**'''
+
+      - name: Run migrations
+        if: steps.filter.outputs.database == '''true'''
+        run: pnpm --filter @codex/database db:migrate
+
+      - name: Run tests for @codex/database
+        if: steps.filter.outputs.database == '''true'''
+        run: pnpm --filter @codex/database test
+
+      - name: Run tests for @codex/validation
+        if: steps.filter.outputs.validation == '''true'''
+        run: pnpm --filter @codex/validation test
+
+      - name: Run tests for @codex/cloudflare-clients
+        if: steps.filter.outputs.cloudflare-clients == '''true'''
+        run: pnpm --filter @codex/cloudflare-clients test
+
+      - name: Run tests for @codex/test-utils
+        if: steps.filter.outputs.test-utils == '''true'''
+        run: pnpm --filter @codex/test-utils test
+
+      - name: Run tests for web
+        if: steps.filter.outputs.web == '''true'''
+        run: pnpm --filter web test
+
+      - name: Run tests for auth-worker
+        if: steps.filter.outputs.auth-worker == '''true'''
+        run: pnpm --filter auth test
+
+      - name: Run tests for stripe-webhook-handler
+        if: steps.filter.outputs.stripe-webhook-handler == '''true'''
+        run: pnpm --filter stripe-webhook-handler test
+
+  e2e-tests:
+    name: E2E Tests
+    needs: [create-neon-branch, test]
+    runs-on: ubuntu-latest
+    if: needs.test.outputs.web == '''true'''
+    env:
+      DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+      DB_METHOD: CI
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm i --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps
+
+      - name: Run E2E tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 30

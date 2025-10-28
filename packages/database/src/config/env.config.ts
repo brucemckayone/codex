@@ -14,28 +14,26 @@ function isProd(): boolean {
 function getDbUrl(): string {
   switch (process.env.DB_METHOD) {
     case 'LOCAL_PROXY': {
+      // Local PostgreSQL instance (Docker Compose)
       if (!isProd()) {
         return process.env.DATABASE_URL_LOCAL_PROXY!;
-      } else {
-        throw new Error(
-          `Attempting to use Local Database in production environment: ${process.env.NODE_ENV!}`
-        );
       }
+      throw new Error(
+        `Attempting to use Local Database in production environment: ${process.env.NODE_ENV!}`
+      );
     }
-    case 'EPHEMERAL': {
-      if (!isProd()) {
-        return process.env.DATABASE_URL_PROXY!;
-      } else {
-        throw new Error(
-          `Attempting to use Ephemeral Database in production environment: ${process.env.NODE_ENV!}`
-        );
-      }
+    case 'NEON_BRANCH': {
+      // Neon ephemeral branch for testing (CI or local)
+      return process.env.DATABASE_URL!;
     }
-    case 'BRANCH': {
-      return process.env.DATABASE_URL_BRANCH!;
+    case 'PRODUCTION': {
+      // Production database connection
+      return process.env.DATABASE_URL!;
     }
     default:
-      throw new Error('Invalid Environment Variable database setup');
+      throw new Error(
+        `Invalid DB_METHOD: ${process.env.DB_METHOD}. Must be one of: LOCAL_PROXY, NEON_BRANCH, PRODUCTION`
+      );
   }
 }
 
@@ -56,29 +54,21 @@ function applyNeonConfig(neonConfigInstance: NeonConfig) {
       }
       break;
     }
-    case 'EPHEMERAL': {
-      if (!isProd()) {
-        // HTTP Mode (recommended for most applications)
-        neonConfigInstance.fetchEndpoint = 'http://localhost:5432/sql'; // Routes HTTP requests to local proxy
-        neonConfigInstance.poolQueryViaFetch = true; // Enables HTTP connection pooling
-
-        // WebSocket Mode (for real-time applications)
-        neonConfigInstance.useSecureWebSocket = false; // Local proxy doesn't use SSL
-        neonConfigInstance.wsProxy = (
-          _host: string,
-          _port: string | number
-        ): string => 'localhost:5432'; // Routes WebSocket connections to local proxy
-        neonConfigInstance.pipelineConnect = false; // Required for authentication to work
-      } else {
-        throw new Error(
-          'Ephemeral Database can only be run during test or development'
-        );
-      }
+    case 'NEON_BRANCH': {
+      // Configuration for ephemeral branches
+      neonConfigInstance.poolQueryViaFetch = true;
+      neonConfigInstance.useSecureWebSocket = true;
+      neonConfigInstance.pipelineConnect = 'password'; // Optimized for CI
       break;
     }
-    case 'BRANCH':
+    case 'PRODUCTION': {
+      // Standard production configuration
+      neonConfigInstance.poolQueryViaFetch = true;
+      neonConfigInstance.useSecureWebSocket = true;
+      break;
+    }
     default:
-      // No specific neonConfig modifications for BRANCH
+      // No specific neonConfig modifications
       break;
   }
 }

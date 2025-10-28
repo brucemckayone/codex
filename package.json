@@ -34,7 +34,13 @@
     "act:test:verbose": "act -j test --verbose",
     "act:dry": "act -n",
     "db:gen": "cd packages/database && npx drizzle-kit generate --config ./drizzle.config.ts",
-    "db:push": "cd packages/database && npx drizzle-kit push --config ./drizzle.config.ts"
+    "db:push": "cd packages/database && npx drizzle-kit push --config ./drizzle.config.ts",
+    "neon:create": "pnpm --filter @codex/database neon:create",
+    "neon:list": "pnpm --filter @codex/database neon:list",
+    "neon:delete": "pnpm --filter @codex/database neon:delete",
+    "neon:cleanup": "pnpm --filter @codex/database neon:cleanup",
+    "test:neon": "DB_METHOD=BRANCH pnpm test",
+    "test:neon:watch": "DB_METHOD=BRANCH pnpm test:watch"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

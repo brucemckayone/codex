@@ -17,10 +17,12 @@
     "@neondatabase/serverless": "^0.10.4",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.36.4",
+    "node-fetch": "^3.3.2",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/node-fetch": "^2.6.11",
     "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.29.1",
     "tsx": "^4.20.6",
