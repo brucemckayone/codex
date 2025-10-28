@@ -40,7 +40,8 @@
     "neon:delete": "pnpm --filter @codex/database neon:delete",
     "neon:cleanup": "pnpm --filter @codex/database neon:cleanup",
     "test:neon": "DB_METHOD=BRANCH pnpm test",
-    "test:neon:watch": "DB_METHOD=BRANCH pnpm test:watch"
+    "test:neon:watch": "DB_METHOD=BRANCH pnpm test:watch",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",
@@ -61,7 +62,9 @@
     "eslint-plugin-svelte": "^3.12.5",
     "eslint-plugin-vitest": "^0.5.4",
     "happy-dom": "^20.0.8",
+    "husky": "^9.1.7",
     "jsdom": "^27.0.1",
+    "lint-staged": "^16.2.6",
     "miniflare": "^4.20251008.0",
     "pnpm": "^8.0.0",
     "prettier": "^3.6.2",
@@ -83,6 +86,9 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "lint-staged": {
+    "*.{js,ts,svelte,json,md}": "prettier --write"
+  },
   "packageManager": "pnpm@10.18.3",
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
