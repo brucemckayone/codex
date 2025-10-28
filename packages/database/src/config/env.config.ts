@@ -7,16 +7,6 @@ function isProd(): boolean {
 
 function getDbUrl(): string {
   switch (process.env.DB_METHOD!) {
-    case 'LOCAL': {
-      if (!isProd()) {
-        return process.env.DATABASE_URL_LOCAL!;
-      } else {
-        throw new Error(
-          `Attempting set use Local Database in production enviroment: ${process.env.NODE_ENV!}`
-        );
-      }
-    }
-
     case 'LOCAL_PROXY': {
       if (!isProd()) {
         return process.env.DATABASE_URL_LOCAL_PROXY!;
