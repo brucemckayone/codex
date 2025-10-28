@@ -25,11 +25,11 @@ jobs:
     outputs:
       database: ${{ steps.filter.outputs.database }}
       validation: ${{ steps.filter.outputs.validation }}
-      'cloudflare-clients': ${{ steps.filter.outputs.cloudflare-clients }}
-      'test-utils': ${{ steps.filter.outputs.test-utils }}
+      "cloudflare-clients": ${{ steps.filter.outputs.cloudflare-clients }}
+      "test-utils": ${{ steps.filter.outputs.test-utils }}
       web: ${{ steps.filter.outputs.web }}
-      'auth-worker': ${{ steps.filter.outputs.auth-worker }}
-      'stripe-webhook-handler': ${{ steps.filter.outputs.stripe-webhook-handler }}
+      "auth-worker": ${{ steps.filter.outputs.auth-worker }}
+      "stripe-webhook-handler": ${{ steps.filter.outputs.stripe-webhook-handler }}
     steps:
       - uses: actions/checkout@v4
       - name: Filter changed packages
@@ -100,12 +100,12 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 10.18.3
       - name: Use Node.js ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: 'pnpm'
+          cache: "pnpm"
       - name: Install dependencies
         run: pnpm i --frozen-lockfile
 
@@ -138,12 +138,12 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 10.18.3
       - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
+          cache: "pnpm"
       - name: Install dependencies
         run: pnpm i --frozen-lockfile
       - name: Install Playwright browsers
