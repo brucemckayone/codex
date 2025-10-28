@@ -1,5 +1,9 @@
 import { defineProject } from 'vitest/config';
-import path from 'path';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+
+// Load env.dev from project root (2 levels up from packages/database)
+config({ path: resolve(__dirname, '../../.env.dev') });
 
 export default defineProject({
   test: {
@@ -7,11 +11,8 @@ export default defineProject({
     globals: true,
     environment: 'node',
     include: ['src/**/*.{test,spec}.{js,ts}'],
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    testTimeout: 30000,
+    hookTimeout: 30000,
     // Note: coverage is configured at root level
-  },
-  resolve: {
-    conditions: ['node'],
   },
 });
