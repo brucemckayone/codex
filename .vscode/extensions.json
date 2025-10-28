@@ -1,0 +1,20 @@
+{
+  "recommendations": [
+    // Essential
+    "svelte.svelte-vscode",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+
+    // Testing
+    "vitest.explorer",
+
+    // Database
+    "drizzle-team.drizzle-vscode",
+
+    // Cloudflare
+    "cloudflare.vscode-cloudflare-workers",
+
+    // TypeScript
+    "yoavbls.pretty-ts-errors"
+  ]
+}

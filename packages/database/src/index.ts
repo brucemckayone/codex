@@ -1,5 +1,2 @@
-// Database package entry point
-// Exports database client and schema
-
 export * from './client';
-export * as schema from './schema';
+export * as schema from './schema/test';

@@ -1,0 +1,16 @@
+# Cloudflare Tunnel Configuration for Local Development
+# This allows you to test your local app at https://local.revelations.studio
+# which is crucial for testing Stripe webhooks and other integrations
+
+tunnel: 3bbd7b3c-f529-4b58-9ca2-089004592373
+credentials-file: /Users/brucemckay/.cloudflared/3bbd7b3c-f529-4b58-9ca2-089004592373.json
+
+ingress:
+  # Route all traffic from local.revelations.studio to localhost:5173
+  - hostname: local.revelations.studio
+    service: http://localhost:5173
+    originRequest:
+      noTLSVerify: true
+
+  # Catch-all rule (required)
+  - service: http_status:404

@@ -1,0 +1,18 @@
+import { config } from 'dotenv';
+import { defineConfig } from 'drizzle-kit';
+import { resolve } from 'path';
+import { DbEnvConfig } from '@codex/database/config/env.config';
+
+// Load env.dev from project root (2 levels up from packages/database)
+config({ path: resolve(__dirname, DbEnvConfig.rootEnvPath) });
+
+export default defineConfig({
+  out: DbEnvConfig.out,
+  schema: DbEnvConfig.schema,
+  dialect: DbEnvConfig.dialetc!,
+  dbCredentials: {
+    url: DbEnvConfig.getDbUrl()!,
+  },
+  verbose: true,
+  strict: true,
+});

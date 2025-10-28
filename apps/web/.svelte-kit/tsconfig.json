@@ -25,24 +25,6 @@
 			"@codex/cloudflare-clients/*": [
 				"../../../packages/cloudflare-clients/src/*"
 			],
-			"@codex/core-services": [
-				"../../../packages/core-services/src"
-			],
-			"@codex/core-services/*": [
-				"../../../packages/core-services/src/*"
-			],
-			"@codex/auth": [
-				"../../../packages/auth/src"
-			],
-			"@codex/auth/*": [
-				"../../../packages/auth/src/*"
-			],
-			"@codex/notifications": [
-				"../../../packages/notifications/src"
-			],
-			"@codex/notifications/*": [
-				"../../../packages/notifications/src/*"
-			],
 			"$app/types": [
 				"./types/index.d.ts"
 			]

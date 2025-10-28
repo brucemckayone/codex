@@ -1,0 +1,18 @@
+services:
+  neon-local:
+    image: neondatabase/neon_local:latest
+    container_name: codex-neon-local
+    environment:
+      NEON_API_KEY: ${NEON_API_KEY}
+      NEON_PROJECT_ID: ${NEON_PROJECT_ID}
+      PARENT_BRANCH_ID: ${NEON_PARENT_BRANCH_ID}
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'nc -z localhost 5432']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db_data:

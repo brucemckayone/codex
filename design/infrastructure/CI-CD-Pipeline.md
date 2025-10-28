@@ -729,7 +729,7 @@ Sentry.init({
 ## Related Documents
 
 - [EnvironmentManagement.md](./EnvironmentManagement.md) - Local dev setup
-- [TestingStrategy.md](./TestingStrategy.md) - Testing frameworks
+- [TestingStrategy.md](./Testing.md) - Testing frameworks
 - **CodeStructure.md** - Project organization (TBD)
 
 ---

@@ -4,10 +4,6 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts",
-    "./*": "./src/*"
-  },
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -18,14 +14,20 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "drizzle-orm": "^0.36.3",
-    "@neondatabase/serverless": "^0.10.3",
-    "postgres": "^3.4.5"
+    "@neondatabase/serverless": "^0.10.4",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.36.4",
+    "node-fetch": "^3.3.2",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.29.1",
     "@types/node": "^22.0.0",
+    "@types/node-fetch": "^2.6.11",
+    "@types/ws": "^8.18.1",
+    "drizzle-kit": "^0.29.1",
+    "tsx": "^4.20.6",
     "typescript": "^5.6.3",
-    "vitest": "^4.0.2"
+    "vitest": "^4.0.2",
+    "ws": "^8.18.3"
   }
 }

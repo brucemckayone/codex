@@ -173,15 +173,63 @@ if (env.RUNPOD_LOCAL) {
 - [RunPod Local Testing Docs](https://docs.runpod.io/serverless/development/local-testing)
 - [RunPod CLI Reference](https://docs.runpod.io/cli/overview)
 
-**Stripe webhooks:**
+### Cloudflare Tunnel (for Webhook Testing)
+
+For testing webhooks from external services (Stripe, RunPod, etc.) that need a public HTTPS URL, use Cloudflare Tunnel.
+
+**Why use a tunnel?**
+- Test real webhooks locally (Stripe, RunPod, etc.)
+- Access your dev server from any device
+- Test with HTTPS/SSL locally
+- No need for ngrok or similar services
+
+**Setup:**
+
+The tunnel is pre-configured at `https://local.revelations.studio`:
 
 ```bash
-# Install CLI
-brew install stripe/stripe-cli/stripe
-
-# Forward to local
-stripe listen --forward-to localhost:5173/api/webhooks/stripe
+# Tunnel already created with ID: 3bbd7b3c-f529-4b58-9ca2-089004592373
+# DNS already configured: local.revelations.studio → tunnel
 ```
+
+**Usage with VSCode Tasks:**
+
+```bash
+# Open Command Palette (Cmd+Shift+P)
+# → "Tasks: Run Task"
+# → "Start Cloudflare Tunnel"
+
+# Or start everything at once:
+# → "Dev: Full Stack" (Docker + Dev Server + Tunnel)
+```
+
+**Or run directly:**
+
+```bash
+cloudflared tunnel --config infrastructure/cloudflare-tunnel/config.yml run codex-local
+```
+
+**Testing Stripe webhooks with tunnel:**
+
+Option 1 - Stripe CLI (simpler):
+```bash
+stripe listen --forward-to http://localhost:5173/api/webhooks/stripe/checkout \
+  --events checkout.session.completed,checkout.session.expired
+```
+
+Option 2 - Cloudflare Tunnel (recommended, tests like production):
+1. Start tunnel (see above)
+2. Visit: `https://local.revelations.studio`
+3. Create test webhooks in Stripe Dashboard:
+   - `https://local.revelations.studio/api/webhooks/stripe/checkout`
+   - `https://local.revelations.studio/api/webhooks/stripe/payment`
+   - etc.
+4. Update `env.dev`:
+   ```bash
+   SITE_URL=https://local.revelations.studio
+   ```
+
+**Tunnel configuration:** `infrastructure/cloudflare-tunnel/config.yml`
 
 ---
 
@@ -383,3 +431,5 @@ Never commit secrets to git.
 - [Miniflare](https://miniflare.dev/)
 - [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - [Drizzle ORM](https://orm.drizzle.team/)
+
+```
