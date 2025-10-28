@@ -13,7 +13,6 @@ permissions:
   actions: write
 
 env:
-  # Set how long to keep the branch (RFC3339).
   EXPIRES_IN_DAYS: 1
 
 concurrency:
@@ -21,11 +20,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      database: ${{ steps.filter.outputs.database }}
+      validation: ${{ steps.filter.outputs.validation }}
+      "cloudflare-clients": ${{ steps.filter.outputs.cloudflare-clients }}
+      "test-utils": ${{ steps.filter.outputs.test-utils }}
+      web: ${{ steps.filter.outputs.web }}
+      "auth-worker": ${{ steps.filter.outputs.auth-worker }}
+      "stripe-webhook-handler": ${{ steps.filter.outputs.stripe-webhook-handler }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Filter changed packages
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            database:
+              - '''packages/database/**'''
+            validation:
+              - '''packages/validation/**'''
+            cloudflare-clients:
+              - '''packages/cloudflare-clients/**'''
+            test-utils:
+              - '''packages/test-utils/**'''
+            web:
+              - '''apps/web/**'''
+            auth-worker:
+              - '''workers/auth/**'''
+            stripe-webhook-handler:
+              - '''workers/stripe-webhook-handler/**'''
+
   create-neon-branch:
     runs-on: ubuntu-latest
     outputs:
       db_url: ${{ steps.create-branch.outputs.db_url }}
-      db_url_pooled: ${{ steps.create-branch.outputs.db_url_pooled }}
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
     steps:
       - name: Generate Neon Branch Name
@@ -54,119 +84,72 @@ jobs:
           expires_at: ${{ env.EXPIRES_AT }}
 
   test:
-    needs: create-neon-branch
+    needs: [changes, create-neon-branch]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node: [20]
     env:
       DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
-                DB_METHOD: NEON_BRANCH
-                # Pass Neon credentials to the test environment      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      DB_METHOD: NEON_BRANCH
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
       NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
       NEON_PARENT_BRANCH_ID: ${{ vars.NEON_PARENT_BRANCH_ID }}
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
           version: 8
-
       - name: Use Node.js ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: "pnpm"
-
       - name: Install dependencies
         run: pnpm i --frozen-lockfile
 
-      - name: Filter changed packages
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            database:
-              - '''packages/database/**'''
-            validation:
-              - '''packages/validation/**'''
-            cloudflare-clients:
-              - '''packages/cloudflare-clients/**'''
-            test-utils:
-              - '''packages/test-utils/**'''
-            web:
-              - '''apps/web/**'''
-            auth-worker:
-              - '''workers/auth/**'''
-            stripe-webhook-handler:
-              - '''workers/stripe-webhook-handler/**'''
-
       - name: Run migrations
-        if: steps.filter.outputs.database == '''true'''
+        if: needs.changes.outputs.database == 'true'
         run: pnpm --filter @codex/database db:migrate
 
-      - name: Run tests for @codex/database
-        if: steps.filter.outputs.database == '''true'''
-        run: pnpm --filter @codex/database test
-
-      - name: Run tests for @codex/validation
-        if: steps.filter.outputs.validation == '''true'''
-        run: pnpm --filter @codex/validation test
-
-      - name: Run tests for @codex/cloudflare-clients
-        if: steps.filter.outputs.cloudflare-clients == '''true'''
-        run: pnpm --filter @codex/cloudflare-clients test
-
-      - name: Run tests for @codex/test-utils
-        if: steps.filter.outputs.test-utils == '''true'''
-        run: pnpm --filter @codex/test-utils test
-
-      - name: Run tests for web
-        if: steps.filter.outputs.web == '''true'''
-        run: pnpm --filter web test
-
-      - name: Run tests for auth-worker
-        if: steps.filter.outputs.auth-worker == '''true'''
-        run: pnpm --filter auth test
-
-      - name: Run tests for stripe-webhook-handler
-        if: steps.filter.outputs.stripe-webhook-handler == '''true'''
-        run: pnpm --filter stripe-webhook-handler test
+      - name: Run tests for affected packages
+        if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
+        run: |
+          if [[ "${{ needs.changes.outputs.database }}" == "true" ]]; then pnpm --filter @codex/database test; fi
+          if [[ "${{ needs.changes.outputs.validation }}" == "true" ]]; then pnpm --filter @codex/validation test; fi
+          if [[ "${{ needs.changes.outputs.cloudflare-clients }}" == "true" ]]; then pnpm --filter @codex/cloudflare-clients test; fi
+          if [[ "${{ needs.changes.outputs.test-utils }}" == "true" ]]; then pnpm --filter @codex/test-utils test; fi
+          if [[ "${{ needs.changes.outputs.web }}" == "true" ]]; then pnpm --filter web test; fi
+          if [[ "${{ needs.changes.outputs.auth-worker }}" == "true" ]]; then pnpm --filter auth test; fi
+          if [[ "${{ needs.changes.outputs.stripe-webhook-handler }}" == "true" ]]; then pnpm --filter stripe-webhook-handler test; fi
 
   e2e-tests:
     name: E2E Tests
-    needs: [create-neon-branch, test]
+    needs: [changes, create-neon-branch]
     runs-on: ubuntu-latest
-    if: needs.test.outputs.web == '''true'''
+    if: needs.changes.outputs.web == 'true'
     env:
       DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
-      DB_METHOD: CI
+      DB_METHOD: NEON_BRANCH
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
           version: 8
-
       - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: "pnpm"
-
       - name: Install dependencies
         run: pnpm i --frozen-lockfile
-
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
-
       - name: Run E2E tests
         run: pnpm test:e2e
-
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
         if: always()
