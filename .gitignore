@@ -1,12 +1,16 @@
+# Environment variables
 .env
 .env.*
 **/.env
 **/.env.*
 env.dev
 env.prod
-node_modules
-*.png
 
+# Dependencies
+node_modules
+
+# Image assets (if not part of the source)
+*.png
 
 # Act (GitHub Actions local testing)
 .secrets
@@ -17,3 +21,18 @@ coverage/
 **/coverage/
 **/.wrangler/
 .svelte-kit/
+
+# IDE settings
+.vscode/
+
+# Test results
+**/test-results/
+
+# Build output
+**/dist/
+
+# OS-specific
+.DS_Store
+
+# Claude IDE settings
+.claude/
