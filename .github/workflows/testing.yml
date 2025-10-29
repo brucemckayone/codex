@@ -107,11 +107,11 @@ jobs:
         run: pnpm i --frozen-lockfile
 
       - name: Run migrations
-        if: needs.changes.outputs.database == 'true'
+        # if: needs.changes.outputs.database == 'true'
         run: pnpm --filter @codex/database db:migrate
 
       - name: Run tests for affected packages
-        if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
+        # if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
         run: |
           if [[ "${{ needs.changes.outputs.database }}" == "true" ]]; then pnpm --filter @codex/database test; fi
           if [[ "${{ needs.changes.outputs.validation }}" == "true" ]]; then pnpm --filter @codex/validation test; fi
