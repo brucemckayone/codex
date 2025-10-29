@@ -1,0 +1,256 @@
+# E-Commerce Direct Purchase Flow - Phase 1
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Browser Layer
+browser: {
+  label: "Customer Browser"
+
+  content_page: {
+    label: "Content Page\n\n[Buy Now] button\nShows price"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  stripe_checkout: {
+    label: "Stripe Checkout\n(Hosted Page)\n\nPayment form\nCard details\nSecure payment"
+    style: {
+      fill: ${color-stripe}
+      stroke: ${stroke-stripe}
+    }
+  }
+
+  success_page: {
+    label: "Success Page\n\n'Purchase Complete'\nAccess granted"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  style: {
+    fill: "#FAFAFA"
+    stroke: "#BDBDBD"
+    stroke-width: 2
+  }
+}
+
+# SvelteKit Server Layer
+sveltekit: {
+  label: "SvelteKit Server"
+
+  checkout_api: {
+    label: "Checkout API\n\nPOST /api/checkout\nCreate Stripe session"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  webhook_handler: {
+    label: "Webhook Handler\n\nPOST /api/webhooks/stripe\nVerify & process events"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  success_route: {
+    label: "Success Route\n\nGET /checkout/success\nDisplay confirmation"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  style: {
+    fill: ${color-nextjs}
+    stroke: ${stroke-nextjs}
+    stroke-width: 2
+  }
+}
+
+# Service Layer
+services: {
+  label: "Service Layer"
+
+  purchases_service: {
+    label: "Purchases Service\n\ncreateCheckoutSession()\nhandleWebhook()\ngrantAccess()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  auth_service: {
+    label: "Auth Service\n\nrequireAuth()\ngetCurrentUser()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  notification_service: {
+    label: "Notification Service\n\nsendPurchaseReceipt()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  style: {
+    fill: "#F5F5F5"
+    stroke: "#9E9E9E"
+    stroke-width: 2
+  }
+}
+
+# Database Layer
+postgres: {
+  label: "Neon PostgreSQL"
+  shape: cylinder
+
+  tables: {
+    label: "Database Tables\n\n• purchases (status: pending/completed)\n• content (price, title)\n• users"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# Stripe External Service
+stripe: {
+  label: "Stripe API"
+
+  checkout_api: {
+    label: "Checkout Sessions\n\nCreate session\nHost payment page"
+    style: {
+      fill: ${color-stripe}
+      stroke: ${stroke-stripe}
+    }
+  }
+
+  webhooks: {
+    label: "Webhooks\n\ncheckout.session.completed\npayment_intent.succeeded"
+    style: {
+      fill: ${color-stripe}
+      stroke: ${stroke-stripe}
+    }
+  }
+
+  style: {
+    fill: ${color-stripe}
+    stroke: ${stroke-stripe}
+    stroke-width: 2
+  }
+}
+
+# Flow Step 1: User clicks Buy Now
+browser.content_page -> sveltekit.checkout_api: "1. POST /api/checkout\n{contentId}" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+sveltekit.checkout_api -> services.auth_service: "requireAuth()" {
+  style.stroke: ${arrow-http}
+}
+
+sveltekit.checkout_api -> services.purchases_service: "createCheckoutSession(userId, contentId)" {
+  style.stroke: ${arrow-http}
+}
+
+# Flow Step 2: Create pending purchase
+services.purchases_service -> postgres.tables: "INSERT INTO purchases\nstatus='pending'\nstripeSessionId" {
+  style.stroke: ${arrow-sql}
+}
+
+# Flow Step 3: Create Stripe session
+services.purchases_service -> stripe.checkout_api: "Stripe.checkout.sessions.create()\n{amount, metadata}" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 2
+}
+
+stripe.checkout_api -> services.purchases_service: "Return session URL" {
+  style.stroke: ${arrow-external}
+  style.stroke-dash: 3
+}
+
+# Flow Step 4: Redirect to Stripe
+sveltekit.checkout_api -> browser.stripe_checkout: "2. Redirect to\nStripe Checkout URL" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+# Flow Step 5: Customer completes payment
+browser.stripe_checkout -> stripe.checkout_api: "3. Submit payment\n(card details)" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 3
+}
+
+# Flow Step 6: Stripe sends webhook
+stripe.webhooks -> sveltekit.webhook_handler: "4. POST /api/webhooks/stripe\ncheckout.session.completed" {
+  style.stroke: ${arrow-external}
+  style.stroke-width: 3
+}
+
+sveltekit.webhook_handler -> services.purchases_service: "handleWebhook(event)" {
+  style.stroke: ${arrow-http}
+}
+
+# Flow Step 7: Update purchase status
+services.purchases_service -> postgres.tables: "UPDATE purchases\nSET status='completed'\nWHERE stripeSessionId" {
+  style.stroke: ${arrow-sql}
+  style.stroke-width: 2
+}
+
+# Flow Step 8: Grant content access
+services.purchases_service -> postgres.tables: "Verify purchase exists\n(idempotency check)" {
+  style.stroke: ${arrow-sql}
+}
+
+# Flow Step 9: Send receipt email
+services.purchases_service -> services.notification_service: "sendPurchaseReceipt()" {
+  style.stroke: ${arrow-http}
+}
+
+# Flow Step 10: Redirect to success
+stripe.checkout_api -> browser.success_page: "5. Redirect to\n/checkout/success" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+browser.success_page -> sveltekit.success_route: "GET /checkout/success" {
+  style.stroke: ${arrow-https}
+}
+
+sveltekit.success_route -> postgres.tables: "Verify purchase completed" {
+  style.stroke: ${arrow-sql}
+}
+
+# Notes
+note_security: {
+  label: "🔐 Security:\n1. Pending purchase created BEFORE redirect\n2. Access granted ONLY after webhook verification\n3. Webhook signature verified (Stripe secret)\n4. Idempotent: duplicate webhooks handled safely"
+  shape: text
+}
+
+note_flow: {
+  label: "📝 Purchase Flow:\n1. User clicks [Buy Now] → Create pending purchase\n2. Redirect to Stripe Checkout (hosted page)\n3. User completes payment on Stripe\n4. Stripe sends webhook → Update to 'completed'\n5. Stripe redirects back → Success page"
+  shape: text
+}
+
+note_pci: {
+  label: "💳 PCI Compliance:\n• Card details NEVER touch our servers\n• All payment processing by Stripe\n• We only store: purchaseId, amount, status\n• Minimizes PCI compliance scope"
+  shape: text
+}

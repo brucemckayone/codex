@@ -54,6 +54,7 @@
 - **Cost**: $5/month minimum (same as D1 at scale)
 
 **Connection**:
+
 - SvelteKit connects via Neon's serverless driver
 - Connection pooling built-in (pgBouncer)
 - ~50-100ms latency (acceptable for database operations)
@@ -265,11 +266,13 @@
 ## Database Schema
 
 Database schema and table definitions are documented separately in:
+
 - **[Database Schema Design](./DatabaseSchema.md)** - Complete table definitions, relationships, and migrations
 
 ## Environment Configuration
 
 Environment-specific configuration and deployment strategies are documented in:
+
 - **[Environment Management Guide](./EnvironmentManagement.md)** - Local development, staging, and production setup
 
 ### Required Environment Variables (All Environments)
@@ -310,17 +313,18 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 
 ### Fixed Costs
 
-| Service | Tier | Monthly Cost |
-|---------|------|--------------|
-| **Neon Postgres** | Launch | $5 minimum |
-| **Cloudflare Pages** | Free | $0 |
-| **Cloudflare Workers** | Paid ($5) | $5 |
-| **Resend Email** | Free (3k emails) | $0 |
-| | **Fixed Total** | **$10/month** |
+| Service                | Tier             | Monthly Cost  |
+| ---------------------- | ---------------- | ------------- |
+| **Neon Postgres**      | Launch           | $5 minimum    |
+| **Cloudflare Pages**   | Free             | $0            |
+| **Cloudflare Workers** | Paid ($5)        | $5            |
+| **Resend Email**       | Free (3k emails) | $0            |
+|                        | **Fixed Total**  | **$10/month** |
 
 ### Variable Costs (Usage-Based)
 
 #### Neon Postgres
+
 - **Compute**: $0.14/CU-hour
   - Estimate: ~30 CU-hours/month (light traffic) = $4.20
   - Covered by $5 minimum
@@ -331,6 +335,7 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 **Neon Total**: $5/month (minimum billing)
 
 #### Cloudflare R2
+
 - **Storage**: $0.015/GB-month
   - Estimate: 100GB (50 videos × 2GB avg) = $1.50
 - **Egress**: $0 (free!)
@@ -339,6 +344,7 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 **R2 Total**: ~$2/month
 
 #### RunPod Serverless GPU
+
 - **GPU**: $0.0002/second (A4000)
 - **Processing time**: ~5 minutes per 1-hour video
   - 1 video: 300 seconds × $0.0002 = $0.06
@@ -348,12 +354,14 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 **RunPod Total**: $3-10/month
 
 #### Cloudflare Queues (if used)
+
 - **Operations**: $0.40/million operations
 - **Estimate**: ~10k operations/month = negligible
 
 **Queues Total**: <$1/month
 
 #### Stripe
+
 - **Percentage**: 2.9% + $0.30 per transaction
 - **Example**: 20 sales @ $30 avg = $600 revenue
   - Fees: (20 × $0.30) + ($600 × 0.029) = $6 + $17.40 = $23.40
@@ -361,23 +369,23 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 
 ### Total Monthly Cost (MVP)
 
-| Scenario | Videos Uploaded | Storage Used | Monthly Cost |
-|----------|----------------|--------------|--------------|
-| **Light Usage** | 20 videos | 40GB | $15-20 |
-| **Medium Usage** | 50 videos | 100GB | $20-25 |
-| **Heavy Usage** | 100 videos | 200GB | $25-30 |
+| Scenario         | Videos Uploaded | Storage Used | Monthly Cost |
+| ---------------- | --------------- | ------------ | ------------ |
+| **Light Usage**  | 20 videos       | 40GB         | $15-20       |
+| **Medium Usage** | 50 videos       | 100GB        | $20-25       |
+| **Heavy Usage**  | 100 videos      | 200GB        | $25-30       |
 
 **Expected MVP Cost**: **$20-30/month**
 
 ### Cost at Scale (Year 1)
 
-| Metric | Estimate | Monthly Cost |
-|--------|----------|--------------|
-| Neon (more traffic) | 200 CU-hours | $28 |
-| R2 Storage | 500GB | $8 |
-| RunPod | 200 videos/month | $12 |
-| Workers | 5M requests | $5 |
-| | **Total** | **~$50-60/month** |
+| Metric              | Estimate         | Monthly Cost      |
+| ------------------- | ---------------- | ----------------- |
+| Neon (more traffic) | 200 CU-hours     | $28               |
+| R2 Storage          | 500GB            | $8                |
+| RunPod              | 200 videos/month | $12               |
+| Workers             | 5M requests      | $5                |
+|                     | **Total**        | **~$50-60/month** |
 
 ### Cost Optimization Notes
 
@@ -406,16 +414,19 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 ### Easy to Migrate (No Lock-in)
 
 ✅ **Neon Postgres** → Any Postgres provider
+
 - Standard `pg_dump` / `pg_restore`
 - Migration time: <1 hour
 - Targets: AWS RDS, Supabase, Railway, self-hosted
 
 ✅ **Cloudflare R2** → AWS S3 or compatible
+
 - S3-compatible API
 - `rclone sync` or `aws s3 sync`
 - Migration time: Few hours (depends on data size)
 
 ✅ **SvelteKit** → Any Node.js host
+
 - Standard SvelteKit adapter swap
 - Targets: Vercel, Netlify, self-hosted
 - Migration time: <1 hour
@@ -423,11 +434,13 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 ### Moderate Migration Effort
 
 ⚠️ **Cloudflare Pages** → Vercel/Netlify
+
 - Mostly environment variable changes
 - May need adapter adjustments
 - Migration time: 2-4 hours
 
 ⚠️ **Cloudflare Workers** → AWS Lambda/Vercel Functions
+
 - Code mostly portable (standard Web APIs)
 - Queue consumers need rewrite
 - Migration time: 4-8 hours
@@ -435,16 +448,19 @@ See [EnvironmentManagement.md](./EnvironmentManagement.md) for detailed setup in
 ### Vendor-Specific (Acceptable)
 
 🔒 **Cloudflare Queues** → AWS SQS/RabbitMQ
+
 - Queue consumer logic needs rewrite
 - But queues are optional (can call RunPod directly)
 - Migration time: 8-16 hours
 
 🔒 **Cloudflare KV** → Redis/Upstash
+
 - Key-value semantics mostly portable
 - Mainly used for caching (not critical data)
 - Migration time: 4-8 hours
 
 **Risk Assessment**: **LOW**
+
 - Critical data (Postgres) has zero lock-in
 - Most infrastructure is portable or replaceable
 - Total migration time estimate: 1-2 weeks if needed

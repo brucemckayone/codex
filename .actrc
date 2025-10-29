@@ -1,0 +1,11 @@
+# Act configuration file for local GitHub Actions testing
+# See .github/ACT_SETUP.md for usage
+
+# Use medium Ubuntu image with Node.js, pnpm, and common tools
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Load secrets from .secrets file
+--secret-file .secrets
+
+# Set container architecture
+--container-architecture linux/amd64

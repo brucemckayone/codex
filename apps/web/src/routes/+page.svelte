@@ -1,6 +1,4 @@
 <script lang="ts">
-  import Button from '$lib/components/Button.svelte';
-
   let count = $state(0);
 
   function increment() {

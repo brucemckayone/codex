@@ -1,0 +1,11 @@
+[
+  {
+    "AllowedOrigins": [
+      "https://codex-3x3.pages.dev",
+      "https://revelations.studio"
+    ],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }
+]

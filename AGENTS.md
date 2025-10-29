@@ -31,32 +31,43 @@ After completing the code, ask the user if they want a playground link. Only cal
 This is a monorepo with feature-based organization:
 
 ### Apps
+
 - `apps/web` - SvelteKit application
 
 ### Packages
+
+**Active Packages:**
+
 - `packages/database` - Drizzle ORM schemas and migrations
 - `packages/validation` - Zod schemas for validation
 - `packages/cloudflare-clients` - R2 and KV clients
-- `packages/auth` - Authentication service (Better Auth)
-- `packages/notifications` - Email notifications (Resend)
-- `packages/core-services` - Business logic services
-- `packages/test-utils` - Shared testing utilities
+- `packages/test-utils` - Shared testing utilities (includes Miniflare helpers)
+
+**Deleted Packages:**
+
+- `packages/auth` - Deleted (will use Better Auth directly in web app)
+- `packages/notifications` - Deleted (will implement email/notifications when needed)
+- `packages/core-services` - Deleted (business logic will live in web app features)
+
+### Workers
+
+- `workers/queue-consumer` - Currently disabled (Cloudflare not set up yet, will enable in Phase 2)
 
 ### Testing Strategy
 
 Follow the testing pyramid approach:
 
-1. **Unit Tests** (*.test.ts) - Test individual functions, components, utilities
+1. **Unit Tests** (\*.test.ts) - Test individual functions, components, utilities
    - Co-located with source files
    - Fast, isolated tests
    - Mock external dependencies
 
-2. **Integration Tests** (*.test.ts) - Test service interactions, API routes
+2. **Integration Tests** (\*.test.ts) - Test service interactions, API routes
    - Test database interactions with test DB
    - Test API endpoints
    - Located near the code they test
 
-3. **E2E Tests** (*.spec.ts) - Test critical user flows
+3. **E2E Tests** (\*.spec.ts) - Test critical user flows
    - Located in `apps/web/e2e/`
    - Use Playwright
    - Test complete user journeys
@@ -64,6 +75,7 @@ Follow the testing pyramid approach:
 ### Code Organization
 
 Follow feature-based organization in `apps/web/src/lib/features/`:
+
 - Each feature has: components, services, types, utils
 - Shared code goes in `lib/features/shared/`
 - Tests are co-located with source code

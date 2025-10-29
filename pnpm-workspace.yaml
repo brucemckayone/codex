@@ -1,5 +1,4 @@
-# pnpm-workspace.yaml
 packages:
-  - "apps/*" # all apps: web, worker, queue-consumer
-  - "workers/*" # any dedicated workers
-  - "packages/*" # shared libraries: types, db client, helpers
+  - 'apps/*'
+  - 'workers/*'
+  - 'packages/*'

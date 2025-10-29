@@ -6,11 +6,11 @@ Development environment setup for Codex monorepo with Cloudflare + Neon architec
 
 ## Environments
 
-| Environment | Hosting | Database | Workers |
-|------------|---------|----------|---------|
-| **Local** | localhost:5173 | Postgres (Docker) + Neon HTTP proxy | Miniflare |
-| **Staging** | Cloudflare Pages preview | Neon staging branch | Cloudflare Workers |
-| **Production** | Cloudflare Pages | Neon production | Cloudflare Workers |
+| Environment    | Hosting                  | Database                            | Workers            |
+| -------------- | ------------------------ | ----------------------------------- | ------------------ |
+| **Local**      | localhost:5173           | Postgres (Docker) + Neon HTTP proxy | Miniflare          |
+| **Staging**    | Cloudflare Pages preview | Neon staging branch                 | Cloudflare Workers |
+| **Production** | Cloudflare Pages         | Neon production                     | Cloudflare Workers |
 
 ---
 
@@ -52,8 +52,8 @@ pnpm dev
 services:
   postgres:
     image: postgres:17
-    command: "-d 1"
-    ports: ["5432:5432"]
+    command: '-d 1'
+    ports: ['5432:5432']
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -61,19 +61,20 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
 
   neon-proxy:
     image: ghcr.io/timowilhelm/local-neon-http-proxy:main
     environment:
       PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/main
-    ports: ["4444:4444"]
+    ports: ['4444:4444']
     depends_on:
       postgres:
         condition: service_healthy
 ```
 
 **Why Neon HTTP proxy?**
+
 - Exact API parity with production Neon
 - Test serverless driver behavior locally
 - No Neon dev branch costs
@@ -123,6 +124,7 @@ pnpm dev
 ```
 
 **Miniflare simulates:**
+
 - KV (sessions, cache)
 - R2 (media storage)
 - Queues (video processing jobs)
@@ -135,11 +137,13 @@ State persists to `workers/*/.wrangler/state/` across restarts.
 RunPod supports local testing via CLI. This lets you test GPU workloads without paying per-second costs.
 
 **Install RunPod CLI:**
+
 ```bash
 pip install runpod
 ```
 
 **Test handler locally:**
+
 ```bash
 cd workers/runpod-handler  # If you have a dedicated RunPod handler
 
@@ -151,6 +155,7 @@ runpodctl test --env BUCKET_NAME=codex-media-dev --input '{...}'
 ```
 
 **Mock RunPod in SvelteKit:**
+
 ```bash
 # Set in .env.dev
 RUNPOD_LOCAL=true
@@ -164,17 +169,67 @@ if (env.RUNPOD_LOCAL) {
 ```
 
 **References:**
+
 - [RunPod Local Testing Docs](https://docs.runpod.io/serverless/development/local-testing)
 - [RunPod CLI Reference](https://docs.runpod.io/cli/overview)
 
-**Stripe webhooks:**
-```bash
-# Install CLI
-brew install stripe/stripe-cli/stripe
+### Cloudflare Tunnel (for Webhook Testing)
 
-# Forward to local
-stripe listen --forward-to localhost:5173/api/webhooks/stripe
+For testing webhooks from external services (Stripe, RunPod, etc.) that need a public HTTPS URL, use Cloudflare Tunnel.
+
+**Why use a tunnel?**
+- Test real webhooks locally (Stripe, RunPod, etc.)
+- Access your dev server from any device
+- Test with HTTPS/SSL locally
+- No need for ngrok or similar services
+
+**Setup:**
+
+The tunnel is pre-configured at `https://local.revelations.studio`:
+
+```bash
+# Tunnel already created with ID: 3bbd7b3c-f529-4b58-9ca2-089004592373
+# DNS already configured: local.revelations.studio → tunnel
 ```
+
+**Usage with VSCode Tasks:**
+
+```bash
+# Open Command Palette (Cmd+Shift+P)
+# → "Tasks: Run Task"
+# → "Start Cloudflare Tunnel"
+
+# Or start everything at once:
+# → "Dev: Full Stack" (Docker + Dev Server + Tunnel)
+```
+
+**Or run directly:**
+
+```bash
+cloudflared tunnel --config infrastructure/cloudflare-tunnel/config.yml run codex-local
+```
+
+**Testing Stripe webhooks with tunnel:**
+
+Option 1 - Stripe CLI (simpler):
+```bash
+stripe listen --forward-to http://localhost:5173/api/webhooks/stripe/checkout \
+  --events checkout.session.completed,checkout.session.expired
+```
+
+Option 2 - Cloudflare Tunnel (recommended, tests like production):
+1. Start tunnel (see above)
+2. Visit: `https://local.revelations.studio`
+3. Create test webhooks in Stripe Dashboard:
+   - `https://local.revelations.studio/api/webhooks/stripe/checkout`
+   - `https://local.revelations.studio/api/webhooks/stripe/payment`
+   - etc.
+4. Update `env.dev`:
+   ```bash
+   SITE_URL=https://local.revelations.studio
+   ```
+
+**Tunnel configuration:** `infrastructure/cloudflare-tunnel/config.yml`
 
 ---
 
@@ -202,6 +257,7 @@ Codex/
 ## VS Code Setup
 
 **Extensions (`.vscode/extensions.json`):**
+
 ```json
 {
   "recommendations": [
@@ -215,6 +271,7 @@ Codex/
 ```
 
 **Debug config (`.vscode/launch.json`):**
+
 ```json
 {
   "configurations": [
@@ -234,6 +291,7 @@ Codex/
 ## TypeScript Code Sharing
 
 **Path mappings (`tsconfig.json`):**
+
 ```json
 {
   "compilerOptions": {
@@ -246,6 +304,7 @@ Codex/
 ```
 
 **Usage:**
+
 ```typescript
 // In SvelteKit or Workers
 import type { Content, VideoProcessingJob } from '@codex/shared-types';
@@ -259,18 +318,21 @@ const env = envSchema.parse(process.env);
 ## Deployment
 
 **Staging (Cloudflare Pages Preview):**
+
 ```bash
 git push origin develop
 # Auto-deploys to *.pages.dev preview URL
 ```
 
 **Production:**
+
 ```bash
 git push origin main
 # Auto-deploys to production domain
 ```
 
 **Workers:**
+
 ```bash
 pnpm --filter queue-consumer deploy
 pnpm --filter webhook-handler deploy
@@ -284,6 +346,7 @@ Set in Cloudflare Dashboard → Pages → Settings → Environment Variables
 ## Database Migrations
 
 **Local:**
+
 ```bash
 # Generate from schema changes
 pnpm --filter web db:generate
@@ -296,6 +359,7 @@ pnpm --filter web db:studio
 ```
 
 **Production:**
+
 ```bash
 # Option 1: Auto-run during build
 # Add to package.json: "build": "vite build && pnpm db:migrate"
@@ -339,11 +403,13 @@ wrangler tail --env dev                                     # View logs
 ## Secrets
 
 Generate:
+
 ```bash
 openssl rand -hex 32  # AUTH_SECRET
 ```
 
 Storage:
+
 - Local: `.env.dev` (gitignored)
 - Staging/Prod: Cloudflare Pages environment variables
 
@@ -354,12 +420,16 @@ Never commit secrets to git.
 ## Reference
 
 **Ports:**
+
 - SvelteKit: 5173
 - Postgres: 5432
 - Neon proxy: 4444
 
 **Docs:**
+
 - [RunPod Local Testing](https://docs.runpod.io/serverless/development/local-testing)
 - [Miniflare](https://miniflare.dev/)
 - [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - [Drizzle ORM](https://orm.drizzle.team/)
+
+```

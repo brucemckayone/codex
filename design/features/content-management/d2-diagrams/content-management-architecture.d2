@@ -1,0 +1,279 @@
+# Content Management Architecture - Phase 1
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Browser Layer
+browser: {
+  label: "Creator Browser"
+
+  upload_ui: {
+    label: "Upload Interface\n\n• File picker\n• Upload progress\n• Thumbnail upload"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  content_editor: {
+    label: "Content Editor\n\n• Title, description\n• Category, tags\n• Pricing\n• Status (draft/published)"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  media_library: {
+    label: "Media Library\n\nBrowse uploaded\nmedia files"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  style: {
+    fill: "#FAFAFA"
+    stroke: "#BDBDBD"
+    stroke-width: 2
+  }
+}
+
+# SvelteKit Server Layer
+sveltekit: {
+  label: "SvelteKit Server"
+
+  upload_api: {
+    label: "Upload API\n\nGET /api/upload/presigned-url\nReturns R2 presigned URL"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  content_api: {
+    label: "Content API\n\nPOST /api/content\nPUT /api/content/{id}\nDELETE /api/content/{id}"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  media_routes: {
+    label: "Media Routes\n\nGET /media\nLists media library"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  style: {
+    fill: ${color-nextjs}
+    stroke: ${stroke-nextjs}
+    stroke-width: 2
+  }
+}
+
+# Service Layer
+services: {
+  label: "Service Layer"
+
+  content_service: {
+    label: "Content Service\n\ncreateContent()\nupdateContent()\nlistContent()\ndeleteContent()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  media_service: {
+    label: "Media Service\n\ngeneratePresignedUrl()\ncreateMediaItem()\nlistMediaItems()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  auth_service: {
+    label: "Auth Service\n\nrequireCreator()\ngetCurrentUser()"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  style: {
+    fill: "#F5F5F5"
+    stroke: "#9E9E9E"
+    stroke-width: 2
+  }
+}
+
+# Database Layer
+postgres: {
+  label: "Neon PostgreSQL"
+  shape: cylinder
+
+  tables: {
+    label: "Database Tables\n\n• media_items (uploaded files)\n• content (metadata)\n• categories\n• tags\n• content_tags (junction)"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# R2 Storage Layer
+r2: {
+  label: "Cloudflare R2 (Bucket-Per-Creator)"
+
+  media_bucket: {
+    label: "codex-media-{creatorId}\n\n• Original uploads\n• Transcoded HLS\n• Audio files\n• Waveforms"
+    style: {
+      fill: ${color-r2}
+      stroke: ${stroke-r2}
+    }
+  }
+
+  assets_bucket: {
+    label: "codex-assets-{creatorId}\n\n• Thumbnails\n• Posters\n• Images"
+    style: {
+      fill: ${color-r2}
+      stroke: ${stroke-r2}
+    }
+  }
+
+  resources_bucket: {
+    label: "codex-resources-{creatorId}\n\n• PDFs\n• Workbooks\n• Downloads"
+    style: {
+      fill: ${color-r2}
+      stroke: ${stroke-r2}
+    }
+  }
+
+  style: {
+    fill: ${color-r2}
+    stroke: ${stroke-r2}
+    stroke-width: 2
+  }
+}
+
+# Transcoding Queue
+queue: {
+  label: "Cloudflare Queue"
+
+  transcoding_queue: {
+    label: "TRANSCODING_QUEUE\n\nJobs for video\nprocessing"
+    style: {
+      fill: ${color-redis}
+      stroke: ${stroke-redis}
+    }
+  }
+
+  style: {
+    fill: "#FFEBEE"
+    stroke: "#EF9A9A"
+    stroke-width: 2
+  }
+}
+
+# Connections - Upload Flow (Step 1: Get Presigned URL)
+browser.upload_ui -> sveltekit.upload_api: "1. GET /api/upload/presigned-url\n?filename=video.mp4&type=video" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+sveltekit.upload_api -> services.auth_service: "requireCreator()" {
+  style.stroke: ${arrow-http}
+}
+
+sveltekit.upload_api -> services.media_service: "generatePresignedUrl(creatorId, filename)" {
+  style.stroke: ${arrow-http}
+}
+
+services.media_service -> r2.media_bucket: "Generate presigned PUT URL\n(15 min expiry)" {
+  style.stroke: ${arrow-external}
+}
+
+sveltekit.upload_api -> browser.upload_ui: "2. Return {uploadUrl, mediaItemId}" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Connections - Upload Flow (Step 2: Direct Upload)
+browser.upload_ui -> r2.media_bucket: "3. PUT {uploadUrl}\n(direct upload, bypasses server)" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 3
+}
+
+# Connections - Upload Flow (Step 3: Confirm Upload)
+browser.upload_ui -> sveltekit.upload_api: "4. POST /api/media/confirm\n{mediaItemId, fileKey}" {
+  style.stroke: ${arrow-https}
+}
+
+sveltekit.upload_api -> services.media_service: "createMediaItem()" {
+  style.stroke: ${arrow-http}
+}
+
+services.media_service -> postgres.tables: "INSERT INTO media_items\n(id, creatorId, fileKey, type)" {
+  style.stroke: ${arrow-sql}
+}
+
+services.media_service -> queue.transcoding_queue: "Enqueue video\nfor transcoding" {
+  style.stroke: ${arrow-cache}
+}
+
+# Connections - Content Creation Flow
+browser.content_editor -> sveltekit.content_api: "POST /api/content\n{title, mediaItemId, ...}" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+sveltekit.content_api -> services.content_service: "createContent()" {
+  style.stroke: ${arrow-http}
+}
+
+services.content_service -> postgres.tables: "INSERT INTO content\n(title, mediaItemId, creatorId, ...)" {
+  style.stroke: ${arrow-sql}
+}
+
+sveltekit.content_api -> browser.content_editor: "Return {contentId}" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Connections - Media Library
+browser.media_library -> sveltekit.media_routes: "GET /media\n(list all uploaded media)" {
+  style.stroke: ${arrow-https}
+}
+
+sveltekit.media_routes -> postgres.tables: "SELECT FROM media_items\nWHERE creatorId = ?" {
+  style.stroke: ${arrow-sql}
+}
+
+sveltekit.media_routes -> browser.media_library: "SSR HTML\n(media list)" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Notes
+note_direct_upload: {
+  label: "🚀 Direct Upload Strategy:\n1. Browser requests presigned URL from server\n2. Server generates R2 presigned URL (15min)\n3. Browser uploads DIRECTLY to R2 (bypasses server)\n4. Browser confirms upload → Server creates DB record\n5. Video enqueued for transcoding"
+  shape: text
+}
+
+note_bucket_isolation: {
+  label: "🗂️ Bucket-Per-Creator:\n• Each creator gets 3 isolated buckets:\n  - codex-media-{creatorId}\n  - codex-assets-{creatorId}\n  - codex-resources-{creatorId}\n• Prevents cross-creator data leakage\n• Simplifies access control"
+  shape: text
+}
+
+note_media_library: {
+  label: "📚 Media Library Pattern:\n• Uploaded files stored in media_items table\n• Content references media via mediaItemId\n• Same media can be reused in multiple content\n• Separate metadata (content) from files (media)"
+  shape: text
+}

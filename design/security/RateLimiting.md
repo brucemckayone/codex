@@ -7,6 +7,7 @@ Rate limiting protects the platform from abuse, brute-force attacks, and excessi
 ## Phase 1: Cloudflare KV-Based Rate Limiting
 
 ### Why Cloudflare KV?
+
 - **Distributed**: Works across all Cloudflare edge locations
 - **Fast**: Sub-millisecond read/write operations
 - **Persistent**: Data survives server restarts
@@ -14,14 +15,14 @@ Rate limiting protects the platform from abuse, brute-force attacks, and excessi
 
 ### Rate Limiting Targets
 
-| Endpoint/Action | Limit | Window | Rationale |
-|----------------|-------|--------|-----------|
-| **Login** (`POST /api/auth/login`) | 5 attempts | 15 minutes | Prevent brute-force attacks |
-| **Registration** (`POST /api/auth/register`) | 3 attempts | 1 hour | Prevent spam accounts |
-| **Password Reset Request** (`POST /api/auth/forgot-password`) | 3 attempts | 1 hour | Prevent email bombing |
-| **Email Verification Resend** (`POST /api/auth/resend-verification`) | 5 attempts | 1 hour | Prevent email spam |
-| **API Routes** (general) | 100 requests | 1 minute | Prevent API abuse |
-| **Content Upload** (`POST /api/content/upload`) | 10 uploads | 1 hour | Prevent storage abuse |
+| Endpoint/Action                                                      | Limit        | Window     | Rationale                   |
+| -------------------------------------------------------------------- | ------------ | ---------- | --------------------------- |
+| **Login** (`POST /api/auth/login`)                                   | 5 attempts   | 15 minutes | Prevent brute-force attacks |
+| **Registration** (`POST /api/auth/register`)                         | 3 attempts   | 1 hour     | Prevent spam accounts       |
+| **Password Reset Request** (`POST /api/auth/forgot-password`)        | 3 attempts   | 1 hour     | Prevent email bombing       |
+| **Email Verification Resend** (`POST /api/auth/resend-verification`) | 5 attempts   | 1 hour     | Prevent email spam          |
+| **API Routes** (general)                                             | 100 requests | 1 minute   | Prevent API abuse           |
+| **Content Upload** (`POST /api/content/upload`)                      | 10 uploads   | 1 hour     | Prevent storage abuse       |
 
 ### Implementation Strategy
 
@@ -31,54 +32,57 @@ Rate limiting protects the platform from abuse, brute-force attacks, and excessi
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 interface RateLimitConfig {
-  limit: number;        // Max attempts
-  window: number;       // Window in seconds
-  keyPrefix: string;    // KV key prefix (e.g., 'rl:login:')
+  limit: number; // Max attempts
+  window: number; // Window in seconds
+  keyPrefix: string; // KV key prefix (e.g., 'rl:login:')
 }
 
 interface RateLimitResult {
   allowed: boolean;
   remaining: number;
-  resetAt: number;      // Unix timestamp
+  resetAt: number; // Unix timestamp
 }
 
 export async function rateLimit(
   kv: KVNamespace,
-  identifier: string,     // IP address, user ID, etc.
+  identifier: string, // IP address, user ID, etc.
   config: RateLimitConfig
 ): Promise<RateLimitResult> {
   const key = `${config.keyPrefix}${identifier}`;
   const now = Date.now();
 
   // Get current count from KV
-  const data = await kv.get(key, 'json') as { count: number; resetAt: number } | null;
+  const data = (await kv.get(key, 'json')) as {
+    count: number;
+    resetAt: number;
+  } | null;
 
   if (!data) {
     // First request in window
-    const resetAt = now + (config.window * 1000);
+    const resetAt = now + config.window * 1000;
     await kv.put(key, JSON.stringify({ count: 1, resetAt }), {
-      expirationTtl: config.window
+      expirationTtl: config.window,
     });
 
     return {
       allowed: true,
       remaining: config.limit - 1,
-      resetAt
+      resetAt,
     };
   }
 
   // Check if window expired
   if (now > data.resetAt) {
     // Window expired, reset counter
-    const resetAt = now + (config.window * 1000);
+    const resetAt = now + config.window * 1000;
     await kv.put(key, JSON.stringify({ count: 1, resetAt }), {
-      expirationTtl: config.window
+      expirationTtl: config.window,
     });
 
     return {
       allowed: true,
       remaining: config.limit - 1,
-      resetAt
+      resetAt,
     };
   }
 
@@ -87,19 +91,23 @@ export async function rateLimit(
     return {
       allowed: false,
       remaining: 0,
-      resetAt: data.resetAt
+      resetAt: data.resetAt,
     };
   }
 
   // Increment counter
-  await kv.put(key, JSON.stringify({ count: data.count + 1, resetAt: data.resetAt }), {
-    expirationTtl: Math.ceil((data.resetAt - now) / 1000)
-  });
+  await kv.put(
+    key,
+    JSON.stringify({ count: data.count + 1, resetAt: data.resetAt }),
+    {
+      expirationTtl: Math.ceil((data.resetAt - now) / 1000),
+    }
+  );
 
   return {
     allowed: true,
     remaining: config.limit - data.count - 1,
-    resetAt: data.resetAt
+    resetAt: data.resetAt,
   };
 }
 ```
@@ -126,15 +134,15 @@ export const handle: Handle = async ({ event, resolve }) => {
   // Apply rate limiting to sensitive routes
   if (event.url.pathname.startsWith('/api/auth/')) {
     const result = await rateLimit(kv, ip, {
-      limit: 10,          // General auth rate limit
-      window: 60,         // 1 minute
-      keyPrefix: 'rl:auth:'
+      limit: 10, // General auth rate limit
+      window: 60, // 1 minute
+      keyPrefix: 'rl:auth:',
     });
 
     if (!result.allowed) {
       throw error(429, {
         message: 'Too many requests. Please try again later.',
-        retryAfter: Math.ceil((result.resetAt - Date.now()) / 1000)
+        retryAfter: Math.ceil((result.resetAt - Date.now()) / 1000),
       });
     }
 
@@ -142,7 +150,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.setHeaders({
       'X-RateLimit-Limit': '10',
       'X-RateLimit-Remaining': result.remaining.toString(),
-      'X-RateLimit-Reset': result.resetAt.toString()
+      'X-RateLimit-Reset': result.resetAt.toString(),
     });
   }
 
@@ -160,7 +168,11 @@ import { rateLimit } from '$lib/server/rateLimit';
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-export const POST: RequestHandler = async ({ request, platform, getClientAddress }) => {
+export const POST: RequestHandler = async ({
+  request,
+  platform,
+  getClientAddress,
+}) => {
   const kv = platform?.env?.KV;
   const ip = getClientAddress();
 
@@ -168,14 +180,14 @@ export const POST: RequestHandler = async ({ request, platform, getClientAddress
     // Stricter rate limit for login attempts
     const result = await rateLimit(kv, ip, {
       limit: 5,
-      window: 900,        // 15 minutes
-      keyPrefix: 'rl:login:'
+      window: 900, // 15 minutes
+      keyPrefix: 'rl:login:',
     });
 
     if (!result.allowed) {
       throw error(429, {
         message: 'Too many login attempts. Please try again in 15 minutes.',
-        retryAfter: Math.ceil((result.resetAt - Date.now()) / 1000)
+        retryAfter: Math.ceil((result.resetAt - Date.now()) / 1000),
       });
     }
   }
@@ -200,7 +212,7 @@ describe('rateLimit', () => {
     const result = await rateLimit(mockKV, '192.168.1.1', {
       limit: 5,
       window: 60,
-      keyPrefix: 'rl:test:'
+      keyPrefix: 'rl:test:',
     });
 
     expect(result.allowed).toBe(true);
@@ -213,7 +225,7 @@ describe('rateLimit', () => {
       await rateLimit(mockKV, '192.168.1.1', {
         limit: 5,
         window: 60,
-        keyPrefix: 'rl:test:'
+        keyPrefix: 'rl:test:',
       });
     }
 
@@ -221,7 +233,7 @@ describe('rateLimit', () => {
     const result = await rateLimit(mockKV, '192.168.1.1', {
       limit: 5,
       window: 60,
-      keyPrefix: 'rl:test:'
+      keyPrefix: 'rl:test:',
     });
 
     expect(result.allowed).toBe(false);
@@ -234,7 +246,7 @@ describe('rateLimit', () => {
       await rateLimit(mockKV, '192.168.1.1', {
         limit: 5,
         window: 60,
-        keyPrefix: 'rl:test:'
+        keyPrefix: 'rl:test:',
       });
     }
 
@@ -245,7 +257,7 @@ describe('rateLimit', () => {
     const result = await rateLimit(mockKV, '192.168.1.1', {
       limit: 5,
       window: 60,
-      keyPrefix: 'rl:test:'
+      keyPrefix: 'rl:test:',
     });
 
     expect(result.allowed).toBe(true);
@@ -261,6 +273,7 @@ describe('rateLimit', () => {
 ### Cloudflare KV Namespace
 
 **Development**:
+
 ```bash
 # Create KV namespace for local development
 npx wrangler kv:namespace create RATE_LIMIT_KV --preview
@@ -272,6 +285,7 @@ kv_namespaces = [
 ```
 
 **Production**:
+
 ```bash
 # Create production KV namespace
 npx wrangler kv:namespace create RATE_LIMIT_KV
@@ -292,10 +306,10 @@ export default {
       // KV namespace bindings
       routes: {
         include: ['/*'],
-        exclude: ['<all>']
-      }
-    })
-  }
+        exclude: ['<all>'],
+      },
+    }),
+  },
 };
 ```
 
@@ -308,6 +322,7 @@ export default {
 When rate limit is exceeded:
 
 **Login**:
+
 ```json
 {
   "error": "Too many login attempts. Please try again in 15 minutes.",
@@ -317,6 +332,7 @@ When rate limit is exceeded:
 ```
 
 **Registration**:
+
 ```json
 {
   "error": "Too many registration attempts. Please try again later.",
@@ -328,6 +344,7 @@ When rate limit is exceeded:
 ### Response Headers
 
 All rate-limited endpoints include:
+
 ```
 X-RateLimit-Limit: 5
 X-RateLimit-Remaining: 3
@@ -339,16 +356,20 @@ X-RateLimit-Reset: 1698765432
 ## Future Enhancements (Phase 2+)
 
 ### User-Based Rate Limiting
+
 Currently uses IP-based rate limiting. Future phases can add:
+
 - **Authenticated User Rate Limiting**: Track by user ID instead of IP
 - **Per-User + Per-IP**: Combine both for stricter control
 
 ### Adaptive Rate Limiting
+
 - **Suspicious Activity Detection**: Reduce limits for suspicious IPs
 - **Trusted Users**: Increase limits for verified, trusted users
 - **Geographic Rate Limiting**: Different limits based on region
 
 ### DDoS Protection
+
 - **Cloudflare DDoS Protection**: Leverage Cloudflare's built-in DDoS mitigation
 - **CAPTCHA Integration**: Add CAPTCHA for repeated violations
 - **IP Reputation**: Block known malicious IPs

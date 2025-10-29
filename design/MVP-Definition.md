@@ -5,6 +5,7 @@
 **Architecture**: Cloudflare + Neon Serverless
 
 > **Related Documents**:
+>
 > - [Platform Overview](./overview.md) - Complete platform vision and requirements
 > - [Infrastructure Plan](./infrastructure/infraplan.md) - Technical architecture details
 > - [Environment Management](./infrastructure/EnvironmentManagement.md) - Deployment configuration
@@ -18,6 +19,7 @@ This document defines the **Minimum Viable Product (MVP)** for the Codex platfor
 ### MVP Goal
 
 Launch a functional platform where a Platform Owner can:
+
 1. Upload and organize **video and audio content**
 2. Set prices and sell content to customers
 3. Process payments securely
@@ -48,6 +50,7 @@ The MVP serves **two primary stakeholders**. Multi-creator support (Media Owners
 **Who**: Non-technical business owner who operates the platform
 
 **MVP Needs**:
+
 - Upload video and audio content without technical knowledge
 - Set prices on individual content items
 - View sales and revenue
@@ -63,6 +66,7 @@ The MVP serves **two primary stakeholders**. Multi-creator support (Media Owners
 **Who**: End users who purchase and consume content
 
 **MVP Needs**:
+
 - Discover content easily (browse, search)
 - Purchase content securely
 - Access purchased content reliably on any device
@@ -78,12 +82,14 @@ The MVP serves **two primary stakeholders**. Multi-creator support (Media Owners
 ### What We're Building
 
 A **content monetization platform** with:
+
 - Video and audio upload
 - Payment processing (Stripe)
 - Streaming delivery (Cloudflare R2)
 - Access control (purchased content only)
 
 **Core Value Proposition**:
+
 ```
 Platform Owner uploads content → Sets prices → Customers buy → Customers access content
 ```
@@ -97,6 +103,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **Stakeholder Need**: Secure login and role-based access control
 
 **Features**:
+
 - ✅ Email/password registration and login
 - ✅ Password reset flow via email
 - ✅ Basic user profiles (name, email, avatar)
@@ -109,6 +116,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **User Stories**:
 
 **As a Customer:**
+
 - I can register with my email and password
 - I can log in to access my purchased content
 - I can reset my password if I forget it
@@ -116,6 +124,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - I can update my profile (name, avatar)
 
 **As Platform Owner:**
+
 - I have admin access to manage content and customers
 - I can view all customers and their purchase history
 - My role is distinct from regular customers
@@ -125,10 +134,12 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **Stakeholder Need**: Platform Owner uploads and organizes media without technical knowledge
 
 **Content Types**:
+
 - ✅ **Video**: MP4, MOV (up to 5GB per file)
 - ✅ **Audio**: MP3, WAV, AAC (up to 500MB per file)
 
 **Features**:
+
 - ✅ Upload video and audio files
 - ✅ Automatic video transcoding (1080p, 720p for quality options)
 - ✅ Automatic thumbnail generation from video (frame at 2 seconds)
@@ -148,6 +159,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **User Stories**:
 
 **As Platform Owner:**
+
 - I can upload a video file and see upload progress
 - I can upload an audio file
 - I can add title, description, and price while uploading
@@ -161,6 +173,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - I can view all my content (published and unpublished)
 
 **Upload Flow**:
+
 ```
 1. Platform Owner selects file (video or audio)
 2. Enters title, description, price, tags
@@ -174,6 +187,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 ```
 
 **Content States**:
+
 - `uploading`: File being uploaded
 - `processing`: Video being transcoded (audio skips this)
 - `ready`: Processed, ready to publish
@@ -186,6 +200,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **Stakeholder Need**: Customers purchase content securely, Platform Owner receives payments
 
 **Features**:
+
 - ✅ Stripe payment integration
 - ✅ Individual content pricing (USD only for MVP)
 - ✅ Simple checkout flow:
@@ -200,6 +215,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **User Stories**:
 
 **As a Customer:**
+
 - I can see content price clearly before purchasing
 - I click "Buy Now" and enter payment details securely
 - I receive instant access after successful payment
@@ -208,6 +224,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - I can view all my past purchases
 
 **As Platform Owner:**
+
 - I set prices on each piece of content
 - I receive payments directly to my Stripe account
 - I can view total revenue
@@ -215,6 +232,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - I can manually grant access to customers (for support/refunds)
 
 **Purchase Flow**:
+
 ```
 1. Customer browses content catalog
 2. Clicks on content to view details
@@ -230,6 +248,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 ```
 
 **Payment Rules**:
+
 - Minimum purchase: $1.00
 - Maximum purchase: $999.99 (MVP limit)
 - Currency: USD only
@@ -237,6 +256,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - Test mode for development, live mode for production
 
 **Security**:
+
 - ✅ Stripe webhook signature verification (prevent fake payment confirmations)
 - ✅ Atomic transaction: purchase + access grant happen together (if one fails, both fail)
 - ✅ Check for existing purchase before creating payment
@@ -248,6 +268,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **Stakeholder Need**: Customers watch/listen to purchased content reliably on any device
 
 **Video Player Features**:
+
 - ✅ Play/pause
 - ✅ Volume control
 - ✅ Fullscreen toggle
@@ -258,6 +279,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - ✅ **Video Player**: Mux Web Component Player (excellent UX, handles HLS streaming)
 
 **Audio Player Features**:
+
 - ✅ Play/pause
 - ✅ Volume control
 - ✅ Playback speed (0.5x, 1x, 1.5x, 2x)
@@ -266,6 +288,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - ✅ Background playback (audio continues if browser tab changes)
 
 **Access Control**:
+
 - ✅ Only customers who purchased content can watch/listen
 - ✅ Signed URLs (expire after 4 hours, customer must be logged in to renew)
 - ✅ Cannot share direct video/audio URLs (signed URLs prevent unauthorized access)
@@ -273,6 +296,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **User Stories**:
 
 **As a Customer:**
+
 - I can watch purchased videos in high quality (1080p or 720p based on connection)
 - I can listen to purchased audio
 - I can adjust playback speed (faster or slower)
@@ -282,6 +306,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - Playback starts quickly (<3 seconds on broadband)
 
 **Access Flow**:
+
 ```
 1. Customer logs in
 2. Goes to Library (purchased content)
@@ -296,6 +321,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 ```
 
 **Browser Support**:
+
 - Chrome/Edge (latest 2 versions)
 - Firefox (latest 2 versions)
 - Safari (latest 2 versions)
@@ -307,6 +333,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **Stakeholder Need**: Customers view all purchased content in one organized place
 
 **Features**:
+
 - ✅ Grid view of all purchased content
 - ✅ Thumbnail, title, duration displayed for each item
 - ✅ "Continue Watching/Listening" section (shows content with playback progress >0%)
@@ -321,6 +348,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **User Stories**:
 
 **As a Customer:**
+
 - I see all my purchased content in one place
 - I can quickly find content by searching title
 - I can filter by tags (e.g., show only "meditation" content)
@@ -335,6 +363,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **Admin Sections**:
 
 #### Content Management
+
 - List all content (published, unpublished, processing)
 - Create new content (upload flow)
 - Edit content metadata (title, description, price, tags)
@@ -346,6 +375,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - Delete content (with confirmation)
 
 #### Customer Management
+
 - List all customers
 - View customer details:
   - Email, join date
@@ -355,6 +385,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - Manually grant access (for support, refunds, promotions)
 
 #### Analytics Dashboard (Simple)
+
 - **Total Revenue**: All-time and this month
 - **Customer Count**: Total registered customers
 - **Purchase Count**: Total purchases made
@@ -362,6 +393,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - **Recent Activity**: Last 10 purchases
 
 #### Settings
+
 - **Branding**:
   - Upload logo
   - Set primary color (color picker)
@@ -376,6 +408,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **User Stories**:
 
 **As Platform Owner:**
+
 - I can see all my content in one dashboard
 - I can quickly publish or unpublish content
 - I can see which content is selling best
@@ -390,6 +423,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **Stakeholder Need**: Automated email communication for important events
 
 **Email Types**:
+
 - ✅ Welcome email (on registration)
 - ✅ Email verification (after registration)
 - ✅ Password reset email (with secure reset link)
@@ -397,6 +431,7 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - ✅ Platform Owner sale notification (when customer purchases)
 
 **Email Customization**:
+
 - ✅ Platform Owner can set:
   - From name (e.g., "Acme Meditation Platform")
   - Reply-to email
@@ -407,11 +442,13 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 **User Stories**:
 
 **As a Customer:**
+
 - I receive email confirmation immediately after purchase
 - I receive password reset link when I request it
 - Emails include clear next steps (e.g., "Click here to access your content")
 
 **As Platform Owner:**
+
 - I receive email notification when a sale is made
 - I can set the "from name" for all customer emails
 - I can customize basic email content
@@ -478,16 +515,16 @@ These features are important but **explicitly out of scope for MVP**. They will 
 
 ### Required Services
 
-| Service | Purpose | Cost |
-|---------|---------|------|
-| **Cloudflare Pages** | Host SvelteKit app (SSR + API) | Free |
-| **Neon Postgres** | Database (users, content, purchases) | $5-10/month |
-| **Cloudflare R2** | Store videos, audio, thumbnails | $2-5/month |
-| **Cloudflare Workers** | Queue consumer for video processing | $5/month |
-| **Cloudflare Queues** | Async job queue (video transcoding) | Included with Workers |
-| **RunPod Serverless GPU** | Video transcoding | $3-10/month |
-| **Stripe** | Payment processing | 2.9% + $0.30/txn |
-| **Resend** | Transactional email | Free (3k emails/month) |
+| Service                   | Purpose                              | Cost                   |
+| ------------------------- | ------------------------------------ | ---------------------- |
+| **Cloudflare Pages**      | Host SvelteKit app (SSR + API)       | Free                   |
+| **Neon Postgres**         | Database (users, content, purchases) | $5-10/month            |
+| **Cloudflare R2**         | Store videos, audio, thumbnails      | $2-5/month             |
+| **Cloudflare Workers**    | Queue consumer for video processing  | $5/month               |
+| **Cloudflare Queues**     | Async job queue (video transcoding)  | Included with Workers  |
+| **RunPod Serverless GPU** | Video transcoding                    | $3-10/month            |
+| **Stripe**                | Payment processing                   | 2.9% + $0.30/txn       |
+| **Resend**                | Transactional email                  | Free (3k emails/month) |
 
 **Total Fixed Cost**: $15-25/month + Stripe fees
 
@@ -496,12 +533,14 @@ These features are important but **explicitly out of scope for MVP**. They will 
 **Cloudflare Queue + Workers**
 
 Queues are **required for MVP** because:
+
 - Decouples video upload from processing (better UX)
 - Handles processing failures gracefully (retries)
 - Allows Platform Owner to upload multiple videos without waiting
 - Prevents timeouts (transcoding can take 10+ minutes)
 
 **MVP Architecture**:
+
 ```
 Upload → Queue → Worker → RunPod → Webhook → Update DB
 ```
@@ -509,6 +548,7 @@ Upload → Queue → Worker → RunPod → Webhook → Update DB
 **Mux Web Component Player for Video**
 
 Use Mux player because:
+
 - Excellent UX out of the box
 - Handles HLS streaming (adaptive bitrate)
 - Works on all browsers/devices
@@ -518,6 +558,7 @@ Use Mux player because:
 **Platform Owner Controls Email Templates**
 
 MVP includes:
+
 - Simple text-based email templates
 - Platform Owner can edit email content (basic text editor)
 - Set from name and reply-to email
@@ -528,12 +569,14 @@ MVP includes:
 ### Technology Justifications
 
 **Why SvelteKit?**
+
 - Modern framework with excellent developer experience
 - Built-in SSR and form actions (no separate API needed)
 - Easy deployment to Cloudflare Pages
 - Type-safe with TypeScript
 
 **Why Neon over Cloudflare D1?**
+
 - Production-grade Postgres (ACID transactions)
 - Critical for payment processing (requires strong consistency)
 - No SQLite limitations
@@ -541,18 +584,21 @@ MVP includes:
 - BetterAuth native support
 
 **Why BetterAuth?**
+
 - Framework-agnostic (works with SvelteKit)
 - Type-safe, modern architecture
 - Built-in session management
 - Excellent documentation
 
 **Why RunPod over Cloudflare Stream?**
+
 - Much cheaper: $0.06/video vs $1/1000 min stored
 - Pay only for processing time (no ongoing storage fees)
 - Can add AI features later (subtitles, chapters)
 - Full control over transcoding pipeline
 
 **Why Cloudflare R2 over AWS S3?**
+
 - Zero egress fees (S3 charges $0.09/GB for downloads)
 - S3-compatible API (easy to migrate if needed)
 - Native Cloudflare integration
@@ -565,6 +611,7 @@ MVP includes:
 ### Launch Criteria (Must Achieve Before Launch)
 
 **Technical Requirements**:
+
 - ✅ Platform Owner can upload a video in <5 minutes
 - ✅ Video processing completes in <15 minutes (for 1-hour video)
 - ✅ Customer can purchase content in <2 minutes
@@ -574,6 +621,7 @@ MVP includes:
 - ✅ All critical user flows tested end-to-end
 
 **User Experience**:
+
 - ✅ Platform Owner can operate platform without developer help
 - ✅ Clear error messages for all failure cases
 - ✅ Mobile-responsive on all pages
@@ -581,6 +629,7 @@ MVP includes:
 ### Post-Launch Success Indicators
 
 **Validation Metrics** (indicates MVP is working):
+
 - ✅ Platform Owner makes first sale (validates core flow)
 - ✅ Customer purchases and accesses content successfully
 - ✅ Platform Owner publishes multiple pieces of content
@@ -588,6 +637,7 @@ MVP includes:
 - ✅ 99%+ uptime
 
 **Engineering Success**:
+
 - System reliability (uptime, error rates)
 - Performance (upload speed, playback latency)
 - User experience (Platform Owner operates independently)
@@ -597,12 +647,14 @@ MVP includes:
 **Metrics Tracked for Platform Owner** (visible in admin dashboard):
 
 **Business Metrics**:
+
 - Total revenue
 - Number of customers
 - Number of purchases
 - Top 5 most purchased content
 
 **Technical Metrics** (internal monitoring, not shown to Platform Owner):
+
 - Video upload success rate
 - Video processing success rate
 - Payment processing success rate
@@ -610,6 +662,7 @@ MVP includes:
 - Platform uptime
 
 **User Experience Metrics** (internal):
+
 - Time to first purchase (new customer)
 - Video upload time (Platform Owner)
 - Purchase completion rate
@@ -622,6 +675,7 @@ MVP includes:
 ### Technology Justifications
 
 **Why SvelteKit?**
+
 - Modern framework with excellent developer experience
 - Built-in SSR and form actions (no separate API needed)
 - Great performance out of the box
@@ -629,6 +683,7 @@ MVP includes:
 - Type-safe with TypeScript
 
 **Why Neon over D1?**
+
 - Production-grade Postgres (ACID transactions)
 - Better for payment processing (requires strong consistency)
 - No SQLite limitations (better JOINs, complex queries)
@@ -636,6 +691,7 @@ MVP includes:
 - BetterAuth has native support
 
 **Why BetterAuth over NextAuth/Lucia?**
+
 - Framework-agnostic (works with SvelteKit)
 - Type-safe with excellent DX
 - Modern architecture
@@ -643,12 +699,14 @@ MVP includes:
 - Good documentation
 
 **Why RunPod over Cloudflare Stream?**
+
 - Much cheaper ($0.06/video vs $1/1000 min stored)
 - Pay only for processing time (no ongoing storage fees)
 - Can add custom AI features later (subtitles, chapters)
 - We control the transcoding pipeline
 
 **Why R2 over S3?**
+
 - Zero egress fees (S3 charges $0.09/GB for downloads)
 - S3-compatible API (easy to migrate if needed)
 - Native Cloudflare integration
@@ -687,6 +745,7 @@ MVP includes:
 **Document Status**: ✅ Ready for Implementation
 
 **Related Documents**:
+
 - [Platform Overview](./overview.md) - Complete platform vision
 - [Infrastructure Plan](./infrastructure/infraplan.md) - Technical architecture
 - [Environment Management](./infrastructure/EnvironmentManagement.md) - Deployment configuration

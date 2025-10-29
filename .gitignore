@@ -2,5 +2,18 @@
 .env.*
 **/.env
 **/.env.*
+env.dev
+env.prod
 node_modules
 *.png
+
+
+# Act (GitHub Actions local testing)
+.secrets
+.actrc.local
+
+# Coverage reports
+coverage/
+**/coverage/
+**/.wrangler/
+.svelte-kit/

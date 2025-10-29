@@ -41,14 +41,32 @@ pnpm test:all          # Everything
 
 ## Current Status
 
-✅ **All tests passing**
-- 9 unit tests (8 packages + 1 worker)
-- 3 integration tests (1 worker)
-- 2 E2E tests
+✅ **All tests passing** (5 test suites, 5 tests total)
+
+**Active Test Suites:**
+- `@codex/database` - Database client tests
+- `@codex/validation` - User schema + example validation tests
+- `@codex/cloudflare-clients` - R2 client tests
+- `@codex/test-utils` - Helper function tests
+- `apps/web` - Web application tests
+
+**Disabled/Not Yet Implemented:**
+- `workers/queue-consumer` - Disabled (Cloudflare not set up yet)
+- Integration tests - Placeholder tests only
+- E2E tests - Placeholder tests only
+
+**Coverage Configuration:**
+- Coverage collection enabled (v8 provider)
+- Thresholds set to 0% (allows placeholder code during clean slate setup)
+- Coverage reports generated in `/coverage` directory
+- Placeholder files excluded from coverage
+
+**Note:** The project is in a clean slate state with placeholder code. As features are implemented, coverage thresholds should be increased and integration/E2E tests should be added.
 
 ## Test Organization
 
 **Packages & Workers** - Use `/tests` directory:
+
 ```
 packages/database/
 ├── src/
@@ -66,6 +84,7 @@ workers/queue-consumer/
 ```
 
 **SvelteKit App** - Co-locate with features:
+
 ```
 apps/web/src/lib/features/auth/
 ├── components/
@@ -79,6 +98,7 @@ apps/web/src/lib/features/auth/
 ```
 
 **E2E Tests** - Separate directory:
+
 ```
 apps/web/e2e/
 ├── auth/
@@ -91,6 +111,7 @@ See [CodeStructure.md](CodeStructure.md) for complete project structure with tes
 ## Writing Tests
 
 **Minimal Unit Test:**
+
 ```typescript
 import { describe, it, expect } from 'vitest';
 
@@ -102,9 +123,13 @@ describe('MyFunction', () => {
 ```
 
 **Worker Integration Test (Miniflare):**
+
 ```typescript
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createMiniflareHelper, type MiniflareTestHelper } from '@codex/test-utils';
+import {
+  createMiniflareHelper,
+  type MiniflareTestHelper,
+} from '@codex/test-utils';
 
 describe('My Worker - Integration Tests', () => {
   let helper: MiniflareTestHelper;
@@ -146,6 +171,7 @@ describe('My Worker - Integration Tests', () => {
 ```
 
 **Minimal E2E Test:**
+
 ```typescript
 import { test, expect } from '@playwright/test';
 
@@ -163,6 +189,7 @@ test('should load page', async ({ page }) => {
 ## Configuration
 
 **Root Config:**
+
 - `vitest.config.ts` - Workspace projects and global coverage
 - `vitest.shared.ts` - Shared test settings
 
@@ -181,11 +208,13 @@ Each package has `vitest.config.ts` defining project name, environment, and test
 We use a **two-tier approach** for worker testing:
 
 **Unit Tests** (Fast, Node environment):
+
 - Test pure functions and business logic
 - Run in standard Node environment
 - Located in `/tests/unit/`
 
 **Integration Tests** (Realistic, Miniflare):
+
 - Test full worker behavior with bindings
 - Run in actual Workers runtime via Miniflare
 - Located in `/tests/integration/`
@@ -249,6 +278,7 @@ pnpm test:all               # Everything
 The `@codex/test-utils` package provides shared testing utilities:
 
 **Miniflare Helpers:**
+
 - `createMiniflareHelper()` - Create a Miniflare test helper with sensible defaults
 - `MiniflareTestHelper` - Class for managing Miniflare lifecycle
   - `setup(options)` - Initialize Miniflare with worker config
@@ -262,15 +292,19 @@ The `@codex/test-utils` package provides shared testing utilities:
   - `getBindings()` - Get all bindings
 
 **Database Helpers:**
+
 - `createTestDatabase()` - Create test database connection
 - Database factories and fixtures
 
 **Usage:**
+
 ```typescript
 import { createMiniflareHelper } from '@codex/test-utils';
 
 const helper = createMiniflareHelper();
-await helper.setup({ /* config */ });
+await helper.setup({
+  /* config */
+});
 // ... test code ...
 await helper.cleanup();
 ```

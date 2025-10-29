@@ -5,36 +5,31 @@
 The Content Access system provides secure, authenticated access to purchased media content (video and audio) via a customer library and dedicated media players. It leverages server-side access control, signed R2 URLs for media streaming, and client-side playback progress tracking.
 
 **Key Architecture Decisions**:
+
 - **Server-Side Access Control**: All access checks are performed on the server before rendering content pages or generating media URLs.
 - **Signed R2 URLs**: Media content is served from Cloudflare R2 using short-lived, signed URLs to prevent unauthorized direct access and hotlinking.
 - **Unified Media Player**: A single Svelte component will handle both video and audio playback, adapting based on content type.
 - **Playback Progress Tracking**: User progress is saved to the database to enable seamless resume functionality.
 
-**Architecture Diagram**: See [Content Access Architecture](../_assets/content-access-architecture.png) (Placeholder for future diagram)
+**Architecture Diagram**:
+
+![Content Access Architecture](./assets/content-access-architecture.png)
+
+The diagram shows the secure content access flow including purchase verification, signed R2 URL generation, HLS streaming, and playback progress tracking.
 
 ---
 
 ## Dependencies
 
-### Must Be Completed First
+See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#3-content-access) document for details on dependencies between features.
 
-1.  **Auth System** ([Auth TDD](../auth/ttd-dphase-1.md)):
-    - `requireAuth()` guard for all protected routes.
-    - User authentication and session management.
-2.  **E-Commerce System** ([E-Commerce TDD](../e-commerce/ttd-dphase-1.md)):
-    - `purchases` table as the source of truth for completed transactions.
-    - The `purchases` table now uses `itemId` and `itemType` for polymorphic relationships.
-3.  **Content Management System** ([Content Management TDD](../content-management/ttd-dphase-1.md)):
-    - `content` table for content metadata (title, description, thumbnail).
-    - `media_items` table for media file details (HLS master playlist keys, waveform keys).
-4.  **Media Transcoding System** ([Media Transcoding TDD](../media-transcoding/ttd-dphase-1.md)):
-    - Provides HLS master playlists for both video and audio.
-    - Provides waveform JSON for audio.
-5.  **R2 Bucket Structure** ([Infrastructure - R2 Bucket Structure](../../infrastructure/R2BucketStructure.md)):
-    - Defines bucket naming conventions and file keys for media and assets.
+### Technical Prerequisites
 
-### Can Be Developed In Parallel
-- Admin Dashboard (displays content access analytics)
+1.  **Auth System**: The `requireAuth()` guard and session management must be implemented.
+2.  **E-Commerce System**: The `purchases` table must be available as the source of truth for access rights.
+3.  **Content Management System**: The `content` and `media_items` tables are needed for metadata.
+4.  **Media Transcoding System**: This feature relies on the HLS and waveform outputs from the transcoding process.
+5.  **R2 Bucket Structure**: The bucket naming conventions must be established.
 
 ---
 
@@ -45,6 +40,7 @@ The Content Access system provides secure, authenticated access to purchased med
 **Responsibility**: Centralized business logic for checking user access to content and generating secure media URLs.
 
 **Interface**:
+
 ```typescript
 export interface IContentAccessService {
   /**
@@ -54,7 +50,11 @@ export interface IContentAccessService {
    * @param itemType The type of the item (e.g., 'content', 'offering').
    * @returns True if access is granted, false otherwise.
    */
-  checkAccess(userId: string, itemId: string, itemType: string): Promise<boolean>;
+  checkAccess(
+    userId: string,
+    itemId: string,
+    itemType: string
+  ): Promise<boolean>;
 
   /**
    * Generates a short-lived, signed URL for streaming media from R2.
@@ -71,7 +71,12 @@ export interface IContentAccessService {
    * @param positionSeconds The current playback position in seconds.
    * @param durationSeconds The total duration of the media item in seconds.
    */
-  savePlaybackProgress(userId: string, mediaItemId: string, positionSeconds: number, durationSeconds: number): Promise<void>;
+  savePlaybackProgress(
+    userId: string,
+    mediaItemId: string,
+    positionSeconds: number,
+    durationSeconds: number
+  ): Promise<void>;
 
   /**
    * Retrieves a user's last saved playback progress for a media item.
@@ -84,6 +89,7 @@ export interface IContentAccessService {
 ```
 
 **Implementation Notes**:
+
 - `checkAccess` will query the `purchases` table (or a future `content_access` table) for a `status = 'completed'` and `refundedAt IS NULL` record matching `userId`, `itemId`, and `itemType`.
 - `getSignedMediaStreamUrl` will first call `checkAccess`, then retrieve the `hlsMasterPlaylistKey` from `media_items`, and finally use the `R2Service` to generate the signed URL.
 - `savePlaybackProgress` and `getPlaybackProgress` will interact with the `video_playback` table.
@@ -99,12 +105,14 @@ export interface IContentAccessService {
 **Responsibility**: Display all purchased content to the user.
 
 **`+page.server.ts` (Load Function)**:
+
 - Requires authentication using `requireAuth()`.
 - Fetches all `purchases` records for the logged-in user where `status = 'completed'` and `refundedAt IS NULL`.
 - Joins with the `content` table to retrieve content metadata (title, thumbnail, description).
 - Passes the list of purchased content to the Svelte component.
 
 **`+page.svelte` (Frontend Component)**:
+
 - Renders a grid/list of `ContentCard` components.
 - Implements a basic search filter by content title.
 - Navigates to `/content/[id]` when a content card is clicked.
@@ -114,6 +122,7 @@ export interface IContentAccessService {
 **Responsibility**: Securely display the media player for a specific content item.
 
 **`+page.server.ts` (Load Function)**:
+
 - Requires authentication using `requireAuth()`.
 - Extracts `id` (which is `itemId`) from `params`.
 - Calls `contentAccessService.checkAccess(userId, itemId, 'content')`.
@@ -123,6 +132,7 @@ export interface IContentAccessService {
 - Passes all necessary data (content, media item, initial playback position) to the Svelte component.
 
 **`+page.svelte` (Frontend Component)**:
+
 - Receives content data, media item data, and initial playback position from `load` function.
 - Renders the `MediaPlayer` component, passing it the media item details and initial position.
 
@@ -131,6 +141,7 @@ export interface IContentAccessService {
 **Responsibility**: A reusable Svelte component that renders either a video or audio player based on the `media_item.type`.
 
 **Implementation Notes**:
+
 - **Video Playback**: Integrates the Mux Web Component Player (or similar HLS-compatible player).
 - **Audio Playback**: Uses a custom HTML5 audio player or a dedicated HLS audio player library.
 - **Signed URL Handling**: The player will receive a signed HLS master playlist URL. It should not expose this URL.
@@ -142,6 +153,7 @@ export interface IContentAccessService {
 **Responsibility**: Generates and returns a short-lived signed URL for the HLS master playlist.
 
 **`+server.ts` (GET Handler)**:
+
 - Requires authentication using `requireAuth()`.
 - Extracts `id` (which is `mediaItemId`) from `params`.
 - Calls `contentAccessService.getSignedMediaStreamUrl(userId, mediaItemId)`.
@@ -152,6 +164,7 @@ export interface IContentAccessService {
 **Responsibility**: Receives and saves the user's current playback position.
 
 **`+server.ts` (POST Handler)**:
+
 - Requires authentication using `requireAuth()`.
 - Receives `mediaItemId`, `positionSeconds`, `durationSeconds` from request body.
 - Calls `contentAccessService.savePlaybackProgress(userId, mediaItemId, positionSeconds, durationSeconds)`.
@@ -172,22 +185,30 @@ import { mediaItems } from './media';
 
 export const videoPlayback = pgTable('video_playback', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').references(() => users.id).notNull(),
-  mediaItemId: uuid('media_item_id').references(() => mediaItems.id).notNull(),
+  userId: uuid('user_id')
+    .references(() => users.id)
+    .notNull(),
+  mediaItemId: uuid('media_item_id')
+    .references(() => mediaItems.id)
+    .notNull(),
 
   positionSeconds: integer('position_seconds').notNull().default(0),
   durationSeconds: integer('duration_seconds').notNull(), // Total duration of the media
   completed: boolean('completed').notNull().default(false), // True if watched >= 95%
 
   createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull()
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // Unique constraint to ensure one playback record per user per media item
-export const videoPlaybackUnique = unique('user_media_unique').on(videoPlayback.userId, videoPlayback.mediaItemId);
+export const videoPlaybackUnique = unique('user_media_unique').on(
+  videoPlayback.userId,
+  videoPlayback.mediaItemId
+);
 ```
 
 ### 2. Existing Tables (Read-Only Interaction)
+
 - `users` (for `userId`)
 - `content` (for content metadata)
 - `media_items` (for media details, HLS keys, waveform keys)
@@ -199,26 +220,26 @@ export const videoPlaybackUnique = unique('user_media_unique').on(videoPlayback.
 
 1.  **User Request**: Customer navigates to `/content/[contentId]`.
 2.  **Server-Side Load (`+page.server.ts`)**:
-    a.  `requireAuth(event)`: Ensures user is logged in. If not, redirects to login.
-    b.  `contentAccessService.checkAccess(event.locals.user.id, contentId, 'content')`:
-        i.  Queries `purchases` table: `SELECT * FROM purchases WHERE customerId = userId AND itemId = contentId AND itemType = 'content' AND status = 'completed' AND refundedAt IS NULL;`
-        ii. Returns `true` if a valid purchase exists, `false` otherwise.
-    c.  **Access Denied**: If `checkAccess` returns `false`, `throw redirect(303, `/purchase/${contentId}`);`.
-    d.  **Access Granted**: If `checkAccess` returns `true`:
-        i.  Fetches `content` and associated `media_items` data.
-        ii. Fetches `initialPlaybackPosition = contentAccessService.getPlaybackProgress(userId, mediaItemId)`.
-        iii. Returns `{ content, mediaItem, initialPlaybackPosition }` to the client.
+    a. `requireAuth(event)`: Ensures user is logged in. If not, redirects to login.
+    b. `contentAccessService.checkAccess(event.locals.user.id, contentId, 'content')`:
+    i. Queries `purchases` table: `SELECT * FROM purchases WHERE customerId = userId AND itemId = contentId AND itemType = 'content' AND status = 'completed' AND refundedAt IS NULL;`
+    ii. Returns `true` if a valid purchase exists, `false` otherwise.
+    c. **Access Denied**: If `checkAccess` returns `false`, `throw redirect(303, `/purchase/${contentId}`);`.
+    d. **Access Granted**: If `checkAccess` returns `true`:
+    i. Fetches `content` and associated `media_items` data.
+    ii. Fetches `initialPlaybackPosition = contentAccessService.getPlaybackProgress(userId, mediaItemId)`.
+    iii. Returns `{ content, mediaItem, initialPlaybackPosition }` to the client.
 3.  **Client-Side Render (`+page.svelte`)**:
-    a.  Renders `MediaPlayer` component with `mediaItem` and `initialPlaybackPosition`.
+    a. Renders `MediaPlayer` component with `mediaItem` and `initialPlaybackPosition`.
 4.  **Media Player Initialization (`MediaPlayer.svelte`)**:
-    a.  On mount, the player requests the actual stream URL from the backend.
-    b.  `fetch('/api/media/${mediaItem.id}/stream-url')`.
+    a. On mount, the player requests the actual stream URL from the backend.
+    b. `fetch('/api/media/${mediaItem.id}/stream-url')`.
 5.  **API Route: Get Media Stream URL (`src/routes/api/media/[id]/stream-url/+server.ts`)**:
-    a.  `requireAuth(event)`.
-    b.  `contentAccessService.checkAccess(event.locals.user.id, mediaItemId, mediaItem.type)`: Re-validates access for the specific media item.
-    c.  Retrieves `hlsMasterPlaylistKey` from `media_items` table.
-    d.  `signedUrl = r2Service.getDownloadUrl(mediaItem.bucketName, hlsMasterPlaylistKey, 3600)` (expires in 1 hour).
-    e.  Returns `{ streamUrl: signedUrl }`.
+    a. `requireAuth(event)`.
+    b. `contentAccessService.checkAccess(event.locals.user.id, mediaItemId, mediaItem.type)`: Re-validates access for the specific media item.
+    c. Retrieves `hlsMasterPlaylistKey` from `media_items` table.
+    d. `signedUrl = r2Service.getDownloadUrl(mediaItem.bucketName, hlsMasterPlaylistKey, 3600)` (expires in 1 hour).
+    e. Returns `{ streamUrl: signedUrl }`.
 6.  **Media Playback**: Player receives `streamUrl` and begins HLS streaming.
 
 ---
@@ -228,34 +249,34 @@ export const videoPlaybackUnique = unique('user_media_unique').on(videoPlayback.
 1.  **Player Event**: `MediaPlayer.svelte` listens for `timeupdate` events (e.g., every 15 seconds).
 2.  **Client-Side API Call**: Dispatches `fetch('/api/playback/progress', { method: 'POST', body: { mediaItemId, positionSeconds, durationSeconds } })`.
 3.  **API Route: Save Playback Progress (`src/routes/api/playback/progress/+server.ts`)**:
-    a.  `requireAuth(event)`.
-    b.  `contentAccessService.savePlaybackProgress(event.locals.user.id, mediaItemId, positionSeconds, durationSeconds)`:
-        i.  Upserts (inserts or updates) a record in the `video_playback` table.
-        ii. Sets `completed = true` if `positionSeconds` is >= 95% of `durationSeconds`.
-    c.  Returns success.
+    a. `requireAuth(event)`.
+    b. `contentAccessService.savePlaybackProgress(event.locals.user.id, mediaItemId, positionSeconds, durationSeconds)`:
+    i. Upserts (inserts or updates) a record in the `video_playback` table.
+    ii. Sets `completed = true` if `positionSeconds` is >= 95% of `durationSeconds`.
+    c. Returns success.
 4.  **Page Load**: When `/content/[id]` loads, `+page.server.ts` fetches `contentAccessService.getPlaybackProgress(userId, mediaItemId)` and passes it to the player.
 
 ---
 
 ## Testing Strategy
 
--   **Unit Tests**: For `ContentAccessService` (mocking database and R2 interactions).
--   **Integration Tests**: For API routes (`/api/media/[id]/stream-url`, `/api/playback/progress`).
--   **E2E Tests**: For full user flows (login -> purchase -> library -> play content -> resume playback).
+- **Unit Tests**: For `ContentAccessService` (mocking database and R2 interactions).
+- **Integration Tests**: For API routes (`/api/media/[id]/stream-url`, `/api/playback/progress`).
+- **E2E Tests**: For full user flows (login -> purchase -> library -> play content -> resume playback).
 
 ---
 
 ## Related Documents
 
--   **PRD**: [Content Access PRD](./pdr-phase-1.md)
--   **Cross-Feature Dependencies**:
-    -   [Auth TDD](../auth/ttd-dphase-1.md)
-    -   [E-Commerce TDD](../e-commerce/ttd-dphase-1.md)
-    -   [Content Management TDD](../content-management/ttd-dphase-1.md)
-    -   [Media Transcoding TDD](../media-transcoding/ttd-dphase-1.md)
--   **Infrastructure**:
-    -   [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md)
-    -   [Database Schema](../../infrastructure/DatabaseSchema.md)
+- **PRD**: [Content Access PRD](./pdr-phase-1.md)
+- **Cross-Feature Dependencies**:
+  - [Auth TDD](../auth/ttd-dphase-1.md)
+  - [E-Commerce TDD](../e-commerce/ttd-dphase-1.md)
+  - [Content Management TDD](../content-management/ttd-dphase-1.md)
+  - [Media Transcoding TDD](../media-transcoding/ttd-dphase-1.md)
+- **Infrastructure**:
+  - [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md)
+  - [Database Schema](../../infrastructure/DatabaseSchema.md)
 
 ---
 

@@ -1,0 +1,228 @@
+# Authentication & Authorization Architecture - Phase 1
+# Import theme variables
+...@../../../d2/theme
+
+direction: down
+
+# Browser Layer
+browser: {
+  label: "User Browser"
+
+  auth_ui: {
+    label: "Auth Pages\n\n• /login\n• /signup\n• /verify-email\n• /reset-password"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  app_ui: {
+    label: "Protected App\n\n• Dashboard\n• Content Library\n• Profile"
+    style: {
+      fill: ${color-browser}
+      stroke: ${stroke-browser}
+    }
+  }
+
+  style: {
+    fill: "#FAFAFA"
+    stroke: "#BDBDBD"
+    stroke-width: 2
+  }
+}
+
+# SvelteKit Server Layer
+sveltekit: {
+  label: "SvelteKit Server"
+
+  hooks: {
+    label: "hooks.server.ts\n\n• Mount BetterAuth handler\n• Session middleware\n• KV session cache"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  auth_routes: {
+    label: "Auth Routes\n\n• /api/auth/*\n• Handle login/signup\n• Email verification"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  guards: {
+    label: "Auth Guards\n\nrequireAuth()\nrequireOwner()\nrequireCreator()"
+    style: {
+      fill: ${color-nextjs-sub}
+      stroke: ${stroke-nextjs-sub}
+    }
+  }
+
+  style: {
+    fill: ${color-nextjs}
+    stroke: ${stroke-nextjs}
+    stroke-width: 2
+  }
+}
+
+# BetterAuth Layer
+betterauth: {
+  label: "BetterAuth Library"
+
+  core: {
+    label: "BetterAuth Core\n\n• Session management\n• Password hashing\n• Token generation\n• Email verification"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  drizzle_adapter: {
+    label: "Drizzle Adapter\n\nMaps BetterAuth\nto database schema"
+    style: {
+      fill: ${color-go}
+      stroke: ${stroke-go}
+    }
+  }
+
+  style: {
+    fill: "#F5F5F5"
+    stroke: "#9E9E9E"
+    stroke-width: 2
+  }
+}
+
+# Storage Layer - Postgres
+postgres: {
+  label: "Neon PostgreSQL"
+  shape: cylinder
+
+  auth_tables: {
+    label: "Auth Tables\n\n• users\n• sessions\n• verification_tokens"
+    style: {
+      fill: ${color-postgres}
+      stroke: ${stroke-postgres}
+    }
+  }
+
+  style: {
+    fill: "#E8EAF6"
+    stroke: "#9FA8DA"
+    stroke-width: 2
+  }
+}
+
+# Storage Layer - KV Cache
+kv: {
+  label: "Cloudflare KV"
+
+  session_cache: {
+    label: "Session Cache\n\nKey: session:{id}\nTTL: 24 hours\n\nAvoids DB lookup\non every request"
+    style: {
+      fill: ${color-redis}
+      stroke: ${stroke-redis}
+    }
+  }
+
+  style: {
+    fill: "#FFEBEE"
+    stroke: "#EF9A9A"
+    stroke-width: 2
+  }
+}
+
+# Email Service
+email: {
+  label: "Notification Service"
+
+  templates: {
+    label: "Email Templates\n\n• Verification email\n• Password reset\n• Password changed"
+    style: {
+      fill: ${color-email}
+      stroke: ${stroke-email}
+    }
+  }
+
+  style: {
+    fill: ${color-email}
+    stroke: ${stroke-email}
+    stroke-width: 2
+  }
+}
+
+# Connections - Login Flow
+browser.auth_ui -> sveltekit.auth_routes: "POST /api/auth/login\n{email, password}" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+sveltekit.auth_routes -> betterauth.core: "authenticate()" {
+  style.stroke: ${arrow-http}
+}
+
+betterauth.core -> betterauth.drizzle_adapter: "findUser(email)" {
+  style.stroke: ${arrow-http}
+}
+
+betterauth.drizzle_adapter -> postgres.auth_tables: "SELECT * FROM users\nWHERE email = ?" {
+  style.stroke: ${arrow-sql}
+}
+
+betterauth.core -> postgres.auth_tables: "INSERT session" {
+  style.stroke: ${arrow-sql}
+}
+
+betterauth.core -> kv.session_cache: "SET session:{id}\n(cache for 24h)" {
+  style.stroke: ${arrow-cache}
+}
+
+sveltekit.auth_routes -> browser.auth_ui: "Set-Cookie: codex-session\nRedirect to /dashboard" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Connections - Protected Request Flow
+browser.app_ui -> sveltekit.hooks: "GET /dashboard\n(with session cookie)" {
+  style.stroke: ${arrow-https}
+  style.stroke-width: 2
+}
+
+sveltekit.hooks -> kv.session_cache: "GET session:{id}\n(check cache first)" {
+  style.stroke: ${arrow-cache}
+}
+
+kv.session_cache -> sveltekit.hooks: "session data\n(if cached)" {
+  style.stroke: ${arrow-cache}
+  style.stroke-dash: 3
+}
+
+sveltekit.hooks -> postgres.auth_tables: "SELECT session\n(if not cached)" {
+  style.stroke: ${arrow-sql}
+  style.stroke-dash: 3
+}
+
+sveltekit.hooks -> sveltekit.guards: "requireAuth()\n(validate role)" {
+  style.stroke: ${arrow-http}
+}
+
+sveltekit.guards -> browser.app_ui: "Render page\nor 401/403" {
+  style.stroke: ${arrow-https}
+  style.stroke-dash: 3
+}
+
+# Connections - Email Flow
+betterauth.core -> email.templates: "sendVerificationEmail()\nsendResetPasswordEmail()" {
+  style.stroke: ${arrow-external}
+}
+
+# Notes
+note_session_flow: {
+  label: "📝 Session Flow:\n1. Login → Create session in Postgres\n2. Cache session in KV (24h TTL)\n3. Future requests → Check KV first\n4. If KV miss → Query Postgres → Cache in KV"
+  shape: text
+}
+
+note_security: {
+  label: "🔐 Security:\n• Passwords hashed with bcrypt\n• Sessions stored server-side only\n• HttpOnly, Secure cookies\n• CSRF protection via SameSite=Lax"
+  shape: text
+}

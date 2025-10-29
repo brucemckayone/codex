@@ -1,2 +1,7 @@
-// Schema exports
-// Will export all table schemas
+/**
+ * Database schema exports
+ *
+ * Exports all table schemas for use with Drizzle ORM
+ */
+
+export * from './test';

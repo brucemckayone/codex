@@ -6,6 +6,34 @@ Continuous integration and deployment strategy for Codex monorepo using GitHub A
 
 ---
 
+## Current Implementation Status
+
+✅ **Fully Implemented & Working:**
+- GitHub Actions test workflow with parallel jobs (typecheck, lint, unit-tests, integration-tests, e2e-tests)
+- Act for local GitHub Actions testing (see [ACT_SETUP.md](../../.github/ACT_SETUP.md))
+- ESLint, Prettier, TypeScript configuration
+- Vitest with coverage reporting (thresholds disabled for clean slate)
+- 5 test suites passing (database, validation, cloudflare-clients, test-utils, web)
+- Coverage collection configured (thresholds set to 0% to allow placeholder code)
+
+🚧 **Not Yet Configured:**
+- Cloudflare Pages deployment (requires account setup)
+- Cloudflare Workers deployment (queue-consumer disabled, workflow disabled - see `.github/workflows/deploy-workers.yml.disabled`)
+- Neon Postgres production database (will use free tier)
+- Staging/preview deployments
+- Production deployments
+- Environment variable configuration in Cloudflare
+- Branch protection rules
+
+💡 **Current Approach:**
+Using only free services for CI testing. The test workflow runs successfully on GitHub Actions. Deployment workflows will be enabled when Cloudflare and Neon accounts are configured.
+
+**Disabled Components:**
+- `workers/queue-consumer` - Commented out in vitest.config.ts (Cloudflare not set up)
+- `.github/workflows/deploy-workers.yml` - Renamed to `.disabled` (will enable after Cloudflare setup)
+
+---
+
 ## Pipeline Overview
 
 ```
@@ -19,6 +47,7 @@ Git Push → GitHub Actions → Tests → Type Check → Build → Deploy
 ```
 
 **Goals:**
+
 - Automated testing on every push
 - FREE preview deployments for branches
 - Staging environment for migration testing
@@ -30,24 +59,27 @@ Git Push → GitHub Actions → Tests → Type Check → Build → Deploy
 
 ## Branch Strategy
 
-| Branch | Environment | Trigger | Auto-Deploy | Cost |
-|--------|-------------|---------|-------------|------|
-| `feature/*` | Preview | Push | Yes | **FREE** (Cloudflare Pages) |
-| `develop` | Staging | Push | Yes | **FREE** (Cloudflare Pages) |
-| `main` | Production | Push/Merge | Yes | Paid (actual usage) |
+| Branch      | Environment | Trigger    | Auto-Deploy | Cost                        |
+| ----------- | ----------- | ---------- | ----------- | --------------------------- |
+| `feature/*` | Preview     | Push       | Yes         | **FREE** (Cloudflare Pages) |
+| `develop`   | Staging     | Push       | Yes         | **FREE** (Cloudflare Pages) |
+| `main`      | Production  | Push/Merge | Yes         | Paid (actual usage)         |
 
 **Workflow:**
+
 ```
 feature/new-feature → PR to develop → develop (staging) → PR to main → main (production)
 ```
 
 **Why this works:**
+
 - Cloudflare Pages: **Unlimited preview deployments FREE**
 - Each branch gets unique URL: `<branch>.<project>.pages.dev`
 - Previews auto-deleted when branch deleted
 - No concurrent preview cost concerns
 
 **Branch protection rules:**
+
 - `main`: Require PR approval, passing tests, staging validation
 - `develop`: Require passing tests
 
@@ -55,18 +87,19 @@ feature/new-feature → PR to develop → develop (staging) → PR to main → m
 
 ## Cost Breakdown
 
-| Service | Tier | Cost | Notes |
-|---------|------|------|-------|
-| **GitHub Actions** | Free | $0 | 2000 min/month public repos |
-| **Cloudflare Pages** | Free | $0 | Unlimited deployments + previews |
-| **Cloudflare Workers** | Free | $0 | 100k requests/day free |
-| **Neon Database** | Free | $0 | 0.5GB storage + staging branch |
-| **Sentry** | Free | $0 | 5k errors/month, 1 project |
-| **Uptime Monitor** | UptimeRobot Free | $0 | 50 monitors, 5min interval |
+| Service                | Tier             | Cost | Notes                            |
+| ---------------------- | ---------------- | ---- | -------------------------------- |
+| **GitHub Actions**     | Free             | $0   | 2000 min/month public repos      |
+| **Cloudflare Pages**   | Free             | $0   | Unlimited deployments + previews |
+| **Cloudflare Workers** | Free             | $0   | 100k requests/day free           |
+| **Neon Database**      | Free             | $0   | 0.5GB storage + staging branch   |
+| **Sentry**             | Free             | $0   | 5k errors/month, 1 project       |
+| **Uptime Monitor**     | UptimeRobot Free | $0   | 50 monitors, 5min interval       |
 
 **Total CI/CD cost: $0** (stays within free tiers)
 
 **Production costs (only):**
+
 - Cloudflare Workers: $5/month minimum (10M requests)
 - Neon: $19/month Scale plan (if needed, else free)
 - Stripe: Pay-as-you-go (no fixed cost)
@@ -78,6 +111,7 @@ feature/new-feature → PR to develop → develop (staging) → PR to main → m
 ### Purpose
 
 **Critical for migration safety:**
+
 1. Test database migrations against real-ish data
 2. Verify deployment process works
 3. Integration testing with external APIs
@@ -87,6 +121,7 @@ feature/new-feature → PR to develop → develop (staging) → PR to main → m
 ### Setup
 
 **Neon staging branch:**
+
 ```bash
 # Create staging branch from production
 neon branches create --name staging --parent main
@@ -95,11 +130,13 @@ neon branches create --name staging --parent main
 ```
 
 **Cloudflare Pages - develop branch:**
+
 - URL: `develop.<project>.pages.dev` or custom `staging.yourdomain.com`
 - Environment variables: Staging API keys
 - Database: Neon staging branch
 
 **Migration workflow:**
+
 ```
 1. Create migration locally (pnpm db:generate)
 2. Test migration on local DB
@@ -121,11 +158,7 @@ neon branches create --name staging --parent main
 **Trigger:** Every push, every PR
 
 **Jobs:**
-1. Type checking (~1 min)
-2. Linting (~30 sec)
-3. Unit tests (~2 min)
-4. Integration tests (~3 min)
-5. E2E tests (~5 min, staging/production branches only)
+The test workflow runs a series of jobs to ensure code quality, including type checking, linting, unit tests, integration tests, and end-to-end (E2E) tests. For a detailed breakdown of the testing strategy, environments, and commands, see the [Testing Guide](./Testing.md).
 
 **Total time: ~5 min for feature branches, ~12 min for staging/prod**
 
@@ -355,6 +388,7 @@ jobs:
 ```
 
 **Budget file:**
+
 ```json
 // lighthouse-budget.json
 {
@@ -378,27 +412,38 @@ jobs:
 ### Build Configuration
 
 **Cloudflare Dashboard → Pages → Settings:**
+
 ```yaml
-Build command: pnpm install && pnpm --filter web build
-Build output directory: apps/web/build
+Framework preset: SvelteKit
+Build command: pnpm --filter web build
+Build output directory: (leave empty - auto-detected by SvelteKit adapter)
 Root directory: /
 Node version: 20
-Branch: main
+Production branch: main
 ```
 
+**Important Notes:**
+- pnpm is pre-installed on Cloudflare Pages, no need for `pnpm install`
+- SvelteKit adapter outputs to `.svelte-kit/cloudflare` (auto-detected)
+- DO NOT specify `apps/web/build` - this is incorrect for Cloudflare adapter
+- Framework preset "SvelteKit" enables automatic configuration
+
 **Preview deployments (automatic):**
+
 - Every branch push → `<branch>.<project>.pages.dev`
 - FREE, unlimited
 - Auto-deleted when branch deleted
 - PR comment with preview URL
 
 **Staging (develop branch):**
+
 - URL: `develop.<project>.pages.dev`
 - Or custom domain: `staging.yourdomain.com`
 - Uses Neon staging branch
 - Test migrations here before production
 
 **Production (main branch):**
+
 - URL: `yourdomain.com`
 - Uses Neon production database
 - Workers deployed separately via GitHub Actions
@@ -406,6 +451,7 @@ Branch: main
 ### Environment Variables
 
 **Preview environment variables:**
+
 ```bash
 NODE_ENV=preview
 DATABASE_URL=<neon-staging-url>  # Read-only or staging branch
@@ -417,6 +463,7 @@ AUTH_SECRET=<staging-secret>
 ```
 
 **Production environment variables:**
+
 ```bash
 NODE_ENV=production
 DATABASE_URL=<neon-production-url>
@@ -484,12 +531,14 @@ Pre-merge checklist:
 ### Cloudflare Pages (Instant)
 
 **Via Dashboard:**
+
 1. Pages → Deployments
 2. Select previous deployment
 3. Click "Rollback"
 4. **Takes effect immediately (seconds)**
 
 **Via Git:**
+
 ```bash
 git revert HEAD
 git push origin main
@@ -499,12 +548,14 @@ git push origin main
 ### Workers (Fast)
 
 **Via Wrangler:**
+
 ```bash
 wrangler deployments list
 wrangler rollback <deployment-id>
 ```
 
 **Via Git:**
+
 ```bash
 git revert <worker-commit>
 git push origin main
@@ -514,12 +565,14 @@ git push origin main
 ### Database (Careful)
 
 **Neon Point-in-Time Recovery:**
+
 1. Neon Dashboard → Branches
 2. Create branch from timestamp (before migration)
 3. Update DATABASE_URL in Cloudflare Pages
 4. Redeploy
 
 **Manual migration rollback:**
+
 - Write down migration SQL
 - Prepare rollback SQL before deploying
 - Test rollback on staging first
@@ -533,6 +586,7 @@ git push origin main
 **Free tier: 5,000 errors/month, 1 project**
 
 Setup:
+
 ```typescript
 // apps/web/src/hooks.server.ts
 import * as Sentry from '@sentry/sveltekit';
@@ -546,6 +600,7 @@ Sentry.init({
 ```
 
 **Alert on:**
+
 - Error rate spike (>10 errors/min)
 - New error types
 - Unhandled exceptions
@@ -553,6 +608,7 @@ Sentry.init({
 ### Cloudflare Analytics (Free, Built-in)
 
 **Available metrics:**
+
 - Request count
 - Response times
 - Error rates (4xx, 5xx)
@@ -566,6 +622,7 @@ Sentry.init({
 **Free tier: 50 monitors, 5-minute intervals**
 
 **Monitor:**
+
 - `GET https://yourdomain.com/` (homepage)
 - `GET https://yourdomain.com/api/health` (API health)
 
@@ -577,14 +634,15 @@ Sentry.init({
 
 **Required (Settings → Secrets → Actions):**
 
-| Secret | Purpose |
-|--------|---------|
-| `CLOUDFLARE_API_TOKEN` | Deploy workers |
-| `CLOUDFLARE_ACCOUNT_ID` | Worker deployments |
-| `STRIPE_TEST_KEY` | E2E tests with real Stripe test mode |
-| `SENTRY_DSN` | Error tracking |
+| Secret                  | Purpose                              |
+| ----------------------- | ------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`  | Deploy workers                       |
+| `CLOUDFLARE_ACCOUNT_ID` | Worker deployments                   |
+| `STRIPE_TEST_KEY`       | E2E tests with real Stripe test mode |
+| `SENTRY_DSN`            | Error tracking                       |
 
 **NOT in GitHub (set in Cloudflare Pages environment variables):**
+
 - Production database URL
 - Production Stripe keys
 - Production API keys
@@ -626,20 +684,24 @@ Sentry.init({
 ### Stay Within Free Tiers
 
 **Cloudflare Workers:**
+
 - Free: 100k requests/day
 - Paid: $5/month for 10M requests
 - **Strategy:** Monitor usage, upgrade when needed
 
 **Neon:**
+
 - Free: 0.5GB storage, 1 branch
 - Scale: $19/month, unlimited branches
 - **Strategy:** Start free, upgrade when storage exceeded
 
 **Sentry:**
+
 - Free: 5k errors/month
 - **Strategy:** Keep error rate low via good testing, sample traces at 10%
 
 **GitHub Actions:**
+
 - Free: 2000 minutes/month (public repos)
 - **Strategy:** ~5-12 min per push, ~300-400 builds/month fits free tier
 
@@ -650,12 +712,14 @@ Sentry.init({
 ## Future Enhancements
 
 ### Phase 2 (After MVP Launch)
+
 - [ ] Automated dependency updates (Dependabot - FREE)
 - [ ] Security scanning (GitHub Security - FREE)
 - [ ] Load testing on staging (k6 open source - FREE)
 - [ ] Visual regression testing (consider cost)
 
 ### Phase 3 (Scale)
+
 - [ ] Blue-green deployments for workers
 - [ ] Canary releases (gradual rollout)
 - [ ] Automated rollback on error threshold
@@ -665,7 +729,7 @@ Sentry.init({
 ## Related Documents
 
 - [EnvironmentManagement.md](./EnvironmentManagement.md) - Local dev setup
-- [TestingStrategy.md](./TestingStrategy.md) - Testing frameworks
+- [TestingStrategy.md](./Testing.md) - Testing frameworks
 - **CodeStructure.md** - Project organization (TBD)
 
 ---

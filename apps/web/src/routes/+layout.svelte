@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { LayoutData } from './$types';
 
-  let { data, children }: { data: LayoutData; children: any } = $props();
+  // eslint-disable-next-line no-unused-vars
+  let { data: _, children }: { data: LayoutData; children: any } = $props();
 </script>
 
 <div class="app">
@@ -30,7 +31,8 @@
 
   :global(body) {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
-      Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+      Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
   }
 </style>
