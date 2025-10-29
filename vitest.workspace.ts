@@ -11,5 +11,6 @@ export default defineWorkspace([
   'packages/test-utils',
 
   // Workers (uncomment when ready)
-  // 'workers/queue-consumer',
+  'workers/auth',
+  'workers/stripe-webhook-handler',
 ]);
