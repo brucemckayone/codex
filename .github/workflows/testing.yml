@@ -1,4 +1,4 @@
-name: PR and Push CI (Neon ephemeral DB)
+name: Testing with Ephemeral Db
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - main
-      - develop
+      - feature/*
 
 permissions:
   contents: read
