@@ -16,7 +16,7 @@ env:
   EXPIRES_IN_DAYS: 1
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}$-{{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,19 +38,19 @@ jobs:
         with:
           filters: |
             database:
-              - '''packages/database/**'''
+              - 'packages/database/**'
             validation:
-              - '''packages/validation/**'''
+              - 'packages/validation/**'
             cloudflare-clients:
-              - '''packages/cloudflare-clients/**'''
+              - 'packages/cloudflare-clients/**'
             test-utils:
-              - '''packages/test-utils/**'''
+              - 'packages/test-utils/**'
             web:
-              - '''apps/web/**'''
+              - 'apps/web/**'
             auth-worker:
-              - '''workers/auth/**'''
+              - 'workers/auth/**'
             stripe-webhook-handler:
-              - '''workers/stripe-webhook-handler/**'''
+              - 'workers/stripe-webhook-handler/**'
 
   create-neon-branch:
     runs-on: ubuntu-latest
@@ -72,14 +72,37 @@ jobs:
       - name: Set expiry timestamp
         id: expires
         run: |
-          echo "EXPIRES_AT=$(date -u --date "+${{ env.EXPIRES_IN_DAYS }} days" +'''%Y-%m-%dT%H:%M:%SZ''')" >> $GITHUB_ENV
+          echo "EXPIRES_AT=$(date -u --date "+${{ env.EXPIRES_IN_DAYS }} days" +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
 
-      - name: Create Neon branch
+      - name: Debug: call Neon API to create branch (shows full error body)
+        id: neon-debug
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          BRANCH_NAME: ${{ steps.branch-name.outputs.name }}
+          EXPIRES_AT: ${{ env.EXPIRES_AT }}
+        run: |
+          echo "Project: $PROJECT_ID"
+          echo "Branch: $BRANCH_NAME"
+          echo "Expires at: $EXPIRES_AT"
+          printf '\nCreating branch via curl (output will include Neon JSON error if any):\n\n'
+          curl -sS -w "\n\nHTTP_STATUS:%{http_code}\n" \
+            -X POST "https://console.neon.tech/api/v2/projects/$PROJECT_ID/branches" \
+            -H "Authorization: Bearer $NEON_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"name\": \"${BRANCH_NAME}\",
+              \"parent_branch\": \"main\",
+              \"expires_at\": \"${EXPIRES_AT}\" 
+            }" || true
+
+      - name: Create Neon branch (safer)
         id: create-branch
         uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
+          parent_branch: main
           api_key: ${{ secrets.NEON_API_KEY }}
           expires_at: ${{ env.EXPIRES_AT }}
 
@@ -105,6 +128,15 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm i --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
 
       - name: Run migrations
         if: needs.changes.outputs.database == 'true'
