@@ -1,17 +1,18 @@
 name: Deploy Workers
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: # Allow manual deployment
+  workflow_run:
+    workflows: ["PR and Push CI (Neon ephemeral DB)"]
+    types:
+      - completed
+    branches:
+      - main
 
 jobs:
   deploy-workers:
     name: Deploy Cloudflare Workers
     runs-on: ubuntu-latest
-    # Only deploy if tests pass
-    needs: [] # Will be updated to depend on test workflow when needed
-
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
 
