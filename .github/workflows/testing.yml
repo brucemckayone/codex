@@ -71,8 +71,7 @@ jobs:
 
       - name: Set expiry timestamp
         id: expires
-        run: |
-          echo "EXPIRES_AT=$(date -u --date \"+${{ env.EXPIRES_IN_DAYS }} days\" +'%%Y-%%m-%%dT%%H:%%M:%%SZ')" >> $GITHUB_ENV
+        run: echo "EXPIRES_AT=$(date -u --date '+${{ env.EXPIRES_IN_DAYS }} days' +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
 
       - name: Debug: call Neon API to create branch (shows full error body)
         id: neon-debug
