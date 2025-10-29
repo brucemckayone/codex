@@ -14,7 +14,6 @@ describe('Database Client', () => {
       const { sql } = await import('drizzle-orm');
 
       const result = await db.execute(sql`SELECT 1 as value`);
-
       expect(result).toBeDefined();
       expect(result.rows.length).toBeGreaterThan(0);
       expect((result.rows[0] as { value: number }).value).toBe(1);
