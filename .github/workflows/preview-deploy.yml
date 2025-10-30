@@ -1,0 +1,204 @@
+name: Preview Deployment
+
+on:
+  # Run after tests complete successfully
+  workflow_run:
+    workflows: ['PR and Push CI (Neon ephemeral DB)']
+    types:
+      - completed
+  # Also run when PR is closed for cleanup
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  deployments: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Handle both workflow_run and pull_request triggers
+  PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
+
+jobs:
+  # Cleanup preview when PR is closed
+  cleanup-preview:
+    name: Cleanup Preview Environment
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete Neon branch
+        uses: neondatabase/delete-branch-action@v3
+        continue-on-error: true
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch: pr-${{ env.PR_NUMBER }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install wrangler
+        run: pnpm add -g wrangler
+
+      - name: Delete worker deployments
+        continue-on-error: true
+        run: |
+          wrangler delete --name stripe-webhook-handler-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name auth-worker-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name codex-web-preview-${{ env.PR_NUMBER }} || true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Comment cleanup complete
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ env.PR_NUMBER }},
+              body: '🧹 Preview environment cleaned up successfully.'
+            });
+
+  deploy-preview:
+    name: Deploy Preview Environment
+    runs-on: ubuntu-latest
+    # Only deploy if: (1) tests passed, (2) this is a PR (not push to main), (3) not a closed event
+    if: |
+      github.event.action != 'closed' &&
+      (github.event.workflow_run.conclusion == 'success' || github.event_name == 'pull_request') &&
+      (github.event.workflow_run.event == 'pull_request' || github.event_name == 'pull_request')
+    outputs:
+      web_url: ${{ steps.deploy-web.outputs.deployment-url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Download Neon connection details from test workflow
+      - name: Download Neon connection artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: neon-connection-${{ github.run_id }}
+
+      - name: Load DATABASE_URL from artifact
+        id: load-db-url
+        run: |
+          DATABASE_URL=$(cat database-url.txt)
+          echo "::add-mask::$DATABASE_URL"
+          echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+
+          BRANCH_ID=$(cat branch-id.txt)
+          echo "BRANCH_ID=$BRANCH_ID" >> $GITHUB_ENV
+
+          BRANCH_NAME=$(cat branch-name.txt)
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      # Deploy stripe-webhook-handler worker
+      - name: Deploy stripe-webhook-handler (preview)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/stripe-webhook-handler
+          command: deploy --name stripe-webhook-handler-preview-${{ env.PR_NUMBER }} --var ENVIRONMENT:preview
+          secrets: |
+            DATABASE_URL
+            STRIPE_SECRET_KEY
+            STRIPE_WEBHOOK_SECRET_PAYMENT
+            STRIPE_WEBHOOK_SECRET_SUBSCRIPTION
+            STRIPE_WEBHOOK_SECRET_CONNECT
+            STRIPE_WEBHOOK_SECRET_CUSTOMER
+            STRIPE_WEBHOOK_SECRET_BOOKING
+            STRIPE_WEBHOOK_SECRET_DISPUTE
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_TEST_PAYMENT_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_TEST_SUBSCRIPTION_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_TEST_CONNECT_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_TEST_CUSTOMER_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_TEST_BOOKING_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_TEST_DISPUTE_WEBHOOK_SECRET }}
+
+      # Deploy auth worker
+      - name: Deploy auth-worker (preview)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/auth
+          command: deploy --name auth-worker-preview-${{ env.PR_NUMBER }} --var ENVIRONMENT:preview
+          secrets: |
+            DATABASE_URL
+            SESSION_SECRET
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+
+      # Build and deploy SvelteKit app
+      - name: Build SvelteKit app
+        run: pnpm --filter web build
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Deploy SvelteKit (preview)
+        id: deploy-web
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          command: deploy --name codex-web-preview-${{ env.PR_NUMBER }} --var ENVIRONMENT:preview
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      # Comment on PR with preview URLs
+      - name: Comment preview URLs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ env.PR_NUMBER }};
+            const webUrl = `https://codex-web-preview-${prNumber}.workers.dev`;
+            const comment = `## 🚀 Preview Deployment Ready
+
+            **🌐 Web App:** ${webUrl}
+            **📊 Database:** Neon branch \`${{ env.BRANCH_NAME }}\`
+            **⚙️ Workers:** Deployed with \`preview-${prNumber}\` environment
+
+            ### Testing Checklist
+            - [ ] Visual confirmation of UI changes
+            - [ ] Test user flows end-to-end
+            - [ ] Verify database operations
+            - [ ] Check worker functionality (webhooks, auth)
+
+            ### Preview Stack Details
+            - **Stripe Webhook:** \`stripe-webhook-handler-preview-${prNumber}\`
+            - **Auth Worker:** \`auth-worker-preview-${prNumber}\`
+            - **Web App:** \`codex-web-preview-${prNumber}\`
+
+            **Note:** This preview will be automatically deleted when PR is closed.`;
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: comment
+            });

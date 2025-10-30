@@ -6,7 +6,10 @@
   "scripts": {
     "build": "node build.js",
     "deploy": "pnpm build && wrangler deploy",
-    "dev": "pnpm build && wrangler dev"
+    "dev": "pnpm build && wrangler dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@codex/database": "workspace:*",

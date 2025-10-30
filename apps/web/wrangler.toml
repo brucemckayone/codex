@@ -1,0 +1,39 @@
+name = "codex-web"
+main = ".svelte-kit/cloudflare/_worker.js"
+compatibility_date = "2025-01-01"
+
+# Static assets binding for SvelteKit
+[assets]
+binding = "ASSETS"
+directory = ".svelte-kit/cloudflare"
+
+# Route configuration - SvelteKit handles all routes
+[routes]
+include = ["/*"]
+
+# Observability configuration
+[observability]
+enabled = true
+
+# Production environment
+[env.production]
+name = "codex-web-production"
+vars = { ENVIRONMENT = "production" }
+
+# Staging environment
+[env.staging]
+name = "codex-web-staging"
+vars = { ENVIRONMENT = "staging" }
+
+# Note: Secrets to be set via wrangler CLI or CI/CD:
+# - DATABASE_URL
+# - SESSION_SECRET
+# - PUBLIC_APP_URL (for OAuth callbacks, etc.)
+#
+# Set secrets with:
+#   wrangler secret put DATABASE_URL --env production
+#   wrangler secret put SESSION_SECRET --env production
+#
+# For preview deployments, environment-specific configs will be created dynamically:
+#   [env.preview-{PR_NUMBER}]
+#   name = "codex-web-preview-{PR_NUMBER}"

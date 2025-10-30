@@ -1,0 +1,27 @@
+name = "stripe-webhook-handler"
+main = "dist/index.js"
+compatibility_date = "2025-01-01"
+
+# Observability configuration
+[observability]
+enabled = true
+
+# Production environment
+[env.production]
+name = "stripe-webhook-handler-production"
+vars = { ENVIRONMENT = "production" }
+
+# Staging environment
+[env.staging]
+name = "stripe-webhook-handler-staging"
+vars = { ENVIRONMENT = "staging" }
+
+# Note: Secrets to be set via wrangler CLI or CI/CD:
+# - DATABASE_URL
+# - STRIPE_SECRET_KEY
+# - STRIPE_WEBHOOK_SECRET
+#
+# Set secrets with:
+#   wrangler secret put DATABASE_URL --env production
+#   wrangler secret put STRIPE_SECRET_KEY --env production
+#   wrangler secret put STRIPE_WEBHOOK_SECRET --env production

@@ -124,6 +124,23 @@ jobs:
           DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:migrate
 
+      # Save DATABASE_URL for preview deployments
+      - name: Save Neon connection details to artifact
+        run: |
+          echo "${{ steps.create-branch.outputs.db_url_with_pooler }}" > database-url.txt
+          echo "${{ steps.create-branch.outputs.branch_id }}" > branch-id.txt
+          echo "${{ steps.branch-name.outputs.name }}" > branch-name.txt
+
+      - name: Upload Neon connection artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neon-connection-${{ github.run_id }}
+          path: |
+            database-url.txt
+            branch-id.txt
+            branch-name.txt
+          retention-days: 1
+
       # Run tests for affected packages
       - name: Run tests for affected packages
         if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
