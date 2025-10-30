@@ -5,7 +5,20 @@ declare global {
     // interface Locals {}
     // interface PageData {}
     // interface PageState {}
-    // interface Platform {}
+    interface Platform {
+      env: {
+        ENVIRONMENT?: string;
+        DATABASE_URL?: string;
+        SESSION_SECRET?: string;
+        AUTH_WORKER_URL?: string;
+        API_URL?: string;
+        ASSETS?: any;
+      };
+      context: {
+        waitUntil(promise: Promise<any>): void;
+      };
+      caches: CacheStorage & { default: Cache };
+    }
   }
 }
 

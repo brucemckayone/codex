@@ -37,12 +37,33 @@ app.onError((err, c) => {
 });
 
 app.get('/', (c) => {
+  return c.json({ status: 'ok', service: 'stripe-webhook-handler' });
+});
+
+app.get('/health', (c) => {
   const obs = new ObservabilityClient(
     'stripe-webhook-handler',
     c.env.ENVIRONMENT || 'development'
   );
   obs.info('Health check endpoint hit');
-  return c.json({ status: 'ok', service: 'stripe-webhook-handler' });
+  return c.json({
+    status: 'healthy',
+    worker: 'stripe-webhook-handler',
+    environment: c.env.ENVIRONMENT || 'development',
+    timestamp: new Date().toISOString(),
+    config: {
+      hasDatabase: !!c.env.DATABASE_URL,
+      hasStripeKey: !!c.env.STRIPE_SECRET_KEY,
+      webhookSecretsConfigured: {
+        payment: !!c.env.STRIPE_WEBHOOK_SECRET_PAYMENT,
+        subscription: !!c.env.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION,
+        connect: !!c.env.STRIPE_WEBHOOK_SECRET_CONNECT,
+        customer: !!c.env.STRIPE_WEBHOOK_SECRET_CUSTOMER,
+        booking: !!c.env.STRIPE_WEBHOOK_SECRET_BOOKING,
+        dispute: !!c.env.STRIPE_WEBHOOK_SECRET_DISPUTE,
+      },
+    },
+  });
 });
 
 // TODO: Add actual Stripe webhook handling logic
