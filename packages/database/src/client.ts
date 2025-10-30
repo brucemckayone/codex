@@ -1,13 +1,18 @@
 import { drizzle } from 'drizzle-orm/neon-http';
 import { neon, neonConfig } from '@neondatabase/serverless';
-import * as schema from './schema';
+
 import { DbEnvConfig } from './config/env.config';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+
+if (!DbEnvConfig.method)
+  config({ path: resolve(__dirname, '../../../../.env.dev') });
 
 // Apply neonConfig modifications using the function from DbEnvConfig
 DbEnvConfig.applyNeonConfig(neonConfig);
 
 export const sql = neon(DbEnvConfig.getDbUrl()!);
-export const db = drizzle(sql, { schema });
+export const db = drizzle({ client: sql });
 
 /**
  * Checks if the database connection is working by running a simple query.

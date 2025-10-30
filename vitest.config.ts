@@ -84,7 +84,6 @@ export default defineConfig({
       },
 
       // Advanced options
-      all: true, // Include all files, even untested ones
       clean: true, // Clean coverage directory before each run
       cleanOnRerun: true,
     },

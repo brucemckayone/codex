@@ -1,208 +1,187 @@
-# Act - Local GitHub Actions Testing
+# Act Setup - Local GitHub Actions Testing
 
-✅ **Setup Complete & Verified** - Act is working correctly and catching type errors before push!
+This document explains how to test GitHub Actions workflows locally using [Act](https://github.com/nektos/act).
 
-Test your GitHub Actions workflows locally before pushing. Act is the industry standard tool for this.
+## Prerequisites
+
+1. **Install Act**:
+   ```bash
+   brew install act
+   ```
+
+2. **Install Docker Desktop** (required by Act):
+   - Download from https://www.docker.com/products/docker-desktop
+
+## Configuration Files
+
+Act is configured through several files in the repository:
+
+- **`.actrc`**: Main Act configuration (image, secrets, environment)
+- **`.secrets`**: GitHub secrets (API keys, tokens) - **NEVER commit this file**
+- **`.github/.env.act`**: GitHub variables (project IDs, configuration)
 
 ## Quick Start
 
-### 1. Start Test Database
+### List Available Workflows
 
 ```bash
-pnpm docker:test:up
+pnpm act:list
 ```
 
-### 2. List Workflows
+This shows all jobs in your workflows.
+
+### Run the Test Job Locally
 
 ```bash
-act -l
+pnpm act:test
 ```
 
-### 3. Run Tests Locally
+This runs the `test` job from the workflow, which:
+1. Creates a Neon ephemeral branch
+2. Runs type checking, linting, and formatting checks
+3. Runs migrations on the ephemeral branch
+4. Runs all package tests
+5. Cleans up the ephemeral branch
+
+### Run with Verbose Output
 
 ```bash
-# Run the test job (unit + integration tests)
-act -j test
-
-# Dry run (see what would execute)
-act -n
+pnpm act:test:verbose
 ```
 
-## Configuration
-
-### `.actrc`
-
-- Uses `catthehacker/ubuntu:act-latest` image (includes Node.js 20, pnpm, common tools)
-- Loads secrets from `.secrets` file
-- Uses host network (`--network host`) so containers can access `localhost:5433` postgres
-
-### `.secrets`
-
-Contains environment variables for workflows (gitignored):
-
-```
-# Use host.docker.internal to connect from act container to host postgres
-DATABASE_URL=postgresql://codex_test:codex_test_password@host.docker.internal:5433/codex_test
-GITHUB_TOKEN=
-CODECOV_TOKEN=
-```
-
-**Important:** The DATABASE_URL uses `host.docker.internal` instead of `localhost` because act runs inside Docker and needs to reach your host machine's postgres container.
-
-Copy from `.secrets.example` and customize as needed.
-
-## Common Commands
+### Dry Run (see what would happen without executing)
 
 ```bash
-# List all workflows and jobs
-act -l
-
-# Run specific job
-act -j test
-
-# Run all jobs for push event
-act push
-
-# Run pull_request event
-act pull_request
-
-# Verbose output for debugging
-act -j test --verbose
-
-# Dry run
-act -n
-
-# Rebuild without cache
-act -j test --pull
+pnpm act:dry
 ```
 
-## Workflow Support
+## Testing Specific Workflows
 
-### ✅ What Works Great
+### Test Only Database Package
 
-- **Unit & Integration Tests** - Full support for vitest, node environment
-- **Type Checking** - TypeScript, ESLint, Prettier
-- **Service Containers** - Postgres works via host network mode
-- **Caching** - pnpm cache works (may be slower than GitHub)
-- **Environment Variables** - Full support via `.secrets`
-- **Most Actions** - `actions/checkout`, `actions/cache`, `pnpm/action-setup`, etc.
-
-### ⚠️ Known Differences
-
-- **Codecov Upload** - Skip in local testing (action will warn but not fail)
-- **First Run** - Docker image download (~10GB, one-time)
-- **Speed** - Slightly slower than GitHub runners due to emulation
-- **E2E Tests** - Branch condition may skip (`if: github.ref == 'refs/heads/main'`)
-
-### 💡 Tips
-
-**Skip E2E Branch Check:**
-Temporarily remove or modify the `if` condition in [.github/workflows/test.yml](.github/workflows/test.yml):
-
-```yaml
-# Remove or comment this line for local testing
-# if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-```
-
-**Speed Up Runs:**
-Skip coverage for faster local tests:
+To test just the database connection and migrations:
 
 ```bash
-# Modify workflow temporarily to use `pnpm test` instead of `pnpm test:coverage`
+act -j test --matrix node:20
 ```
 
-**Debug Environment:**
+### Test E2E Tests
 
 ```bash
-# See all environment variables
-act -j test --env
-
-# Get shell access to runner
-act -j test --shell
+act -j e2e-tests
 ```
 
-## Testing Workflow
+## Environment Variables
 
-### Before Pushing Changes
+Act uses different sources for environment variables:
+
+1. **Secrets** (from `.secrets` file):
+   - `NEON_API_KEY`: API key for creating Neon branches
+   - `STRIPE_SECRET_KEY`: For E2E tests
+   - `GITHUB_TOKEN`: Optional, for GitHub API calls
+
+2. **Variables** (from `.github/.env.act`):
+   - `NEON_PROJECT_ID`: Your Neon project identifier
+
+3. **Workflow Environment Variables**:
+   - Set directly in the workflow YAML files
+
+## Troubleshooting
+
+### Act Can't Find Workflows
+
+Make sure you're running Act from the repository root:
 
 ```bash
-# 1. Start database
-pnpm docker:test:up
-
-# 2. Check what will run
-act -l
-
-# 3. Run tests
-act -j test
-
-# 4. If successful, commit and push
-git add .
-git commit -m "Your changes"
-git push
+cd /Users/brucemckay/development/Codex
+pnpm act:test
 ```
 
-### Debugging Failures
+### Docker Issues
+
+If Act fails with Docker errors:
+
+1. Ensure Docker Desktop is running
+2. Try pulling the image manually:
+   ```bash
+   docker pull catthehacker/ubuntu:act-latest
+   ```
+
+### Neon Branch Creation Fails
+
+1. Verify `.secrets` has a valid `NEON_API_KEY`
+2. Verify `.github/.env.act` has the correct `NEON_PROJECT_ID`
+3. Check Neon API key permissions in your Neon console
+
+### Tests Fail with Database Connection Errors
+
+The workflow should:
+1. Create a Neon branch
+2. Set `DATABASE_URL` from the branch output
+3. Set `DB_METHOD=NEON_BRANCH`
+4. Run migrations before tests
+
+If this fails, check:
+- The `create-neon-branch` job completed successfully
+- The `DATABASE_URL` environment variable is set correctly
+- Migrations ran without errors
+
+## CI/CD Workflow Overview
+
+### Main Workflow: `testing.yml`
+
+1. **changes**: Detects which packages have changed
+2. **create-neon-branch**: Creates ephemeral Neon database branch
+3. **test**: Runs type checks, linting, formatting, migrations, and tests
+4. **e2e-tests**: Runs Playwright E2E tests (if web app changed)
+5. **cleanup-neon-branch**: Deletes the ephemeral branch (runs always)
+6. **deploy-workers**: Deploys to Cloudflare Workers (only on main branch)
+
+### Testing Strategy
+
+The workflow uses Neon's ephemeral branch feature to:
+- Create an isolated database for each CI run
+- Run migrations on fresh database
+- Run all tests with real database
+- Automatically clean up after tests complete
+
+This approach is faster and more cost-effective than:
+- Docker Postgres in CI (slow to start)
+- Persistent test databases (requires cleanup management)
+- Mocked databases (doesn't test real SQL)
+
+## Local Development Workflow
+
+For local development, you typically use:
 
 ```bash
-# Run with verbose output
-act -j test --verbose
+# Start local Neon proxy with Docker
+pnpm docker:up
 
-# Check if postgres is accessible
-docker ps  # Should show codex-postgres-test
+# Run development server
+pnpm dev
 
-# Verify secrets are loaded
-cat .secrets
-
-# Test database connection
-psql postgresql://codex_test:codex_test_password@localhost:5433/codex_test -c "SELECT 1"
+# Run tests against local proxy
+DB_METHOD=LOCAL_PROXY pnpm test
 ```
 
-## Project Structure Compliance
+For testing the CI environment locally:
 
-This setup follows project conventions per [CodeStructure.md](../../design/infrastructure/CodeStructure.md):
+```bash
+# Test with Act (uses ephemeral Neon branch)
+pnpm act:test
+```
 
-- Monorepo with pnpm workspaces
-- Feature-based organization
-- Shared packages
+## Best Practices
 
-Per [Testing.md](../../design/infrastructure/Testing.md):
+1. **Always run Act tests before pushing** to catch CI failures early
+2. **Keep secrets file secure** - it's in `.gitignore` for a reason
+3. **Use descriptive branch names** - they appear in Neon console
+4. **Monitor Neon branch usage** - ephemeral branches auto-cleanup but check occasionally
+5. **Update documentation** when changing workflows
 
-- Unit tests (Vitest)
-- Integration tests (Miniflare)
-- E2E tests (Playwright)
+## Additional Resources
 
-Per [CI-CD-Pipeline.md](../../design/infrastructure/CI-CD-Pipeline.md):
-
-- Tests run on push/PR
-- Type checking, linting, formatting
-- Coverage reporting
-
-## Alternative: Just Push
-
-If act feels like overkill for simple changes:
-
-1. Create a draft PR
-2. Let GitHub Actions run
-3. Iterate based on results
-
-Act is most valuable for:
-
-- Complex workflow changes
-- Debugging CI failures
-- Testing before important releases
-
-## Setup Summary
-
-**What was configured:**
-
-- `.actrc` - Main config, `.secrets` - Environment vars (gitignored)
-- npm scripts: `act:list`, `act:test`, `act:test:verbose`, `act:dry`
-- Added `typescript@^5.9.3` to support type checking
-- Fixed workflow: removed redundant pnpm version (uses `packageManager` from package.json)
-
-**Verification:** Act successfully runs all workflow steps and catches TypeScript errors before push.
-
-## Resources
-
-- [Act GitHub Repository](https://github.com/nektos/act)
-- [GitHub Actions Docs](https://docs.github.com/actions)
+- [Act Documentation](https://github.com/nektos/act)
+- [Neon Branching Guide](https://neon.com/docs/guides/branching-github-actions)
+- [GitHub Actions Documentation](https://docs.github.com/en/actions)

@@ -1,0 +1,125 @@
+name: Production Deployment
+
+on:
+  workflow_run:
+    workflows: ['PR and Push CI (Neon ephemeral DB)']
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    # Only deploy if tests passed and this is a push to main
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://codex-web-production.workers.dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Apply migrations to production database
+      - name: Run production migrations
+        run: pnpm --filter @codex/database db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          DB_METHOD: PRODUCTION
+
+      # Deploy stripe-webhook-handler to production
+      - name: Deploy stripe-webhook-handler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/stripe-webhook-handler
+          command: deploy --env production
+          secrets: |
+            DATABASE_URL
+            STRIPE_SECRET_KEY
+            STRIPE_WEBHOOK_SECRET_PAYMENT
+            STRIPE_WEBHOOK_SECRET_SUBSCRIPTION
+            STRIPE_WEBHOOK_SECRET_CONNECT
+            STRIPE_WEBHOOK_SECRET_CUSTOMER
+            STRIPE_WEBHOOK_SECRET_BOOKING
+            STRIPE_WEBHOOK_SECRET_DISPUTE
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_PRODUCTION_KEY }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_PRODUCTION_PAYMENT_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_PRODUCTION_SUBSCRIPTION_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_PRODUCTION_CONNECT_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_PRODUCTION_CUSTOMER_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_PRODUCTION_BOOKING_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_PRODUCTION_DISPUTE_WEBHOOK_SECRET }}
+
+      # Deploy auth-worker to production
+      - name: Deploy auth-worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/auth
+          command: deploy --env production
+          secrets: |
+            DATABASE_URL
+            SESSION_SECRET
+            SESSION_SECRET_PRODUCTION
+            BETTER_AUTH_SECRET
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET_PRODUCTION }}
+          SESSION_SECRET_PRODUCTION: ${{ secrets.SESSION_SECRET_PRODUCTION }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET_PRODUCTION }}
+
+      # Build SvelteKit app
+      - name: Build SvelteKit app
+        run: pnpm --filter web build
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          PUBLIC_APP_URL: https://codex-web-production.workers.dev
+
+      # Deploy SvelteKit to production
+      - name: Deploy SvelteKit to production
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          command: deploy --env production
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+
+      - name: Deployment notification
+        if: success()
+        run: |
+          echo "✅ Production deployment successful"
+          echo "🌐 Web App: https://codex-web-production.workers.dev"
+          echo "⚡ All workers deployed to production environment"
+
+      - name: Deployment failed
+        if: failure()
+        run: |
+          echo "❌ Production deployment failed - check logs"
+          echo "🔍 Review the workflow logs for details"
+          # TODO: Add notification logic (Slack, Discord, email, etc.)

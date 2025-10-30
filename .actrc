@@ -7,5 +7,11 @@
 # Load secrets from .secrets file
 --secret-file .secrets
 
+# Load environment variables (for GitHub vars)
+--env-file .github/.env.act
+
+# Use custom event payload with correct default branch
+--eventpath .github/workflows/event.json
+
 # Set container architecture
 --container-architecture linux/amd64

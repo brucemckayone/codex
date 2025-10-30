@@ -18,6 +18,8 @@
       "@codex/database/*": ["packages/database/src/*"],
       "@codex/validation": ["packages/validation/src/index.ts"],
       "@codex/validation/*": ["packages/validation/src/*"],
+      "@codex/observability": ["packages/observability/src/index.ts"],
+      "@codex/observability/*": ["packages/observability/src/*"],
       "@codex/cloudflare-clients": ["packages/cloudflare-clients/src/index.ts"],
       "@codex/cloudflare-clients/*": ["packages/cloudflare-clients/src/*"],
       "@codex/test-utils": ["packages/test-utils/src/index.ts"],

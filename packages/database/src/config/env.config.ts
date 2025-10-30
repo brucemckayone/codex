@@ -1,7 +1,3 @@
-// Don't import '@neondatabase/serverless' (fix TS2307)
-// Type all function params explicitly (fix TS7006)
-// Keep rest of API the same
-
 import type { NeonConfig } from '@neondatabase/serverless';
 import { URL } from 'url';
 
@@ -75,7 +71,7 @@ function applyNeonConfig(neonConfigInstance: NeonConfig) {
 
 // Main exported value for config/env logic
 export const DbEnvConfig = {
-  rootEnvPath: '../../.env.dev',
+  rootEnvPath: '../../../../env.dev',
   isProd,
   getDbUrl,
   method: process.env.DB_METHOD!,

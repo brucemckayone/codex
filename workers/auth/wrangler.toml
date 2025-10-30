@@ -1,0 +1,27 @@
+name = "auth-worker"
+main = "dist/index.js"
+compatibility_date = "2025-01-01"
+
+# Observability configuration
+[observability]
+enabled = true
+
+# Production environment
+[env.production]
+name = "auth-worker-production"
+vars = { ENVIRONMENT = "production" }
+
+# Staging environment
+[env.staging]
+name = "auth-worker-staging"
+vars = { ENVIRONMENT = "staging" }
+
+# Note: Secrets to be set via wrangler CLI or CI/CD:
+# - DATABASE_URL
+# - SESSION_SECRET
+# - BETTER_AUTH_SECRET
+#
+# Set secrets with:
+#   wrangler secret put DATABASE_URL --env production
+#   wrangler secret put SESSION_SECRET --env production
+#   wrangler secret put BETTER_AUTH_SECRET --env production

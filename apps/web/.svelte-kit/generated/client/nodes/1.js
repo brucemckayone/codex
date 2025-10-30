@@ -1,1 +1,1 @@
-export { default as component } from "../../../../../../node_modules/.pnpm/@sveltejs+kit@2.47.3_@sveltejs+vite-plugin-svelte@5.1.1_svelte@5.41.2_vite@6.4.1_@types_8d31c85fcae1463e3e5b1b788e00727f/node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte";
+export { default as component } from "../../../../../../node_modules/.pnpm/@sveltejs+kit@2.47.3_@opentelemetry+api@1.9.0_@sveltejs+vite-plugin-svelte@5.1.1_svelte_77b69f87d4eae5d0e987632a0dc8c770/node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte";
