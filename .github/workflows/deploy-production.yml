@@ -23,7 +23,7 @@ jobs:
       github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: https://codex-web-production.workers.dev
+      url: https://codex.revelations.studio
 
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +95,7 @@ jobs:
         run: pnpm --filter web build
         env:
           DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
-          PUBLIC_APP_URL: https://codex-web-production.workers.dev
+          PUBLIC_APP_URL: https://codex.revelations.studio
 
       # Deploy SvelteKit to production
       - name: Deploy SvelteKit to production
@@ -114,7 +114,9 @@ jobs:
         if: success()
         run: |
           echo "✅ Production deployment successful"
-          echo "🌐 Web App: https://codex-web-production.workers.dev"
+          echo "🌐 Web App: https://codex.revelations.studio"
+          echo "🔌 API: https://api.revelations.studio"
+          echo "🔐 Auth: https://auth.revelations.studio"
           echo "⚡ All workers deployed to production environment"
 
       - name: Deployment failed

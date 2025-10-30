@@ -9,12 +9,28 @@ enabled = true
 # Production environment
 [env.production]
 name = "stripe-webhook-handler-production"
-vars = { ENVIRONMENT = "production" }
+
+[env.production.vars]
+ENVIRONMENT = "production"
+WEB_APP_URL = "https://codex.revelations.studio"
+AUTH_WORKER_URL = "https://auth.revelations.studio"
+
+[[env.production.routes]]
+pattern = "api.revelations.studio/*"
+custom_domain = true
 
 # Staging environment
 [env.staging]
 name = "stripe-webhook-handler-staging"
-vars = { ENVIRONMENT = "staging" }
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+WEB_APP_URL = "https://codex-staging.revelations.studio"
+AUTH_WORKER_URL = "https://auth-staging.revelations.studio"
+
+[[env.staging.routes]]
+pattern = "api-staging.revelations.studio/*"
+custom_domain = true
 
 # Note: Secrets to be set via wrangler CLI or CI/CD:
 # - DATABASE_URL

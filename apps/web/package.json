@@ -22,6 +22,7 @@
     "happy-dom": "^20.0.8"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251014.0",
     "@playwright/test": "^1.56.1",
     "@sveltejs/adapter-auto": "^3.0.0",
     "@sveltejs/adapter-cloudflare": "^7.2.4",
