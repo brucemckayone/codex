@@ -1,4 +1,6 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
+/// <reference types="@cloudflare/workers-types" />
+
 declare global {
   namespace App {
     // interface Error {}
@@ -12,12 +14,15 @@ declare global {
         SESSION_SECRET?: string;
         AUTH_WORKER_URL?: string;
         API_URL?: string;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ASSETS?: any;
       };
       context: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         waitUntil(promise: Promise<any>): void;
       };
-      caches: CacheStorage & { default: Cache };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      caches: any;
     }
   }
 }
