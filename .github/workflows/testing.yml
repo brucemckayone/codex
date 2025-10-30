@@ -19,8 +19,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Wait for static analysis to pass before running expensive tests
+  static-analysis:
+    uses: ./.github/workflows/static_analysis.yml
+
   changes:
     runs-on: ubuntu-latest
+    needs: [static-analysis]
     outputs:
       database: ${{ steps.filter.outputs.database }}
       validation: ${{ steps.filter.outputs.validation }}
@@ -100,17 +105,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Run static analysis
-      - name: Type check
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Format check
-        run: pnpm format:check
-
       # Database Setup: Generate and apply migrations to ephemeral branch
+      # Note: Static analysis (typecheck, lint, format) runs in separate workflow
       # Note: db_url_with_pooler from create-branch step is available in this job
       - name: Generate migrations from schema
         env:
