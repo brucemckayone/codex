@@ -2,7 +2,7 @@ name: Deploy Workers
 
 on:
   workflow_run:
-    workflows: ["PR and Push CI (Neon ephemeral DB)"]
+    workflows: ['PR and Push CI (Neon ephemeral DB)']
     types:
       - completed
     branches:

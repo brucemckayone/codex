@@ -58,6 +58,7 @@ jobs:
     outputs:
       db_url: ${{ steps.create-branch.outputs.db_url }}
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
+      branch_name: ${{ steps.branch-name.outputs.name }}
     steps:
       - name: Generate Neon Branch Name
         id: branch-name
@@ -73,38 +74,14 @@ jobs:
             echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set expiry timestamp
-        id: expires
-        run: |
-          echo "EXPIRES_AT=$(date -u --date='+1 days' +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
-
-      - name: Debug call Neon API to create branch (shows full error body)
-        id: neon-debug
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
-          BRANCH_NAME: ${{ steps.branch-name.outputs.name }}
-          EXPIRES_AT: ${{ env.EXPIRES_AT }}
-        run: |
-          echo "Project: $PROJECT_ID"
-          echo "Branch: $BRANCH_NAME"
-          echo "Expires at: $EXPIRES_AT"
-          printf '\nCreating branch via curl (output will include Neon JSON error if any):\n\n'
-          curl -sS -w "\n\nHTTP_STATUS:%{http_code}\n" \
-            -X POST "https://console.neon.tech/api/v2/projects/$PROJECT_ID/branches" \
-            -H "Authorization: Bearer $NEON_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"name\":\"${BRANCH_NAME}\",\"parent_branch\":\"main\",\"expires_at\":\"${EXPIRES_AT}\"}" || true
-
-      - name: Create Neon branch (safer)
+      - name: Create Neon branch
         id: create-branch
         uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent_branch: main
+          parent: main
           api_key: ${{ secrets.NEON_API_KEY }}
-          expires_at: ${{ env.EXPIRES_AT }}
 
   test:
     needs: [changes, create-neon-branch]
@@ -136,12 +113,21 @@ jobs:
       - name: Format check
         run: pnpm format:check
 
-      - name: Run migrations
-        if: ${{ needs.changes.outputs.database == 'true' }}
+      # Database Setup: Generate and apply migrations to ephemeral branch
+      # Note: Better Auth schema is already in src/schema/auth.ts
+      # Drizzle generates migrations from all schema files
+      - name: Generate migrations from schema
+        run: pnpm --filter @codex/database db:gen:drizzle
+
+      - name: Apply migrations to ephemeral branch
         run: pnpm --filter @codex/database db:migrate
 
+      # Run tests for affected packages (with DATABASE_URL in env)
       - name: Run tests for affected packages
         if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
+        env:
+          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
         run: |
           if [[ "${{ needs.changes.outputs.database }}" == "true" ]]; then pnpm --filter @codex/database test; fi
           if [[ "${{ needs.changes.outputs.validation }}" == "true" ]]; then pnpm --filter @codex/validation test; fi
@@ -171,8 +157,18 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Database Setup: Generate and apply migrations before E2E tests
+      # Note: Better Auth schema is managed by Drizzle via drizzleAdapter
+      - name: Generate migrations
+        run: pnpm --filter @codex/database db:gen:drizzle
+
+      - name: Apply migrations to ephemeral branch
+        run: pnpm --filter @codex/database db:migrate
+
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
+
       - name: Run E2E tests
         run: pnpm test:e2e
       - name: Upload Playwright report
@@ -182,6 +178,19 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 30
+
+  cleanup-neon-branch:
+    name: Cleanup Neon Branch
+    runs-on: ubuntu-latest
+    needs: [create-neon-branch, test, e2e-tests]
+    if: always()
+    steps:
+      - name: Delete Neon branch
+        uses: neondatabase/delete-branch-action@v6
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch: ${{ needs.create-neon-branch.outputs.branch_id }}
+          api_key: ${{ secrets.NEON_API_KEY }}
 
   deploy-workers:
     name: Deploy Cloudflare Workers
