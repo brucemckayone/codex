@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches:
-      - '**' # Run on all branches for debugging
+      - '**'  # Run on all branches for debugging
 
 permissions:
   contents: read
@@ -15,7 +15,6 @@ env:
   EXPIRES_IN_DAYS: 1
 
 concurrency:
-  # use the ref to avoid complex fallback expressions that break parsers locally
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
@@ -53,13 +52,18 @@ jobs:
             stripe-webhook-handler:
               - 'workers/stripe-webhook-handler/**'
 
-  create-neon-branch:
+  test:
+    needs: [changes]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20]
     outputs:
-      db_url: ${{ steps.create-branch.outputs.db_url }}
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
-      branch_name: ${{ steps.branch-name.outputs.name }}
     steps:
+      - uses: actions/checkout@v4
+
+      # Generate Neon branch name
       - name: Generate Neon Branch Name
         id: branch-name
         run: |
@@ -74,26 +78,17 @@ jobs:
             echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
           fi
 
+      # Create Neon branch
       - name: Create Neon branch
         id: create-branch
-        uses: neondatabase/create-branch-action@v6
+        uses: neondatabase/create-branch-action@v5
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: main
+          parent_branch: main
           api_key: ${{ secrets.NEON_API_KEY }}
 
-  test:
-    needs: [changes, create-neon-branch]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [20]
-    env:
-      DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
-      DB_METHOD: NEON_BRANCH
-    steps:
-      - uses: actions/checkout@v4
+      # Install dependencies
       - name: Install pnpm
         uses: pnpm/action-setup@v4
       - name: Use Node.js
@@ -104,6 +99,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Run static analysis
       - name: Type check
         run: pnpm typecheck
 
@@ -114,25 +110,24 @@ jobs:
         run: pnpm format:check
 
       # Database Setup: Generate and apply migrations to ephemeral branch
-      # Note: Better Auth schema is already in src/schema/auth.ts
-      # Drizzle generates migrations from all schema files
+      # Note: db_url from create-branch step is available in this job
       - name: Generate migrations from schema
         env:
-          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch
         env:
-          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:migrate
 
-      # Run tests for affected packages (with DATABASE_URL in env)
+      # Run tests for affected packages
       - name: Run tests for affected packages
         if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
         env:
-          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           if [[ "${{ needs.changes.outputs.database }}" == "true" ]]; then pnpm --filter @codex/database test; fi
@@ -145,15 +140,42 @@ jobs:
 
   e2e-tests:
     name: E2E Tests
-    needs: [changes, create-neon-branch]
+    needs: [changes]
     runs-on: ubuntu-latest
     if: ${{ needs.changes.outputs.web == 'true' }}
+    outputs:
+      branch_id: ${{ steps.create-branch.outputs.branch_id }}
     env:
-      DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
-      DB_METHOD: NEON_BRANCH
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
     steps:
       - uses: actions/checkout@v4
+
+      # Generate Neon branch name
+      - name: Generate Neon Branch Name
+        id: branch-name
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "name=pr-${{ github.event.number }}-e2e" >> $GITHUB_OUTPUT
+          else
+            SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-e2e"
+            # truncate to 63 chars (Neon limit)
+            BRANCH_NAME_TRUNC=${BRANCH_NAME:0:63}
+            echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
+          fi
+
+      # Create separate Neon branch for E2E tests
+      - name: Create Neon branch for E2E
+        id: create-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: ${{ steps.branch-name.outputs.name }}
+          parent_branch: main
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      # Install dependencies
       - name: Install pnpm
         uses: pnpm/action-setup@v4
       - name: Use Node.js
@@ -165,24 +187,28 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Database Setup: Generate and apply migrations before E2E tests
-      # Note: Better Auth schema is managed by Drizzle via drizzleAdapter
       - name: Generate migrations
         env:
-          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch
         env:
-          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:migrate
 
+      # Run E2E tests
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
       - name: Run E2E tests
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
         run: pnpm test:e2e
+
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
         if: always()
@@ -191,17 +217,26 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 30
 
-  cleanup-neon-branch:
-    name: Cleanup Neon Branch
+  cleanup-neon-branches:
+    name: Cleanup Neon Branches
     runs-on: ubuntu-latest
-    needs: [create-neon-branch, test, e2e-tests]
+    needs: [test, e2e-tests]
     if: always()
     steps:
-      - name: Delete Neon branch
-        uses: neondatabase/delete-branch-action@v6
+      - name: Delete test branch
+        if: needs.test.outputs.branch_id
+        uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.create-neon-branch.outputs.branch_id }}
+          branch: ${{ needs.test.outputs.branch_id }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Delete E2E branch
+        if: needs.e2e-tests.outputs.branch_id
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch: ${{ needs.e2e-tests.outputs.branch_id }}
           api_key: ${{ secrets.NEON_API_KEY }}
 
   deploy-workers:
