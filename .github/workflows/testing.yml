@@ -85,7 +85,7 @@ jobs:
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: main
+          parent: production
           username: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
@@ -190,7 +190,7 @@ jobs:
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: main
+          parent: production
           username: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
