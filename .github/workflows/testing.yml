@@ -85,8 +85,8 @@ jobs:
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent_branch: main
-          role: neondb_owner
+          parent: main
+          username: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       # Install dependencies
@@ -173,8 +173,8 @@ jobs:
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent_branch: main
-          role: neondb_owner
+          parent: main
+          username: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       # Install dependencies
