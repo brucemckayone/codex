@@ -5,8 +5,7 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches:
-      - main
-      - develop
+      - '**'  # Run on all branches for debugging
 
 permissions:
   contents: read
@@ -37,6 +36,7 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
+          base: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch || 'main' }}
           filters: |
             database:
               - 'packages/database/**'
@@ -117,9 +117,15 @@ jobs:
       # Note: Better Auth schema is already in src/schema/auth.ts
       # Drizzle generates migrations from all schema files
       - name: Generate migrations from schema
+        env:
+          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch
+        env:
+          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:migrate
 
       # Run tests for affected packages (with DATABASE_URL in env)
@@ -161,9 +167,15 @@ jobs:
       # Database Setup: Generate and apply migrations before E2E tests
       # Note: Better Auth schema is managed by Drizzle via drizzleAdapter
       - name: Generate migrations
+        env:
+          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch
+        env:
+          DATABASE_URL: ${{ needs.create-neon-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:migrate
 
       - name: Install Playwright browsers
