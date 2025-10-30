@@ -11,7 +11,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? 'html' : 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    // Use environment variable in CI (wrangler dev on 8787), default to dev server locally
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
     trace: 'on-first-retry',
   },
 
@@ -22,10 +23,7 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    command: 'pnpm --filter web dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000,
-  },
+  // Note: webServer removed - start server manually before running E2E tests
+  // Local: pnpm --filter web dev
+  // CI: wrangler dev is started in GitHub Actions workflow
 });

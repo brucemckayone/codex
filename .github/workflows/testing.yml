@@ -218,15 +218,41 @@ jobs:
           DB_METHOD: NEON_BRANCH
         run: pnpm --filter @codex/database db:migrate
 
-      # Run E2E tests
+      # Build SvelteKit for Cloudflare Workers
+      - name: Build SvelteKit app
+        run: pnpm --filter web build
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: NEON_BRANCH
+
+      # Run E2E tests against built worker using wrangler dev
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
+
+      - name: Start Wrangler dev server in background
+        run: |
+          cd apps/web
+          pnpm wrangler dev --port 8787 --local &
+          echo $! > wrangler.pid
+          # Wait for server to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:8787 > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
 
       - name: Run E2E tests
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
+          PLAYWRIGHT_BASE_URL: http://localhost:8787
         run: pnpm test:e2e
+
+      - name: Stop Wrangler dev server
+        if: always()
+        run: |
+          if [ -f apps/web/wrangler.pid ]; then
+            kill $(cat apps/web/wrangler.pid) || true
+            rm apps/web/wrangler.pid
+          fi
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
