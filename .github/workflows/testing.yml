@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches:
-      - '**'  # Run on all branches for debugging
+      - '**' # Run on all branches for debugging
 
 permissions:
   contents: read
