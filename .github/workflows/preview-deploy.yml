@@ -236,9 +236,10 @@ jobs:
         with:
           script: |
             const prNumber = ${{ env.PR_NUMBER }};
-            const webUrl = `https://codex-preview-${prNumber}.revelations.studio`;
-            const apiUrl = `https://api-preview-${prNumber}.revelations.studio`;
-            const authUrl = `https://auth-preview-${prNumber}.revelations.studio`;
+            const accountId = '${{ secrets.CLOUDFLARE_ACCOUNT_ID }}';
+            const webUrl = `https://codex-web-preview-${prNumber}.${accountId}.workers.dev`;
+            const apiUrl = `https://stripe-webhook-handler-preview-${prNumber}.${accountId}.workers.dev`;
+            const authUrl = `https://auth-worker-preview-${prNumber}.${accountId}.workers.dev`;
             const comment = `## 🚀 Preview Deployment Ready
 
             **🌐 Web App:** ${webUrl}
