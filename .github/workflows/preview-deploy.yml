@@ -236,14 +236,13 @@ jobs:
         with:
           script: |
             const prNumber = ${{ env.PR_NUMBER }};
-            const accountId = '${{ secrets.CLOUDFLARE_ACCOUNT_ID }}';
-            const webUrl = `https://codex-web-preview-${prNumber}.${accountId}.workers.dev`;
-            const apiUrl = `https://stripe-webhook-handler-preview-${prNumber}.${accountId}.workers.dev`;
-            const authUrl = `https://auth-worker-preview-${prNumber}.${accountId}.workers.dev`;
+            const webUrl = `https://codex-preview-${prNumber}.revelations.studio`;
+            const apiUrl = `https://api-preview-${prNumber}.revelations.studio`;
+            const authUrl = `https://auth-preview-${prNumber}.revelations.studio`;
             const comment = `## 🚀 Preview Deployment Ready
 
             **🌐 Web App:** ${webUrl}
-            **🔌 API:** ${apiUrl}
+            **🔌 API (Stripe Webhooks):** ${apiUrl}
             **🔐 Auth:** ${authUrl}
             **📊 Database:** Neon branch \`${{ env.BRANCH_NAME }}\`
 
@@ -254,9 +253,9 @@ jobs:
             - [ ] Check worker functionality (webhooks, auth)
 
             ### Preview Stack Details
+            - **Web App Worker:** \`codex-web-preview-${prNumber}\`
             - **Stripe Webhook Handler:** \`stripe-webhook-handler-preview-${prNumber}\`
             - **Auth Worker:** \`auth-worker-preview-${prNumber}\`
-            - **Web App:** \`codex-web-preview-${prNumber}\`
             - **DNS Records:** Automatically created and proxied through Cloudflare
 
             **Note:** Preview environment with custom domains on revelations.studio. All resources will be automatically deleted when PR is closed.`;
