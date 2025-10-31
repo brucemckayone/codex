@@ -279,4 +279,3 @@ jobs:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch: ${{ needs.e2e-tests.outputs.branch_id }}
           api_key: ${{ secrets.NEON_API_KEY }}
-
