@@ -2,6 +2,8 @@
 
 Complete this checklist before your first deployment.
 
+> **Note**: After completing setup, the CI/CD pipeline will automatically deploy to custom domains on revelations.studio. See [DNS_ROUTING_PLAN.md](DNS_ROUTING_PLAN.md) for architecture details.
+
 ## ✅ Prerequisites
 
 ### Accounts
