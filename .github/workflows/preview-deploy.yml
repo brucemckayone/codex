@@ -94,7 +94,9 @@ jobs:
       - name: Download Neon connection artifact
         uses: actions/download-artifact@v4
         with:
-          name: neon-connection-${{ github.run_id }}
+          name: neon-connection-${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
 
       - name: Load DATABASE_URL from artifact
         id: load-db-url
