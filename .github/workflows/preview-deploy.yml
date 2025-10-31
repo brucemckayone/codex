@@ -123,7 +123,7 @@ jobs:
             --var ENVIRONMENT:preview
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var AUTH_WORKER_URL:https://auth-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+            --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio"
           secrets: |
             DATABASE_URL
             STRIPE_SECRET_KEY
@@ -155,7 +155,7 @@ jobs:
             --var ENVIRONMENT:preview
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "auth-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+            --route "auth-preview-${{ env.PR_NUMBER }}.revelations.studio"
           secrets: |
             DATABASE_URL
             SESSION_SECRET
@@ -181,7 +181,7 @@ jobs:
             --var ENVIRONMENT:preview
             --var AUTH_WORKER_URL:https://auth-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "codex-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+            --route "codex-preview-${{ env.PR_NUMBER }}.revelations.studio"
           secrets: |
             DATABASE_URL
         env:

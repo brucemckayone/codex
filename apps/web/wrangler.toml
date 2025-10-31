@@ -21,10 +21,11 @@ ENVIRONMENT = "production"
 AUTH_WORKER_URL = "https://auth.revelations.studio"
 API_URL = "https://api.revelations.studio"
 
-# Wildcard route to handle all tenant subdomains (codex.revelations.studio, future-tenant.revelations.studio, etc.)
-# Excludes api.* and auth.* which are handled by separate workers
+# Custom domain for Codex tenant
+# Note: For multi-tenant, we'll need to add each tenant subdomain here
+# or use Workers Routes (not custom domains) with wildcard patterns
 [[env.production.routes]]
-pattern = "*.revelations.studio/*"
+pattern = "codex.revelations.studio"
 custom_domain = true
 
 # Staging environment
