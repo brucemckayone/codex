@@ -16,7 +16,7 @@ permissions:
   deployments: write
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
   cancel-in-progress: true
 
 env:
@@ -70,17 +70,25 @@ jobs:
   deploy-preview:
     name: Deploy Preview Environment
     runs-on: ubuntu-latest
-    # Only deploy if: (1) tests passed, (2) this is a PR (not push to main), (3) not a closed event
+    # Only deploy if: (1) not a closed event, (2) workflow_run succeeded, (3) workflow_run was triggered by a PR
     if: |
       github.event.action != 'closed' &&
-      (github.event.workflow_run.conclusion == 'success' || github.event_name == 'pull_request') &&
-      (github.event.workflow_run.event == 'pull_request' || github.event_name == 'pull_request')
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
     outputs:
       web_url: ${{ steps.deploy-web.outputs.deployment-url }}
 
     steps:
+      - name: Debug workflow context
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Event action: ${{ github.event.action }}"
+          echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
+          echo "Workflow run event: ${{ github.event.workflow_run.event }}"
+          echo "Workflow run ID: ${{ github.event.workflow_run.id }}"
+          echo "PR Number: ${{ env.PR_NUMBER }}"
+          echo "Has PR requests: ${{ github.event.workflow_run.pull_requests[0] != null }}"
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -113,6 +121,7 @@ jobs:
 
       # Deploy stripe-webhook-handler worker
       - name: Deploy stripe-webhook-handler (preview)
+        id: deploy-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -121,9 +130,6 @@ jobs:
           command: >
             deploy --name stripe-webhook-handler-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
-            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var AUTH_WORKER_URL:https://auth-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio"
           secrets: |
             DATABASE_URL
             STRIPE_SECRET_KEY
@@ -143,8 +149,16 @@ jobs:
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_TEST_BOOKING_WEBHOOK_SECRET }}
           STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_TEST_DISPUTE_WEBHOOK_SECRET }}
 
+      - name: Extract API worker URL
+        id: api-url
+        run: |
+          API_URL="https://stripe-webhook-handler-preview-${{ env.PR_NUMBER }}.${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.workers.dev"
+          echo "url=$API_URL" >> $GITHUB_OUTPUT
+          echo "API_URL=$API_URL" >> $GITHUB_ENV
+
       # Deploy auth worker
       - name: Deploy auth-worker (preview)
+        id: deploy-auth
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -153,9 +167,38 @@ jobs:
           command: >
             deploy --name auth-worker-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
-            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "auth-preview-${{ env.PR_NUMBER }}.revelations.studio"
+            --var API_URL:${{ env.API_URL }}
+          secrets: |
+            DATABASE_URL
+            SESSION_SECRET
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+
+      - name: Extract Auth worker URL
+        id: auth-url
+        run: |
+          AUTH_URL="https://auth-worker-preview-${{ env.PR_NUMBER }}.${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.workers.dev"
+          echo "url=$AUTH_URL" >> $GITHUB_OUTPUT
+          echo "AUTH_URL=$AUTH_URL" >> $GITHUB_ENV
+
+      # Update auth worker with web app URL (after we know all URLs)
+      - name: Update auth-worker with WEB_APP_URL
+        run: |
+          WEB_URL="https://codex-web-preview-${{ env.PR_NUMBER }}.${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.workers.dev"
+          echo "WEB_URL=$WEB_URL" >> $GITHUB_ENV
+
+      - name: Redeploy auth-worker with WEB_APP_URL
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/auth
+          command: >
+            deploy --name auth-worker-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --var API_URL:${{ env.API_URL }}
+            --var WEB_APP_URL:${{ env.WEB_URL }}
           secrets: |
             DATABASE_URL
             SESSION_SECRET
@@ -179,9 +222,8 @@ jobs:
           command: >
             deploy --name codex-web-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
-            --var AUTH_WORKER_URL:https://auth-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "codex-preview-${{ env.PR_NUMBER }}.revelations.studio"
+            --var AUTH_WORKER_URL:${{ env.AUTH_URL }}
+            --var API_URL:${{ env.API_URL }}
           secrets: |
             DATABASE_URL
         env:
@@ -193,9 +235,10 @@ jobs:
         with:
           script: |
             const prNumber = ${{ env.PR_NUMBER }};
-            const webUrl = `https://codex-preview-${prNumber}.revelations.studio`;
-            const apiUrl = `https://api-preview-${prNumber}.revelations.studio`;
-            const authUrl = `https://auth-preview-${prNumber}.revelations.studio`;
+            const accountId = '${{ secrets.CLOUDFLARE_ACCOUNT_ID }}';
+            const webUrl = `https://codex-web-preview-${prNumber}.${accountId}.workers.dev`;
+            const apiUrl = `https://stripe-webhook-handler-preview-${prNumber}.${accountId}.workers.dev`;
+            const authUrl = `https://auth-worker-preview-${prNumber}.${accountId}.workers.dev`;
             const comment = `## 🚀 Preview Deployment Ready
 
             **🌐 Web App:** ${webUrl}
@@ -214,7 +257,7 @@ jobs:
             - **Auth Worker:** \`auth-worker-preview-${prNumber}\`
             - **Web App:** \`codex-web-preview-${prNumber}\`
 
-            **Note:** This preview will be automatically deleted when PR is closed.`;
+            **Note:** This preview uses workers.dev URLs and will be automatically deleted when PR is closed.`;
 
             github.rest.issues.createComment({
               owner: context.repo.owner,
