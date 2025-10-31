@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: preview-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: true # Cancel old deployments for same PR
 
 env:
   # Handle both workflow_run and pull_request triggers
@@ -94,16 +94,9 @@ jobs:
           echo "Workflow run ID: ${{ github.event.workflow_run.id }}"
           echo "PR Number: ${{ env.PR_NUMBER }}"
           echo "Has PR requests: ${{ github.event.workflow_run.pull_requests[0] != null }}"
-      - uses: actions/checkout@v4
-      # Create DNS records for preview domains
-      - name: Create preview DNS records
-        run: |
-          chmod +x .github/scripts/manage-preview-dns.sh
-          .github/scripts/manage-preview-dns.sh create ${{ env.PR_NUMBER }} ${{ secrets.CLOUDFLARE_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
-        continue-on-error: false
 
-      - name: Wait for DNS propagation
-        run: sleep 10
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -113,7 +106,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Download Neon connection details from test workflow
+      # CRITICAL: Download artifact FIRST (fail fast if expired/missing)
       - name: Download Neon connection artifact
         uses: actions/download-artifact@v4
         with:
@@ -121,10 +114,32 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Load DATABASE_URL from artifact
+      # Validate artifact contents BEFORE creating any resources
+      - name: Validate and load DATABASE_URL from artifact
         id: load-db-url
         run: |
+          # Validate files exist
+          if [ ! -f database-url.txt ]; then
+            echo "❌ ERROR: Artifact missing database-url.txt"
+            exit 1
+          fi
+          if [ ! -f branch-id.txt ]; then
+            echo "❌ ERROR: Artifact missing branch-id.txt"
+            exit 1
+          fi
+          if [ ! -f branch-name.txt ]; then
+            echo "❌ ERROR: Artifact missing branch-name.txt"
+            exit 1
+          fi
+
+          # Validate DATABASE_URL is not empty
           DATABASE_URL=$(cat database-url.txt)
+          if [ -z "$DATABASE_URL" ]; then
+            echo "❌ ERROR: DATABASE_URL is empty"
+            exit 1
+          fi
+
+          # Load all values
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
 
@@ -133,6 +148,35 @@ jobs:
 
           BRANCH_NAME=$(cat branch-name.txt)
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+          echo "✅ Artifact validated successfully"
+          echo "📊 Database branch: $BRANCH_NAME"
+
+      # Only AFTER artifact validation, create DNS records
+      - name: Create preview DNS records
+        id: dns-creation
+        run: |
+          echo "🌐 Creating DNS records for preview-${{ env.PR_NUMBER }}..."
+          chmod +x .github/scripts/manage-preview-dns.sh
+          .github/scripts/manage-preview-dns.sh create ${{ env.PR_NUMBER }} ${{ secrets.CLOUDFLARE_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
+
+      # Verify DNS propagation with polling instead of fixed sleep
+      - name: Verify DNS propagation
+        timeout-minutes: 2
+        run: |
+          echo "⏳ Waiting for DNS propagation..."
+          for i in {1..30}; do
+            if dig +short codex-preview-${{ env.PR_NUMBER }}.revelations.studio | grep -q .; then
+              echo "✅ DNS propagated successfully after ${i} attempts"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "⚠️ DNS propagation timeout - continuing anyway (might still work)"
+              break
+            fi
+            echo "Waiting for DNS propagation... ($i/30)"
+            sleep 2
+          done
 
       # Deploy stripe-webhook-handler worker
       - name: Deploy stripe-webhook-handler (preview)
