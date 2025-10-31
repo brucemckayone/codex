@@ -89,7 +89,6 @@ jobs:
           echo "PR Number: ${{ env.PR_NUMBER }}"
           echo "Has PR requests: ${{ github.event.workflow_run.pull_requests[0] != null }}"
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
