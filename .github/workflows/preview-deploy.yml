@@ -16,7 +16,7 @@ permissions:
   deployments: write
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
   cancel-in-progress: true
 
 env:
@@ -70,15 +70,24 @@ jobs:
   deploy-preview:
     name: Deploy Preview Environment
     runs-on: ubuntu-latest
-    # Only deploy if: (1) tests passed, (2) this is a PR (not push to main), (3) not a closed event
+    # Only deploy if: (1) not a closed event, (2) workflow_run succeeded, (3) workflow_run was triggered by a PR
     if: |
       github.event.action != 'closed' &&
-      (github.event.workflow_run.conclusion == 'success' || github.event_name == 'pull_request') &&
-      (github.event.workflow_run.event == 'pull_request' || github.event_name == 'pull_request')
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
     outputs:
       web_url: ${{ steps.deploy-web.outputs.deployment-url }}
 
     steps:
+      - name: Debug workflow context
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Event action: ${{ github.event.action }}"
+          echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
+          echo "Workflow run event: ${{ github.event.workflow_run.event }}"
+          echo "Workflow run ID: ${{ github.event.workflow_run.id }}"
+          echo "PR Number: ${{ env.PR_NUMBER }}"
+          echo "Has PR requests: ${{ github.event.workflow_run.pull_requests[0] != null }}"
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
