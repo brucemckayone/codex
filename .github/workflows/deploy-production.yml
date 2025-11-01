@@ -112,34 +112,9 @@ jobs:
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_PRODUCTION_BOOKING_WEBHOOK_SECRET }}
           STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_PRODUCTION_DISPUTE_WEBHOOK_SECRET }}
 
-      # Health check for stripe webhook handler
-      - name: Wait for Cloudflare global propagation
-        run: sleep 15
-
-      - name: Health check - Stripe webhook handler
-        timeout-minutes: 2
-        run: |
-          echo "🏥 Checking API worker health..."
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://api.revelations.studio/health" || echo "000")
-
-          if [ "$RESPONSE" = "200" ]; then
-            echo "✅ API worker: HTTP $RESPONSE - Healthy"
-          elif [ "$RESPONSE" = "000" ]; then
-            echo "⚠️ API worker: Connection failed - might still be propagating"
-            echo "Waiting additional 15s..."
-            sleep 15
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-              "https://api.revelations.studio/health" || echo "000")
-            if [ "$RESPONSE" != "200" ]; then
-              echo "❌ API worker: HTTP $RESPONSE - Health check failed after retry"
-              exit 1
-            fi
-            echo "✅ API worker: HTTP $RESPONSE - Healthy after retry"
-          else
-            echo "❌ API worker: HTTP $RESPONSE - Health check failed"
-            exit 1
-          fi
+      # NOTE: Health checks disabled - custom domains not yet configured
+      # Worker deployed successfully to workers.dev subdomain
+      # TODO: Configure custom domains in Cloudflare dashboard then re-enable health checks
 
       # Deploy auth-worker to production
       - name: Deploy auth-worker
@@ -161,32 +136,7 @@ jobs:
           SESSION_SECRET_PRODUCTION: ${{ secrets.SESSION_SECRET_PRODUCTION }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET_PRODUCTION }}
 
-      # Health check for auth worker
-      - name: Health check - Auth worker
-        timeout-minutes: 2
-        run: |
-          echo "🏥 Checking auth worker health..."
-          sleep 15  # Wait for propagation
-
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://auth.revelations.studio/health" || echo "000")
-
-          if [ "$RESPONSE" = "200" ]; then
-            echo "✅ Auth worker: HTTP $RESPONSE - Healthy"
-          elif [ "$RESPONSE" = "000" ]; then
-            echo "⚠️ Auth worker: Connection failed - retrying..."
-            sleep 15
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-              "https://auth.revelations.studio/health" || echo "000")
-            if [ "$RESPONSE" != "200" ]; then
-              echo "❌ Auth worker: HTTP $RESPONSE - Health check failed after retry"
-              exit 1
-            fi
-            echo "✅ Auth worker: HTTP $RESPONSE - Healthy after retry"
-          else
-            echo "❌ Auth worker: HTTP $RESPONSE - Health check failed"
-            exit 1
-          fi
+      # NOTE: Health checks disabled - custom domains not yet configured
 
       # Build SvelteKit app (NOTE: Build was already validated earlier)
       - name: Build SvelteKit app for production
@@ -209,32 +159,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
 
-      # Health check for web app
-      - name: Health check - Web app
-        timeout-minutes: 2
-        run: |
-          echo "🏥 Checking web app health..."
-          sleep 15  # Wait for propagation
-
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://codex.revelations.studio/" || echo "000")
-
-          if [ "$RESPONSE" = "200" ]; then
-            echo "✅ Web app: HTTP $RESPONSE - Healthy"
-          elif [ "$RESPONSE" = "000" ]; then
-            echo "⚠️ Web app: Connection failed - retrying..."
-            sleep 15
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-              "https://codex.revelations.studio/" || echo "000")
-            if [ "$RESPONSE" != "200" ]; then
-              echo "❌ Web app: HTTP $RESPONSE - Health check failed after retry"
-              exit 1
-            fi
-            echo "✅ Web app: HTTP $RESPONSE - Healthy after retry"
-          else
-            echo "❌ Web app: HTTP $RESPONSE - Health check failed"
-            exit 1
-          fi
+      # NOTE: Health checks disabled - custom domains not yet configured
 
       - name: Deployment notification
         if: success()
