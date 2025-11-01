@@ -9,6 +9,13 @@ on:
   # Also run when PR is closed for cleanup
   pull_request:
     types: [closed]
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to deploy'
+        required: true
+        type: number
 
 permissions:
   contents: read
@@ -16,12 +23,12 @@ permissions:
   deployments: write
 
 concurrency:
-  group: preview-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
+  group: preview-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true # Cancel old deployments for same PR
 
 env:
-  # Handle both workflow_run and pull_request triggers
-  PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
+  # Handle workflow_run, pull_request, and workflow_dispatch triggers
+  PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || inputs.pr_number }}
 
 jobs:
   # Cleanup preview when PR is closed
@@ -76,11 +83,12 @@ jobs:
   deploy-preview:
     name: Deploy Preview Environment
     runs-on: ubuntu-latest
-    # Only deploy if: (1) not a closed event, (2) workflow_run succeeded, (3) workflow_run was triggered by a PR
+    # Deploy if: (1) manual trigger OR (2) not a closed event AND workflow_run succeeded AND was triggered by PR
     if: |
-      github.event.action != 'closed' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action != 'closed' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request')
     outputs:
       web_url: ${{ steps.deploy-web.outputs.deployment-url }}
 
