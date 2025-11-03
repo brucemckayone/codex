@@ -179,9 +179,9 @@ function isSensitiveValue(value: unknown): boolean {
  * Synchronous redaction (uses 'mask' or 'remove' only)
  */
 export function redactSensitiveData(
-  data: any,
+  data: unknown,
   options: RedactionOptions = {}
-): any {
+): unknown {
   const {
     mode = 'mask',
     customKeys = [],
@@ -216,7 +216,8 @@ export function redactSensitiveData(
   }
 
   // Handle objects
-  const redacted: any = mode === 'remove' ? {} : { ...data };
+  const redacted: Record<string, unknown> =
+    mode === 'remove' ? {} : { ...data };
 
   for (const [key, value] of Object.entries(data)) {
     // Check if key is sensitive
@@ -257,9 +258,9 @@ export function redactSensitiveData(
  * Async redaction (supports 'hash' mode)
  */
 export async function redactSensitiveDataAsync(
-  data: any,
+  data: unknown,
   options: RedactionOptions = {}
-): Promise<any> {
+): Promise<unknown> {
   const {
     mode = 'mask',
     customKeys = [],
@@ -297,7 +298,7 @@ export async function redactSensitiveDataAsync(
   }
 
   // Handle objects
-  const redacted: any = {};
+  const redacted: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(data)) {
     if (isSensitiveKey(key, customKeys)) {

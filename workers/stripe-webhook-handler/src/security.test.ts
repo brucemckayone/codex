@@ -25,7 +25,7 @@ describe('Stripe Webhook Handler - Security Integration', () => {
       // Apply security headers (same config as worker)
       app.use('*', (c, next) => {
         // Simulate worker environment binding
-        (c as any).env = mockEnv;
+        c.env = mockEnv;
         return securityHeaders({
           environment: mockEnv.ENVIRONMENT || 'development',
           csp: CSP_PRESETS.api,
@@ -47,6 +47,7 @@ describe('Stripe Webhook Handler - Security Integration', () => {
       const mockEnv = { ENVIRONMENT: 'development' };
 
       app.use('*', (c, next) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (c as any).env = mockEnv;
         return securityHeaders({
           environment: mockEnv.ENVIRONMENT || 'development',
@@ -94,6 +95,7 @@ describe('Stripe Webhook Handler - Security Integration', () => {
 
   describe('Health Endpoint Security', () => {
     it('should not expose sensitive environment variables in responses', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app = new Hono<{ Bindings: any }>();
       const mockEnv = {
         ENVIRONMENT: 'development',
@@ -104,6 +106,7 @@ describe('Stripe Webhook Handler - Security Integration', () => {
 
       app.get('/health', (c) => {
         // Simulate worker health endpoint
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (c as any).env = mockEnv;
 
         return c.json({
