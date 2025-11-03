@@ -8,8 +8,10 @@ export default defineConfig({
       'packages/database',
       'packages/validation',
       'packages/cloudflare-clients',
+      'packages/security',
       'packages/test-utils',
-      // 'workers/queue-consumer', // Disabled - Cloudflare not set up yet
+      'workers/auth',
+      'workers/stripe-webhook-handler',
     ],
 
     // Global coverage configuration (cannot be overridden in projects)

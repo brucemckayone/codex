@@ -1,94 +1,158 @@
-# Environment Management Diagram
+# Environment Management
+# Local → Preview → Production
 
-...@../../d2/theme
+direction: right
 
-direction: down
+# Local Development
+local: {
+  label: "Local Development"
+  style.fill: "#F5F5F5"
+  style.stroke: "#9E9E9E"
 
-local: Local Development {
-  style.fill: ${color-caddy}
-  style.stroke: ${stroke-caddy}
-
-  docker: Docker Compose {
-    style.fill: ${color-volume}
-    style.stroke: ${stroke-volume}
-
-    postgres: Postgres 17\n:5432 {
-      style.fill: ${color-postgres}
-      style.stroke: ${stroke-postgres}
-    }
-    neon_proxy: Neon HTTP Proxy\n:4444 {
-      style.fill: ${color-go}
-      style.stroke: ${stroke-go}
-    }
+  dev: "Developer Machine" {
+    shape: rectangle
   }
 
-  sveltekit: SvelteKit\n:5173 {
-    style.fill: ${color-nextjs}
-    style.stroke: ${stroke-nextjs}
+  wrangler: "wrangler dev\n- codex-web:5173\n- auth-worker:8787\n- stripe-webhook:8788" {
+    style.fill: "#E0E0E0"
   }
 
-  miniflare: Miniflare Workers {
-    style.fill: ${color-r2}
-    style.stroke: ${stroke-r2}
+  db: "Database Options\n1. Local Neon branch\n2. Ephemeral branch\n3. Proxy to preview" {
+    shape: cylinder
+    style.fill: "#BDBDBD"
+  }
 
-    queue_consumer: queue-consumer {
-      style.fill: ${color-go}
-      style.stroke: ${stroke-go}
-    }
-    webhook_handler: webhook-handler {
-      style.fill: ${color-go}
-      style.stroke: ${stroke-go}
-    }
+  dev -> wrangler: "pnpm dev"
+  wrangler -> db: "DATABASE_URL"
+}
+
+# Preview Environment
+preview: {
+  label: "Preview Environment\n(Per PR)"
+  style.fill: "#E8F5E9"
+  style.stroke: "#4CAF50"
+
+  pr: "Pull Request #{PR}" {
+    shape: rectangle
+    style.fill: "#C8E6C9"
+  }
+
+  workers: "Cloudflare Workers\n- codex-web-preview-{PR}\n- auth-worker-preview-{PR}\n- stripe-webhook-handler-preview-{PR}" {
+    style.fill: "#A5D6A7"
+  }
+
+  dns: "Custom Domains\n- codex-preview-{PR}.revelations.studio\n- auth-preview-{PR}.revelations.studio\n- api-preview-{PR}.revelations.studio" {
+    style.fill: "#81C784"
+  }
+
+  db: "Neon Database\npr-{PR} branch" {
+    shape: cylinder
+    style.fill: "#66BB6A"
+  }
+
+  secrets: "Cloudflare Secrets\n- DATABASE_URL (pr-{PR})\n- BETTER_AUTH_SECRET (generated)\n- STRIPE_SECRET_KEY (test mode)" {
+    style.fill: "#4CAF50"
+  }
+
+  pr -> workers: "Deploy on\nPR open/update"
+  workers -> dns: "Custom domains\nvia Cloudflare API"
+  workers -> db: "Isolated DB\nper PR"
+  workers -> secrets: "Environment\nspecific"
+}
+
+# Production Environment
+production: {
+  label: "Production Environment"
+  style.fill: "#FFEBEE"
+  style.stroke: "#F44336"
+
+  merge: "Merge to main" {
+    shape: rectangle
+    style.fill: "#FFCDD2"
+  }
+
+  workers: "Cloudflare Workers\n- codex-web-production\n- auth-worker-production\n- stripe-webhook-handler-production" {
+    style.fill: "#EF9A9A"
+  }
+
+  dns: "Custom Domains\n- codex.revelations.studio\n- auth.revelations.studio\n- api.revelations.studio" {
+    style.fill: "#E57373"
+  }
+
+  db: "Neon Database\nproduction branch" {
+    shape: cylinder
+    style.fill: "#EF5350"
+  }
+
+  secrets: "Cloudflare Secrets\n- DATABASE_URL (production)\n- BETTER_AUTH_SECRET (prod key)\n- STRIPE_SECRET_KEY (live mode)" {
+    style.fill: "#F44336"
+  }
+
+  merge -> workers: "Deploy on\nmerge to main"
+  workers -> dns: "Production domains\nverified"
+  workers -> db: "Production DB\nwith migrations"
+  workers -> secrets: "Production\nsecrets"
+}
+
+# Database Branching Strategy
+neon: {
+  label: "Neon Database Branching"
+  style.fill: "#E1BEE7"
+  style.stroke: "#9C27B0"
+
+  prod_branch: "production\n(main branch)" {
+    shape: cylinder
+    style.fill: "#BA68C8"
+  }
+
+  ephemeral: "Ephemeral Branches\npush-{branch}-{sha}" {
+    shape: cylinder
+    style.fill: "#CE93D8"
+  }
+
+  pr_branch: "PR Branches\npr-{number}" {
+    shape: cylinder
+    style.fill: "#CE93D8"
+  }
+
+  local_branch: "Development Branches\ndev-{name}" {
+    shape: cylinder
+    style.fill: "#E1BEE7"
+  }
+
+  prod_branch -> ephemeral: "Create for\nCI testing"
+  prod_branch -> pr_branch: "Create for\npreview"
+  prod_branch -> local_branch: "Create for\nlocal dev"
+
+  ephemeral -> cleanup: "Auto-delete\nafter tests"
+  pr_branch -> cleanup: "Delete on\nPR close"
+  local_branch -> cleanup: "Manual cleanup"
+
+  cleanup: "Auto-cleanup\n(serverless)" {
+    shape: circle
+    style.fill: "#F8BBD0"
   }
 }
 
-staging: Staging {
-  style.fill: ${color-go-sub}
-  style.stroke: ${stroke-go-sub}
+# Flow
+local.wrangler -> preview.pr: "git push\nopen PR"
+preview.workers -> production.merge: "PR approved\nmerge to main"
 
-  pages_staging: Cloudflare Pages\n(develop branch) {
-    style.fill: ${color-nextjs}
-    style.stroke: ${stroke-nextjs}
-  }
+# Database connections
+local.db -> neon.local_branch: "Optional:\nUse dev branch"
+preview.db -> neon.pr_branch: "Isolated\nper PR"
+production.db -> neon.prod_branch: "Production\ndata"
 
-  neon_staging: Neon Staging Branch {
-    style.fill: ${color-postgres}
-    style.stroke: ${stroke-postgres}
-  }
+# Notes
+notes: {
+  label: "Key Points"
+  style.fill: "#FFF9C4"
+  style.stroke: "#F9A825"
 
-  workers_staging: Cloudflare Workers\n(test mode) {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
-  }
+  note1: "• Each environment is completely isolated"
+  note2: "• Database branches created from production (not from each other)"
+  note3: "• DNS records auto-managed via Cloudflare API"
+  note4: "• Secrets are environment-specific"
+  note5: "• Preview environments auto-cleanup on PR close"
+  note6: "• Production uses custom domains with SSL"
 }
-
-production: Production {
-  style.fill: ${color-redis}
-  style.stroke: ${stroke-redis}
-
-  pages_prod: Cloudflare Pages\n(main branch) {
-    style.fill: ${color-nextjs}
-    style.stroke: ${stroke-nextjs}
-  }
-
-  neon_prod: Neon Production {
-    style.fill: ${color-postgres}
-    style.stroke: ${stroke-postgres}
-  }
-
-  workers_prod: Cloudflare Workers\n(production) {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
-  }
-}
-
-# Connections
-local.sveltekit -> local.docker.neon_proxy: HTTP {style.stroke: ${arrow-http}}
-local.docker.neon_proxy -> local.docker.postgres: SQL {style.stroke: ${arrow-sql}}
-local.sveltekit -> local.miniflare: Queue jobs {style.stroke: ${arrow-cache}}
-
-staging.pages_staging -> staging.neon_staging: SQL {style.stroke: ${arrow-sql}}
-staging.pages_staging -> staging.workers_staging: Queue {style.stroke: ${arrow-cache}}
-
-production.pages_prod -> production.neon_prod: SQL {style.stroke: ${arrow-sql}}
-production.pages_prod -> production.workers_prod: Queue {style.stroke: ${arrow-cache}}

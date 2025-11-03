@@ -1,5 +1,4 @@
 import type { NeonConfig } from '@neondatabase/serverless';
-import { URL } from 'url';
 
 // Utility function to check for production environment
 function isProd(): boolean {

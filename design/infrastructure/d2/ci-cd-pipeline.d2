@@ -1,114 +1,159 @@
-# CI/CD Pipeline Diagram
-
-...@../../d2/theme
+# CI/CD Pipeline Architecture
+# Codex Platform - Cloudflare Workers + Neon Postgres
 
 direction: right
 
-git: Git Push {
-  style.fill: ${color-internet}
-  style.stroke: ${stroke-internet}
-}
-
-github: GitHub Actions {
-  style.fill: ${color-nextjs}
-  style.stroke: ${stroke-nextjs}
-
-  typecheck: Type Check {
-    style.fill: ${color-nextjs-sub}
-    style.stroke: ${stroke-nextjs-sub}
+# Trigger Events
+trigger: {
+  label: "Trigger Events"
+  push: "Push to Branch" {
+    shape: circle
+    style.fill: "#E8F5E9"
   }
-  lint: Lint {
-    style.fill: ${color-nextjs-sub}
-    style.stroke: ${stroke-nextjs-sub}
+  pr: "Pull Request" {
+    shape: circle
+    style.fill: "#E3F2FD"
   }
-  unit: Unit Tests {
-    style.fill: ${color-nextjs-sub}
-    style.stroke: ${stroke-nextjs-sub}
-  }
-  integration: Integration Tests {
-    style.fill: ${color-nextjs-sub}
-    style.stroke: ${stroke-nextjs-sub}
-  }
-  e2e: E2E Tests {
-    style.fill: ${color-nextjs-sub}
-    style.stroke: ${stroke-nextjs-sub}
+  merge: "Merge to Main" {
+    shape: circle
+    style.fill: "#FFF3E0"
   }
 }
 
-branch: Branch Strategy {
-  style.fill: ${color-volume}
-  style.stroke: ${stroke-volume}
+# Testing Workflow
+testing: {
+  label: "Testing Workflow\n(testing.yml)"
+  style.fill: "#BBDEFB"
+  style.stroke: "#1976D2"
 
-  feature: feature/* → Preview {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
+  setup: "Setup\n- Checkout code\n- Setup pnpm\n- Install deps"
+
+  db: "Database\n- Create ephemeral\n  Neon branch\n- Run migrations"
+
+  analysis: "Static Analysis\n- TypeScript check\n- ESLint\n- Prettier"
+
+  tests: "Tests\n- Unit tests\n- Integration tests\n- E2E tests (web)"
+
+  artifact: "Artifact\n- Upload DATABASE_URL\n- Save for deployment"
+
+  cleanup: "Cleanup\n- Delete ephemeral\n  branch"
+
+  setup -> db -> analysis -> tests -> artifact -> cleanup
+}
+
+# Preview Deployment
+preview: {
+  label: "Preview Deployment\n(preview-deploy.yml)"
+  style.fill: "#C5E1A5"
+  style.stroke: "#689F38"
+
+  trigger: "Trigger\n- Wait for testing\n- PR only"
+
+  dns: "DNS Setup\n- Create CNAME:\n  *-preview-{PR}.revelations.studio"
+
+  deploy: "Deploy Workers\n- codex-web-preview-{PR}\n- auth-worker-preview-{PR}\n- stripe-webhook-handler-preview-{PR}"
+
+  health: "Health Checks\n- Wait 30s (SSL)\n- Check each worker\n- Exponential backoff"
+
+  comment: "PR Comment\n- Post preview URLs\n- Show status"
+
+  trigger -> dns -> deploy -> health -> comment
+}
+
+# Production Deployment
+production: {
+  label: "Production Deployment\n(deploy-production.yml)"
+  style.fill: "#FFCCBC"
+  style.stroke: "#E64A19"
+
+  trigger: "Trigger\n- Wait for testing\n- main branch only"
+
+  validate: "Validate\n- Verify DNS records\n- Build all workers\n- Fail fast"
+
+  migrate: "Migrate DB\n- production branch\n- Drizzle migrations"
+
+  deploy: "Sequential Deploy\n1. Web worker\n2. Auth worker\n3. Stripe worker"
+
+  health: "Health Checks\n- Wait 30s per worker\n- Check endpoints\n- Exponential backoff"
+
+  success: "Success\n- Deployment complete\n- Monitor logs"
+
+  trigger -> validate -> migrate -> deploy -> health -> success
+}
+
+# Neon Database Strategy
+neon: {
+  label: "Neon Database Strategy"
+  style.fill: "#E1BEE7"
+  style.stroke: "#8E24AA"
+
+  prod: "production\n(main branch)" {
+    shape: cylinder
+    style.fill: "#BA68C8"
   }
-  develop: develop → Staging {
-    style.fill: ${color-go-sub}
-    style.stroke: ${stroke-go-sub}
+
+  ephemeral: "Ephemeral Branches\n(testing)" {
+    shape: cylinder
+    style.fill: "#CE93D8"
   }
-  main: main → Production {
-    style.fill: ${color-redis}
-    style.stroke: ${stroke-redis}
+
+  pr: "PR Branches\n(preview)" {
+    shape: cylinder
+    style.fill: "#CE93D8"
+  }
+
+  prod -> ephemeral: "Create from\nproduction"
+  prod -> pr: "Create from\nproduction"
+  ephemeral -> cleanup: "Auto-delete\nafter tests"
+  pr -> cleanup: "Delete on\nPR close"
+
+  cleanup: "Cleanup" {
+    shape: circle
+    style.fill: "#F8BBD0"
   }
 }
 
-cloudflare: Cloudflare Pages {
-  style.fill: ${color-r2}
-  style.stroke: ${stroke-r2}
+# Environments
+environments: {
+  label: "Environments"
 
-  preview: Preview Deploy\n(FREE) {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
+  local: "Local\n- wrangler dev\n- localhost:*\n- Manual DB setup" {
+    style.fill: "#F5F5F5"
   }
-  staging: Staging Deploy\n(FREE) {
-    style.fill: ${color-go-sub}
-    style.stroke: ${stroke-go-sub}
+
+  preview: "Preview\n- *-preview-{PR}\n- *.revelations.studio\n- pr-{PR} DB branch" {
+    style.fill: "#E8F5E9"
   }
-  production: Production Deploy {
-    style.fill: ${color-redis}
-    style.stroke: ${stroke-redis}
+
+  prod: "Production\n- *-production\n- *.revelations.studio\n- production DB branch" {
+    style.fill: "#FFEBEE"
   }
+
+  local -> preview: "PR opened"
+  preview -> prod: "PR merged"
 }
 
-workers: Deploy Workers {
-  style.fill: ${color-caddy}
-  style.stroke: ${stroke-caddy}
+# Flow connections
+trigger.push -> testing.setup: "On every push"
+trigger.pr -> testing.setup: "On PR open/update"
+testing.artifact -> preview.trigger: "Testing passed\n(PR only)"
+trigger.merge -> testing.setup: "On merge to main"
+testing.artifact -> production.trigger: "Testing passed\n(main only)"
 
-  queue: queue-consumer {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
-  }
-  webhook: webhook-handler {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
-  }
+# Database connections
+testing.db -> neon.ephemeral: "Creates"
+preview.deploy -> neon.pr: "Uses pr-{PR}"
+production.deploy -> neon.prod: "Uses production"
+
+# Notes
+notes: {
+  label: "Key Concepts"
+  style.fill: "#FFF9C4"
+  style.stroke: "#F9A825"
+
+  concept1: "• Ephemeral branches created from production (not from other PRs)"
+  concept2: "• DNS records auto-created via Cloudflare API"
+  concept3: "• Health checks wait 30s for SSL provisioning"
+  concept4: "• Workers deployed sequentially with verification"
+  concept5: "• All apps are Workers (including SvelteKit)"
 }
-
-monitor: Monitoring {
-  style.fill: ${color-stripe}
-  style.stroke: ${stroke-stripe}
-
-  sentry: Sentry\n(FREE 5k/mo) {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
-  }
-  cf_analytics: Cloudflare Analytics\n(FREE) {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
-  }
-  uptime: UptimeRobot\n(FREE) {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
-  }
-}
-
-# Connections
-git -> github: {style.stroke: ${arrow-https}}
-github -> branch: {style.stroke: ${arrow-http}}
-branch.feature -> cloudflare.preview: {style.stroke: ${arrow-external}}
-branch.develop -> cloudflare.staging: {style.stroke: ${arrow-external}}
-branch.main -> cloudflare.production: {style.stroke: ${arrow-external}}
-branch.main -> workers: {style.stroke: ${arrow-external}}
-cloudflare -> monitor: {style.stroke: ${arrow-cache}}
-workers -> monitor: {style.stroke: ${arrow-cache}}

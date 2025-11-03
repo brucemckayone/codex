@@ -1,115 +1,214 @@
-# Codex Infrastructure - Cloudflare + Neon Architecture
-
-...@../../d2/theme
+# Infrastructure Architecture
+# Codex Platform - Complete System Overview
 
 direction: right
 
-# Frontend
-frontend: Frontend {
-  style.fill: ${color-nextjs}
-  style.stroke: ${stroke-nextjs}
+# Client Layer
+client: {
+  label: "Client Layer"
+  style.fill: "#E3F2FD"
+  style.stroke: "#1976D2"
 
-  pages: Cloudflare Pages {
-    sveltekit: SvelteKit SSR
-    api_routes: API Routes (+server.ts)
+  browser: "Web Browser\n- Modern browsers\n- Mobile responsive\n- Progressive web app" {
+    shape: rectangle
+    style.fill: "#BBDEFB"
+  }
+
+  domains: "Custom Domains\ncodex.revelations.studio\nauth.revelations.studio\napi.revelations.studio" {
+    style.fill: "#90CAF9"
   }
 }
 
-# Cloudflare Services
-cloudflare: Cloudflare Services {
-  style.fill: ${color-volume}
-  style.stroke: ${stroke-volume}
+# Cloudflare Edge
+cloudflare: {
+  label: "Cloudflare Edge Network"
+  style.fill: "#FFF3E0"
+  style.stroke: "#FF6F00"
 
-  workers: Workers {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
-
-    queue_consumer: Queue Consumer
-    webhook_handler: Webhook Handler
+  dns: "Cloudflare DNS\n- CNAME records\n- Proxied (CDN)\n- Auto SSL/TLS" {
+    style.fill: "#FFE0B2"
   }
 
-  kv: KV Store {
-    style.fill: ${color-redis}
-    style.stroke: ${stroke-redis}
-
-    sessions: Sessions
-    cache: Cache
+  workers: "Cloudflare Workers\n- Edge compute\n- Zero cold starts\n- Global distribution" {
+    style.fill: "#FFCC80"
   }
 
-  queues: Queues {
-    style.fill: ${color-redis}
-    style.stroke: ${stroke-redis}
-
-    video_queue: Video Processing
-    notify_queue: Notifications
-  }
-
-  r2: R2 Storage {
-    style.fill: ${color-r2}
-    style.stroke: ${stroke-r2}
-
-    videos: Videos (original)
-    transcoded: Transcoded outputs
-    thumbs: Thumbnails
+  secrets: "Worker Secrets\n- DATABASE_URL\n- BETTER_AUTH_SECRET\n- STRIPE_SECRET_KEY\n- API tokens" {
+    style.fill: "#FFB74D"
   }
 }
 
-# Database
-database: Database {
-  style.fill: ${color-postgres}
-  style.stroke: ${stroke-postgres}
+# Application Layer
+app: {
+  label: "Application Layer"
+  style.fill: "#C8E6C9"
+  style.stroke: "#388E3C"
 
-  neon: Neon Postgres {
-    users: Users
-    content: Content metadata
-    purchases: Purchases
-    sessions_db: Sessions (BetterAuth)
+  web: "Web Worker\ncodex-web-production\n- SvelteKit app\n- Server-side rendering\n- Client hydration\n- Session management" {
+    style.fill: "#A5D6A7"
+  }
+
+  auth: "Auth Worker\nauth-worker-production\n- Better Auth\n- OAuth providers\n- Session tokens\n- User management" {
+    style.fill: "#81C784"
+  }
+
+  api: "API Worker\nstripe-webhook-handler-production\n- Stripe webhooks\n- Payment processing\n- Subscription management\n- Event handling" {
+    style.fill: "#66BB6A"
+  }
+}
+
+# Database Layer
+database: {
+  label: "Database Layer"
+  style.fill: "#E1BEE7"
+  style.stroke: "#7B1FA2"
+
+  neon: "Neon Postgres\n- Serverless\n- Auto-scaling\n- Branching (git-like)\n- Global replication" {
+    shape: cylinder
+    style.fill: "#CE93D8"
+  }
+
+  branches: "Database Branches\n- production (main)\n- pr-{number} (preview)\n- push-{branch}-{sha} (ephemeral)" {
+    shape: cylinder
+    style.fill: "#BA68C8"
+  }
+
+  drizzle: "Drizzle ORM\n- Type-safe queries\n- Schema migrations\n- TypeScript-first" {
+    style.fill: "#AB47BC"
   }
 }
 
 # External Services
-external: External Services {
-  style.fill: ${color-caddy}
-  style.stroke: ${stroke-caddy}
+external: {
+  label: "External Services"
+  style.fill: "#FFCCBC"
+  style.stroke: "#D84315"
 
-  runpod: RunPod {
-    style.fill: ${color-go-sub}
-    style.stroke: ${stroke-go-sub}
-    gpu: GPU Processing
+  stripe: "Stripe\n- Payment processing\n- Subscription billing\n- Webhooks\n- Customer portal" {
+    style.fill: "#FFAB91"
   }
 
-  stripe: Stripe {
-    style.fill: ${color-stripe}
-    style.stroke: ${stroke-stripe}
-    payments: Payments API
+  oauth: "OAuth Providers\n- Google\n- GitHub\n- Custom providers\n- Social login" {
+    style.fill: "#FF8A65"
   }
 
-  resend: Resend {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
-    email: Transactional Email
+  analytics: "Analytics\n- Posthog (planned)\n- Error tracking\n- Performance monitoring" {
+    style.fill: "#FF7043"
   }
 }
 
-# User
-user: Customer {
-  style.fill: ${color-internet}
-  style.stroke: ${stroke-internet}
-  browser: Web Browser
+# CI/CD Pipeline
+cicd: {
+  label: "CI/CD Pipeline"
+  style.fill: "#B2DFDB"
+  style.stroke: "#00695C"
+
+  github: "GitHub Actions\n- testing.yml\n- preview-deploy.yml\n- deploy-production.yml" {
+    style.fill: "#80CBC4"
+  }
+
+  testing: "Automated Testing\n- Unit tests (Vitest)\n- Integration tests\n- E2E tests (Playwright)\n- Static analysis" {
+    style.fill: "#4DB6AC"
+  }
+
+  preview: "Preview Environments\n- Per PR\n- Isolated DB\n- Custom domains\n- Auto-cleanup" {
+    style.fill: "#26A69A"
+  }
+
+  production: "Production Deploy\n- On merge to main\n- Sequential deployment\n- Health checks\n- Auto-rollback info" {
+    style.fill: "#00897B"
+  }
 }
 
-# Connections
-user.browser -> frontend.pages: HTTPS {style.stroke: ${arrow-https}}
-frontend.pages.api_routes -> database.neon: SQL {style.stroke: ${arrow-sql}}
-frontend.pages.api_routes -> cloudflare.kv: Read/Write {style.stroke: ${arrow-cache}}
-frontend.pages.api_routes -> cloudflare.queues: Enqueue jobs {style.stroke: ${arrow-cache}}
-frontend.pages.api_routes -> cloudflare.r2: Upload/Download {style.stroke: ${arrow-file}}
+# Developer Tools
+devtools: {
+  label: "Developer Tools"
+  style.fill: "#F8BBD0"
+  style.stroke: "#C2185B"
 
-cloudflare.queues.video_queue -> cloudflare.workers.queue_consumer: Consume {style.stroke: ${arrow-cache}}
-cloudflare.workers.queue_consumer -> external.runpod.gpu: Dispatch job {style.stroke: ${arrow-external}}
-external.runpod.gpu -> cloudflare.workers.webhook_handler: Webhook callback {style.stroke: ${arrow-external}}
-cloudflare.workers.webhook_handler -> database.neon: Update metadata {style.stroke: ${arrow-sql}}
-cloudflare.workers.webhook_handler -> cloudflare.r2: Store outputs {style.stroke: ${arrow-file}}
+  wrangler: "Wrangler CLI\n- Local dev server\n- Deploy workers\n- Tail logs\n- Manage secrets" {
+    style.fill: "#F48FB1"
+  }
 
-frontend.pages.api_routes -> external.stripe.payments: Process payment {style.stroke: ${arrow-external}}
-frontend.pages.api_routes -> external.resend.email: Send email {style.stroke: ${arrow-external}}
+  drizzle_kit: "Drizzle Kit\n- Generate migrations\n- Push schema\n- Studio (DB UI)" {
+    style.fill: "#F06292"
+  }
+
+  pnpm: "pnpm Workspace\n- Monorepo\n- Shared packages\n- Efficient caching" {
+    style.fill: "#EC407A"
+  }
+}
+
+# Flow: Client to Application
+client.browser -> client.domains: "HTTPS request"
+client.domains -> cloudflare.dns: "DNS resolution"
+cloudflare.dns -> cloudflare.workers: "Route to worker"
+cloudflare.workers -> app.web: "codex.*"
+cloudflare.workers -> app.auth: "auth.*"
+cloudflare.workers -> app.api: "api.*"
+
+# Flow: Application to Database
+app.web -> database.drizzle: "ORM queries"
+app.auth -> database.drizzle: "User data"
+app.api -> database.drizzle: "Subscriptions"
+database.drizzle -> database.neon: "SQL"
+
+# Flow: Application to External Services
+app.auth -> external.oauth: "OAuth flow"
+app.api -> external.stripe: "Payments"
+app.web -> external.analytics: "Events"
+external.stripe -> app.api: "Webhooks"
+
+# Flow: CI/CD
+cicd.github -> cicd.testing: "On push/PR"
+cicd.testing -> database.branches: "Ephemeral branch"
+cicd.testing -> cicd.preview: "On PR (tests pass)"
+cicd.testing -> cicd.production: "On main (tests pass)"
+cicd.preview -> cloudflare.workers: "Deploy preview"
+cicd.production -> cloudflare.workers: "Deploy production"
+
+# Flow: Development
+devtools.wrangler -> app: "Local dev"
+devtools.drizzle_kit -> database.drizzle: "Migrations"
+devtools.pnpm -> cicd.github: "git push"
+
+# Secrets
+cloudflare.secrets -> app.web: "Environment vars"
+cloudflare.secrets -> app.auth: "Environment vars"
+cloudflare.secrets -> app.api: "Environment vars"
+
+# Environment Summary
+environments: {
+  label: "Environments"
+  style.fill: "#FFF9C4"
+  style.stroke: "#F57F17"
+
+  local: "Local Development\n• wrangler dev\n• localhost:*\n• Optional DB branch" {
+    style.fill: "#FFF59D"
+  }
+
+  preview: "Preview (Per PR)\n• *-preview-{PR}\n• *.revelations.studio\n• pr-{PR} DB branch" {
+    style.fill: "#FFF176"
+  }
+
+  production: "Production\n• *-production\n• *.revelations.studio\n• production DB branch" {
+    style.fill: "#FFEE58"
+  }
+
+  local -> preview: "Open PR"
+  preview -> production: "Merge to main"
+}
+
+# Key Concepts
+concepts: {
+  label: "Key Architecture Concepts"
+  style.fill: "#D1C4E9"
+  style.stroke: "#5E35B1"
+
+  concept1: "• All apps are Cloudflare Workers (including SvelteKit)" {style.fill: "#B39DDB"}
+  concept2: "• Neon database branches like git branches" {style.fill: "#9575CD"}
+  concept3: "• Custom domains on revelations.studio" {style.fill: "#7E57C2"}
+  concept4: "• Automated CI/CD via GitHub Actions" {style.fill: "#673AB7"}
+  concept5: "• Preview environments per PR with auto-cleanup" {style.fill: "#5E35B1"}
+  concept6: "• Sequential production deployment with health checks" {style.fill: "#512DA8"}
+}

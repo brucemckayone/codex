@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.js",
+    "build": "vite build --config vite.stripe-webhook-handler.config",
     "deploy": "pnpm build && wrangler deploy",
     "dev": "pnpm build && wrangler dev",
     "test": "vitest run",
@@ -14,16 +14,20 @@
   "dependencies": {
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
+    "@codex/security": "workspace:*",
     "@codex/validation": "workspace:*",
     "hono": "^4.6.20",
+    "stripe": "^19.2.0",
+    "vite-plugin-dts": "^4.5.4",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250129.0",
+    "@codex/test-utils": "workspace:*",
     "@types/node": "22.13.0",
     "@types/service-worker-mock": "^2.0.4",
     "esbuild": "^0.21.5",
     "esbuild-node-externals": "^1.13.0",
+    "vitest": "^4.0.2",
     "wrangler": "^4.45.0"
   }
 }

@@ -25,7 +25,7 @@ jobs:
     if: |
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      github.ref == 'refs/heads/main'
+      github.event.workflow_run.head_branch == 'main'
     environment:
       name: production
       url: https://codex.revelations.studio
@@ -41,6 +41,21 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # CRITICAL: Verify/Create DNS records for custom domains BEFORE deployment
+      - name: Verify production DNS records
+        id: verify-dns
+        run: |
+          echo "🔍 Verifying production DNS configuration..."
+          chmod +x .github/scripts/manage-production-dns.sh
+
+          # First verify, if missing then create
+          if ! .github/scripts/manage-production-dns.sh verify ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}; then
+            echo "⚠️  Some DNS records missing, creating them..."
+            .github/scripts/manage-production-dns.sh create ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          fi
+
+          echo "✅ Production DNS verified"
 
       # Pre-deployment validation: Build all workers BEFORE touching database
       - name: Validate all workers build successfully
@@ -112,9 +127,41 @@ jobs:
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_PRODUCTION_BOOKING_WEBHOOK_SECRET }}
           STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_PRODUCTION_DISPUTE_WEBHOOK_SECRET }}
 
-      # NOTE: Health checks disabled - custom domains not yet configured
-      # Worker deployed successfully to workers.dev subdomain
-      # TODO: Configure custom domains in Cloudflare dashboard then re-enable health checks
+      # Verify API worker is healthy after deployment
+      - name: Health check - API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking API worker health at https://api.revelations.studio..."
+
+          # Wait for custom domain SSL to provision (can take 30-90 seconds)
+          echo "⏳ Waiting for SSL certificate provisioning..."
+          sleep 30
+
+          # Retry health check with exponential backoff
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2)) # Exponential backoff
+          done
+
+          echo "❌ API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
 
       # Deploy auth-worker to production
       - name: Deploy auth-worker
@@ -136,7 +183,40 @@ jobs:
           SESSION_SECRET_PRODUCTION: ${{ secrets.SESSION_SECRET_PRODUCTION }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET_PRODUCTION }}
 
-      # NOTE: Health checks disabled - custom domains not yet configured
+      # Verify auth worker is healthy after deployment
+      - name: Health check - Auth worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Auth worker health at https://auth.revelations.studio..."
+
+          # Wait for custom domain SSL (shorter wait since API already provisioned)
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://auth.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Auth worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Auth returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Auth worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
 
       # Build SvelteKit app (NOTE: Build was already validated earlier)
       - name: Build SvelteKit app for production
@@ -159,7 +239,41 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
 
-      # NOTE: Health checks disabled - custom domains not yet configured
+      # Verify web app is healthy after deployment
+      - name: Health check - Web app
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Web app health at https://codex.revelations.studio..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            # For SvelteKit app, check the homepage (may not have /health endpoint)
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://codex.revelations.studio || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Web app is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Web app returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Web app health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
 
       - name: Deployment notification
         if: success()

@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@codex/database": "workspace:*",
-    "miniflare": "^3.20241129.0"
+    "miniflare": "^3.20241129.0",
+    "vite-plugin-dts": "^4.5.4"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",

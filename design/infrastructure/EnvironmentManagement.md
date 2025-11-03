@@ -1,29 +1,30 @@
-# Environment Management Guide
+# Environment Management
 
-Development environment setup for Codex monorepo with Cloudflare + Neon architecture.
+**Cloudflare Workers + Neon Postgres**
 
-![Environment Management Diagram](assets/environment-management.png)
-
-## Environments
-
-| Environment    | Hosting                  | Database                            | Workers            |
-| -------------- | ------------------------ | ----------------------------------- | ------------------ |
-| **Local**      | localhost:5173           | Postgres (Docker) + Neon HTTP proxy | Miniflare          |
-| **Staging**    | Cloudflare Pages preview | Neon staging branch                 | Cloudflare Workers |
-| **Production** | Cloudflare Pages         | Neon production                     | Cloudflare Workers |
+Last Updated: 2025-11-02
 
 ---
 
-## Local Development Setup
+## Environments
+
+| Environment | Database | Workers | URLs |
+|-------------|----------|---------|------|
+| **Local** | Local (to be configured) | Wrangler dev | `localhost:*` |
+| **Preview** | Neon `pr-{number}` branch | `*-preview-{PR}` | `*-preview-{PR}.revelations.studio` |
+| **Production** | Neon `production` branch | `*-production` | `*.revelations.studio` |
+
+---
+
+## Local Development
 
 ### Prerequisites
 
 - Node.js 20+
 - pnpm 10.18.3+
-- Docker Desktop
-- VS Code (recommended)
+- Wrangler CLI
 
-### Initial Setup
+### Setup
 
 ```bash
 # Clone and install
@@ -31,405 +32,332 @@ git clone <repo-url>
 cd Codex
 pnpm install
 
-# Start infrastructure
-docker-compose up -d
-
-# Run migrations
-pnpm --filter web db:migrate
+# Configure environment
+cp .env.example .env.dev
+# Edit .env.dev with your credentials
 
 # Start development
 pnpm dev
 ```
 
-### Docker Compose Stack
-
-`docker-compose.yml` runs:
-
-1. **Postgres 17**: Standard Postgres on port 5432
-2. **Neon HTTP Proxy**: Translates HTTP requests to Postgres, mimics Neon's serverless driver
-
-```yaml
-services:
-  postgres:
-    image: postgres:17
-    command: '-d 1'
-    ports: ['5432:5432']
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: main
-    volumes:
-      - db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres']
-
-  neon-proxy:
-    image: ghcr.io/timowilhelm/local-neon-http-proxy:main
-    environment:
-      PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/main
-    ports: ['4444:4444']
-    depends_on:
-      postgres:
-        condition: service_healthy
-```
-
-**Why Neon HTTP proxy?**
-
-- Exact API parity with production Neon
-- Test serverless driver behavior locally
-- No Neon dev branch costs
-
 ### Environment Variables
 
-`.env.dev`:
+Create `.env.dev`:
 
 ```bash
-# Database (via Neon HTTP proxy)
-PG_CONNECTION_STRING=http://localhost:4444
+# Database (local or Neon branch)
+DATABASE_URL=postgresql://neondb_owner:***@***-pooler.us-east-2.aws.neon.tech/neondb
 
-# Cloudflare (simulated by Miniflare)
-SESSIONS_KV_ID=dev-sessions-kv
-BUCKET_NAME=codex-media-dev
-TASK_QUEUE_NAME=video-processing-queue
-NOTIFICATIONS_QUEUE_NAME=notifications-queue
-
-# RunPod (test endpoint or local - see below)
-RUNPOD_API_KEY=your-test-api-key
-RUNPOD_ENDPOINT_ID=your-test-endpoint-id
-RUNPOD_LOCAL=true  # Set true for local RunPod testing
+# Auth
+SESSION_SECRET=<random_32_chars>
+BETTER_AUTH_SECRET=<random_32_chars>
 
 # Stripe (test mode)
-STRIPE_SECRET_KEY=sk_test_xxxxx
-STRIPE_WEBHOOK_SECRET=whsec_test_xxxxx
-STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
+STRIPE_SECRET_KEY=sk_test_***
+STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_test_***
+STRIPE_WEBHOOK_SECRET_SUBSCRIPTION=whsec_test_***
+STRIPE_WEBHOOK_SECRET_CONNECT=whsec_test_***
+STRIPE_WEBHOOK_SECRET_CUSTOMER=whsec_test_***
+STRIPE_WEBHOOK_SECRET_BOOKING=whsec_test_***
+STRIPE_WEBHOOK_SECRET_DISPUTE=whsec_test_***
+```
 
-# BetterAuth
-AUTH_SECRET=<32+ char random string>
-AUTH_URL=http://localhost:5173
-
-# Resend
-RESEND_API_KEY=re_xxxxx
+**Generate secrets:**
+```bash
+openssl rand -base64 32
 ```
 
 ### Running Locally
 
 ```bash
-# Start everything
+# Start all services
 pnpm dev
 
-# Runs:
-# - SvelteKit on :5173 (HMR enabled)
-# - Queue consumer worker with Miniflare
-# - Webhook handler worker with Miniflare
-```
-
-**Miniflare simulates:**
-
-- KV (sessions, cache)
-- R2 (media storage)
-- Queues (video processing jobs)
-- Workers runtime
-
-State persists to `workers/*/.wrangler/state/` across restarts.
-
-### RunPod Local Testing
-
-RunPod supports local testing via CLI. This lets you test GPU workloads without paying per-second costs.
-
-**Install RunPod CLI:**
-
-```bash
-pip install runpod
-```
-
-**Test handler locally:**
-
-```bash
-cd workers/runpod-handler  # If you have a dedicated RunPod handler
-
-# Test with local input
-runpodctl test --input '{"videoKey": "test.mp4", "contentId": "123"}'
-
-# Simulate production environment
-runpodctl test --env BUCKET_NAME=codex-media-dev --input '{...}'
-```
-
-**Mock RunPod in SvelteKit:**
-
-```bash
-# Set in .env.dev
-RUNPOD_LOCAL=true
-
-# Your code checks this flag:
-if (env.RUNPOD_LOCAL) {
-  return mockVideoProcessing(videoKey);
-} else {
-  return await runpod.submit(jobData);
-}
-```
-
-**References:**
-
-- [RunPod Local Testing Docs](https://docs.runpod.io/serverless/development/local-testing)
-- [RunPod CLI Reference](https://docs.runpod.io/cli/overview)
-
-### Cloudflare Tunnel (for Webhook Testing)
-
-For testing webhooks from external services (Stripe, RunPod, etc.) that need a public HTTPS URL, use Cloudflare Tunnel.
-
-**Why use a tunnel?**
-- Test real webhooks locally (Stripe, RunPod, etc.)
-- Access your dev server from any device
-- Test with HTTPS/SSL locally
-- No need for ngrok or similar services
-
-**Setup:**
-
-The tunnel is pre-configured at `https://local.revelations.studio`:
-
-```bash
-# Tunnel already created with ID: 3bbd7b3c-f529-4b58-9ca2-089004592373
-# DNS already configured: local.revelations.studio → tunnel
-```
-
-**Usage with VSCode Tasks:**
-
-```bash
-# Open Command Palette (Cmd+Shift+P)
-# → "Tasks: Run Task"
-# → "Start Cloudflare Tunnel"
-
-# Or start everything at once:
-# → "Dev: Full Stack" (Docker + Dev Server + Tunnel)
-```
-
-**Or run directly:**
-
-```bash
-cloudflared tunnel --config infrastructure/cloudflare-tunnel/config.yml run codex-local
-```
-
-**Testing Stripe webhooks with tunnel:**
-
-Option 1 - Stripe CLI (simpler):
-```bash
-stripe listen --forward-to http://localhost:5173/api/webhooks/stripe/checkout \
-  --events checkout.session.completed,checkout.session.expired
-```
-
-Option 2 - Cloudflare Tunnel (recommended, tests like production):
-1. Start tunnel (see above)
-2. Visit: `https://local.revelations.studio`
-3. Create test webhooks in Stripe Dashboard:
-   - `https://local.revelations.studio/api/webhooks/stripe/checkout`
-   - `https://local.revelations.studio/api/webhooks/stripe/payment`
-   - etc.
-4. Update `env.dev`:
-   ```bash
-   SITE_URL=https://local.revelations.studio
-   ```
-
-**Tunnel configuration:** `infrastructure/cloudflare-tunnel/config.yml`
-
----
-
-## Monorepo Structure
-
-```
-Codex/
-├── apps/
-│   └── web/                    # SvelteKit (frontend + API routes)
-├── workers/
-│   ├── queue-consumer/         # Cloudflare Worker (queue consumer)
-│   └── webhook-handler/        # Cloudflare Worker (RunPod webhooks)
-├── packages/
-│   ├── shared-types/           # TypeScript types
-│   └── env-config/             # Zod schemas for env validation
-├── infrastructure/
-│   └── docker-compose.dev.yml  # Postgres + Neon proxy
-├── .env.dev                    # Dev environment variables
-├── .env.prod                   # Prod env template
-└── pnpm-workspace.yaml
+# Or specific apps
+pnpm --filter web dev          # SvelteKit
+pnpm --filter auth dev          # Auth worker
+pnpm --filter stripe-webhook-handler dev  # API worker
 ```
 
 ---
 
-## VS Code Setup
+## Preview Environment (Per PR)
 
-**Extensions (`.vscode/extensions.json`):**
+### How It Works
 
-```json
-{
-  "recommendations": [
-    "svelte.svelte-vscode",
-    "dbaeumer.vscode-eslint",
-    "esbenp.prettier-vscode",
-    "drizzle-team.drizzle-vscode",
-    "cloudflare.vscode-cloudflare-workers"
-  ]
-}
-```
+1. Open a pull request
+2. Test workflow creates `pr-{number}` Neon branch
+3. Preview workflow deploys workers with custom domains
+4. PR comment posted with URLs
 
-**Debug config (`.vscode/launch.json`):**
+### Preview URLs
 
-```json
-{
-  "configurations": [
-    {
-      "name": "SvelteKit",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "web", "dev"]
-    }
-  ]
-}
+For PR #8:
+- **Web:** `https://codex-preview-8.revelations.studio`
+- **API:** `https://api-preview-8.revelations.studio`
+- **Auth:** `https://auth-preview-8.revelations.studio`
+
+### Preview Environment Details
+
+- **Database:** Neon branch `pr-{number}` (inherits from production)
+- **Workers:** `codex-web-preview-{PR}`, `auth-worker-preview-{PR}`, `stripe-webhook-handler-preview-{PR}`
+- **DNS:** Automatically created via Cloudflare API
+- **Secrets:** Test mode credentials (Stripe test keys, etc.)
+- **Lifetime:** Deleted when PR closes
+
+### Testing Preview
+
+```bash
+# Check web app
+curl https://codex-preview-8.revelations.studio
+
+# Check API
+curl https://api-preview-8.revelations.studio/health
+
+# Check auth
+curl https://auth-preview-8.revelations.studio/health
 ```
 
 ---
 
-## TypeScript Code Sharing
+## Production Environment
 
-**Path mappings (`tsconfig.json`):**
+### Deployment
 
-```json
-{
-  "compilerOptions": {
-    "paths": {
-      "@codex/shared-types": ["./packages/shared-types/src"],
-      "@codex/env-config": ["./packages/env-config/src"]
-    }
-  }
-}
-```
+Production deploys automatically when PR is merged to `main`:
 
-**Usage:**
+1. Tests pass on `main` branch
+2. Production deployment workflow triggers
+3. DNS verified/created
+4. Builds validated
+5. Migrations applied
+6. Workers deployed with health checks
 
-```typescript
-// In SvelteKit or Workers
-import type { Content, VideoProcessingJob } from '@codex/shared-types';
-import { envSchema } from '@codex/env-config';
+### Production URLs
 
-const env = envSchema.parse(process.env);
+- **Web:** `https://codex.revelations.studio`
+- **API:** `https://api.revelations.studio`
+- **Auth:** `https://auth.revelations.studio`
+
+### Production Environment Details
+
+- **Database:** Neon `production` branch
+- **Workers:** `codex-web-production`, `auth-worker-production`, `stripe-webhook-handler-production`
+- **DNS:** Custom domains managed automatically
+- **Secrets:** Production credentials (set via Wrangler CLI)
+- **Monitoring:** Cloudflare observability enabled
+
+### Accessing Production
+
+```bash
+# View worker logs
+wrangler tail codex-web-production
+wrangler tail auth-worker-production
+wrangler tail stripe-webhook-handler-production
+
+# Check health
+curl https://codex.revelations.studio
+curl https://api.revelations.studio/health
+curl https://auth.revelations.studio/health
 ```
 
 ---
 
-## Deployment
+## Database Management
 
-**Staging (Cloudflare Pages Preview):**
+### Neon Branch Strategy
 
-```bash
-git push origin develop
-# Auto-deploys to *.pages.dev preview URL
-```
+**For Testing:**
+- PR events: `pr-{number}` (created from production)
+- Push events: `push-{branch}-{sha}` (created from production)
+- E2E tests: `pr-{number}-e2e` (separate branch)
 
-**Production:**
+**For Production:**
+- Main branch: `production`
 
-```bash
-git push origin main
-# Auto-deploys to production domain
-```
-
-**Workers:**
-
-```bash
-pnpm --filter queue-consumer deploy
-pnpm --filter webhook-handler deploy
-```
-
-**Environment Variables:**
-Set in Cloudflare Dashboard → Pages → Settings → Environment Variables
-
----
-
-## Database Migrations
+### Migrations
 
 **Local:**
-
 ```bash
-# Generate from schema changes
-pnpm --filter web db:generate
+# Generate migration
+pnpm --filter @codex/database db:gen:drizzle
 
-# Apply
-pnpm --filter web db:migrate
+# Apply migration
+pnpm --filter @codex/database db:migrate
 
-# GUI
-pnpm --filter web db:studio
+# Open Drizzle Studio
+pnpm --filter @codex/database db:studio
 ```
 
-**Production:**
+**Preview (automatic):**
+- Migrations applied to ephemeral branch during tests
+- No manual intervention needed
+
+**Production (automatic):**
+- Migrations applied during production deployment
+- Runs after build validation, before worker deployment
+
+---
+
+## Secrets Management
+
+### GitHub Secrets
+
+Configure in: `Settings → Secrets and variables → Actions → Secrets`
+
+**Cloudflare:**
+- `CLOUDFLARE_API_TOKEN` - Worker deployment
+- `CLOUDFLARE_DNS_API_TOKEN` - DNS management
+- `CLOUDFLARE_ACCOUNT_ID` - Account ID
+- `CLOUDFLARE_ZONE_ID` - Zone ID for revelations.studio
+
+**Neon:**
+- `NEON_API_KEY` - Branch management
+- `NEON_PRODUCTION_URL` - Production database URL
+
+**Application:**
+- `SESSION_SECRET_PRODUCTION`
+- `BETTER_AUTH_SECRET_PRODUCTION`
+- `STRIPE_PRODUCTION_KEY`
+- `STRIPE_PRODUCTION_*_WEBHOOK_SECRET`
+
+### Cloudflare Secrets
+
+Set via Wrangler CLI:
 
 ```bash
-# Option 1: Auto-run during build
-# Add to package.json: "build": "vite build && pnpm db:migrate"
+# Production
+wrangler secret put DATABASE_URL --env production
+wrangler secret put SESSION_SECRET --env production
+wrangler secret put BETTER_AUTH_SECRET --env production
+wrangler secret put STRIPE_SECRET_KEY --env production
 
-# Option 2: Manual before deploy
-export DATABASE_URL=<prod-url>
-pnpm db:migrate
+# List secrets
+wrangler secret list --env production
 ```
-
-**Rollback:**
-Use Neon Point-in-Time Recovery via dashboard.
 
 ---
 
 ## Common Commands
 
+### Development
 ```bash
-# Development
-docker-compose -f infrastructure/docker-compose.dev.yml up -d  # Start DB
-pnpm dev                                                       # Start all
-pnpm dev:web                                                   # SvelteKit only
-pnpm dev:workers                                               # Workers only
+pnpm dev                              # Start all
+pnpm --filter web dev                 # Web app only
+pnpm --filter auth dev                # Auth worker only
+pnpm --filter stripe-webhook-handler dev  # API worker only
+```
 
-# Database
-pnpm db:migrate          # Run migrations
-pnpm db:studio           # Open GUI
-docker-compose down -v   # Reset DB
+### Testing
+```bash
+pnpm test                             # Unit & integration tests
+pnpm test:e2e                         # E2E tests
+pnpm test:watch                       # Watch mode
+```
 
-# Build/Deploy
-pnpm build               # Build all
-pnpm typecheck           # Check types
-pnpm test                # Run tests
+### Database
+```bash
+pnpm --filter @codex/database db:gen:drizzle  # Generate migration
+pnpm --filter @codex/database db:migrate      # Apply migration
+pnpm --filter @codex/database db:studio       # Open studio
+```
 
-# Workers
-wrangler queues send video-processing-queue --body '{...}'  # Test queue
-wrangler tail --env dev                                     # View logs
+### Deployment
+```bash
+# Push to deploy (via CI/CD)
+git push origin main                  # Production
+# Open PR                              # Preview
+
+# Manual deployment
+wrangler deploy --env production      # Deploy worker manually
 ```
 
 ---
 
-## Secrets
+## Environment Variables Summary
 
-Generate:
+### Local (.env.dev)
+- `DATABASE_URL` - Local or Neon dev branch
+- `SESSION_SECRET` - Random string
+- `BETTER_AUTH_SECRET` - Random string
+- `STRIPE_SECRET_KEY` - Test key (sk_test_***)
+- `STRIPE_WEBHOOK_SECRET_*` - Test webhook secrets
 
-```bash
-openssl rand -hex 32  # AUTH_SECRET
-```
+### Preview (set by CI/CD)
+- `DATABASE_URL` - Ephemeral Neon branch
+- `SESSION_SECRET` - Test secret
+- `STRIPE_SECRET_KEY` - Test key
+- `STRIPE_WEBHOOK_SECRET_*` - Test webhook secrets
 
-Storage:
-
-- Local: `.env.dev` (gitignored)
-- Staging/Prod: Cloudflare Pages environment variables
-
-Never commit secrets to git.
+### Production (set via Wrangler)
+- `DATABASE_URL` - Production Neon branch (pooler URL)
+- `SESSION_SECRET` - Production secret
+- `BETTER_AUTH_SECRET` - Production secret
+- `STRIPE_SECRET_KEY` - Live key (sk_live_***)
+- `STRIPE_WEBHOOK_SECRET_*` - Live webhook secrets
 
 ---
 
-## Reference
+## Troubleshooting
 
-**Ports:**
+### Local development issues
 
-- SvelteKit: 5173
-- Postgres: 5432
-- Neon proxy: 4444
+**Database connection fails:**
+```bash
+# Check DATABASE_URL is set
+echo $DATABASE_URL
 
-**Docs:**
-
-- [RunPod Local Testing](https://docs.runpod.io/serverless/development/local-testing)
-- [Miniflare](https://miniflare.dev/)
-- [Cloudflare Workers](https://developers.cloudflare.com/workers/)
-- [Drizzle ORM](https://orm.drizzle.team/)
-
+# Test connection
+psql $DATABASE_URL -c "SELECT 1"
 ```
+
+**Worker not starting:**
+```bash
+# Check wrangler is installed
+wrangler --version
+
+# Check for errors
+pnpm --filter <worker> dev --verbose
+```
+
+### Preview deployment issues
+
+**Artifact not found:**
+- Wait for test workflow to complete
+- Check test workflow logs
+- Ensure artifact retention is set (7 days)
+
+**DNS not resolving:**
+- Check CLOUDFLARE_ZONE_ID is set
+- Verify DNS records in Cloudflare dashboard
+- Wait 1-2 minutes for propagation
+
+### Production issues
+
+See [CI-CD-GUIDE.md#troubleshooting](./CI-CD-GUIDE.md#troubleshooting)
+
+---
+
+## Summary
+
+**Environment Isolation:**
+- ✅ Each PR gets unique database branch
+- ✅ Each PR gets unique workers
+- ✅ Each PR gets unique DNS records
+- ✅ Production is completely isolated
+
+**Automatic Management:**
+- ✅ Neon branches created/deleted automatically
+- ✅ Workers deployed/deleted automatically
+- ✅ DNS records created/deleted automatically
+- ✅ Migrations applied automatically
+
+**For More Information:**
+- [CI-CD-GUIDE.md](./CI-CD-GUIDE.md) - Complete CI/CD reference
+- [CLOUDFLARE-SETUP.md](./CLOUDFLARE-SETUP.md) - Cloudflare configuration
+- [Database-Integration-Tests.md](./Database-Integration-Tests.md) - Database testing
+
+---
+
+**Last Updated:** 2025-11-02
+**Maintained By:** DevOps Team
