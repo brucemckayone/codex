@@ -1,7 +1,10 @@
 // tests/integration.auth.test.ts
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createMiniflareHelper, useMiniflare } from '@codex/test-utils';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const helper = createMiniflareHelper({
   modules: true,
@@ -18,7 +21,7 @@ const {
 
 describe.skip('Auth Worker (integration)', () => {
   beforeEach(async () => {
-    const scriptPath = path.resolve(__dirname, '../dist/index.js'); // built worker
+    const scriptPath = path.resolve(__dirname, 'dist/index.js'); // built worker
     await mfBefore({
       scriptPath,
       modules: true,

@@ -11,10 +11,7 @@
     "moduleResolution": "node",
     "sourceMap": true,
     "esModuleInterop": true,
-    "types": [
-      "@cloudflare/workers-types",
-      "vitest-environment-miniflare/globals"
-    ]
+    "types": ["@cloudflare/workers-types"]
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "test"]
