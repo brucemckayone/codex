@@ -54,7 +54,9 @@ describe('Auth Worker Middleware - Unit Tests', () => {
       const mockContext = {} as Context;
       const mockNext = vi.fn();
 
-      const sequence = (...handlers: (typeof handler1)[]) => {
+      const sequence = (
+        ...handlers: ((c: Context, next: Next) => Promise<Response | void>)[]
+      ) => {
         return async (c: Context, next: Next) => {
           for (const handler of handlers) {
             const response = await handler(c, next);
