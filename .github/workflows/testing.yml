@@ -141,6 +141,10 @@ jobs:
             branch-name.txt
           retention-days: 7 # Keep for workflow_run delays
 
+      # Build packages
+      - name: Build packages
+        run: pnpm build:packages
+
       # Run tests for affected packages
       - name: Run tests for affected packages
         if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}

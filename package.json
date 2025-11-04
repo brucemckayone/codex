@@ -46,9 +46,7 @@
     "test:neon": "DB_METHOD=BRANCH pnpm test",
     "test:neon:watch": "DB_METHOD=BRANCH pnpm test:watch",
     "prepare": "husky",
-    "build:packages": "pnpm -r run build",
-    "build:workers": "pnpm -r run build --filter ./workers/*",
-    "build": "pnpm build:packages && pnpm build:workers"
+    "build:packages": "pnpm -r run build"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",
