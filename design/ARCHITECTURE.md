@@ -9,7 +9,7 @@
                                        │
                     ┌──────────────────┼──────────────────┐
                     │                  │                  │
-         ┌──────────▼──────────┐  ┌────▼─────────┐  ┌───▼──────────────┐
+         ┌──────────▼──────────┐  ┌────▼─────────┐  ┌─────▼────────────┐
          │  Web App (SvelteKit)│  │ Auth Worker  │  │ Webhook Handler  │
          │   (SPA)             │  │ (BetterAuth) │  │ (Stripe)         │
          │                     │  │              │  │                  │
@@ -67,13 +67,13 @@
 User → Web App → Auth Worker → BetterAuth → Neon DB
          ↓
        KV Cache (session)
-       ↓
+         ↓
        Issues JWT
-       ↓
+         ↓
        Web App stores in cookie
-       ↓
+         ↓
        Future requests include JWT
-       ↓
+         ↓
        Auth Worker validates
 ```
 

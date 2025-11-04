@@ -2,7 +2,9 @@
 
 ## Feature Summary
 
-Secure user authentication system using BetterAuth with email/password registration, login, password reset, and role-based access control (Platform Owner and Customer roles for MVP, with extensibility for future Media Owner role).
+Secure user authentication and organization-based authorization using BetterAuth. Supports email/password registration, login, password reset, and multi-role access control. Phase 1 implements single organization with owner/admin/member roles. Architecture is multi-tenant ready for Phase 2+ growth to multiple organizations and creators.
+
+**Long-Term Vision**: See [EVOLUTION.md](./EVOLUTION.md) for complete Phase 1→4 roadmap and architectural decisions.
 
 ## Problem Statement
 
@@ -10,27 +12,32 @@ The platform requires a secure, reliable authentication system that:
 
 - Allows users to create accounts and log in
 - Protects sensitive operations (content management, purchases, admin functions)
-- Differentiates between Platform Owners (admins) and Customers (end users)
+- Differentiates between Platform Owner (system admin), Organization Owner/Admin (staff), and Customers (end users)
 - Handles password recovery securely
-- Maintains session state across requests
+- Maintains session state with organization context
+- Supports inviting team members to organizations
+- Provides foundation for multi-organization expansion (Phase 2+)
 
 Without authentication, the platform cannot:
 
 - Protect admin functionality from unauthorized access
 - Track content purchases and access rights
+- Manage team member permissions
 - Provide personalized user experiences
 - Ensure payment security and user accountability
+- Support multiple organizations with data isolation
 
 ## Goals / Success Criteria
 
 ### Primary Goals
 
 1. **Secure user registration** - Users can create accounts with email/password
-2. **Reliable login** - Users can authenticate and maintain sessions
+2. **Reliable login** - Users can authenticate and maintain sessions with organization context
 3. **Password recovery** - Users can reset forgotten passwords
-4. **Role-based access** - System distinguishes Platform Owner from Customer
-5. **Session management** - Sessions persist across requests and expire appropriately
-6. **Extensible design** - Role system accommodates future Media Owner role (Phase 3)
+4. **Role-based access** - System distinguishes Platform Owner, Organization Owner, Admin, and Customer
+5. **Session management** - Sessions persist across requests, include organization context, and expire appropriately
+6. **Team invitations** - Organization owner can invite staff/creators via email
+7. **Multi-tenant foundation** - Code/schema support multi-organization without Phase 2 migration
 
 ### Success Metrics
 
