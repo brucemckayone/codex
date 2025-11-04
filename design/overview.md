@@ -59,39 +59,75 @@ Complete e-commerce flow for browsing, purchasing, and accessing content and off
 
 The platform serves four distinct user types, each with specific needs and access levels.
 
-## 1. Platform Creator (Developer/Admin)
+## 1. Platform Owner (You - System Owner)
 
-**Role**: System administrator and developer
-**Access**: Full system access, database, configurations, deployments
+**Role**: System administrator
+**Scope**: System-wide
+**Access**: Full system access, all organizations, configurations, deployments
 
-**Description**: The technical owner responsible for platform deployment, maintenance, and system-level configuration.
+**Description**: The developer/owner (you) responsible for platform deployment, maintenance, and system-level configuration. You have access to the entire system and can manage all organizations.
 
-## 2. Platform Owner (Business Owner)
+**Authentication**: `user.role = 'platform_owner'` (platform level)
 
-**Role**: Primary business operator and content creator
-**Access**: Full administrative access to all content, users, and business operations
+**Platform 1 Note**: In Phase 1, there is one organization and you operate it. Phase 2+ allows creating additional organizations.
 
-**Description**: The non-technical business owner who operates the platform day-to-day. They are the primary content creator and main revenue recipient. They need an intuitive interface to manage their entire business without technical knowledge.
+## 2. Organization Owner (Business Owner)
 
-## 3. Media Owners (Guest Creators)
+**Role**: Organization administrator
+**Scope**: Single organization (or multiple in Phase 2+)
+**Access**: Full administrative access to their organization's content, team, users, and business operations
 
-**Role**: Invited content creators
-**Access**: Limited to creating and managing their own content
+**Description**: The non-technical business owner who operates their organization (e.g., yoga studio, coaching business). They manage their entire business without technical knowledge. In Phase 1, you may also be the organization owner.
 
-**Description**: Guest creators or employees invited to contribute content to the platform. They receive payments for their content sales through Stripe Connect, with a revenue split going to the Platform Owner.
+**Authentication**: `user.role = 'customer'` (platform level) + `organization_member.role = 'owner'` (org level)
 
-## 4. Customers (End Users)
+**Phase 2+**: Organization owners can own multiple organizations.
 
-**Role**: Content consumers and service clients
-**Access**: Public content browsing, purchased content access, booking management
+## 3. Organization Admin (Staff)
 
-**Description**: The end consumers who purchase and consume content, attend events, and book services. They represent the core revenue source and should receive the best user experience.
+**Role**: Organization staff with elevated permissions
+**Scope**: Single organization
+**Access**: Content management, team management, customer support, analytics (within their org)
+
+**Description**: Staff members invited to help manage the organization. They can approve content, manage team members, and view analytics, but cannot change organization settings.
+
+**Authentication**: `user.role = 'customer'` (platform level) + `organization_member.role = 'admin'` (org level)
+
+## 4. Creator (Guest Creators - Phase 2+)
+
+**Role**: Content creator
+**Scope**: Multiple organizations (freelancer model)
+**Access**: Create and manage own content, view own earnings, accept organization invitations
+
+**Description**: Freelance creators invited to contribute content to one or more organizations. In Phase 1, they are "members" invited by the organization owner. In Phase 2+, they upgrade to "creator" role and can belong to multiple organizations, receiving payments through Stripe Connect.
+
+**Authentication**: `user.role = 'customer'` (platform level) + `organization_member.role = 'member'` → `'creator'` in Phase 2
+
+## 5. Customers/Subscribers (End Users)
+
+**Role**: Content consumer
+**Scope**: None (purchase from organizations)
+**Access**: Public content browsing, purchased content access, offering registration, booking management
+
+**Description**: End consumers who purchase and consume content, attend events, and book services. They do NOT need to be organization members; they simply purchase content from the platform. They represent the core revenue source and should receive the best user experience.
+
+**Authentication**: `user.role = 'customer'` (platform level) + NO organization membership
+
+## 6. Guests (Unauthenticated)
+
+**Role**: Visitor
+**Scope**: Public content only
+**Access**: Browse public content, view details, proceed to login/register for purchase
+
+**Description**: Unauthenticated visitors browsing the platform. They can see public content but must create an account to purchase.
 
 ---
 
 # Stakeholder Requirements
 
-## 1. Platform Creator Requirements
+**See [Authentication & Authorization - EVOLUTION.md](./features/auth/EVOLUTION.md) for detailed auth architecture and phase evolution.**
+
+## 1. Platform Owner Requirements
 
 ### R1.1 System Administration
 
@@ -687,11 +723,13 @@ From the customer perspective:
 
 ---
 
-## 3. Media Owner Requirements
+## 3. Creator Requirements (Phase 2+)
+
+**Note**: Phase 1 includes creators as "members" in the organization. Phase 2+ upgrades them to "creator" role with freelance capabilities.
 
 ### R3.1 Content Creation
 
-**Requirement**: Upload and manage own content within granted permissions
+**Requirement**: Upload and manage own content within invited organizations
 
 **Capabilities**:
 
@@ -699,12 +737,13 @@ From the customer perspective:
 - Add metadata and organize own content
 - Preview content before submission
 - View content approval status
+- Manage content across multiple organizations
 
-**Success Criteria**: Media Owner can upload content and understand its status (pending/approved/rejected).
+**Success Criteria**: Creator can upload content to their organizations and understand approval status.
 
 ### R3.2 Revenue Tracking
 
-**Requirement**: Track earnings and receive payments transparently
+**Requirement**: Track earnings and receive payments transparently (Phase 2+)
 
 **Capabilities**:
 
@@ -713,10 +752,25 @@ From the customer perspective:
 - Manage Stripe Connect payout settings
 - Download earnings reports
 - View payment history
+- Track earnings across multiple organizations
 
-**Success Criteria**: Media Owner can see exactly how much they've earned and when they'll be paid.
+**Success Criteria**: Creator can see exactly how much they've earned per organization and when they'll be paid.
 
-### R3.3 Profile Management
+### R3.3 Organization Membership
+
+**Requirement**: Belong to and manage relationships with multiple organizations
+
+**Capabilities**:
+
+- Accept invitations from multiple organizations
+- Switch between organizations in dashboard
+- View all organizations they belong to
+- Manage their membership status
+- Leave organizations if needed
+
+**Success Criteria**: Creator can easily manage multiple organizational memberships.
+
+### R3.4 Profile Management
 
 **Requirement**: Maintain professional creator profile
 
@@ -727,19 +781,20 @@ From the customer perspective:
 - Add social media links
 - View public-facing profile page
 
-**Success Criteria**: Media Owner can create a professional presence that customers can discover.
+**Success Criteria**: Creator can create a professional presence that customers can discover.
 
-### R3.4 Limited Analytics
+### R3.5 Limited Analytics
 
-**Requirement**: Understand content performance without full platform access
+**Requirement**: Understand content performance without full organization admin access
 
 **Capabilities**:
 
 - View own content performance (views, purchases)
 - See customer engagement metrics
 - Compare performance across own content
+- View earnings trends
 
-**Success Criteria**: Media Owner can identify their best-performing content.
+**Success Criteria**: Creator can identify their best-performing content and earnings trends.
 
 ---
 

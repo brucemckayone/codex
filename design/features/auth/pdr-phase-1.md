@@ -52,40 +52,75 @@ Without authentication, the platform cannot:
 -  100% pass rate on auth unit tests
 -  Role system supports adding Media Owner role without schema migration
 
+
 ## Scope
+
+**See [EVOLUTION.md](./EVOLUTION.md) for complete Phase 1→4 roadmap and architectural decisions.**
 
 ### In Scope (Phase 1 MVP)
 
--  Email/password registration
--  Email verification (confirm email address) - See [Notifications PRD](../notifications/pdr-phase-1.md) for email abstraction
--  Login with email/password
--  Password reset flow (forgot password) - Uses notification service
--  Session management (BetterAuth handles cookies)
--  Role-based access control (RBAC):
-  - Platform Owner role (`role: 'owner'`)
-  - Customer role (`role: 'customer'`)
-  - Database schema supports `role` enum with space for `'creator'` (Phase 3)
--  Protected route middleware
--  Logout functionality
--  Basic user profile (name, email)
--  Password strength requirements (min 8 chars, complexity)
+**Authentication Core**
+-  Email/password registration
+-  Email verification (confirm email address) - See [Notifications PRD](../notifications/pdr-phase-1.md) for email abstraction
+-  Login with email/password
+-  Password reset flow (forgot password) - Uses notification service
+-  Session management with organization context (BetterAuth + KV caching)
+-  Logout functionality
+-  Basic user profile (name, email)
+-  Password strength requirements (min 8 chars, complexity)
 
-### Explicitly Out of Scope (Future Phases)
+**Authorization & Organization**
+-  Platform-level roles: `platform_owner` (you) or `customer` (everyone else)
+-  Organization-level roles: `owner` (runs org), `admin` (staff), `member` (team members)
+-  Protected route middleware with role-based guards
+-  Team member invitations via email (7-day expiry)
+-  Invitation acceptance flow with secure tokens
+-  Session context includes `activeOrganizationId` (foundation for Phase 2 multi-org)
 
-- L Social login (Google, Facebook, Apple) - Phase 2
-- L Two-factor authentication (2FA) - Phase 2
-- L Magic link authentication - Phase 2
-- L **Media Owner role implementation** - Phase 3 (but schema supports it)
-- L Granular permission system (beyond role) - Phase 3
-- L Account lockout after failed attempts - Phase 2
-- L Session device management (view/revoke sessions) - Phase 2
-- L OAuth provider for third-party apps - Phase 4
+**Database & RLS**
+-  Single organization with members
+-  Organization invitations table
+-  RLS policies designed and documented (enforced Phase 2+)
+-  Schema supports unlimited organizations, creators, custom roles (no Phase 2 migration needed)
+
+### Out of Scope (Future Phases)
+
+**Phase 2+**
+- L Creator role and multi-organization support
+- L Multiple organizations per Platform Owner
+- L Organization switching in UI
+- L Custom membership tiers
+- L Social login (Google, Facebook, Apple)
+- L Two-factor authentication (2FA)
+- L Magic link authentication
+- L Account lockout after failed attempts
+- L Session device management
+
+**Phase 3+**
+- L Granular permission system (beyond role-based)
+- L Custom roles per organization
+- L Advanced delegation
+
+**Phase 4+**
+- L Single Sign-On (SAML/OIDC)
+- L OAuth provider for third-party apps
+- L Audit logging
+- L Enterprise session policies
+- L MFA enforcement
 
 ## Cross-Feature Dependencies
 
 See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#2-auth-authentication--authorization) document for details.
 
+**Key Dependencies for Phase 1:**
+- **Notifications**: Email abstraction for verification, password reset emails
+- **Database**: Neon Postgres with Drizzle ORM
+- **Platform Settings**: Organization branding and contact info
+- **Admin Dashboard**: Uses auth guards and session context
+- **Content Access**: Uses `activeOrganizationId` for scoping
+
 ---
+
 
 ## User Stories & Use Cases
 
