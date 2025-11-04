@@ -5,6 +5,8 @@
  * Designed to be extended with services like Axiom, Baselime, or custom solutions
  */
 
+import { redactSensitiveData, type RedactionOptions } from './redact';
+
 export interface LogEvent {
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
@@ -37,18 +39,36 @@ export interface ErrorContext {
 export class ObservabilityClient {
   private environment: string;
   private serviceName: string;
+  private redactionOptions: RedactionOptions;
 
-  constructor(serviceName: string, environment: string = 'development') {
+  constructor(
+    serviceName: string,
+    environment: string = 'development',
+    redactionOptions?: RedactionOptions
+  ) {
     this.serviceName = serviceName;
     this.environment = environment;
+
+    // Default redaction based on environment
+    this.redactionOptions = redactionOptions ?? {
+      mode: environment === 'production' ? 'mask' : 'mask',
+      redactEmails: environment === 'production',
+      keepChars: environment === 'production' ? undefined : 4,
+    };
   }
 
   /**
    * Log a generic event
    */
   log(event: LogEvent): void {
+    // Redact sensitive data from metadata
+    const safeMetadata = event.metadata
+      ? redactSensitiveData(event.metadata, this.redactionOptions)
+      : undefined;
+
     const logEntry = {
       ...event,
+      metadata: safeMetadata,
       service: this.serviceName,
       environment: this.environment,
       timestamp: event.timestamp.toISOString(),
@@ -211,3 +231,12 @@ export function trackRequestError(
     method: request.method,
   });
 }
+
+// Re-export redaction utilities
+export {
+  redactSensitiveData,
+  redactSensitiveDataAsync,
+  REDACTION_PRESETS,
+  type RedactionOptions,
+  type RedactionMode,
+} from './redact';

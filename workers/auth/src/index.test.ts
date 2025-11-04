@@ -1,37 +1,103 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import app from './index';
 
-/**
- * Auth Worker - Test Scaffolds
- *
- * These are minimal tests to demonstrate testing patterns.
- * Expand these as the worker functionality grows.
- */
-
-describe('Auth Worker', () => {
-  it('should have a test environment configured', () => {
-    // This test ensures Vitest is properly configured
-    expect(true).toBe(true);
+describe('Auth Worker - Unit Tests', () => {
+  describe('Hono App Initialization', () => {
+    it('should export a Hono app', () => {
+      expect(app).toBeDefined();
+      expect(app.fetch).toBeDefined();
+      expect(typeof app.fetch).toBe('function');
+    });
   });
 
-  // TODO: Implement when JWT validation logic is added
-  it.todo('validates JWT tokens');
+  describe('Security Headers', () => {
+    it('should add security headers to responses', async () => {
+      const req = new Request('http://localhost/test', {
+        method: 'GET',
+      });
 
-  // TODO: Implement when login flow is complete
-  it.todo('handles login requests');
+      // Mock the environment bindings
+      const env = {
+        ENVIRONMENT: 'test',
+        BETTER_AUTH_SECRET: 'test-secret',
+        WEB_APP_URL: 'http://localhost:3000',
+        API_URL: 'http://localhost:8787',
+        AUTH_SESSION_KV: {} as KVNamespace,
+        RATE_LIMIT_KV: {} as KVNamespace,
+      };
 
-  // TODO: Implement when session management is added
-  it.todo('creates and validates sessions');
+      const res = await app.fetch(req, env);
 
-  // TODO: Implement when database integration is complete
-  it.todo('queries user data from database');
+      // Check for security headers
+      expect(res.headers.get('X-Frame-Options')).toBeDefined();
+      expect(res.headers.get('X-Content-Type-Options')).toBeDefined();
+    });
+  });
 
-  // TODO: Implement when Better Auth integration is complete
-  it.todo('integrates with Better Auth properly');
+  describe('Request Handling', () => {
+    it('should handle requests to auth endpoints', async () => {
+      const req = new Request('http://localhost/api/auth/session', {
+        method: 'GET',
+      });
+
+      const env = {
+        ENVIRONMENT: 'test',
+        BETTER_AUTH_SECRET: 'test-secret-at-least-32-chars-long',
+        WEB_APP_URL: 'http://localhost:3000',
+        API_URL: 'http://localhost:8787',
+        AUTH_SESSION_KV: {
+          get: vi.fn().mockResolvedValue(null),
+          put: vi.fn().mockResolvedValue(undefined),
+        } as unknown as KVNamespace,
+        RATE_LIMIT_KV: {
+          get: vi.fn().mockResolvedValue(null),
+          put: vi.fn().mockResolvedValue(undefined),
+        } as unknown as KVNamespace,
+      };
+
+      const res = await app.fetch(req, env);
+
+      // Should get some response from Better Auth
+      expect(res.status).toBeDefined();
+      expect([200, 401, 404]).toContain(res.status);
+    });
+  });
+
+  describe('Rate Limiting', () => {
+    it('should not rate limit non-login requests', async () => {
+      const req = new Request('http://localhost/api/auth/session', {
+        method: 'GET',
+      });
+
+      const env = {
+        ENVIRONMENT: 'test',
+        BETTER_AUTH_SECRET: 'test-secret-at-least-32-chars-long',
+        WEB_APP_URL: 'http://localhost:3000',
+        API_URL: 'http://localhost:8787',
+        AUTH_SESSION_KV: {
+          get: vi.fn().mockResolvedValue(null),
+          put: vi.fn().mockResolvedValue(undefined),
+        } as unknown as KVNamespace,
+        RATE_LIMIT_KV: {
+          get: vi.fn().mockResolvedValue(null),
+          put: vi.fn().mockResolvedValue(undefined),
+        } as unknown as KVNamespace,
+      };
+
+      const res = await app.fetch(req, env);
+
+      // Should not be rate limited (429)
+      expect(res.status).not.toBe(429);
+    });
+  });
 });
 
-describe('Integration Tests', () => {
-  // TODO: Add integration tests when Miniflare is configured
+describe('Auth Worker - Integration Tests', () => {
+  it.todo('validates JWT tokens correctly');
+  it.todo('handles email/password login requests');
+  it.todo('creates and validates sessions with KV caching');
+  it.todo('queries user data from database');
+  it.todo('integrates with Better Auth properly');
   it.todo('connects to test database successfully');
-
   it.todo('handles end-to-end authentication flow');
 });

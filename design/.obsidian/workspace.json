@@ -1,0 +1,188 @@
+{
+  "main": {
+    "id": "552267220b62624f",
+    "type": "split",
+    "children": [
+      {
+        "id": "437ae031c87c9754",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "f9e416ad637af1a8",
+            "type": "leaf",
+            "state": {
+              "type": "empty",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "New tab"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "4e021659e382f0c6",
+    "type": "split",
+    "children": [
+      {
+        "id": "608ad784fe7169bd",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0ba8de14df472946",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "052917dabc598244",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "cdc11ab250cce3c6",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "e4291c2507b07b01",
+    "type": "split",
+    "children": [
+      {
+        "id": "c6d790c3c440852e",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "179d57546fd384a8",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "infrastructure/SECURITY.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for SECURITY"
+            }
+          },
+          {
+            "id": "503c67ba34ca46ab",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "infrastructure/SECURITY.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from SECURITY"
+            }
+          },
+          {
+            "id": "2d691eb50406e206",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "fe17cafa4485a811",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "infrastructure/SECURITY.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of SECURITY"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false
+    }
+  },
+  "active": "f9e416ad637af1a8",
+  "lastOpenFiles": [
+    "features/auth/PHASE_1_AUTH_DESIGN.md",
+    "PHASE_1_AUTH_DESIGN.md",
+    "DOCUMENTATION_INDEX.md",
+    "DEVELOPER_GUIDE.md",
+    "CODEBASE_ANALYSIS.md",
+    "ARCHITECTURE.md",
+    "QUICK_REFERENCE.md",
+    "QUICK_START.md",
+    "START_HERE.md",
+    "documentation-index.md",
+    "infrastructure/R2BucketStructure.md",
+    "infrastructure/SECURITY.md",
+    "infrastructure/README.md",
+    "infrastructure/Testing.md",
+    "infrastructure/KV-Namespaces.md",
+    "README_DOCUMENTATION.md",
+    "infrastructure/Database-Integration-Tests.md",
+    "infrastructure/CLOUDFLARE-SETUP.md"
+  ]
+}

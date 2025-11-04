@@ -11,8 +11,12 @@
     "docker:down": "docker-compose -f infrastructure/neon/docker-compose.dev.local.yml down",
     "docker:down:ephemeral": "docker-compose -f infrastructure/neon/docker-compose.dev.ephemeral.yml down",
     "dev:web": "pnpm --filter web dev",
-    "dev:worker": "pnpm --filter queue-consumer dev",
-    "dev": "concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm --filter web dev\" \"pnpm --filter stripe-webhook-handler dev\"",
+    "dev:stripe-webhook-handler": "pnpm --filter stripe-webhook-handler dev",
+    "dev:auth": "pnpm --filter auth dev",
+    "dev": "concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm dev:web\" \"pnpm dev:stripe-webhook-handler\" \"pnpm dev:auth\"",
+    "dev:full": "bash scripts/dev-full-stack.sh",
+    "dev:build": "pnpm build:packages && pnpm build:workers",
+    "dev:clean": "pnpm docker:down && rm -rf node_modules/.cache && rm -rf apps/*/dist && rm -rf workers/*/dist && rm -rf packages/*/dist",
     "stop": "pnpm docker:down",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -41,7 +45,8 @@
     "neon:cleanup": "pnpm --filter @codex/database neon:cleanup",
     "test:neon": "DB_METHOD=BRANCH pnpm test",
     "test:neon:watch": "DB_METHOD=BRANCH pnpm test:watch",
-    "prepare": "husky"
+    "prepare": "husky",
+    "build:packages": "pnpm -r run build"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",
@@ -62,6 +67,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-svelte": "^3.12.5",
     "eslint-plugin-vitest": "^0.5.4",
+    "globals": "^15.9.0",
     "happy-dom": "^20.0.8",
     "husky": "^9.1.7",
     "jsdom": "^27.0.1",
@@ -77,7 +83,8 @@
     "vite": "^6.4.1",
     "vitest": "^4.0.2",
     "wait-on": "^9.0.1",
-    "wrangler": "^4.45.0"
+    "wrangler": "^4.45.0",
+    "@cloudflare/workers-types": "^4.20250129.0"
   },
   "workspaces": [
     "apps/*",

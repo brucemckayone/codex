@@ -1,106 +1,205 @@
-# Testing Strategy - Testing Pyramid
-
-...@../../d2/theme
+# Testing Strategy
+# Codex Platform - Vitest + Playwright + Neon Ephemeral Branches
 
 direction: down
 
-pyramid: Testing Pyramid {
-  style.fill: ${color-volume}
-  style.stroke: ${stroke-volume}
+# Test Types
+tests: {
+  label: "Test Types"
+  style.fill: "#E3F2FD"
+  style.stroke: "#1976D2"
 
-  e2e: E2E Tests {
-    style.fill: ${color-redis}
-    style.stroke: ${stroke-redis}
-
-    playwright: Playwright
-    critical_flows: Critical user flows
-    cost: Slow, high confidence
+  unit: "Unit Tests\n- Business logic\n- Pure functions\n- No database\n- Fast (ms)" {
+    style.fill: "#BBDEFB"
   }
 
-  integration: Integration Tests {
-    style.fill: ${color-r2}
-    style.stroke: ${stroke-r2}
-
-    vitest_int: Vitest
-    api_routes: API routes + DB
-    cost_int: Medium speed
+  integration: "Integration Tests\n- Database operations\n- API endpoints\n- Worker logic\n- Medium (seconds)" {
+    style.fill: "#90CAF9"
   }
 
-  unit: Unit Tests {
-    style.fill: ${color-caddy}
-    style.stroke: ${stroke-caddy}
-
-    vitest_unit: Vitest
-    components: Components, utils, logic
-    workers: Worker tests (Miniflare)
-    cost_unit: Fast, isolated
+  e2e: "E2E Tests\n- Full user flows\n- Browser automation\n- Cross-worker\n- Slow (minutes)" {
+    style.fill: "#64B5F6"
   }
 }
 
-frameworks: Test Frameworks {
-  style.fill: ${color-nextjs}
-  style.stroke: ${stroke-nextjs}
+# Local Testing
+local: {
+  label: "Local Testing"
+  style.fill: "#F5F5F5"
+  style.stroke: "#9E9E9E"
 
-  sveltekit_tests: SvelteKit {
-    style.fill: ${color-nextjs-sub}
-    style.stroke: ${stroke-nextjs-sub}
-    vitest: Vitest + Testing Library
-    supertest: Supertest (API)
+  dev: "Developer" {
+    shape: person
   }
 
-  worker_tests: Workers {
-    style.fill: ${color-go}
-    style.stroke: ${stroke-go}
-    vitest_w: Vitest
-    miniflare: Miniflare (runtime sim)
+  commands: "Commands\n- pnpm test (unit)\n- pnpm test:integration\n- pnpm test:e2e" {
+    style.fill: "#E0E0E0"
   }
 
-  e2e_tests: E2E {
-    style.fill: ${color-go-sub}
-    style.stroke: ${stroke-go-sub}
-    pw: Playwright
-    browsers: Chromium
+  vitest: "Vitest\n- Watch mode\n- Fast feedback\n- Coverage reports" {
+    style.fill: "#BDBDBD"
+  }
+
+  playwright: "Playwright\n- Headless browser\n- UI mode available\n- Visual debugging" {
+    style.fill: "#9E9E9E"
+  }
+
+  dev -> commands: "Run tests"
+  commands -> vitest: "Unit &\nIntegration"
+  commands -> playwright: "E2E tests"
+}
+
+# CI Testing Flow
+ci: {
+  label: "CI Testing Flow\n(testing.yml)"
+  style.fill: "#C8E6C9"
+  style.stroke: "#4CAF50"
+
+  trigger: "Trigger\n- Push to any branch\n- PR open/update" {
+    shape: circle
+    style.fill: "#A5D6A7"
+  }
+
+  setup: "Setup\n1. Checkout code\n2. Install pnpm\n3. Install dependencies\n4. Build packages" {
+    style.fill: "#81C784"
+  }
+
+  neon: "Create Neon Branch\n- Branch: push-{branch}-{sha}\n- Parent: production\n- Ephemeral: true" {
+    style.fill: "#66BB6A"
+  }
+
+  migrate: "Run Migrations\n- drizzle-kit push\n- On ephemeral branch\n- Fresh schema" {
+    style.fill: "#4CAF50"
+  }
+
+  static: "Static Analysis\n- TypeScript (tsc)\n- ESLint\n- Prettier" {
+    style.fill: "#388E3C"
+  }
+
+  unit: "Unit Tests\n- Changed packages only\n- Parallel execution\n- No database needed" {
+    style.fill: "#2E7D32"
+  }
+
+  integration: "Integration Tests\n- With DATABASE_URL\n- Real Neon branch\n- Isolated data" {
+    style.fill: "#1B5E20"
+  }
+
+  e2e: "E2E Tests\n- If web app changed\n- Playwright tests\n- Full user flows" {
+    style.fill: "#33691E"
+  }
+
+  artifact: "Upload Artifact\n- DATABASE_URL\n- For deployment\n- Preview/production" {
+    style.fill: "#827717"
+  }
+
+  cleanup: "Cleanup\n- Delete Neon branch\n- Even on failure\n- Zero cost" {
+    shape: circle
+    style.fill: "#F57C00"
+  }
+
+  trigger -> setup -> neon -> migrate
+  migrate -> static
+  migrate -> unit
+  migrate -> integration
+  static -> artifact
+  unit -> artifact
+  integration -> e2e -> artifact
+  artifact -> cleanup
+}
+
+# Database Testing Pattern
+db_pattern: {
+  label: "Database Testing Pattern"
+  style.fill: "#E1BEE7"
+  style.stroke: "#9C27B0"
+
+  ephemeral: "Ephemeral Branch\npush-{branch}-{sha}" {
+    shape: cylinder
+    style.fill: "#CE93D8"
+  }
+
+  schema: "Schema State\n- From production\n- Apply migrations\n- Fresh data" {
+    style.fill: "#BA68C8"
+  }
+
+  test: "Test Execution\n- Insert test data\n- Run queries\n- Verify results" {
+    style.fill: "#AB47BC"
+  }
+
+  cleanup: "Auto-delete\n- After tests\n- Even on failure\n- No manual cleanup" {
+    shape: circle
+    style.fill: "#9C27B0"
+  }
+
+  ephemeral -> schema: "Migrate"
+  schema -> test: "Test"
+  test -> cleanup: "Delete"
+}
+
+# Test Organization
+organization: {
+  label: "Test Organization"
+  style.fill: "#FFF9C4"
+  style.stroke: "#F9A825"
+
+  structure: "File Structure\npackages/\n  web/\n    src/\n      lib/\n        utils.test.ts ← unit\n    tests/\n      integration/ ← integration\n      e2e/ ← playwright\n  auth/\n    src/\n      lib/\n        auth.test.ts ← unit\n    tests/\n      integration/ ← integration" {
+    style.fill: "#FFF59D"
+  }
+
+  naming: "Naming Convention\n- *.test.ts → unit tests\n- *.integration.test.ts → integration\n- *.spec.ts → e2e (Playwright)" {
+    style.fill: "#FFF176"
+  }
+
+  config: "Configuration\n- vitest.config.ts (unit)\n- vitest.integration.config.ts\n- playwright.config.ts (e2e)" {
+    style.fill: "#FFEE58"
   }
 }
 
-test_db: Test Database {
-  style.fill: ${color-postgres}
-  style.stroke: ${stroke-postgres}
+# Test Data Strategy
+data: {
+  label: "Test Data Strategy"
+  style.fill: "#FFCCBC"
+  style.stroke: "#FF5722"
 
-  docker_test: Docker Compose\n(test.yml)
-  postgres_test: Postgres :5433
-  neon_proxy_test: Neon Proxy :4445
-  tmpfs: In-memory for speed
-}
+  factories: "Factories\n- User factory\n- Subscription factory\n- Payment factory\n- Type-safe builders" {
+    style.fill: "#FFAB91"
+  }
 
-mocks: External Service Mocks {
-  style.fill: ${color-stripe}
-  style.stroke: ${stroke-stripe}
+  fixtures: "Fixtures\n- Playwright fixtures\n- Auth state\n- User sessions\n- Reusable contexts" {
+    style.fill: "#FF8A65"
+  }
 
-  stripe_mock: Stripe (vi.fn) {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
-  }
-  runpod_mock: RunPod (vi.fn) {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
-  }
-  resend_mock: Resend (vi.fn) {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
-  }
-  r2_mock: R2 (Miniflare) {
-    style.fill: ${color-email}
-    style.stroke: ${stroke-email}
+  mocks: "Mocks\n- Stripe webhooks\n- Better Auth\n- External APIs\n- Vitest mocks" {
+    style.fill: "#FF7043"
   }
 }
 
 # Connections
-pyramid.e2e -> frameworks.e2e_tests: {style.stroke: ${arrow-cache}}
-pyramid.integration -> frameworks.sveltekit_tests: {style.stroke: ${arrow-http}}
-pyramid.unit -> frameworks.sveltekit_tests: {style.stroke: ${arrow-http}}
-pyramid.unit -> frameworks.worker_tests: {style.stroke: ${arrow-http}}
+tests.unit -> local.vitest: "Run locally"
+tests.integration -> local.vitest: "Run locally"
+tests.e2e -> local.playwright: "Run locally"
 
-frameworks.sveltekit_tests -> test_db: {style.stroke: ${arrow-sql}}
-frameworks.sveltekit_tests -> mocks: {style.stroke: ${arrow-external}}
-frameworks.worker_tests -> mocks: {style.stroke: ${arrow-external}}
+tests.unit -> ci.unit: "Run in CI"
+tests.integration -> ci.integration: "Run in CI"
+tests.e2e -> ci.e2e: "Run in CI"
+
+ci.integration -> db_pattern.ephemeral: "Uses"
+ci.e2e -> db_pattern.ephemeral: "Uses"
+
+organization.structure -> data.factories: "Import"
+organization.structure -> data.fixtures: "Import"
+organization.structure -> data.mocks: "Import"
+
+# Notes
+notes: {
+  label: "Key Concepts"
+  style.fill: "#B2DFDB"
+  style.stroke: "#00897B"
+
+  note1: "• Every push gets isolated database branch"
+  note2: "• Branches created from production (not from other PRs)"
+  note3: "• Tests run in parallel where possible"
+  note4: "• E2E tests only run when web app changes"
+  note5: "• Ephemeral branches auto-delete after tests"
+  note6: "• Zero cost for testing (serverless, auto-suspend)"
+}

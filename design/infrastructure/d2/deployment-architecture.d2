@@ -1,0 +1,174 @@
+# Production Deployment Architecture
+
+direction: right
+
+title: Production Deployment Pipeline - Cloudflare Workers + Neon {
+  near: top-center
+  shape: text
+  style: {
+    font-size: 24
+    bold: true
+  }
+}
+
+# Git Push
+developer: Developer {
+  shape: person
+}
+
+github: GitHub Repository {
+  main_branch: main branch {
+    shape: cylinder
+  }
+}
+
+# Test Workflow
+test_workflow: Test Workflow {
+  style.fill: "#e3f2fd"
+
+  static_analysis: Static Analysis
+  ephemeral_db: Create Ephemeral\nNeon Branch
+  unit_tests: Unit & Integration\nTests
+  e2e_tests: E2E Tests\n(Playwright)
+  cleanup: Cleanup\nEphemeral Branch
+}
+
+# Production Workflow
+prod_workflow: Production Deployment {
+  style.fill: "#e8f5e9"
+
+  dns_verify: Verify DNS Records
+  build_validate: Build Validation
+  migrations: Database Migrations
+  deploy_api: Deploy API Worker
+  health_api: Health Check\napi.revelations.studio
+  deploy_auth: Deploy Auth Worker
+  health_auth: Health Check\nauth.revelations.studio
+  deploy_web: Deploy Web Worker
+  health_web: Health Check\ncodex.revelations.studio
+
+  success: Deployment\nSuccess ✅ {
+    shape: hexagon
+    style.fill: "#4caf50"
+  }
+
+  failure: Deployment\nFailure ❌ {
+    shape: hexagon
+    style.fill: "#f44336"
+  }
+}
+
+# Cloudflare Infrastructure
+cloudflare: Cloudflare {
+  style.fill: "#fff3e0"
+
+  dns: DNS Manager {
+    dns_codex: codex.revelations.studio\nCNAME → revelations.studio
+    dns_auth: auth.revelations.studio\nCNAME → revelations.studio
+    dns_api: api.revelations.studio\nCNAME → revelations.studio
+  }
+
+  workers: Workers Runtime {
+    worker_web: codex-web-production
+    worker_auth: auth-worker-production
+    worker_api: stripe-webhook-handler-production
+  }
+
+  ssl: SSL Certificates\n(Auto-provisioned)
+}
+
+# Neon Database
+neon: Neon Database {
+  style.fill: "#f3e5f5"
+
+  production_branch: Production Branch {
+    shape: cylinder
+  }
+
+  pooler: Connection Pooler\n(Serverless-optimized)
+  pitr: Point-in-Time Recovery\n(30 min rollback)
+}
+
+# Connections
+developer -> github.main_branch: git push origin main
+
+github.main_branch -> test_workflow.static_analysis: Trigger test workflow
+
+test_workflow.static_analysis -> test_workflow.ephemeral_db
+test_workflow.ephemeral_db -> test_workflow.unit_tests
+test_workflow.unit_tests -> test_workflow.e2e_tests
+test_workflow.e2e_tests -> test_workflow.cleanup
+
+test_workflow.cleanup -> prod_workflow.dns_verify: On success,\ntrigger production {
+  style.stroke-dash: 3
+}
+
+prod_workflow.dns_verify -> cloudflare.dns: Verify/Create records
+cloudflare.dns -> prod_workflow.dns_verify
+
+prod_workflow.dns_verify -> prod_workflow.build_validate
+prod_workflow.build_validate -> prod_workflow.migrations
+prod_workflow.migrations -> neon.production_branch: Apply migrations
+
+prod_workflow.migrations -> prod_workflow.deploy_api
+prod_workflow.deploy_api -> cloudflare.workers.worker_api: Deploy code
+prod_workflow.deploy_api -> prod_workflow.health_api
+prod_workflow.health_api -> prod_workflow.deploy_auth: HTTP 200 OK
+
+prod_workflow.deploy_auth -> cloudflare.workers.worker_auth
+prod_workflow.deploy_auth -> prod_workflow.health_auth
+prod_workflow.health_auth -> prod_workflow.deploy_web: HTTP 200 OK
+
+prod_workflow.deploy_web -> cloudflare.workers.worker_web
+prod_workflow.deploy_web -> prod_workflow.health_web
+prod_workflow.health_web -> prod_workflow.success: HTTP 200 OK
+
+prod_workflow.health_api -> prod_workflow.failure: Timeout/Error {
+  style.stroke: "#f44336"
+  style.stroke-dash: 3
+}
+prod_workflow.health_auth -> prod_workflow.failure: Timeout/Error {
+  style.stroke: "#f44336"
+  style.stroke-dash: 3
+}
+prod_workflow.health_web -> prod_workflow.failure: Timeout/Error {
+  style.stroke: "#f44336"
+  style.stroke-dash: 3
+}
+
+# Worker to Database connections
+cloudflare.workers.worker_web -> neon.pooler: DATABASE_URL secret
+cloudflare.workers.worker_auth -> neon.pooler: DATABASE_URL secret
+cloudflare.workers.worker_api -> neon.pooler: DATABASE_URL secret
+
+neon.pooler -> neon.production_branch
+
+# SSL connections
+cloudflare.ssl -> cloudflare.dns: Auto-provision for\ncustom domains
+cloudflare.workers -> cloudflare.ssl: Use for HTTPS
+
+# Ephemeral DB for tests
+test_workflow.ephemeral_db -> neon: Create branch from production {
+  style.stroke-dash: 3
+}
+test_workflow.cleanup -> neon: Delete ephemeral branch {
+  style.stroke-dash: 3
+}
+
+# Rollback option
+prod_workflow.failure -> neon.pitr: Manual rollback\n(if needed) {
+  style.stroke: "#ff9800"
+  style.stroke-dash: 3
+}
+prod_workflow.failure -> cloudflare.workers: Wrangler rollback\n(if needed) {
+  style.stroke: "#ff9800"
+  style.stroke-dash: 3
+}
+
+# Production traffic
+internet: Internet Users {
+  shape: cloud
+}
+
+internet -> cloudflare.dns: HTTPS requests
+cloudflare.dns -> cloudflare.workers: Route to worker

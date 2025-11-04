@@ -12,6 +12,7 @@ export default defineConfig({
       'packages/cloudflare-clients',
       'packages/test-utils',
       'packages/observability',
+      'packages/security',
 
       // Workers (uncomment when ready)
       'workers/auth',

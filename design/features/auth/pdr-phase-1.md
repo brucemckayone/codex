@@ -2,7 +2,9 @@
 
 ## Feature Summary
 
-Secure user authentication system using BetterAuth with email/password registration, login, password reset, and role-based access control (Platform Owner and Customer roles for MVP, with extensibility for future Media Owner role).
+Secure user authentication and organization-based authorization using BetterAuth. Supports email/password registration, login, password reset, and multi-role access control. Phase 1 implements single organization with owner/admin/member roles. Architecture is multi-tenant ready for Phase 2+ growth to multiple organizations and creators.
+
+**Long-Term Vision**: See [EVOLUTION.md](./EVOLUTION.md) for complete Phase 1→4 roadmap and architectural decisions.
 
 ## Problem Statement
 
@@ -10,27 +12,32 @@ The platform requires a secure, reliable authentication system that:
 
 - Allows users to create accounts and log in
 - Protects sensitive operations (content management, purchases, admin functions)
-- Differentiates between Platform Owners (admins) and Customers (end users)
+- Differentiates between Platform Owner (system admin), Organization Owner/Admin (staff), and Customers (end users)
 - Handles password recovery securely
-- Maintains session state across requests
+- Maintains session state with organization context
+- Supports inviting team members to organizations
+- Provides foundation for multi-organization expansion (Phase 2+)
 
 Without authentication, the platform cannot:
 
 - Protect admin functionality from unauthorized access
 - Track content purchases and access rights
+- Manage team member permissions
 - Provide personalized user experiences
 - Ensure payment security and user accountability
+- Support multiple organizations with data isolation
 
 ## Goals / Success Criteria
 
 ### Primary Goals
 
 1. **Secure user registration** - Users can create accounts with email/password
-2. **Reliable login** - Users can authenticate and maintain sessions
+2. **Reliable login** - Users can authenticate and maintain sessions with organization context
 3. **Password recovery** - Users can reset forgotten passwords
-4. **Role-based access** - System distinguishes Platform Owner from Customer
-5. **Session management** - Sessions persist across requests and expire appropriately
-6. **Extensible design** - Role system accommodates future Media Owner role (Phase 3)
+4. **Role-based access** - System distinguishes Platform Owner, Organization Owner, Admin, and Customer
+5. **Session management** - Sessions persist across requests, include organization context, and expire appropriately
+6. **Team invitations** - Organization owner can invite staff/creators via email
+7. **Multi-tenant foundation** - Code/schema support multi-organization without Phase 2 migration
 
 ### Success Metrics
 
@@ -45,40 +52,75 @@ Without authentication, the platform cannot:
 -  100% pass rate on auth unit tests
 -  Role system supports adding Media Owner role without schema migration
 
+
 ## Scope
+
+**See [EVOLUTION.md](./EVOLUTION.md) for complete Phase 1→4 roadmap and architectural decisions.**
 
 ### In Scope (Phase 1 MVP)
 
--  Email/password registration
--  Email verification (confirm email address) - See [Notifications PRD](../notifications/pdr-phase-1.md) for email abstraction
--  Login with email/password
--  Password reset flow (forgot password) - Uses notification service
--  Session management (BetterAuth handles cookies)
--  Role-based access control (RBAC):
-  - Platform Owner role (`role: 'owner'`)
-  - Customer role (`role: 'customer'`)
-  - Database schema supports `role` enum with space for `'creator'` (Phase 3)
--  Protected route middleware
--  Logout functionality
--  Basic user profile (name, email)
--  Password strength requirements (min 8 chars, complexity)
+**Authentication Core**
+-  Email/password registration
+-  Email verification (confirm email address) - See [Notifications PRD](../notifications/pdr-phase-1.md) for email abstraction
+-  Login with email/password
+-  Password reset flow (forgot password) - Uses notification service
+-  Session management with organization context (BetterAuth + KV caching)
+-  Logout functionality
+-  Basic user profile (name, email)
+-  Password strength requirements (min 8 chars, complexity)
 
-### Explicitly Out of Scope (Future Phases)
+**Authorization & Organization**
+-  Platform-level roles: `platform_owner` (you) or `customer` (everyone else)
+-  Organization-level roles: `owner` (runs org), `admin` (staff), `member` (team members)
+-  Protected route middleware with role-based guards
+-  Team member invitations via email (7-day expiry)
+-  Invitation acceptance flow with secure tokens
+-  Session context includes `activeOrganizationId` (foundation for Phase 2 multi-org)
 
-- L Social login (Google, Facebook, Apple) - Phase 2
-- L Two-factor authentication (2FA) - Phase 2
-- L Magic link authentication - Phase 2
-- L **Media Owner role implementation** - Phase 3 (but schema supports it)
-- L Granular permission system (beyond role) - Phase 3
-- L Account lockout after failed attempts - Phase 2
-- L Session device management (view/revoke sessions) - Phase 2
-- L OAuth provider for third-party apps - Phase 4
+**Database & RLS**
+-  Single organization with members
+-  Organization invitations table
+-  RLS policies designed and documented (enforced Phase 2+)
+-  Schema supports unlimited organizations, creators, custom roles (no Phase 2 migration needed)
+
+### Out of Scope (Future Phases)
+
+**Phase 2+**
+- L Creator role and multi-organization support
+- L Multiple organizations per Platform Owner
+- L Organization switching in UI
+- L Custom membership tiers
+- L Social login (Google, Facebook, Apple)
+- L Two-factor authentication (2FA)
+- L Magic link authentication
+- L Account lockout after failed attempts
+- L Session device management
+
+**Phase 3+**
+- L Granular permission system (beyond role-based)
+- L Custom roles per organization
+- L Advanced delegation
+
+**Phase 4+**
+- L Single Sign-On (SAML/OIDC)
+- L OAuth provider for third-party apps
+- L Audit logging
+- L Enterprise session policies
+- L MFA enforcement
 
 ## Cross-Feature Dependencies
 
 See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencies.md#2-auth-authentication--authorization) document for details.
 
+**Key Dependencies for Phase 1:**
+- **Notifications**: Email abstraction for verification, password reset emails
+- **Database**: Neon Postgres with Drizzle ORM
+- **Platform Settings**: Organization branding and contact info
+- **Admin Dashboard**: Uses auth guards and session context
+- **Content Access**: Uses `activeOrganizationId` for scoping
+
 ---
+
 
 ## User Stories & Use Cases
 

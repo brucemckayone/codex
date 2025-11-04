@@ -17,6 +17,8 @@ Codex/
 │   ├── database/               # Shared database schema & client
 │   ├── validation/             # Shared Zod schemas
 │   ├── cloudflare-clients/     # Shared Cloudflare service clients (R2, KV)
+│   ├── security/               # Shared security utilities
+│   ├── observability/          # Shared observability clients
 │   └── test-utils/             # Shared testing utilities
 ├── scripts/                    # Build & deployment scripts
 └── infrastructure/             # Docker Compose, etc.
@@ -27,6 +29,8 @@ Codex/
 - **`packages/database`**: Single source of truth for database schema (Drizzle) and the database client.
 - **`packages/validation`**: Shared Zod schemas for type-safe validation across the stack.
 - **`packages/cloudflare-clients`**: Framework-agnostic clients for interacting with Cloudflare services like R2 and KV.
+- **`packages/security`**: Shared security utilities for Cloudflare Workers (rate limiting, headers, etc.).
+- **`packages/observability`**: Shared clients for structured logging and request metrics.
 - **`packages/test-utils`**: Shared testing utilities, including helpers for Miniflare.
 
 ## SvelteKit App Structure (apps/web)

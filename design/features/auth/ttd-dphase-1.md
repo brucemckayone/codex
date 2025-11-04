@@ -1,20 +1,29 @@
 # Authentication & Authorization - Phase 1 TDD (Technical Design Document)
 
+**See [EVOLUTION.md](./EVOLUTION.md) for complete architecture vision and Phase 1→4 roadmap.**
+**See [PHASE_1_AUTH_DESIGN.md](../../PHASE_1_AUTH_DESIGN.md) for detailed implementation guide.**
+
 ## System Overview
 
-The authentication system provides secure user identity management using BetterAuth library with:
+Phase 1 authentication provides secure user identity management and organization-based authorization using BetterAuth with:
 
-- **Primary Storage**: Neon Postgres (user accounts, sessions)
-- **Session Caching**: Cloudflare KV (high-performance session lookups)
+- **Primary Storage**: Neon Postgres (users, sessions, organization members, invitations)
+- **Session Caching**: Cloudflare KV (high-performance session lookups with organization context)
 - **Email Delivery**: Notification service abstraction (see [Notifications TDD](../notifications/ttd-dphase-1.md))
+- **Authorization**: BetterAuth organization plugin + custom guards + RLS policies (prepared)
 
-**Architecture**: BetterAuth handles authentication logic, Drizzle ORM manages database schema, Cloudflare KV caches sessions to avoid database queries on every request.
+**Architecture Principles**:
+- BetterAuth handles authentication (login, register, password reset)
+- Custom organization module manages teams and invitations
+- Session includes `activeOrganizationId` for organization context
+- RLS policies designed for Phase 2+ multi-tenant enforcement
+- Drizzle ORM manages database schema with future-proof design
 
 **Architecture Diagram**:
 
 ![Auth System Architecture](./assets/auth-architecture.png)
 
-The diagram illustrates the complete authentication flow including BetterAuth integration, session caching in Cloudflare KV, and the dual-storage strategy (Postgres + KV).
+The diagram illustrates the complete authentication flow including BetterAuth integration, session caching in Cloudflare KV, organization context in sessions, and the foundation for Phase 2+ multi-tenancy.
 
 ---
 

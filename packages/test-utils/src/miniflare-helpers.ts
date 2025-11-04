@@ -16,8 +16,8 @@ type MiniflareD1Database = any;
 type MiniflareR2Bucket = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MiniflareQueue<_Body = any> = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type MiniflareWorker = any;
+
+type MiniflareWorker = ReturnType<Miniflare['getWorker']>;
 
 /**
  * Helper class for managing Miniflare instances in integration tests.

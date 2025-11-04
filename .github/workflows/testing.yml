@@ -112,13 +112,17 @@ jobs:
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
-        run: pnpm --filter @codex/database db:gen:drizzle
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
-        run: pnpm --filter @codex/database db:migrate
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:migrate
 
       # Save DATABASE_URL for preview deployments
       - name: Save Neon connection details to artifact
@@ -135,7 +139,11 @@ jobs:
             database-url.txt
             branch-id.txt
             branch-name.txt
-          retention-days: 7 # Increased from 1 to handle workflow_run delays
+          retention-days: 7 # Keep for workflow_run delays
+
+      # Build packages
+      - name: Build packages
+        run: pnpm build:packages
 
       # Run tests for affected packages
       - name: Run tests for affected packages
@@ -144,6 +152,7 @@ jobs:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
         run: |
+          echo "::add-mask::$DATABASE_URL"
           if [[ "${{ needs.changes.outputs.database }}" == "true" ]]; then pnpm --filter @codex/database test; fi
           if [[ "${{ needs.changes.outputs.validation }}" == "true" ]]; then pnpm --filter @codex/validation test; fi
           if [[ "${{ needs.changes.outputs.cloudflare-clients }}" == "true" ]]; then pnpm --filter @codex/cloudflare-clients test; fi
@@ -206,17 +215,23 @@ jobs:
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
-        run: pnpm --filter @codex/database db:gen:drizzle
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
-        run: pnpm --filter @codex/database db:migrate
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:migrate
 
       # Build SvelteKit for Cloudflare Workers
       - name: Build SvelteKit app
-        run: pnpm --filter web build
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter web build
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
@@ -227,6 +242,7 @@ jobs:
 
       - name: Start Wrangler dev server in background
         run: |
+          echo "::add-mask::$DATABASE_URL"
           cd apps/web
           pnpm wrangler dev --port 8787 --local &
           echo $! > wrangler.pid
@@ -240,7 +256,9 @@ jobs:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
           PLAYWRIGHT_BASE_URL: http://localhost:8787
-        run: pnpm test:e2e
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm test:e2e
 
       - name: Stop Wrangler dev server
         if: always()

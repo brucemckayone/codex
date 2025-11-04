@@ -4,7 +4,7 @@
     "outDir": "dist",
     "module": "esnext",
     "target": "esnext",
-    "lib": ["esnext"],
+    "lib": ["ESNext", "WebWorker"],
     "alwaysStrict": true,
     "strict": true,
     "preserveConstEnums": true,

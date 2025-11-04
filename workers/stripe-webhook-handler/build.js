@@ -6,8 +6,8 @@ esbuild
     entryPoints: ['src/index.ts'],
     bundle: true,
     outfile: 'dist/index.js',
-    platform: 'node',
-    target: 'node20',
+    platform: 'neutral',
+    target: 'esnext',
     format: 'esm',
     plugins: [nodeExternalsPlugin()],
   })

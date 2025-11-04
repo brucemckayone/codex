@@ -1,25 +1,74 @@
-# Cloudflare Workers OpenAPI 3.1
+# Stripe Webhook Handler
 
-This is a Cloudflare Worker with OpenAPI 3.1 using [chanfana](https://github.com/cloudflare/chanfana) and [Hono](https://github.com/honojs/hono).
+Cloudflare Worker for handling Stripe webhooks with signature verification and event routing.
 
-This is an example project made to be used as a quick start into building OpenAPI compliant Workers that generates the
-`openapi.json` schema automatically from code and validates the incoming request to the defined parameters or request body.
+## Architecture
 
-## Get started
+This worker handles webhooks from Stripe across 6 specialized endpoints:
 
-1. Sign up for [Cloudflare Workers](https://workers.dev). The free tier is more than enough for most use cases.
-2. Clone this project and install dependencies with `npm install`
-3. Run `wrangler login` to login to your Cloudflare account in wrangler
-4. Run `wrangler deploy` to publish the API to Cloudflare Workers
+| Endpoint | Events | Purpose |
+|----------|--------|---------|
+| `/webhooks/stripe/payment` | `payment_intent.*`, `charge.*` | Payment processing |
+| `/webhooks/stripe/subscription` | `customer.subscription.*`, `invoice.*` | Subscription lifecycle |
+| `/webhooks/stripe/connect` | `account.*`, `capability.*`, `person.*` | Stripe Connect |
+| `/webhooks/stripe/customer` | `customer.*` | Customer management |
+| `/webhooks/stripe/booking` | `checkout.session.*` | Booking deposits |
+| `/webhooks/stripe/dispute` | `charge.dispute.*`, `radar.early_fraud_warning.*` | Chargebacks & fraud |
 
-## Project structure
+## Quick Start
 
-1. Your main router is defined in `src/index.ts`.
-2. Each endpoint has its own file in `src/endpoints/`.
-3. For more information read the [chanfana documentation](https://chanfana.pages.dev/) and [Hono documentation](https://hono.dev/docs).
+```bash
+# Install dependencies
+pnpm install
 
-## Development
+# Set up secrets (staging)
+echo "sk_test_your_key" | wrangler secret put STRIPE_SECRET_KEY --env staging
+# ... set other secrets (see Setup section)
 
-1. Run `wrangler dev` to start a local instance of the API.
-2. Open `http://localhost:8787/` in your browser to see the Swagger interface where you can try the endpoints.
-3. Changes made in the `src/` folder will automatically trigger the server to reload, you only need to refresh the Swagger interface.
+# Build and deploy
+pnpm build && wrangler deploy --env staging
+```
+
+## Project Structure
+
+```
+src/
+├── index.ts                    # Main worker with all routes
+├── middleware/
+│   └── verify-signature.ts     # Stripe signature verification
+├── schemas/                    # Metadata validation schemas (to be defined)
+│   ├── payment.ts
+│   ├── subscription.ts
+│   ├── booking.ts
+│   ├── customer.ts
+│   ├── connect.ts
+│   └── dispute.ts
+└── utils/
+    └── metadata.ts             # Generic metadata validation utilities
+```
+
+## Documentation
+
+- **[Stripe Webhook Setup Guide](./STRIPE_WEBHOOK_SETUP.md)** - Complete setup instructions
+- **[Security Plan](../../design/infrastructure/SECURITY.md)** - Security implementation details
+
+## Key Features
+
+✅ Signature verification on all endpoints
+✅ Separate webhook secrets per endpoint type
+✅ Rate limiting and security headers
+✅ Type-safe metadata validation with Zod
+✅ Comprehensive logging with PII redaction
+
+## Testing
+
+```bash
+# Local development
+pnpm dev
+
+# Forward webhooks (separate terminal)
+stripe listen --forward-to http://localhost:8787/webhooks/stripe/payment
+
+# Trigger test event
+stripe trigger payment_intent.succeeded
+```

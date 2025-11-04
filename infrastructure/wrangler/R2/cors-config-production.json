@@ -1,0 +1,11 @@
+[
+  {
+    "AllowedOrigins": [
+      "https://codex-3x3.pages.dev// this is currently just a copy and does not update as we go. we will have to integrate this into our CI/CD TODO:: integrate cors policy push for CI CD. will have to set up a bucket for testing also... PUT https://api.cloudflare.com/client/v4/accounts/abc123/r2/buckets/my-bucket/corsAuthorization: Bearer YOUR_TOKENContent-Type: application/json so on merge to main ensure file is as such on preview build ensure we",
+      "https://revelations.studio"
+    ],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }
+]
