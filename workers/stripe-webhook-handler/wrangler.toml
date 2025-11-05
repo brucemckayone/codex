@@ -21,12 +21,9 @@ ENVIRONMENT = "production"
 WEB_APP_URL = "https://codex.revelations.studio"
 AUTH_WORKER_URL = "https://auth.revelations.studio"
 
+# Custom domain (handles all traffic for api.revelations.studio)
 [[env.production.routes]]
-pattern = "api.revelations.studio/webhooks/stripe/*"
-custom_domain = true
-
-[[env.production.routes]]
-pattern = "api.revelations.studio/health"
+pattern = "api.revelations.studio/*"
 custom_domain = true
 
 # Staging environment
@@ -38,12 +35,9 @@ ENVIRONMENT = "staging"
 WEB_APP_URL = "https://codex-staging.revelations.studio"
 AUTH_WORKER_URL = "https://auth-staging.revelations.studio"
 
+# Custom domain (handles all traffic for api-staging.revelations.studio)
 [[env.staging.routes]]
-pattern = "api-staging.revelations.studio/webhooks/stripe/*"
-custom_domain = true
-
-[[env.staging.routes]]
-pattern = "api-staging.revelations.studio/health"
+pattern = "api-staging.revelations.studio/*"
 custom_domain = true
 
 # Note: Secrets to be set via wrangler CLI or CI/CD:
