@@ -11,23 +11,28 @@
 
 ### Design Philosophy
 
-1. **Build for multi-tenant from day one** - Phase 1 uses single org, but schema/code supports unlimited orgs without migration
-2. **Database-enforced isolation** - Row-level security (RLS) policies prevent data leaks between organizations
-3. **Clear role hierarchy** - Roles are scoped to platform level or organization level, never mixed
-4. **Creator flexibility** - Creators can belong to multiple organizations (Phase 2+)
-5. **Customer anonymity** - Customers don't need organization membership; they just purchase content
-6. **Security-first defaults** - Guards, RLS, and signed URLs all work together
+This feature follows Codex's multi-tenant architecture principles. See [Multi-Tenant Architecture](/design/core/MULTI_TENANT_ARCHITECTURE.md) for complete multi-tenant design patterns and philosophy.
+
+**Auth-Specific Principles:**
+1. **Clear role hierarchy** - Dual-tier system: platform-level roles (user.role) and organization-level roles (organization_member.role)
+2. **Creator flexibility** - Creators can belong to multiple organizations (Phase 2+)
+3. **Customer anonymity** - Customers don't need organization membership; they just purchase content
+4. **Security-first defaults** - Multi-layer protection: Guards (Layer 1) + RLS (Layer 2) + Query Scoping (Layer 3)
 
 ### User Types (Universal Across All Phases)
 
-| User Type | Introduced | Scope | Belongs To | Key Trait |
-|-----------|-----------|-------|-----------|-----------|
-| **Platform Owner** | Phase 1 | System-wide | Single org (Phase 1) or multiple orgs (Phase 2+) | Super admin, full access |
-| **Organization Owner** | Phase 1 | Organization | One or more organizations | Owns/operates organization, manages team |
-| **Organization Admin** | Phase 1 | Organization | One or more organizations | Staff with elevated perms, manages content approval |
-| **Creator** | Phase 2 | Organization | Multiple organizations possible | Freelancer, uploads content, belongs to 1+ orgs |
-| **Customer** | Phase 1 | None (purchases from orgs) | Not a member, just purchases | Browses, purchases, subscribes |
-| **Guest** | Phase 1 | Public only | None | Unauthenticated visitor |
+Codex uses a **dual-tier role system**:
+- **Platform-level roles**: Stored in `user.role` - determines system-wide permissions (`platform_owner` or `customer`)
+- **Organization-level roles**: Stored in `organization_member.role` - determines permissions within a specific organization (`owner`, `admin`, `member`, `creator`)
+
+**Key User Types in Auth Context:**
+- **Platform Owner**: Super admin with system-wide access, can create organizations
+- **Organization Owner/Admin**: Manages organization, team members, and content
+- **Creator**: Content creator who can belong to multiple organizations (Phase 2+)
+- **Customer**: Purchases content but isn't an organization member
+- **Guest**: Unauthenticated visitor with public-only access
+
+For complete user type definitions, role hierarchy, and permission matrix, see [Multi-Tenant Architecture - User Types & Roles](/design/core/MULTI_TENANT_ARCHITECTURE.md#user-types--roles).
 
 ---
 
@@ -74,11 +79,14 @@ organization (1 for Phase 1)
 ```
 
 **Session Context**
+
+Sessions include organization context for multi-tenant operations. See [Multi-Tenant Architecture - Session Context Pattern](/design/core/MULTI_TENANT_ARCHITECTURE.md#session-context-pattern) for complete session lifecycle and management patterns.
+
 ```typescript
 {
   userId: string;
   userRole: 'platform_owner' | 'customer';
-  activeOrganizationId?: string; // Set if user is org member
+  activeOrganizationId?: string; // Set if user is org member (required Phase 2+)
   organizationRole?: 'owner' | 'admin' | 'member';
 }
 ```
@@ -93,13 +101,14 @@ organization (1 for Phase 1)
 
 #### Phase 1 Guard Functions
 
-```typescript
-require.auth(event)                    // Authenticated user
-require.owner(event)                   // Organization owner only
-require.admin(event)                   // Admin or owner
-require.member(event)                  // Any org member
-require.platformOwner(event)           // System admin only
-```
+Application guards provide Layer 1 route protection. For complete guard implementations, patterns, and best practices, see [Access Control Patterns - Layer 1: Application Guards](/design/core/ACCESS_CONTROL_PATTERNS.md#layer-1-application-guards).
+
+**Phase 1 Guards:**
+- `requireAuth(event)` - Authenticated user
+- `requireOwner(event)` - Platform Owner only (system admin)
+- `requireCreatorAccess(event)` - Owner or Creator (Phase 2+ ready)
+
+Note: Organization-specific guards (`requireOrganizationMember`, `requireOrganizationRole`) are Phase 2+ additions when multi-org is enabled.
 
 ---
 
@@ -140,19 +149,12 @@ require.platformOwner(event)           // System admin only
 
 #### Phase 2 Guard Functions
 
-```typescript
-// Phase 1 guards still work
-require.auth(event)
-require.owner(event)
-require.admin(event)
-require.member(event)
-require.platformOwner(event)
+Phase 2 adds organization-specific guards for multi-tenant operations. See [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md#layer-1-application-guards) for implementations.
 
-// New Phase 2 guards
-require.creator(event)                 // Creator role specifically
-require.role(['owner', 'admin'], event)  // Array-based role check
-require.organizationAccess(orgId, event)   // Check user can access org
-```
+**Phase 2 Additions:**
+- `requireOrganizationMember(event, orgId)` - Verify user belongs to organization
+- `requireOrganizationRole(event, orgId, role)` - Require specific role within organization
+- Array-based role checks for flexible authorization
 
 #### Phase 2 Session Context
 
@@ -388,39 +390,16 @@ CREATE TABLE session_policy (
 
 ### RLS Policies (Phase 2+)
 
-```sql
--- Organization members: Only members of same org can see
-ALTER TABLE organization_member ENABLE ROW LEVEL SECURITY;
+Row-Level Security provides database-enforced multi-tenant isolation (Layer 2 of defense-in-depth). RLS policies are designed in Phase 1 but enforced starting Phase 2.
 
-CREATE POLICY org_member_view ON organization_member
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM organization_member AS om
-      WHERE om.organizationId = organization_member.organizationId
-      AND om.userId = current_user_id()
-    )
-  );
+For complete RLS policy patterns, helper functions, and implementation examples, see:
+- [Multi-Tenant Architecture - Row-Level Security](/design/core/MULTI_TENANT_ARCHITECTURE.md#row-level-security-rls)
+- [Access Control Patterns - Layer 2: Database RLS](/design/core/ACCESS_CONTROL_PATTERNS.md#layer-2-database-rls)
 
--- Organization invitations: Only admins of org can see
-ALTER TABLE organization_invitation ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY org_invitation_admin_view ON organization_invitation
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM organization_member
-      WHERE organizationId = organization_invitation.organizationId
-      AND userId = current_user_id()
-      AND role IN ('owner', 'admin')
-    )
-  );
-
--- User can accept invitation sent to their email
-CREATE POLICY org_invitation_self_accept ON organization_invitation
-  FOR UPDATE USING (
-    email = current_user_email()
-    AND acceptedAt IS NULL
-  );
-```
+**Key RLS Patterns for Auth Tables:**
+- Organization members: Users can only see members of organizations they belong to
+- Organization invitations: Only owners/admins can manage invitations
+- Self-service: Users can accept invitations sent to their email
 
 ---
 
@@ -511,11 +490,12 @@ require.organizationAccess(orgId, event)  // Can access specific org
 
 ### Phase 3+ Additions
 
-```typescript
-require.permission('upload_content', event)  // Permission-based
-require.permission(['upload_content', 'approve_content'], event)
-require.policyCompliant(event)              // Meets org policies
-```
+Phase 3+ introduces permission-based guards (beyond role-based). See [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md) for implementation details.
+
+**Phase 3+ Guards:**
+- Permission-based checks: `requirePermission('upload_content', event)`
+- Policy compliance: `requirePolicyCompliant(event)`
+- Custom role validation based on organization-defined roles
 
 ---
 
@@ -595,34 +575,28 @@ User is now organization_member with role=member
 
 ## Part 8: Security Architecture (Complete)
 
-### Three Layers of Protection
+### Defense-in-Depth Model
 
-**Layer 1: Application Guards**
-```typescript
-if (!event.locals.userId) throw redirect('/login');
-if (event.locals.organizationRole !== 'owner') throw error(403);
-```
+Authentication and authorization use a **three-layer defense-in-depth model**. For complete security architecture, patterns, and best practices, see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md).
 
-**Layer 2: Database-Level Access Control (RLS)**
-```sql
-CREATE POLICY org_member_view ON organization_member
-  FOR SELECT USING (organizationId = active_org_id());
-```
+**Layer 1: Application Guards** - Fast-fail route protection
+- Executes in SvelteKit route handlers before code runs
+- Redirects or throws errors for unauthorized access
+- Checks authentication state and role/permissions
 
-**Layer 3: Query-Level Scoping**
-```typescript
-const members = await db.query.organizationMember.findMany({
-  where: eq(organizationMember.organizationId, organizationId)
-});
-```
+**Layer 2: Database RLS** - Database-enforced isolation (Phase 2+)
+- PostgreSQL Row-Level Security policies
+- Automatic filtering of query results
+- Protection against application bugs
+
+**Layer 3: Query Scoping & Signed URLs** - Application-level filtering
+- Explicit organization scoping in all queries
+- Purchase verification before content access
+- Time-limited signed URLs for media
 
 ### Key Security Principles
 
-1. **Default deny**: Access rejected unless explicitly granted
-2. **Defense in depth**: Multiple layers (guards + RLS + queries)
-3. **Fail secure**: Errors result in denial, not accidental grants
-4. **Audit trail**: All auth events logged
-5. **Token security**: Short TTL, signed tokens, rotation
+See [Access Control Patterns - Security Philosophy](/design/core/ACCESS_CONTROL_PATTERNS.md#introduction-and-security-philosophy) for detailed security principles and threat protection strategies.
 
 ---
 

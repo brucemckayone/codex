@@ -70,9 +70,9 @@ Without authentication, the platform cannot:
 -  Password strength requirements (min 8 chars, complexity)
 
 **Authorization & Organization**
--  Platform-level roles: `platform_owner` (you) or `customer` (everyone else)
--  Organization-level roles: `owner` (runs org), `admin` (staff), `member` (team members)
--  Protected route middleware with role-based guards
+-  Dual-tier role system: Platform roles (`platform_owner`, `customer`) + Organization roles (`owner`, `admin`, `member`)
+   - For complete role definitions and hierarchy, see [Multi-Tenant Architecture - User Types & Roles](/design/core/MULTI_TENANT_ARCHITECTURE.md#user-types--roles)
+-  Protected route middleware with role-based guards (see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md))
 -  Team member invitations via email (7-day expiry)
 -  Invitation acceptance flow with secure tokens
 -  Session context includes `activeOrganizationId` (foundation for Phase 2 multi-org)

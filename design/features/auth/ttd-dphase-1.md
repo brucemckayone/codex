@@ -15,8 +15,9 @@ Phase 1 authentication provides secure user identity management and organization
 **Architecture Principles**:
 - BetterAuth handles authentication (login, register, password reset)
 - Custom organization module manages teams and invitations
-- Session includes `activeOrganizationId` for organization context
-- RLS policies designed for Phase 2+ multi-tenant enforcement
+- Session includes `activeOrganizationId` for organization context (see [Multi-Tenant Architecture - Session Context Pattern](/design/core/MULTI_TENANT_ARCHITECTURE.md#session-context-pattern))
+- RLS policies designed for Phase 2+ multi-tenant enforcement (see [Multi-Tenant Architecture - Row-Level Security](/design/core/MULTI_TENANT_ARCHITECTURE.md#row-level-security-rls))
+- Three-layer security model: Guards + RLS + Query Scoping (see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md))
 - Drizzle ORM manages database schema with future-proof design
 
 **Architecture Diagram**:
@@ -245,7 +246,9 @@ export const handle = sequence(authHandler, sessionHandler);
 
 ### 3. Route Guards (`packages/web/src/lib/server/guards.ts`)
 
-**Responsibility**: Reusable authorization checks for protecting routes
+**Responsibility**: Reusable authorization checks for protecting routes (Layer 1 of defense-in-depth)
+
+For complete guard patterns, composition strategies, and best practices, see [Access Control Patterns - Layer 1: Application Guards](/design/core/ACCESS_CONTROL_PATTERNS.md#layer-1-application-guards).
 
 **Implementation**:
 
