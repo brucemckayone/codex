@@ -1,5 +1,15 @@
 # Platform Settings - Phase 1 PRD
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization model, settings ownership and access
+- **[R2 Storage Patterns](/home/user/codex/design/core/R2_STORAGE_PATTERNS.md)** - Logo storage pattern, asset bucket structure
+- **[Access Control Patterns](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md)** - Settings access control (owner-only)
+
+---
+
 ## Feature Summary
 
 This feature enables the Platform Owner to customize basic branding and business information for their platform. It provides a simple interface to upload a logo, set a single primary brand color (from which the entire theme is mathematically derived), configure the platform name, and manage essential business contact details.

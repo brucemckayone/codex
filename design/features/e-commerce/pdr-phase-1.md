@@ -6,6 +6,17 @@ Payment processing system for selling digital content (videos, audio) and offeri
 
 **Key Concept**: Customer clicks "Buy Now" � Stripe Checkout � webhook confirms payment � purchase record created � Content Access verifies purchase � customer gains access.
 
+---
+
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization scoping patterns, query patterns, session context
+- **[Access Control Patterns](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md)** - Purchase verification, authentication guards
+
+---
+
 ## Problem Statement
 
 Creators need a way to monetize content because:

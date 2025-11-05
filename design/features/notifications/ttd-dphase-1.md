@@ -1,5 +1,13 @@
 # Notifications - Phase 1 TDD (Technical Design Document)
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization context for emails (if organization-specific notifications needed)
+
+---
+
 ## System Overview
 
 The notification system provides email delivery with provider abstraction, ensuring business logic is decoupled from email service providers. Phase 1 implements Resend as the default provider but maintains flexibility for future provider changes.

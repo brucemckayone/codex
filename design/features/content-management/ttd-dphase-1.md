@@ -7,17 +7,18 @@ The content management system enables Creators to upload, organize, and manage v
 **Key Architecture Decisions**:
 
 - **Media Library Pattern**: Separate `media_items` table for uploaded files, `content` table references media via `media_item_id`
-- **Bucket-Per-Creator**: Each creator gets isolated R2 buckets (`codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`)
-- **Reusable Resources**: PDF/workbooks stored once, attached to multiple content/offerings via `resource_attachments`
-- **Direct Upload Strategy**: Browser → R2 uploads via presigned URLs (bypasses server)
+- **R2 Storage**: Unified buckets with per-creator folder structure (see [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md#bucket-architecture))
+- **Reusable Resources**: PDF/workbooks stored once, attached to multiple content/offerings via `resource_attachments` (see [R2 Storage Patterns - Reusable Resources](/design/core/R2_STORAGE_PATTERNS.md#reusable-resources-pattern))
+- **Direct Upload Strategy**: Browser → R2 uploads via presigned URLs (bypasses server) (see [R2 Storage Patterns - Upload Patterns](/design/core/R2_STORAGE_PATTERNS.md#upload-patterns))
 - **Transcoding Separation**: Video transcoding handled by separate Media Transcoding feature
+- **Organization Scoping**: All queries scoped by organization context (see [Multi-Tenant Architecture](/design/core/MULTI_TENANT_ARCHITECTURE.md#query-patterns))
 
 **Architecture**:
 
-- **Storage Layer**: Cloudflare R2 (bucket-per-creator) for media files, resources, assets
+- **Storage Layer**: Cloudflare R2 with unified buckets per environment for media files, resources, assets
 - **Metadata Layer**: Neon Postgres for `media_items`, `content`, `resources` records
 - **Upload Strategy**: Direct browser → R2 (bypasses server, tracks progress)
-- **Access Control**: Presigned URLs for secure file access
+- **Access Control**: Presigned URLs for secure file access (see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md#layer-3-query-scoping--signed-urls))
 
 **Architecture Diagram**:
 
@@ -640,150 +641,64 @@ export const resourceService = new ResourceService();
 
 ### 4. R2 Service (`packages/web/src/lib/server/r2/service.ts`)
 
-**Responsibility**: Interact with Cloudflare R2 for file storage (bucket-per-creator)
+**Responsibility**: Interact with Cloudflare R2 for file storage
 
-**Implementation**:
+**Implementation**: See [R2 Storage Patterns - R2Service Interface](/design/core/R2_STORAGE_PATTERNS.md#r2service-interface) for complete implementation details.
+
+**Key Methods Used in Content Management**:
 
 ```typescript
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  CreateBucketCommand,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { r2Service } from '$lib/server/r2/service';
 
-export class R2Service {
-  private client: S3Client;
-  private accountId: string;
+// Generate presigned upload URL for media
+const uploadUrl = await r2Service.getUploadUrl(
+  'codex-media-production',
+  `${creatorId}/originals/${mediaId}/${filename}`,
+  contentType,
+  900  // 15 minutes for large files
+);
 
-  constructor() {
-    this.accountId = process.env.CLOUDFLARE_ACCOUNT_ID!;
+// Generate presigned download URL for streaming
+const downloadUrl = await r2Service.getDownloadUrl(
+  'codex-media-production',
+  `${creatorId}/hls/${mediaId}/master.m3u8`,
+  3600  // 1 hour
+);
 
-    // R2 uses S3-compatible API
-    this.client = new S3Client({
-      region: 'auto',
-      endpoint: `https://${this.accountId}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-      },
-    });
-  }
+// Generate file keys with naming conventions
+const mediaKey = r2Service.generateMediaKey(mediaId, filename);
+// Returns: 'originals/{mediaId}/{sanitized-filename}'
 
-  /**
-   * Provision creator buckets on signup
-   * Creates: codex-media-{creatorId}, codex-resources-{creatorId}, codex-assets-{creatorId}
-   */
-  async provisionCreatorBuckets(creatorId: string): Promise<void> {
-    const buckets = [
-      `codex-media-${creatorId}`,
-      `codex-resources-${creatorId}`,
-      `codex-assets-${creatorId}`,
-    ];
-
-    for (const bucketName of buckets) {
-      try {
-        await this.client.send(
-          new CreateBucketCommand({
-            Bucket: bucketName,
-          })
-        );
-
-        console.log(`Created bucket: ${bucketName}`);
-      } catch (error) {
-        // Bucket may already exist, ignore error
-        console.error(`Failed to create bucket ${bucketName}:`, error);
-      }
-    }
-
-    // Store bucket names in creator_buckets table (see Database Schema)
-  }
-
-  /**
-   * Generate presigned PUT URL for direct browser upload
-   */
-  async getUploadUrl(
-    bucketName: string,
-    fileKey: string,
-    contentType: string,
-    expiresIn: number = 900 // 15 minutes (large files)
-  ): Promise<PresignedUploadUrl> {
-    const command = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: fileKey,
-      ContentType: contentType,
-    });
-
-    const url = await getSignedUrl(this.client, command, { expiresIn });
-
-    return {
-      url,
-      bucketName,
-      fileKey,
-      expiresIn,
-    };
-  }
-
-  /**
-   * Generate signed URL for downloading/viewing file
-   * Used for serving video HLS streams, resources to customers
-   */
-  async getDownloadUrl(
-    bucketName: string,
-    fileKey: string,
-    expiresIn: number = 3600 // 1 hour
-  ): Promise<string> {
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: fileKey,
-    });
-
-    return await getSignedUrl(this.client, command, { expiresIn });
-  }
-
-  /**
-   * Delete file from R2
-   */
-  async deleteFile(bucketName: string, fileKey: string): Promise<void> {
-    const command = new DeleteObjectCommand({
-      Bucket: bucketName,
-      Key: fileKey,
-    });
-
-    await this.client.send(command);
-  }
-
-  /**
-   * Generate unique file keys for R2
-   */
-  generateMediaKey(mediaId: string, filename: string): string {
-    const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return `originals/${mediaId}/${sanitized}`;
-  }
-
-  generateResourceKey(resourceId: string, filename: string): string {
-    const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return `${resourceId}/${sanitized}`;
-  }
-
-  generateThumbnailKey(
-    entityType: string,
-    entityId: string,
-    filename: string
-  ): string {
-    const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return `thumbnails/${entityType}/${entityId}/${sanitized}`;
-  }
-}
-
-export const r2Service = new R2Service();
+const resourceKey = r2Service.generateResourceKey(resourceId, filename);
+// Returns: '{resourceId}/{sanitized-filename}'
 ```
+
+**Storage Structure for Content Management**:
+
+```
+codex-media-production/{creatorId}/
+├── originals/{mediaId}/original.mp4
+└── hls/{mediaId}/master.m3u8
+
+codex-resources-production/{creatorId}/
+└── {resourceId}/workbook.pdf
+
+codex-assets-production/{creatorId}/
+└── thumbnails/content/{contentId}/custom.jpg
+```
+
+**References**:
+- [R2 Storage Patterns - Bucket Architecture](/design/core/R2_STORAGE_PATTERNS.md#bucket-architecture)
+- [R2 Storage Patterns - Naming Conventions](/design/core/R2_STORAGE_PATTERNS.md#naming-conventions)
+- [R2 Storage Patterns - Upload Patterns](/design/core/R2_STORAGE_PATTERNS.md#upload-patterns)
 
 ---
 
 ### 5. Upload Flows
+
+**General Upload Pattern**: See [R2 Storage Patterns - Upload Flow Pattern](/design/core/R2_STORAGE_PATTERNS.md#upload-flow-pattern) for the generic upload workflow (request presigned URL → browser uploads to R2 → notify backend).
+
+The implementation below shows the **content management-specific** upload flows with media items and transcoding queue integration.
 
 #### A. Media Upload Flow (Video/Audio)
 
@@ -796,7 +711,8 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-  // Require Creator access
+  // Layer 1: Access control - require Creator access
+  // See: /design/core/ACCESS_CONTROL_PATTERNS.md#authorization-guards
   const user = requireCreatorAccess({ locals, url: request.url });
 
   const { filename, contentType, mediaId } = await request.json();
@@ -815,14 +731,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     return json({ error: 'Invalid file type' }, { status: 400 });
   }
 
-  // Generate presigned URL for creator's media bucket
-  const bucketName = `codex-media-${user.id}`;
-  const fileKey = r2Service.generateMediaKey(mediaId, filename);
+  // Generate presigned URL for creator's folder in unified media bucket
+  // See: /design/core/R2_STORAGE_PATTERNS.md#media-upload-flow
+  const bucketName = 'codex-media-production';
+  const fileKey = `${user.id}/originals/${mediaId}/${r2Service.sanitizeFilename(filename)}`;
 
   const uploadUrl = await r2Service.getUploadUrl(
     bucketName,
     fileKey,
-    contentType
+    contentType,
+    900  // 15 minutes for large files
   );
 
   return json({
@@ -843,6 +761,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
+  // Layer 1: Access control - require Creator access
   const user = requireCreatorAccess({ locals, url: request.url });
 
   const { mediaId, filename, fileSize, mimeType, bucketName, fileKey } =
@@ -860,20 +779,20 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
     mimeType,
   });
 
-  // If video, enqueue transcoding job
+  // If video, enqueue transcoding job (Phase 1 disabled, prepared for Phase 2)
   if (mediaItem.type === 'video') {
     await platform.env.TRANSCODING_QUEUE.send({
       mediaId: mediaItem.id,
       inputBucket: bucketName,
       inputKey: fileKey,
       outputBucket: bucketName,
-      outputPrefix: `hls/${mediaId}/`,
+      outputPrefix: `${user.id}/hls/${mediaId}/`,  // Creator-scoped HLS output
     });
 
     // Update status to transcoding
     await mediaItemsService.updateMediaItemStatus(mediaId, 'transcoding');
   } else {
-    // Audio files are immediately ready
+    // Audio files are immediately ready (no transcoding)
     await mediaItemsService.updateMediaItemStatus(mediaId, 'ready');
   }
 
@@ -885,8 +804,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 **Backend API** (`packages/web/src/routes/api/resources/presigned-upload/+server.ts`):
 
+See [R2 Storage Patterns - Resource Upload Flow](/design/core/R2_STORAGE_PATTERNS.md#resource-upload-flow) for general pattern.
+
 ```typescript
 export const POST: RequestHandler = async ({ request, locals }) => {
+  // Layer 1: Access control - require Creator access
   const user = requireCreatorAccess({ locals, url: request.url });
 
   const { filename, contentType, resourceId } = await request.json();
@@ -903,9 +825,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     return json({ error: 'Invalid file type' }, { status: 400 });
   }
 
-  // Generate presigned URL for creator's resource bucket
-  const bucketName = `codex-resources-${user.id}`;
-  const fileKey = r2Service.generateResourceKey(resourceId, filename);
+  // Generate presigned URL for creator's folder in unified resource bucket
+  // See: /design/core/R2_STORAGE_PATTERNS.md#resource-upload-flow
+  const bucketName = 'codex-resources-production';
+  const fileKey = `${user.id}/${resourceId}/${r2Service.sanitizeFilename(filename)}`;
 
   const uploadUrl = await r2Service.getUploadUrl(
     bucketName,
@@ -964,11 +887,15 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
+  // Layer 1: Access control - require Creator access
+  // See: /design/core/ACCESS_CONTROL_PATTERNS.md#authorization-guards
   const user = requireCreatorAccess({ locals, url: request.url });
 
   const data = await request.json();
 
   try {
+    // Content service handles organization scoping internally
+    // See: /design/core/MULTI_TENANT_ARCHITECTURE.md#query-patterns
     const content = await contentService.createContent(data, user.id);
     return json(content, { status: 201 });
   } catch (error) {
@@ -977,6 +904,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 };
 
 export const GET: RequestHandler = async ({ url, locals }) => {
+  // Layer 1: Access control - require Creator access
   const user = requireCreatorAccess({ locals, url: url.toString() });
 
   const filters = {
@@ -986,6 +914,8 @@ export const GET: RequestHandler = async ({ url, locals }) => {
     offset: Number(url.searchParams.get('offset') || 0),
   };
 
+  // Layer 3: Organization-scoped queries
+  // See: /design/core/MULTI_TENANT_ARCHITECTURE.md#organization-scoped-query-pattern
   const result = await contentService.getContentList(user.id, filters);
   return json(result);
 };

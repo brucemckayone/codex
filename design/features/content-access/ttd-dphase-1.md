@@ -11,6 +11,10 @@ The Content Access system provides secure, authenticated access to purchased med
 - **Unified Media Player**: A single Svelte component will handle both video and audio playback, adapting based on content type.
 - **Playback Progress Tracking**: User progress is saved to the database to enable seamless resume functionality.
 
+**Architecture References**:
+- **Access Control Implementation**: See [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md) for the three-layer security model, purchase verification patterns, and security best practices
+- **R2 Storage Implementation**: See [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md) for signed URL generation, media streaming patterns, and security considerations
+
 **Architecture Diagram**:
 
 ![Content Access Architecture](./assets/content-access-architecture.png)
@@ -91,7 +95,9 @@ export interface IContentAccessService {
 **Implementation Notes**:
 
 - `checkAccess` will query the `purchases` table (or a future `content_access` table) for a `status = 'completed'` and `refundedAt IS NULL` record matching `userId`, `itemId`, and `itemType`.
+  - See [Access Control Patterns - Purchase Verification](/design/core/ACCESS_CONTROL_PATTERNS.md#pattern-check-purchase-access) for the implementation pattern.
 - `getSignedMediaStreamUrl` will first call `checkAccess`, then retrieve the `hlsMasterPlaylistKey` from `media_items`, and finally use the `R2Service` to generate the signed URL.
+  - See [R2 Storage Patterns - Signed Download URLs](/design/core/R2_STORAGE_PATTERNS.md#generating-signed-download-urls) for URL generation patterns.
 - `savePlaybackProgress` and `getPlaybackProgress` will interact with the `video_playback` table.
 
 ### 2. R2 Service (`packages/web/src/lib/server/r2/service.ts`)
@@ -99,6 +105,8 @@ export interface IContentAccessService {
 **Responsibility**: Interact with Cloudflare R2 for file storage and signed URL generation.
 
 **Note**: This service is already defined in [Content Management TDD](../content-management/ttd-dphase-1.md) and will be reused here. It provides `getDownloadUrl` which can be adapted for streaming.
+
+**Complete Implementation Reference**: See [R2 Storage Patterns - R2Service Interface](/design/core/R2_STORAGE_PATTERNS.md#r2service-interface) for the full service interface and implementation examples.
 
 ### 3. Customer Library Page (`src/routes/library/+page.svelte` and `+page.server.ts`)
 
@@ -218,29 +226,49 @@ export const videoPlaybackUnique = unique('user_media_unique').on(
 
 ## Access Control Flow (Detailed)
 
+This section describes the content-access-specific implementation of the three-layer security model. For the general patterns and security considerations, see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md).
+
+### Purchase-Based Access Flow
+
 1.  **User Request**: Customer navigates to `/content/[contentId]`.
+
 2.  **Server-Side Load (`+page.server.ts`)**:
-    a. `requireAuth(event)`: Ensures user is logged in. If not, redirects to login.
-    b. `contentAccessService.checkAccess(event.locals.user.id, contentId, 'content')`:
-    i. Queries `purchases` table: `SELECT * FROM purchases WHERE customerId = userId AND itemId = contentId AND itemType = 'content' AND status = 'completed' AND refundedAt IS NULL;`
-    ii. Returns `true` if a valid purchase exists, `false` otherwise.
-    c. **Access Denied**: If `checkAccess` returns `false`, `throw redirect(303, `/purchase/${contentId}`);`.
-    d. **Access Granted**: If `checkAccess` returns `true`:
-    i. Fetches `content` and associated `media_items` data.
-    ii. Fetches `initialPlaybackPosition = contentAccessService.getPlaybackProgress(userId, mediaItemId)`.
-    iii. Returns `{ content, mediaItem, initialPlaybackPosition }` to the client.
+    - **Layer 1 - Application Guard**:
+      - `requireAuth(event)`: Ensures user is logged in. If not, redirects to login.
+    - **Layer 3 - Purchase Verification**:
+      - `contentAccessService.checkAccess(event.locals.user.id, contentId, 'content')`:
+        - Queries `purchases` table: `SELECT * FROM purchases WHERE customerId = userId AND itemId = contentId AND itemType = 'content' AND status = 'completed' AND refundedAt IS NULL;`
+        - Returns `true` if a valid purchase exists, `false` otherwise.
+        - See [Access Control Patterns - Check Purchase Access](/design/core/ACCESS_CONTROL_PATTERNS.md#pattern-check-purchase-access)
+    - **Access Denied**: If `checkAccess` returns `false`, `throw redirect(303, `/purchase/${contentId}`);`.
+    - **Access Granted**: If `checkAccess` returns `true`:
+      - Fetches `content` and associated `media_items` data.
+      - Fetches `initialPlaybackPosition = contentAccessService.getPlaybackProgress(userId, mediaItemId)`.
+      - Returns `{ content, mediaItem, initialPlaybackPosition }` to the client.
+
 3.  **Client-Side Render (`+page.svelte`)**:
-    a. Renders `MediaPlayer` component with `mediaItem` and `initialPlaybackPosition`.
+    - Renders `MediaPlayer` component with `mediaItem` and `initialPlaybackPosition`.
+
 4.  **Media Player Initialization (`MediaPlayer.svelte`)**:
-    a. On mount, the player requests the actual stream URL from the backend.
-    b. `fetch('/api/media/${mediaItem.id}/stream-url')`.
+    - On mount, the player requests the actual stream URL from the backend.
+    - `fetch('/api/media/${mediaItem.id}/stream-url')`.
+
 5.  **API Route: Get Media Stream URL (`src/routes/api/media/[id]/stream-url/+server.ts`)**:
-    a. `requireAuth(event)`.
-    b. `contentAccessService.checkAccess(event.locals.user.id, mediaItemId, mediaItem.type)`: Re-validates access for the specific media item.
-    c. Retrieves `hlsMasterPlaylistKey` from `media_items` table.
-    d. `signedUrl = r2Service.getDownloadUrl(mediaItem.bucketName, hlsMasterPlaylistKey, 3600)` (expires in 1 hour).
-    e. Returns `{ streamUrl: signedUrl }`.
+    - **Layer 1**: `requireAuth(event)`.
+    - **Layer 3**: `contentAccessService.checkAccess(event.locals.user.id, mediaItemId, mediaItem.type)`: Re-validates access for the specific media item.
+    - Retrieves `hlsMasterPlaylistKey` from `media_items` table.
+    - **Layer 3 - Signed URL**: `signedUrl = r2Service.getDownloadUrl(mediaItem.bucketName, hlsMasterPlaylistKey, 3600)` (expires in 1 hour).
+      - See [R2 Storage Patterns - HLS Video Streaming](/design/core/R2_STORAGE_PATTERNS.md#hls-video-streaming)
+    - Returns `{ streamUrl: signedUrl }`.
+
 6.  **Media Playback**: Player receives `streamUrl` and begins HLS streaming.
+
+**Security Implementation**: This flow demonstrates all three security layers:
+- **Layer 1**: Application guards (`requireAuth`)
+- **Layer 2**: Database RLS (Phase 2+ - automatic query filtering)
+- **Layer 3**: Purchase verification + signed URLs
+
+For complete security best practices, see [Access Control Patterns - Best Practices](/design/core/ACCESS_CONTROL_PATTERNS.md#best-practices).
 
 ---
 
@@ -268,15 +296,21 @@ export const videoPlaybackUnique = unique('user_media_unique').on(
 
 ## Related Documents
 
+### Core Architecture
+- **[Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md)** - Three-layer security model, purchase verification, guards, RLS
+- **[R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md)** - Signed URL generation, media streaming, security patterns
+
+### Feature Documents
 - **PRD**: [Content Access PRD](./pdr-phase-1.md)
 - **Cross-Feature Dependencies**:
   - [Auth TDD](../auth/ttd-dphase-1.md)
   - [E-Commerce TDD](../e-commerce/ttd-dphase-1.md)
   - [Content Management TDD](../content-management/ttd-dphase-1.md)
   - [Media Transcoding TDD](../media-transcoding/ttd-dphase-1.md)
-- **Infrastructure**:
-  - [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md)
-  - [Database Schema](../../infrastructure/DatabaseSchema.md)
+
+### Infrastructure
+- [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md)
+- [Database Schema](../../infrastructure/DatabaseSchema.md)
 
 ---
 

@@ -1,5 +1,14 @@
 # Admin Dashboard - Phase 1 TDD (Technical Design Document)
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization-scoped queries, query patterns, admin dashboard query examples
+- **[Access Control Patterns](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md)** - Access control hierarchy, protected admin routes, requireOwner guard
+
+---
+
 ## System Overview
 
 The Admin Dashboard provides the Platform Owner with a secure, server-rendered interface for managing core platform entities and viewing essential business metrics. It is built using SvelteKit, leveraging server-side `load` functions for data fetching and access control, and client-side Svelte components for interactive UI.

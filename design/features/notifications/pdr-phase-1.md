@@ -1,5 +1,13 @@
 # Notifications - Phase 1 PRD
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization context for emails (if organization-specific notifications needed)
+
+---
+
 ## Feature Summary
 
 Email notification service with provider abstraction layer, enabling transactional emails (authentication, purchases, content access) without vendor lock-in. Phase 1 uses Resend but maintains flexibility to switch providers.

@@ -93,9 +93,9 @@ Without content management:
   - Content preview
   - Resource attachment management
 - **Storage**:
-  - Cloudflare R2 bucket-per-creator architecture
+  - Cloudflare R2 for file storage (see [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md))
   - Neon Postgres for metadata
-  - Presigned URLs for secure file access
+  - Presigned URLs for secure file access (see [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md#upload-patterns))
 
 ### Explicitly Out of Scope (Future Phases)
 
@@ -417,18 +417,18 @@ See diagrams:
 
 ### Internal Dependencies (Phase 1)
 
-- **Auth**: Content routes require `requireCreatorAccess()` guard
+- **Auth**: Content routes require `requireCreatorAccess()` guard (see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md#authorization-guards))
 - **Admin Dashboard**: UI for content and media management
 - **Media Transcoding**: Converts uploaded videos to HLS streams
 - **E-Commerce**: Content pricing and purchase linking
-- **Content Access**: Published content access control, signed URLs
+- **Content Access**: Published content access control, signed URLs (see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md#layer-3-query-scoping--signed-urls))
 
 ### External Dependencies
 
 - **Cloudflare R2**: Object storage for media, resources, assets
-  - Bucket-per-creator architecture (see [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
-  - Buckets: `codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`
-  - Access via R2 API with presigned URLs
+  - See [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md) for bucket architecture, naming conventions, and access patterns
+  - Unified buckets with per-creator folders: `codex-media-production/{creatorId}/`, `codex-resources-production/{creatorId}/`, `codex-assets-production/{creatorId}/`
+  - Access via R2 API with presigned URLs (see [Upload Patterns](/design/core/R2_STORAGE_PATTERNS.md#upload-patterns))
 - **Neon Postgres**: Metadata storage
   - `media_items` table (uploaded files)
   - `content` table (content metadata, references media_items)
@@ -492,11 +492,11 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 
 ### Security Requirements
 
-- Only Creators can access their own content/media
-- Creators cannot access other creators' buckets
-- R2 files not publicly accessible (presigned URLs only)
+- Only Creators can access their own content/media (see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md#authorization-guards))
+- Creator content isolated by folder structure in R2 (see [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md#bucket-architecture))
+- R2 files not publicly accessible (presigned URLs only - see [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md#access-patterns))
 - File type validation (reject non-video/audio)
-- File size limits enforced
+- File size limits enforced (see [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md#file-size-limits))
 - CSRF protection on all content forms
 
 ### Testing Requirements
@@ -537,19 +537,23 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - **Cost Efficiency**: No file duplication in R2
 - **Future-Proof**: Easier to add media management features (folders, galleries)
 
-### Why Bucket-Per-Creator?
+### Storage Architecture
 
-- **Isolation**: Each creator's files physically separated
-- **Security**: Compromised creator doesn't affect others
-- **Permissions**: Easier creator-specific access control
-- **Billing**: Track storage costs per creator
-- **Scale**: Cloudflare allows 1 million buckets
+For detailed R2 storage architecture, bucket organization, and upload patterns, see:
+
+- **[R2 Storage Patterns - Bucket Architecture](/design/core/R2_STORAGE_PATTERNS.md#bucket-architecture)** - Unified bucket structure with per-creator folders, isolation strategy, and rationale
+- **[R2 Storage Patterns - Upload Patterns](/design/core/R2_STORAGE_PATTERNS.md#upload-patterns)** - Direct browser → R2 upload strategy via presigned URLs, benefits, and implementation details
+- **[R2 Storage Patterns - File Organization](/design/core/R2_STORAGE_PATTERNS.md#file-organization-patterns)** - Media library pattern and reusable resources explained in detail
 
 ### Why Reusable Resources?
 
-- **Cost Efficiency**: Same workbook used across multiple offerings/content → stored once
+**Feature-Specific Pattern**: Resources in content management are designed for reusability:
+
+- **Cost Efficiency**: Same workbook used across multiple offerings/content → stored once in R2
 - **Consistency**: Update resource once, all attachments reflect change
-- **Flexibility**: Resources can attach to content, offerings, courses (extensible)
+- **Flexibility**: Resources can attach to content, offerings, courses (extensible via `resource_attachments` table)
+
+See [R2 Storage Patterns - Reusable Resources Pattern](/design/core/R2_STORAGE_PATTERNS.md#reusable-resources-pattern) for detailed implementation.
 
 ### Content vs Media Items vs Resources
 
@@ -558,23 +562,6 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 | **Media Item** | Uploaded video/audio file             | R2 (originals + HLS)        | Yes - multiple content items     |
 | **Content**    | Sellable package (pricing + metadata) | Database (references media) | N/A                              |
 | **Resource**   | Downloadable file (PDF, workbook)     | R2 (resources bucket)       | Yes - multiple content/offerings |
-
-### File Upload Strategy
-
-**Direct browser → R2 upload via presigned URL**:
-
-1. Browser requests upload URL from backend: `POST /api/media/presigned-upload`
-2. Backend generates R2 presigned PUT URL for creator's bucket
-3. Browser uploads directly to R2 (progress tracking)
-4. On complete, browser notifies backend: `POST /api/media/upload-complete`
-5. Backend creates `media_items` record and enqueues transcoding job
-
-**Benefits**:
-
-- No file passes through SvelteKit server (saves bandwidth)
-- Upload progress tracked client-side
-- Scalable (R2 handles upload load)
-- Works with Cloudflare Workers/Pages (no filesystem access needed)
 
 ---
 

@@ -1,15 +1,25 @@
 # Platform Settings - Phase 1 TDD (Technical Design Document)
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization model, settings ownership, organization context
+- **[R2 Storage Patterns](/home/user/codex/design/core/R2_STORAGE_PATTERNS.md)** - Logo storage in assets bucket, upload patterns, file management
+- **[Access Control Patterns](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md)** - Settings access control (owner-only), requireOwner guard
+
+---
+
 ## System Overview
 
 The Platform Settings system provides the Platform Owner with the ability to customize branding (logo, color scheme) and configure business information (platform name, contact details, timezone). It implements an intelligent theming system that generates a complete, accessible design system from a single primary color choice, with results cached in Cloudflare KV for instant global availability.
 
 **Key Architecture Decisions**:
 
-- **Intelligent Color Generation**: From one primary color, mathematically derive a full palette using HSL color space transformations.
+- **Intelligent Color Generation**: From one primary color, mathematically derive a full palette using HSL color space transformations (unique to this feature).
 - **Cloudflare KV for Theme Caching**: Store generated CSS custom properties in KV for edge-cached, instant loading.
-- **R2 for Logo Storage**: Use existing `codex-assets-{ownerId}` bucket (per R2 Bucket Structure) for logo files.
-- **Future-Ready Schema**: Database includes `owner_id` for Phase 3 multi-tenant support without schema migration.
+- **R2 for Logo Storage**: Logo stored at `codex-assets-{ownerId}/branding/logo.{ext}` (see [R2_STORAGE_PATTERNS.md](/home/user/codex/design/core/R2_STORAGE_PATTERNS.md#3-assets-bucket)).
+- **Future-Ready Schema**: Database includes `owner_id` for Phase 3 multi-tenant support without schema migration (see [MULTI_TENANT_ARCHITECTURE.md](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md#organization-model)).
 - **Server-Side Rendering**: Settings loaded in SvelteKit layout and injected as CSS variables in document `<head>`.
 
 **Architecture Diagram**: See [Platform Settings Architecture](../_assets/platform-settings-architecture.png) (Placeholder for future diagram)

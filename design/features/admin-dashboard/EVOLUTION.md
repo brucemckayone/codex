@@ -3,7 +3,16 @@
 **Purpose**: This document defines the complete evolution of Codex's admin dashboard from Phase 1 through Phase 4+. It serves as the single source of truth for dashboard architecture and guides all phase-specific design documents.
 
 **Version**: 1.0
-**Last Updated**: 2025-11-04 j
+**Last Updated**: 2025-11-04
+
+---
+
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization scoping, query patterns, session context, organization model
+- **[Access Control Patterns](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md)** - Access control hierarchy, role-based guards, protected routes
 
 ---
 
@@ -20,36 +29,15 @@
 
 ### Access Control
 
-```
-Platform Owner (you)
-  ├─ System Admin Panel (Phase 1)
-  │   ├─ Organization management
-  │   ├─ User management (system-wide)
-  │   └─ System settings
-  │
-Organization Owner
-  ├─ Organization Dashboard (Phase 1+)
-  │   ├─ Content management
-  │   ├─ Team management
-  │   ├─ Customer management
-  │   ├─ Analytics
-  │   ├─ Settings
-  │   └─ Offerings (Phase 2+)
-  │
-Organization Admin
-  ├─ Limited Admin Dashboard (Phase 1+)
-  │   ├─ Content approval/publishing
-  │   ├─ View-only team settings
-  │   ├─ Customer support tools
-  │   └─ Analytics (limited)
-  │
-Creator (Phase 2+)
-  └─ Creator Dashboard
-      ├─ My content
-      ├─ My offerings
-      ├─ My earnings
-      └─ Organization switching
-```
+The admin dashboard implements the platform's role-based access control hierarchy. For the complete access control tree and implementation details, see:
+
+- **[Access Control Patterns - Access Control Tree](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md#requireowner)** - Platform Owner, Organization Owner, Organization Admin, and Creator hierarchy
+
+**Phase 1 Dashboard Access Summary**:
+- **Platform Owner**: System Admin Panel (organization management, user management, system settings)
+- **Organization Owner**: Organization Dashboard (content, team, customers, analytics, settings)
+- **Organization Admin**: Limited Admin Dashboard (content approval, view-only team, customer support, limited analytics)
+- **Creator** (Phase 2+): Creator Dashboard (my content, my offerings, earnings, org switching)
 
 ---
 
@@ -422,25 +410,31 @@ Sarah | sarah@... | Admin | Oct 2024 | Active | Edit
 
 ### Phase 1 Data Access Patterns
 
+**All admin queries follow organization-scoped patterns**. For complete query patterns and best practices, see:
+
+- **[Multi-Tenant Architecture - Query Patterns](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md#query-patterns)** - Organization-scoped queries, admin dashboard query patterns
+
+**Dashboard-Specific Query Examples**:
+
 ```typescript
-// All queries include organization context
+// Admin context from session (see Multi-Tenant Architecture for details)
 interface AdminContext {
   organizationId: string;
   organizationRole: 'owner' | 'admin' | 'member';
   userId: string;
 }
 
-// Examples:
+// Organization-scoped content query (see MULTI_TENANT_ARCHITECTURE.md)
 const content = await db.query.content.findMany({
   where: eq(content.organizationId, organizationId)
 });
 
-const customers = await db.query.purchase.findMany({
-  where: eq(purchase.organizationId, organizationId)
-});
-
-const members = await db.query.organizationMember.findMany({
-  where: eq(organizationMember.organizationId, organizationId)
+// Revenue query (admin dashboard specific)
+const revenue = await db.query.purchase.findMany({
+  where: and(
+    eq(purchase.organizationId, organizationId),
+    eq(purchase.status, 'completed')
+  )
 });
 ```
 

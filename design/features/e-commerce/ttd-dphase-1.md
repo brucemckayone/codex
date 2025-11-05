@@ -1,5 +1,14 @@
 # E-Commerce - Phase 1 TDD (Technical Design Document)
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization scoping, query patterns, organization model
+- **[Access Control Patterns](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md)** - Purchase verification patterns, authentication guards
+
+---
+
 ## System Overview
 
 The e-commerce system facilitates one-time purchases of digital content using Stripe Checkout. The architecture is designed for security and reliability, ensuring that payment processing is handled by Stripe to minimize our PCI compliance scope, while our backend reliably tracks purchases to grant content access.

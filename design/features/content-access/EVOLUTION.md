@@ -457,56 +457,79 @@ AI-personalized experience
 
 ## Part 3: Security Model
 
-### Layer 1: Application Access Control
+Content access uses Codex's **defense-in-depth security model** with multiple independent layers protecting against unauthorized access. For complete details, see [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md).
 
+### Three-Layer Protection
+
+**Layer 1: Application Guards**
+- `requireAuth()` ensures user is logged in
+- `checkAccess()` verifies purchase before content access
+- Fast-fail route protection at application boundary
+
+**Layer 2: Database RLS (Phase 2+)**
+- Row-level security policies enforce organization isolation
+- Purchase-based access filtering
+- Automatic query scoping to user's organizations
+
+**Layer 3: Query Scoping & Signed URLs**
+- Explicit purchase verification in queries
+- Time-limited signed URLs for media streaming (1 hour expiry)
+- Organization-scoped queries prevent cross-tenant leakage
+
+### Content-Specific Security Implementation
+
+**Purchase Verification Flow**:
 ```typescript
-// Check in route handler
-if (!user) {
-  // Public content OK, redirect for login on watch
-} else if (!hasPurchase(user, content)) {
-  // Redirect to purchase page
+// Layer 1: Require authentication
+const user = requireAuth(event);
+
+// Layer 3: Verify purchase
+const hasAccess = await contentAccessService.checkAccess(
+  user.id,
+  contentId,
+  'content'
+);
+
+if (!hasAccess) {
+  throw redirect(303, `/purchase/${contentId}`);
 }
-```
 
-### Layer 2: Database RLS (Phase 2+)
-
-```sql
--- RLS ensures:
--- 1. Only org members see unpublished content
--- 2. Only purchasers see purchased content
--- 3. Subscribed users see tier-matched content
-```
-
-### Layer 3: Signed URLs
-
-```typescript
-// Generate time-limited, signed URL for streaming
-const url = await generateSignedUrl(contentId, userId, {
+// Generate signed URL for streaming
+const signedUrl = await generateSignedUrl(contentId, userId, {
   expiresIn: 3600, // 1 hour
-  ipBound: true    // Only valid from user's IP
 });
 ```
 
-### Threat Prevention
+**Media Streaming Security**:
+- Signed R2 URLs prevent direct media access
+- URLs expire after 1 hour (requires refresh for long sessions)
+- Purchase re-verified before each URL generation
+- R2 validates signature before serving content
+
+**Threat Prevention**:
+
+For detailed threat prevention strategies, see [Access Control Patterns - Security Considerations](/design/core/ACCESS_CONTROL_PATTERNS.md#security-considerations).
 
 ```
-Data Leakage (Org A sees Org B content)
-  ├─ Layer 1: organizationId check in every query
-  ├─ Layer 2: RLS policies block cross-org
-  └─ Layer 3: Signed URLs include orgId
-
 Unauthorized Playback (Watch without purchase)
-  ├─ Layer 1: Check purchase before issuing URL
-  ├─ Layer 2: RLS prevents DB query
+  ├─ Layer 1: Check purchase before loading page
+  ├─ Layer 1: Check purchase before generating URL
   ├─ Layer 3: Signed URL validates purchase
   └─ Layer 4: R2 validates signature
 
+Data Leakage (Org A sees Org B content)
+  ├─ Layer 1: organizationId check in every query
+  ├─ Layer 2: RLS policies block cross-org (Phase 2+)
+  └─ Layer 3: Signed URLs include validation
+
 License/DRM Bypass (Phase 3+)
-  ├─ Use industry-standard DRM (Widevine, FairPlay)
-  ├─ Client validation of time-limited keys
+  ├─ Industry-standard DRM (Widevine, FairPlay)
+  ├─ Time-limited license keys
   ├─ Server revocation of compromised keys
   └─ Audit logs of all license issuance
 ```
+
+**Reference**: See [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md) for complete security implementation details.
 
 ---
 
@@ -590,6 +613,11 @@ GET /api/content/:id/resume
 
 ## Part 6: Related Documentation
 
+### Core Architecture
+- **[Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md)** - Three-layer security model, purchase verification, guards, threat prevention
+- **[R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md)** - Signed URL generation, media streaming, security patterns
+
+### Feature Documents
 - **Auth EVOLUTION**: [authentication/EVOLUTION.md](../auth/EVOLUTION.md)
 - **Admin Dashboard EVOLUTION**: [admin-dashboard/EVOLUTION.md](../admin-dashboard/EVOLUTION.md)
 - **Phase 1 PRD**: [content-access/pdr-phase-1.md](./pdr-phase-1.md)

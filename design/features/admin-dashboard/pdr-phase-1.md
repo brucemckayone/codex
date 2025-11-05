@@ -1,5 +1,14 @@
 # Admin Dashboard - Phase 1 PRD
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization scoping, query patterns, session context
+- **[Access Control Patterns](/home/user/codex/design/core/ACCESS_CONTROL_PATTERNS.md)** - Access control hierarchy, role-based guards, protected routes
+
+---
+
 ## Feature Summary
 
 The Admin Dashboard provides the Platform Owner with a centralized interface to manage content, customers, and view essential business analytics. It is designed to be intuitive and enable the Platform Owner to operate the platform independently without technical assistance.

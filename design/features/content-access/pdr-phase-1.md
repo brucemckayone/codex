@@ -6,6 +6,10 @@ This feature provides customers with the interface to access and consume their p
 
 **Key Concept**: After a purchase is confirmed by the E-Commerce feature, the Content Access feature takes over, presenting the content to the user in a secure, high-quality player and tracking their progress.
 
+**Core Architecture References**:
+- **Access Control**: See [Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md) for purchase verification patterns and security layers
+- **R2 Storage**: See [R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md) for signed URL generation and media streaming patterns
+
 ## Problem Statement
 
 Once a customer purchases content, they need a clear, immediate, and reliable way to view it. The platform must:
@@ -55,9 +59,12 @@ Without this feature, a purchase is meaningless as the customer would have no wa
 - **Access Control Logic**:
   - Server-side check on page load to verify a valid, non-refunded purchase exists for the user and content.
   - Redirection to the purchase page if access is denied.
+  - Uses the three-layer security model: application guards, database RLS (Phase 2+), and query scoping.
+  - See [Access Control Patterns - Purchase Verification](/design/core/ACCESS_CONTROL_PATTERNS.md#purchase-verification) for detailed patterns.
 - **Secure Streaming**:
   - Media URLs (for HLS playlists, audio files, etc.) are not exposed directly.
   - The backend generates short-lived, signed URLs for Cloudflare R2 on demand.
+  - See [R2 Storage Patterns - Signed URLs](/design/core/R2_STORAGE_PATTERNS.md#generating-signed-download-urls) for implementation details.
 
 ### Explicitly Out of Scope (Future Phases)
 
@@ -150,14 +157,22 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 - A user cannot view a paid content page without a valid purchase.
 - A user who has had their purchase refunded can no longer access the content.
 
+**Implementation Reference**: See [Access Control Patterns - Purchase-Gated Route](/design/core/ACCESS_CONTROL_PATTERNS.md#pattern-purchase-gated-route) for the complete implementation pattern.
+
 ---
 
 ## Related Documents
 
+### Core Architecture
+- **[Access Control Patterns](/design/core/ACCESS_CONTROL_PATTERNS.md)** - Purchase verification, three-layer security model
+- **[R2 Storage Patterns](/design/core/R2_STORAGE_PATTERNS.md)** - Signed URL generation, media streaming security
+
+### Feature Documents
 - **TDD**: [Content Access Technical Design](./ttd-dphase-1.md)
 - **Cross-Feature Dependencies**:
   - [E-Commerce PRD](../e-commerce/pdr-phase-1.md)
   - [Auth PRD](../auth/pdr-phase-1.md)
   - [Media Transcoding PRD](../media-transcoding/pdr-phase-1.md)
-- **Infrastructure**:
-  - [Database Schema](../../infrastructure/DatabaseSchema.md)
+
+### Infrastructure
+- [Database Schema](../../infrastructure/DatabaseSchema.md)

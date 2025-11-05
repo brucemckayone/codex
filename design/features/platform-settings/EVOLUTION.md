@@ -7,6 +7,15 @@
 
 ---
 
+## Core Architecture References
+
+This feature builds on core platform patterns. For foundational architecture details, see:
+
+- **[Multi-Tenant Architecture](/home/user/codex/design/core/MULTI_TENANT_ARCHITECTURE.md)** - Organization model, organization settings scoping
+- **[R2 Storage Patterns](/home/user/codex/design/core/R2_STORAGE_PATTERNS.md)** - Logo storage in R2, asset management patterns
+
+---
+
 ## Part 1: Core Principles
 
 ### Design Philosophy
