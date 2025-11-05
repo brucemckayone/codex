@@ -23,7 +23,7 @@ AUTH_WORKER_URL = "https://auth.revelations.studio"
 
 # Custom domain (handles all traffic for api.revelations.studio)
 [[env.production.routes]]
-pattern = "api.revelations.studio/*"
+pattern = "api.revelations.studio"
 custom_domain = true
 
 # Staging environment

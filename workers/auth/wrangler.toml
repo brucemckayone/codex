@@ -21,7 +21,7 @@ WEB_APP_URL = "https://codex.revelations.studio"
 API_URL = "https://api.revelations.studio"
 
 [[env.production.routes]]
-pattern = "auth.revelations.studio/*"
+pattern = "auth.revelations.studio"
 custom_domain = true
 
 # Staging environment
