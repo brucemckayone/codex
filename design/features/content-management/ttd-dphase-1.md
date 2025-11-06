@@ -7,23 +7,29 @@ The content management system enables Creators to upload, organize, and manage v
 **Key Architecture Decisions**:
 
 - **Media Library Pattern**: Separate `media_items` table for uploaded files, `content` table references media via `media_item_id`
-- **Bucket-Per-Creator**: Each creator gets isolated R2 buckets (`codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`)
-- **Reusable Resources**: PDF/workbooks stored once, attached to multiple content/offerings via `resource_attachments`
+- **Shared Buckets with Organization Scoping** (Phase 1 Simplification):
+  - Shared R2 buckets: `codex-media-production`, `codex-assets-production`
+  - Organization-scoped paths: `{organizationId}/media/{mediaId}/`, `{organizationId}/assets/{type}/`
+  - **Future**: Bucket-per-creator isolation (Phase 2+)
+- **Reusable Resources**: PDF/workbooks stored once, attached to multiple content via `content_resources`
 - **Direct Upload Strategy**: Browser → R2 uploads via presigned URLs (bypasses server)
-- **Transcoding Separation**: Video transcoding handled by separate Media Transcoding feature
+- **Transcoding Separation**: Video transcoding handled by separate Media Transcoding feature (Phase 2)
 
 **Architecture**:
 
-- **Storage Layer**: Cloudflare R2 (bucket-per-creator) for media files, resources, assets
+- **Storage Layer**: Cloudflare R2 (shared buckets with org-scoped paths) for media files, resources, assets
 - **Metadata Layer**: Neon Postgres for `media_items`, `content`, `resources` records
 - **Upload Strategy**: Direct browser → R2 (bypasses server, tracks progress)
 - **Access Control**: Presigned URLs for secure file access
+- **Multi-Tenancy**: Organization-scoped queries on all database operations
 
 **Architecture Diagram**:
 
 ![Content Management Architecture](./assets/content-management-architecture.png)
 
-The diagram illustrates the direct upload strategy (browser → R2 via presigned URLs), media library pattern, bucket-per-creator isolation, and transcoding queue integration.
+The diagram illustrates the direct upload strategy (browser → R2 via presigned URLs), media library pattern, organization-scoped storage paths, and transcoding queue integration.
+
+**Phase 1 Note**: This TDD describes the simplified Phase 1 architecture using shared R2 buckets with organization-scoped paths. For the full bucket-per-creator architecture, see the Phase 2+ evolution plan in [EVOLUTION.md](./EVOLUTION.md).
 
 ---
 
@@ -34,13 +40,19 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ### Technical Prerequisites
 
 1.  **Drizzle ORM Setup**: The database schema for content, media, and resources must be in place.
-2.  **Cloudflare R2 Buckets**: The bucket-per-creator architecture needs to be set up for file storage.
-3.  **Auth System**: The `requireCreatorAccess()` guard is necessary to protect content management routes.
-4.  **Cloudflare Queue**: The `TRANSCODING_QUEUE` is needed to handle video processing jobs.
+2.  **Cloudflare R2 Buckets**: Shared buckets (`codex-media-production`, `codex-assets-production`) must be configured.
+3.  **Auth System**: The `requireAuth()` middleware is necessary to protect content management routes and provide user context.
+4.  **Cloudflare Queue**: The `TRANSCODING_QUEUE` is needed to handle video processing jobs (Phase 2).
 
 ---
 
 ## Component List
+
+> **Phase 1 Simplifications:**
+> - **Shared R2 Buckets**: Using `codex-media-production` and `codex-assets-production` shared buckets with organization-scoped paths
+> - **Organization-Level Isolation**: All queries filtered by `organizationId` from user context
+> - **Bucket-per-creator Architecture**: Deferred to Phase 2+ (see [EVOLUTION.md](./EVOLUTION.md))
+> - **Auth Context**: `requireAuth()` middleware provides user context including `organizationId`
 
 ### 1. Media Items Service (`packages/web/src/lib/server/media/service.ts`)
 
@@ -54,9 +66,9 @@ export interface IMediaItemsService {
   createMediaItem(data: CreateMediaItemInput): Promise<MediaItem>;
 
   // Read
-  getMediaItemById(id: string, ownerId: string): Promise<MediaItem | null>;
+  getMediaItemById(id: string, organizationId: string): Promise<MediaItem | null>;
   getMediaLibrary(
-    ownerId: string,
+    organizationId: string,
     filters: MediaFilters
   ): Promise<PaginatedMediaItems>;
 
@@ -64,7 +76,7 @@ export interface IMediaItemsService {
   updateMediaItemStatus(id: string, status: MediaStatus): Promise<MediaItem>;
 
   // Delete (only if not referenced by content)
-  deleteMediaItem(id: string, ownerId: string): Promise<void>;
+  deleteMediaItem(id: string, organizationId: string): Promise<void>;
 }
 
 export type MediaStatus =
@@ -76,10 +88,9 @@ export type MediaStatus =
 
 export interface CreateMediaItemInput {
   id: string; // Generated upfront (UUID)
-  ownerId: string;
+  organizationId: string;
   type: 'video' | 'audio';
-  bucketName: string; // 'codex-media-{creatorId}'
-  fileKey: string; // 'originals/{mediaId}/original.mp4'
+  r2Path: string; // '{organizationId}/media/{mediaId}/original.{ext}'
   filename: string;
   fileSize: number;
   mimeType: string;
@@ -100,11 +111,10 @@ export class MediaItemsService implements IMediaItemsService {
       .insert(mediaItems)
       .values({
         id: data.id,
-        ownerId: data.ownerId,
+        organizationId: data.organizationId,
         type: data.type,
         status: 'uploaded', // Initial status
-        bucketName: data.bucketName,
-        fileKey: data.fileKey,
+        r2Path: data.r2Path,
         filename: data.filename,
         fileSize: data.fileSize,
         mimeType: data.mimeType,
@@ -115,12 +125,12 @@ export class MediaItemsService implements IMediaItemsService {
   }
 
   async getMediaLibrary(
-    ownerId: string,
+    organizationId: string,
     filters: MediaFilters
   ): Promise<PaginatedMediaItems> {
     const items = await db.query.mediaItems.findMany({
       where: and(
-        eq(mediaItems.ownerId, ownerId),
+        eq(mediaItems.organizationId, organizationId),
         filters.type ? eq(mediaItems.type, filters.type) : undefined,
         filters.status ? eq(mediaItems.status, filters.status) : undefined
       ),
@@ -132,7 +142,7 @@ export class MediaItemsService implements IMediaItemsService {
     const total = await db
       .select({ count: sql`count(*)` })
       .from(mediaItems)
-      .where(eq(mediaItems.ownerId, ownerId));
+      .where(eq(mediaItems.organizationId, organizationId));
 
     return {
       items,
@@ -155,7 +165,7 @@ export class MediaItemsService implements IMediaItemsService {
     return updated;
   }
 
-  async deleteMediaItem(id: string, ownerId: string): Promise<void> {
+  async deleteMediaItem(id: string, organizationId: string): Promise<void> {
     // Check if media item is referenced by any content
     const referencingContent = await db.query.content.findFirst({
       where: and(eq(content.mediaItemId, id), isNull(content.deletedAt)),
@@ -168,7 +178,7 @@ export class MediaItemsService implements IMediaItemsService {
     // Delete media item
     await db
       .delete(mediaItems)
-      .where(and(eq(mediaItems.id, id), eq(mediaItems.ownerId, ownerId)));
+      .where(and(eq(mediaItems.id, id), eq(mediaItems.organizationId, organizationId)));
 
     // Note: R2 file deletion handled separately (manual cleanup or cron job)
   }
@@ -188,26 +198,26 @@ export const mediaItemsService = new MediaItemsService();
 ```typescript
 export interface IContentService {
   // Create content (references existing media item)
-  createContent(data: CreateContentInput, ownerId: string): Promise<Content>;
+  createContent(data: CreateContentInput, organizationId: string): Promise<Content>;
 
   // Read
-  getContentById(id: string, ownerId: string): Promise<Content | null>;
+  getContentById(id: string, organizationId: string): Promise<Content | null>;
   getContentList(
-    ownerId: string,
+    organizationId: string,
     filters: ContentFilters
   ): Promise<PaginatedContent>;
 
   // Update
   updateContent(
     id: string,
-    ownerId: string,
+    organizationId: string,
     data: UpdateContentInput
   ): Promise<Content>;
-  publishContent(id: string, ownerId: string): Promise<Content>;
-  archiveContent(id: string, ownerId: string): Promise<Content>;
+  publishContent(id: string, organizationId: string): Promise<Content>;
+  archiveContent(id: string, organizationId: string): Promise<Content>;
 
   // Delete (soft delete)
-  deleteContent(id: string, ownerId: string): Promise<void>;
+  deleteContent(id: string, organizationId: string): Promise<void>;
 }
 
 export interface CreateContentInput {
@@ -217,7 +227,7 @@ export interface CreateContentInput {
   categoryId: string;
   tags: string[];
   price: number;
-  customThumbnailKey?: string; // Optional custom thumbnail in R2
+  customThumbnailPath?: string; // Optional custom thumbnail: '{organizationId}/media/{mediaId}/thumb-custom.jpg'
 }
 ```
 
@@ -238,13 +248,13 @@ import { eq, and, isNull } from 'drizzle-orm';
 export class ContentService implements IContentService {
   async createContent(
     data: CreateContentInput,
-    ownerId: string
+    organizationId: string
   ): Promise<Content> {
-    // 1. Validate media item exists and belongs to creator
+    // 1. Validate media item exists and belongs to organization
     const mediaItem = await db.query.mediaItems.findFirst({
       where: and(
         eq(mediaItems.id, data.mediaItemId),
-        eq(mediaItems.ownerId, ownerId)
+        eq(mediaItems.organizationId, organizationId)
       ),
     });
 
@@ -276,8 +286,8 @@ export class ContentService implements IContentService {
         categoryId: data.categoryId,
         price: data.price,
         status: 'draft',
-        ownerId,
-        customThumbnailKey: data.customThumbnailKey,
+        organizationId,
+        customThumbnailPath: data.customThumbnailPath,
       })
       .returning();
 
@@ -290,12 +300,12 @@ export class ContentService implements IContentService {
   }
 
   async getContentList(
-    ownerId: string,
+    organizationId: string,
     filters: ContentFilters
   ): Promise<PaginatedContent> {
     const items = await db.query.content.findMany({
       where: and(
-        eq(content.ownerId, ownerId),
+        eq(content.organizationId, organizationId),
         isNull(content.deletedAt), // Exclude deleted
         filters.status ? eq(content.status, filters.status) : undefined,
         filters.categoryId
@@ -325,7 +335,7 @@ export class ContentService implements IContentService {
     const total = await db
       .select({ count: sql`count(*)` })
       .from(content)
-      .where(and(eq(content.ownerId, ownerId), isNull(content.deletedAt)));
+      .where(and(eq(content.organizationId, organizationId), isNull(content.deletedAt)));
 
     return {
       items,
@@ -337,12 +347,12 @@ export class ContentService implements IContentService {
 
   async updateContent(
     id: string,
-    ownerId: string,
+    organizationId: string,
     data: UpdateContentInput
   ): Promise<Content> {
     // Validate ownership
     const existing = await db.query.content.findFirst({
-      where: and(eq(content.id, id), eq(content.ownerId, ownerId)),
+      where: and(eq(content.id, id), eq(content.organizationId, organizationId)),
     });
 
     if (!existing) {
@@ -354,7 +364,7 @@ export class ContentService implements IContentService {
       const mediaItem = await db.query.mediaItems.findFirst({
         where: and(
           eq(mediaItems.id, data.mediaItemId),
-          eq(mediaItems.ownerId, ownerId)
+          eq(mediaItems.organizationId, organizationId)
         ),
       });
 
@@ -372,10 +382,10 @@ export class ContentService implements IContentService {
         mediaItemId: data.mediaItemId,
         price: data.price,
         categoryId: data.categoryId,
-        customThumbnailKey: data.customThumbnailKey,
+        customThumbnailPath: data.customThumbnailPath,
         updatedAt: new Date(),
       })
-      .where(and(eq(content.id, id), eq(content.ownerId, ownerId)))
+      .where(and(eq(content.id, id), eq(content.organizationId, organizationId)))
       .returning();
 
     // Update tags
@@ -389,22 +399,22 @@ export class ContentService implements IContentService {
     return updated;
   }
 
-  async publishContent(id: string, ownerId: string): Promise<Content> {
+  async publishContent(id: string, organizationId: string): Promise<Content> {
     const [published] = await db
       .update(content)
       .set({ status: 'published', publishedAt: new Date() })
-      .where(and(eq(content.id, id), eq(content.ownerId, ownerId)))
+      .where(and(eq(content.id, id), eq(content.organizationId, organizationId)))
       .returning();
 
     return published;
   }
 
-  async deleteContent(id: string, ownerId: string): Promise<void> {
+  async deleteContent(id: string, organizationId: string): Promise<void> {
     // Soft delete content
     await db
       .update(content)
       .set({ deletedAt: new Date() })
-      .where(and(eq(content.id, id), eq(content.ownerId, ownerId)));
+      .where(and(eq(content.id, id), eq(content.organizationId, organizationId)));
 
     // Note: Does NOT delete media item (may be used by other content)
     // Note: Does NOT delete resource attachments (resources remain for other content)
@@ -462,38 +472,37 @@ export const contentService = new ContentService();
 ```typescript
 export interface IResourceService {
   // Create resource record after upload
-  createResource(data: CreateResourceInput, ownerId: string): Promise<Resource>;
+  createResource(data: CreateResourceInput, organizationId: string): Promise<Resource>;
 
   // Attach resource to content
   attachResourceToContent(
     resourceId: string,
     contentId: string,
     label: string,
-    ownerId: string
+    organizationId: string
   ): Promise<void>;
 
   // Detach resource from content
   detachResourceFromContent(
     resourceId: string,
     contentId: string,
-    ownerId: string
+    organizationId: string
   ): Promise<void>;
 
-  // List resources owned by creator
+  // List resources owned by organization
   getResourceLibrary(
-    ownerId: string,
+    organizationId: string,
     filters: ResourceFilters
   ): Promise<PaginatedResources>;
 
   // Delete resource (only if not attached to any content)
-  deleteResource(id: string, ownerId: string): Promise<void>;
+  deleteResource(id: string, organizationId: string): Promise<void>;
 }
 
 export interface CreateResourceInput {
   id: string; // Generated upfront (UUID)
-  ownerId: string;
-  bucketName: string; // 'codex-resources-{creatorId}'
-  fileKey: string; // '{resourceId}/filename.pdf'
+  organizationId: string;
+  r2Path: string; // '{organizationId}/resources/{resourceId}/{filename}'
   filename: string;
   fileSize: number;
   mimeType: string;
@@ -510,15 +519,14 @@ import { eq, and } from 'drizzle-orm';
 export class ResourceService implements IResourceService {
   async createResource(
     data: CreateResourceInput,
-    ownerId: string
+    organizationId: string
   ): Promise<Resource> {
     const [newResource] = await db
       .insert(resources)
       .values({
         id: data.id,
-        ownerId: data.ownerId,
-        bucketName: data.bucketName,
-        fileKey: data.fileKey,
+        organizationId: data.organizationId,
+        r2Path: data.r2Path,
         filename: data.filename,
         fileSize: data.fileSize,
         mimeType: data.mimeType,
@@ -532,11 +540,11 @@ export class ResourceService implements IResourceService {
     resourceId: string,
     contentId: string,
     label: string,
-    ownerId: string
+    organizationId: string
   ): Promise<void> {
     // Validate resource ownership
     const resource = await db.query.resources.findFirst({
-      where: and(eq(resources.id, resourceId), eq(resources.ownerId, ownerId)),
+      where: and(eq(resources.id, resourceId), eq(resources.organizationId, organizationId)),
     });
 
     if (!resource) {
@@ -545,7 +553,7 @@ export class ResourceService implements IResourceService {
 
     // Validate content ownership
     const contentItem = await db.query.content.findFirst({
-      where: and(eq(content.id, contentId), eq(content.ownerId, ownerId)),
+      where: and(eq(content.id, contentId), eq(content.organizationId, organizationId)),
     });
 
     if (!contentItem) {
@@ -567,11 +575,11 @@ export class ResourceService implements IResourceService {
   async detachResourceFromContent(
     resourceId: string,
     contentId: string,
-    ownerId: string
+    organizationId: string
   ): Promise<void> {
     // Validate ownership via resource
     const resource = await db.query.resources.findFirst({
-      where: and(eq(resources.id, resourceId), eq(resources.ownerId, ownerId)),
+      where: and(eq(resources.id, resourceId), eq(resources.organizationId, organizationId)),
     });
 
     if (!resource) {
@@ -591,11 +599,11 @@ export class ResourceService implements IResourceService {
   }
 
   async getResourceLibrary(
-    ownerId: string,
+    organizationId: string,
     filters: ResourceFilters
   ): Promise<PaginatedResources> {
     const items = await db.query.resources.findMany({
-      where: eq(resources.ownerId, ownerId),
+      where: eq(resources.organizationId, organizationId),
       limit: filters.limit || 20,
       offset: filters.offset || 0,
       orderBy: (resources, { desc }) => [desc(resources.createdAt)],
@@ -604,7 +612,7 @@ export class ResourceService implements IResourceService {
     const total = await db
       .select({ count: sql`count(*)` })
       .from(resources)
-      .where(eq(resources.ownerId, ownerId));
+      .where(eq(resources.organizationId, organizationId));
 
     return {
       items,
@@ -614,7 +622,7 @@ export class ResourceService implements IResourceService {
     };
   }
 
-  async deleteResource(id: string, ownerId: string): Promise<void> {
+  async deleteResource(id: string, organizationId: string): Promise<void> {
     // Check if resource is attached to any content
     const attachments = await db.query.resourceAttachments.findFirst({
       where: eq(resourceAttachments.resourceId, id),
@@ -627,7 +635,7 @@ export class ResourceService implements IResourceService {
     // Delete resource
     await db
       .delete(resources)
-      .where(and(eq(resources.id, id), eq(resources.ownerId, ownerId)));
+      .where(and(eq(resources.id, id), eq(resources.organizationId, organizationId)));
 
     // Note: R2 file deletion handled separately
   }
@@ -640,7 +648,7 @@ export const resourceService = new ResourceService();
 
 ### 4. R2 Service (`packages/web/src/lib/server/r2/service.ts`)
 
-**Responsibility**: Interact with Cloudflare R2 for file storage (bucket-per-creator)
+**Responsibility**: Interact with Cloudflare R2 for file storage (shared buckets with organization-scoped paths)
 
 **Implementation**:
 
@@ -650,13 +658,14 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
-  CreateBucketCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export class R2Service {
   private client: S3Client;
   private accountId: string;
+  private mediaBucket: string = 'codex-media-production';
+  private assetsBucket: string = 'codex-assets-production';
 
   constructor() {
     this.accountId = process.env.CLOUDFLARE_ACCOUNT_ID!;
@@ -673,46 +682,17 @@ export class R2Service {
   }
 
   /**
-   * Provision creator buckets on signup
-   * Creates: codex-media-{creatorId}, codex-resources-{creatorId}, codex-assets-{creatorId}
-   */
-  async provisionCreatorBuckets(creatorId: string): Promise<void> {
-    const buckets = [
-      `codex-media-${creatorId}`,
-      `codex-resources-${creatorId}`,
-      `codex-assets-${creatorId}`,
-    ];
-
-    for (const bucketName of buckets) {
-      try {
-        await this.client.send(
-          new CreateBucketCommand({
-            Bucket: bucketName,
-          })
-        );
-
-        console.log(`Created bucket: ${bucketName}`);
-      } catch (error) {
-        // Bucket may already exist, ignore error
-        console.error(`Failed to create bucket ${bucketName}:`, error);
-      }
-    }
-
-    // Store bucket names in creator_buckets table (see Database Schema)
-  }
-
-  /**
    * Generate presigned PUT URL for direct browser upload
    */
   async getUploadUrl(
     bucketName: string,
-    fileKey: string,
+    r2Path: string,
     contentType: string,
     expiresIn: number = 900 // 15 minutes (large files)
   ): Promise<PresignedUploadUrl> {
     const command = new PutObjectCommand({
       Bucket: bucketName,
-      Key: fileKey,
+      Key: r2Path,
       ContentType: contentType,
     });
 
@@ -721,7 +701,7 @@ export class R2Service {
     return {
       url,
       bucketName,
-      fileKey,
+      r2Path,
       expiresIn,
     };
   }
@@ -732,12 +712,12 @@ export class R2Service {
    */
   async getDownloadUrl(
     bucketName: string,
-    fileKey: string,
+    r2Path: string,
     expiresIn: number = 3600 // 1 hour
   ): Promise<string> {
     const command = new GetObjectCommand({
       Bucket: bucketName,
-      Key: fileKey,
+      Key: r2Path,
     });
 
     return await getSignedUrl(this.client, command, { expiresIn });
@@ -746,35 +726,42 @@ export class R2Service {
   /**
    * Delete file from R2
    */
-  async deleteFile(bucketName: string, fileKey: string): Promise<void> {
+  async deleteFile(bucketName: string, r2Path: string): Promise<void> {
     const command = new DeleteObjectCommand({
       Bucket: bucketName,
-      Key: fileKey,
+      Key: r2Path,
     });
 
     await this.client.send(command);
   }
 
   /**
-   * Generate unique file keys for R2
+   * Generate organization-scoped R2 paths (Phase 1)
    */
-  generateMediaKey(mediaId: string, filename: string): string {
-    const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return `originals/${mediaId}/${sanitized}`;
+  generateMediaPath(organizationId: string, mediaId: string, filename: string): string {
+    const ext = filename.split('.').pop();
+    return `${organizationId}/media/${mediaId}/original.${ext}`;
   }
 
-  generateResourceKey(resourceId: string, filename: string): string {
+  generateResourcePath(organizationId: string, resourceId: string, filename: string): string {
     const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return `${resourceId}/${sanitized}`;
+    return `${organizationId}/resources/${resourceId}/${sanitized}`;
   }
 
-  generateThumbnailKey(
-    entityType: string,
-    entityId: string,
-    filename: string
+  generateThumbnailPath(
+    organizationId: string,
+    mediaId: string,
+    size: string
   ): string {
-    const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    return `thumbnails/${entityType}/${entityId}/${sanitized}`;
+    return `${organizationId}/media/${mediaId}/thumb-${size}.jpg`;
+  }
+
+  getMediaBucket(): string {
+    return this.mediaBucket;
+  }
+
+  getAssetsBucket(): string {
+    return this.assetsBucket;
   }
 }
 
@@ -791,13 +778,13 @@ export const r2Service = new R2Service();
 
 ```typescript
 import { r2Service } from '$lib/server/r2/service';
-import { requireCreatorAccess } from '$lib/server/guards';
+import { requireAuth } from '$lib/server/guards';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-  // Require Creator access
-  const user = requireCreatorAccess({ locals, url: request.url });
+  // Require authentication (provides organizationId from user context)
+  const user = requireAuth({ locals, url: request.url });
 
   const { filename, contentType, mediaId } = await request.json();
 
@@ -815,20 +802,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     return json({ error: 'Invalid file type' }, { status: 400 });
   }
 
-  // Generate presigned URL for creator's media bucket
-  const bucketName = `codex-media-${user.id}`;
-  const fileKey = r2Service.generateMediaKey(mediaId, filename);
+  // Generate presigned URL for shared media bucket with organization-scoped path
+  const bucketName = r2Service.getMediaBucket();
+  const r2Path = r2Service.generateMediaPath(user.organizationId, mediaId, filename);
 
   const uploadUrl = await r2Service.getUploadUrl(
     bucketName,
-    fileKey,
+    r2Path,
     contentType
   );
 
   return json({
     uploadUrl: uploadUrl.url,
     bucketName: uploadUrl.bucketName,
-    fileKey: uploadUrl.fileKey,
+    r2Path: uploadUrl.r2Path,
     expiresIn: uploadUrl.expiresIn,
   });
 };
@@ -838,23 +825,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 ```typescript
 import { mediaItemsService } from '$lib/server/media/service';
-import { requireCreatorAccess } from '$lib/server/guards';
+import { requireAuth } from '$lib/server/guards';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
-  const user = requireCreatorAccess({ locals, url: request.url });
+  const user = requireAuth({ locals, url: request.url });
 
-  const { mediaId, filename, fileSize, mimeType, bucketName, fileKey } =
+  const { mediaId, filename, fileSize, mimeType, bucketName, r2Path } =
     await request.json();
 
   // Create media_items record
   const mediaItem = await mediaItemsService.createMediaItem({
     id: mediaId,
-    ownerId: user.id,
+    organizationId: user.organizationId,
     type: mimeType.startsWith('video/') ? 'video' : 'audio',
-    bucketName,
-    fileKey,
+    r2Path,
     filename,
     fileSize,
     mimeType,
@@ -864,10 +850,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
   if (mediaItem.type === 'video') {
     await platform.env.TRANSCODING_QUEUE.send({
       mediaId: mediaItem.id,
+      organizationId: user.organizationId,
       inputBucket: bucketName,
-      inputKey: fileKey,
+      inputPath: r2Path,
       outputBucket: bucketName,
-      outputPrefix: `hls/${mediaId}/`,
+      outputPrefix: `${user.organizationId}/media/${mediaId}/hls/`,
     });
 
     // Update status to transcoding
@@ -887,7 +874,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 ```typescript
 export const POST: RequestHandler = async ({ request, locals }) => {
-  const user = requireCreatorAccess({ locals, url: request.url });
+  const user = requireAuth({ locals, url: request.url });
 
   const { filename, contentType, resourceId } = await request.json();
 
@@ -903,20 +890,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     return json({ error: 'Invalid file type' }, { status: 400 });
   }
 
-  // Generate presigned URL for creator's resource bucket
-  const bucketName = `codex-resources-${user.id}`;
-  const fileKey = r2Service.generateResourceKey(resourceId, filename);
+  // Generate presigned URL for shared media bucket with organization-scoped path
+  const bucketName = r2Service.getMediaBucket();
+  const r2Path = r2Service.generateResourcePath(user.organizationId, resourceId, filename);
 
   const uploadUrl = await r2Service.getUploadUrl(
     bucketName,
-    fileKey,
+    r2Path,
     contentType
   );
 
   return json({
     uploadUrl: uploadUrl.url,
     bucketName: uploadUrl.bucketName,
-    fileKey: uploadUrl.fileKey,
+    r2Path: uploadUrl.r2Path,
     expiresIn: uploadUrl.expiresIn,
   });
 };
@@ -928,23 +915,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 import { resourceService } from '$lib/server/resources/service';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-  const user = requireCreatorAccess({ locals, url: request.url });
+  const user = requireAuth({ locals, url: request.url });
 
-  const { resourceId, filename, fileSize, mimeType, bucketName, fileKey } =
+  const { resourceId, filename, fileSize, mimeType, bucketName, r2Path } =
     await request.json();
 
   // Create resources record
   const resource = await resourceService.createResource(
     {
       id: resourceId,
-      ownerId: user.id,
-      bucketName,
-      fileKey,
+      organizationId: user.organizationId,
+      r2Path,
       filename,
       fileSize,
       mimeType,
     },
-    user.id
+    user.organizationId
   );
 
   return json(resource, { status: 201 });
@@ -959,17 +945,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 ```typescript
 import { contentService } from '$lib/server/content/service';
-import { requireCreatorAccess } from '$lib/server/guards';
+import { requireAuth } from '$lib/server/guards';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
-  const user = requireCreatorAccess({ locals, url: request.url });
+  const user = requireAuth({ locals, url: request.url });
 
   const data = await request.json();
 
   try {
-    const content = await contentService.createContent(data, user.id);
+    const content = await contentService.createContent(data, user.organizationId);
     return json(content, { status: 201 });
   } catch (error) {
     return json({ error: error.message }, { status: 400 });
@@ -977,7 +963,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 };
 
 export const GET: RequestHandler = async ({ url, locals }) => {
-  const user = requireCreatorAccess({ locals, url: url.toString() });
+  const user = requireAuth({ locals, url: url.toString() });
 
   const filters = {
     status: url.searchParams.get('status'),
@@ -986,7 +972,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
     offset: Number(url.searchParams.get('offset') || 0),
   };
 
-  const result = await contentService.getContentList(user.id, filters);
+  const result = await contentService.getContentList(user.organizationId, filters);
   return json(result);
 };
 ```
@@ -997,7 +983,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 import { resourceService } from '$lib/server/resources/service';
 
 export const POST: RequestHandler = async ({ request, params, locals }) => {
-  const user = requireCreatorAccess({ locals, url: request.url });
+  const user = requireAuth({ locals, url: request.url });
 
   const { resourceId, label } = await request.json();
 
@@ -1005,21 +991,21 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
     resourceId,
     params.id, // contentId
     label,
-    user.id
+    user.organizationId
   );
 
   return json({ success: true });
 };
 
 export const DELETE: RequestHandler = async ({ request, params, locals }) => {
-  const user = requireCreatorAccess({ locals, url: request.url });
+  const user = requireAuth({ locals, url: request.url });
 
   const { resourceId } = await request.json();
 
   await resourceService.detachResourceFromContent(
     resourceId,
     params.id, // contentId
-    user.id
+    user.organizationId
   );
 
   return json({ success: true });
@@ -1056,8 +1042,8 @@ export const mediaItems = pgTable('media_items', {
   id: uuid('id').primaryKey().defaultRandom(),
 
   // Ownership
-  ownerId: uuid('owner_id')
-    .references(() => users.id)
+  organizationId: uuid('organization_id')
+    .references(() => organizations.id)
     .notNull(),
 
   // Type
@@ -1065,14 +1051,13 @@ export const mediaItems = pgTable('media_items', {
   status: mediaStatusEnum('status').default('uploading').notNull(),
 
   // Storage (R2)
-  bucketName: varchar('bucket_name', { length: 100 }).notNull(), // 'codex-media-{creatorId}'
-  fileKey: varchar('file_key', { length: 500 }).notNull(), // 'originals/{mediaId}/original.mp4'
+  r2Path: varchar('r2_path', { length: 500 }).notNull(), // '{organizationId}/media/{mediaId}/original.{ext}'
   filename: varchar('filename', { length: 255 }).notNull(),
   fileSize: bigint('file_size', { mode: 'number' }).notNull(), // bytes
   mimeType: varchar('mime_type', { length: 100 }).notNull(),
 
   // HLS output (if video, populated after transcoding)
-  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }), // 'hls/{mediaId}/master.m3u8'
+  hlsMasterPlaylistPath: varchar('hls_master_playlist_path', { length: 500 }), // '{organizationId}/media/{mediaId}/hls/master.m3u8'
 
   // Metadata (extracted during transcoding)
   durationSeconds: integer('duration_seconds'),
@@ -1108,8 +1093,8 @@ export const content = pgTable('content', {
   id: uuid('id').primaryKey().defaultRandom(),
 
   // Ownership
-  ownerId: uuid('owner_id')
-    .references(() => users.id)
+  organizationId: uuid('organization_id')
+    .references(() => organizations.id)
     .notNull(),
 
   // Metadata
@@ -1123,7 +1108,7 @@ export const content = pgTable('content', {
     .notNull(),
 
   // Custom thumbnail (optional, override auto-generated)
-  customThumbnailKey: varchar('custom_thumbnail_key', { length: 500 }), // R2 key in assets bucket
+  customThumbnailPath: varchar('custom_thumbnail_path', { length: 500 }), // R2 path: '{organizationId}/media/{mediaId}/thumb-custom.jpg'
 
   // Organization
   categoryId: uuid('category_id')
@@ -1148,13 +1133,12 @@ export const resources = pgTable('resources', {
   id: uuid('id').primaryKey().defaultRandom(),
 
   // Ownership
-  ownerId: uuid('owner_id')
-    .references(() => users.id)
+  organizationId: uuid('organization_id')
+    .references(() => organizations.id)
     .notNull(),
 
   // Storage (R2)
-  bucketName: varchar('bucket_name', { length: 100 }).notNull(), // 'codex-resources-{creatorId}'
-  fileKey: varchar('file_key', { length: 500 }).notNull(), // '{resourceId}/filename.pdf'
+  r2Path: varchar('r2_path', { length: 500 }).notNull(), // '{organizationId}/resources/{resourceId}/{filename}'
   filename: varchar('filename', { length: 255 }).notNull(),
   fileSize: bigint('file_size', { mode: 'number' }).notNull(),
   mimeType: varchar('mime_type', { length: 100 }).notNull(),
@@ -1190,25 +1174,7 @@ export const resourceAttachmentsUnique = unique('resource_entity_unique').on(
 );
 ```
 
-**Creator Buckets Table** (`packages/web/src/lib/server/db/schema/creator_buckets.ts`):
-
-```typescript
-export const creatorBuckets = pgTable('creator_buckets', {
-  creatorId: uuid('creator_id')
-    .primaryKey()
-    .references(() => users.id),
-
-  // Bucket names
-  mediaBucket: varchar('media_bucket', { length: 100 }).notNull(), // 'codex-media-{creatorId}'
-  resourcesBucket: varchar('resources_bucket', { length: 100 }).notNull(), // 'codex-resources-{creatorId}'
-  assetsBucket: varchar('assets_bucket', { length: 100 }).notNull(), // 'codex-assets-{creatorId}'
-
-  // Timestamps
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-```
-
-**Categories & Tags** (same as before):
+**Categories & Tags**:
 
 ```typescript
 export const categories = pgTable('categories', {
@@ -1264,10 +1230,9 @@ describe('MediaItemsService', () => {
   it('creates media item record', async () => {
     const mediaItem = await mediaItemsService.createMediaItem({
       id: 'media-uuid',
-      ownerId: 'creator-uuid',
+      organizationId: 'org-uuid',
       type: 'video',
-      bucketName: 'codex-media-creator-uuid',
-      fileKey: 'originals/media-uuid/video.mp4',
+      r2Path: 'org-uuid/media/media-uuid/original.mp4',
       filename: 'video.mp4',
       fileSize: 1024000,
       mimeType: 'video/mp4',
@@ -1286,12 +1251,12 @@ describe('MediaItemsService', () => {
         mediaItemId: 'media-uuid',
         // ...
       },
-      'creator-uuid'
+      'org-uuid'
     );
 
     // Attempt to delete media
     await expect(
-      mediaItemsService.deleteMediaItem('media-uuid', 'creator-uuid')
+      mediaItemsService.deleteMediaItem('media-uuid', 'org-uuid')
     ).rejects.toThrow('Cannot delete media item: referenced by content');
   });
 });
@@ -1311,7 +1276,7 @@ describe('ContentService', () => {
         tags: ['test', 'video'],
         price: 29.99,
       },
-      'creator-uuid'
+      'org-uuid'
     );
 
     expect(content.id).toBeDefined();
@@ -1329,14 +1294,13 @@ describe('ResourceService', () => {
     const resource = await resourceService.createResource(
       {
         id: 'resource-uuid',
-        ownerId: 'creator-uuid',
-        bucketName: 'codex-resources-creator-uuid',
-        fileKey: 'resource-uuid/workbook.pdf',
+        organizationId: 'org-uuid',
+        r2Path: 'org-uuid/resources/resource-uuid/workbook.pdf',
         filename: 'workbook.pdf',
         fileSize: 500000,
         mimeType: 'application/pdf',
       },
-      'creator-uuid'
+      'org-uuid'
     );
 
     // Attach to content A
@@ -1344,7 +1308,7 @@ describe('ResourceService', () => {
       'resource-uuid',
       'content-a-uuid',
       'Workbook',
-      'creator-uuid'
+      'org-uuid'
     );
 
     // Attach to content B
@@ -1352,7 +1316,7 @@ describe('ResourceService', () => {
       'resource-uuid',
       'content-b-uuid',
       'Workbook',
-      'creator-uuid'
+      'org-uuid'
     );
 
     // Verify attachments
@@ -1381,13 +1345,13 @@ describe('Media Upload API', () => {
           mediaId: 'media-uuid',
         }),
       }),
-      locals: { user: mockCreator() },
+      locals: { user: mockUser({ organizationId: 'org-uuid' }) },
     });
 
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.uploadUrl).toBeDefined();
-    expect(data.fileKey).toBe('originals/media-uuid/video.mp4');
+    expect(data.r2Path).toBe('org-uuid/media/media-uuid/original.mp4');
   });
 });
 ```
