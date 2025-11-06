@@ -741,6 +741,7 @@ describe('Settings Validation Schemas', () => {
 ## Related Documentation
 
 **Must Read**:
+- [Platform Settings TDD](../../features/platform-settings/ttd-dphase-1.md) - Feature specification
 - [R2 Storage Patterns](../../core/R2_STORAGE_PATTERNS.md)
 - [STANDARDS.md](../STANDARDS.md) - § 3 Validation separation
 

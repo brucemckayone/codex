@@ -1069,6 +1069,7 @@ export default app;
 ## Related Documentation
 
 **Must Read**:
+- [Admin Dashboard TDD](../../features/admin-dashboard/ttd-dphase-1.md) - Feature specification
 - [Access Control Patterns](../../core/ACCESS_CONTROL_PATTERNS.md)
 - [Multi-Tenant Architecture](../../core/MULTI_TENANT_ARCHITECTURE.md)
 - [STANDARDS.md](../STANDARDS.md) - § 4 Security
