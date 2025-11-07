@@ -23,7 +23,6 @@ API_URL = "https://api.revelations.studio"
 [[env.production.routes]]
 pattern = "auth.revelations.studio"
 custom_domain = true
-override_existing_dns_record = true
 
 # Staging environment
 [env.staging]

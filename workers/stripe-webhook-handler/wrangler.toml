@@ -25,7 +25,6 @@ AUTH_WORKER_URL = "https://auth.revelations.studio"
 [[env.production.routes]]
 pattern = "api.revelations.studio"
 custom_domain = true
-override_existing_dns_record = true
 
 # Staging environment
 [env.staging]
