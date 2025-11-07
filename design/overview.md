@@ -1,6 +1,6 @@
-# Codex Platform - Non-Technical Overview
+# Codex Platform - Complete Overview
 
-**Purpose**: A single, comprehensive reference document that explains what Codex is, who it's for, and how it works—in plain English.
+**Purpose**: A single, comprehensive reference document that explains what Codex is, who it's for, and how it works—in plain English, with no technical jargon.
 
 **Last Updated**: November 7, 2025
 
@@ -18,684 +18,944 @@ The platform creates a journey for your customers:
 
 ---
 
-## Who Is Codex For?
+## Who Uses Codex?
 
-### Three Types of People Use This Platform
+### Four Types of People
 
-**1. The Developer (Platform Owner)**
+**1. Platform Owner (The Developer)**
 - You—the person who built and maintains the system
-- You have access to everything, but you don't run any businesses on it
+- You have complete access to everything, but you don't run any businesses on it
 - Think of this as being the "landlord" of a building where businesses operate
+- You can see all the data, manage all the settings, but you're not creating content or selling anything
 
-**2. Business Operators (Organization Owners)**
-- People who run their own business on the platform
-- Examples: A yoga studio owner, a life coach, a cooking instructor
-- They upload videos, host workshops, and coach clients
-- They are ALSO creators—they have their own media library
-- In Phase 1, there's only one business operator (could be you wearing both hats)
+**2. Creators (Independent Media Owners)**
+- Independent people who create and own their media (videos, audio files, courses)
+- Examples: A yoga instructor, a cooking teacher, a business coach
+- **They own their media library**—their videos and audio files belong to them forever
+- They can work independently OR collaborate with organizations
+- In the future (Phase 2+), they can license their content to multiple organizations
 
-**3. Customers**
+**What makes a creator?**
+- They upload videos and audio to their own personal media library
+- They decide what to do with their content
+- They can sell on their own personal profile
+- They can collaborate with organizations and share revenue
+- Their files stay in their storage even if they stop working with an organization
+
+**3. Organizations (Business Operators)**
+- Groups or businesses that work with creators
+- Examples: A yoga studio collective, a coaching academy, an online learning platform
+- Organizations are run by an **Organization Owner** (who is ALSO a creator)
+- Organizations can feature content from multiple creators (Phase 2+)
+- They have their own branded storefront/website
+
+**Key distinction**:
+- **Creators** = people who own media
+- **Organizations** = businesses/collectives who sell media (including from multiple creators)
+
+**4. Customers**
 - Regular people who buy courses, attend workshops, or book coaching sessions
 - They don't need any special access—they just browse, buy, and consume
+- They see content from organizations or from individual creators
 
 ---
 
-## The Core Architecture: How Content Works
+## Understanding Creators and Organizations
 
-### Media Library (What You Own)
-
-Every creator (including organization owners) has their own **media library**—think of it like your personal Dropbox for videos and audio files.
-
-**Key Points**:
-- **You own your media files** forever, even if you leave an organization
-- Your files live in your own storage space (`codex-media-{your-id}`)
-- You upload once, use many times
-- Example: Upload a 30-minute video about meditation
-
-### Content Posts (What You Sell)
-
-A **content post** is how you package your media for sale. It's like a product listing on Amazon.
-
-**Content posts can live in two places**:
-
-1. **Your Personal Profile** (`organization_id = NULL`)
-   - It's just yours—appears on your creator profile
-   - You set the price and description
-   - Customers buy directly from you
-
-2. **An Organization's Catalog** (`organization_id = org-abc`)
-   - Posted to a specific business (yoga studio, coaching company, etc.)
-   - Appears in that organization's store
-   - You still own the underlying media file
-
-**Example Flow**:
-1. You upload a video called "Intro to Meditation" to your media library
-2. You create Content Post #1: "Beginner Meditation - $9.99" on your personal profile
-3. You create Content Post #2: "Meditation for Yoga Practitioners - $19.99" posted to "Peaceful Yoga Studio"
-4. Same video, two different products, two different audiences
-
-**Why this matters**:
-- No duplicate uploads
-- Media stays with you even if you leave the yoga studio
-- You can sell the same content in different contexts
-
----
-
-## Phase 1: What We're Building First
-
-### The Setup
-
-**One organization** (one website/business) run by one organization owner who is also a creator.
-
-**The Database Can Handle More**, But The UI Shows One:
-- The database structure supports multiple creators and organizations from day one
-- But Phase 1 only builds the UI for a single organization with one creator
-- This means we won't need to rebuild everything later—we're just adding UI
-
-### Who's Who in Phase 1
-
-| Person | What They Do | Are They A Creator? |
-|--------|-------------|---------------------|
-| **Platform Owner** (You) | Maintain the system, fix bugs, no business operations | No |
-| **Organization Owner** (Business Operator) | Run the business, upload videos, coach clients | YES—has their own media library |
-| **Customers** | Buy stuff and watch/attend | No |
-
-**Key Point**: The organization owner IS a creator. They have their own media library and can upload videos just like any other creator would.
-
-### What Organization Owners Can Do
-
-#### Upload Media to Their Library
-- Drag and drop a video file
-- It goes to their personal storage bucket
-- The system processes it (makes it streamable, generates a thumbnail)
-- Now it's in their media library
-
-#### Create Content Posts
-- Pick a video from their media library
-- Add a title, description, and price
-- Choose: "Post to my organization" (appears in the business catalog)
-- Or in the future: "Post to my personal profile"
-- Publish it
-- Customers can now buy it
-
-#### See What's Selling
-- Dashboard shows total revenue
-- Which content is most popular
-- Who has purchased what
-- Basic business metrics
-
-#### Manage Customers
-- See all customers and their purchases
-- Manually grant access (for refunds or customer service)
-- Send emails to customers
-
-#### Brand the Organization
-- Upload a logo
-- Choose colors
-- Set business name and contact info
-
----
-
-## The Customer Experience
-
-### Browsing
-- Customer visits the organization's website (e.g., peacefulyogastudio.com)
-- Sees all published content posts
-- Can filter by category, search, etc.
-- Sees prices clearly
-
-### Buying
-- Click "Buy Now" on a video course
-- Enter payment info (powered by Stripe)
-- Purchase completes instantly
-- Automatic email confirmation
-
-### Watching
-- Content now appears in "My Library"
-- Click to watch
-- Video streams smoothly with quality options
-- Playback resumes where you left off
-- Can watch on phone, tablet, or computer
-
----
-
-## Phase 2 and Beyond: What Comes Later
-
-### Phase 2 (3-6 Months Later)
-
-**Multi-Creator Support**:
-- Organization owner can invite other creators
-- Example: Yoga studio invites 5 yoga instructors
-- Each instructor uploads to their own media library
-- They create content posts and share revenue with the studio
-
-**Multi-Organization**:
-- Platform owner can create more organizations
-- One creator can belong to multiple organizations
-- Example: A yoga instructor posts content to 3 different studios
-
-**Subscriptions**:
-- Monthly/annual plans instead of one-time purchases
-- Example: "$29/month for access to all yoga content"
-- Credits system: subscribers get credits to book classes
-
-### Phase 3 (6-12 Months Later)
-
-**Offerings System** (Events, Workshops, Coaching):
-- One-time workshops ("Intro to Yoga Workshop - March 15")
-- Recurring services ("Weekly therapy sessions - book your time")
-- Retreats and multi-day programs
-- Each offering gets its own "portal" with schedule, resources, and chat
-
-**Revenue Sharing**:
-- Automatic payment splits between organization and creator
-- Powered by Stripe Connect
-- Example: Studio keeps 30%, creator gets 70%
-
-### Phase 4 (1+ Year Later)
-
-**Advanced Features**:
-- Mobile apps
-- Live streaming
-- Community features (comments, forums)
-- Advanced analytics
-- Marketing automation
-
----
-
-## Key Business Concepts
-
-### The Upsell Funnel
-
-The platform is designed to move customers through a journey:
-
-**Stage 1: Discovery (Free → $10)**
-- Free content or cheap videos to get them interested
-- Low risk for the customer
-
-**Stage 2: Commitment ($29-79/month)**
-- Subscribe to ongoing access
-- Regular engagement
-
-**Stage 3: Engagement (Book Services)**
-- Attend workshops and classes
-- Use subscription credits to book sessions
-
-**Stage 4: Transformation (High-Value)**
-- One-on-one coaching
-- Intensive programs
-- Retreats and immersive experiences
-
-**Why This Works**:
-- Customers start with low commitment
-- Build trust through content
-- Naturally progress to higher-value offers
-- Platform makes each step easy
-
----
-
-## Understanding the Structure
-
-### Organizations vs. Personal Profiles
+### The Relationship
 
 Think of it like this:
 
-**Organization** = A business/brand
-- Example: "Peaceful Yoga Studio"
-- Has a website, branding, customers
-- Multiple creators can post content here
-- Appears at peacefulyogastudio.com
+**Creators are musicians. Organizations are record labels.**
 
-**Personal Creator Profile** = Individual creator's space
-- Example: "Jane Smith - Yoga Instructor"
-- Personal brand, independent of any studio
-- Creators can sell their own content here
-- Appears at codex.com/creators/jane-smith (future)
+- A musician (creator) owns their songs (media)
+- They can release songs independently on their own profile
+- OR they can work with a record label (organization) who promotes and sells their music
+- The musician still owns the songs—the label just gets a cut of sales
+- A musician can work with multiple labels (Phase 2+)
 
-**Why Both Matter**:
-- Freelance creators can build their own audience
-- Organizations can curate content from multiple creators
-- Same media file, different contexts
+### In Codex Terms
 
-### Content vs. Media: What's the Difference?
+**Sarah is a yoga instructor (creator)**:
+- She records 50 yoga videos
+- These videos live in HER media library (she owns them)
+- She can do THREE things with her videos:
 
-**Media = The Raw File**
-- The actual video or audio file
-- Stored once in your media library
-- Example: "meditation-intro.mp4" (500 MB file)
+1. **Sell Independently**
+   - Post videos on her personal creator profile
+   - Set her own prices
+   - Keep 100% of revenue (minus platform fees)
+   - Example: "30-Day Yoga Challenge - $49"
 
-**Content = The Product Listing**
-- How you package media for sale
-- Has title, description, price
-- Links to a media file
-- Example: "Beginner Meditation Course - $19.99"
+2. **Work with an Organization**
+   - She joins "Peaceful Mind Yoga Studio" (an organization)
+   - She allows them to feature her videos in their catalog
+   - The organization sets the pricing and branding
+   - Sarah gets a percentage of each sale (Phase 2+ feature)
+   - Example: The studio bundles her videos with other instructors as "Complete Beginner Series - $99"
 
-**Analogy**:
-- Media = Your photo on your phone
-- Content = That photo in an Instagram post or a print you're selling on Etsy
-- Same photo, different uses
+3. **Both at Once** (Phase 2+)
+   - Same video can appear on her personal profile for $10
+   - AND in the yoga studio's premium package for $99 (bundled with other content)
+   - She earns revenue from both places
+
+**The key**: Sarah's videos always stay in HER library. Organizations can't take them away.
+
+### Phase 1 Simplification
+
+In Phase 1, we're building for:
+- **One organization**
+- Run by **one organization owner** (who is also a creator with their own library)
+- No other creators yet
+- No revenue splitting yet
+- No licensing yet
+
+BUT: The database structure is ready for multiple creators and organizations from day one. We're just building the interface for one organization first.
+
+---
+
+## What Can You Do With Codex?
+
+This section describes each major capability of the platform, organized by what you're trying to accomplish.
+
+### 1. Managing Your Content Library
+
+**What is this?**
+Your content library is where you upload and organize all your media files (videos, audio). Think of it like your personal Dropbox, but specifically designed for content creators.
+
+**What you can do:**
+
+- **Upload Videos**: Upload video files (MP4, MOV, WebM) up to 5GB each
+  - Videos are stored in your personal storage space
+  - You can upload a 30-minute yoga class, a 2-hour workshop, or a 5-minute tip
+  - The platform tracks upload progress so you can see how much time is left
+
+- **Upload Audio**: Upload audio files (MP3, WAV) up to 500MB each
+  - Perfect for podcasts, guided meditations, or audiobooks
+  - Same storage system as videos—it's all your media library
+
+- **Organize Your Library**: See all your uploaded media in one place
+  - Sort by date, title, or type (video/audio)
+  - Search for specific files
+  - See which videos are being used in which content posts
+  - Know if a video is still processing or ready to use
+
+- **Reuse Content**: Upload once, use many times
+  - Record a video about "Introduction to Mindfulness"
+  - Use it in a $5 beginner course
+  - Use it again in a $99 complete mindfulness program
+  - Use it in a free preview to attract customers
+  - The video file only exists once—you just create different "product listings" that reference it
+
+- **Add Metadata**: Add information to help you organize
+  - Give each video a title and description (for your own reference)
+  - See file size, duration, upload date
+  - See status (uploading, processing, ready)
+
+**Why this matters:**
+- No duplicate uploads means less storage cost
+- You own your files forever—they're not tied to any specific course or organization
+- If you create a better version of a video, you can swap it out without recreating all your products
+
+**Example Workflow:**
+
+*Tom the Business Coach*:
+1. Records 10 videos about starting a business
+2. Uploads all 10 to his media library
+3. Creates "Startup Basics" course using videos 1-5 → Sells for $29
+4. Creates "Advanced Business Strategy" using videos 6-10 → Sells for $79
+5. Later, creates "Complete Entrepreneur Bundle" using ALL 10 videos → Sells for $99
+6. All three products reference the same 10 video files—no duplicate uploads
+
+---
+
+### 2. Creating Content to Sell
+
+**What is this?**
+Creating "content posts" is how you package your media into products that customers can buy. It's like creating a product listing on Amazon—you're describing what they get and how much it costs.
+
+**What you can do:**
+
+- **Create Content Posts**: Package media into sellable products
+  - Choose a video or audio file from your library
+  - Write a title and description that customers will see
+  - Set a price (or make it free)
+  - Choose whether it appears on your personal profile or an organization's storefront
+  - Add a custom thumbnail image
+
+- **Organize with Categories**: Group content by topic
+  - Create categories like "Beginner Yoga", "Advanced Techniques", "Meditation"
+  - Customers can browse by category
+  - Helps them find what they're looking for
+
+- **Add Tags**: Make content easier to find
+  - Tag a video with "stress relief", "morning routine", "15 minutes"
+  - Customers can filter by tags
+  - You can have multiple tags per content post
+
+- **Manage Lifecycle**: Control when content is visible
+  - **Draft**: You're still working on it—customers can't see it
+  - **Published**: Live and available for purchase
+  - **Archived**: Not available anymore, but not deleted (you might bring it back)
+
+- **Choose Where It Appears**: Decide who "owns" the storefront
+  - Post to your **personal profile**: Appears on your creator page, you control everything
+  - Post to an **organization**: Appears in their catalog (like the yoga studio's website)
+  - The underlying video is still yours either way
+
+- **Attach Downloadable Resources**: Give customers bonus files
+  - Upload a PDF workbook that goes with your video
+  - Upload a meditation audio track to accompany a video course
+  - Upload exercise templates, checklists, or guides
+  - Resources are stored separately and can be reused across multiple content posts
+
+**Example Workflow:**
+
+*Maria the Cooking Teacher*:
+1. Uploads a video: "How to Make Perfect Pasta" (30 minutes)
+2. Creates content post #1:
+   - Title: "Italian Pasta Masterclass"
+   - Description: "Learn authentic techniques from my grandmother's recipes"
+   - Price: $15
+   - Posted to: Her personal profile
+   - Attached resource: PDF with 10 pasta recipes
+3. Creates content post #2:
+   - Title: "Quick Family Dinners: Pasta Edition"
+   - Description: "Fast, delicious meals your kids will love"
+   - Price: $10
+   - Posted to: "Family Cooking Academy" (an organization)
+   - Attached resource: Same PDF (reused!)
+4. Same video, two different products, two different audiences
+
+---
+
+### 3. Selling Content (E-Commerce)
+
+**What is this?**
+The checkout and payment system that lets customers buy your content. This is how money actually changes hands.
+
+**What you can do:**
+
+- **Set Prices**: Decide what each piece of content costs
+  - Prices are in your local currency
+  - You can charge anything from $0 (free) to thousands of dollars
+  - Different products can reference the same video but have different prices
+
+- **Free Content Strategy**: Offer some content for free
+  - Use free videos as "lead magnets" to attract customers
+  - Once they trust you, they'll buy your paid content
+  - Example: Free "Intro to Yoga" video leads to $49 "30-Day Yoga Challenge"
+
+- **Checkout Process**: Customers go through a simple purchase flow
+  - They click "Buy" on a content post
+  - They're taken to a secure checkout page
+  - They enter their payment information (handled by Stripe)
+  - They receive instant access after payment
+
+- **Payment Processing**: Money is handled securely
+  - Payments processed through Stripe (industry-standard, very secure)
+  - Credit cards, debit cards supported
+  - Customers aren't charged until they complete checkout
+  - Failed payments are handled automatically (customer is notified)
+
+- **Purchase Tracking**: See who bought what
+  - View all purchases in the admin dashboard
+  - See customer name, what they bought, when, how much
+  - Filter by date range, product, customer
+  - Track your revenue over time
+
+- **Prevent Duplicate Purchases**: Customers can't accidentally buy twice
+  - If they try to buy something they already own, they're notified
+  - Prevents frustration and support requests
+
+**How money flows:**
+1. Customer pays $50 for your course
+2. Stripe takes their fee (~3%): $1.50
+3. Platform takes its fee (configurable): $2.50
+4. You receive: $46
+5. Money arrives in your bank account within 2-7 days (Stripe's standard timeline)
+
+**Example Workflow:**
+
+*Alex the Fitness Coach*:
+- Posts "Home Workout Program" for $39
+- Sarah (customer) finds it and clicks "Buy Now"
+- Sarah enters her credit card information on the secure Stripe checkout page
+- Payment succeeds → Sarah immediately gets access to the videos
+- Alex sees the purchase in his dashboard: "Sarah Johnson purchased Home Workout Program - $39"
+- Stripe deposits $37.83 into Alex's bank account 2 days later (after fees)
+
+---
+
+### 4. Delivering Content to Customers (Content Access)
+
+**What is this?**
+Once a customer buys your content, they need to be able to watch or download it. This system handles access control, streaming, and download links.
+
+**What you can do:**
+
+- **Automatic Access Granting**: Customers get instant access after purchase
+  - No manual work required
+  - Purchase completes → Access is immediately granted
+  - Customer can start watching right away
+
+- **Secure Streaming**: Videos are delivered securely
+  - Customers can't copy the video file URL and share it with friends
+  - Each viewing session gets a unique, expiring link
+  - Links expire after 1 hour (customer can refresh for a new link)
+  - This prevents unauthorized sharing
+
+- **User Library**: Customers see all their purchased content
+  - They log in and see "My Library"
+  - All their purchased videos and audio in one place
+  - Organized by purchase date (newest first)
+  - They can click any item to start watching
+
+- **Progress Tracking**: Resume where you left off
+  - Customer watches 15 minutes of a 30-minute video
+  - They close their browser
+  - Next time they open it, the video starts at the 15-minute mark
+  - Progress is saved automatically every 30 seconds
+  - Shows "43% complete" on the library page
+
+- **Download Access**: Let customers download files (if you choose)
+  - Videos can be downloadable (optional—you decide)
+  - Resources (PDFs, audio files) are always downloadable
+  - Downloaded files have no expiry—customer keeps them forever
+  - Secure download links prevent unauthorized access
+
+- **Multi-Device Support**: Watch anywhere
+  - Start watching on laptop, continue on phone
+  - Progress syncs across all devices
+  - Works on desktop, mobile, tablet
+
+**Example Workflow:**
+
+*Sarah the Customer*:
+1. Buys "Complete Yoga Course" with 20 videos
+2. Immediately redirected to "My Library"
+3. Clicks on Video 1: "Introduction to Yoga"
+4. Video streams in her browser (can't download the URL)
+5. Watches 10 minutes, then closes laptop
+6. Next day: Opens laptop, goes to "My Library"
+7. Video 1 shows "32% complete" → Clicks it, resumes at 10 minutes
+8. Finishes Video 1, clicks Video 2
+9. Downloads the PDF workbook to her computer (downloadable resource)
+
+---
+
+### 5. Managing Your Business (Admin Dashboard)
+
+**What is this?**
+Your command center for running your business. See sales, manage customers, control content, and make decisions based on data.
+
+**What you can do:**
+
+**Revenue Analytics:**
+- **See total revenue**: How much you've made overall
+- **Track revenue over time**: Daily, weekly, monthly breakdowns
+- **Average order value**: How much customers typically spend
+- **Revenue by content**: Which products are your best sellers
+- **Revenue trends**: Are sales going up or down?
+
+**Customer Management:**
+- **View all customers**: See everyone who's registered or purchased
+- **Customer details**: Name, email, join date, total spent
+- **Purchase history**: See what each customer has bought
+- **Grant free access**: Give a customer free access to content (for refunds, support, or marketing)
+
+**Content Management:**
+- **View all content**: See everything you've created (even drafts)
+- **Quick publish**: Move content from draft to published with one click
+- **Unpublish content**: Take something live offline temporarily
+- **Delete content**: Remove content you no longer want to offer
+- **See performance**: Which content is most popular
+
+**Top-Performing Content:**
+- See your top 10 best-sellers
+- Ranked by revenue, purchase count, or both
+- Helps you understand what customers want most
+- Decide what to create more of
+
+**Quick Actions:**
+- Publish multiple pieces of content at once
+- Send access to a customer without them paying (comps, refunds)
+- Search for specific customers, purchases, or content quickly
+
+**Example Workflow:**
+
+*Jordan the Course Creator (Monthly Review)*:
+1. Logs into admin dashboard
+2. Checks revenue analytics: "Made $3,450 this month" (up 20% from last month!)
+3. Sees top-performing content: "Beginner Photography Course" is #1 with $1,200 in sales
+4. Views customer list: 45 new customers this month
+5. Checks purchase history for customer "Emma Wilson": She's bought 3 courses, spent $127 total
+6. Decision: Create more photography content since that's selling best
+7. Also decision: Reach out to Emma with a personalized discount on the advanced course (she's a good customer!)
+
+---
+
+### 6. Communicating with Customers (Notifications)
+
+**What is this?**
+Automated emails that keep customers informed and engaged. You don't have to manually send these—the system handles it.
+
+**What you can do:**
+
+**Purchase Confirmations:**
+- Customer buys content → Instant email with receipt
+- Email includes:
+  - What they bought
+  - How much they paid
+  - Link to access their content immediately
+  - Receipt for their records
+
+**Access Instructions:**
+- Email explains how to watch/download
+- Direct link to their library
+- Simple instructions for first-time users
+
+**Future Capabilities** (Phase 2+):
+- Welcome emails for new customers
+- Abandoned cart reminders (they almost bought but didn't complete)
+- New content announcements (email your existing customers when you release something new)
+- Re-engagement campaigns (reach out to inactive customers)
+
+**Example Workflow:**
+
+*Customer Tom buys "Home Workout Program"*:
+1. Tom completes purchase at 2:34 PM
+2. At 2:34 PM (instantly): Tom receives email: "Thank you for your purchase!"
+3. Email contains:
+   - "You've purchased: Home Workout Program ($39)"
+   - "Click here to start watching immediately"
+   - Receipt with date, price, payment method
+   - "Questions? Reply to this email"
+4. Tom clicks the link → Goes straight to the first workout video
+5. He's happy and ready to start working out—no confusion
+
+---
+
+### 7. Configuring Your Platform (Platform Settings)
+
+**What is this?**
+Global settings that control how your entire platform works. Think of it as the "preferences" or "configuration" panel for your business.
+
+**What you can do:**
+
+**Business Information:**
+- Set your business name (appears everywhere on the site)
+- Add your business description
+- Upload your logo
+- Add contact information (email, phone, address)
+
+**Payment Settings:**
+- Connect your Stripe account (where money goes)
+- Set your default currency (USD, EUR, GBP, etc.)
+- Configure tax settings (if applicable)
+
+**Email Configuration:**
+- Set "from" email address (what customers see when they receive emails)
+- Customize email templates (add your branding)
+- Test email sending
+
+**Content Defaults:**
+- Default content visibility (published or draft)
+- Default pricing strategy
+- Content organization preferences
+
+**Platform Behavior:**
+- Time zone for your business
+- Date formats
+- Language preferences
+
+**Example Workflow:**
+
+*Lisa sets up her new platform*:
+1. Logs in as Platform Owner
+2. Goes to "Platform Settings"
+3. Updates:
+   - Business name: "Mindful Life Coaching"
+   - Logo: Uploads her company logo
+   - Stripe: Connects her Stripe account
+   - Currency: USD
+   - Timezone: Pacific Time (PST)
+   - From email: "hello@mindfullifecoaching.com"
+4. Saves settings
+5. Now all purchase confirmation emails come from "hello@mindfullifecoaching.com"
+6. All content posts show "Mindful Life Coaching" at the top
+7. Revenue dashboard shows USD
+8. Everything is branded and professional
+
+---
+
+## How It Works: Complete User Journeys
+
+These stories show how real people would use Codex from start to finish.
+
+### Journey 1: Sarah the Yoga Instructor (Solo Creator)
+
+**Sarah's Background:**
+- Independent yoga instructor
+- Has 50 pre-recorded yoga videos on her laptop
+- Currently posts free videos on YouTube but makes no money
+- Wants to monetize her content
+
+**What She Does:**
+
+**Week 1: Getting Started**
+1. Platform Owner sets up Codex and invites Sarah as the Organization Owner
+2. Sarah logs in for the first time
+3. She connects her Stripe account (where payments go)
+4. She starts uploading her videos:
+   - "Morning Flow - 20 minutes"
+   - "Evening Relaxation - 30 minutes"
+   - "Core Strength Yoga - 45 minutes"
+   - ...and 47 more videos
+5. Upload takes 2 days (large files, slow internet)
+6. All 50 videos now live in her media library
+
+**Week 2: Creating Products**
+7. Sarah creates her first content post:
+   - Selects "Morning Flow" from her library
+   - Title: "Energizing Morning Yoga"
+   - Description: "Start your day with this gentle 20-minute flow"
+   - Price: FREE (to attract customers)
+   - Publishes it
+8. Creates second content post:
+   - Selects "Evening Relaxation" from her library
+   - Title: "Bedtime Wind-Down Yoga"
+   - Price: $5
+   - Publishes it
+9. Creates a bundle:
+   - Selects all 50 videos
+   - Title: "Complete Yoga Library - All Access"
+   - Price: $99
+   - Publishes it
+
+**Week 3: First Sales**
+10. Sarah shares her Codex storefront on social media
+11. Friend Emily sees it, watches the free "Morning Flow"
+12. Emily loves it, buys "Bedtime Wind-Down" for $5
+13. Emily watches it that evening, loves it, buys "Complete Library" for $99
+14. Sarah receives email: "You made a sale! Emily purchased Complete Yoga Library - $99"
+15. Sarah checks admin dashboard: $104 in sales this week!
+
+**Month 2: Growing**
+16. Sarah analyzes her top sellers: "Complete Library" bundle is most popular
+17. She creates more bundles:
+   - "Beginner Series" (videos 1-10) - $29
+   - "Advanced Series" (videos 41-50) - $49
+18. She grants free access to her existing students as a thank-you
+19. Revenue grows to $450/month
+
+**Month 6: Established**
+20. Sarah has 120 customers
+21. She's earned $5,800 total
+22. She adds new videos to her library monthly
+23. She uses free content as marketing to attract new customers
+24. Her business is running smoothly with minimal work
+
+**Key Lesson**: Sarah uploaded once, created products, and now earns passive income.
+
+---
+
+### Journey 2: Mike's Cooking Academy (Organization with Future Creators)
+
+**Mike's Background:**
+- Runs an online cooking school
+- Has 5 chef instructors who work with him
+- Each chef has their own specialty (Italian, French, Asian, Baking, Grilling)
+- Wants to sell courses featuring all chefs
+
+**Phase 1 Reality (What Mike Can Do NOW):**
+
+Mike is the Organization Owner and also a creator:
+1. Mike uploads his own 30 cooking videos (Italian cuisine)
+2. He creates content posts on his organization's storefront:
+   - "Italian Basics" - $19
+   - "Pasta Mastery" - $29
+   - "Complete Italian Cooking" - $79
+3. Mike runs the business solo initially
+4. He can't yet feature his other chef instructors (that's Phase 2)
+
+**Phase 2 Vision (What Mike WILL Be Able To Do):**
+
+**Setting Up Multiple Creators:**
+1. Mike invites Chef Antoine (French cuisine specialist) to the platform
+2. Antoine gets his own creator account
+3. Antoine uploads 25 French cooking videos to HIS media library
+4. Antoine creates content on the "Cooking Academy" organization:
+   - "French Techniques" - $25
+   - "Classic French Desserts" - $35
+5. Mike (as Organization Owner) sets revenue split: 70% to Antoine, 30% to the Academy
+6. When customers buy Antoine's courses, both earn money
+
+**Growing the Team:**
+7. Mike invites Chef Yuki (Asian cuisine)
+8. Chef Maria (Baking)
+9. Chef Tony (Grilling)
+10. Each chef uploads their videos to their own library
+11. Each chef creates courses on the Academy's storefront
+
+**Creating Bundles:**
+12. Mike creates "Complete Cooking Mastery" bundle:
+    - Includes content from all 5 chefs
+    - Price: $299
+    - Revenue split: Each chef gets % based on how much of their content is included
+13. Customers get access to 150+ videos from 5 expert chefs
+
+**Customer Experience:**
+14. Customer Jen visits "Cooking Academy"
+15. She sees courses from multiple chefs
+16. She doesn't care who created each video—she just wants to learn cooking
+17. She buys "Complete Cooking Mastery" for $299
+18. Gets instant access to all 150+ videos
+19. Money is automatically split between Mike and the 5 chefs
+
+**Why This Works:**
+- Mike runs one storefront, but features multiple creators
+- Each chef owns their videos (stored in their own library)
+- Chefs can ALSO sell independently on their own profiles
+- Example: Chef Antoine sells "French Techniques" on the Academy for $25, AND on his personal profile for $20
+- Antoine keeps 70% from Academy sales, 100% from personal sales (minus platform fees)
+- Same video, two storefronts, two revenue streams
+
+**Key Lesson**: Organizations are collections of creators who collaborate and share revenue.
+
+---
+
+### Journey 3: Emma the Course Creator (Licensing Vision)
+
+**Emma's Background:**
+- Business coach with popular courses about entrepreneurship
+- Has 100 videos about starting and running a business
+- Works with 3 different business academies who want to feature her content
+- Wants to license her content to multiple organizations
+
+**Phase 1 Reality:**
+Emma is a solo creator with her own library, selling on her personal profile only.
+
+**Phase 2+ Vision (Licensing):**
+
+**Emma's Setup:**
+1. Emma uploads all 100 videos to her media library
+2. She creates courses on her personal profile:
+   - "Startup Fundamentals" - $49
+   - "Scaling Your Business" - $99
+   - "Complete Entrepreneur Bundle" - $199
+
+**Licensing Deal #1: Tech Startup Academy**
+3. Tech Startup Academy reaches out: "Can we feature your content on our platform?"
+4. Emma agrees to license her "Startup Fundamentals" course
+5. Licensing terms:
+   - Academy can sell it under their branding
+   - Emma gets 40% of every sale
+   - Videos stay in Emma's library (Academy can't take them)
+6. Academy creates their own content post:
+   - Title: "Tech Startup Fundamentals (feat. Emma Jones)"
+   - Price: $79 (higher than Emma's $49 solo price)
+   - Posted on Academy's storefront
+7. Customer buys from Academy for $79:
+   - Academy gets $47.40 (60%)
+   - Emma gets $31.60 (40%)
+   - Emma did zero work (content already existed)
+
+**Licensing Deal #2: Women in Business Collective**
+8. Another organization wants the same content
+9. Emma licenses "Startup Fundamentals" again
+10. Different pricing: $59
+11. Different revenue split: Emma gets 50%
+12. Same video, now generating revenue from 3 places:
+    - Emma's profile: $49 (she keeps 100% minus platform fees)
+    - Tech Academy: $79 (she gets 40%)
+    - Women Collective: $59 (she gets 50%)
+
+**Licensing Deal #3: Corporate Training Platform**
+13. Corporate platform wants ALL Emma's content for employee training
+14. Emma licenses entire library (100 videos)
+15. Corporate pays $500/month flat fee
+16. Unlimited access for all their employees
+17. Emma earns passive income without individual sales
+
+**Why This Works:**
+- Emma creates content once, earns from multiple sources
+- Organizations get expert content without creating it themselves
+- Customers benefit from curated collections from multiple experts
+- Everyone wins
+
+**Revenue Example (One Month):**
+- Personal profile sales: 10 courses × $49 = $490
+- Tech Academy (licensed): 15 sales × $79 × 40% = $474
+- Women Collective (licensed): 8 sales × $59 × 50% = $236
+- Corporate (licensed): Flat $500/month = $500
+- **Total**: $1,700 from content Emma created months ago
+
+**Key Lesson**: Licensing lets creators earn from their content many times over without additional work.
+
+---
+
+## Phase 1 vs The Future
+
+### Phase 1: What Works Now (MVP)
+
+**Users:**
+- 1 Platform Owner (you, the developer)
+- 1 Organization Owner (who is also a creator)
+- Unlimited customers
+
+**What You Can Do:**
+- Upload videos and audio to your media library
+- Create content posts with pricing
+- Sell content through Stripe checkout
+- Deliver content to customers (streaming, downloads)
+- Track revenue and customers in admin dashboard
+- Send purchase confirmation emails
+- Configure platform settings
+
+**Limitations:**
+- Only one organization
+- Only one creator (the organization owner)
+- No additional team members
+- No revenue splitting
+- No licensing
+- No subscriptions (only one-time purchases)
+
+**Why These Limitations?**
+- Keeps Phase 1 simple and focused
+- Lets us validate the core concept quickly
+- Database structure already supports more—we just build UI later
+- You can start making money immediately with Phase 1
+
+---
+
+### Phase 2: Multi-Creator Organizations
+
+**New Capabilities:**
+- Invite additional creators to your organization
+- Each creator has their own media library
+- Creators can post to the organization's storefront
+- Automatic revenue splitting (configurable per creator)
+- Organization Owner controls who can post what
+
+**Example:**
+- Yoga studio owner (organization)
+- Invites 5 yoga instructors (creators)
+- Each instructor uploads their own videos
+- All videos appear on studio's website
+- Revenue splits automatically: 70% creator, 30% studio
+
+---
+
+### Phase 3: Multi-Organization Platform
+
+**New Capabilities:**
+- Platform supports multiple organizations
+- Each organization has its own subdomain (yoga-studio.codex.com, cooking-school.codex.com)
+- Creators can work with multiple organizations simultaneously
+- Central creator profiles (customers can follow individual creators)
+- Platform Owner earns from every organization
+
+**Example:**
+- Sarah the yoga instructor works with 3 different studios
+- Each studio features her content
+- She earns from all 3, plus her personal profile
+- Customers can find Sarah's content anywhere, or go directly to her profile
+
+---
+
+### Phase 4: Subscriptions & Licensing
+
+**New Capabilities:**
+- Monthly subscriptions (unlimited access to content library)
+- Licensing deals (creators license content to organizations for a % or flat fee)
+- Credit-based system (customers buy credits, spend them on events/content)
+- Advanced analytics (customer lifetime value, churn rates, cohort analysis)
+
+**Example:**
+- Emma licenses her business courses to 10 different platforms
+- Each pays her monthly or per-sale
+- She creates once, earns from 10 sources
+- Passive income at scale
 
 ---
 
 ## How Money Flows
 
-### Phase 1 (Simple)
+### Direct Sales (Phase 1)
 
-**Direct Purchases**:
-- Customer buys content for $50
-- Stripe processes payment (keeps ~$1.50 in fees)
-- Organization owner receives $48.50
-- Simple, straightforward
+**Customer buys "Yoga Course" for $50:**
+1. Customer pays $50
+2. Stripe processing fee (~3%): -$1.50
+3. Platform fee (configurable, e.g., 5%): -$2.50
+4. Creator receives: $46
+5. Money appears in creator's bank account within 2-7 days
 
-### Phase 2+ (With Creators and Subscriptions)
+**Breakdown:**
+- Stripe: $1.50 (payment processing, unavoidable)
+- Platform: $2.50 (your revenue as platform owner)
+- Creator: $46 (what they earn)
 
-**Creator Content Purchases**:
-- Customer buys creator's content for $50
-- Platform fee: 30% ($15) goes to organization
-- Creator revenue: 70% ($35) goes to creator
-- Automatic via Stripe Connect
+### Revenue Splitting (Phase 2+)
 
-**Subscriptions**:
-- Two options for how to split subscription revenue:
+**Organization sells content from a creator:**
 
-**Option A (Simple - Recommended for Phase 2)**:
-- Subscription revenue = 100% to organization owner
-- Individual purchases = split with creators
-- Easy to understand and calculate
+**Customer buys course for $100:**
+1. Customer pays $100
+2. Stripe fee: -$3.00
+3. Platform fee: -$5.00
+4. Remaining: $92
+5. Split between organization and creator:
+   - If deal is 60/40: Creator gets $55.20, Organization gets $36.80
+   - If deal is 70/30: Creator gets $64.40, Organization gets $27.60
+   - If deal is 50/50: Creator gets $46, Organization gets $46
 
-**Option B (Complex - Maybe Phase 3+)**:
-- Track what content each subscriber watches
-- Split subscription money based on engagement
-- Example: If 30% of watch time is Creator A's videos, they get 30% of subscription revenue
+**Automatic:**
+- No manual calculations
+- Money splits automatically when payment clears
+- Each party sees their share in their dashboard
+- Both receive payouts to their connected bank accounts
 
----
+### Licensing (Phase 2+)
 
-## Storage and Security
+**Option A: Percentage Per Sale**
+- Creator licenses content to organization
+- Organization sells it for $79
+- Creator gets 40% of each sale: $31.60
+- Organization keeps 60%: $47.40
+- Creator does no marketing—organization handles it
 
-### Where Files Live
-
-**Media Files**:
-- Each creator has their own storage space
-- Format: `codex-media-{creator-id}/`
-- Example: `codex-media-jane-smith-123/originals/video.mp4`
-- Isolated from other creators for security
-- You own your files even if you leave an organization
-
-**Why This Structure**:
-- **Security**: One compromised account doesn't affect others
-- **Ownership**: Creators truly own their content
-- **Flexibility**: Use the same media file across multiple organizations
-- **Accounting**: Easy to track who's using how much storage
-
-### How Customers Access Content
-
-**They Don't Get Direct File Access**:
-- When a customer watches a video, they never get the actual file
-- Platform generates a temporary, secure link
-- Link expires after a few hours
-- Must be logged in as the purchaser
-
-**Why**:
-- Prevents sharing paid content with friends
-- Protects creator's intellectual property
-- Customers can't download and distribute
+**Option B: Flat Monthly Fee**
+- Organization pays creator $500/month
+- Organization can sell unlimited copies
+- Creator gets predictable income
+- Organization takes all sales revenue
 
 ---
 
-## Common Scenarios Explained
+## Common Questions
 
-### Scenario 1: Solo Creator Business
+**Q: Do I need to know how to code to use Codex?**
+A: No! As a creator or organization owner, you just upload videos, create products, and sell. The platform handles all the technical stuff. (But YOU, the Platform Owner, built this—so you do know how to code!)
 
-**Jane is a life coach who wants her own platform.**
+**Q: What happens to my content if I leave an organization?**
+A: Your media library stays with you forever. The videos are stored in YOUR storage space. If you leave an organization, they lose access to your videos, but you keep them.
 
-- Jane = Platform Owner + Organization Owner (wearing both hats)
-- She creates one organization: "Jane's Coaching Hub"
-- She uploads 50 videos to her media library
-- She creates 50 content posts in her organization catalog
-- Customers buy courses from "Jane's Coaching Hub"
-- All revenue goes to Jane
-- **Phase 1 is perfect for Jane**
+**Q: Can I sell the same video at different prices?**
+A: Yes! Upload the video once to your library, then create multiple content posts with different prices. Example: Sell "Intro to Yoga" for $10 on your profile, and include it in a $99 bundle on an organization's site.
 
-### Scenario 2: Multi-Creator Organization (Phase 2+)
+**Q: How do customers watch the videos after buying?**
+A: They log in, go to "My Library", and see all their purchased content. They click a video to start watching. The video streams in their browser—they can't download it (unless you choose to allow downloads).
 
-**Peaceful Yoga Studio wants to feature multiple instructors.**
+**Q: Can customers download videos?**
+A: You decide! By default, videos stream only (can't be downloaded). But you can enable downloads if you want. Resources (PDFs, workbooks) are always downloadable.
 
-- Studio owner = Organization Owner
-- Studio has 5 yoga instructors = Creators
-- Each instructor uploads videos to their own media library
-- Instructors create content posts in the studio's catalog
-- Customers visit peacefulyogastudio.com and see all content
-- Revenue splits automatically: Studio 30%, Instructor 70%
-- **Needs Phase 2**
+**Q: What if a customer asks for a refund?**
+A: You handle refunds through Stripe's dashboard. Once refunded, you can manually revoke the customer's access in the admin dashboard (or leave it—your choice).
 
-### Scenario 3: Freelance Creator (Phase 2+)
+**Q: How long does it take to receive money?**
+A: Stripe deposits money into your bank account within 2-7 business days after a sale. First payout might take longer (Stripe's security verification).
 
-**Sarah is a yoga instructor who teaches at 3 studios.**
+**Q: Can I offer free content?**
+A: Absolutely! Set the price to $0. Free content is a great way to attract customers who then buy your paid content. Example: Free "Intro to Meditation" leads to paid "30-Day Meditation Challenge".
 
-- Sarah = Creator
-- She uploads 30 videos to her media library (her files, stored once)
-- She posts content to Studio A's catalog
-- She posts different content to Studio B's catalog
-- She also posts content to her personal profile
-- Same videos, different pricing/contexts
-- Earns money from all three sources
-- **Needs Phase 2**
+**Q: What file types are supported?**
+A: Videos: MP4, MOV, WebM (up to 5GB each). Audio: MP3, WAV (up to 500MB each). Resources: PDF, DOCX, and most document types (up to 100MB each).
 
-### Scenario 4: The Full Ecosystem (Phase 3+)
+**Q: How many videos can I upload?**
+A: Unlimited! Storage costs scale with usage, but there's no hard limit.
 
-**A yoga studio with content, workshops, and private sessions.**
+**Q: Can I edit a video after uploading?**
+A: You can't edit the video file itself in Codex, but you can:
+- Upload a new version and swap it out
+- Update the title, description, price of content posts
+- Replace thumbnails
 
-- Studio uploads 100 videos
-- Offers a subscription: "$49/month for all yoga videos + 2 class credits"
-- Subscribers use credits to book live workshops
-- Studio also offers one-on-one privates ("Book a session: $75")
-- Customers progress from free content → subscription → private coaching
-- **Needs Phase 3**
+**Q: What happens if my upload fails?**
+A: The platform tracks upload progress. If it fails, you can restart from where it left off. Large files (5GB) might take hours on slow internet—be patient!
 
----
+**Q: Can customers leave reviews or comments?**
+A: Not in Phase 1. Phase 3+ will add customer reviews, ratings, and comments.
 
-## What Makes Codex Different
+**Q: Can I bundle content from multiple creators?**
+A: Yes, in Phase 2+! You (as organization owner) can create bundles that include content from all your creators. Revenue automatically splits according to each creator's deal.
 
-### Compared to Teachable/Kajabi (Course Platforms)
-- **They focus on**: Pre-recorded courses only
-- **Codex adds**: Live workshops, coaching, full service offerings
-- **Codex advantage**: Complete customer journey in one place
+**Q: How do I market my content?**
+A: Codex doesn't include marketing tools (no email campaigns, social media scheduling, etc.). You market externally (Instagram, Facebook, email list) and send people to your Codex storefront.
 
-### Compared to Calendly (Booking Software)
-- **They focus on**: Appointment scheduling only
-- **Codex adds**: Content library, subscriptions, dedicated portals per offering
-- **Codex advantage**: Booking is part of a larger relationship
+**Q: Can I import existing customers from another platform?**
+A: Not automatically. Customers will need to create new accounts. But you can manually grant them free access to content they've already purchased elsewhere (goodwill gesture).
 
-### Compared to Patreon (Membership Platforms)
-- **They focus on**: Recurring subscriptions with social features
-- **Codex adds**: One-time purchases, services, professional booking
-- **Codex advantage**: Better for professional services, not just content
-
-### Compared to Podia/Gumroad (Creator Tools)
-- **Similar scope**: Content + digital products + memberships
-- **Codex different**: Built-in offerings system, multi-creator marketplace
-- **Codex advantage**: Scales from solo creator to organization with team
-
-**Codex is the "complete creator business platform"** - everything in one place.
+**Q: Is there a mobile app?**
+A: Not yet. Codex works in any web browser (desktop, mobile, tablet). Customers watch in their mobile browser. A native app is possible in the future.
 
 ---
 
-## The Technical Foundation (Very High Level)
-
-You don't need to understand this deeply, but here's the 10,000-foot view:
-
-**Frontend** (What Users See):
-- Website built with SvelteKit (modern, fast)
-- Works on desktop and mobile browsers
-- Responsive design
-
-**Backend** (Where Data Lives):
-- Database: Neon Postgres (stores all information)
-- File Storage: Cloudflare R2 (stores videos and audio)
-- Payments: Stripe (handles all money securely)
-- Auth: BetterAuth (login and security)
-
-**Infrastructure**:
-- Hosted on Cloudflare (global, fast, reliable)
-- Automatic backups (never lose data)
-- CDN delivery (videos load fast worldwide)
-- 99.9% uptime target
+## Glossary
 
-**Why These Choices**:
-- **Cost-effective**: Starts at ~$20-30/month, scales as you grow
-- **Fast**: Global content delivery
-- **Secure**: Industry-standard security practices
-- **Reliable**: Built on proven platforms
+**Creator**: An independent person who uploads media to their own library. They own their content forever and decide how to sell it.
 
----
+**Organization**: A business or collective that features content from one or more creators. Run by an Organization Owner.
 
-## Getting Started Roadmap
+**Organization Owner**: The person who runs an organization. They are ALSO a creator with their own media library.
 
-### Month 1-2: Build Phase 1 MVP
+**Platform Owner**: You—the developer who built and maintains Codex. You have access to everything but don't run businesses on it.
 
-**What You'll Have**:
-- One organization with one creator
-- Upload videos and create content posts
-- Customers can buy and watch content
-- Basic admin dashboard
-- Stripe payments working
-- Email confirmations
+**Customer**: A regular person who buys and consumes content. No special access needed.
 
-**You Can**:
-- Start selling content immediately
-- Test with real customers
-- Validate the business model
-- Learn what features matter most
+**Media Library**: Your personal collection of uploaded videos and audio files. Think of it like Dropbox for content creators.
 
-### Month 3-4: Enhance and Refine
+**Media Item**: A single video or audio file in your media library. Example: "Morning Yoga - 20 minutes.mp4"
 
-**Add**:
-- Better analytics
-- Subscription tiers
-- More payment options
-- Improved organization settings
-- Customer management tools
+**Content Post**: A product listing that packages a media item for sale. It has a title, description, price, and category. Multiple content posts can reference the same media item.
 
-### Month 5-8: Multi-Creator (Phase 2)
-
-**Add**:
-- Invite other creators
-- Revenue sharing
-- Creator dashboards
-- Multi-organization support
+**Personal Profile**: Your individual creator page where you sell content independently. Customers can buy directly from you.
 
-### Month 9-15: Offerings System (Phase 3)
+**Organization Storefront**: The website/catalog for an organization. Features content from the organization owner and (in Phase 2+) other creators.
 
-**Add**:
-- Workshop and event creation
-- Booking system
-- One-on-one coaching
-- Customer portals for each offering
+**Draft**: Content that's not published yet. Only you can see it—customers can't.
 
----
+**Published**: Content that's live and available for customers to purchase.
 
-## Success Metrics: How You Know It's Working
+**Archived**: Content that's been taken offline but not deleted. You might bring it back later.
 
-### Phase 1 Success
+**Revenue Split**: How money is divided between a creator and organization when the organization sells the creator's content. Example: 60/40 split means creator gets 60%, organization gets 40%.
 
-**Week 1 After Launch**:
-- [ ] First content uploaded in under 5 minutes
-- [ ] First customer purchase completed
-- [ ] Payment received in Stripe account
-- [ ] Customer can watch purchased content
-- [ ] Zero technical issues requiring developer help
+**Licensing**: When a creator allows an organization to sell their content in exchange for a percentage of sales or flat fee. The creator still owns the media—the organization just has permission to sell it.
 
-**Month 1 After Launch**:
-- [ ] 10+ pieces of content published
-- [ ] 5+ paying customers
-- [ ] $500+ in revenue
-- [ ] Organization owner operates independently
-- [ ] 95%+ uptime
+**Stripe**: The payment processing company that handles all transactions. Customers' credit card info goes through Stripe (not Codex), which is very secure.
 
-**You'll Know It's Working When**:
-- Organization owner uploads and publishes content without help
-- Customers complete purchases without confusion
-- Money flows smoothly from customer → Stripe → organization owner
-- No calls at 2am about broken things
+**Platform Fee**: The small percentage you (Platform Owner) take from each sale to cover costs and make money. Configurable, usually 5-10%.
 
-### Phase 2 Success
+**Presigned URL**: A temporary, secure link that lets customers watch or download content. Links expire after a set time (usually 1 hour) to prevent sharing.
 
-- First creator invited and onboarded
-- Creator uploads their own content
-- Revenue split happens automatically
-- Subscription revenue starts flowing
-- 20% of revenue is recurring (subscriptions)
+**Streaming**: When customers watch videos in their browser without downloading the file. Like Netflix—video plays, but they don't get a file.
 
-### Phase 3 Success
+**Progress Tracking**: The system remembers where customers stopped watching and lets them resume later.
 
-- First workshop booked and delivered
-- Customer books and attends one-on-one session
-- Offering portals are used daily
-- 30% of customers use offerings (not just content)
+**Admin Dashboard**: The control panel where creators and organization owners manage their business. See sales, customers, content, analytics.
 
----
+**Resource**: A downloadable file (PDF, workbook, template) attached to content. Example: A meditation course might include a PDF journal.
 
-## Common Questions Answered
-
-### "Can I change my mind about how things work?"
-
-**Short answer**: Yes, but earlier is easier.
-
-**Explanation**: The database is designed to support many future scenarios—multiple creators, organizations, etc.—even if we're only building UI for one scenario in Phase 1. So the foundation is flexible. But changing core concepts like "who owns what" gets harder once you have real data.
-
-### "What if I want to add a feature not in the plan?"
-
-**Process**:
-1. Describe what you want and why (business goal)
-2. Evaluate if it fits the existing structure
-3. Determine which phase it makes sense in
-4. Add it to the roadmap
-5. Build when the time comes
-
-**Example**: "I want customers to leave reviews"
-- Fits the structure: Yes, reviews link to content
-- Which phase: Phase 3 (community features)
-- Complexity: Medium (need moderation)
-
-### "How does this scale?"
-
-**Small** (0-100 customers):
-- Phase 1 handles this perfectly
-- Cost: ~$30/month
-- No performance issues
-
-**Medium** (100-1,000 customers):
-- Phase 2 handles this
-- Cost: ~$100-200/month
-- May need video optimization
-
-**Large** (1,000-10,000 customers):
-- Phase 3 infrastructure
-- Cost: ~$500-1,000/month
-- Needs CDN, caching, optimization
-
-**Enterprise** (10,000+ customers):
-- Phase 4 features required
-- Cost: $2,000+/month
-- Dedicated infrastructure
-
-**The Architecture Scales**: Built on Cloudflare which handles millions of requests. Won't need to rebuild.
-
-### "What if a creator leaves?"
-
-**Their media stays with them**:
-- Creator's files are in their own storage bucket
-- When they leave, they take their files
-- Content posts stay, but link to missing media
-- Organization owner can hide those posts
-
-**Revenue already earned**:
-- Past payouts = theirs to keep
-- No clawbacks or disputes
-
-**Clean separation**:
-- That's why creator-owned media matters
-- No messy migration of files
-
-### "Can I run multiple organizations?"
-
-**Phase 1**: No, UI supports one
-**Phase 2**: Yes, create multiple organizations
-**Example**: Run "Yoga Studio A" and "Coaching Business B" separately
-
-**Why wait**:
-- Phase 1 is simpler, faster to build
-- Most people start with one business
-- Database ready, just need UI
-
----
-
-## Glossary (Plain English)
-
-**Creator**: Anyone who uploads content—could be organization owner or invited instructor
-
-**Organization**: A business/brand that sells content (like "Peaceful Yoga Studio")
-
-**Organization Owner**: Person who runs the business
-
-**Platform Owner**: The developer (you) who maintains the system
-
-**Content Post**: A product listing for sale (links to media + has price)
-
-**Media Item**: The actual video or audio file in creator's library
-
-**Media Library**: Creator's personal collection of uploaded files
-
-**Offering**: Any bookable engagement (workshop, coaching, retreat)
-
-**Portal**: Dedicated page for an offering with schedule, resources, chat
-
-**Subscription Tier**: Monthly or annual plan for ongoing access
-
-**Credits**: Tokens earned from subscription, spent on bookings
-
-**Revenue Split**: Automatic payment division between organization and creator
-
-**Personal Profile**: Creator's independent space (not tied to any organization)
-
-**Catalog**: Organization's public store where customers browse content
-
-**Organization ID = NULL**: Technical way to say "this content is on personal profile, not an organization"
+**Checkout Session**: The page where customers enter payment info and complete a purchase. Handled by Stripe for security.
 
 ---
 
 ## Final Thoughts
 
-### What You're Building
+Codex is designed to grow with your needs:
 
-A platform that lets creators make money from their expertise without needing 5 different tools. Everything in one place:
-- Store (content sales)
-- Membership site (subscriptions)
-- Event platform (workshops)
-- Booking system (coaching)
-- Payment processing (Stripe)
+- **Start simple** (Phase 1): One creator, upload content, start selling
+- **Grow your team** (Phase 2): Add creators, split revenue, build a collective
+- **Scale your business** (Phase 3): Multiple organizations, licensing deals, passive income
+- **Optimize for profit** (Phase 4): Subscriptions, analytics, advanced monetization
 
-### Why It Matters
+The key principle: **Creators own their content forever.** Organizations are partners who help sell and market, but they never own the creator's media files.
 
-**For Creators**:
-- One platform instead of stitching together Teachable + Calendly + Patreon + Stripe
-- Professional appearance
-- Own their content forever
-- Multiple revenue streams
+Whether you're a solo yoga instructor, a business coach, or running an online academy with 50 instructors, Codex gives you the tools to monetize knowledge without needing to be technical.
 
-**For Customers**:
-- Everything in one place
-- Clear access to what they bought
-- Easy to book and attend
-- Smooth payment experience
-
-### How to Use This Document
-
-**When planning**: Refer to phases and timelines
-
-**When deciding features**: Check "What's in Phase X"
-
-**When explaining to others**: Use the scenarios and analogies
-
-**When stuck**: Read the common questions section
-
-**When building**: Remember the "can a non-technical person do this?" test
+**You focus on creating great content. Codex handles the rest.**
 
 ---
 
-## Next Steps
-
-1. **Review this document**: Make sure it matches your vision
-2. **Clarify any gaps**: Ask questions now before building
-3. **Start with Phase 1**: Build the foundation correctly
-4. **Launch small**: One organization, one creator, prove it works
-5. **Iterate**: Learn what customers actually want
-6. **Scale up**: Add multi-creator and offerings when ready
-
-**Remember**: The best platforms start simple and grow based on real user needs. Build Phase 1 really well, then expand.
-
----
-
-**Last Updated**: November 7, 2025
-**Document Status**: ✅ Aligned with Current Architecture
-**For Questions**: Ask the developer (that's you!)
+**Questions or feedback?** This document is your single source of truth for understanding Codex. If something is unclear, that's a documentation problem—let's fix it!
