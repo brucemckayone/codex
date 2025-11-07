@@ -4,7 +4,10 @@
 
 Content management system for Creators to upload, organize, and manage video and audio content. Phase 1 focuses on core CRUD operations with media library separation, Cloudflare R2 storage via bucket-per-creator architecture, and metadata management in Neon Postgres.
 
-**Key Concept**: Content entities reference media items (videos/audio) stored in the media library. This separation allows content pricing/packaging while media items handle storage and transcoding.
+**Key Concept**: Media items (videos/audio) are **creator-owned** and stored in creator-specific R2 buckets. Content posts reference media items and can belong to organizations OR exist on creator's personal profile. This separation allows:
+- Media reusability across multiple content posts/organizations
+- Creator independence (media persists even if they leave an org)
+- Personal creator profiles alongside organizational content
 
 ## Problem Statement
 
@@ -134,18 +137,17 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 4. System:
    - Validates file type (MP4, WebM, MOV) and size (max 5GB)
    - Requests presigned upload URL from backend
-   - Backend generates R2 presigned URL for `codex-media-{creatorId}/originals/{mediaId}/original.mp4`
+   - Backend generates R2 presigned URL for creator's bucket: `codex-media-{creatorId}/originals/{mediaId}/original.mp4`
    - Shows upload progress bar
-   - Uploads directly to creator's R2 media bucket
+   - Uploads directly to creator's R2 media bucket (creator-owned storage)
 5. On upload complete:
    - Frontend notifies backend: `POST /api/media/upload-complete`
    - Backend creates `media_items` record:
      - `id = {mediaId}`
-     - `owner_id = {creatorId}`
+     - `creator_id = {creatorId}` ← Media is creator-owned
      - `type = 'video'`
      - `status = 'uploaded'`
-     - `bucket_name = 'codex-media-{creatorId}'`
-     - `file_key = 'originals/{mediaId}/original.mp4'`
+     - `r2_key = 'originals/{mediaId}/original.mp4'`
    - Backend enqueues transcoding job (see [Media Transcoding](../media-transcoding/pdr-phase-1.md))
    - `media_items.status` updated to `'transcoding'`
 6. Creator sees media item in media library with status "Transcoding..."
@@ -167,7 +169,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 
 **As a** Creator
 **I want to** create content that references a video in my media library
-**So that** I can package media with pricing and metadata for sale
+**So that** I can package media with pricing and metadata for sale on my profile or an organization
 
 **Flow:**
 
@@ -178,6 +180,9 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
    - **Content Type**: "Video" (selected)
    - **Media Item**: Dropdown showing creator's video media items
      - Creator selects "typescript-intro.mp4" (uploaded previously)
+   - **Post to**: Dropdown
+     - "My Profile" (personal content, `organization_id = NULL`)
+     - "Acme Org" (organizational content, `organization_id = {orgId}`) [If creator belongs to orgs]
    - **Category**: "Programming"
    - **Tags**: "typescript", "javascript", "tutorial"
    - **Price**: $29.99
@@ -192,7 +197,9 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 5. Creator clicks "Save as Draft"
 6. System:
    - Creates `content` record:
-     - `media_item_id = {mediaId}` (reference to media library)
+     - `creator_id = {creatorId}` ← Creator owns this post
+     - `organization_id = NULL` (if "My Profile") OR `{orgId}` (if posted to org)
+     - `media_item_id = {mediaId}` (reference to creator's media library)
      - `status = 'draft'`
      - `price = 29.99`
      - All metadata fields
@@ -201,18 +208,21 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 7. Creator reviews, then clicks "Publish"
 8. System:
    - Updates `content.status = 'published'`
-   - Content now available for purchase in customer catalog
+   - If personal: Content appears on creator's profile page
+   - If org: Content appears in organization's catalog
 
 **Acceptance Criteria:**
 
 - Content created successfully referencing existing media item
-- No video re-upload required (reuses media library)
-- Metadata stored correctly in `content` table
+- No video re-upload required (reuses creator's media library)
+- Metadata stored correctly in `content` table with `creator_id` and `organization_id`
 - Resources attached correctly (many-to-many via `resource_attachments`)
 - Draft content hidden from customers
-- Published content appears in catalog
+- Published personal content (`organization_id = NULL`) appears on creator's profile
+- Published org content appears in organization's catalog
 - Custom thumbnail stored in creator's asset bucket
 - Media item can be referenced by multiple content entities (reusability)
+- Creator can choose to post to personal profile OR organization
 
 ---
 
@@ -440,11 +450,20 @@ See diagrams:
 
 ### Database Schema Dependencies
 
-See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
+See [Database Schema](../../features/shared/database-schema.md) for full schema:
 
-- `media_items` table (videos/audio in media library)
-- `content` table (references media_items via `media_item_id`)
+- `media_items` table
+  - Creator-owned media (videos/audio)
+  - `creator_id` references `users(id)`
+  - Stored in creator's R2 bucket: `codex-media-{creator_id}`
+- `content` table
+  - Content posts (references media_items via `media_item_id`)
+  - `creator_id` references `users(id)` (who created the post)
+  - `organization_id` references `organizations(id)` (NULL = personal, NOT NULL = org)
+  - `media_item_id` references `media_items(id)` (creator's media)
 - `resources` table (PDFs, workbooks)
+  - Creator-owned resources
+  - `creator_id` references `users(id)`
 - `resource_attachments` table (content ↔ resources many-to-many)
 - `categories` table
 - `tags` table
@@ -553,11 +572,16 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 
 ### Content vs Media Items vs Resources
 
-| Entity         | Purpose                               | Storage                     | Reusability                      |
-| -------------- | ------------------------------------- | --------------------------- | -------------------------------- |
-| **Media Item** | Uploaded video/audio file             | R2 (originals + HLS)        | Yes - multiple content items     |
-| **Content**    | Sellable package (pricing + metadata) | Database (references media) | N/A                              |
-| **Resource**   | Downloadable file (PDF, workbook)     | R2 (resources bucket)       | Yes - multiple content/offerings |
+| Entity         | Purpose                               | Ownership    | Storage                               | Reusability                      |
+| -------------- | ------------------------------------- | ------------ | ------------------------------------- | -------------------------------- |
+| **Media Item** | Uploaded video/audio file             | Creator-owned | R2: `codex-media-{creator_id}`     | Yes - multiple content items     |
+| **Content**    | Sellable post (pricing + metadata)    | Creator-owned | Database (references media)          | N/A (links to media)             |
+| **Resource**   | Downloadable file (PDF, workbook)     | Creator-owned | R2: `codex-resources-{creator_id}` | Yes - multiple content/offerings |
+
+**Key Ownership Model:**
+- **Media Items**: Owned by creator, stored in their bucket, can be used across multiple content posts
+- **Content Posts**: Created by creator, can belong to their personal profile (`organization_id = NULL`) or an organization (`organization_id = X`)
+- **Resources**: Owned by creator, can be attached to multiple content posts or offerings
 
 ### File Upload Strategy
 

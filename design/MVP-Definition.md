@@ -43,27 +43,42 @@ Launch a functional platform where a Platform Owner can:
 
 ## Stakeholders
 
-The MVP serves **two primary stakeholders**. Multi-creator support (Media Owners) comes in Phase 3.
+The MVP serves **three primary stakeholders**. Additional creators can join organizations in Phase 2+.
 
-### 1. Platform Owner
+### 1. Platform Owner (Developer/Super Admin)
 
-**Who**: Non-technical business owner who operates the platform
+**Who**: Technical administrator (developer) who manages the infrastructure
 
 **MVP Needs**:
 
-- Upload video and audio content without technical knowledge
-- Set prices on individual content items
-- View sales and revenue
-- Manage customer access
-- Basic platform branding (logo, colors, business name)
+- System-level access to all data and configurations
+- Ability to troubleshoot and maintain the platform
+- Not responsible for day-to-day content management
 
-**Success Metric**: Can run entire platform independently without developer assistance
+**Success Metric**: Platform runs reliably with minimal intervention
+
+### 2. Organization Owner (Business Operator)
+
+**Who**: Non-technical business owner who operates their organization and creates content
+
+**MVP Needs**:
+
+- Upload video and audio content to their media library
+- Create content posts referencing their media
+- Set prices on individual content items
+- View sales and revenue for their organization
+- Manage customer access
+- Basic organization branding (logo, colors, business name)
+
+**Key Note**: Organization Owner is **also a Creator** with their own creator ID and R2 bucket (`codex-media-{creator_id}`)
+
+**Success Metric**: Can run entire organization independently without developer assistance
 
 **Critical Requirement**: Every feature must pass the "can a non-technical user do this independently?" test.
 
-### 2. Customers
+### 3. Customers
 
-**Who**: End users who purchase and consume content
+**Who**: End users who purchase and consume content from organizations or creators
 
 **MVP Needs**:
 
@@ -131,7 +146,12 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 
 ### 2. Content Management
 
-**Stakeholder Need**: Platform Owner uploads and organizes media without technical knowledge
+**Stakeholder Need**: Organization Owner (as creator) uploads and organizes media without technical knowledge
+
+**Architecture**: Media library pattern
+- **Media items** (videos/audio) stored in creator's R2 bucket: `codex-media-{creator_id}`
+- **Content posts** reference media items, can be published to organization
+- Same media item can be used in multiple content posts (no duplication)
 
 **Content Types**:
 
@@ -140,14 +160,16 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 
 **Features**:
 
-- ✅ Upload video and audio files
+- ✅ Upload video and audio files to personal media library
 - ✅ Automatic video transcoding (1080p, 720p for quality options)
 - ✅ Automatic thumbnail generation from video (frame at 2 seconds)
-- ✅ Content metadata:
+- ✅ Create content posts referencing media library items
+- ✅ Content post metadata:
   - Title
   - Description
   - Price (in USD)
   - Tags (simple array, e.g., ["meditation", "beginner"])
+  - Media reference (select from creator's media library)
 - ✅ Publish/unpublish toggle (draft vs live)
 - ✅ Processing status visibility:
   - Uploading
@@ -158,32 +180,36 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 
 **User Stories**:
 
-**As Platform Owner:**
+**As Organization Owner (Creator):**
 
-- I can upload a video file and see upload progress
-- I can upload an audio file
-- I can add title, description, and price while uploading
+- I can upload a video file to my media library and see upload progress
+- I can upload an audio file to my media library
+- I can create content posts by selecting from my media library
+- I can add title, description, and price to content posts
 - I can add tags to organize content
-- I see when processing is complete (video transcoded, thumbnail generated)
+- I see when media processing is complete (video transcoded, thumbnail generated)
 - I can preview content before publishing
-- I can publish content to make it visible to customers
+- I can publish content to make it visible to customers in my organization
 - I can unpublish content to hide it from customers
 - I can edit content metadata (title, description, price, tags)
 - I can delete content with confirmation prompt
-- I can view all my content (published and unpublished)
+- I can view all my media items and content posts (published and unpublished)
+- I can reuse the same media item in multiple content posts
 
 **Upload Flow**:
 
 ```
-1. Platform Owner selects file (video or audio)
-2. Enters title, description, price, tags
-3. Upload begins (progress bar shows status)
-4. File uploads directly to Cloudflare R2
-5. For video: RunPod transcodes and generates thumbnail (5-10 min)
-6. For audio: Ready immediately after upload
-7. Platform Owner sees "Ready to publish"
-8. Platform Owner clicks "Publish"
-9. Content appears to customers
+1. Organization Owner uploads file (video or audio) to media library
+   → Stored in codex-media-{creator_id} bucket
+2. For video: RunPod transcodes and generates thumbnail (5-10 min)
+   For audio: Ready immediately after upload
+3. Organization Owner creates content post
+4. Selects media item from their library
+5. Enters title, description, price, tags
+6. Clicks "Save as Draft"
+7. Reviews content post
+8. Clicks "Publish"
+9. Content appears to customers in organization catalog
 ```
 
 **Content States**:
@@ -356,17 +382,25 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 - I can sort by different criteria
 - I click thumbnail to start watching/listening immediately
 
-### 6. Platform Owner Admin Panel
+### 6. Organization Owner Admin Panel
 
-**Stakeholder Need**: Platform Owner manages content, customers, and views business metrics
+**Stakeholder Need**: Organization Owner manages content, customers, and views business metrics
 
 **Admin Sections**:
 
+#### Media Library Management
+
+- List all uploaded media items (videos, audio)
+- View media processing status
+- Delete unused media items
+- View which content posts use each media item
+
 #### Content Management
 
-- List all content (published, unpublished, processing)
-- Create new content (upload flow)
+- List all content posts (published, unpublished, processing)
+- Create new content post (select from media library)
 - Edit content metadata (title, description, price, tags)
+- Change media item reference (swap video/audio)
 - Publish/unpublish content
 - View content statistics:
   - Number of purchases
@@ -407,15 +441,16 @@ Platform Owner uploads content → Sets prices → Customers buy → Customers a
 
 **User Stories**:
 
-**As Platform Owner:**
+**As Organization Owner:**
 
-- I can see all my content in one dashboard
-- I can quickly publish or unpublish content
+- I can see all my media items and content posts in one dashboard
+- I can quickly publish or unpublish content posts
+- I can see which media items are used in multiple content posts
 - I can see which content is selling best
 - I can see total revenue at a glance
 - I can find any customer and view their purchases
 - I can grant access to a customer manually (for refunds or support)
-- I can customize platform branding (logo, colors)
+- I can customize organization branding (logo, colors)
 - I can manage business information and settings
 
 ### 7. Email Notifications
