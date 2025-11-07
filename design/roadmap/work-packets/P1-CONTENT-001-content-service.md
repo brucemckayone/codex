@@ -78,46 +78,53 @@ export const tags = pgTable('tags', {
 
 /**
  * Media items (uploaded videos/audio)
+ * Creator-owned, stored in creator's R2 bucket
  * Separate from content for reusability
  */
 export const mediaItems = pgTable('media_items', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  organizationId: text('organization_id').notNull(),
+  creatorId: text('creator_id').notNull().references(() => users.id), // Creator owns media
   type: text('type', { enum: ['video', 'audio'] }).notNull(),
   status: text('status', { enum: ['uploading', 'uploaded', 'transcoding', 'ready', 'failed'] })
     .default('uploaded').notNull(),
 
-  // R2 storage keys
-  r2Key: text('r2_key').notNull(), // Original file
+  // R2 storage keys (in creator's bucket: codex-media-{creatorId})
+  r2Key: text('r2_key').notNull(), // e.g., "originals/{mediaId}/video.mp4"
   hlsMasterKey: text('hls_master_key'), // HLS master playlist (after transcoding)
   thumbnailKey: text('thumbnail_key'), // Generated thumbnail
 
   // Metadata
+  title: text('title').notNull(),
   filename: text('filename').notNull(),
   fileSize: integer('file_size').notNull(), // bytes
   mimeType: text('mime_type').notNull(),
   durationSeconds: integer('duration_seconds'), // Set after processing
+  width: integer('width'), // For video
+  height: integer('height'), // For video
 
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull()
     .$onUpdate(() => new Date()),
+  deletedAt: timestamp('deleted_at'), // Soft delete
 });
 
 /**
  * Published content (references media items)
+ * Can belong to organization OR creator's personal profile
  */
 export const content = pgTable('content', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  organizationId: text('organization_id').notNull(),
+  creatorId: text('creator_id').notNull().references(() => users.id), // Who created this post
+  organizationId: text('organization_id').references(() => organizations.id), // NULL = personal profile
 
   // Basic info
   title: text('title').notNull(),
-  slug: text('slug').notNull(), // Unique per organization
+  slug: text('slug').notNull(), // Unique per organization (or per creator if personal)
   description: text('description').notNull(),
 
   // Relationships
-  mediaItemId: text('media_item_id').notNull()
-    .references(() => mediaItems.id, { onDelete: 'restrict' }),
+  mediaItemId: text('media_item_id')
+    .references(() => mediaItems.id, { onDelete: 'restrict' }), // NULL for written content
   categoryId: text('category_id').notNull()
     .references(() => categories.id, { onDelete: 'restrict' }),
 
@@ -135,7 +142,10 @@ export const content = pgTable('content', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull()
     .$onUpdate(() => new Date()),
-});
+}, (table) => ({
+  // Unique slug per organization (or per creator for personal content)
+  uniqueSlugPerOrg: unique().on(table.slug, table.organizationId),
+}));
 
 /**
  * Many-to-many: Content to Tags
@@ -327,12 +337,12 @@ import { createContentSchema, updateContentSchema, type CreateContentInput } fro
 import { ObservabilityClient } from '@codex/observability';
 
 export interface IContentService {
-  create(input: CreateContentInput, organizationId: string): Promise<Content>;
-  findById(id: string, organizationId: string): Promise<Content | null>;
-  update(id: string, input: Partial<CreateContentInput>, organizationId: string): Promise<Content>;
-  publish(id: string, organizationId: string): Promise<Content>;
-  delete(id: string, organizationId: string): Promise<void>;
-  list(organizationId: string, filters?: ContentFilters): Promise<PaginatedContent>;
+  create(input: CreateContentInput, creatorId: string, organizationId?: string): Promise<Content>;
+  findById(id: string, creatorId: string): Promise<Content | null>;
+  update(id: string, input: Partial<CreateContentInput>, creatorId: string): Promise<Content>;
+  publish(id: string, creatorId: string): Promise<Content>;
+  delete(id: string, creatorId: string): Promise<void>;
+  list(creatorId: string, organizationId?: string, filters?: ContentFilters): Promise<PaginatedContent>;
 }
 
 export interface ContentFilters {
@@ -356,15 +366,15 @@ export class ContentService implements IContentService {
     this.obs = new ObservabilityClient('content-service', process.env.ENVIRONMENT || 'development');
   }
 
-  async create(input: CreateContentInput, organizationId: string): Promise<Content> {
+  async create(input: CreateContentInput, creatorId: string, organizationId?: string): Promise<Content> {
     // Step 1: Validate input (pure function, testable!)
     const validated = createContentSchema.parse(input);
 
-    // Step 2: Verify media item exists and belongs to org
+    // Step 2: Verify media item exists and belongs to creator
     const mediaItem = await db.query.mediaItems.findFirst({
       where: and(
         eq(mediaItems.id, validated.mediaItemId),
-        eq(mediaItems.organizationId, organizationId)
+        eq(mediaItems.creatorId, creatorId) // Media must be owned by creator
       ),
     });
 
@@ -376,12 +386,17 @@ export class ContentService implements IContentService {
       throw new Error('Media item not ready (still processing)');
     }
 
-    // Step 3: Generate unique slug
-    const slug = await this.generateUniqueSlug(validated.title, organizationId);
+    // Step 3: If organizationId provided, verify creator belongs to org (Phase 2+)
+    // Phase 1: organizationId is always the single org, skip check
+    // Phase 2+: Check organization_members table
 
-    // Step 4: Create content
+    // Step 4: Generate unique slug (unique per org OR per creator if personal)
+    const slug = await this.generateUniqueSlug(validated.title, organizationId, creatorId);
+
+    // Step 5: Create content
     const [newContent] = await db.insert(content).values({
-      organizationId,
+      creatorId,
+      organizationId: organizationId || null, // NULL = personal profile
       title: validated.title,
       slug,
       description: validated.description,
@@ -391,7 +406,7 @@ export class ContentService implements IContentService {
       status: 'draft',
     }).returning();
 
-    // Step 5: Handle tags if provided
+    // Step 6: Handle tags if provided
     if (validated.tagIds && validated.tagIds.length > 0) {
       await db.insert(contentTags).values(
         validated.tagIds.map(tagId => ({
@@ -401,16 +416,20 @@ export class ContentService implements IContentService {
       );
     }
 
-    this.obs.info('Content created', { contentId: newContent.id, organizationId });
+    this.obs.info('Content created', {
+      contentId: newContent.id,
+      creatorId,
+      organizationId: organizationId || 'personal'
+    });
 
     return newContent;
   }
 
-  async findById(id: string, organizationId: string): Promise<Content | null> {
+  async findById(id: string, creatorId: string): Promise<Content | null> {
     return db.query.content.findFirst({
       where: and(
         eq(content.id, id),
-        eq(content.organizationId, organizationId),
+        eq(content.creatorId, creatorId), // Only creator's own content
         isNull(content.deletedAt)
       ),
       with: {
@@ -421,8 +440,8 @@ export class ContentService implements IContentService {
     });
   }
 
-  async publish(id: string, organizationId: string): Promise<Content> {
-    const existing = await this.findById(id, organizationId);
+  async publish(id: string, creatorId: string): Promise<Content> {
+    const existing = await this.findById(id, creatorId);
 
     if (!existing) {
       throw new Error('Content not found');
@@ -439,38 +458,46 @@ export class ContentService implements IContentService {
       })
       .where(and(
         eq(content.id, id),
-        eq(content.organizationId, organizationId)
+        eq(content.creatorId, creatorId)
       ))
       .returning();
 
-    this.obs.info('Content published', { contentId: id });
+    this.obs.info('Content published', { contentId: id, creatorId });
 
     return updated;
   }
 
-  async delete(id: string, organizationId: string): Promise<void> {
+  async delete(id: string, creatorId: string): Promise<void> {
     // Soft delete
     await db.update(content)
       .set({ deletedAt: new Date() })
       .where(and(
         eq(content.id, id),
-        eq(content.organizationId, organizationId)
+        eq(content.creatorId, creatorId)
       ));
 
-    this.obs.info('Content deleted', { contentId: id });
+    this.obs.info('Content deleted', { contentId: id, creatorId });
   }
 
-  async list(organizationId: string, filters: ContentFilters = {}): Promise<PaginatedContent> {
+  async list(creatorId: string, organizationId?: string, filters: ContentFilters = {}): Promise<PaginatedContent> {
     const limit = filters.limit || 20;
     const offset = filters.offset || 0;
 
+    // Build where conditions
+    const whereConditions = [
+      eq(content.creatorId, creatorId), // Only creator's content
+      isNull(content.deletedAt),
+      filters.status ? eq(content.status, filters.status) : undefined,
+      filters.categoryId ? eq(content.categoryId, filters.categoryId) : undefined,
+    ];
+
+    // If organizationId provided, filter by org; otherwise show all creator's content
+    if (organizationId !== undefined) {
+      whereConditions.push(eq(content.organizationId, organizationId));
+    }
+
     const items = await db.query.content.findMany({
-      where: and(
-        eq(content.organizationId, organizationId),
-        isNull(content.deletedAt),
-        filters.status ? eq(content.status, filters.status) : undefined,
-        filters.categoryId ? eq(content.categoryId, filters.categoryId) : undefined
-      ),
+      where: and(...whereConditions.filter(Boolean)),
       limit,
       offset,
       orderBy: [desc(content.createdAt)],
@@ -482,10 +509,7 @@ export class ContentService implements IContentService {
 
     const [{ count }] = await db.select({ count: count() })
       .from(content)
-      .where(and(
-        eq(content.organizationId, organizationId),
-        isNull(content.deletedAt)
-      ));
+      .where(and(...whereConditions.filter(Boolean)));
 
     return {
       items,
@@ -495,12 +519,12 @@ export class ContentService implements IContentService {
     };
   }
 
-  private async generateUniqueSlug(title: string, organizationId: string): Promise<string> {
+  private async generateUniqueSlug(title: string, organizationId: string | undefined, creatorId: string): Promise<string> {
     let slug = title.toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
 
-    // Check uniqueness
+    // Check uniqueness (unique per org OR per creator if personal)
     let attempt = 0;
     let finalSlug = slug;
 
@@ -508,7 +532,9 @@ export class ContentService implements IContentService {
       const existing = await db.query.content.findFirst({
         where: and(
           eq(content.slug, finalSlug),
-          eq(content.organizationId, organizationId),
+          organizationId !== undefined
+            ? eq(content.organizationId, organizationId)
+            : and(isNull(content.organizationId), eq(content.creatorId, creatorId)),
           isNull(content.deletedAt)
         ),
       });

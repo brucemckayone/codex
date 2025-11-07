@@ -76,31 +76,87 @@ CREATE TABLE users (
 
 ---
 
+### MediaItems
+
+Stores uploaded media files (videos, audio) owned by creators. Separate from content for reusability.
+
+```sql
+CREATE TYPE media_type AS ENUM ('video', 'audio');
+CREATE TYPE media_status AS ENUM ('uploading', 'uploaded', 'transcoding', 'ready', 'failed');
+
+CREATE TABLE media_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  creator_id UUID NOT NULL REFERENCES users(id), -- Creator owns media
+  -- Phase 1: Can be organization_owner or future creators
+
+  -- Basic Info
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  media_type media_type NOT NULL,
+  status media_status DEFAULT 'uploading' NOT NULL,
+
+  -- R2 Storage (in creator's bucket: codex-media-{creator_id})
+  r2_key VARCHAR(500) NOT NULL, -- e.g., "originals/{media_id}/video.mp4"
+  file_size_bytes BIGINT,
+  mime_type VARCHAR(100),
+
+  -- Media Metadata
+  duration_seconds INTEGER,
+  width INTEGER,  -- For video
+  height INTEGER, -- For video
+
+  -- HLS Transcoding (Phase 1+, handled by Media Transcoding feature)
+  hls_master_playlist_key VARCHAR(500), -- e.g., "hls/{media_id}/master.m3u8"
+  thumbnail_key VARCHAR(500), -- e.g., "thumbnails/{media_id}/thumb.jpg"
+
+  -- Timestamps
+  uploaded_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  deleted_at TIMESTAMPTZ,
+
+  -- Indexes
+  INDEX idx_media_items_creator_id (creator_id) WHERE deleted_at IS NULL,
+  INDEX idx_media_items_status (creator_id, status) WHERE deleted_at IS NULL,
+  INDEX idx_media_items_type (creator_id, media_type) WHERE deleted_at IS NULL
+);
+```
+
+**Phase 1 Usage**:
+
+- Creator uploads video/audio → creates media_item
+- Media stored in creator's R2 bucket (`codex-media-{creator_id}`)
+- Status tracks upload/transcoding lifecycle
+- One media_item can be referenced by multiple content posts
+
+---
+
 ### Content
 
-Stores all content (video, audio, written) created by platform owner or media owners.
+Stores content posts (references media items). Can belong to organization or creator's personal profile.
 
 ```sql
 CREATE TABLE content (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  creator_id UUID NOT NULL REFERENCES users(id),
-  -- Phase 1: Always platform_owner
-  -- Phase 3: Can be media_owner
+  creator_id UUID NOT NULL REFERENCES users(id), -- Who created this post
+  organization_id UUID REFERENCES organizations(id), -- NULL = personal profile, NOT NULL = org content
+
+  -- Media Reference (separates content from media for reusability)
+  media_item_id UUID REFERENCES media_items(id), -- Links to creator-owned media
+  -- Note: media_item_id can be NULL for written content (no media)
 
   -- Basic Info
   title VARCHAR(500) NOT NULL,
-  slug VARCHAR(500) UNIQUE NOT NULL,
+  slug VARCHAR(500) NOT NULL, -- Unique per organization (or per creator if personal)
   description TEXT,
   content_type VARCHAR(50) NOT NULL CHECK (content_type IN ('video', 'audio', 'written')),
-  -- Phase 1: video, written
-  -- Phase 2: audio added
+  -- Phase 1: video, audio
+  -- Phase 2: written content
 
-  -- Video/Audio specific
-  media_url TEXT, -- R2 URL for video/audio
-  media_duration_seconds INTEGER,
+  -- Thumbnail (optional custom thumbnail, otherwise uses media_items.thumbnail_key)
   thumbnail_url TEXT,
 
-  -- Written content
+  -- Written content (Phase 2+)
   content_body TEXT, -- HTML from rich text editor
 
   -- Organization
@@ -134,23 +190,37 @@ CREATE TABLE content (
 
   -- Indexes
   INDEX idx_content_creator_id (creator_id),
-  INDEX idx_content_slug (slug),
+  INDEX idx_content_organization_id (organization_id) WHERE organization_id IS NOT NULL,
+  INDEX idx_content_media_item_id (media_item_id),
+  INDEX idx_content_slug (slug, organization_id), -- Unique per org or personal
   INDEX idx_content_status (status),
   INDEX idx_content_published_at (published_at),
   INDEX idx_content_category (category),
-  INDEX idx_content_series_id (series_id)
+  INDEX idx_content_series_id (series_id),
+
+  -- Constraints
+  UNIQUE (slug, organization_id) -- Slug unique per organization (NULL = personal)
 );
 ```
 
 **Phase 1 MVP Fields**:
 
-- Basic fields, video + written only
-- Simple category string
-- creator_id always references platform_owner
+- Separates content metadata from media files
+- `organization_id = NULL` for personal creator content
+- `organization_id = {org_id}` for organization content
+- `media_item_id` references reusable media library
+- creator_id can be organization_owner or future creators
+
+**Key Concepts**:
+
+- **Media Library Pattern**: Content references media_items (no file duplication)
+- **Personal vs Org Content**: NULL organization_id = creator's personal profile
+- **Reusability**: Same media_item can be used in multiple content posts
+- **Creator Ownership**: Media owned by creator, content posts can be personal or org
 
 **Phase 2 Extensions**:
 
-- `content_type`: 'audio'
+- `content_type`: 'written' for blog posts
 - `series_id`: Content organization
 - `visibility`: 'members_only' for subscriptions
 

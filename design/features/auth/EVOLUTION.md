@@ -22,10 +22,10 @@
 
 | User Type | Introduced | Scope | Belongs To | Key Trait |
 |-----------|-----------|-------|-----------|-----------|
-| **Platform Owner** | Phase 1 | System-wide | Single org (Phase 1) or multiple orgs (Phase 2+) | Super admin, full access |
-| **Organization Owner** | Phase 1 | Organization | One or more organizations | Owns/operates organization, manages team |
-| **Organization Admin** | Phase 1 | Organization | One or more organizations | Staff with elevated perms, manages content approval |
-| **Creator** | Phase 2 | Organization | Multiple organizations possible | Freelancer, uploads content, belongs to 1+ orgs |
+| **Platform Owner** | Phase 1 | System-wide | None (super admin) | Super admin, full access, not org owner |
+| **Organization Owner** | Phase 1 | Organization | Owns one org (Phase 1), multiple orgs (Phase 2+) | Owns/operates organization, also a creator |
+| **Creator** | Phase 1 | Personal + Orgs | Can join organizations or work independently | Uploads media, creates content on personal profile or orgs |
+| **Organization Admin** | Phase 2 | Organization | One or more organizations | Staff with elevated perms, manages content approval |
 | **Customer** | Phase 1 | None (purchases from orgs) | Not a member, just purchases | Browses, purchases, subscribes |
 | **Guest** | Phase 1 | Public only | None | Unauthenticated visitor |
 
@@ -33,44 +33,60 @@
 
 ## Part 2: Phase-by-Phase Evolution
 
-### Phase 1: Foundation (Single Organization, Multi-Team Ready)
+### Phase 1: Foundation (Single Organization, Creator-Ready)
 
 **When**: MVP launch
-**Scope**: You + optional admins managing one organization
-**Architecture**: Single-tenant for operations, multi-tenant for code
+**Scope**: Single organization with organization owner (who is also a creator)
+**Architecture**: Database supports multi-tenant/multi-creator from day 1, Phase 1 uses single org
 
 #### Phase 1 Components
 
 **Authentication**
 - Email/password registration and login
-- Session management with activeOrganizationId context
+- Session management with activeOrganizationId context (for future multi-org)
 - Cloudflare KV session caching
 - Password reset flow
 - Email verification
 
 **Authorization**
-- Platform-level role: `platform_owner` or `customer`
-- Organization-level role: `owner`, `admin`, `member` (for staff)
+- Platform-level role: `platform_owner` (super admin) or `customer`
+- Organization-level role: `owner` (Phase 1), `admin`/`member` (Phase 2+)
+- Creator role: Organization owner IS a creator (has creator_id)
 - Guard functions for route protection
 - RLS policies written but not enforced (single org is safe)
 
 **Organization Model**
-- Single organization created at setup (or you create it)
-- Organization has: owner, optional admins, members (Phase 2 adds creators)
-- Organization invitations for team members (creators added in Phase 2)
-- Session tracks `activeOrganizationId` (used in Phase 2+ for switching)
+- Single organization in Phase 1
+- Organization owner is also a creator (can upload media to personal bucket)
+- Database supports multi-org structure (ready for Phase 2)
+- Session tracks `activeOrganizationId` (for future org switching)
+
+**Creator Model** (Phase 1 Foundation)
+- Creators exist from Phase 1 (organization owner is a creator)
+- Each creator has own R2 bucket: `codex-media-{creator_id}`
+- Media is creator-owned (`media_items.creator_id`), not org-owned
+- Content can be personal (`organization_id = NULL`) or org (`organization_id = X`)
+- Framework ready for multi-creator (Phase 2+): just add UI for invitations
 
 **Database Schema**
 ```
-user (platform_owner | customer)
+user (platform_owner | customer | creator)
   ├─ session (activeOrganizationId)
   ├─ verification_token
   └─ profile (minimal)
 
 organization (1 for Phase 1)
-  ├─ organization_member (owner, admin, member roles)
-  ├─ organization_invitation (team invites)
+  ├─ organization_member (owner role in Phase 1)
+  ├─ organization_invitation (ready for Phase 2+)
   └─ platform_settings (branding, contact info)
+
+media_items (creator-owned)
+  └─ creator_id → user (owner's media in their R2 bucket)
+
+content (posts)
+  ├─ creator_id → user (who created post)
+  ├─ organization_id → organization (NULL = personal, NOT NULL = org)
+  └─ media_item_id → media_items (references creator's media)
 ```
 
 **Session Context**
@@ -85,11 +101,13 @@ organization (1 for Phase 1)
 
 #### Phase 1 Limitations (Intentional)
 
-- Creators are invited as team members with `member` role (Phase 2 upgrades them)
+- Single organization only (multi-org support in Phase 2)
+- No UI for inviting additional creators (database ready, just no UI yet)
 - No custom membership tiers (Phase 2)
-- No creator revenue tracking in auth (e-commerce feature)
+- No creator revenue tracking/splits in auth (e-commerce feature, Phase 3)
 - No multi-org switching UI (Phase 2)
 - RLS policies not enforced (single org removes need)
+- Organization owner is the only creator uploading content (Phase 1 UI constraint)
 
 #### Phase 1 Guard Functions
 
@@ -103,19 +121,20 @@ require.platformOwner(event)           // System admin only
 
 ---
 
-### Phase 2: Multi-Organization & Creators (Enhanced)
+### Phase 2: Multi-Organization & Multi-Creator
 
 **When**: 3-6 months after Phase 1
-**Scope**: Multiple organizations, creators belong to many
-**Changes**: Schema stays the same, code changes for multi-org support
+**Scope**: Multiple organizations, multiple creators, creators can join many orgs
+**Changes**: Schema stays the same, add UI for creator invitations and multi-org
 
 #### Phase 2 Additions
 
-**Creator Role Evolution**
-- `member` role in Phase 1 becomes `creator` in Phase 2
+**Multi-Creator Support**
+- Add UI for organization owner to invite creators
 - Creators can join multiple organizations
 - Creators have their own dashboard showing all org memberships
-- Organization admin can promote `member` → `creator`
+- Creator invitation system (similar to team member invites)
+- Creator can post to their personal profile or any org they belong to
 
 **Multi-Organization Support**
 - Platform Owner can create new organizations
