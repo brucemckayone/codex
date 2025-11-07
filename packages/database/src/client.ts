@@ -18,8 +18,37 @@ if (!DbEnvConfig.method && typeof import.meta.url !== 'undefined') {
 // Apply neonConfig modifications using the function from DbEnvConfig
 DbEnvConfig.applyNeonConfig(neonConfig);
 
-export const sql = neon(DbEnvConfig.getDbUrl()!);
-export const db = drizzle({ client: sql });
+// Lazy initialization: defer database connection creation until first use
+// This ensures environment variables are available at runtime in Workers
+let _sql: ReturnType<typeof neon> | null = null;
+let _db: ReturnType<typeof drizzle> | null = null;
+
+export const sql = new Proxy({} as ReturnType<typeof neon>, {
+  get(_target, prop) {
+    if (!_sql) {
+      _sql = neon(DbEnvConfig.getDbUrl()!);
+    }
+    return Reflect.get(_sql, prop, _sql);
+  },
+  apply(_target, thisArg, args) {
+    if (!_sql) {
+      _sql = neon(DbEnvConfig.getDbUrl()!);
+    }
+    return Reflect.apply(_sql as any, thisArg, args);
+  },
+});
+
+export const db = new Proxy({} as ReturnType<typeof drizzle>, {
+  get(_target, prop) {
+    if (!_db) {
+      if (!_sql) {
+        _sql = neon(DbEnvConfig.getDbUrl()!);
+      }
+      _db = drizzle({ client: _sql });
+    }
+    return Reflect.get(_db, prop, _db);
+  },
+});
 
 /**
  * Checks if the database connection is working by running a simple query.
