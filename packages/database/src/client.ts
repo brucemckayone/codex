@@ -2,16 +2,18 @@ import { drizzle } from 'drizzle-orm/neon-http';
 import { neon, neonConfig } from '@neondatabase/serverless';
 
 import { DbEnvConfig } from './config/env.config';
-import { config } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
-// ES module alternative to __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Load .env for local development only
+// Skip in Cloudflare Workers where import.meta.url is undefined and DB_METHOD is always set
+if (!DbEnvConfig.method && typeof import.meta.url !== 'undefined') {
+  const { config } = await import('dotenv');
+  const { resolve, dirname } = await import('path');
+  const { fileURLToPath } = await import('url');
 
-if (!DbEnvConfig.method)
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
   config({ path: resolve(__dirname, '../../../../.env.dev') });
+}
 
 // Apply neonConfig modifications using the function from DbEnvConfig
 DbEnvConfig.applyNeonConfig(neonConfig);
