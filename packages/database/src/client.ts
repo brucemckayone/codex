@@ -3,7 +3,12 @@ import { neon, neonConfig } from '@neondatabase/serverless';
 
 import { DbEnvConfig } from './config/env.config';
 import { config } from 'dotenv';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// ES module alternative to __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 if (!DbEnvConfig.method)
   config({ path: resolve(__dirname, '../../../../.env.dev') });
