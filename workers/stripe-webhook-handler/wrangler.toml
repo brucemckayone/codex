@@ -18,6 +18,7 @@ name = "stripe-webhook-handler-production"
 
 [env.production.vars]
 ENVIRONMENT = "production"
+DB_METHOD = "PRODUCTION"
 WEB_APP_URL = "https://codex.revelations.studio"
 AUTH_WORKER_URL = "https://auth.revelations.studio"
 
