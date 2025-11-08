@@ -160,6 +160,11 @@ const rateLimiter = async (c: Context, next: Next) => {
   return next();
 };
 
+// Health check endpoint (must be before the catch-all auth handler)
+app.get('/health', (c) => {
+  return c.json({ status: 'ok', service: 'auth-worker' }, 200);
+});
+
 app.use(
   '*',
   sequence(
