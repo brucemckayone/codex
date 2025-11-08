@@ -1,9 +1,52 @@
 # Complete Database Schema
 
-**Version**: 1.0
-**Last Updated**: 2025-10-16
+**Version**: 2.0
+**Last Updated**: 2025-11-08
 
 This document contains the **complete database schema** for all phases of the platform. Tables and fields marked with phase indicators show when they're introduced or fully utilized.
+
+---
+
+## Version 2.0 Changes (2025-11-08)
+
+### Critical Fixes
+
+1. **Fixed User Roles** - Removed outdated 'platform_creator', 'media_owner' terminology
+   - New roles: 'platform_owner', 'creator', 'customer'
+   - Organization ownership tracked in `organization_memberships` table
+
+2. **Money as Integer Cents** - Eliminates floating-point rounding errors
+   - `purchases` table now uses `amount_paid_cents`, `platform_fee_cents`, etc.
+   - CHECK constraint ensures splits add up exactly
+
+3. **3-Way Revenue Splits** - Added support for platform/organization/creator splits
+   - New `revenue_split_configurations` table
+   - Configurable models: percentage, flat_fee, hybrid
+   - Aligned with Stripe Connect best practices
+
+4. **Organization-Scoped Subscriptions** - Fixed subscription model
+   - `subscription_tiers` now has `organization_id` (not platform-wide)
+   - `subscriptions` linked to `organization_memberships` via `membership_id`
+   - Removed denormalized `organization_id` from subscriptions
+
+5. **Organization-Scoped Credits** - Clarified credit system
+   - `credit_balances` and `credit_transactions` now have `organization_id`
+   - Customers have separate balances per organization
+   - Added CHECK constraints for data consistency
+
+### New Tables
+
+- **organization_memberships** - Tracks creator-organization relationships
+- **revenue_split_configurations** - Configurable revenue splitting
+
+### ACID Compliance Improvements
+
+- All foreign keys have explicit ON DELETE behavior
+- CHECK constraints prevent invalid data
+- Partial unique indexes created correctly (as separate indexes)
+- No redundant data (removed subscription.organization_id denormalization)
+
+See `design/features/shared/SCHEMA_ANALYSIS_AND_FIXES.md` for detailed analysis.
 
 ---
 
@@ -29,13 +72,16 @@ CREATE TABLE users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   full_name VARCHAR(255) NOT NULL,
-  role VARCHAR(50) NOT NULL CHECK (role IN ('platform_creator', 'platform_owner', 'media_owner', 'customer')),
-  -- Phase 1: Only platform_owner and customer used
-  -- Phase 3: media_owner introduced
+  role VARCHAR(50) NOT NULL CHECK (role IN ('platform_owner', 'creator', 'customer')),
+  -- Phase 1: platform_owner (super admin), creator (content creator), customer (buyer)
+  --   - 'platform_owner' = Developer/super admin (not content creator)
+  --   - 'creator' = Content creator (may or may not own an organization)
+  --   - Organization ownership determined by organization_memberships.role='owner'
+  -- Phase 2+: creator role used for invited creators to organizations
 
   -- Profile
   profile_image_url TEXT,
-  bio TEXT, -- Phase 3: Used for media_owner profiles
+  bio TEXT, -- Used for creator profiles
 
   -- Email verification
   email_verified_at TIMESTAMP,
@@ -46,9 +92,9 @@ CREATE TABLE users (
   password_reset_token VARCHAR(255),
   password_reset_expires_at TIMESTAMP,
 
-  -- Stripe (for future media_owner payouts)
+  -- Stripe
   stripe_customer_id VARCHAR(255), -- Phase 1: For customer payment methods
-  stripe_connect_account_id VARCHAR(255), -- Phase 3: For media_owner payouts
+  stripe_connect_account_id VARCHAR(255), -- Phase 3: For creator payouts via Stripe Connect
 
   -- Timestamps
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -64,15 +110,20 @@ CREATE TABLE users (
 
 **Phase 1 Usage**:
 
-- `role`: 'platform_owner', 'customer'
+- `role`: 'platform_owner' (super admin), 'creator' (content creator), 'customer' (buyer)
+- Organization ownership tracked in `organization_memberships` table
 - Email verification required before purchase
 - Stripe customer ID for saved payment methods
 
-**Phase 3 Extensions**:
+**Phase 2+ Extensions**:
 
-- `role`: 'media_owner' enabled
-- `bio` used for creator profiles
-- `stripe_connect_account_id` for revenue sharing
+- Multi-creator organizations (invite creators via `organization_memberships`)
+- `bio` used for public creator profiles
+
+**Phase 3+ Extensions**:
+
+- `stripe_connect_account_id` for creator payouts via Stripe Connect
+- Automated revenue splitting and transfers
 
 ---
 
@@ -272,30 +323,55 @@ CREATE TABLE purchases (
   customer_id UUID NOT NULL REFERENCES users(id),
   content_id UUID NOT NULL REFERENCES content(id),
 
-  -- Payment
-  amount_paid DECIMAL(10,2) NOT NULL,
+  -- Payment (stored as integer cents to avoid rounding errors)
+  amount_paid_cents INTEGER NOT NULL,
   currency VARCHAR(3) NOT NULL DEFAULT 'usd',
   stripe_payment_intent_id VARCHAR(255) UNIQUE NOT NULL,
 
-  -- Revenue tracking (for future splitting)
-  platform_fee_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
-  -- Phase 1: 0
-  -- Phase 3: 30% of amount_paid for media_owner content
-  creator_payout_amount DECIMAL(10,2) NOT NULL,
-  -- Phase 1: = amount_paid
-  -- Phase 3: = amount_paid - platform_fee_amount
+  -- Revenue Split (calculated at purchase time using revenue_split_configurations)
+  revenue_split_config_id UUID REFERENCES revenue_split_configurations(id),
+  -- Tracks which configuration was used for this purchase
+
+  platform_fee_cents INTEGER NOT NULL DEFAULT 0,
+  -- Phase 1: 0 (no platform fee)
+  -- Phase 2+: Based on revenue_split_configuration
+
+  organization_fee_cents INTEGER NOT NULL DEFAULT 0,
+  -- Phase 1: 0 (no organization fee)
+  -- Phase 2+: Based on revenue_split_configuration (only if content.organization_id NOT NULL)
+
+  creator_payout_cents INTEGER NOT NULL,
+  -- Phase 1: = amount_paid_cents (100% to creator)
+  -- Phase 2+: = amount_paid_cents - platform_fee_cents - organization_fee_cents
+
+  -- Ensure splits add up exactly (no rounding errors with integer cents)
+  CHECK (amount_paid_cents = platform_fee_cents + organization_fee_cents + creator_payout_cents),
+  CHECK (amount_paid_cents >= 0),
+
+  -- Stripe Connect Payout Tracking (Phase 3+)
+  creator_payout_status VARCHAR(50) DEFAULT 'pending'
+    CHECK (creator_payout_status IN ('pending', 'paid', 'failed')),
+  creator_stripe_transfer_id VARCHAR(255), -- Stripe Transfer ID to creator's Connect account
+  creator_payout_at TIMESTAMPTZ,
+
+  organization_payout_status VARCHAR(50) DEFAULT 'pending'
+    CHECK (organization_payout_status IN ('pending', 'paid', 'failed')),
+  organization_stripe_transfer_id VARCHAR(255), -- Stripe Transfer ID to org's Connect account
+  organization_payout_at TIMESTAMPTZ,
 
   -- Status
   status VARCHAR(50) NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'completed', 'refunded', 'failed')),
 
-  -- Timestamps
-  purchased_at TIMESTAMP,
-  refunded_at TIMESTAMP,
+  -- Refund Tracking
+  purchased_at TIMESTAMPTZ,
+  refunded_at TIMESTAMPTZ,
   refund_reason TEXT,
+  refund_amount_cents INTEGER, -- Can be partial refund (Phase 2+)
+  stripe_refund_id VARCHAR(255),
 
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
   -- Indexes
   INDEX idx_purchases_customer_id (customer_id),
@@ -303,22 +379,34 @@ CREATE TABLE purchases (
   INDEX idx_purchases_status (status),
   INDEX idx_purchases_created_at (created_at),
   INDEX idx_purchases_stripe_payment_intent_id (stripe_payment_intent_id),
-
-  -- Constraint: Can't purchase same content twice (unless refunded)
-  UNIQUE (customer_id, content_id, status)
+  INDEX idx_purchases_payout_status (creator_payout_status, organization_payout_status)
 );
+
+-- Prevent duplicate purchases (partial unique index)
+CREATE UNIQUE INDEX idx_no_duplicate_purchases
+  ON purchases(customer_id, content_id)
+  WHERE status = 'completed' AND refunded_at IS NULL;
 ```
 
 **Phase 1 Usage**:
 
 - Simple one-time purchases
-- `platform_fee_amount` = 0 (no split)
-- `creator_payout_amount` = `amount_paid`
+- Money stored as integer cents (eliminates rounding errors)
+- `platform_fee_cents` = 0, `organization_fee_cents` = 0
+- `creator_payout_cents` = `amount_paid_cents` (100% to creator)
+- `revenue_split_config_id` = platform default (no fees)
 
-**Phase 3 Extensions**:
+**Phase 2+ Extensions**:
 
-- Revenue splitting for media_owner content
-- Stripe Connect payout tracking
+- Revenue splitting using `revenue_split_configurations`
+- 3-way splits: platform + organization + creator
+- Configurable models: percentage, flat_fee, hybrid
+
+**Phase 3+ Extensions**:
+
+- Stripe Connect automated payouts
+- `creator_stripe_transfer_id` and `organization_stripe_transfer_id` track transfers
+- Payout status tracking for reconciliation
 
 ---
 
@@ -409,6 +497,214 @@ CREATE TABLE video_playback (
 
 ---
 
+### OrganizationMemberships
+
+Tracks which users belong to which organizations and their roles.
+
+```sql
+CREATE TYPE org_membership_role AS ENUM ('owner', 'creator', 'subscriber', 'admin');
+
+CREATE TABLE organization_memberships (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- Role within organization
+  role org_membership_role NOT NULL,
+  -- 'owner' = Organization owner (only one per org)
+  -- 'creator' = Invited creator (can post content)
+  -- 'subscriber' = Paying member via subscription (Phase 2+)
+  -- 'admin' = Manager role (Phase 3+)
+
+  -- Permissions (JSONB for flexibility)
+  permissions JSONB DEFAULT '{}',
+  -- Phase 1: Empty
+  -- Phase 2+: { can_post: true, can_edit_others: false, can_manage_members: false }
+
+  -- Status
+  status VARCHAR(50) NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'inactive', 'invited')),
+  -- 'active' = Current member
+  -- 'inactive' = Removed/left organization
+  -- 'invited' = Pending invitation acceptance (Phase 2+)
+
+  -- Subscription link (Phase 2+)
+  subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
+  -- If role='subscriber', this links to their active subscription
+  -- When subscription ends, membership.status = 'inactive'
+
+  invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  invited_at TIMESTAMPTZ,
+  joined_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Indexes
+  INDEX idx_org_memberships_org_id (organization_id),
+  INDEX idx_org_memberships_user_id (user_id),
+  INDEX idx_org_memberships_role (organization_id, role),
+  INDEX idx_org_memberships_subscription_id (subscription_id),
+
+  -- Constraints
+  UNIQUE (organization_id, user_id) -- One membership per user per org
+);
+
+-- One owner per organization (partial unique index)
+CREATE UNIQUE INDEX idx_one_owner_per_org
+  ON organization_memberships(organization_id)
+  WHERE role = 'owner';
+```
+
+**Phase 1 Usage**:
+
+- Created automatically when organization is created (owner membership)
+- `role = 'owner'` for organization owner
+- Single membership per organization
+
+**Phase 2+ Extensions**:
+
+- Invite creators: `role = 'creator'`
+- Subscriptions create: `role = 'subscriber'` memberships
+- Content access checks include membership status
+
+**Key Relationships**:
+
+- Subscription → Membership: When customer subscribes, creates membership with `role='subscriber'`
+- Membership → Access: Active members can access org content with `visibility='members_only'`
+- Organization ownership: Derived from `role='owner'` (not from `users.role`)
+
+---
+
+### RevenueSplitConfigurations
+
+Configures how revenue is split between platform, organization, and creator.
+
+```sql
+CREATE TYPE split_model AS ENUM ('percentage', 'flat_fee', 'hybrid');
+
+CREATE TABLE revenue_split_configurations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- Scope
+  organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  -- NULL = platform-wide default
+  -- NOT NULL = organization-specific override
+
+  -- Model Type
+  model split_model NOT NULL,
+  -- 'percentage' = All splits as percentages
+  -- 'flat_fee' = All splits as fixed amounts (in cents)
+  -- 'hybrid' = Mix of percentage and flat fee
+
+  -- Platform Split
+  platform_percentage DECIMAL(5,2), -- e.g., 5.00 for 5%
+  platform_flat_fee_cents INTEGER,  -- e.g., 200 for $2.00
+
+  -- Organization Split (only applies if content.organization_id NOT NULL)
+  organization_percentage DECIMAL(5,2), -- e.g., 20.00 for 20%
+  organization_flat_fee_cents INTEGER,  -- e.g., 1000 for $10.00
+
+  -- Creator gets remainder: amount_paid - platform_fee - organization_fee
+
+  -- Validation
+  CHECK (
+    (model = 'percentage' AND platform_percentage IS NOT NULL) OR
+    (model = 'flat_fee' AND platform_flat_fee_cents IS NOT NULL) OR
+    (model = 'hybrid' AND (platform_percentage IS NOT NULL OR platform_flat_fee_cents IS NOT NULL))
+  ),
+  CHECK (platform_percentage IS NULL OR (platform_percentage >= 0 AND platform_percentage <= 100)),
+  CHECK (organization_percentage IS NULL OR (organization_percentage >= 0 AND organization_percentage <= 100)),
+  CHECK (COALESCE(platform_percentage, 0) + COALESCE(organization_percentage, 0) <= 100),
+
+  -- Status
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  effective_until TIMESTAMPTZ, -- NULL = active indefinitely
+
+  -- Notes
+  description TEXT,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Indexes
+  INDEX idx_revenue_split_org_id (organization_id),
+  INDEX idx_revenue_split_active (active, effective_from, effective_until)
+);
+
+-- Only one active config per organization (including NULL for platform default)
+CREATE UNIQUE INDEX idx_one_active_config_per_org
+  ON revenue_split_configurations(COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'))
+  WHERE active = TRUE;
+```
+
+**Phase 1 Default**:
+
+```sql
+INSERT INTO revenue_split_configurations (
+  organization_id, model, platform_percentage, platform_flat_fee_cents,
+  organization_percentage, description
+) VALUES (
+  NULL, 'percentage', 0.00, 0, 0.00,
+  'Phase 1 - No platform fees (100% to creator)'
+);
+```
+
+**Phase 2+ Examples**:
+
+```sql
+-- Platform default: 5% + $0.50
+INSERT INTO revenue_split_configurations (
+  organization_id, model, platform_percentage, platform_flat_fee_cents, description
+) VALUES (
+  NULL, 'hybrid', 5.00, 50, 'Platform default: 5% + $0.50'
+);
+
+-- Organization-specific: 20% to org
+INSERT INTO revenue_split_configurations (
+  organization_id, model, organization_percentage, description
+) VALUES (
+  '{org-id}', 'percentage', 20.00, 'Yoga Studio - 20% organization fee'
+);
+```
+
+**Revenue Calculation**:
+
+```typescript
+// Get active config for organization (or platform default if org has no config)
+const config = getActiveSplitConfig(content.organizationId);
+
+const totalCents = purchase.amountPaidCents;
+
+// Calculate platform fee
+let platformCents = 0;
+if (config.platformPercentage) {
+  platformCents += Math.floor(totalCents * (config.platformPercentage / 100));
+}
+if (config.platformFlatFeeCents) {
+  platformCents += config.platformFlatFeeCents;
+}
+
+// Calculate organization fee (only if content posted to org)
+let orgCents = 0;
+if (content.organizationId) {
+  const remaining = totalCents - platformCents;
+  if (config.organizationPercentage) {
+    orgCents += Math.floor(remaining * (config.organizationPercentage / 100));
+  }
+  if (config.organizationFlatFeeCents) {
+    orgCents += config.organizationFlatFeeCents;
+  }
+}
+
+// Creator gets exact remainder (no rounding errors)
+const creatorCents = totalCents - platformCents - orgCents;
+```
+
+---
+
 ### PlatformSettings
 
 Single-row table for platform configuration.
@@ -462,13 +758,19 @@ CREATE TABLE platform_settings (
 
 ### SubscriptionTier
 
-Defines subscription plans.
+Defines subscription plans (organization-scoped).
 
 ```sql
 CREATE TABLE subscription_tiers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-  name VARCHAR(255) NOT NULL, -- e.g., "Yoga Tier", "VIP"
+  -- Organization Scoping
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  -- Subscriptions are ORGANIZATION-SCOPED (not platform-wide)
+  -- Each organization defines its own tiers
+
+  name VARCHAR(255) NOT NULL, -- e.g., "Basic Membership", "VIP Access"
+  slug VARCHAR(255) NOT NULL, -- URL-friendly identifier
   description TEXT,
 
   -- Pricing
@@ -478,126 +780,206 @@ CREATE TABLE subscription_tiers (
   -- Content access
   category_access JSONB DEFAULT '[]', -- Array of categories granted
   -- e.g., ["yoga", "meditation"]
-  full_catalog_access BOOLEAN NOT NULL DEFAULT FALSE, -- All content?
+  full_catalog_access BOOLEAN NOT NULL DEFAULT FALSE, -- Access to all org content?
 
-  -- Offering access
+  -- Offering access (Phase 2+)
   offering_access_rules JSONB DEFAULT '[]',
   -- e.g., [{ type: "one_time_event", included: true }]
 
-  -- Credits
+  -- Credits (Phase 2+)
   monthly_credits INTEGER NOT NULL DEFAULT 0,
   credit_rollover BOOLEAN NOT NULL DEFAULT FALSE,
 
   -- Status
   active BOOLEAN NOT NULL DEFAULT TRUE,
+  display_order INTEGER NOT NULL DEFAULT 0,
 
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-  INDEX idx_subscription_tiers_active (active)
+  -- Indexes
+  INDEX idx_subscription_tiers_org_id (organization_id),
+  INDEX idx_subscription_tiers_active (organization_id, active),
+
+  -- Constraints
+  UNIQUE (organization_id, slug) -- Slug unique per organization
 );
 ```
 
 **Phase**: 2
+
+**Key Changes**:
+- Added `organization_id` - Tiers are organization-specific
+- Added `slug` for URL-friendly identifiers
+- Each organization can have: "Basic", "Premium", "VIP", etc.
 
 ---
 
 ### Subscription
 
-Customer subscription records.
+Customer subscription records (linked to organization memberships).
 
 ```sql
 CREATE TABLE subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id UUID NOT NULL REFERENCES users(id),
-  tier_id UUID NOT NULL REFERENCES subscription_tiers(id),
+
+  -- Relationships
+  customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tier_id UUID NOT NULL REFERENCES subscription_tiers(id) ON DELETE RESTRICT,
+  -- ON DELETE RESTRICT prevents tier deletion if active subscriptions exist
 
   -- Stripe
   stripe_subscription_id VARCHAR(255) UNIQUE NOT NULL,
+  stripe_customer_id VARCHAR(255) NOT NULL, -- Customer's Stripe ID
 
   -- Billing
   billing_period VARCHAR(20) NOT NULL CHECK (billing_period IN ('monthly', 'yearly')),
-  current_period_start TIMESTAMP NOT NULL,
-  current_period_end TIMESTAMP NOT NULL,
+  current_period_start TIMESTAMPTZ NOT NULL,
+  current_period_end TIMESTAMPTZ NOT NULL,
 
   -- Status
   status VARCHAR(50) NOT NULL
-    CHECK (status IN ('active', 'past_due', 'canceled', 'trialing')),
+    CHECK (status IN ('active', 'past_due', 'canceled', 'trialing', 'incomplete')),
   cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
 
   -- Trial
-  trial_end TIMESTAMP,
+  trial_end TIMESTAMPTZ,
 
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  canceled_at TIMESTAMP,
+  -- Membership Link
+  membership_id UUID REFERENCES organization_memberships(id) ON DELETE SET NULL,
+  -- Links to the organization_membership record created by this subscription
+  -- When subscription is active, membership.role = 'subscriber'
+  -- When subscription ends, membership.status = 'inactive'
 
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  canceled_at TIMESTAMPTZ,
+  ended_at TIMESTAMPTZ,
+
+  -- Indexes
   INDEX idx_subscriptions_customer_id (customer_id),
+  INDEX idx_subscriptions_tier_id (tier_id),
   INDEX idx_subscriptions_status (status),
-  INDEX idx_subscriptions_stripe_subscription_id (stripe_subscription_id)
+  INDEX idx_subscriptions_stripe_subscription_id (stripe_subscription_id),
+  INDEX idx_subscriptions_membership_id (membership_id)
 );
 ```
 
 **Phase**: 2
+
+**Key Changes**:
+- Added `membership_id` - Links subscription to organization membership
+- Removed denormalized `organization_id` (derive from tier)
+- Added ON DELETE behaviors for data integrity
+- Subscription lifecycle → Membership lifecycle
 
 ---
 
 ### CreditBalance
 
-Tracks customer credit balances.
+Tracks customer credit balances (organization-scoped).
 
 ```sql
 CREATE TABLE credit_balances (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id UUID NOT NULL REFERENCES users(id),
+
+  customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  -- Credits are ORGANIZATION-SCOPED
+  -- Customer has separate credit balance per organization
 
   current_balance INTEGER NOT NULL DEFAULT 0,
   lifetime_earned INTEGER NOT NULL DEFAULT 0,
   lifetime_spent INTEGER NOT NULL DEFAULT 0,
 
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  -- Data integrity: ensure balance = earned - spent
+  CHECK (current_balance = lifetime_earned - lifetime_spent),
+  CHECK (current_balance >= 0),
+  CHECK (lifetime_earned >= 0),
+  CHECK (lifetime_spent >= 0),
 
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Indexes
   INDEX idx_credit_balances_customer_id (customer_id),
+  INDEX idx_credit_balances_org_id (organization_id),
 
-  UNIQUE (customer_id)
+  -- Constraints
+  UNIQUE (customer_id, organization_id) -- One balance per customer per org
 );
 ```
 
 **Phase**: 2
+
+**Key Changes**:
+- Added `organization_id` - Credits scoped to organizations
+- Added CHECK constraints for data consistency
+- Customer can have different credit balances for different organizations
+
+**Purpose**:
+- Primary: Subscriber benefits (monthly credits from active subscriptions)
+- Secondary: Gifting by organization owners
+- Tertiary: Purchase bonuses (e.g., spend $100, earn 10 credits)
 
 ---
 
 ### CreditTransaction
 
-Ledger of credit transactions.
+Ledger of credit transactions (organization-scoped).
 
 ```sql
 CREATE TABLE credit_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id UUID NOT NULL REFERENCES users(id),
+
+  customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
 
   type VARCHAR(50) NOT NULL
-    CHECK (type IN ('earned_subscription', 'earned_purchase', 'spent_offering', 'expired', 'adjustment')),
-  amount INTEGER NOT NULL, -- Positive for earn, negative for spend
+    CHECK (type IN (
+      'earned_subscription',   -- Monthly credits from active subscription
+      'earned_purchase',       -- Bonus credits from content purchase
+      'earned_gift',           -- Gifted by organization owner
+      'spent_content',         -- Used to purchase content
+      'spent_offering',        -- Used to book offering (Phase 2+)
+      'expired',               -- Credits expired
+      'adjustment'             -- Manual admin adjustment
+    )),
 
+  amount INTEGER NOT NULL, -- Positive for earn, negative for spend
   balance_after INTEGER NOT NULL,
 
-  -- Reference
-  subscription_id UUID REFERENCES subscriptions(id),
-  offering_booking_id UUID REFERENCES offering_bookings(id),
+  -- References
+  subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
+  -- If type='earned_subscription'
+
+  purchase_id UUID REFERENCES purchases(id) ON DELETE SET NULL,
+  -- If type='earned_purchase' or 'spent_content'
+
+  offering_booking_id UUID REFERENCES offering_bookings(id) ON DELETE SET NULL,
+  -- If type='spent_offering' (Phase 2+)
+
+  -- Expiration
+  expires_at TIMESTAMPTZ, -- For credits that expire (e.g., monthly subscription credits)
 
   description TEXT,
-  expires_at TIMESTAMP, -- For credits that expire
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-
+  -- Indexes
   INDEX idx_credit_transactions_customer_id (customer_id),
-  INDEX idx_credit_transactions_created_at (created_at)
+  INDEX idx_credit_transactions_org_id (organization_id),
+  INDEX idx_credit_transactions_created_at (created_at),
+  INDEX idx_credit_transactions_type (type)
 );
 ```
 
 **Phase**: 2
+
+**Key Changes**:
+- Added `organization_id` - Transactions scoped to organizations
+- Expanded `type` enum for clearer purposes
+- Added `purchase_id` reference for credit spending on content
+- Added expiration tracking
 
 ---
 
