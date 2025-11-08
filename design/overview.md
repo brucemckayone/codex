@@ -489,6 +489,86 @@ Global settings that control how your entire platform works. Think of it as the 
 
 ---
 
+### 8. Automatic Video Processing (Behind the Scenes)
+
+**What is this?**
+When you upload a video or audio file, the platform automatically processes it to make it streamable on any device. This all happens in the background—you don't need to do anything.
+
+**What happens automatically:**
+
+- **Video Conversion to HLS** (HTTP Live Streaming):
+  - Your uploaded video is converted into a format that works perfectly on phones, tablets, and computers
+  - Multiple quality versions are created automatically (1080p, 720p, 480p, 360p)
+  - The video player automatically picks the best quality based on the viewer's internet speed
+  - If someone's on WiFi, they get 1080p. If they're on 3G, they get 360p
+  - No more buffering or freezing videos!
+
+- **30-Second Preview Clip**:
+  - Automatically creates a short preview (first 30 seconds of your video)
+  - Customers can watch this preview before purchasing
+  - Great for marketing—let them sample your content
+  - Works like Netflix or YouTube previews
+
+- **Auto-Generated Thumbnail**:
+  - Platform picks a frame from your video (at the 10% mark)
+  - Creates a nice thumbnail image customers see before clicking
+  - Saves you time—no need to create thumbnails manually
+  - You can upload your own custom thumbnail later (Phase 2+)
+
+- **Audio Processing**:
+  - Audio files converted to streaming format
+  - Volume normalized so all your audio sounds consistent
+  - Waveform visualization generated (that cool wave graphic on audio players)
+  - Works with podcasts, meditations, audiobooks
+
+**Status tracking:**
+- **Uploading**: File is being transferred to storage
+- **Processing**: Being converted (usually takes 2-10 minutes depending on file size)
+- **Ready**: Done! You can now create content posts using this video
+- **Failed**: Something went wrong (corrupted file, unsupported format)
+
+**How long does it take?**
+- 1GB video (10 minutes long): ~2-3 minutes to process
+- 100MB audio file: ~30 seconds to process
+- You'll see real-time progress in your media library
+
+**Example Workflow:**
+
+*Sarah uploads a 45-minute yoga class*:
+1. She uploads the video file (2GB, takes 5 minutes to upload)
+2. Status shows: "Processing..."
+3. Behind the scenes:
+   - System creates 4 quality versions (1080p, 720p, 480p, 360p)
+   - Generates 30-second preview of the first pose
+   - Extracts a nice thumbnail showing Sarah in a yoga pose
+4. 4 minutes later, status shows: "Ready!"
+5. Sarah creates content post: "Morning Flow - $15"
+6. Customers can:
+   - Watch the 30-second preview for free
+   - See the thumbnail on the browse page
+   - Purchase and stream in perfect quality on any device
+
+**Why this matters:**
+- You upload once, platform handles all the technical stuff
+- Videos work perfectly on every device
+- Preview clips help sell more (customers sample before buying)
+- No video editing software needed
+- Professional streaming quality automatically
+
+**Cost:**
+- Processing is included—you don't pay extra
+- Uses serverless GPU workers (RunPod) which only charge when actually processing
+- Very cheap: ~$0.02 to process a 1GB video
+
+**What you DON'T need to do:**
+- Don't manually create different quality versions
+- Don't create preview clips yourself
+- Don't worry about video formats or codecs
+- Don't generate thumbnails (unless you want a custom one)
+- Just upload and go!
+
+---
+
 ## How It Works: Complete User Journeys
 
 These stories show how real people would use Codex from start to finish.
