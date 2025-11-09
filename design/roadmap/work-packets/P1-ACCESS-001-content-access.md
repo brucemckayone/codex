@@ -4,119 +4,174 @@
 **Priority**: P0 (Critical - content delivery)
 **Estimated Effort**: 3-4 days
 **Branch**: `feature/P1-ACCESS-001-content-access`
+**Last Updated**: 2025-11-08
+
+---
+
+## Overview
+
+This work packet implements the content access control system that verifies user permissions and generates signed R2 URLs for streaming media content. It also provides playback progress tracking for video content, enabling "continue watching" functionality.
+
+### Key Responsibilities
+
+1. **Access Verification**: Check if user has purchased content or if content is free
+2. **Signed URL Generation**: Create time-limited R2 URLs for media streaming
+3. **Playback Tracking**: Save and retrieve video playback progress
+4. **User Library**: List purchased content with progress indicators
+
+### Business Context
+
+This is the gateway between customers and content. Every content access request flows through this service:
+- Free content → Generate signed URL immediately
+- Paid content → Verify purchase exists → Generate signed URL
+- Video playback → Track progress every 30 seconds → Enable resume watching
 
 ---
 
 ## Current State
 
-**✅ Already Implemented:**
-- R2 client with signed URL generation (`packages/cloudflare-clients/src/r2/client.ts`)
-- Content schema from P1-CONTENT-001
-- Purchase schema from P1-ECOM-001
-- Authentication middleware (user context available)
+### ✅ Already Implemented
 
-**🚧 Needs Implementation:**
-- Content access service (check purchase, generate streaming URLs)
-- Playback progress tracking schema
-- Playback progress API (save/retrieve position)
-- User library API (list purchased content)
-- Tests
+- **R2 Client**: Signed URL generation available at `packages/cloudflare-clients/src/r2/client.ts`
+- **Content Schema**: From P1-CONTENT-001 (`content`, `media_items` tables)
+- **Purchase Schema**: From P1-ECOM-001 (`purchases`, `content_access` tables)
+- **Authentication Middleware**: User context available in all routes
+
+### 🚧 Needs Implementation
+
+- `video_playback` table and migration
+- `ContentAccessService` class with business logic
+- Access validation schemas (Zod)
+- API endpoints in auth worker:
+  - `GET /api/content/:id/stream` - Get streaming URL
+  - `POST /api/content/:id/progress` - Save playback progress
+  - `GET /api/content/:id/progress` - Get playback progress
+  - `GET /api/user/library` - List purchased content
+- Unit tests for service and validation
+- Integration tests for API endpoints
 
 ---
 
 ## Dependencies
 
-### Required Work Packets
-- **P1-CONTENT-001** (Content Service) - MUST complete first for content schema
-- **P1-ECOM-001** (Stripe Checkout) - MUST complete first for purchase checking
+### Required Work Packets (Must Complete First)
 
-### Existing Code
-```typescript
-// Already available in packages/cloudflare-clients/src/r2/client.ts
-import { R2Service } from '@codex/cloudflare-clients/r2';
+| Work Packet | Dependency | What We Need |
+|-------------|------------|--------------|
+| **P1-CONTENT-001** | Hard | `content` and `media_items` tables, content service for querying |
+| **P1-ECOM-001** | Hard | `purchases` table with `status='completed'` records |
 
-const r2 = new R2Service(env.R2_BUCKET);
-const signedUrl = await r2.generateSignedUrl('path/to/video.mp4', 3600); // 1 hour expiry
-```
+### Existing Infrastructure
 
-### Required Documentation
-- [R2 Storage Patterns](../../core/R2_STORAGE_PATTERNS.md)
-- [Access Control Patterns](../../core/ACCESS_CONTROL_PATTERNS.md)
-- [Content Access TDD](../../features/content-access/ttd-dphase-1.md)
-- [STANDARDS.md](../STANDARDS.md)
+- **Database**: Neon Postgres with Drizzle ORM
+- **R2 Storage**: Cloudflare R2 buckets (see R2BucketStructure.md)
+- **Auth Worker**: Hono-based API with `requireAuth()` middleware
+- **Observability**: ObservabilityClient for logging and error tracking
 
 ---
 
-## Implementation Steps
+## Database Schema
 
-### Step 1: Create Playback Progress Schema
+### Video Playback Table
 
 **File**: `packages/database/src/schema/playback.ts`
 
+This schema is aligned with `design/features/shared/database-schema.md` lines 465-497.
+
 ```typescript
-import { pgTable, text, integer, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, integer, boolean, timestamp, unique, index } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
 import { content } from './content';
+import { users } from './users';
 
 /**
- * Tracks playback progress for video/audio content
+ * Tracks video playback progress for resume functionality
  *
  * Design decisions:
- * - Composite primary key (customerId + contentId) for upsert pattern
+ * - Composite unique key (user_id + content_id) for upsert pattern
  * - Progress in seconds (not percentage) for accuracy
- * - Duration stored for progress calculation
- * - lastWatchedAt for "continue watching" features
- * - Organization-scoped for multi-tenancy
+ * - completed flag set when user watches >= 95% of video
+ * - Aligned with database-schema.md v2.0 (lines 465-497)
+ *
+ * Business rules:
+ * - Update every 30 seconds during playback (frontend responsibility)
+ * - Auto-complete when position >= 95% of duration
+ * - No cleanup (historical record useful for analytics)
  */
 export const videoPlayback = pgTable('video_playback', {
-  customerId: text('customer_id').notNull(),
-  contentId: text('content_id').notNull()
-    .references(() => content.id, { onDelete: 'cascade' }),
-  organizationId: text('organization_id').notNull(),
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  contentId: uuid('content_id').notNull().references(() => content.id, { onDelete: 'cascade' }),
 
   // Playback state
-  currentPositionSeconds: integer('current_position_seconds').notNull().default(0),
+  positionSeconds: integer('position_seconds').notNull().default(0),
   durationSeconds: integer('duration_seconds').notNull(),
-  completed: boolean('completed').notNull().default(false),
+  completed: boolean('completed').notNull().default(false), // Watched >= 95%
 
-  // Metadata
-  lastWatchedAt: timestamp('last_watched_at').notNull().defaultNow(),
+  // Timestamps
+  updatedAt: timestamp('updated_at').notNull().defaultNow().$onUpdate(() => new Date()),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow()
-    .$onUpdate(() => new Date()),
 }, (table) => ({
-  pk: primaryKey({ columns: [table.customerId, table.contentId] }),
+  // One playback record per user per video
+  userContentUnique: unique().on(table.userId, table.contentId),
+
+  // Indexes for common queries
+  userIdIdx: index('idx_video_playback_user_id').on(table.userId),
+  contentIdIdx: index('idx_video_playback_content_id').on(table.contentId),
 }));
 
 export const videoPlaybackRelations = relations(videoPlayback, ({ one }) => ({
+  user: one(users, {
+    fields: [videoPlayback.userId],
+    references: [users.id],
+  }),
   content: one(content, {
     fields: [videoPlayback.contentId],
     references: [content.id],
   }),
 }));
+
+export type VideoPlayback = typeof videoPlayback.$inferSelect;
+export type NewVideoPlayback = typeof videoPlayback.$inferInsert;
 ```
 
-**Migration**: `packages/database/migrations/XXXX_create_video_playback.sql`
+### Migration File
+
+**File**: `packages/database/migrations/XXXX_create_video_playback.sql`
 
 ```sql
+-- Create video_playback table for tracking playback progress
+-- Aligned with design/features/shared/database-schema.md v2.0
+
 CREATE TABLE video_playback (
-  customer_id TEXT NOT NULL,
-  content_id TEXT NOT NULL REFERENCES content(id) ON DELETE CASCADE,
-  organization_id TEXT NOT NULL,
-  current_position_seconds INTEGER NOT NULL DEFAULT 0,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content_id UUID NOT NULL REFERENCES content(id) ON DELETE CASCADE,
+
+  position_seconds INTEGER NOT NULL DEFAULT 0,
   duration_seconds INTEGER NOT NULL,
   completed BOOLEAN NOT NULL DEFAULT FALSE,
-  last_watched_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (customer_id, content_id)
+
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Constraints
+  CONSTRAINT video_playback_user_content_unique UNIQUE (user_id, content_id)
 );
 
-CREATE INDEX idx_video_playback_customer ON video_playback(customer_id);
-CREATE INDEX idx_video_playback_organization ON video_playback(organization_id);
-CREATE INDEX idx_video_playback_last_watched ON video_playback(customer_id, last_watched_at DESC);
+-- Indexes for efficient queries
+CREATE INDEX idx_video_playback_user_id ON video_playback(user_id);
+CREATE INDEX idx_video_playback_content_id ON video_playback(content_id);
+
+-- Comments
+COMMENT ON TABLE video_playback IS 'Tracks video playback progress for resume functionality';
+COMMENT ON COLUMN video_playback.position_seconds IS 'Current playback position in seconds';
+COMMENT ON COLUMN video_playback.completed IS 'True if user watched >= 95% of video';
 ```
 
-### Step 2: Create Access Validation Schemas
+---
+
+## Validation Schemas
 
 **File**: `packages/validation/src/schemas/access.ts`
 
@@ -124,54 +179,64 @@ CREATE INDEX idx_video_playback_last_watched ON video_playback(customer_id, last
 import { z } from 'zod';
 
 /**
- * ✅ TESTABLE: Pure validation schemas (no DB dependency)
+ * Validation schemas for content access endpoints
+ *
+ * Design principles:
+ * - Pure validation (no DB dependency)
+ * - Clear error messages for API responses
+ * - Sensible defaults (1 hour expiry, page 1, limit 20)
+ * - Bounds checking (expiry: 5 minutes to 24 hours)
  */
 
 export const getStreamingUrlSchema = z.object({
-  contentId: z.string().uuid('Invalid content ID'),
+  contentId: z.string().uuid('Invalid content ID format'),
   expirySeconds: z.number()
-    .int('Expiry must be integer')
-    .min(300, 'Minimum expiry is 5 minutes')
-    .max(86400, 'Maximum expiry is 24 hours')
+    .int('Expiry must be an integer')
+    .min(300, 'Minimum expiry is 5 minutes (300 seconds)')
+    .max(86400, 'Maximum expiry is 24 hours (86400 seconds)')
     .optional()
     .default(3600), // 1 hour default
 });
 
 export const savePlaybackProgressSchema = z.object({
-  contentId: z.string().uuid('Invalid content ID'),
-  currentPositionSeconds: z.number()
-    .int('Position must be integer')
+  contentId: z.string().uuid('Invalid content ID format'),
+  positionSeconds: z.number()
+    .int('Position must be an integer')
     .min(0, 'Position cannot be negative'),
   durationSeconds: z.number()
-    .int('Duration must be integer')
+    .int('Duration must be an integer')
     .min(1, 'Duration must be at least 1 second'),
   completed: z.boolean().optional().default(false),
 });
 
 export const getPlaybackProgressSchema = z.object({
-  contentId: z.string().uuid('Invalid content ID'),
+  contentId: z.string().uuid('Invalid content ID format'),
 });
 
 export const listUserLibrarySchema = z.object({
   page: z.number().int().min(1).optional().default(1),
   limit: z.number().int().min(1).max(100).optional().default(20),
   filter: z.enum(['all', 'in-progress', 'completed']).optional().default('all'),
+  sortBy: z.enum(['recent', 'title', 'duration']).optional().default('recent'),
 });
 
+// Type exports
 export type GetStreamingUrlInput = z.infer<typeof getStreamingUrlSchema>;
 export type SavePlaybackProgressInput = z.infer<typeof savePlaybackProgressSchema>;
 export type GetPlaybackProgressInput = z.infer<typeof getPlaybackProgressSchema>;
 export type ListUserLibraryInput = z.infer<typeof listUserLibrarySchema>;
 ```
 
-### Step 3: Create Content Access Service
+---
+
+## Service Implementation
 
 **File**: `packages/content-access/src/service.ts`
 
 ```typescript
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
 import type { DrizzleClient } from '@codex/database';
-import { content, contentPurchases, videoPlayback } from '@codex/database/schema';
+import { content, purchases, videoPlayback, mediaItems, contentAccess } from '@codex/database/schema';
 import { R2Service } from '@codex/cloudflare-clients/r2';
 import { ObservabilityClient } from '@codex/observability';
 import type {
@@ -185,146 +250,231 @@ export interface ContentAccessServiceConfig {
   db: DrizzleClient;
   r2: R2Service;
   obs: ObservabilityClient;
-  organizationId: string;
 }
 
+/**
+ * Content Access Service
+ *
+ * Responsibilities:
+ * 1. Verify user has access to content (purchase or free)
+ * 2. Generate time-limited signed R2 URLs for streaming
+ * 3. Track video playback progress for resume functionality
+ * 4. List user's content library with progress
+ *
+ * Security:
+ * - All methods require authenticated userId
+ * - Purchase verification before generating signed URLs
+ * - Only published, non-deleted content is accessible
+ * - Row-level security enforced via user_id filters
+ *
+ * Integration points:
+ * - P1-CONTENT-001: Queries content and media_items tables
+ * - P1-ECOM-001: Verifies purchases table for access
+ * - R2 Service: Generates presigned URLs via AWS SDK
+ */
 export class ContentAccessService {
   constructor(private config: ContentAccessServiceConfig) {}
 
   /**
-   * Check if user has access to content and generate signed streaming URL
+   * Generate signed streaming URL for content
    *
-   * Business rules:
-   * - Free content (price = 0): Anyone can access
-   * - Paid content: Must have completed purchase
+   * Access control flow:
+   * 1. Verify content exists and is published
+   * 2. Check if content is free (price_cents = 0)
+   * 3. If paid, verify user has completed purchase
+   * 4. Generate time-limited signed R2 URL
    *
-   * @throws {Error} - 'CONTENT_NOT_FOUND', 'ACCESS_DENIED', 'CONTENT_UNAVAILABLE'
+   * Error codes:
+   * - CONTENT_NOT_FOUND: Content doesn't exist, is draft, or is deleted
+   * - ACCESS_DENIED: User hasn't purchased paid content
+   * - R2_ERROR: Failed to generate signed URL
+   *
+   * @param userId - Authenticated user ID
+   * @param input - Content ID and optional expiry
+   * @returns Streaming URL and expiration timestamp
+   * @throws Error with specific code for error handling
    */
   async getStreamingUrl(
-    customerId: string,
+    userId: string,
     input: GetStreamingUrlInput
-  ): Promise<{ streamingUrl: string; expiresAt: Date }> {
-    const { db, r2, obs, organizationId } = this.config;
+  ): Promise<{ streamingUrl: string; expiresAt: Date; contentType: 'video' | 'audio' }> {
+    const { db, r2, obs } = this.config;
 
     obs.info('Getting streaming URL', {
-      customerId,
+      userId,
       contentId: input.contentId,
+      expirySeconds: input.expirySeconds,
     });
 
-    // 1. Get content details
+    // Step 1: Get content with media details
     const contentRecord = await db.query.content.findFirst({
       where: and(
         eq(content.id, input.contentId),
-        eq(content.organizationId, organizationId),
         eq(content.status, 'published'),
         isNull(content.deletedAt)
       ),
       with: {
-        mediaItem: true, // Get R2 path
+        mediaItem: true, // Includes r2_key, content_type, duration
       },
     });
 
-    if (!contentRecord) {
-      obs.warn('Content not found or not published', {
+    if (!contentRecord || !contentRecord.mediaItem) {
+      obs.warn('Content not found or not accessible', {
         contentId: input.contentId,
+        found: !!contentRecord,
+        hasMedia: !!contentRecord?.mediaItem,
       });
       throw new Error('CONTENT_NOT_FOUND');
     }
 
-    // 2. Check access (free content or purchased)
+    // Step 2: Check access (free content or purchased)
     if (contentRecord.priceCents > 0) {
-      const purchase = await db.query.contentPurchases.findFirst({
+      // Paid content - verify purchase or content_access
+      const hasAccess = await db.query.contentAccess.findFirst({
         where: and(
-          eq(contentPurchases.customerId, customerId),
-          eq(contentPurchases.contentId, input.contentId),
-          eq(contentPurchases.status, 'completed')
+          eq(contentAccess.userId, userId),
+          eq(contentAccess.contentId, input.contentId),
+          eq(contentAccess.accessType, 'purchased'), // Phase 1: Only purchased access
+          // Phase 2+: Also check subscription, complimentary
         ),
       });
 
-      if (!purchase) {
+      if (!hasAccess) {
         obs.warn('Access denied - no purchase found', {
-          customerId,
+          userId,
           contentId: input.contentId,
+          priceCents: contentRecord.priceCents,
         });
         throw new Error('ACCESS_DENIED');
       }
+    } else {
+      obs.info('Free content - skipping purchase check', {
+        contentId: input.contentId,
+      });
     }
 
-    // 3. Generate signed R2 URL
-    const r2Path = contentRecord.mediaItem.r2Path;
-    const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
+    // Step 3: Generate signed R2 URL
+    // R2 key format: {creatorId}/hls/{mediaId}/master.m3u8 (for video)
+    //                {creatorId}/audio/{mediaId}/audio.mp3 (for audio)
+    const r2Key = contentRecord.mediaItem.r2Key;
 
-    const streamingUrl = await r2.generateSignedUrl(r2Path, input.expirySeconds);
+    if (!r2Key) {
+      obs.error('Media item missing R2 key', {
+        contentId: input.contentId,
+        mediaItemId: contentRecord.mediaItem.id,
+      });
+      throw new Error('R2_ERROR');
+    }
 
-    obs.info('Streaming URL generated', {
-      customerId,
-      contentId: input.contentId,
-      expiresAt: expiresAt.toISOString(),
-    });
+    try {
+      const streamingUrl = await r2.generateSignedUrl(r2Key, input.expirySeconds);
+      const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
 
-    return { streamingUrl, expiresAt };
+      obs.info('Streaming URL generated successfully', {
+        userId,
+        contentId: input.contentId,
+        contentType: contentRecord.mediaItem.contentType,
+        expiresAt: expiresAt.toISOString(),
+      });
+
+      return {
+        streamingUrl,
+        expiresAt,
+        contentType: contentRecord.mediaItem.contentType as 'video' | 'audio',
+      };
+    } catch (err) {
+      obs.error('Failed to generate signed R2 URL', {
+        error: err,
+        userId,
+        contentId: input.contentId,
+        r2Key,
+      });
+      throw new Error('R2_ERROR');
+    }
   }
 
   /**
    * Save playback progress (upsert pattern)
    *
-   * Uses composite primary key for automatic upsert behavior
+   * Uses unique constraint on (user_id, content_id) for automatic upsert.
+   * Updates lastWatchedAt timestamp on every save.
+   * Auto-completes if positionSeconds >= 95% of durationSeconds.
+   *
+   * Called by frontend:
+   * - Every 30 seconds during playback
+   * - On pause
+   * - On seek
+   * - On video end
+   *
+   * @param userId - Authenticated user ID
+   * @param input - Content ID, position, duration, completed flag
    */
   async savePlaybackProgress(
-    customerId: string,
+    userId: string,
     input: SavePlaybackProgressInput
   ): Promise<void> {
-    const { db, obs, organizationId } = this.config;
+    const { db, obs } = this.config;
+
+    // Auto-complete if watched >= 95%
+    const completionThreshold = input.durationSeconds * 0.95;
+    const isCompleted = input.positionSeconds >= completionThreshold;
 
     obs.info('Saving playback progress', {
-      customerId,
+      userId,
       contentId: input.contentId,
-      position: input.currentPositionSeconds,
+      positionSeconds: input.positionSeconds,
+      durationSeconds: input.durationSeconds,
+      completed: isCompleted,
     });
 
-    // Upsert pattern with composite primary key
+    // Upsert using unique constraint
     await db.insert(videoPlayback).values({
-      customerId,
+      userId,
       contentId: input.contentId,
-      organizationId,
-      currentPositionSeconds: input.currentPositionSeconds,
+      positionSeconds: input.positionSeconds,
       durationSeconds: input.durationSeconds,
-      completed: input.completed,
-      lastWatchedAt: new Date(),
+      completed: isCompleted || input.completed,
     }).onConflictDoUpdate({
-      target: [videoPlayback.customerId, videoPlayback.contentId],
+      target: [videoPlayback.userId, videoPlayback.contentId],
       set: {
-        currentPositionSeconds: input.currentPositionSeconds,
+        positionSeconds: input.positionSeconds,
         durationSeconds: input.durationSeconds,
-        completed: input.completed,
-        lastWatchedAt: new Date(),
+        completed: isCompleted || input.completed,
         updatedAt: new Date(),
       },
     });
 
     obs.info('Playback progress saved', {
-      customerId,
+      userId,
       contentId: input.contentId,
+      completed: isCompleted,
     });
   }
 
   /**
-   * Get playback progress for a specific content item
+   * Get playback progress for specific content
+   *
+   * Returns null if no progress exists (user hasn't started watching).
+   * Used by frontend to resume playback at saved position.
+   *
+   * @param userId - Authenticated user ID
+   * @param input - Content ID
+   * @returns Progress object or null
    */
   async getPlaybackProgress(
-    customerId: string,
+    userId: string,
     input: GetPlaybackProgressInput
   ): Promise<{
-    currentPositionSeconds: number;
+    positionSeconds: number;
     durationSeconds: number;
     completed: boolean;
-    lastWatchedAt: Date;
+    updatedAt: Date;
   } | null> {
     const { db } = this.config;
 
     const progress = await db.query.videoPlayback.findFirst({
       where: and(
-        eq(videoPlayback.customerId, customerId),
+        eq(videoPlayback.userId, userId),
         eq(videoPlayback.contentId, input.contentId)
       ),
     });
@@ -334,78 +484,102 @@ export class ContentAccessService {
     }
 
     return {
-      currentPositionSeconds: progress.currentPositionSeconds,
+      positionSeconds: progress.positionSeconds,
       durationSeconds: progress.durationSeconds,
       completed: progress.completed,
-      lastWatchedAt: progress.lastWatchedAt,
+      updatedAt: progress.updatedAt,
     };
   }
 
   /**
    * List user's purchased content library with playback progress
+   *
+   * Query flow:
+   * 1. Get all purchases for user (status='completed')
+   * 2. Join with content and media_items for details
+   * 3. Get playback progress for all content in batch
+   * 4. Combine results and apply filters
+   * 5. Sort and paginate
+   *
+   * Filters:
+   * - 'all': All purchased content
+   * - 'in-progress': Started but not completed
+   * - 'completed': Watched >= 95%
+   *
+   * @param userId - Authenticated user ID
+   * @param input - Pagination, filter, sort options
+   * @returns Paginated list of content with progress
    */
   async listUserLibrary(
-    customerId: string,
+    userId: string,
     input: ListUserLibraryInput
   ): Promise<{
     items: Array<{
       content: {
         id: string;
         title: string;
-        description: string;
-        thumbnailUrl: string;
+        description: string | null;
+        thumbnailUrl: string | null;
+        contentType: 'video' | 'audio';
+        durationSeconds: number | null;
       };
       purchase: {
         purchasedAt: Date;
         priceCents: number;
       };
       progress: {
-        currentPositionSeconds: number;
+        positionSeconds: number;
         durationSeconds: number;
         completed: boolean;
-        lastWatchedAt: Date;
+        percentComplete: number;
+        updatedAt: Date;
       } | null;
     }>;
     pagination: {
       page: number;
       limit: number;
       total: number;
+      hasMore: boolean;
     };
   }> {
-    const { db, obs, organizationId } = this.config;
+    const { db, obs } = this.config;
 
     obs.info('Listing user library', {
-      customerId,
+      userId,
       page: input.page,
       filter: input.filter,
+      sortBy: input.sortBy,
     });
 
-    // Query purchases with content and progress
     const offset = (input.page - 1) * input.limit;
 
-    const purchases = await db.query.contentPurchases.findMany({
+    // Step 1: Get purchases with content and media details
+    const purchaseRecords = await db.query.purchases.findMany({
       where: and(
-        eq(contentPurchases.customerId, customerId),
-        eq(contentPurchases.organizationId, organizationId),
-        eq(contentPurchases.status, 'completed')
+        eq(purchases.customerId, userId),
+        eq(purchases.status, 'completed')
       ),
       with: {
         content: {
           with: {
-            mediaItem: true, // For thumbnail
+            mediaItem: true,
           },
         },
       },
-      orderBy: [desc(contentPurchases.createdAt)],
-      limit: input.limit,
+      orderBy: [desc(purchases.createdAt)],
+      limit: input.limit + 1, // Fetch one extra to check if there's more
       offset,
     });
 
-    // Get playback progress for all content items
+    // Check if there are more pages
+    const hasMore = purchaseRecords.length > input.limit;
+    const purchases = hasMore ? purchaseRecords.slice(0, input.limit) : purchaseRecords;
+
+    // Step 2: Get playback progress for all content in batch
     const contentIds = purchases.map(p => p.contentId);
     const progressRecords = await db.query.videoPlayback.findMany({
       where: and(
-        eq(videoPlayback.customerId, customerId),
+        eq(videoPlayback.userId, userId),
         inArray(videoPlayback.contentId, contentIds)
       ),
     });
@@ -414,48 +588,59 @@ export class ContentAccessService {
       progressRecords.map(p => [p.contentId, p])
     );
 
-    // Build response
-    const items = purchases.map(purchase => ({
-      content: {
-        id: purchase.content.id,
-        title: purchase.content.title,
-        description: purchase.content.description,
-        thumbnailUrl: purchase.content.mediaItem.thumbnailUrl,
-      },
-      purchase: {
-        purchasedAt: purchase.createdAt,
-        priceCents: purchase.priceCents,
-      },
-      progress: progressMap.has(purchase.contentId)
-        ? {
-            currentPositionSeconds: progressMap.get(purchase.contentId)!.currentPositionSeconds,
-            durationSeconds: progressMap.get(purchase.contentId)!.durationSeconds,
-            completed: progressMap.get(purchase.contentId)!.completed,
-            lastWatchedAt: progressMap.get(purchase.contentId)!.lastWatchedAt,
-          }
-        : null,
-    }));
+    // Step 3: Build response items
+    let items = purchases.map(purchase => {
+      const progress = progressMap.get(purchase.contentId);
 
-    // Apply filter
-    const filteredItems = items.filter(item => {
+      return {
+        content: {
+          id: purchase.content.id,
+          title: purchase.content.title,
+          description: purchase.content.description,
+          thumbnailUrl: purchase.content.mediaItem?.thumbnailUrl ?? null,
+          contentType: purchase.content.mediaItem?.contentType as 'video' | 'audio',
+          durationSeconds: purchase.content.mediaItem?.durationSeconds ?? null,
+        },
+        purchase: {
+          purchasedAt: purchase.createdAt,
+          priceCents: purchase.amountPaidCents,
+        },
+        progress: progress ? {
+          positionSeconds: progress.positionSeconds,
+          durationSeconds: progress.durationSeconds,
+          completed: progress.completed,
+          percentComplete: Math.round((progress.positionSeconds / progress.durationSeconds) * 100),
+          updatedAt: progress.updatedAt,
+        } : null,
+      };
+    });
+
+    // Step 4: Apply filter
+    items = items.filter(item => {
       if (input.filter === 'in-progress') {
         return item.progress && !item.progress.completed;
       }
       if (input.filter === 'completed') {
-        return item.progress?.completed;
+        return item.progress?.completed === true;
       }
       return true; // 'all'
     });
 
-    // Get total count (simplified - in production, use separate count query)
-    const total = filteredItems.length;
+    // Step 5: Apply sort (after filter for accuracy)
+    if (input.sortBy === 'title') {
+      items.sort((a, b) => a.content.title.localeCompare(b.content.title));
+    } else if (input.sortBy === 'duration') {
+      items.sort((a, b) => (b.content.durationSeconds ?? 0) - (a.content.durationSeconds ?? 0));
+    }
+    // 'recent' is already sorted by purchase.createdAt DESC
 
     return {
-      items: filteredItems,
+      items,
       pagination: {
         page: input.page,
         limit: input.limit,
-        total,
+        total: items.length, // Note: This is filtered total, not total purchases
+        hasMore,
       },
     };
   }
@@ -463,35 +648,33 @@ export class ContentAccessService {
 
 /**
  * Factory function for dependency injection
+ *
+ * Used in API endpoints to create service instance with environment config.
  */
-export function getContentAccessService(env: {
+export function createContentAccessService(env: {
   DATABASE_URL: string;
   R2_BUCKET: R2Bucket;
   ENVIRONMENT: string;
-  ORGANIZATION_ID: string;
 }): ContentAccessService {
   const db = getDbClient(env.DATABASE_URL);
   const r2 = new R2Service(env.R2_BUCKET);
   const obs = new ObservabilityClient('content-access-service', env.ENVIRONMENT);
 
-  return new ContentAccessService({
-    db,
-    r2,
-    obs,
-    organizationId: env.ORGANIZATION_ID,
-  });
+  return new ContentAccessService({ db, r2, obs });
 }
 ```
 
-### Step 4: Create API Endpoints
+---
 
-**File**: `workers/auth/src/routes/content-access.ts` (add to existing auth worker)
+## API Endpoints
+
+**File**: `workers/auth/src/routes/content-access.ts`
 
 ```typescript
 import { Hono } from 'hono';
 import type { AuthContext } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
-import { getContentAccessService } from '@codex/content-access';
+import { createContentAccessService } from '@codex/content-access';
 import {
   getStreamingUrlSchema,
   savePlaybackProgressSchema,
@@ -499,6 +682,7 @@ import {
   listUserLibrarySchema,
 } from '@codex/validation/schemas/access';
 import { ObservabilityClient } from '@codex/observability';
+import { ZodError } from 'zod';
 
 const app = new Hono<AuthContext>();
 
@@ -507,36 +691,50 @@ app.use('*', requireAuth());
 
 /**
  * GET /api/content/:id/stream
- * Generate signed streaming URL for content
+ *
+ * Generate signed streaming URL for content.
+ *
+ * Query params:
+ * - expiry (optional): Expiry time in seconds (default: 3600)
+ *
+ * Response:
+ * - 200: { streamingUrl: string, expiresAt: ISO8601, contentType: 'video'|'audio' }
+ * - 403: { error: { code: 'ACCESS_DENIED', message: 'Purchase required' } }
+ * - 404: { error: { code: 'CONTENT_NOT_FOUND', message: 'Content not found' } }
+ * - 500: { error: { code: 'INTERNAL_ERROR', message: '...' } }
  */
 app.get('/api/content/:id/stream', async (c) => {
   const obs = new ObservabilityClient('content-access-api', c.env.ENVIRONMENT);
-  const user = c.get('user'); // From requireAuth middleware
+  const user = c.get('user');
 
   try {
     const input = getStreamingUrlSchema.parse({
       contentId: c.req.param('id'),
-      expirySeconds: Number(c.req.query('expiry')) || 3600,
+      expirySeconds: c.req.query('expiry') ? Number(c.req.query('expiry')) : undefined,
     });
 
-    const service = getContentAccessService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
+    const service = createContentAccessService(c.env);
     const result = await service.getStreamingUrl(user.id, input);
 
     return c.json({
       streamingUrl: result.streamingUrl,
       expiresAt: result.expiresAt.toISOString(),
+      contentType: result.contentType,
     });
   } catch (err) {
+    if (err instanceof ZodError) {
+      obs.warn('Validation error', { errors: err.errors });
+      return c.json({ error: { code: 'VALIDATION_ERROR', message: err.errors[0].message } }, 400);
+    }
+
     if ((err as Error).message === 'CONTENT_NOT_FOUND') {
-      return c.json({ error: { code: 'CONTENT_NOT_FOUND', message: 'Content not found' } }, 404);
+      return c.json({ error: { code: 'CONTENT_NOT_FOUND', message: 'Content not found or not accessible' } }, 404);
     }
+
     if ((err as Error).message === 'ACCESS_DENIED') {
-      return c.json({ error: { code: 'ACCESS_DENIED', message: 'Purchase required' } }, 403);
+      return c.json({ error: { code: 'ACCESS_DENIED', message: 'Purchase required to access this content' } }, 403);
     }
+
     obs.trackError(err as Error, { userId: user.id, contentId: c.req.param('id') });
     return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to generate streaming URL' } }, 500);
   }
@@ -544,7 +742,20 @@ app.get('/api/content/:id/stream', async (c) => {
 
 /**
  * POST /api/content/:id/progress
- * Save playback progress
+ *
+ * Save playback progress for video content.
+ *
+ * Body:
+ * {
+ *   positionSeconds: number,
+ *   durationSeconds: number,
+ *   completed?: boolean
+ * }
+ *
+ * Response:
+ * - 200: { success: true }
+ * - 400: { error: { code: 'VALIDATION_ERROR', message: '...' } }
+ * - 500: { error: { code: 'INTERNAL_ERROR', message: '...' } }
  */
 app.post('/api/content/:id/progress', async (c) => {
   const obs = new ObservabilityClient('content-access-api', c.env.ENVIRONMENT);
@@ -557,23 +768,29 @@ app.post('/api/content/:id/progress', async (c) => {
       ...body,
     });
 
-    const service = getContentAccessService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
+    const service = createContentAccessService(c.env);
     await service.savePlaybackProgress(user.id, input);
 
     return c.json({ success: true });
   } catch (err) {
+    if (err instanceof ZodError) {
+      obs.warn('Validation error', { errors: err.errors });
+      return c.json({ error: { code: 'VALIDATION_ERROR', message: err.errors[0].message } }, 400);
+    }
+
     obs.trackError(err as Error, { userId: user.id, contentId: c.req.param('id') });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to save progress' } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to save playback progress' } }, 500);
   }
 });
 
 /**
  * GET /api/content/:id/progress
- * Get playback progress
+ *
+ * Get playback progress for video content.
+ *
+ * Response:
+ * - 200: { progress: { positionSeconds, durationSeconds, completed, updatedAt } | null }
+ * - 500: { error: { code: 'INTERNAL_ERROR', message: '...' } }
  */
 app.get('/api/content/:id/progress', async (c) => {
   const obs = new ObservabilityClient('content-access-api', c.env.ENVIRONMENT);
@@ -584,11 +801,7 @@ app.get('/api/content/:id/progress', async (c) => {
       contentId: c.req.param('id'),
     });
 
-    const service = getContentAccessService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
+    const service = createContentAccessService(c.env);
     const progress = await service.getPlaybackProgress(user.id, input);
 
     if (!progress) {
@@ -597,21 +810,32 @@ app.get('/api/content/:id/progress', async (c) => {
 
     return c.json({
       progress: {
-        currentPositionSeconds: progress.currentPositionSeconds,
+        positionSeconds: progress.positionSeconds,
         durationSeconds: progress.durationSeconds,
         completed: progress.completed,
-        lastWatchedAt: progress.lastWatchedAt.toISOString(),
+        updatedAt: progress.updatedAt.toISOString(),
       },
     });
   } catch (err) {
     obs.trackError(err as Error, { userId: user.id, contentId: c.req.param('id') });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to get progress' } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to get playback progress' } }, 500);
   }
 });
 
 /**
  * GET /api/user/library
- * List user's purchased content with progress
+ *
+ * List user's purchased content with playback progress.
+ *
+ * Query params:
+ * - page (optional): Page number (default: 1)
+ * - limit (optional): Items per page (default: 20, max: 100)
+ * - filter (optional): 'all' | 'in-progress' | 'completed' (default: 'all')
+ * - sortBy (optional): 'recent' | 'title' | 'duration' (default: 'recent')
+ *
+ * Response:
+ * - 200: { items: [...], pagination: { page, limit, total, hasMore } }
+ * - 500: { error: { code: 'INTERNAL_ERROR', message: '...' } }
  */
 app.get('/api/user/library', async (c) => {
   const obs = new ObservabilityClient('content-access-api', c.env.ENVIRONMENT);
@@ -619,20 +843,22 @@ app.get('/api/user/library', async (c) => {
 
   try {
     const input = listUserLibrarySchema.parse({
-      page: Number(c.req.query('page')) || 1,
-      limit: Number(c.req.query('limit')) || 20,
-      filter: c.req.query('filter') || 'all',
+      page: c.req.query('page') ? Number(c.req.query('page')) : undefined,
+      limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
+      filter: c.req.query('filter'),
+      sortBy: c.req.query('sortBy'),
     });
 
-    const service = getContentAccessService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
+    const service = createContentAccessService(c.env);
     const result = await service.listUserLibrary(user.id, input);
 
     return c.json(result);
   } catch (err) {
+    if (err instanceof ZodError) {
+      obs.warn('Validation error', { errors: err.errors });
+      return c.json({ error: { code: 'VALIDATION_ERROR', message: err.errors[0].message } }, 400);
+    }
+
     obs.trackError(err as Error, { userId: user.id });
     return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to list library' } }, 500);
   }
@@ -641,369 +867,566 @@ app.get('/api/user/library', async (c) => {
 export default app;
 ```
 
-### Step 5: Wire Up Routes
+### Wire Up Routes
 
-**File**: `workers/auth/src/index.ts` (modify existing)
+**File**: `workers/auth/src/index.ts` (add to existing)
 
 ```typescript
 import contentAccessRoutes from './routes/content-access';
 
-// ... existing routes ...
+// ... existing imports and setup ...
 
+// Mount content access routes
 app.route('/', contentAccessRoutes);
-```
 
-### Step 6: Add Tests
-
-**File**: `packages/content-access/src/service.test.ts`
-
-```typescript
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ContentAccessService } from './service';
-
-describe('ContentAccessService', () => {
-  let mockDb: any;
-  let mockR2: any;
-  let mockObs: any;
-  let service: ContentAccessService;
-
-  beforeEach(() => {
-    mockDb = {
-      query: {
-        content: { findFirst: vi.fn() },
-        contentPurchases: { findFirst: vi.fn(), findMany: vi.fn() },
-        videoPlayback: { findFirst: vi.fn(), findMany: vi.fn() },
-      },
-      insert: vi.fn(() => ({
-        values: vi.fn(() => ({
-          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
-        })),
-      })),
-    };
-
-    mockR2 = {
-      generateSignedUrl: vi.fn().mockResolvedValue('https://r2.example.com/signed-url'),
-    };
-
-    mockObs = {
-      info: vi.fn(),
-      warn: vi.fn(),
-    };
-
-    service = new ContentAccessService({
-      db: mockDb,
-      r2: mockR2,
-      obs: mockObs,
-      organizationId: 'org-123',
-    });
-  });
-
-  describe('getStreamingUrl', () => {
-    it('should generate URL for free content without purchase check', async () => {
-      mockDb.query.content.findFirst.mockResolvedValue({
-        id: 'content-123',
-        priceCents: 0, // Free content
-        mediaItem: { r2Path: 'videos/sample.mp4' },
-      });
-
-      const result = await service.getStreamingUrl('user-123', {
-        contentId: 'content-123',
-        expirySeconds: 3600,
-      });
-
-      expect(result.streamingUrl).toBe('https://r2.example.com/signed-url');
-      expect(mockDb.query.contentPurchases.findFirst).not.toHaveBeenCalled();
-    });
-
-    it('should require purchase for paid content', async () => {
-      mockDb.query.content.findFirst.mockResolvedValue({
-        id: 'content-123',
-        priceCents: 999, // Paid content
-        mediaItem: { r2Path: 'videos/sample.mp4' },
-      });
-
-      mockDb.query.contentPurchases.findFirst.mockResolvedValue(null); // No purchase
-
-      await expect(
-        service.getStreamingUrl('user-123', {
-          contentId: 'content-123',
-          expirySeconds: 3600,
-        })
-      ).rejects.toThrow('ACCESS_DENIED');
-    });
-
-    it('should generate URL for purchased content', async () => {
-      mockDb.query.content.findFirst.mockResolvedValue({
-        id: 'content-123',
-        priceCents: 999,
-        mediaItem: { r2Path: 'videos/sample.mp4' },
-      });
-
-      mockDb.query.contentPurchases.findFirst.mockResolvedValue({
-        id: 'purchase-123',
-        status: 'completed',
-      });
-
-      const result = await service.getStreamingUrl('user-123', {
-        contentId: 'content-123',
-        expirySeconds: 7200,
-      });
-
-      expect(result.streamingUrl).toBe('https://r2.example.com/signed-url');
-      expect(mockR2.generateSignedUrl).toHaveBeenCalledWith('videos/sample.mp4', 7200);
-    });
-
-    it('should throw CONTENT_NOT_FOUND for missing content', async () => {
-      mockDb.query.content.findFirst.mockResolvedValue(null);
-
-      await expect(
-        service.getStreamingUrl('user-123', {
-          contentId: 'missing-123',
-          expirySeconds: 3600,
-        })
-      ).rejects.toThrow('CONTENT_NOT_FOUND');
-    });
-  });
-
-  describe('savePlaybackProgress', () => {
-    it('should upsert playback progress', async () => {
-      await service.savePlaybackProgress('user-123', {
-        contentId: 'content-123',
-        currentPositionSeconds: 120,
-        durationSeconds: 600,
-        completed: false,
-      });
-
-      expect(mockDb.insert).toHaveBeenCalled();
-    });
-  });
-
-  describe('getPlaybackProgress', () => {
-    it('should return progress if exists', async () => {
-      mockDb.query.videoPlayback.findFirst.mockResolvedValue({
-        currentPositionSeconds: 120,
-        durationSeconds: 600,
-        completed: false,
-        lastWatchedAt: new Date('2025-01-01'),
-      });
-
-      const progress = await service.getPlaybackProgress('user-123', {
-        contentId: 'content-123',
-      });
-
-      expect(progress).toEqual({
-        currentPositionSeconds: 120,
-        durationSeconds: 600,
-        completed: false,
-        lastWatchedAt: new Date('2025-01-01'),
-      });
-    });
-
-    it('should return null if no progress exists', async () => {
-      mockDb.query.videoPlayback.findFirst.mockResolvedValue(null);
-
-      const progress = await service.getPlaybackProgress('user-123', {
-        contentId: 'content-123',
-      });
-
-      expect(progress).toBeNull();
-    });
-  });
-});
-```
-
-**File**: `packages/validation/src/schemas/access.test.ts`
-
-```typescript
-import { describe, it, expect } from 'vitest';
-import {
-  getStreamingUrlSchema,
-  savePlaybackProgressSchema,
-  listUserLibrarySchema,
-} from './access';
-
-describe('Access Validation Schemas', () => {
-  describe('getStreamingUrlSchema', () => {
-    it('should validate valid input', () => {
-      const result = getStreamingUrlSchema.parse({
-        contentId: '123e4567-e89b-12d3-a456-426614174000',
-        expirySeconds: 3600,
-      });
-
-      expect(result.contentId).toBe('123e4567-e89b-12d3-a456-426614174000');
-      expect(result.expirySeconds).toBe(3600);
-    });
-
-    it('should use default expiry', () => {
-      const result = getStreamingUrlSchema.parse({
-        contentId: '123e4567-e89b-12d3-a456-426614174000',
-      });
-
-      expect(result.expirySeconds).toBe(3600); // Default 1 hour
-    });
-
-    it('should reject invalid UUID', () => {
-      expect(() =>
-        getStreamingUrlSchema.parse({
-          contentId: 'not-a-uuid',
-        })
-      ).toThrow();
-    });
-
-    it('should enforce expiry bounds', () => {
-      expect(() =>
-        getStreamingUrlSchema.parse({
-          contentId: '123e4567-e89b-12d3-a456-426614174000',
-          expirySeconds: 100, // Too short (< 300)
-        })
-      ).toThrow();
-
-      expect(() =>
-        getStreamingUrlSchema.parse({
-          contentId: '123e4567-e89b-12d3-a456-426614174000',
-          expirySeconds: 100000, // Too long (> 86400)
-        })
-      ).toThrow();
-    });
-  });
-
-  describe('savePlaybackProgressSchema', () => {
-    it('should validate valid progress', () => {
-      const result = savePlaybackProgressSchema.parse({
-        contentId: '123e4567-e89b-12d3-a456-426614174000',
-        currentPositionSeconds: 120,
-        durationSeconds: 600,
-        completed: false,
-      });
-
-      expect(result).toEqual({
-        contentId: '123e4567-e89b-12d3-a456-426614174000',
-        currentPositionSeconds: 120,
-        durationSeconds: 600,
-        completed: false,
-      });
-    });
-
-    it('should reject negative position', () => {
-      expect(() =>
-        savePlaybackProgressSchema.parse({
-          contentId: '123e4567-e89b-12d3-a456-426614174000',
-          currentPositionSeconds: -10,
-          durationSeconds: 600,
-        })
-      ).toThrow();
-    });
-
-    it('should default completed to false', () => {
-      const result = savePlaybackProgressSchema.parse({
-        contentId: '123e4567-e89b-12d3-a456-426614174000',
-        currentPositionSeconds: 120,
-        durationSeconds: 600,
-      });
-
-      expect(result.completed).toBe(false);
-    });
-  });
-});
+export default app;
 ```
 
 ---
 
-## Test Specifications
+## Interfaces & Integration Points
 
-### Unit Tests (Validation)
-- `getStreamingUrlSchema` - Valid UUID, default expiry, bounds checking
-- `savePlaybackProgressSchema` - Valid progress, negative position rejection
-- `listUserLibrarySchema` - Pagination, filter enums
+### Upstream Dependencies (What This Work Packet Needs)
 
-### Unit Tests (Service)
-- `getStreamingUrl` - Free content (no purchase check)
-- `getStreamingUrl` - Paid content with purchase
-- `getStreamingUrl` - Paid content without purchase (ACCESS_DENIED)
-- `getStreamingUrl` - Content not found
-- `savePlaybackProgress` - Upsert behavior
-- `getPlaybackProgress` - Returns progress or null
-- `listUserLibrary` - Pagination, filtering
+#### P1-CONTENT-001 (Content Service)
 
-### Integration Tests (API)
-- `GET /api/content/:id/stream` - Returns signed URL with auth
-- `GET /api/content/:id/stream` - 403 for unpurchased paid content
-- `GET /api/content/:id/stream` - 401 without auth
-- `POST /api/content/:id/progress` - Saves progress
-- `GET /api/content/:id/progress` - Returns progress
-- `GET /api/user/library` - Returns purchased content with progress
+**Tables Used**:
+- `content` - Query for published content, check pricing
+  - Fields: `id`, `status`, `price_cents`, `deleted_at`
+  - Where clause: `status='published' AND deleted_at IS NULL`
+- `media_items` - Get R2 key for signed URL generation
+  - Fields: `id`, `r2_key`, `content_type`, `duration_seconds`, `thumbnail_url`
+
+**Service Methods Called**:
+- None (direct database queries for efficiency)
+
+**Example Query**:
+```typescript
+const content = await db.query.content.findFirst({
+  where: and(
+    eq(content.id, contentId),
+    eq(content.status, 'published'),
+    isNull(content.deletedAt)
+  ),
+  with: {
+    mediaItem: true, // Join to get R2 key
+  },
+});
+```
+
+#### P1-ECOM-001 (Stripe Checkout)
+
+**Tables Used**:
+- `purchases` - Verify completed purchases
+  - Fields: `customer_id`, `content_id`, `status`, `amount_paid_cents`, `created_at`
+  - Where clause: `customer_id={userId} AND content_id={contentId} AND status='completed'`
+- `content_access` - Check access grants (Phase 1: only purchased access)
+  - Fields: `user_id`, `content_id`, `access_type`
+  - Where clause: `user_id={userId} AND content_id={contentId} AND access_type='purchased'`
+
+**Business Rule**:
+- Free content (price_cents = 0): No purchase check required
+- Paid content (price_cents > 0): Must have content_access record with access_type='purchased'
+
+**Example Query**:
+```typescript
+if (content.priceCents > 0) {
+  const hasAccess = await db.query.contentAccess.findFirst({
+    where: and(
+      eq(contentAccess.userId, userId),
+      eq(contentAccess.contentId, contentId),
+      eq(contentAccess.accessType, 'purchased')
+    ),
+  });
+
+  if (!hasAccess) throw new Error('ACCESS_DENIED');
+}
+```
+
+#### Infrastructure: R2 Service
+
+**Package**: `@codex/cloudflare-clients/r2`
+
+**Method Used**: `generateSignedUrl(key: string, expirySeconds: number): Promise<string>`
+
+**R2 Key Format** (from R2BucketStructure.md):
+- Video HLS: `{creatorId}/hls/{mediaId}/master.m3u8`
+- Audio: `{creatorId}/audio/{mediaId}/audio.mp3`
+
+**Bucket**: `codex-media-production` (or staging/dev variants)
+
+**Documentation**: `design/infrastructure/R2BucketStructure.md`
+
+---
+
+### Downstream Consumers (What Uses This Work Packet)
+
+#### Frontend Video Player
+
+**Endpoints Called**:
+1. `GET /api/content/:id/stream` - Get streaming URL when user clicks play
+2. `POST /api/content/:id/progress` - Save progress every 30 seconds during playback
+3. `GET /api/content/:id/progress` - Resume playback at saved position
+
+**Example Frontend Flow**:
+```typescript
+// User clicks play on video
+const { streamingUrl } = await fetch(`/api/content/${contentId}/stream`).then(r => r.json());
+
+// Load video in player
+videoPlayer.src = streamingUrl;
+
+// On initial load, check for saved progress
+const { progress } = await fetch(`/api/content/${contentId}/progress`).then(r => r.json());
+if (progress) {
+  videoPlayer.currentTime = progress.positionSeconds;
+}
+
+// During playback, save progress every 30 seconds
+setInterval(async () => {
+  if (!videoPlayer.paused) {
+    await fetch(`/api/content/${contentId}/progress`, {
+      method: 'POST',
+      body: JSON.stringify({
+        positionSeconds: Math.floor(videoPlayer.currentTime),
+        durationSeconds: Math.floor(videoPlayer.duration),
+      }),
+    });
+  }
+}, 30000);
+```
+
+#### User Library Page
+
+**Endpoint Called**:
+- `GET /api/user/library?page=1&limit=20&filter=in-progress`
+
+**Use Cases**:
+- Display all purchased content
+- Show "Continue Watching" section (filter=in-progress)
+- Show completed content (filter=completed)
+- Sort by recent purchases, title, or duration
+
+---
+
+### Error Propagation
+
+| Error Code | HTTP Status | Meaning | Frontend Action |
+|------------|-------------|---------|-----------------|
+| `CONTENT_NOT_FOUND` | 404 | Content doesn't exist or is not published | Show "Content not available" message |
+| `ACCESS_DENIED` | 403 | User hasn't purchased paid content | Redirect to purchase page |
+| `VALIDATION_ERROR` | 400 | Invalid input parameters | Show error message |
+| `R2_ERROR` | 500 | Failed to generate signed URL | Retry or show error |
+| `INTERNAL_ERROR` | 500 | Unexpected server error | Show generic error, log to Sentry |
+
+---
+
+## Testing Strategy
+
+**Full testing specifications**: See `design/roadmap/testing/access-testing-definition.md`
+
+### Testing Categories
+
+1. **Validation Tests** (`packages/validation/src/schemas/access.test.ts`)
+   - Test Zod schemas in isolation
+   - No database dependencies
+   - Fast unit tests
+
+2. **Service Tests** (`packages/content-access/src/service.test.ts`)
+   - Mock database and R2 client
+   - Test business logic
+   - Coverage: access control, URL generation, progress tracking
+
+3. **Integration Tests** (`workers/auth/src/routes/content-access.integration.test.ts`)
+   - Test full API endpoints
+   - Mock database with test data
+   - Verify HTTP responses and error codes
+
+### Key Test Scenarios
+
+- ✅ Free content accessible without purchase
+- ✅ Paid content requires completed purchase
+- ✅ Unpublished content returns 404
+- ✅ Deleted content returns 404
+- ✅ Playback progress upserts correctly
+- ✅ Library filters work (all, in-progress, completed)
+- ✅ Signed URLs have correct expiry
+- ✅ Pagination works correctly
+
+**Run Tests**:
+```bash
+# Validation tests
+pnpm --filter @codex/validation test
+
+# Service tests
+pnpm --filter @codex/content-access test
+
+# Integration tests
+pnpm --filter auth-worker test:integration
+```
+
+---
+
+## Implementation Steps
+
+### Step 1: Database Schema (0.5 days)
+
+1. Create `packages/database/src/schema/playback.ts` with video_playback table
+2. Create migration file
+3. Run migration: `pnpm db:migrate`
+4. Verify schema: `pnpm db:studio`
+
+**Verification**: Table exists, can manually insert/query records
+
+---
+
+### Step 2: Validation Schemas (0.25 days)
+
+1. Create `packages/validation/src/schemas/access.ts`
+2. Implement Zod schemas with proper defaults and bounds
+3. Write unit tests
+4. Verify 100% test coverage
+
+**Verification**: `pnpm --filter @codex/validation test --coverage`
+
+---
+
+### Step 3: Content Access Service (1.5 days)
+
+1. Create `packages/content-access/src/service.ts`
+2. Implement `getStreamingUrl()` with access control
+3. Implement `savePlaybackProgress()` with upsert
+4. Implement `getPlaybackProgress()`
+5. Implement `listUserLibrary()` with filters
+6. Add comprehensive logging with ObservabilityClient
+7. Write service tests with mocked DB and R2
+
+**Verification**: All service tests pass, 100% coverage
+
+---
+
+### Step 4: API Endpoints (1 day)
+
+1. Create `workers/auth/src/routes/content-access.ts`
+2. Implement GET /api/content/:id/stream
+3. Implement POST /api/content/:id/progress
+4. Implement GET /api/content/:id/progress
+5. Implement GET /api/user/library
+6. Add error handling for all error codes
+7. Wire up routes in main worker
+8. Write integration tests
+
+**Verification**: Integration tests pass, manual testing with curl/Postman
+
+---
+
+### Step 5: Documentation & Review (0.25 days)
+
+1. Update API documentation
+2. Add JSDoc comments to all public methods
+3. Create example frontend integration code
+4. Code review with team
 
 ---
 
 ## Definition of Done
 
-- [ ] Playback schema created with migration
-- [ ] Access validation schemas implemented (Zod)
-- [ ] Content access service implemented
-- [ ] API endpoints added to auth worker
-- [ ] Unit tests for validation (100% coverage)
-- [ ] Unit tests for service (mocked DB)
-- [ ] Integration tests for API endpoints
-- [ ] Error handling comprehensive (CONTENT_NOT_FOUND, ACCESS_DENIED)
-- [ ] Observability logging complete
-- [ ] R2 signed URL generation working
-- [ ] Upsert pattern for playback progress working
-- [ ] CI passing (tests + typecheck + lint)
+### Functionality
+- [ ] `video_playback` table created and migrated
+- [ ] Access validation schemas implemented with Zod
+- [ ] `ContentAccessService` class complete with all methods
+- [ ] All 4 API endpoints implemented and working
+- [ ] Free content accessible without purchase check
+- [ ] Paid content requires purchase verification
+- [ ] Signed URLs generated with correct expiry
+- [ ] Playback progress upserts correctly
+- [ ] User library returns purchased content with progress
+
+### Code Quality
+- [ ] TypeScript strict mode (no `any` types)
+- [ ] All public methods have JSDoc comments
+- [ ] Error codes standardized and documented
+- [ ] Observability logging on all operations
+- [ ] Input validation with clear error messages
+
+### Testing
+- [ ] Validation tests: 100% coverage
+- [ ] Service tests: 100% coverage
+- [ ] Integration tests for all endpoints
+- [ ] Tests verify access control rules
+- [ ] Tests verify error handling
+
+### Integration
+- [ ] Routes registered in auth worker
+- [ ] R2 client configured correctly
+- [ ] Database queries optimized (indexes used)
+- [ ] Environment variables documented
+
+### CI/CD
+- [ ] All tests passing in CI
+- [ ] TypeScript compilation successful
+- [ ] Linting passing
+- [ ] No security vulnerabilities
 
 ---
 
-## Integration Points
+## Documentation References
 
-### Depends On
-- **P1-CONTENT-001**: Content schema and service
-- **P1-ECOM-001**: Purchase schema and checking
+### Must Read Before Implementation
 
-### Integrates With
-- Existing auth worker: `workers/auth/src/index.ts`
-- R2 client: `@codex/cloudflare-clients/r2`
-- Database client: `@codex/database`
+1. **Database Schema v2.0** (CRITICAL)
+   - File: `design/features/shared/database-schema.md`
+   - Sections: Lines 465-497 (video_playback), Lines 367-417 (content_access)
+   - Reason: Schema must match exactly
 
-### Enables
-- Frontend video player (signed URLs)
-- Continue watching feature (playback progress)
-- User library page (purchased content list)
+2. **R2 Bucket Structure** (CRITICAL)
+   - File: `design/infrastructure/R2BucketStructure.md`
+   - Sections: Lines 372-444 (Access Patterns, Signed URLs)
+   - Reason: R2 key format and signed URL generation
 
----
+3. **Testing Definition** (CRITICAL)
+   - File: `design/roadmap/testing/access-testing-definition.md`
+   - Sections: All
+   - Reason: Test specifications and patterns
 
-## Related Documentation
+4. **Content Access PRD**
+   - File: `design/features/content-access/pdr-phase-1.md`
+   - Reason: Business requirements and user stories
 
-**Must Read**:
-- [R2 Storage Patterns](../../core/R2_STORAGE_PATTERNS.md)
-- [Access Control Patterns](../../core/ACCESS_CONTROL_PATTERNS.md)
-- [STANDARDS.md](../STANDARDS.md) - § 3 Validation separation
+5. **Content Access TDD**
+   - File: `design/features/content-access/ttd-dphase-1.md`
+   - Reason: Technical architecture and decisions
 
-**Reference**:
-- [Content Access TDD](../../features/content-access/ttd-dphase-1.md)
-- [Testing Strategy](../../infrastructure/Testing.md)
+### Reference During Implementation
 
-**Code Examples**:
-- R2 client: `packages/cloudflare-clients/src/r2/client.ts`
-- Auth middleware: `workers/auth/src/middleware/auth.ts`
+- **P1-CONTENT-001 Work Packet**: Content and media_items schema
+- **P1-ECOM-001 Work Packet**: Purchase and content_access schema
+- **STANDARDS.md**: Validation separation, error handling patterns
+- **Row-Level Security Strategy**: database-schema.md lines 1348-1952
 
----
+### Code Examples
 
-## Notes for LLM Developer
-
-1. **MUST Complete P1-CONTENT-001 and P1-ECOM-001 First**: Depends on content and purchase schemas
-2. **Signed URLs**: Use existing R2 client, set appropriate expiry (1 hour default)
-3. **Free vs. Paid Content**: Skip purchase check if `priceCents = 0`
-4. **Upsert Pattern**: Use composite primary key for automatic upsert behavior
-5. **Progress Tracking**: Save on player pause, seek, or every 30 seconds
-6. **Security**: All endpoints require authentication via `requireAuth()` middleware
-7. **Organization Scope**: All queries must filter by `organizationId` from user context
-
-**Common Pitfalls**:
-- Don't forget to check `status = 'published'` and `deletedAt IS NULL`
-- Always verify purchase status is `'completed'` before granting access
-- Handle R2 signed URL generation errors gracefully
-
-**If Stuck**: Check [CONTEXT_MAP.md](../CONTEXT_MAP.md) or existing R2 client implementation.
+- **R2 Client**: `packages/cloudflare-clients/src/r2/client.ts`
+- **Auth Middleware**: `workers/auth/src/middleware/auth.ts`
+- **Existing Service Pattern**: P1-CONTENT-001 content service
 
 ---
 
-**Last Updated**: 2025-11-05
+## Security Considerations
+
+### Row-Level Security (RLS)
+
+Per `database-schema.md` lines 1348-1952, this service enforces:
+
+**Customers can access**:
+- Content they've purchased (via content_access table)
+- Their own playback progress (WHERE user_id = current_user)
+- Their own library (WHERE customer_id = current_user)
+
+**Customers cannot access**:
+- Other users' purchase history
+- Other users' playback progress
+- Content they haven't purchased (paid content)
+
+**Enforcement**:
+- Application-level: All queries filter by authenticated userId
+- Database-level (Phase 2+): RLS policies enforce same rules
+
+### Signed URL Security
+
+- **Expiry**: Default 1 hour, max 24 hours
+- **One-time use**: No (URL can be reused until expiry)
+- **Scope**: Single file (master.m3u8 or audio.mp3)
+- **HLS Segments**: Browser requests additional signed URLs for .ts files
+  - Frontend must request new signed URLs for segments (or configure CORS)
+  - Phase 2: Implement token-based access for all HLS segments
+
+### Attack Vectors
+
+**URL Sharing**: Users could share signed URLs before expiry
+- Mitigation (Phase 1): Short expiry (1 hour), acceptable risk
+- Mitigation (Phase 2): Token-based authentication, device fingerprinting
+
+**Replay Attacks**: Users could replay API calls
+- Mitigation: Rate limiting on progress saves (max 1 per 10 seconds)
+
+**Enumeration**: Users could enumerate content IDs
+- Mitigation: UUIDs (not sequential IDs), 404 for unauthorized access
+
+---
+
+## Performance Considerations
+
+### Database Queries
+
+**Optimized Queries**:
+- `getStreamingUrl`: 2 queries (content + purchase), uses indexes
+- `savePlaybackProgress`: 1 query (upsert), no round-trip
+- `listUserLibrary`: 2 queries (purchases + progress batch), uses indexes
+
+**Indexes Required** (already in schema):
+- `content`: (id, status, deleted_at)
+- `content_access`: (user_id, content_id, access_type)
+- `video_playback`: (user_id, content_id) - unique constraint serves as index
+- `purchases`: (customer_id, status)
+
+### Caching Strategy (Phase 2+)
+
+**Content Metadata**: Cache for 5 minutes
+```typescript
+const cacheKey = `content:${contentId}`;
+const cached = await redis.get(cacheKey);
+if (cached) return JSON.parse(cached);
+```
+
+**Purchase Verification**: Cache for 1 hour
+```typescript
+const cacheKey = `access:${userId}:${contentId}`;
+```
+
+**Playback Progress**: No caching (realtime updates)
+
+### R2 Performance
+
+- **Signed URL Generation**: ~10ms (AWS SDK call)
+- **Video Streaming**: Handled by R2 (no worker involved)
+- **HLS Segment Requests**: Direct to R2 (bypass worker)
+
+---
+
+## Monitoring & Observability
+
+### Key Metrics
+
+**Success Metrics**:
+- Streaming URL generation success rate
+- Average playback progress save time
+- Library load time (P95)
+
+**Error Metrics**:
+- ACCESS_DENIED rate (indicates purchase flow issues)
+- CONTENT_NOT_FOUND rate (indicates broken links)
+- R2_ERROR rate (indicates R2 issues)
+
+**Business Metrics**:
+- Content views per day
+- Average watch completion rate
+- Resume rate (users continuing where they left off)
+
+### Logging
+
+All operations logged with ObservabilityClient:
+- `info`: Successful operations with key parameters
+- `warn`: Access denied, content not found (expected errors)
+- `error`: R2 failures, database errors (unexpected)
+
+### Alerts
+
+**Critical**:
+- R2_ERROR rate > 5% (5 minutes)
+- Database connection failures
+
+**Warning**:
+- ACCESS_DENIED rate spike (>50 in 1 minute)
+- High latency on library endpoint (P95 > 500ms)
+
+---
+
+## Rollout Plan
+
+### Phase 1: Core Implementation (This Work Packet)
+
+- ✅ Basic access control (free vs paid)
+- ✅ Signed URL generation
+- ✅ Playback progress tracking
+- ✅ User library with filters
+
+### Phase 2: Enhanced Features
+
+- Token-based HLS segment access (no URL sharing)
+- Purchase verification caching (Redis)
+- Advanced library filters (by category, creator)
+- Watchlist functionality
+
+### Phase 3: Analytics & Optimization
+
+- View analytics (most watched content)
+- Completion rate tracking
+- A/B test different expiry times
+- CDN integration for HLS delivery
+
+---
+
+## Known Limitations & Future Work
+
+### Current Limitations
+
+1. **HLS Segment Access**: Segments require additional signed URLs
+   - Current: Frontend must request signed URLs for each segment
+   - Future: Implement token-based authentication for all segments
+
+2. **Concurrent Device Playback**: No device limit enforcement
+   - Current: User can play on multiple devices simultaneously
+   - Future: Enforce device limits per purchase
+
+3. **Offline Viewing**: Not supported
+   - Current: Requires internet connection for signed URLs
+   - Future: Implement DRM with offline capability
+
+4. **Preview Clips**: Not implemented
+   - Current: All content requires purchase (or is free)
+   - Future: Generate 30-second preview clips (see P1-TRANSCODE-001)
+
+### Technical Debt
+
+None (new implementation)
+
+### Migration Path
+
+No migration needed (new tables)
+
+---
+
+## Questions & Clarifications
+
+**Q: Should we support subscription-based access in Phase 1?**
+A: No. Phase 1 only supports:
+- Free content (price_cents = 0)
+- Purchased content (content_access.access_type = 'purchased')
+
+Subscription access (content_access.access_type = 'subscription') is Phase 2.
+
+**Q: How do we handle HLS segment requests?**
+A: Phase 1 approach:
+- Generate signed URL for master.m3u8
+- Browser requests segments, R2 serves them
+- CORS configured to allow segment requests
+
+Phase 2: Token-based authentication for all segments.
+
+**Q: Should we track audio playback progress?**
+A: Yes. The same video_playback table handles both video and audio. Field name is historical.
+
+**Q: What happens if user purchases content while watching preview?**
+A: Frontend must refresh streaming URL with new access rights. Preview URLs expire quickly (5 minutes).
+
+---
+
+## Success Criteria
+
+This work packet is successful when:
+
+1. ✅ Users can watch free content without purchase
+2. ✅ Users must purchase paid content before accessing
+3. ✅ Video playback resumes from last saved position
+4. ✅ User library shows all purchased content with progress
+5. ✅ Signed URLs work for 1 hour without interruption
+6. ✅ All tests pass with 100% coverage
+7. ✅ No security vulnerabilities in access control
+8. ✅ Performance meets targets (P95 < 200ms for URL generation)
+
+---
+
+**Document Status**: ✅ Ready for Implementation
+**Last Updated**: 2025-11-08
+**Version**: 2.0 (Comprehensive revision)
