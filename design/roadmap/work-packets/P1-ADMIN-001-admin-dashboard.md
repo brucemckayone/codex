@@ -1863,5 +1863,504 @@ access_type: 'purchased' | 'manual_grant'
 
 ---
 
+## Step 7: Public API & Package Exports
+
+**Package Configuration**:
+
+**File**: `packages/admin-dashboard/package.json`
+
+```json
+{
+  "name": "@codex/admin-dashboard",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./analytics": "./src/analytics-service.ts",
+    "./customer-management": "./src/customer-management-service.ts"
+  },
+  "dependencies": {
+    "@codex/database": "workspace:*",
+    "@codex/observability": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "drizzle-orm": "^0.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+**Public Interface**:
+
+**File**: `packages/admin-dashboard/src/index.ts`
+
+```typescript
+/**
+ * @codex/admin-dashboard
+ *
+ * Platform owner administrative services for Codex platform.
+ *
+ * Core Responsibilities:
+ * - Calculate platform revenue analytics (total, by period, by creator)
+ * - Track customer metrics (total customers, purchase counts)
+ * - Manage customer access (manual content grants)
+ * - List and manage customer purchases
+ *
+ * Integration Points:
+ * - Used by: Admin dashboard worker (platform owner endpoints)
+ * - Depends on: @codex/database (users, purchases, content_access)
+ *
+ * Security Model:
+ * - ALL operations require platform_owner role
+ * - Organization scoping enforced on all queries
+ * - No PII in logs (user IDs only)
+ */
+
+export {
+  AnalyticsService,
+  createAnalyticsService,
+  type AnalyticsServiceConfig,
+} from './analytics-service';
+
+export {
+  CustomerManagementService,
+  createCustomerManagementService,
+  type CustomerManagementServiceConfig,
+} from './customer-management-service';
+
+// Re-export validation schemas for convenience
+export {
+  getRevenueMetricsSchema,
+  getCustomerStatsSchema,
+  grantAccessSchema,
+  listCustomerPurchasesSchema,
+  type GetRevenueMetricsInput,
+  type GetCustomerStatsInput,
+  type GrantAccessInput,
+  type ListCustomerPurchasesInput,
+} from '@codex/validation/schemas/admin';
+```
+
+**Usage Examples**:
+
+```typescript
+// Example 1: Get revenue metrics for organization
+import { createAnalyticsService } from '@codex/admin-dashboard';
+
+const analyticsService = createAnalyticsService({
+  DATABASE_URL: env.DATABASE_URL,
+  ENVIRONMENT: env.ENVIRONMENT,
+});
+
+const metrics = await analyticsService.getRevenueMetrics(
+  user.organizationId, // From authenticated platform owner
+  {
+    startDate: new Date('2025-01-01'),
+    endDate: new Date('2025-01-31'),
+    groupBy: 'creator',
+  }
+);
+// Returns: { totalRevenueCents, purchaseCount, revenueByCreator: [...] }
+
+// Example 2: Grant manual access to customer
+import { createCustomerManagementService } from '@codex/admin-dashboard';
+
+const customerService = createCustomerManagementService({
+  DATABASE_URL: env.DATABASE_URL,
+  ENVIRONMENT: env.ENVIRONMENT,
+});
+
+await customerService.grantAccess(
+  user.organizationId,
+  {
+    customerId: 'uuid-customer',
+    contentId: 'uuid-content',
+    reason: 'Support request #1234',
+  }
+);
+// Creates content_access record and $0 purchase for audit trail
+
+// Example 3: List customer's purchases
+const purchases = await customerService.listCustomerPurchases(
+  user.organizationId,
+  {
+    customerId: 'uuid-customer',
+    page: 1,
+    limit: 20,
+  }
+);
+// Returns: { items: [...], pagination: { total, hasMore } }
+```
+
+---
+
+## Step 8: Local Development Setup
+
+### Docker Compose Integration
+
+The admin dashboard service works seamlessly with the existing local development setup. No additional containers needed.
+
+**Existing Services Used**:
+
+1. **Neon Postgres** (`infrastructure/neon/docker-compose.dev.local.yml`):
+   - Already provides local PostgreSQL with all required tables
+   - No changes needed
+
+**Environment Configuration**:
+
+**File**: `workers/admin-dashboard/.dev.vars`
+
+```bash
+# Database (uses local Neon proxy)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/main
+
+# Environment
+ENVIRONMENT=development
+
+# JWT (for authenticating platform owner)
+JWT_SECRET=your-local-jwt-secret
+```
+
+### Local Testing Flow
+
+**Step 1: Start Database**:
+```bash
+cd infrastructure/neon
+docker-compose -f docker-compose.dev.local.yml up -d
+```
+
+**Step 2: Run Migrations**:
+```bash
+pnpm --filter @codex/database db:migrate
+```
+
+**Step 3: Seed Test Data** (create platform owner user):
+```bash
+# Seed database with test users, content, purchases
+pnpm --filter @codex/database db:seed
+
+# Or manually create platform owner
+psql postgresql://postgres:postgres@localhost:5432/main -c "
+  INSERT INTO users (id, email, role, organization_id)
+  VALUES (
+    'uuid-platform-owner',
+    'admin@test.com',
+    'platform_owner',
+    'uuid-org'
+  );
+"
+```
+
+**Step 4: Start Admin Dashboard Worker**:
+```bash
+pnpm --filter admin-dashboard-worker dev
+# Worker runs on http://localhost:8788
+```
+
+**Step 5: Test API** (requires platform owner JWT):
+```bash
+# Generate test JWT with role='platform_owner'
+# (Use your JWT generation script or tool)
+
+# Get revenue metrics
+curl -H "Authorization: Bearer PLATFORM_OWNER_JWT" \
+  "http://localhost:8788/api/admin/analytics/revenue"
+
+# Get customer stats
+curl -H "Authorization: Bearer PLATFORM_OWNER_JWT" \
+  "http://localhost:8788/api/admin/analytics/customers"
+
+# Grant access to customer
+curl -X POST \
+  -H "Authorization: Bearer PLATFORM_OWNER_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"customerId": "uuid", "contentId": "uuid", "reason": "Test grant"}' \
+  "http://localhost:8788/api/admin/access/grant"
+```
+
+### Development Workflow
+
+**Typical Developer Day**:
+
+1. Start local database (one-time)
+2. Work on admin-dashboard package in isolation:
+   ```bash
+   # Run tests in watch mode
+   pnpm --filter @codex/admin-dashboard test --watch
+
+   # Type check
+   pnpm --filter @codex/admin-dashboard typecheck
+   ```
+3. Test integration with admin worker:
+   ```bash
+   pnpm --filter admin-dashboard-worker dev
+   # Make changes, worker auto-reloads
+   ```
+4. Run full test suite before committing:
+   ```bash
+   pnpm test
+   ```
+
+**No External Services Required**:
+- Database: Local PostgreSQL via Docker
+- Auth: Local JWT signing with role='platform_owner'
+- No Stripe, no R2, no email service needed
+
+---
+
+## Step 9: CI/CD Integration
+
+### CI Pipeline
+
+Admin dashboard tests run automatically when:
+- Any file in `packages/admin-dashboard/**` changes
+- Any file in `packages/validation/src/schemas/admin.ts` changes
+- Any file in `workers/admin-dashboard/src/**` changes
+
+**GitHub Actions Workflow** (already configured in `.github/workflows/test.yml`):
+
+```yaml
+# Path-based test filtering (already in place)
+- name: Run admin dashboard tests
+  if: contains(github.event.head_commit.message, 'admin-dashboard') ||
+      contains(github.event.modified_files, 'packages/admin-dashboard') ||
+      contains(github.event.modified_files, 'workers/admin-dashboard')
+  run: |
+    # Validation tests (fast, no DB)
+    pnpm --filter @codex/validation test -- admin.test.ts
+
+    # Service tests (mocked DB)
+    pnpm --filter @codex/admin-dashboard test
+
+    # Integration tests (test DB with Neon branch)
+    pnpm --filter admin-dashboard-worker test:integration
+```
+
+### Test Environment Setup
+
+**CI Environment Variables** (GitHub Secrets):
+```bash
+# Test Database (Neon branch created per PR)
+TEST_DATABASE_URL=postgresql://...
+
+# JWT Secret (for platform owner auth tests)
+JWT_SECRET=test-secret-key
+
+# Environment
+ENVIRONMENT=test
+```
+
+**Neon Database Branching** (per design/infrastructure/CICD.md):
+```bash
+# Create test branch from main
+neon branches create --name "test-pr-${PR_NUMBER}" --parent main
+
+# Run migrations
+DATABASE_URL=$TEST_DATABASE_URL pnpm db:migrate
+
+# Seed test data (platform owner, content, purchases)
+DATABASE_URL=$TEST_DATABASE_URL pnpm db:seed
+
+# Run tests
+DATABASE_URL=$TEST_DATABASE_URL pnpm test
+
+# Cleanup: Delete branch after tests
+neon branches delete "test-pr-${PR_NUMBER}"
+```
+
+### Deployment Pipeline
+
+**Staging Deployment** (on push to `main`):
+```yaml
+- name: Deploy admin dashboard worker to staging
+  run: |
+    cd workers/admin-dashboard
+    wrangler deploy --env staging
+
+    # Smoke test (requires platform owner JWT)
+    curl -f -H "Authorization: Bearer $STAGING_ADMIN_JWT" \
+      https://staging-admin.codex.app/api/admin/analytics/revenue || exit 1
+```
+
+**Production Deployment** (on tag `v*`):
+```yaml
+- name: Deploy admin dashboard worker to production
+  run: |
+    cd workers/admin-dashboard
+    wrangler deploy --env production
+
+    # Smoke test
+    curl -f -H "Authorization: Bearer $PROD_ADMIN_JWT" \
+      https://admin.codex.app/api/admin/analytics/revenue || exit 1
+```
+
+### Integration Test Strategy
+
+**Test Data Isolation**:
+- Each test creates its own organization, platform owner, content, and purchases
+- Tests use deterministic UUIDs for repeatability
+- Cleanup after each test (or use Neon branches)
+
+**Platform Owner Authentication**:
+- Tests generate JWT with `role: 'platform_owner'` and `organizationId`
+- Middleware validates role before allowing access
+- Tests verify 403 for non-platform-owners
+
+**Example Integration Test**:
+```typescript
+// workers/admin-dashboard/src/routes/analytics.integration.test.ts
+import { describe, it, expect, beforeEach } from 'vitest';
+
+describe('Admin Analytics API', () => {
+  let platformOwnerJWT: string;
+  let organizationId: string;
+
+  beforeEach(async () => {
+    // Seed test organization and platform owner
+    ({ platformOwnerJWT, organizationId } = await seedPlatformOwner());
+
+    // Seed test purchases for revenue analytics
+    await seedPurchases(organizationId, [
+      { priceCents: 1000, creatorId: 'creator-1' },
+      { priceCents: 2000, creatorId: 'creator-2' },
+    ]);
+  });
+
+  it('should calculate total revenue for organization', async () => {
+    const response = await fetch('http://localhost:8788/api/admin/analytics/revenue', {
+      headers: { 'Authorization': `Bearer ${platformOwnerJWT}` },
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.totalRevenueCents).toBe(3000);
+    expect(data.purchaseCount).toBe(2);
+  });
+
+  it('should deny access to non-platform-owner', async () => {
+    const customerJWT = await generateJWT({ role: 'customer' });
+
+    const response = await fetch('http://localhost:8788/api/admin/analytics/revenue', {
+      headers: { 'Authorization': `Bearer ${customerJWT}` },
+    });
+
+    expect(response.status).toBe(403);
+    const data = await response.json();
+    expect(data.error.code).toBe('FORBIDDEN');
+  });
+
+  it('should only show revenue for own organization', async () => {
+    // Create another organization with purchases
+    const otherOrg = await seedOrganization();
+    await seedPurchases(otherOrg.id, [{ priceCents: 5000 }]);
+
+    const response = await fetch('http://localhost:8788/api/admin/analytics/revenue', {
+      headers: { 'Authorization': `Bearer ${platformOwnerJWT}` },
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.totalRevenueCents).toBe(3000); // Only this org's revenue
+  });
+});
+```
+
+### Monitoring in CI/CD
+
+**Test Coverage Requirements**:
+- Validation tests: 100% coverage (enforced)
+- Service tests: 100% coverage (enforced)
+- Integration tests: No coverage requirement (end-to-end)
+
+**Performance Benchmarks**:
+- Revenue analytics query: < 500ms (P95)
+- Customer stats query: < 300ms (P95)
+- Manual access grant: < 200ms (P95)
+
+**CI Fails If**:
+- Any test fails
+- Coverage below threshold
+- TypeScript errors
+- Linting errors
+- Performance benchmarks exceeded
+- Security: Non-platform-owner can access admin endpoints
+
+---
+
+## Integration Points Summary
+
+### Package Dependencies
+
+```
+@codex/admin-dashboard
+├── @codex/database (users, purchases, content, content_access)
+├── @codex/observability (logging, metrics)
+└── @codex/validation (Zod schemas)
+```
+
+### Used By
+
+**1. Admin Dashboard Worker** (`workers/admin-dashboard`):
+- Routes: `/api/admin/analytics/*`, `/api/admin/customers/*`, `/api/admin/access/*`
+- Purpose: Platform owner administrative interface
+
+**2. Admin Web UI** (Frontend):
+- Purpose: Dashboard for platform owners
+- Integration: Calls admin dashboard worker APIs
+
+### Upstream Dependencies
+
+**1. Auth Service**:
+- Middleware: `requireAuth()`, `requirePlatformOwner()`
+- JWT: Must contain `role: 'platform_owner'` and `organizationId`
+
+**2. P1-CONTENT-001** (Content Service):
+- Tables: `content` (for manual access grants)
+- Fields: `id`, `organization_id`, `creator_id`, `status`
+
+**3. P1-ECOM-001** (Stripe Checkout):
+- Tables: `purchases`, `content_access`
+- Fields: Revenue analytics, customer purchase history
+
+**4. Database**:
+- Schema v2.0 (`design/features/shared/database-schema.md`)
+- Role enum: `platform_owner` (lines 75-77)
+- Organization scoping (all tables have `organization_id`)
+
+### Data Flow Diagram
+
+```
+Admin Dashboard UI
+    |
+    | 1. GET /api/admin/analytics/revenue
+    |    (Authorization: Bearer JWT with role=platform_owner)
+    |
+Admin Dashboard Worker
+    |
+    | 2. Middleware: requireAuth() + requirePlatformOwner()
+    |    - Verify JWT
+    |    - Check user.role === 'platform_owner'
+    |    - Extract user.organizationId
+    |
+@codex/admin-dashboard (AnalyticsService)
+    |
+    | 3. Query purchases filtered by organizationId
+    |    SELECT SUM(price_cents), COUNT(*)
+    |    FROM purchases
+    |    WHERE organization_id = ? AND status = 'completed'
+    |
+Database
+    |
+    | 4. Return aggregated metrics
+    |
+Admin Dashboard UI
+```
+
+---
+
 **Last Updated**: 2025-11-09
 **Schema Version**: v2.0 (database-schema.md)
+**Version**: 2.1 (Added Steps 7-9 for developer isolation)

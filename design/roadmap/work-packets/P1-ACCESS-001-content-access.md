@@ -1427,6 +1427,433 @@ This work packet is successful when:
 
 ---
 
+## Step 7: Public API & Package Exports
+
+**Package Configuration**:
+
+**File**: `packages/content-access/package.json`
+
+```json
+{
+  "name": "@codex/content-access",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./service": "./src/service.ts"
+  },
+  "dependencies": {
+    "@codex/database": "workspace:*",
+    "@codex/cloudflare-clients": "workspace:*",
+    "@codex/observability": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "drizzle-orm": "^0.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+**Public Interface**:
+
+**File**: `packages/content-access/src/index.ts`
+
+```typescript
+/**
+ * @codex/content-access
+ *
+ * Content access control and playback tracking for Codex platform.
+ *
+ * Core Responsibilities:
+ * - Verify user access to content (free vs purchased)
+ * - Generate time-limited signed R2 URLs for streaming
+ * - Track video/audio playback progress for resume functionality
+ * - Provide user content library with watch history
+ *
+ * Integration Points:
+ * - Used by: Auth worker (streaming URLs), Admin dashboard (analytics)
+ * - Depends on: @codex/database (content, purchases), @codex/cloudflare-clients (R2)
+ *
+ * Security Model:
+ * - All operations require authenticated user ID (from JWT)
+ * - Row-level security: Users can only access their own data
+ * - Access control: Paid content requires purchase verification
+ */
+
+export { ContentAccessService, createContentAccessService } from './service';
+export type { ContentAccessServiceConfig } from './service';
+
+// Re-export validation schemas for convenience
+export {
+  getStreamingUrlSchema,
+  savePlaybackProgressSchema,
+  getPlaybackProgressSchema,
+  listUserLibrarySchema,
+  type GetStreamingUrlInput,
+  type SavePlaybackProgressInput,
+  type GetPlaybackProgressInput,
+  type ListUserLibraryInput,
+} from '@codex/validation/schemas/access';
+```
+
+**Usage Examples**:
+
+```typescript
+// Example 1: Generate streaming URL in auth worker
+import { createContentAccessService } from '@codex/content-access';
+
+const service = createContentAccessService({
+  DATABASE_URL: env.DATABASE_URL,
+  R2_BUCKET: env.R2_BUCKET,
+  ENVIRONMENT: env.ENVIRONMENT,
+});
+
+const { streamingUrl, expiresAt } = await service.getStreamingUrl(userId, {
+  contentId: 'uuid-here',
+  expirySeconds: 3600, // 1 hour
+});
+
+// Example 2: Save playback progress
+await service.savePlaybackProgress(userId, {
+  contentId: 'uuid-here',
+  positionSeconds: 120, // 2 minutes in
+  durationSeconds: 600, // 10 minute video
+});
+
+// Example 3: Get user's library
+const { items, pagination } = await service.listUserLibrary(userId, {
+  page: 1,
+  limit: 20,
+  filter: 'in-progress', // Only videos user started
+  sortBy: 'recent',
+});
+```
+
+---
+
+## Step 8: Local Development Setup
+
+### Docker Compose Integration
+
+The content access service works seamlessly with the existing local development setup. No additional containers needed - R2 and database are already configured.
+
+**Existing Services Used**:
+
+1. **Neon Postgres** (`infrastructure/neon/docker-compose.dev.local.yml`):
+   - Already provides local PostgreSQL for content, purchases, video_playback tables
+   - No changes needed
+
+2. **R2 Local Storage**:
+   - Development uses Cloudflare R2 test bucket or local MinIO
+   - Configure via `.dev.vars` in auth worker
+
+**Environment Configuration**:
+
+**File**: `workers/auth/.dev.vars`
+
+```bash
+# Database (uses local Neon proxy)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/main
+
+# R2 Storage (use R2 dev bucket or local MinIO)
+R2_BUCKET_NAME=codex-media-dev
+R2_ACCESS_KEY_ID=your-dev-access-key
+R2_SECRET_ACCESS_KEY=your-dev-secret-key
+R2_ENDPOINT=http://localhost:9000 # MinIO local or R2 dev endpoint
+
+# Environment
+ENVIRONMENT=development
+```
+
+### Local Testing Flow
+
+**Step 1: Start Database**:
+```bash
+cd infrastructure/neon
+docker-compose -f docker-compose.dev.local.yml up -d
+```
+
+**Step 2: Run Migrations**:
+```bash
+pnpm --filter @codex/database db:migrate
+```
+
+**Step 3: Seed Test Data** (optional):
+```bash
+# Create test content
+pnpm --filter @codex/database db:seed
+```
+
+**Step 4: Start Auth Worker**:
+```bash
+pnpm --filter auth-worker dev
+# Worker runs on http://localhost:8787
+```
+
+**Step 5: Test API**:
+```bash
+# Get streaming URL (requires auth token)
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  "http://localhost:8787/api/content/UUID/stream?expiry=3600"
+
+# Save playback progress
+curl -X POST \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"positionSeconds": 120, "durationSeconds": 600}' \
+  "http://localhost:8787/api/content/UUID/progress"
+```
+
+### Development Workflow
+
+**Typical Developer Day**:
+
+1. Start local database (one-time)
+2. Work on content-access package in isolation:
+   ```bash
+   # Run tests in watch mode
+   pnpm --filter @codex/content-access test --watch
+
+   # Type check
+   pnpm --filter @codex/content-access typecheck
+   ```
+3. Test integration with auth worker:
+   ```bash
+   pnpm --filter auth-worker dev
+   # Make changes, worker auto-reloads
+   ```
+4. Run full test suite before committing:
+   ```bash
+   pnpm test
+   ```
+
+**No External Services Required**:
+- R2: Use local MinIO or R2 dev bucket
+- Database: Local PostgreSQL via Docker
+- Auth: Local JWT signing (no external auth provider needed)
+
+---
+
+## Step 9: CI/CD Integration
+
+### CI Pipeline
+
+Content access tests run automatically when:
+- Any file in `packages/content-access/**` changes
+- Any file in `packages/validation/src/schemas/access.ts` changes
+- Any file in `workers/auth/src/routes/content-access.ts` changes
+
+**GitHub Actions Workflow** (already configured in `.github/workflows/test.yml`):
+
+```yaml
+# Path-based test filtering (already in place)
+- name: Run content access tests
+  if: contains(github.event.head_commit.message, 'content-access') ||
+      contains(github.event.modified_files, 'packages/content-access') ||
+      contains(github.event.modified_files, 'workers/auth/src/routes/content-access')
+  run: |
+    # Validation tests (fast, no DB)
+    pnpm --filter @codex/validation test -- access.test.ts
+
+    # Service tests (mocked DB, mocked R2)
+    pnpm --filter @codex/content-access test
+
+    # Integration tests (test DB, real R2 dev)
+    pnpm --filter auth-worker test:integration -- content-access
+```
+
+### Test Environment Setup
+
+**CI Environment Variables** (GitHub Secrets):
+```bash
+# Test Database (Neon branch created per PR)
+TEST_DATABASE_URL=postgresql://...
+
+# R2 Test Bucket
+R2_TEST_BUCKET_NAME=codex-media-test
+R2_TEST_ACCESS_KEY_ID=***
+R2_TEST_SECRET_ACCESS_KEY=***
+
+# Environment
+ENVIRONMENT=test
+```
+
+**Neon Database Branching** (per design/infrastructure/CICD.md):
+```bash
+# Create test branch from main
+neon branches create --name "test-pr-${PR_NUMBER}" --parent main
+
+# Run migrations
+DATABASE_URL=$TEST_DATABASE_URL pnpm db:migrate
+
+# Run tests
+DATABASE_URL=$TEST_DATABASE_URL pnpm test
+
+# Cleanup: Delete branch after tests
+neon branches delete "test-pr-${PR_NUMBER}"
+```
+
+### Deployment Pipeline
+
+**Staging Deployment** (on push to `main`):
+```yaml
+- name: Deploy auth worker to staging
+  run: |
+    cd workers/auth
+    wrangler deploy --env staging
+
+    # Smoke test
+    curl -f https://staging-auth.codex.app/health || exit 1
+```
+
+**Production Deployment** (on tag `v*`):
+```yaml
+- name: Deploy auth worker to production
+  run: |
+    cd workers/auth
+    wrangler deploy --env production
+
+    # Smoke test
+    curl -f https://auth.codex.app/health || exit 1
+```
+
+### Integration Test Strategy
+
+**Test Data Isolation**:
+- Each test creates its own user, content, and purchase records
+- Tests use deterministic UUIDs for repeatability
+- Cleanup after each test (or use Neon branches)
+
+**R2 Test Bucket**:
+- Separate bucket for CI: `codex-media-test`
+- Pre-populated with test media files
+- Signed URLs generated against test bucket
+
+**Example Integration Test**:
+```typescript
+// workers/auth/src/routes/content-access.integration.test.ts
+import { describe, it, expect, beforeEach } from 'vitest';
+
+describe('Content Access API', () => {
+  beforeEach(async () => {
+    // Seed test data: user, content, purchase
+    await seedTestData();
+  });
+
+  it('should generate streaming URL for purchased content', async () => {
+    const response = await fetch('http://localhost:8787/api/content/test-content-uuid/stream', {
+      headers: { 'Authorization': `Bearer ${testJWT}` },
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.streamingUrl).toContain('r2.cloudflarestorage.com');
+    expect(data.contentType).toBe('video');
+  });
+
+  it('should deny access to unpurchased paid content', async () => {
+    const response = await fetch('http://localhost:8787/api/content/paid-content-uuid/stream', {
+      headers: { 'Authorization': `Bearer ${testJWT}` },
+    });
+
+    expect(response.status).toBe(403);
+    const data = await response.json();
+    expect(data.error.code).toBe('ACCESS_DENIED');
+  });
+});
+```
+
+### Monitoring in CI/CD
+
+**Test Coverage Requirements**:
+- Validation tests: 100% coverage (enforced)
+- Service tests: 100% coverage (enforced)
+- Integration tests: No coverage requirement (end-to-end)
+
+**Performance Benchmarks**:
+- Streaming URL generation: < 200ms (P95)
+- Playback progress save: < 100ms (P95)
+- Library load: < 500ms (P95)
+
+**CI Fails If**:
+- Any test fails
+- Coverage below threshold
+- TypeScript errors
+- Linting errors
+- Performance benchmarks exceeded
+
+---
+
+## Integration Points Summary
+
+### Package Dependencies
+
+```
+@codex/content-access
+├── @codex/database (content, purchases, video_playback tables)
+├── @codex/cloudflare-clients (R2 signed URLs)
+├── @codex/observability (logging, metrics)
+└── @codex/validation (Zod schemas)
+```
+
+### Used By
+
+**1. Auth Worker** (`workers/auth`):
+- Routes: `/api/content/:id/stream`, `/api/content/:id/progress`, `/api/user/library`
+- Purpose: Frontend API for content access
+
+**2. Admin Dashboard** (Future):
+- Purpose: Analytics on content views, completion rates
+- Query: video_playback table for aggregated stats
+
+**3. Content Player** (Frontend):
+- Purpose: Stream video/audio, save progress, resume playback
+- Integration: Calls auth worker APIs
+
+### Upstream Dependencies
+
+**1. P1-CONTENT-001** (Content Service):
+- Tables: `content`, `media_items`
+- Fields: `status`, `price_cents`, `deleted_at`, `r2_key`
+
+**2. P1-ECOM-001** (Stripe Checkout):
+- Tables: `purchases`, `content_access`
+- Fields: `customer_id`, `content_id`, `status`, `access_type`
+
+**3. Infrastructure**:
+- R2 Bucket: `codex-media-production` (or dev/staging)
+- Database: Neon PostgreSQL
+
+### Data Flow Diagram
+
+```
+Frontend Player
+    |
+    | 1. GET /api/content/:id/stream
+    |
+Auth Worker
+    |
+    | 2. Verify user purchased content
+    |
+@codex/content-access
+    |
+    ├─> @codex/database (check purchases)
+    └─> @codex/cloudflare-clients (generate R2 signed URL)
+    |
+    | 3. Return signed URL
+    |
+Frontend Player
+    |
+    | 4. Stream video from R2
+    |
+R2 Bucket
+```
+
+---
+
 **Document Status**: ✅ Ready for Implementation
-**Last Updated**: 2025-11-08
-**Version**: 2.0 (Comprehensive revision)
+**Last Updated**: 2025-11-09
+**Version**: 2.1 (Added Steps 7-9 for developer isolation)

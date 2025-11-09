@@ -1748,4 +1748,535 @@ Database enforces unique slug per organization. If conflict:
 
 ---
 
-**Last Updated**: 2025-11-05
+## Step 7: Public API & Package Exports
+
+**Package Configuration**:
+
+**File**: `packages/content-management/package.json`
+
+```json
+{
+  "name": "@codex/content-management",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./service": "./src/service.ts"
+  },
+  "dependencies": {
+    "@codex/database": "workspace:*",
+    "@codex/observability": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "drizzle-orm": "^0.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+**Public Interface**:
+
+**File**: `packages/content-management/src/index.ts`
+
+```typescript
+/**
+ * @codex/content-management
+ *
+ * Content creation and management service for Codex platform.
+ *
+ * Core Responsibilities:
+ * - Create, update, delete content (soft delete)
+ * - List content by creator or organization
+ * - Manage content metadata (title, description, pricing, visibility)
+ * - Link content to transcoded media items
+ *
+ * Integration Points:
+ * - Used by: Content management worker (creator endpoints)
+ * - Depends on: @codex/database (content, media_items)
+ * - Consumed by: P1-ACCESS-001 (content access), P1-ECOM-001 (purchase validation)
+ *
+ * Security Model:
+ * - Creator ownership: Creators can only manage their own content
+ * - Organization scoping: Content belongs to creator's organization
+ * - Soft delete: deleted_at timestamp preserves data integrity
+ */
+
+export { ContentService, createContentService } from './service';
+export type { ContentServiceConfig } from './service';
+
+// Re-export validation schemas for convenience
+export {
+  createContentSchema,
+  updateContentSchema,
+  getContentSchema,
+  listContentSchema,
+  deleteContentSchema,
+  type CreateContentInput,
+  type UpdateContentInput,
+  type GetContentInput,
+  type ListContentInput,
+  type DeleteContentInput,
+} from '@codex/validation/schemas/content';
+```
+
+**Usage Examples**:
+
+```typescript
+// Example 1: Create content with pricing
+import { createContentService } from '@codex/content-management';
+
+const service = createContentService({
+  DATABASE_URL: env.DATABASE_URL,
+  ENVIRONMENT: env.ENVIRONMENT,
+});
+
+const content = await service.createContent(creatorId, {
+  mediaItemId: 'uuid-media-item',
+  title: 'Introduction to TypeScript',
+  description: 'Learn TypeScript basics in 30 minutes',
+  priceCents: 999, // $9.99
+  visibility: 'public', // Listed in marketplace
+  organizationId: null, // Personal content
+});
+
+// Example 2: Update content pricing
+await service.updateContent(creatorId, contentId, {
+  priceCents: 1499, // Change to $14.99
+});
+
+// Example 3: List creator's content
+const { items, pagination } = await service.listContent(creatorId, {
+  status: 'published',
+  page: 1,
+  limit: 20,
+  sortBy: 'createdAt',
+  sortOrder: 'desc',
+});
+
+// Example 4: Soft delete content
+await service.deleteContent(creatorId, contentId);
+// Sets deleted_at timestamp, preserves data for purchase history
+```
+
+---
+
+## Step 8: Local Development Setup
+
+### Docker Compose Integration
+
+The content management service works seamlessly with the existing local development setup. No additional containers needed.
+
+**Existing Services Used**:
+
+1. **Neon Postgres** (`infrastructure/neon/docker-compose.dev.local.yml`):
+   - Already provides local PostgreSQL with content and media_items tables
+   - No changes needed
+
+**Environment Configuration**:
+
+**File**: `workers/content-management/.dev.vars`
+
+```bash
+# Database (uses local Neon proxy)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/main
+
+# Environment
+ENVIRONMENT=development
+
+# JWT (for authenticating creators)
+JWT_SECRET=your-local-jwt-secret
+```
+
+### Local Testing Flow
+
+**Step 1: Start Database**:
+```bash
+cd infrastructure/neon
+docker-compose -f docker-compose.dev.local.yml up -d
+```
+
+**Step 2: Run Migrations**:
+```bash
+pnpm --filter @codex/database db:migrate
+```
+
+**Step 3: Seed Test Data** (create test creator and media items):
+```bash
+# Seed database with test users and media items
+pnpm --filter @codex/database db:seed
+
+# Or manually create test creator
+psql postgresql://postgres:postgres@localhost:5432/main -c "
+  INSERT INTO users (id, email, role, organization_id)
+  VALUES (
+    'uuid-creator',
+    'creator@test.com',
+    'creator',
+    'uuid-org'
+  );
+
+  INSERT INTO media_items (id, uploader_id, r2_key, content_type, status)
+  VALUES (
+    'uuid-media',
+    'uuid-creator',
+    'creator/hls/media/master.m3u8',
+    'video',
+    'ready'
+  );
+"
+```
+
+**Step 4: Start Content Management Worker**:
+```bash
+pnpm --filter content-management-worker dev
+# Worker runs on http://localhost:8789
+```
+
+**Step 5: Test API** (requires creator JWT):
+```bash
+# Generate test JWT with role='creator'
+# (Use your JWT generation script or tool)
+
+# Create content
+curl -X POST \
+  -H "Authorization: Bearer CREATOR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mediaItemId": "uuid-media",
+    "title": "My Video",
+    "description": "Test video",
+    "priceCents": 999,
+    "visibility": "public"
+  }' \
+  "http://localhost:8789/api/content"
+
+# List creator's content
+curl -H "Authorization: Bearer CREATOR_JWT" \
+  "http://localhost:8789/api/content?status=draft"
+
+# Update content
+curl -X PATCH \
+  -H "Authorization: Bearer CREATOR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "published"}' \
+  "http://localhost:8789/api/content/uuid"
+
+# Delete content (soft delete)
+curl -X DELETE \
+  -H "Authorization: Bearer CREATOR_JWT" \
+  "http://localhost:8789/api/content/uuid"
+```
+
+### Development Workflow
+
+**Typical Developer Day**:
+
+1. Start local database (one-time)
+2. Work on content-management package in isolation:
+   ```bash
+   # Run tests in watch mode
+   pnpm --filter @codex/content-management test --watch
+
+   # Type check
+   pnpm --filter @codex/content-management typecheck
+   ```
+3. Test integration with content worker:
+   ```bash
+   pnpm --filter content-management-worker dev
+   # Make changes, worker auto-reloads
+   ```
+4. Run full test suite before committing:
+   ```bash
+   pnpm test
+   ```
+
+**No External Services Required**:
+- Database: Local PostgreSQL via Docker
+- Auth: Local JWT signing with role='creator'
+- No Stripe, no R2, no email service needed
+
+---
+
+## Step 9: CI/CD Integration
+
+### CI Pipeline
+
+Content management tests run automatically when:
+- Any file in `packages/content-management/**` changes
+- Any file in `packages/validation/src/schemas/content.ts` changes
+- Any file in `workers/content-management/src/**` changes
+- Any file in `packages/database/src/schema/content.ts` changes
+
+**GitHub Actions Workflow** (already configured in `.github/workflows/test.yml`):
+
+```yaml
+# Path-based test filtering (already in place)
+- name: Run content management tests
+  if: contains(github.event.head_commit.message, 'content-management') ||
+      contains(github.event.modified_files, 'packages/content-management') ||
+      contains(github.event.modified_files, 'workers/content-management') ||
+      contains(github.event.modified_files, 'packages/database/src/schema/content')
+  run: |
+    # Validation tests (fast, no DB)
+    pnpm --filter @codex/validation test -- content.test.ts
+
+    # Service tests (mocked DB)
+    pnpm --filter @codex/content-management test
+
+    # Integration tests (test DB with Neon branch)
+    pnpm --filter content-management-worker test:integration
+```
+
+### Test Environment Setup
+
+**CI Environment Variables** (GitHub Secrets):
+```bash
+# Test Database (Neon branch created per PR)
+TEST_DATABASE_URL=postgresql://...
+
+# JWT Secret (for creator auth tests)
+JWT_SECRET=test-secret-key
+
+# Environment
+ENVIRONMENT=test
+```
+
+**Neon Database Branching** (per design/infrastructure/CICD.md):
+```bash
+# Create test branch from main
+neon branches create --name "test-pr-${PR_NUMBER}" --parent main
+
+# Run migrations
+DATABASE_URL=$TEST_DATABASE_URL pnpm db:migrate
+
+# Seed test data (creators, media items)
+DATABASE_URL=$TEST_DATABASE_URL pnpm db:seed
+
+# Run tests
+DATABASE_URL=$TEST_DATABASE_URL pnpm test
+
+# Cleanup: Delete branch after tests
+neon branches delete "test-pr-${PR_NUMBER}"
+```
+
+### Deployment Pipeline
+
+**Staging Deployment** (on push to `main`):
+```yaml
+- name: Deploy content management worker to staging
+  run: |
+    cd workers/content-management
+    wrangler deploy --env staging
+
+    # Smoke test
+    curl -f https://staging-content.codex.app/health || exit 1
+```
+
+**Production Deployment** (on tag `v*`):
+```yaml
+- name: Deploy content management worker to production
+  run: |
+    cd workers/content-management
+    wrangler deploy --env production
+
+    # Smoke test
+    curl -f https://content.codex.app/health || exit 1
+```
+
+### Integration Test Strategy
+
+**Test Data Isolation**:
+- Each test creates its own creator, organization, and media items
+- Tests use deterministic UUIDs for repeatability
+- Cleanup after each test (or use Neon branches)
+
+**Creator Authorization**:
+- Tests generate JWT with `role: 'creator'` and `userId`
+- Middleware validates creator ownership before allowing actions
+- Tests verify creators can only manage their own content
+
+**Example Integration Test**:
+```typescript
+// workers/content-management/src/routes/content.integration.test.ts
+import { describe, it, expect, beforeEach } from 'vitest';
+
+describe('Content Management API', () => {
+  let creatorJWT: string;
+  let creatorId: string;
+  let mediaItemId: string;
+
+  beforeEach(async () => {
+    // Seed test creator and media item
+    ({ creatorJWT, creatorId, mediaItemId } = await seedCreator());
+  });
+
+  it('should create content', async () => {
+    const response = await fetch('http://localhost:8789/api/content', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${creatorJWT}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mediaItemId,
+        title: 'Test Video',
+        description: 'Test description',
+        priceCents: 999,
+        visibility: 'public',
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const data = await response.json();
+    expect(data.id).toBeDefined();
+    expect(data.title).toBe('Test Video');
+    expect(data.status).toBe('draft'); // Default status
+  });
+
+  it('should not allow creator to update another creator\'s content', async () => {
+    // Create content as creator 1
+    const content = await createContent(creatorJWT, mediaItemId);
+
+    // Try to update as creator 2
+    const otherCreatorJWT = await generateCreatorJWT('other-creator-id');
+
+    const response = await fetch(`http://localhost:8789/api/content/${content.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${otherCreatorJWT}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: 'Hacked title' }),
+    });
+
+    expect(response.status).toBe(403);
+    const data = await response.json();
+    expect(data.error.code).toBe('FORBIDDEN');
+  });
+
+  it('should soft delete content', async () => {
+    const content = await createContent(creatorJWT, mediaItemId);
+
+    const response = await fetch(`http://localhost:8789/api/content/${content.id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${creatorJWT}` },
+    });
+
+    expect(response.status).toBe(200);
+
+    // Verify content is soft deleted (has deleted_at timestamp)
+    const getResponse = await fetch(`http://localhost:8789/api/content/${content.id}`, {
+      headers: { 'Authorization': `Bearer ${creatorJWT}` },
+    });
+
+    expect(getResponse.status).toBe(404); // Deleted content not accessible
+  });
+});
+```
+
+### Monitoring in CI/CD
+
+**Test Coverage Requirements**:
+- Validation tests: 100% coverage (enforced)
+- Service tests: 100% coverage (enforced)
+- Integration tests: No coverage requirement (end-to-end)
+
+**Performance Benchmarks**:
+- Content creation: < 200ms (P95)
+- Content list query: < 300ms (P95)
+- Content update: < 150ms (P95)
+
+**CI Fails If**:
+- Any test fails
+- Coverage below threshold
+- TypeScript errors
+- Linting errors
+- Performance benchmarks exceeded
+- Security: Creator can modify another creator's content
+
+---
+
+## Integration Points Summary
+
+### Package Dependencies
+
+```
+@codex/content-management
+├── @codex/database (content, media_items tables)
+├── @codex/observability (logging, metrics)
+└── @codex/validation (Zod schemas)
+```
+
+### Used By
+
+**1. Content Management Worker** (`workers/content-management`):
+- Routes: `/api/content` (CRUD operations)
+- Purpose: Creator interface for managing content
+
+**2. P1-ACCESS-001** (Content Access):
+- Queries: `content` table to verify published status, pricing
+- Purpose: Access control for streaming
+
+**3. P1-ECOM-001** (Stripe Checkout):
+- Queries: `content` table to get pricing, creator info
+- Purpose: Create Stripe checkout sessions
+
+**4. P1-ADMIN-001** (Admin Dashboard):
+- Queries: `content` table for analytics
+- Purpose: Platform owner visibility into all content
+
+### Upstream Dependencies
+
+**1. P1-TRANSCODE-001** (Media Transcoding):
+- Tables: `media_items` (referenced by content.media_item_id)
+- Fields: `id`, `r2_key`, `content_type`, `status`, `duration_seconds`
+- Flow: Upload → transcode → create media_item → create content
+
+**2. Auth Service**:
+- Middleware: `requireAuth()`, `requireCreator()`
+- JWT: Must contain `role: 'creator'` and `userId`
+
+**3. Database**:
+- Schema v2.0 (`design/features/shared/database-schema.md`)
+- Tables: `content` (lines 185-254), `media_items` (lines 130-184)
+- Organization scoping: All content has `organization_id`
+
+### Data Flow Diagram
+
+```
+Creator
+    |
+    | 1. POST /api/content
+    |    (Authorization: Bearer JWT with role=creator)
+    |
+Content Management Worker
+    |
+    | 2. Middleware: requireAuth() + requireCreator()
+    |    - Verify JWT
+    |    - Check user.role === 'creator'
+    |    - Extract user.id (creatorId)
+    |
+@codex/content-management (ContentService)
+    |
+    | 3. Validate input with Zod
+    |    - Check mediaItemId exists and belongs to creator
+    |    - Validate title, description, pricing
+    |
+    | 4. Create content record
+    |    INSERT INTO content (creator_id, media_item_id, ...)
+    |    VALUES (?, ?, ...)
+    |
+Database
+    |
+    | 5. Return new content ID
+    |
+Creator
+```
+
+---
+
+**Last Updated**: 2025-11-09
+**Version**: 2.1 (Added Steps 7-9 for developer isolation)
