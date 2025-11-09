@@ -1203,6 +1203,652 @@ docker push your-registry/codex-transcoding:latest
 
 ---
 
+### Step 6: Local Development Setup
+
+For local development, we run the actual transcoding Docker container with FFmpeg, connecting to your local R2 buckets. This ensures you're testing the real transcoding code before deploying to RunPod.
+
+#### Local Transcoding Service
+
+**File**: `infrastructure/local-dev/transcoding-service/server.py`
+
+```python
+"""
+HTTP server wrapper for local development transcoding.
+Mimics RunPod's serverless endpoint behavior but runs as a persistent service.
+Uses the same transcode.py script that will run on RunPod.
+"""
+
+from flask import Flask, request, jsonify
+from threading import Thread
+import json
+import sys
+import os
+import subprocess
+
+app = Flask(__name__)
+
+def process_job_async(job_input):
+    """
+    Process transcoding job asynchronously (same as RunPod).
+    Calls transcode.py with the job input.
+    """
+    try:
+        # Set job ID for logging
+        os.environ['RUNPOD_JOB_ID'] = f'local-job-{os.getpid()}'
+
+        # Call transcode.py (same script used on RunPod)
+        result = subprocess.run(
+            ['python3', '/app/transcode.py'],
+            input=json.dumps(job_input),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        print(f'[Local Transcoding] Job completed successfully')
+        print(f'[Local Transcoding] Output: {result.stdout}')
+
+    except subprocess.CalledProcessError as e:
+        print(f'[Local Transcoding] Job failed: {e.stderr}', file=sys.stderr)
+    except Exception as e:
+        print(f'[Local Transcoding] Unexpected error: {e}', file=sys.stderr)
+
+@app.route('/v2/<endpoint_id>/run', methods=['POST'])
+def run_job(endpoint_id):
+    """
+    Endpoint that mimics RunPod's serverless API.
+    Accepts job, returns job ID immediately, processes asynchronously.
+    """
+    data = request.get_json()
+    job_input = data.get('input', {})
+
+    job_id = f'local-{os.getpid()}-{int(os.times()[4] * 1000)}'
+
+    print(f'[Local Transcoding] Received job: {job_id}')
+    print(f'[Local Transcoding] Input: {json.dumps(job_input, indent=2)}')
+
+    # Process job asynchronously (like RunPod)
+    thread = Thread(target=process_job_async, args=(job_input,))
+    thread.start()
+
+    # Return immediately (like RunPod)
+    return jsonify({
+        'id': job_id,
+        'status': 'IN_QUEUE'
+    })
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({'status': 'ok'})
+
+if __name__ == '__main__':
+    # Run on port 3001 to avoid conflicts
+    app.run(host='0.0.0.0', port=3001, debug=True)
+```
+
+**File**: `infrastructure/local-dev/transcoding-service/Dockerfile`
+
+```dockerfile
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+# Install FFmpeg with software encoding (no GPU in local dev)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    python3 \
+    python3-pip \
+    curl \
+    audiowaveform \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install boto3 requests flask
+
+WORKDIR /app
+
+# Copy transcoding script (same one used on RunPod)
+COPY ../../runpod/transcode.py /app/transcode.py
+
+# Copy local dev server wrapper
+COPY server.py /app/server.py
+
+EXPOSE 3001
+
+CMD ["python3", "server.py"]
+```
+
+**File**: `infrastructure/local-dev/transcoding-service/transcode-local.py` (Modified version for local dev)
+
+```python
+"""
+Same as infrastructure/runpod/transcode.py but optimized for local development:
+- Uses software encoding instead of GPU (h264 instead of h264_nvenc)
+- Logs more verbosely for debugging
+- Shorter preview (10 seconds instead of 30)
+"""
+
+import os
+import sys
+import json
+import subprocess
+import boto3
+import requests
+from pathlib import Path
+
+def transcode_video(media_id, creator_id, input_key, webhook_url):
+    """
+    Transcode video to HLS - LOCAL DEV VERSION
+    Uses software encoding (no GPU required)
+    """
+
+    print(f'[Transcode] Starting video transcoding for {media_id}')
+
+    # Download input from R2
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=os.environ['R2_ENDPOINT'],
+        aws_access_key_id=os.environ['R2_ACCESS_KEY'],
+        aws_secret_access_key=os.environ['R2_SECRET_KEY']
+    )
+
+    bucket_name = os.environ['R2_BUCKET']
+    input_file = f"/tmp/{media_id}_input.mp4"
+
+    print(f'[Transcode] Downloading from R2: {input_key}')
+    s3_client.download_file(bucket_name, input_key, input_file)
+    print(f'[Transcode] Download complete')
+
+    # Create output directory
+    output_dir = Path(f"/tmp/{media_id}")
+    output_dir.mkdir(exist_ok=True)
+
+    # --- Full HLS Transcoding (2 qualities for local dev: 720p, 480p) ---
+
+    print(f'[Transcode] Generating HLS variants...')
+    variants = [
+        {'name': '720p', 'scale': '1280:720', 'bitrate_v': '2500k', 'bitrate_a': '128k'},
+        {'name': '480p', 'scale': '854:480', 'bitrate_v': '1000k', 'bitrate_a': '128k'},
+    ]
+
+    for variant in variants:
+        print(f'[Transcode] Creating {variant["name"]} variant...')
+        ffmpeg_cmd = [
+            'ffmpeg', '-i', input_file,
+            '-vf', f'scale={variant["scale"]}',
+            '-c:v', 'libx264', '-preset', 'fast',  # Software encoding, faster preset
+            '-b:v', variant['bitrate_v'],
+            '-c:a', 'aac', '-b:a', variant['bitrate_a'],
+            '-f', 'hls', '-hls_time', '6',
+            '-hls_playlist_type', 'vod',
+            '-hls_segment_filename', f'{output_dir}/{variant["name"]}_%03d.ts',
+            f'{output_dir}/{variant["name"]}.m3u8'
+        ]
+        subprocess.run(ffmpeg_cmd, check=True)
+
+    # Create master playlist
+    master_playlist = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720
+720p.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480
+480p.m3u8
+"""
+
+    with open(f'{output_dir}/master.m3u8', 'w') as f:
+        f.write(master_playlist)
+
+    # --- 10-Second Preview HLS (shorter for local dev) ---
+
+    print(f'[Transcode] Creating preview...')
+    preview_dir = Path(f"/tmp/{media_id}/preview")
+    preview_dir.mkdir(exist_ok=True)
+
+    preview_cmd = [
+        'ffmpeg', '-i', input_file, '-t', '10',  # 10 seconds for local dev
+        '-vf', 'scale=1280:720', '-c:v', 'libx264', '-preset', 'fast',
+        '-b:v', '2500k',
+        '-c:a', 'aac', '-b:a', '128k', '-f', 'hls', '-hls_time', '6',
+        '-hls_playlist_type', 'vod', '-hls_segment_filename',
+        f'{preview_dir}/preview_%03d.ts', f'{preview_dir}/preview.m3u8'
+    ]
+    subprocess.run(preview_cmd, check=True)
+
+    # --- Extract Thumbnail (10% mark) ---
+
+    print(f'[Transcode] Extracting thumbnail...')
+
+    # Get video duration
+    probe_cmd = [
+        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', input_file
+    ]
+    duration = float(subprocess.check_output(probe_cmd).decode().strip())
+    thumbnail_time = duration * 0.1  # 10% mark
+
+    thumbnail_path = f'/tmp/{media_id}_thumbnail.jpg'
+    thumbnail_cmd = [
+        'ffmpeg', '-ss', str(thumbnail_time), '-i', input_file,
+        '-vframes', '1', '-vf', 'scale=1280:720', thumbnail_path
+    ]
+    subprocess.run(thumbnail_cmd, check=True)
+
+    # --- Upload to R2 ---
+
+    print(f'[Transcode] Uploading results to R2...')
+
+    # Upload HLS files
+    for file in output_dir.rglob('*'):
+        if file.is_file():
+            relative_path = file.relative_to(output_dir)
+            s3_key = f'{creator_id}/hls/{media_id}/{relative_path}'
+            print(f'[Transcode] Uploading: {s3_key}')
+            s3_client.upload_file(str(file), bucket_name, s3_key)
+
+    # Upload preview files
+    for file in preview_dir.rglob('*'):
+        if file.is_file():
+            relative_path = file.relative_to(preview_dir)
+            s3_key = f'{creator_id}/hls/{media_id}/preview/{relative_path}'
+            s3_client.upload_file(str(file), bucket_name, s3_key)
+
+    # Upload thumbnail
+    thumbnail_key = f'{creator_id}/thumbnails/media/{media_id}/auto-generated.jpg'
+    s3_client.upload_file(thumbnail_path, bucket_name, thumbnail_key)
+
+    # --- Get video metadata ---
+
+    probe_cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height', '-of', 'json', input_file
+    ]
+    metadata = json.loads(subprocess.check_output(probe_cmd).decode())
+    width = metadata['streams'][0]['width']
+    height = metadata['streams'][0]['height']
+
+    # --- Send webhook callback ---
+
+    print(f'[Transcode] Sending webhook to: {webhook_url}')
+
+    result = {
+        'jobId': os.environ.get('RUNPOD_JOB_ID'),
+        'status': 'completed',
+        'output': {
+            'mediaId': media_id,
+            'type': 'video',
+            'hlsMasterKey': f'{creator_id}/hls/{media_id}/master.m3u8',
+            'hlsPreviewKey': f'{creator_id}/hls/{media_id}/preview/preview.m3u8',
+            'thumbnailKey': thumbnail_key,
+            'durationSeconds': int(duration),
+            'width': width,
+            'height': height,
+        }
+    }
+
+    # Send to webhook
+    response = requests.post(webhook_url, json=result)
+    print(f'[Transcode] Webhook response: {response.status_code}')
+
+    return result
+
+def transcode_audio(media_id, creator_id, input_key, webhook_url):
+    """
+    Transcode audio to HLS + generate waveform - LOCAL DEV VERSION
+    """
+
+    print(f'[Transcode] Starting audio transcoding for {media_id}')
+
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=os.environ['R2_ENDPOINT'],
+        aws_access_key_id=os.environ['R2_ACCESS_KEY'],
+        aws_secret_access_key=os.environ['R2_SECRET_KEY']
+    )
+
+    bucket_name = os.environ['R2_BUCKET']
+    input_file = f"/tmp/{media_id}_input.mp3"
+
+    print(f'[Transcode] Downloading from R2: {input_key}')
+    s3_client.download_file(bucket_name, input_key, input_file)
+
+    output_dir = Path(f"/tmp/{media_id}")
+    output_dir.mkdir(exist_ok=True)
+
+    # --- HLS Audio Transcoding (1 quality for local dev) ---
+
+    print(f'[Transcode] Creating HLS audio...')
+
+    ffmpeg_cmd = [
+        'ffmpeg', '-i', input_file,
+        '-c:a', 'aac', '-b:a', '128k',
+        '-f', 'hls', '-hls_time', '6',
+        '-hls_playlist_type', 'vod',
+        '-hls_segment_filename', f'{output_dir}/128k_%03d.ts',
+        f'{output_dir}/128k.m3u8'
+    ]
+    subprocess.run(ffmpeg_cmd, check=True)
+
+    # Create master playlist
+    with open(f'{output_dir}/master.m3u8', 'w') as f:
+        f.write("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n128k.m3u8\n")
+
+    # --- 10-Second Preview ---
+
+    print(f'[Transcode] Creating preview...')
+    preview_dir = Path(f"/tmp/{media_id}/preview")
+    preview_dir.mkdir(exist_ok=True)
+
+    preview_cmd = [
+        'ffmpeg', '-i', input_file, '-t', '10',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-f', 'hls', '-hls_time', '6',
+        '-hls_playlist_type', 'vod',
+        '-hls_segment_filename', f'{preview_dir}/preview_%03d.ts',
+        f'{preview_dir}/preview.m3u8'
+    ]
+    subprocess.run(preview_cmd, check=True)
+
+    # --- Generate Waveform JSON ---
+
+    print(f'[Transcode] Generating waveform...')
+    waveform_file = f'/tmp/{media_id}_waveform.json'
+    waveform_cmd = [
+        'audiowaveform', '-i', input_file,
+        '-o', waveform_file, '--output-format', 'json',
+        '--pixels-per-second', '20', '--bits', '8'
+    ]
+    subprocess.run(waveform_cmd, check=True)
+
+    # --- Get audio duration ---
+
+    probe_cmd = [
+        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', input_file
+    ]
+    duration = float(subprocess.check_output(probe_cmd).decode().strip())
+
+    # --- Upload to R2 ---
+
+    print(f'[Transcode] Uploading results to R2...')
+
+    # Upload HLS files
+    for file in output_dir.rglob('*'):
+        if file.is_file():
+            relative_path = file.relative_to(output_dir)
+            s3_key = f'{creator_id}/hls/{media_id}/{relative_path}'
+            s3_client.upload_file(str(file), bucket_name, s3_key)
+
+    # Upload preview
+    for file in preview_dir.rglob('*'):
+        if file.is_file():
+            relative_path = file.relative_to(preview_dir)
+            s3_key = f'{creator_id}/hls/{media_id}/preview/{relative_path}'
+            s3_client.upload_file(str(file), bucket_name, s3_key)
+
+    # Upload waveform
+    waveform_key = f'{creator_id}/waveforms/{media_id}/waveform.json'
+    s3_client.upload_file(waveform_file, bucket_name, waveform_key)
+
+    # --- Send webhook callback ---
+
+    print(f'[Transcode] Sending webhook to: {webhook_url}')
+
+    result = {
+        'jobId': os.environ.get('RUNPOD_JOB_ID'),
+        'status': 'completed',
+        'output': {
+            'mediaId': media_id,
+            'type': 'audio',
+            'hlsMasterKey': f'{creator_id}/hls/{media_id}/master.m3u8',
+            'hlsPreviewKey': f'{creator_id}/hls/{media_id}/preview/preview.m3u8',
+            'waveformKey': waveform_key,
+            'durationSeconds': int(duration),
+        }
+    }
+
+    response = requests.post(webhook_url, json=result)
+    print(f'[Transcode] Webhook response: {response.status_code}')
+
+    return result
+
+if __name__ == '__main__':
+    job_input = json.loads(sys.stdin.read())
+
+    try:
+        if job_input['type'] == 'video':
+            transcode_video(
+                job_input['mediaId'],
+                job_input['creatorId'],
+                job_input['inputKey'],
+                job_input['webhookUrl']
+            )
+        else:
+            transcode_audio(
+                job_input['mediaId'],
+                job_input['creatorId'],
+                job_input['inputKey'],
+                job_input['webhookUrl']
+            )
+    except Exception as e:
+        # Send failure webhook
+        result = {
+            'jobId': os.environ.get('RUNPOD_JOB_ID'),
+            'status': 'failed',
+            'output': {
+                'mediaId': job_input.get('mediaId'),
+                'type': job_input.get('type'),
+            },
+            'error': str(e),
+        }
+        requests.post(job_input['webhookUrl'], json=result)
+        raise
+```
+
+#### Docker Compose Integration
+
+**File**: `infrastructure/neon/docker-compose.dev.local.yml` (modify existing)
+
+```yaml
+services:
+  postgres:
+    # ... existing postgres config ...
+
+  neon-proxy:
+    # ... existing neon-proxy config ...
+
+  transcoding-service:
+    build: ../local-dev/transcoding-service
+    ports:
+      - '3001:3001'
+    environment:
+      # R2 credentials (same as your workers)
+      - R2_ENDPOINT=${R2_ENDPOINT}
+      - R2_ACCESS_KEY=${R2_ACCESS_KEY}
+      - R2_SECRET_KEY=${R2_SECRET_KEY}
+      - R2_BUCKET=codex-media  # Your R2 bucket name
+    volumes:
+      # Mount transcode script for easy editing during dev
+      - ../../infrastructure/runpod/transcode.py:/app/transcode-prod.py:ro
+      - ../local-dev/transcoding-service/transcode-local.py:/app/transcode.py:ro
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3001/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  db_data:
+```
+
+#### Environment Variables for Local Dev
+
+**File**: `.env.dev` (add/update these)
+
+```bash
+# R2 Storage (shared with transcoding service)
+R2_ENDPOINT=https://<your-account-id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY=<your-r2-access-key>
+R2_SECRET_KEY=<your-r2-secret-key>
+
+# Transcoding (Local Development)
+RUNPOD_API_KEY=not-used-locally  # Not used by local service
+RUNPOD_ENDPOINT_ID=local-endpoint  # Not used by local service
+PUBLIC_APP_URL=http://host.docker.internal:5173  # Your local dev server (accessible from Docker)
+RUNPOD_API_BASE_URL=http://transcoding-service:3001  # Points to local service
+```
+
+#### Update TranscodingService for Local Dev
+
+**File**: `packages/web/src/lib/server/transcoding/service.ts` (modify constructor)
+
+```typescript
+export class TranscodingService {
+  private logger: ObservabilityClient;
+  private runpodBaseUrl: string;
+
+  constructor(
+    private runpodApiKey: string,
+    private runpodEndpointId: string,
+    private webhookBaseUrl: string,
+    runpodBaseUrl?: string  // Optional override for local dev
+  ) {
+    this.logger = new ObservabilityClient('TranscodingService');
+    // Allow override for local development
+    this.runpodBaseUrl = runpodBaseUrl || 'https://api.runpod.ai';
+  }
+
+  async triggerJob(mediaId: string, creatorId: string): Promise<void> {
+    // ... existing code ...
+
+    // Call RunPod API (or local service in dev)
+    try {
+      const response = await fetch(
+        `${this.runpodBaseUrl}/v2/${this.runpodEndpointId}/run`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.runpodApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ input: jobInput }),
+        }
+      );
+
+      // ... rest of existing code ...
+    }
+  }
+}
+```
+
+#### Local Development Workflow
+
+```bash
+# 1. Setup R2 credentials in .env.dev
+cp .env.example .env.dev
+# Edit .env.dev with your R2 credentials
+
+# 2. Start local services (database, transcoding)
+cd infrastructure/neon
+docker compose -f docker-compose.dev.local.yml up -d
+
+# 3. Verify services are healthy
+docker compose -f docker-compose.dev.local.yml ps
+# Should show: postgres, neon-proxy, transcoding-service (all healthy)
+
+# 4. Run migrations
+pnpm --filter @codex/database db:migrate
+
+# 5. Start dev server
+pnpm dev
+
+# 6. Test transcoding flow
+# - Upload a video via your app
+# - Watch transcoding service logs:
+docker compose -f docker-compose.dev.local.yml logs -f transcoding-service
+
+# 7. Verify R2 upload
+# - Check your R2 bucket for transcoded files
+# - Files should appear in: {creator_id}/hls/{media_id}/
+
+# 8. Stop services
+docker compose -f docker-compose.dev.local.yml down
+```
+
+#### Differences: Local Dev vs Production
+
+| Aspect | Local Dev | Production (RunPod) |
+|--------|-----------|---------------------|
+| **Encoding** | Software (libx264) | GPU (h264_nvenc) |
+| **Quality Variants** | 2 (720p, 480p) | 4 (1080p, 720p, 480p, 360p) |
+| **Preview Length** | 10 seconds | 30 seconds |
+| **Speed** | Slower (~30-60s for 1min video) | Faster (~10-15s for 1min video) |
+| **R2 Access** | Direct (via env vars) | Direct (via env vars) |
+| **Webhook** | `host.docker.internal:5173` | Production URL |
+| **Persistence** | Long-running service | Serverless (cold start) |
+
+**Note**: The same Python transcoding logic (`transcode.py`) is used in both environments, just with different FFmpeg parameters for performance.
+
+---
+
+### Step 7: CI/CD Integration
+
+#### Testing Strategy
+
+**Unit Tests** (mock RunPod API):
+- Already covered in Step 2 (service.test.ts)
+- Tests run in CI without hitting real transcoding service
+
+**Integration Tests** (optional):
+- Can use local transcoding service in CI if desired
+- Would require Docker-in-Docker or services setup in GitHub Actions
+- **Recommendation**: Skip for Phase 1, rely on unit tests + manual testing
+
+#### Secrets Configuration
+
+**GitHub Secrets** (for production deployment):
+
+```bash
+# Navigate to: Settings → Secrets and variables → Actions → Secrets
+
+RUNPOD_API_KEY_PRODUCTION          # Production RunPod API key
+RUNPOD_ENDPOINT_ID_PRODUCTION      # Production RunPod endpoint ID
+
+# These R2 secrets should already exist for workers:
+R2_ENDPOINT
+R2_ACCESS_KEY
+R2_SECRET_KEY
+```
+
+**Cloudflare Secrets** (for production workers):
+
+```bash
+# Set via wrangler CLI:
+wrangler secret put RUNPOD_API_KEY --env production
+wrangler secret put RUNPOD_ENDPOINT_ID --env production
+wrangler secret put PUBLIC_APP_URL --env production  # e.g., https://codex.revelations.studio
+
+# Verify secrets are set
+wrangler secret list --env production
+```
+
+#### GitHub Actions Workflow - No Changes Needed
+
+The transcoding service is part of the web app, so it deploys automatically with existing workflows:
+
+- **Testing** (`.github/workflows/testing.yml`): Unit tests run with mocked RunPod API
+- **Preview** (`.github/workflows/preview-deploy.yml`): Uses test RunPod endpoint (if configured)
+- **Production** (`.github/workflows/deploy-production.yml`): Uses production RunPod endpoint
+
+#### Environment Variable Mapping
+
+| Environment | Transcoding Endpoint | Webhook URL |
+|-------------|---------------------|-------------|
+| **Local** | `http://transcoding-service:3001` | `http://host.docker.internal:5173` |
+| **CI Tests** | Mocked in tests | N/A |
+| **Preview** | Production RunPod (shared) | `https://codex-preview-{PR}.revelations.studio` |
+| **Production** | Production RunPod | `https://codex.revelations.studio` |
+
+**Note**: For local development, the transcoding service runs in Docker and has direct access to R2 buckets. It sends webhook callbacks to your local dev server via `host.docker.internal`.
+
+---
+
 ## Definition of Done
 
 ### Functional Requirements
@@ -1232,12 +1878,22 @@ docker push your-registry/codex-transcoding:latest
 - [ ] All tests pass in CI
 
 ### Infrastructure Requirements
+
+**Local Development:**
+- [ ] Local transcoding Docker service created
+- [ ] Docker Compose updated with transcoding service
+- [ ] Local service has R2 access configured
+- [ ] Local transcoding tested end-to-end (upload → transcode → webhook → R2)
+- [ ] Development workflow documented
+
+**Production:**
 - [ ] RunPod serverless endpoint configured
 - [ ] RunPod Docker image built and deployed
 - [ ] Environment variables configured:
   - [ ] `RUNPOD_API_KEY`
   - [ ] `RUNPOD_ENDPOINT_ID`
   - [ ] `PUBLIC_APP_URL`
+  - [ ] `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET_KEY` (already exist)
 - [ ] Webhook URL accessible from RunPod (public endpoint)
 
 ### Documentation Requirements
