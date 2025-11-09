@@ -50,134 +50,141 @@ import { securityHeaders, rateLimit } from '@codex/security'; // ✅ Available
 
 ### Step 1: Create Content Schema
 
+**Note**: Schema aligns with `design/features/shared/database-schema.md` v2.0 (lines 130-254). Uses integer cents for money (ACID-compliant), simple category string, and JSONB tags array.
+
 **File**: `packages/database/src/schema/content.ts`
 
 ```typescript
-import { pgTable, text, integer, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, integer, bigint, timestamp, jsonb, index, unique } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-
-/**
- * Categories for organizing content
- */
-export const categories = pgTable('categories', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  name: text('name').notNull(),
-  slug: text('slug').notNull().unique(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-
-/**
- * Tags for content discovery
- */
-export const tags = pgTable('tags', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  name: text('name').notNull().unique(),
-  slug: text('slug').notNull().unique(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+import { users } from './auth';
+import { organizations } from './organizations';
 
 /**
  * Media items (uploaded videos/audio)
+ * Aligned with database-schema.md lines 130-183
  * Creator-owned, stored in creator's R2 bucket
  * Separate from content for reusability
  */
 export const mediaItems = pgTable('media_items', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  creatorId: text('creator_id').notNull().references(() => users.id), // Creator owns media
-  type: text('type', { enum: ['video', 'audio'] }).notNull(),
-  status: text('status', { enum: ['uploading', 'uploaded', 'transcoding', 'ready', 'failed'] })
-    .default('uploaded').notNull(),
+  id: uuid('id').primaryKey().defaultRandom(),
+  creatorId: uuid('creator_id').notNull().references(() => users.id),
 
-  // R2 storage keys (in creator's bucket: codex-media-{creatorId})
-  r2Key: text('r2_key').notNull(), // e.g., "originals/{mediaId}/video.mp4"
-  hlsMasterKey: text('hls_master_key'), // HLS master playlist (after transcoding)
-  thumbnailKey: text('thumbnail_key'), // Generated thumbnail
+  // Basic Info
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  mediaType: varchar('media_type', { length: 50 }).notNull(), // 'video' | 'audio'
+  status: varchar('status', { length: 50 }).default('uploading').notNull(),
+  // 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed'
 
-  // Metadata
-  title: text('title').notNull(),
-  filename: text('filename').notNull(),
-  fileSize: integer('file_size').notNull(), // bytes
-  mimeType: text('mime_type').notNull(),
-  durationSeconds: integer('duration_seconds'), // Set after processing
-  width: integer('width'), // For video
+  // R2 Storage (in creator's bucket: codex-media-{creator_id})
+  r2Key: varchar('r2_key', { length: 500 }).notNull(), // "originals/{media_id}/video.mp4"
+  fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
+  mimeType: varchar('mime_type', { length: 100 }),
+
+  // Media Metadata
+  durationSeconds: integer('duration_seconds'),
+  width: integer('width'),   // For video
   height: integer('height'), // For video
 
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull()
+  // HLS Transcoding (Phase 1+)
+  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }), // "hls/{media_id}/master.m3u8"
+  thumbnailKey: varchar('thumbnail_key', { length: 500 }), // "thumbnails/{media_id}/thumb.jpg"
+
+  // Timestamps
+  uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
     .$onUpdate(() => new Date()),
-  deletedAt: timestamp('deleted_at'), // Soft delete
-});
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (table) => ({
+  creatorIdIdx: index('idx_media_items_creator_id').on(table.creatorId),
+  statusIdx: index('idx_media_items_status').on(table.creatorId, table.status),
+  typeIdx: index('idx_media_items_type').on(table.creatorId, table.mediaType),
+}));
 
 /**
  * Published content (references media items)
+ * Aligned with database-schema.md lines 185-254
  * Can belong to organization OR creator's personal profile
  */
 export const content = pgTable('content', {
-  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  creatorId: text('creator_id').notNull().references(() => users.id), // Who created this post
-  organizationId: text('organization_id').references(() => organizations.id), // NULL = personal profile
+  id: uuid('id').primaryKey().defaultRandom(),
+  creatorId: uuid('creator_id').notNull().references(() => users.id),
+  organizationId: uuid('organization_id').references(() => organizations.id), // NULL = personal profile
 
-  // Basic info
-  title: text('title').notNull(),
-  slug: text('slug').notNull(), // Unique per organization (or per creator if personal)
-  description: text('description').notNull(),
+  // Media Reference (separates content from media for reusability)
+  mediaItemId: uuid('media_item_id').references(() => mediaItems.id),
+  // NULL for written content (Phase 2)
 
-  // Relationships
-  mediaItemId: text('media_item_id')
-    .references(() => mediaItems.id, { onDelete: 'restrict' }), // NULL for written content
-  categoryId: text('category_id').notNull()
-    .references(() => categories.id, { onDelete: 'restrict' }),
+  // Basic Info
+  title: varchar('title', { length: 500 }).notNull(),
+  slug: varchar('slug', { length: 500 }).notNull(), // Unique per organization
+  description: text('description'),
+  contentType: varchar('content_type', { length: 50 }).notNull(),
+  // 'video' | 'audio' | 'written' (Phase 1: video, audio only)
 
-  // Pricing
-  priceCents: integer('price_cents').notNull().default(0),
+  // Thumbnail (optional custom thumbnail)
+  thumbnailUrl: text('thumbnail_url'),
 
-  // Publishing
-  status: text('status', { enum: ['draft', 'published', 'archived'] })
-    .default('draft').notNull(),
-  publishedAt: timestamp('published_at'),
+  // Written content (Phase 2+)
+  contentBody: text('content_body'),
 
-  // Soft delete
-  deletedAt: timestamp('deleted_at'),
+  // Organization (simplified for Phase 1)
+  category: varchar('category', { length: 100 }), // Simple string category
+  tags: jsonb('tags').default('[]'), // Array of tag strings
 
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull()
+  // Access & Pricing
+  visibility: varchar('visibility', { length: 50 }).default('purchased_only').notNull(),
+  // 'public' | 'private' | 'members_only' | 'purchased_only' (Phase 1: public, purchased_only)
+  priceCents: integer('price_cents'), // NULL = free, INTEGER = price in cents (ACID-compliant)
+
+  // Status
+  status: varchar('status', { length: 50 }).default('draft').notNull(),
+  // 'draft' | 'published' | 'archived'
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+
+  // Metadata
+  viewCount: integer('view_count').default(0).notNull(),
+  purchaseCount: integer('purchase_count').default(0).notNull(),
+
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
     .$onUpdate(() => new Date()),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => ({
-  // Unique slug per organization (or per creator for personal content)
+  creatorIdIdx: index('idx_content_creator_id').on(table.creatorId),
+  organizationIdIdx: index('idx_content_organization_id').on(table.organizationId),
+  mediaItemIdIdx: index('idx_content_media_item_id').on(table.mediaItemId),
+  slugIdx: index('idx_content_slug').on(table.slug, table.organizationId),
+  statusIdx: index('idx_content_status').on(table.status),
+  publishedAtIdx: index('idx_content_published_at').on(table.publishedAt),
+  categoryIdx: index('idx_content_category').on(table.category),
+  // Unique slug per organization (or per creator if personal)
   uniqueSlugPerOrg: unique().on(table.slug, table.organizationId),
 }));
 
-/**
- * Many-to-many: Content to Tags
- */
-export const contentTags = pgTable('content_tags', {
-  contentId: text('content_id').notNull()
-    .references(() => content.id, { onDelete: 'cascade' }),
-  tagId: text('tag_id').notNull()
-    .references(() => tags.id, { onDelete: 'cascade' }),
-});
-
 // Relations
-export const contentRelations = relations(content, ({ one, many }) => ({
+export const mediaItemsRelations = relations(mediaItems, ({ one }) => ({
+  creator: one(users, {
+    fields: [mediaItems.creatorId],
+    references: [users.id],
+  }),
+}));
+
+export const contentRelations = relations(content, ({ one }) => ({
+  creator: one(users, {
+    fields: [content.creatorId],
+    references: [users.id],
+  }),
+  organization: one(organizations, {
+    fields: [content.organizationId],
+    references: [organizations.id],
+  }),
   mediaItem: one(mediaItems, {
     fields: [content.mediaItemId],
     references: [mediaItems.id],
-  }),
-  category: one(categories, {
-    fields: [content.categoryId],
-    references: [categories.id],
-  }),
-  tags: many(contentTags),
-}));
-
-export const contentTagsRelations = relations(contentTags, ({ one }) => ({
-  content: one(content, {
-    fields: [contentTags.contentId],
-    references: [content.id],
-  }),
-  tag: one(tags, {
-    fields: [contentTags.tagId],
-    references: [tags.id],
   }),
 }));
 
@@ -186,16 +193,15 @@ export type MediaItem = typeof mediaItems.$inferSelect;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type Content = typeof content.$inferSelect;
 export type NewContent = typeof content.$inferInsert;
-export type Category = typeof categories.$inferSelect;
-export type Tag = typeof tags.$inferSelect;
 ```
 
-**Then**:
+**Migration**: Generated SQL should match database-schema.md v2.0
+
 ```bash
 # Generate migration
 pnpm --filter @codex/database db:gen:drizzle
 
-# Review generated SQL
+# Review generated SQL (should match database-schema.md lines 135-254)
 cat packages/database/drizzle/000X_content_schema.sql
 
 # Apply to local DB
