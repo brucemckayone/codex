@@ -848,6 +848,546 @@ REPLY_TO_EMAIL=support@example.com    # Optional reply-to address
 
 ---
 
+## Step 7: Public API and Package Exports
+
+**Why This Matters**: Clear public API enables other packages to import only what they need and work in isolation.
+
+**File**: `packages/notifications/src/index.ts`
+
+```typescript
+/**
+ * @codex/notifications - Email notification service
+ *
+ * PUBLIC API
+ * ==========
+ * This package exports a provider-agnostic notification service for sending emails.
+ *
+ * INTERFACE CONTRACT:
+ * ------------------
+ * Other packages (e.g., @codex/auth, @codex/ecommerce) depend on:
+ * 1. NotificationService class with typed send methods
+ * 2. Template data types (VerificationEmailData, etc.)
+ * 3. Factory function for dependency injection
+ *
+ * INTERNAL IMPLEMENTATION:
+ * -----------------------
+ * Template functions, provider implementations, and observability are internal.
+ * Other packages MUST NOT import from subdirectories (e.g., ./templates/verification).
+ *
+ * USAGE EXAMPLE:
+ * -------------
+ * ```typescript
+ * import { getNotificationService, type VerificationEmailData } from '@codex/notifications';
+ *
+ * const notifService = getNotificationService(env);
+ * await notifService.sendVerificationEmail('user@example.com', {
+ *   userName: 'John Doe',
+ *   verificationUrl: 'https://example.com/verify?token=abc',
+ *   expiryHours: 24,
+ * });
+ * ```
+ */
+
+// ============================================================================
+// PUBLIC API - Safe to import from other packages
+// ============================================================================
+
+// Service
+export { NotificationService, getNotificationService } from './service';
+export type { NotificationServiceConfig } from './service';
+
+// Template Data Types (for consumers)
+export type {
+  VerificationEmailData,
+  PasswordResetEmailData,
+  PurchaseReceiptEmailData,
+  WelcomeEmailData,
+} from './templates/types';
+
+// Provider Interface (for testing/mocking)
+export type { EmailProvider, EmailMessage } from './providers/types';
+
+// ============================================================================
+// INTERNAL - DO NOT import from other packages
+// ============================================================================
+
+// Templates are internal - use NotificationService methods instead
+// Providers are internal - use getNotificationService() factory instead
+```
+
+**File**: `packages/notifications/package.json` (exports field)
+
+```json
+{
+  "name": "@codex/notifications",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "resend": "^3.0.0",
+    "zod": "^3.22.4",
+    "@codex/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+---
+
+## Step 8: Local Development Setup
+
+**Why This Matters**: Developers need to test emails locally before deploying to production.
+
+### Email Testing with MailHog
+
+**What is MailHog?**
+- Runs a local SMTP server that captures all outgoing emails
+- Provides web UI at http://localhost:8025 to view emails
+- No emails actually sent (safe for testing)
+- Resend SDK will be configured to use MailHog in local dev
+
+### Docker Compose Integration
+
+**File**: `infrastructure/neon/docker-compose.dev.local.yml` (add service)
+
+```yaml
+services:
+  postgres:
+    # ... existing postgres config ...
+
+  neon-proxy:
+    # ... existing neon-proxy config ...
+
+  # ========================================
+  # Email Testing - MailHog
+  # ========================================
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - '1025:1025'  # SMTP server
+      - '8025:8025'  # Web UI
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:8025']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  db_data:
+```
+
+### Local Environment Variables
+
+**File**: `.env.local` (developer creates this)
+
+```bash
+# ============================================================================
+# Email Service Configuration (Local Development)
+# ============================================================================
+
+# For local development, use MailHog mock SMTP server
+# MailHog runs at localhost:1025 (SMTP) and localhost:8025 (Web UI)
+# All emails will be captured and viewable at http://localhost:8025
+
+# Option 1: Mock mode using MailHog (RECOMMENDED for local dev)
+USE_MOCK_EMAIL=true
+SMTP_HOST=localhost
+SMTP_PORT=1025
+FROM_EMAIL=noreply@localhost
+REPLY_TO_EMAIL=support@localhost
+
+# Option 2: Real Resend (for testing actual email delivery)
+# Uncomment these to use real Resend API (requires API key)
+# USE_MOCK_EMAIL=false
+# RESEND_API_KEY=re_123abc...
+# FROM_EMAIL=noreply@yourdomain.com  # Must be verified in Resend
+# REPLY_TO_EMAIL=support@yourdomain.com
+
+ENVIRONMENT=local
+```
+
+### Mock Email Provider for Local Dev
+
+**File**: `packages/notifications/src/providers/mock-smtp.ts`
+
+```typescript
+import * as nodemailer from 'nodemailer';
+import type { EmailProvider, EmailMessage } from './types';
+import { ObservabilityClient } from '@codex/observability';
+
+/**
+ * Mock email provider using SMTP (MailHog for local dev)
+ *
+ * This provider sends emails to a local SMTP server (MailHog) for testing.
+ * Emails are captured and viewable at http://localhost:8025
+ */
+export class MockSMTPEmailProvider implements EmailProvider {
+  private transporter: nodemailer.Transporter;
+  private obs: ObservabilityClient;
+
+  constructor(smtpHost: string, smtpPort: number, environment: string) {
+    this.transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: false, // MailHog doesn't use TLS
+      ignoreTLS: true,
+    });
+
+    this.obs = new ObservabilityClient('mock-smtp-provider', environment);
+  }
+
+  async sendEmail(message: EmailMessage): Promise<{ id: string }> {
+    this.obs.info('Sending email via mock SMTP', {
+      to: this.obs.redactEmail(message.to),
+      subject: message.subject,
+      tags: message.tags,
+    });
+
+    try {
+      const info = await this.transporter.sendMail({
+        from: message.from,
+        to: message.to,
+        subject: `[LOCAL] ${message.subject}`, // Prefix to indicate local
+        html: message.html,
+        text: message.text,
+        replyTo: message.replyTo,
+      });
+
+      this.obs.info('Email sent via mock SMTP', {
+        messageId: info.messageId,
+        subject: message.subject,
+      });
+
+      return { id: info.messageId };
+    } catch (err) {
+      this.obs.trackError(err as Error, {
+        subject: message.subject,
+      });
+      throw err;
+    }
+  }
+}
+```
+
+**File**: `packages/notifications/package.json` (add nodemailer for local dev)
+
+```json
+{
+  "dependencies": {
+    "resend": "^3.0.0",
+    "zod": "^3.22.4",
+    "@codex/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/nodemailer": "^6.4.14",
+    "nodemailer": "^6.9.8",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+### Update Factory Function for Local Dev
+
+**File**: `packages/notifications/src/service.ts` (update factory)
+
+```typescript
+/**
+ * Factory function for dependency injection
+ * Supports both production (Resend) and local dev (MailHog)
+ */
+export function getNotificationService(env: {
+  USE_MOCK_EMAIL?: string;
+  SMTP_HOST?: string;
+  SMTP_PORT?: string;
+  RESEND_API_KEY?: string;
+  FROM_EMAIL: string;
+  REPLY_TO_EMAIL?: string;
+  ENVIRONMENT: string;
+}): NotificationService {
+  let emailProvider: EmailProvider;
+
+  if (env.USE_MOCK_EMAIL === 'true' && env.SMTP_HOST && env.SMTP_PORT) {
+    // Local development: Use MailHog
+    const { MockSMTPEmailProvider } = require('./providers/mock-smtp');
+    emailProvider = new MockSMTPEmailProvider(
+      env.SMTP_HOST,
+      parseInt(env.SMTP_PORT, 10),
+      env.ENVIRONMENT
+    );
+  } else {
+    // Production: Use Resend
+    if (!env.RESEND_API_KEY) {
+      throw new Error('RESEND_API_KEY is required when USE_MOCK_EMAIL is not true');
+    }
+    const { ResendEmailProvider } = require('./providers/resend');
+    emailProvider = new ResendEmailProvider(env.RESEND_API_KEY, env.ENVIRONMENT);
+  }
+
+  return new NotificationService({
+    emailProvider,
+    fromEmail: env.FROM_EMAIL,
+    replyToEmail: env.REPLY_TO_EMAIL,
+    environment: env.ENVIRONMENT,
+  });
+}
+```
+
+### Local Development Workflow
+
+**Start Local Services**:
+```bash
+# Start postgres, neon-proxy, and MailHog
+cd infrastructure/neon
+docker compose -f docker-compose.dev.local.yml up -d
+
+# Verify MailHog is running
+open http://localhost:8025
+```
+
+**Run Package Tests**:
+```bash
+cd packages/notifications
+pnpm test           # Run all tests
+pnpm test:watch     # Watch mode for development
+```
+
+**Manual Email Testing** (in worker code):
+```typescript
+import { getNotificationService } from '@codex/notifications';
+
+// In your Cloudflare Worker or local test script
+const notifService = getNotificationService(env);
+
+await notifService.sendVerificationEmail('test@example.com', {
+  userName: 'Test User',
+  verificationUrl: 'http://localhost:3000/verify?token=abc123',
+  expiryHours: 24,
+});
+
+// Check http://localhost:8025 to see the email
+```
+
+**View Sent Emails**:
+1. Open http://localhost:8025 in browser
+2. See all captured emails with full HTML/text rendering
+3. Inspect headers, attachments, and raw SMTP data
+
+---
+
+## Step 9: CI/CD Integration
+
+**Why This Matters**: Ensures tests run in CI and emails work correctly across environments.
+
+### GitHub Actions Workflow
+
+**No Changes Required**: Existing workflow already handles this package.
+
+**File**: `.github/workflows/test.yml` (already exists)
+
+```yaml
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run tests
+        run: pnpm test
+        # This will test @codex/notifications with mocked EmailProvider
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+```
+
+### Environment-Specific Configuration
+
+**Local Development** (.env.local):
+```bash
+USE_MOCK_EMAIL=true
+SMTP_HOST=localhost
+SMTP_PORT=1025
+FROM_EMAIL=noreply@localhost
+ENVIRONMENT=local
+```
+
+**Preview Environments** (Cloudflare Workers):
+```bash
+# Set in wrangler.toml [env.preview] or Cloudflare dashboard
+RESEND_API_KEY=re_preview_key123...
+FROM_EMAIL=noreply@preview.yourdomain.com
+REPLY_TO_EMAIL=support@yourdomain.com
+ENVIRONMENT=preview
+```
+
+**Production** (Cloudflare Workers):
+```bash
+# Set in Cloudflare dashboard as secrets
+RESEND_API_KEY=re_prod_key123...
+FROM_EMAIL=noreply@yourdomain.com
+REPLY_TO_EMAIL=support@yourdomain.com
+ENVIRONMENT=production
+```
+
+### Testing Strategy
+
+1. **Unit Tests** (packages/notifications):
+   - Mock EmailProvider interface
+   - Test template rendering
+   - Test service methods
+   - No external dependencies
+
+2. **Local Development**:
+   - Use MailHog to capture emails
+   - Manually verify email rendering
+   - Test with real worker code
+
+3. **Preview Environment**:
+   - Use Resend test mode or separate domain
+   - Test webhook integrations
+   - Verify email delivery
+
+4. **Production**:
+   - Use production Resend API key
+   - Monitor email delivery via Resend dashboard
+   - Track errors via observability
+
+---
+
+## Integration Points (Detailed)
+
+### How Other Packages Use This Service
+
+**Example: Auth Worker** (`apps/auth-worker/src/index.ts`)
+
+```typescript
+import { getNotificationService, type VerificationEmailData } from '@codex/notifications';
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const notifService = getNotificationService({
+      RESEND_API_KEY: env.RESEND_API_KEY,
+      FROM_EMAIL: env.FROM_EMAIL,
+      REPLY_TO_EMAIL: env.REPLY_TO_EMAIL,
+      ENVIRONMENT: env.ENVIRONMENT,
+    });
+
+    // Register new user
+    const user = await createUser(email, password);
+    const token = generateVerificationToken(user.id);
+
+    // Send verification email
+    await notifService.sendVerificationEmail(user.email, {
+      userName: user.username,
+      verificationUrl: `https://yourdomain.com/verify?token=${token}`,
+      expiryHours: 24,
+    });
+
+    return Response.json({ success: true });
+  },
+};
+```
+
+**Example: Ecommerce Worker** (`apps/ecommerce-worker/src/webhooks/stripe.ts`)
+
+```typescript
+import { getNotificationService, type PurchaseReceiptEmailData } from '@codex/notifications';
+
+export async function handleCheckoutComplete(
+  session: Stripe.Checkout.Session,
+  env: Env
+): Promise<void> {
+  const notifService = getNotificationService({
+    RESEND_API_KEY: env.RESEND_API_KEY,
+    FROM_EMAIL: env.FROM_EMAIL,
+    REPLY_TO_EMAIL: env.REPLY_TO_EMAIL,
+    ENVIRONMENT: env.ENVIRONMENT,
+  });
+
+  // Send purchase receipt
+  await notifService.sendPurchaseReceiptEmail(session.customer_email!, {
+    userName: session.metadata.userName,
+    contentTitle: session.metadata.contentTitle,
+    priceCents: session.amount_total!,
+    purchaseDate: new Date(),
+    contentUrl: `https://yourdomain.com/content/${session.metadata.contentId}`,
+  });
+}
+```
+
+### Interface Contracts
+
+**What Other Packages Can Depend On**:
+
+1. **NotificationService** class with these methods:
+   - `sendVerificationEmail(to: string, data: VerificationEmailData): Promise<{id: string}>`
+   - `sendPasswordResetEmail(to: string, data: PasswordResetEmailData): Promise<{id: string}>`
+   - `sendPurchaseReceiptEmail(to: string, data: PurchaseReceiptEmailData): Promise<{id: string}>`
+
+2. **Template Data Types**:
+   - `VerificationEmailData`
+   - `PasswordResetEmailData`
+   - `PurchaseReceiptEmailData`
+
+3. **Factory Function**:
+   - `getNotificationService(env): NotificationService`
+
+**What Other Packages CANNOT Depend On**:
+- Template rendering functions (internal)
+- Provider implementations (internal)
+- Observability logging details (internal)
+
+### Environment Variables Required by Consumers
+
+Workers that use `@codex/notifications` must set:
+
+```bash
+RESEND_API_KEY=re_...         # Production Resend API key
+FROM_EMAIL=noreply@...        # Sender email (verified in Resend)
+REPLY_TO_EMAIL=support@...    # Optional reply-to address
+ENVIRONMENT=production|preview|local
+```
+
+### Package Dependencies
+
+**This package depends on**:
+- `@codex/observability` - PII redaction for logging
+- `resend` - Email provider SDK
+- `nodemailer` (dev only) - Mock SMTP for local testing
+
+**Packages that depend on this**:
+- `@codex/auth` (future) - Verification and password reset emails
+- `@codex/ecommerce` - Purchase receipt emails
+- Any worker that needs to send transactional emails
+
+---
+
 ## Related Documentation
 
 **Must Read**:
