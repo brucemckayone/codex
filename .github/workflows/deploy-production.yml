@@ -42,20 +42,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # CRITICAL: Verify/Create DNS records for custom domains BEFORE deployment
-      - name: Verify production DNS records
-        id: verify-dns
-        run: |
-          echo "🔍 Verifying production DNS configuration..."
-          chmod +x .github/scripts/manage-production-dns.sh
-
-          # First verify, if missing then create
-          if ! .github/scripts/manage-production-dns.sh verify ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}; then
-            echo "⚠️  Some DNS records missing, creating them..."
-            .github/scripts/manage-production-dns.sh create ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
-          fi
-
-          echo "✅ Production DNS verified"
+      # NOTE: DNS records are now managed automatically by Cloudflare Workers custom domains.
+      # Manual DNS creation is not needed and will conflict with Workers' automatic management.
+      # Keeping this step commented out for reference.
+      # - name: Verify production DNS records
+      #   id: verify-dns
+      #   run: |
+      #     echo "🔍 Verifying production DNS configuration..."
+      #     chmod +x .github/scripts/manage-production-dns.sh
+      #
+      #     # First verify, if missing then create
+      #     if ! .github/scripts/manage-production-dns.sh verify ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}; then
+      #       echo "⚠️  Some DNS records missing, creating them..."
+      #       .github/scripts/manage-production-dns.sh create ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      #     fi
+      #
+      #     echo "✅ Production DNS verified"
 
       # Pre-deployment validation: Build all workers BEFORE touching database
       - name: Validate all workers build successfully

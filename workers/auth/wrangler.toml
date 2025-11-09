@@ -1,6 +1,7 @@
 name = "auth-worker"
 main = "dist/index.js"
 compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 # Observability configuration
 [observability]
@@ -17,11 +18,12 @@ name = "auth-worker-production"
 
 [env.production.vars]
 ENVIRONMENT = "production"
+DB_METHOD = "PRODUCTION"
 WEB_APP_URL = "https://codex.revelations.studio"
 API_URL = "https://api.revelations.studio"
 
 [[env.production.routes]]
-pattern = "auth.revelations.studio/*"
+pattern = "auth.revelations.studio"
 custom_domain = true
 
 # Staging environment
