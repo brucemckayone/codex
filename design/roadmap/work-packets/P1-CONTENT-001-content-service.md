@@ -217,119 +217,43 @@ import { z } from 'zod';
 
 /**
  * Validation for creating content
+ * Aligned with database-schema.md v2.0 - simplified categories and tags
  * Separate from DB operations for testability!
  */
 export const createContentSchema = z.object({
-  title: z.string().min(3).max(255),
-  description: z.string().min(10).max(5000),
+  title: z.string().min(3).max(500),
+  slug: z.string().min(1).max(500).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
+  description: z.string().min(10).max(5000).optional(),
+  contentType: z.enum(['video', 'audio']), // Phase 1: video, audio only
   mediaItemId: z.string().uuid(),
-  categoryId: z.string().uuid(),
-  tagIds: z.array(z.string().uuid()).max(10).optional(),
-  priceCents: z.number().int().min(0).max(1000000), // Max $10,000
+  category: z.string().min(1).max(100).optional(), // Simple string category (Phase 1)
+  tags: z.array(z.string().min(1).max(50)).max(10).optional(), // Array of tag strings
+  visibility: z.enum(['public', 'purchased_only']).default('purchased_only'), // Phase 1 options
+  priceCents: z.number().int().min(0).max(10000000).nullable(), // NULL = free, max $100,000
+  thumbnailUrl: z.string().url().optional(),
 });
 
 export const updateContentSchema = createContentSchema.partial();
 
+export const publishContentSchema = z.object({
+  contentId: z.string().uuid(),
+});
+
 export const uploadRequestSchema = z.object({
   filename: z.string().min(1).max(255),
-  contentType: z.enum(['video/mp4', 'video/quicktime', 'audio/mpeg', 'audio/wav']),
+  contentType: z.enum(['video/mp4', 'video/quicktime', 'audio/mpeg', 'audio/wav', 'audio/mp3']),
   fileSize: z.number().int().min(1).max(5 * 1024 * 1024 * 1024), // 5GB max
+  title: z.string().min(3).max(255),
+  description: z.string().max(1000).optional(),
 });
 
 export type CreateContentInput = z.infer<typeof createContentSchema>;
 export type UpdateContentInput = z.infer<typeof updateContentSchema>;
+export type PublishContentInput = z.infer<typeof publishContentSchema>;
 export type UploadRequestInput = z.infer<typeof uploadRequestSchema>;
 ```
 
-**Tests** (Pure validation, no DB!):
-
-**File**: `packages/validation/src/content-schemas.test.ts`
-
-```typescript
-import { describe, it, expect } from 'vitest';
-import { createContentSchema, uploadRequestSchema } from './content-schemas';
-
-describe('Content Validation', () => {
-  describe('createContentSchema', () => {
-    it('should validate valid input', () => {
-      const input = {
-        title: 'My Video',
-        description: 'A great video about coding',
-        mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-        categoryId: '123e4567-e89b-12d3-a456-426614174001',
-        priceCents: 999,
-      };
-
-      const result = createContentSchema.safeParse(input);
-      expect(result.success).toBe(true);
-    });
-
-    it('should reject title too short', () => {
-      const input = {
-        title: 'AB', // Too short
-        description: 'A great video',
-        mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-        categoryId: '123e4567-e89b-12d3-a456-426614174001',
-        priceCents: 999,
-      };
-
-      const result = createContentSchema.safeParse(input);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].path).toContain('title');
-      }
-    });
-
-    it('should reject negative price', () => {
-      const input = {
-        title: 'My Video',
-        description: 'A great video',
-        mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-        categoryId: '123e4567-e89b-12d3-a456-426614174001',
-        priceCents: -100, // Invalid
-      };
-
-      const result = createContentSchema.safeParse(input);
-      expect(result.success).toBe(false);
-    });
-  });
-
-  describe('uploadRequestSchema', () => {
-    it('should validate video upload', () => {
-      const input = {
-        filename: 'video.mp4',
-        contentType: 'video/mp4',
-        fileSize: 1024 * 1024 * 100, // 100MB
-      };
-
-      const result = uploadRequestSchema.safeParse(input);
-      expect(result.success).toBe(true);
-    });
-
-    it('should reject file too large', () => {
-      const input = {
-        filename: 'huge.mp4',
-        contentType: 'video/mp4',
-        fileSize: 6 * 1024 * 1024 * 1024, // 6GB (over limit)
-      };
-
-      const result = uploadRequestSchema.safeParse(input);
-      expect(result.success).toBe(false);
-    });
-
-    it('should reject invalid content type', () => {
-      const input = {
-        filename: 'doc.pdf',
-        contentType: 'application/pdf', // Not allowed
-        fileSize: 1024,
-      };
-
-      const result = uploadRequestSchema.safeParse(input);
-      expect(result.success).toBe(false);
-    });
-  });
-});
-```
+**Testing**: See `design/roadmap/testing/content-testing-definition.md` for comprehensive validation test patterns.
 
 ### Step 3: Create Content Service
 
@@ -337,23 +261,30 @@ describe('Content Validation', () => {
 
 ```typescript
 import { db } from '@codex/database';
-import { content, mediaItems, tags, contentTags, type Content, type MediaItem } from '@codex/database/schema';
-import { eq, and, isNull, desc } from 'drizzle-orm';
-import { createContentSchema, updateContentSchema, type CreateContentInput } from '@codex/validation';
+import { content, mediaItems, type Content, type MediaItem } from '@codex/database/schema';
+import { eq, and, isNull, desc, count, sql } from 'drizzle-orm';
+import { createContentSchema, updateContentSchema, type CreateContentInput, type UpdateContentInput } from '@codex/validation';
 import { ObservabilityClient } from '@codex/observability';
+
+export interface ContentServiceConfig {
+  db: typeof db;
+  obs: ObservabilityClient;
+}
 
 export interface IContentService {
   create(input: CreateContentInput, creatorId: string, organizationId?: string): Promise<Content>;
   findById(id: string, creatorId: string): Promise<Content | null>;
-  update(id: string, input: Partial<CreateContentInput>, creatorId: string): Promise<Content>;
+  update(id: string, input: UpdateContentInput, creatorId: string): Promise<Content>;
   publish(id: string, creatorId: string): Promise<Content>;
+  unpublish(id: string, creatorId: string): Promise<Content>;
   delete(id: string, creatorId: string): Promise<void>;
   list(creatorId: string, organizationId?: string, filters?: ContentFilters): Promise<PaginatedContent>;
 }
 
 export interface ContentFilters {
   status?: 'draft' | 'published' | 'archived';
-  categoryId?: string;
+  category?: string; // Simple string category (Phase 1)
+  contentType?: 'video' | 'audio';
   limit?: number;
   offset?: number;
 }
@@ -366,72 +297,79 @@ export interface PaginatedContent {
 }
 
 export class ContentService implements IContentService {
-  private obs: ObservabilityClient;
+  private config: ContentServiceConfig;
 
-  constructor() {
-    this.obs = new ObservabilityClient('content-service', process.env.ENVIRONMENT || 'development');
+  constructor(config: ContentServiceConfig) {
+    this.config = config;
   }
 
   async create(input: CreateContentInput, creatorId: string, organizationId?: string): Promise<Content> {
+    const { db, obs } = this.config;
+
     // Step 1: Validate input (pure function, testable!)
     const validated = createContentSchema.parse(input);
+
+    obs.info('Creating content', {
+      title: validated.title,
+      creatorId,
+      organizationId: organizationId || 'personal',
+    });
 
     // Step 2: Verify media item exists and belongs to creator
     const mediaItem = await db.query.mediaItems.findFirst({
       where: and(
         eq(mediaItems.id, validated.mediaItemId),
-        eq(mediaItems.creatorId, creatorId) // Media must be owned by creator
+        eq(mediaItems.creatorId, creatorId), // Media must be owned by creator
+        isNull(mediaItems.deletedAt)
       ),
     });
 
     if (!mediaItem) {
-      throw new Error('Media item not found or access denied');
+      throw new Error('MEDIA_NOT_FOUND');
     }
 
     if (mediaItem.status !== 'ready') {
-      throw new Error('Media item not ready (still processing)');
+      throw new Error('MEDIA_NOT_READY');
     }
 
-    // Step 3: If organizationId provided, verify creator belongs to org (Phase 2+)
-    // Phase 1: organizationId is always the single org, skip check
-    // Phase 2+: Check organization_members table
+    // Step 3: Verify content type matches media type
+    if (
+      (validated.contentType === 'video' && mediaItem.mediaType !== 'video') ||
+      (validated.contentType === 'audio' && mediaItem.mediaType !== 'audio')
+    ) {
+      throw new Error('CONTENT_TYPE_MISMATCH');
+    }
 
-    // Step 4: Generate unique slug (unique per org OR per creator if personal)
-    const slug = await this.generateUniqueSlug(validated.title, organizationId, creatorId);
-
-    // Step 5: Create content
+    // Step 4: Create content with simplified tags (JSONB array)
     const [newContent] = await db.insert(content).values({
       creatorId,
       organizationId: organizationId || null, // NULL = personal profile
-      title: validated.title,
-      slug,
-      description: validated.description,
       mediaItemId: validated.mediaItemId,
-      categoryId: validated.categoryId,
-      priceCents: validated.priceCents,
+      title: validated.title,
+      slug: validated.slug,
+      description: validated.description || null,
+      contentType: validated.contentType,
+      category: validated.category || null,
+      tags: validated.tags || [], // JSONB array of strings
+      visibility: validated.visibility || 'purchased_only',
+      priceCents: validated.priceCents ?? null, // NULL = free
+      thumbnailUrl: validated.thumbnailUrl || null,
       status: 'draft',
     }).returning();
 
-    // Step 6: Handle tags if provided
-    if (validated.tagIds && validated.tagIds.length > 0) {
-      await db.insert(contentTags).values(
-        validated.tagIds.map(tagId => ({
-          contentId: newContent.id,
-          tagId,
-        }))
-      );
-    }
-
-    this.obs.info('Content created', {
+    obs.info('Content created', {
       contentId: newContent.id,
       creatorId,
-      organizationId: organizationId || 'personal'
+      organizationId: organizationId || 'personal',
+      slug: newContent.slug,
     });
 
     return newContent;
   }
 
   async findById(id: string, creatorId: string): Promise<Content | null> {
+    const { db } = this.config;
+
     return db.query.content.findFirst({
       where: and(
         eq(content.id, id),
@@ -440,17 +378,43 @@ export class ContentService implements IContentService {
       ),
       with: {
         mediaItem: true,
-        category: true,
-        tags: { with: { tag: true } },
       },
     });
   }
 
+  async update(id: string, input: UpdateContentInput, creatorId: string): Promise<Content> {
+    const { db, obs } = this.config;
+
+    const validated = updateContentSchema.parse(input);
+
+    const existing = await this.findById(id, creatorId);
+    if (!existing) {
+      throw new Error('CONTENT_NOT_FOUND');
+    }
+
+    const [updated] = await db.update(content)
+      .set({
+        ...validated,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(content.id, id),
+        eq(content.creatorId, creatorId)
+      ))
+      .returning();
+
+    obs.info('Content updated', { contentId: id, creatorId });
+
+    return updated;
+  }
+
   async publish(id: string, creatorId: string): Promise<Content> {
+    const { db, obs } = this.config;
+
     const existing = await this.findById(id, creatorId);
 
     if (!existing) {
-      throw new Error('Content not found');
+      throw new Error('CONTENT_NOT_FOUND');
     }
 
     if (existing.status === 'published') {
@@ -461,6 +425,7 @@ export class ContentService implements IContentService {
       .set({
         status: 'published',
         publishedAt: new Date(),
+        updatedAt: new Date(),
       })
       .where(and(
         eq(content.id, id),
@@ -468,24 +433,50 @@ export class ContentService implements IContentService {
       ))
       .returning();
 
-    this.obs.info('Content published', { contentId: id, creatorId });
+    obs.info('Content published', { contentId: id, creatorId });
+
+    return updated;
+  }
+
+  async unpublish(id: string, creatorId: string): Promise<Content> {
+    const { db, obs } = this.config;
+
+    const [updated] = await db.update(content)
+      .set({
+        status: 'draft',
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(content.id, id),
+        eq(content.creatorId, creatorId)
+      ))
+      .returning();
+
+    obs.info('Content unpublished', { contentId: id, creatorId });
 
     return updated;
   }
 
   async delete(id: string, creatorId: string): Promise<void> {
+    const { db, obs } = this.config;
+
     // Soft delete
     await db.update(content)
-      .set({ deletedAt: new Date() })
+      .set({
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(and(
         eq(content.id, id),
         eq(content.creatorId, creatorId)
       ));
 
-    this.obs.info('Content deleted', { contentId: id, creatorId });
+    obs.info('Content deleted (soft)', { contentId: id, creatorId });
   }
 
   async list(creatorId: string, organizationId?: string, filters: ContentFilters = {}): Promise<PaginatedContent> {
+    const { db } = this.config;
+
     const limit = filters.limit || 20;
     const offset = filters.offset || 0;
 
@@ -494,8 +485,9 @@ export class ContentService implements IContentService {
       eq(content.creatorId, creatorId), // Only creator's content
       isNull(content.deletedAt),
       filters.status ? eq(content.status, filters.status) : undefined,
-      filters.categoryId ? eq(content.categoryId, filters.categoryId) : undefined,
-    ];
+      filters.category ? eq(content.category, filters.category) : undefined,
+      filters.contentType ? eq(content.contentType, filters.contentType) : undefined,
+    ].filter(Boolean);
 
     // If organizationId provided, filter by org; otherwise show all creator's content
     if (organizationId !== undefined) {
@@ -503,61 +495,43 @@ export class ContentService implements IContentService {
     }
 
     const items = await db.query.content.findMany({
-      where: and(...whereConditions.filter(Boolean)),
+      where: and(...whereConditions),
       limit,
       offset,
       orderBy: [desc(content.createdAt)],
       with: {
         mediaItem: true,
-        category: true,
       },
     });
 
-    const [{ count }] = await db.select({ count: count() })
+    const [{ total }] = await db.select({ total: count() })
       .from(content)
-      .where(and(...whereConditions.filter(Boolean)));
+      .where(and(...whereConditions));
 
     return {
       items,
-      total: Number(count),
+      total: Number(total),
       page: Math.floor(offset / limit) + 1,
       pageSize: limit,
     };
   }
-
-  private async generateUniqueSlug(title: string, organizationId: string | undefined, creatorId: string): Promise<string> {
-    let slug = title.toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-
-    // Check uniqueness (unique per org OR per creator if personal)
-    let attempt = 0;
-    let finalSlug = slug;
-
-    while (attempt < 10) {
-      const existing = await db.query.content.findFirst({
-        where: and(
-          eq(content.slug, finalSlug),
-          organizationId !== undefined
-            ? eq(content.organizationId, organizationId)
-            : and(isNull(content.organizationId), eq(content.creatorId, creatorId)),
-          isNull(content.deletedAt)
-        ),
-      });
-
-      if (!existing) {
-        return finalSlug;
-      }
-
-      attempt++;
-      finalSlug = `${slug}-${attempt}`;
-    }
-
-    throw new Error('Unable to generate unique slug');
-  }
 }
 
-export const contentService = new ContentService();
+/**
+ * Factory function for dependency injection
+ */
+export function getContentService(env: {
+  DATABASE_URL: string;
+  ENVIRONMENT: string;
+}): ContentService {
+  const database = getDbClient(env.DATABASE_URL);
+  const obs = new ObservabilityClient('content-service', env.ENVIRONMENT);
+
+  return new ContentService({
+    db: database,
+    obs,
+  });
+}
 ```
 
 ### Step 4: Create API Endpoints
