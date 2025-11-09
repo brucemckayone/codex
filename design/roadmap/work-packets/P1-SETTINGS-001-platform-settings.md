@@ -738,6 +738,502 @@ describe('Settings Validation Schemas', () => {
 
 ---
 
+## Step 7: Public API and Package Exports
+
+**Why This Matters**: Clear public API enables other packages to import only what they need and work in isolation.
+
+**File**: `packages/platform-settings/src/index.ts`
+
+```typescript
+/**
+ * @codex/platform-settings - Platform branding and configuration
+ *
+ * PUBLIC API
+ * ==========
+ * This package exports a service for managing platform-wide settings like branding, logos, and feature toggles.
+ *
+ * INTERFACE CONTRACT:
+ * ------------------
+ * Other packages (e.g., @codex/web, @codex/auth) depend on:
+ * 1. PlatformSettingsService class with CRUD methods
+ * 2. Settings data types (PlatformSettings, UpdatePlatformSettingsInput)
+ * 3. Factory function for dependency injection
+ *
+ * INTERNAL IMPLEMENTATION:
+ * -----------------------
+ * Database queries, R2 uploads, and validation logic are internal.
+ * Other packages MUST NOT import from subdirectories.
+ *
+ * USAGE EXAMPLE:
+ * -------------
+ * ```typescript
+ * import { getPlatformSettingsService } from '@codex/platform-settings';
+ *
+ * const service = getPlatformSettingsService(env);
+ * const settings = await service.getSettings();
+ * // { platformName: 'My Platform', logoUrl: '...', ... }
+ * ```
+ */
+
+// ============================================================================
+// PUBLIC API - Safe to import from other packages
+// ============================================================================
+
+// Service
+export { PlatformSettingsService, getPlatformSettingsService } from './service';
+export type { PlatformSettingsServiceConfig } from './service';
+
+// Type exports from database schema
+export type { PlatformSettings, InsertPlatformSettings } from '@codex/database/schema';
+
+// Validation types (re-exported for convenience)
+export type { UpdatePlatformSettingsInput, UploadLogoInput } from '@codex/validation/schemas/settings';
+
+// ============================================================================
+// INTERNAL - DO NOT import from other packages
+// ============================================================================
+
+// Service implementation details are internal
+// Use getPlatformSettingsService() factory instead
+```
+
+**File**: `packages/platform-settings/package.json`
+
+```json
+{
+  "name": "@codex/platform-settings",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@codex/database": "workspace:*",
+    "@codex/cloudflare-clients": "workspace:*",
+    "@codex/observability": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "drizzle-orm": "^0.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+---
+
+## Step 8: Local Development Setup
+
+**Why This Matters**: Developers need to test platform settings locally, including logo uploads to R2.
+
+### Local R2 Access (Already Configured)
+
+Platform settings uses the same R2 bucket as other services, so R2 access is already configured in your local environment:
+
+**File**: `.env.local` (R2 credentials already exist)
+
+```bash
+# R2 Storage (shared with all services)
+R2_ENDPOINT=https://<your-account-id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY=<your-r2-access-key>
+R2_SECRET_KEY=<your-r2-secret-key>
+
+# Organization ID for platform settings
+ORGANIZATION_ID=default-org-123
+```
+
+### Local Development Workflow
+
+**Start Local Services**:
+```bash
+# Start postgres and neon-proxy
+cd infrastructure/neon
+docker compose -f docker-compose.dev.local.yml up -d
+
+# Verify services are running
+docker compose -f docker-compose.dev.local.yml ps
+```
+
+**Run Database Migrations**:
+```bash
+# Apply platform_settings schema
+pnpm --filter @codex/database db:migrate
+
+# Verify table exists
+pnpm --filter @codex/database db:studio
+# Check that 'platform_settings' table appears in Drizzle Studio
+```
+
+**Seed Default Settings (Optional)**:
+```bash
+# Create seed script: packages/database/scripts/seed-settings.ts
+import { db } from '../src/client';
+import { platformSettings } from '../src/schema/settings';
+
+await db.insert(platformSettings).values({
+  organizationId: 'default-org-123',
+  platformName: 'Codex Dev',
+  supportEmail: 'support@localhost',
+  primaryColor: '#3498db',
+  secondaryColor: '#2c3e50',
+  enableSignups: true,
+  enablePurchases: true,
+});
+
+console.log('✓ Default settings seeded');
+```
+
+**Test Platform Settings Service**:
+```bash
+cd packages/platform-settings
+pnpm test           # Run all tests
+pnpm test:watch     # Watch mode for development
+```
+
+**Manual Testing via Auth Worker**:
+
+1. Start your local dev server:
+```bash
+pnpm dev
+```
+
+2. Test GET endpoint (public - no auth):
+```bash
+curl http://localhost:8787/api/settings
+# Returns: { "platformName": "Codex Dev", "logoUrl": null, ... }
+```
+
+3. Test logo upload (requires auth + platform owner role):
+```bash
+# First, get auth token by logging in
+TOKEN="your-auth-token"
+
+# Upload logo
+curl -X POST http://localhost:8787/api/settings/logo \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "logo=@/path/to/logo.png"
+
+# Response: { "logoUrl": "https://r2.example.com/logos/default-org-123.png" }
+```
+
+4. Verify logo in R2:
+```bash
+# Check R2 bucket via Cloudflare dashboard or CLI
+wrangler r2 object get codex-media logos/default-org-123.png --file=downloaded-logo.png
+```
+
+**View Uploaded Logos**:
+- Navigate to Cloudflare dashboard → R2 → codex-media bucket
+- Browse to `logos/` folder
+- See uploaded logo files
+
+---
+
+## Step 9: CI/CD Integration
+
+**Why This Matters**: Ensures tests run in CI and settings work correctly across environments.
+
+### GitHub Actions Workflow
+
+**No Changes Required**: Existing workflow already handles this package.
+
+**File**: `.github/workflows/test.yml` (already exists)
+
+```yaml
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run tests
+        run: pnpm test
+        # This will test @codex/platform-settings with mocked DB and R2
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+```
+
+### Environment-Specific Configuration
+
+**Local Development** (.env.local):
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/main
+R2_ENDPOINT=https://<your-account-id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY=<your-r2-access-key>
+R2_SECRET_KEY=<your-r2-secret-key>
+ORGANIZATION_ID=default-org-123
+ENVIRONMENT=local
+```
+
+**Preview Environments** (Cloudflare Workers):
+```bash
+# Set in wrangler.toml [env.preview] or Cloudflare dashboard
+DATABASE_URL=<neon-preview-branch-url>
+ORGANIZATION_ID=preview-org
+ENVIRONMENT=preview
+
+# R2 secrets already configured for workers:
+# R2_ENDPOINT, R2_ACCESS_KEY, R2_SECRET_KEY
+```
+
+**Production** (Cloudflare Workers):
+```bash
+# Set in Cloudflare dashboard as secrets
+DATABASE_URL=<neon-production-url>
+ORGANIZATION_ID=production-org
+ENVIRONMENT=production
+```
+
+### Testing Strategy
+
+1. **Unit Tests** (packages/platform-settings):
+   - Mock DrizzleClient and R2Service
+   - Test service methods in isolation
+   - Test validation schemas
+   - No external dependencies
+
+2. **Local Development**:
+   - Use real Postgres (via docker-compose)
+   - Use real R2 bucket (your dev bucket)
+   - Test logo upload/delete flows
+   - Verify R2 file operations
+
+3. **Preview Environment**:
+   - Use Neon preview branch (ephemeral database)
+   - Use production R2 bucket (isolated paths)
+   - Test with real auth worker
+   - Verify API endpoints
+
+4. **Production**:
+   - Use production Neon database
+   - Use production R2 bucket
+   - Monitor via observability
+   - Track errors and performance
+
+### Database Migrations in CI/CD
+
+**Preview Deployments**:
+```bash
+# .github/workflows/preview-deploy.yml
+- name: Run migrations on preview branch
+  run: |
+    pnpm --filter @codex/database db:migrate
+  env:
+    DATABASE_URL: ${{ secrets.NEON_PREVIEW_DATABASE_URL }}
+```
+
+**Production Deployments**:
+```bash
+# .github/workflows/deploy-production.yml
+- name: Run migrations on production
+  run: |
+    pnpm --filter @codex/database db:migrate
+  env:
+    DATABASE_URL: ${{ secrets.NEON_PRODUCTION_DATABASE_URL }}
+```
+
+---
+
+## Integration Points (Detailed)
+
+### How Other Packages Use This Service
+
+**Example: Frontend App** (`apps/web/src/routes/+layout.server.ts`)
+
+```typescript
+import { getPlatformSettingsService } from '@codex/platform-settings';
+
+export async function load({ locals }) {
+  const service = getPlatformSettingsService({
+    DATABASE_URL: locals.env.DATABASE_URL,
+    R2_BUCKET: locals.env.R2_BUCKET,
+    ENVIRONMENT: locals.env.ENVIRONMENT,
+    ORGANIZATION_ID: locals.env.ORGANIZATION_ID,
+  });
+
+  // Get settings for layout branding
+  const settings = await service.getSettings();
+
+  return {
+    platformName: settings.platformName,
+    logoUrl: settings.logoUrl,
+    primaryColor: settings.primaryColor,
+    // ... other settings for UI theming
+  };
+}
+```
+
+**Example: Auth Worker** (`workers/auth/src/routes/settings.ts`)
+
+```typescript
+import { getPlatformSettingsService, type UpdatePlatformSettingsInput } from '@codex/platform-settings';
+
+// GET /api/settings (public endpoint)
+app.get('/api/settings', async (c) => {
+  const service = getPlatformSettingsService(c.env);
+  const settings = await service.getSettings();
+  return c.json(settings);
+});
+
+// PUT /api/settings (platform owner only)
+app.put('/api/settings', requireAuth(), requirePlatformOwner(), async (c) => {
+  const body = await c.req.json();
+  const input: UpdatePlatformSettingsInput = updatePlatformSettingsSchema.parse(body);
+
+  const service = getPlatformSettingsService(c.env);
+  await service.updateSettings(input);
+
+  return c.json({ success: true });
+});
+```
+
+**Example: Admin Dashboard** (`apps/admin/src/routes/settings/+page.svelte`)
+
+```typescript
+<script lang="ts">
+  import { onMount } from 'svelte';
+
+  let settings = { platformName: '', logoUrl: null };
+
+  onMount(async () => {
+    const response = await fetch('/api/settings');
+    settings = await response.json();
+  });
+
+  async function uploadLogo(file: File) {
+    const formData = new FormData();
+    formData.append('logo', file);
+
+    const response = await fetch('/api/settings/logo', {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    const result = await response.json();
+    settings.logoUrl = result.logoUrl;
+  }
+</script>
+
+<h1>Platform Settings</h1>
+<img src={settings.logoUrl} alt={settings.platformName} />
+```
+
+### Interface Contracts
+
+**What Other Packages Can Depend On**:
+
+1. **PlatformSettingsService** class with these methods:
+   - `getSettings(): Promise<PlatformSettings>`
+   - `updateSettings(input: UpdatePlatformSettingsInput): Promise<void>`
+   - `uploadLogo(file: File): Promise<{ logoUrl: string }>`
+   - `deleteLogo(): Promise<void>`
+
+2. **Data Types**:
+   - `PlatformSettings` - Full settings object
+   - `UpdatePlatformSettingsInput` - Partial update input
+   - `UploadLogoInput` - Logo upload validation
+
+3. **Factory Function**:
+   - `getPlatformSettingsService(env): PlatformSettingsService`
+
+**What Other Packages CANNOT Depend On**:
+- Database query implementations (internal)
+- R2 upload/delete implementations (internal)
+- Service constructor (use factory instead)
+
+### Environment Variables Required by Consumers
+
+Workers and apps that use `@codex/platform-settings` must set:
+
+```bash
+DATABASE_URL=postgresql://...       # Neon database connection
+ORGANIZATION_ID=org-123            # Organization ID for settings
+ENVIRONMENT=production|preview|local
+# R2_BUCKET is passed directly (not string URL)
+```
+
+### Package Dependencies
+
+**This package depends on**:
+- `@codex/database` - Drizzle ORM client and schema
+- `@codex/cloudflare-clients` - R2Service for file uploads
+- `@codex/observability` - Logging and error tracking
+- `@codex/validation` - Validation schemas (Zod)
+
+**Packages that depend on this**:
+- `@codex/web` - Frontend app (for branding)
+- `workers/auth` - Auth worker (API endpoints)
+- `@codex/admin` (future) - Admin dashboard
+
+### API Endpoints
+
+These endpoints are available after integrating with auth worker:
+
+| Method | Endpoint | Auth Required | Description |
+|--------|----------|---------------|-------------|
+| GET | `/api/settings` | No (public) | Get platform settings |
+| PUT | `/api/settings` | Platform Owner | Update platform settings |
+| POST | `/api/settings/logo` | Platform Owner | Upload platform logo |
+| DELETE | `/api/settings/logo` | Platform Owner | Delete platform logo |
+
+**Request/Response Examples**:
+
+```typescript
+// GET /api/settings
+Response: {
+  "platformName": "Codex",
+  "logoUrl": "https://r2.example.com/logos/org-123.png",
+  "primaryColor": "#3498db",
+  "secondaryColor": "#2c3e50",
+  "supportEmail": "support@codex.com",
+  "contactUrl": "https://codex.com/contact",
+  "enableSignups": true,
+  "enablePurchases": true
+}
+
+// PUT /api/settings
+Request: {
+  "platformName": "New Name",
+  "primaryColor": "#ff0000"
+}
+Response: { "success": true }
+
+// POST /api/settings/logo (multipart/form-data)
+Request: FormData with 'logo' field (File)
+Response: { "logoUrl": "https://r2.example.com/logos/org-123.png" }
+
+// DELETE /api/settings/logo
+Response: { "success": true }
+```
+
+---
+
 ## Related Documentation
 
 **Must Read**:
