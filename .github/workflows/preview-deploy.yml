@@ -114,6 +114,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build packages (required by workers)
+      - name: Build packages
+        run: pnpm build:packages
+
+      # Build workers (required before deployment)
+      - name: Build workers
+        run: pnpm build:workers
+
       # CRITICAL: Download artifact FIRST (fail fast if expired/missing)
       - name: Download Neon connection artifact
         uses: actions/download-artifact@v4

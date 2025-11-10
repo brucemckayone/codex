@@ -67,6 +67,11 @@ Without transcoding:
   - Variant playlists (1080p, 720p, 480p, 360p)
   - Video segments (.ts files, 6-second duration)
   - Adaptive bitrate streaming
+- **Preview Playlist** (NEW):
+  - Separate 30-second HLS preview (preview.m3u8)
+  - 720p quality only (for marketing/sampling)
+  - Always first 30 seconds of video (not configurable in Phase 1)
+  - Stored alongside full video: `hls/{mediaId}/preview/preview.m3u8`
 - **Quality Variants**:
   - 1080p (1920x1080) @ 5 Mbps
   - 720p (1280x720) @ 2.5 Mbps
@@ -114,6 +119,8 @@ Without transcoding:
 
 ### Explicitly Out of Scope (Future Phases)
 
+- **Configurable preview clips** - Creator chooses start time and duration (Phase 2)
+- **Custom thumbnails** - Upload your own or select from video frames (Phase 2)
 - **Custom quality settings** - Creator-defined bitrates/resolutions (Phase 2)
 - **Video editing** - Trim, crop, filters (Phase 3)
 - **Subtitle/caption extraction** - Phase 3
@@ -158,23 +165,28 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 6. Runpod transcodes video:
    - Detects source resolution (e.g., 1080p)
    - Generates HLS variants (1080p, 720p, 480p, 360p)
+   - Generates 30-second preview HLS (first 30 seconds, 720p)
    - Extracts thumbnail at 10% mark
    - Uploads HLS files to `codex-media-{creatorId}/hls/{mediaId}/`
+   - Uploads preview files to `codex-media-{creatorId}/hls/{mediaId}/preview/`
    - Uploads thumbnail to `codex-assets-{creatorId}/thumbnails/media/{mediaId}/auto-generated.jpg`
 7. Runpod notifies webhook: `POST /api/transcoding/webhook`
 8. Webhook updates `media_items`:
    - `status = 'ready'`
    - `hlsMasterPlaylistKey = 'hls/{mediaId}/master.m3u8'`
+   - `hlsPreviewKey = 'hls/{mediaId}/preview/preview.m3u8'`
    - `durationSeconds`, `width`, `height`
 9. Creator sees "Ready" status in media library
 
 **Acceptance Criteria:**
 
 - HLS variants stored in R2 with correct structure
+- 30-second preview HLS stored in `preview/` subdirectory
 - Thumbnail auto-generated and stored
 - Video metadata extracted and saved
 - Creator can create content once status = 'ready'
 - Transcoding completes in < 10 minutes for 1GB video
+- Preview can be used for marketing without purchasing
 
 ---
 

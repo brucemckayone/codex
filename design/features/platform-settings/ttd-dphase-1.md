@@ -8,9 +8,11 @@ The Platform Settings system provides the Platform Owner with the ability to cus
 
 - **Intelligent Color Generation**: From one primary color, mathematically derive a full palette using HSL color space transformations.
 - **Cloudflare KV for Theme Caching**: Store generated CSS custom properties in KV for edge-cached, instant loading.
-- **R2 for Logo Storage**: Use existing `codex-assets-{ownerId}` bucket (per R2 Bucket Structure) for logo files.
-- **Future-Ready Schema**: Database includes `owner_id` for Phase 3 multi-tenant support without schema migration.
+- **R2 for Logo Storage**: Phase 1 uses shared bucket `codex-assets-production` with organization-scoped paths (`{organizationId}/branding/logo.{ext}`).
+- **Organization-Scoped Schema**: Database uses `organization_id` as primary key for organization-level isolation.
 - **Server-Side Rendering**: Settings loaded in SvelteKit layout and injected as CSS variables in document `<head>`.
+
+> **Phase 1 Note**: This implementation uses a shared R2 bucket with organization-scoped paths for simplicity. Each organization's assets are isolated by path prefix (`{organizationId}/`). Future phases may migrate to separate buckets per organization if needed.
 
 **Architecture Diagram**: See [Platform Settings Architecture](../_assets/platform-settings-architecture.png) (Placeholder for future diagram)
 
@@ -22,8 +24,8 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 
 ### Technical Prerequisites
 
-1.  **Auth System**: The `requireOwner()` guard is needed to protect the settings page.
-2.  **Content Management System**: The `R2Service` is required for logo uploads.
+1.  **Auth System**: The `requireAuth()` and `requirePlatformOwner()` guards are needed to protect the settings page. Auth context provides `organizationId` for scoping operations.
+2.  **Content Management System**: The `R2Service` is required for logo uploads to organization-scoped paths.
 3.  **Admin Dashboard System**: The settings page is part of the admin dashboard.
 
 ---
@@ -39,20 +41,20 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ```typescript
 export interface IPlatformSettingsService {
   /**
-   * Retrieves the platform settings for a specific owner.
-   * @param ownerId The ID of the Platform Owner.
+   * Retrieves the platform settings for a specific organization.
+   * @param organizationId The ID of the organization.
    * @returns The platform settings or null if not found.
    */
-  getSettings(ownerId: string): Promise<PlatformSettings | null>;
+  getSettings(organizationId: string): Promise<PlatformSettings | null>;
 
   /**
-   * Updates platform settings for a specific owner.
-   * @param ownerId The ID of the Platform Owner.
+   * Updates platform settings for a specific organization.
+   * @param organizationId The ID of the organization.
    * @param updates Partial settings to update.
    * @returns The updated platform settings.
    */
   updateSettings(
-    ownerId: string,
+    organizationId: string,
     updates: PlatformSettingsUpdate
   ): Promise<PlatformSettings>;
 
@@ -65,13 +67,13 @@ export interface IPlatformSettingsService {
 
   /**
    * Uploads a logo to R2 and returns the public URL.
-   * @param ownerId The ID of the Platform Owner.
+   * @param organizationId The ID of the organization.
    * @param file The logo file (File object or buffer).
    * @param filename The original filename.
    * @returns The public URL of the uploaded logo.
    */
   uploadLogo(
-    ownerId: string,
+    organizationId: string,
     file: ArrayBuffer | Uint8Array,
     filename: string
   ): Promise<string>;
@@ -84,22 +86,22 @@ export interface IPlatformSettingsService {
 
   /**
    * Caches the generated theme in Cloudflare KV.
-   * @param ownerId The ID of the Platform Owner.
+   * @param organizationId The ID of the organization.
    * @param theme The theme colors object.
    */
-  cacheTheme(ownerId: string, theme: ThemeColors): Promise<void>;
+  cacheTheme(organizationId: string, theme: ThemeColors): Promise<void>;
 
   /**
    * Retrieves a cached theme from Cloudflare KV.
-   * @param ownerId The ID of the Platform Owner.
+   * @param organizationId The ID of the organization.
    * @returns The cached theme or null if not found.
    */
-  getCachedTheme(ownerId: string): Promise<ThemeColors | null>;
+  getCachedTheme(organizationId: string): Promise<ThemeColors | null>;
 }
 
 export interface PlatformSettings {
   id: string;
-  ownerId: string;
+  organizationId: string;
   logoUrl: string | null;
   primaryColorHex: string;
   platformName: string;
@@ -164,11 +166,11 @@ export interface BorderColors {
 
 **Implementation Notes**:
 
-- `getSettings`: Query `platform_settings` table by `owner_id`.
+- `getSettings`: Query `platform_settings` table by `organization_id`.
 - `updateSettings`: Update record in `platform_settings` table. If updating `primaryColorHex`, regenerate theme and cache in KV.
 - `generateTheme`: Implements color generation algorithm (detailed below).
-- `uploadLogo`: Uses `R2Service` to upload to `codex-assets-{ownerId}/branding/logo.{ext}`. Deletes old logo if it exists.
-- `cacheTheme`: Stores theme in Cloudflare KV with key `theme:{ownerId}`.
+- `uploadLogo`: Uses `R2Service` to upload to shared bucket `codex-assets-production` with organization-scoped path `{organizationId}/branding/logo.{ext}`. Deletes old logo if it exists.
+- `cacheTheme`: Stores theme in Cloudflare KV with key `theme:{organizationId}`.
 - `getCachedTheme`: Retrieves theme from KV.
 
 ---
@@ -518,21 +520,25 @@ function hslToRGB(hsl: HSL): { r: number; g: number; b: number } {
 
 ```typescript
 import type { PageServerLoad, Actions } from './$types';
-import { requireOwner } from '$lib/server/auth/guards';
+import { requireAuth, requirePlatformOwner } from '$lib/server/auth/guards';
 import { platformSettingsService } from '$lib/server/platform-settings/service';
 import { fail } from '@sveltejs/kit';
 
 export const load: PageServerLoad = async (event) => {
-  // Require Platform Owner role
-  const owner = requireOwner(event);
+  // Require authenticated user with Platform Owner role
+  const user = requireAuth(event);
+  requirePlatformOwner(user);
+
+  // Get organizationId from auth context
+  const { organizationId } = user;
 
   // Load current settings
-  const settings = await platformSettingsService.getSettings(owner.id);
+  const settings = await platformSettingsService.getSettings(organizationId);
 
   // If no settings exist, create defaults
   if (!settings) {
     const defaultSettings = await platformSettingsService.updateSettings(
-      owner.id,
+      organizationId,
       {
         platformName: 'Codex Platform',
         primaryColorHex: '#3B82F6',
@@ -547,7 +553,9 @@ export const load: PageServerLoad = async (event) => {
 
 export const actions: Actions = {
   updateSettings: async (event) => {
-    const owner = requireOwner(event);
+    const user = requireAuth(event);
+    requirePlatformOwner(user);
+    const { organizationId } = user;
     const formData = await event.request.formData();
 
     const updates: PlatformSettingsUpdate = {
@@ -567,13 +575,15 @@ export const actions: Actions = {
     }
 
     // Update settings
-    await platformSettingsService.updateSettings(owner.id, updates);
+    await platformSettingsService.updateSettings(organizationId, updates);
 
     return { success: true };
   },
 
   uploadLogo: async (event) => {
-    const owner = requireOwner(event);
+    const user = requireAuth(event);
+    requirePlatformOwner(user);
+    const { organizationId } = user;
     const formData = await event.request.formData();
     const logoFile = formData.get('logo') as File;
 
@@ -595,12 +605,12 @@ export const actions: Actions = {
     }
 
     // Get current settings to check for old logo
-    const currentSettings = await platformSettingsService.getSettings(owner.id);
+    const currentSettings = await platformSettingsService.getSettings(organizationId);
 
     // Upload new logo
     const arrayBuffer = await logoFile.arrayBuffer();
     const logoUrl = await platformSettingsService.uploadLogo(
-      owner.id,
+      organizationId,
       arrayBuffer,
       logoFile.name
     );
@@ -611,7 +621,7 @@ export const actions: Actions = {
     }
 
     // Update settings with new logo URL
-    await platformSettingsService.updateSettings(owner.id, { logoUrl });
+    await platformSettingsService.updateSettings(organizationId, { logoUrl });
 
     return { success: true, logoUrl };
   },
@@ -778,25 +788,25 @@ import type { LayoutServerLoad } from './$types';
 import { platformSettingsService } from '$lib/server/platform-settings/service';
 
 export const load: LayoutServerLoad = async (event) => {
-  // For Phase 1, use the single Platform Owner's ID
-  // In Phase 3, this will be extracted from the request path (/:ownerSlug/...)
-  const ownerId = 'single-owner-id'; // Hardcoded for MVP, will be dynamic in Phase 3
+  // For Phase 1, use the single organization's ID
+  // In future phases, this will be extracted from auth context or request path
+  const organizationId = 'single-organization-id'; // Hardcoded for MVP, will be dynamic in later phases
 
   // Try to get cached theme from KV first
-  let theme = await platformSettingsService.getCachedTheme(ownerId);
+  let theme = await platformSettingsService.getCachedTheme(organizationId);
 
   if (!theme) {
     // Cache miss: load from database and generate theme
-    const settings = await platformSettingsService.getSettings(ownerId);
+    const settings = await platformSettingsService.getSettings(organizationId);
 
     if (settings) {
       theme = platformSettingsService.generateTheme(settings.primaryColorHex);
-      await platformSettingsService.cacheTheme(ownerId, theme);
+      await platformSettingsService.cacheTheme(organizationId, theme);
     }
   }
 
   // Load basic settings for use in components (logo, platform name, etc.)
-  const settings = await platformSettingsService.getSettings(ownerId);
+  const settings = await platformSettingsService.getSettings(organizationId);
 
   return {
     theme: theme?.cssVariables || '',
@@ -845,18 +855,19 @@ import {
   timestamp,
   index,
 } from 'drizzle-orm/pg-core';
-import { users } from './auth';
+import { organizations } from './organizations';
 
 export const platformSettings = pgTable(
   'platform_settings',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    ownerId: uuid('owner_id')
-      .references(() => users.id)
+    organizationId: uuid('organization_id')
+      .references(() => organizations.id)
       .notNull()
       .unique(),
 
     // Branding
+    // Logo stored in shared R2 bucket at: {organizationId}/branding/logo.{ext}
     logoUrl: text('logo_url'),
     primaryColorHex: varchar('primary_color_hex', { length: 7 })
       .notNull()
@@ -877,8 +888,8 @@ export const platformSettings = pgTable(
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
-    // Index for efficient owner lookups (ready for multi-tenant)
-    ownerIdIdx: index('idx_platform_settings_owner_id').on(table.ownerId),
+    // Index for efficient organization lookups
+    organizationIdIdx: index('idx_platform_settings_organization_id').on(table.organizationId),
   })
 );
 ```
@@ -904,8 +915,8 @@ preview_id = "your-preview-kv-namespace-id"
 
 ```typescript
 // In PlatformSettingsService
-async cacheTheme(ownerId: string, theme: ThemeColors): Promise<void> {
-  const kvKey = `theme:${ownerId}`;
+async cacheTheme(organizationId: string, theme: ThemeColors): Promise<void> {
+  const kvKey = `theme:${organizationId}`;
   await platform.env.THEMES_KV.put(kvKey, JSON.stringify(theme), {
     expirationTtl: 86400 // 24 hours (theme rarely changes)
   });
@@ -915,8 +926,8 @@ async cacheTheme(ownerId: string, theme: ThemeColors): Promise<void> {
 **Retrieving Theme**:
 
 ```typescript
-async getCachedTheme(ownerId: string): Promise<ThemeColors | null> {
-  const kvKey = `theme:${ownerId}`;
+async getCachedTheme(organizationId: string): Promise<ThemeColors | null> {
+  const kvKey = `theme:${organizationId}`;
   const cached = await platform.env.THEMES_KV.get(kvKey);
 
   if (!cached) return null;
@@ -928,17 +939,17 @@ async getCachedTheme(ownerId: string): Promise<ThemeColors | null> {
 **Invalidating Cache on Update**:
 
 ```typescript
-async updateSettings(ownerId: string, updates: PlatformSettingsUpdate): Promise<PlatformSettings> {
+async updateSettings(organizationId: string, updates: PlatformSettingsUpdate): Promise<PlatformSettings> {
   // Update database
   const updated = await db.update(platformSettings)
     .set({ ...updates, updatedAt: new Date() })
-    .where(eq(platformSettings.ownerId, ownerId))
+    .where(eq(platformSettings.organizationId, organizationId))
     .returning();
 
   // If color changed, regenerate and cache theme
   if (updates.primaryColorHex) {
     const theme = this.generateTheme(updates.primaryColorHex);
-    await this.cacheTheme(ownerId, theme);
+    await this.cacheTheme(organizationId, theme);
   }
 
   return updated[0];
@@ -954,13 +965,13 @@ async updateSettings(ownerId: string, updates: PlatformSettingsUpdate): Promise<
 ```typescript
 // In PlatformSettingsService
 async uploadLogo(
-  ownerId: string,
+  organizationId: string,
   file: ArrayBuffer | Uint8Array,
   filename: string
 ): Promise<string> {
-  const bucketName = `codex-assets-${ownerId}`;
+  const bucketName = 'codex-assets-production'; // Shared bucket for Phase 1
   const fileExt = filename.split('.').pop();
-  const key = `branding/logo.${fileExt}`;
+  const key = `${organizationId}/branding/logo.${fileExt}`; // Organization-scoped path
 
   // Upload to R2 using R2Service
   await r2Service.uploadFile(bucketName, key, file, {
@@ -1036,23 +1047,32 @@ function getContentType(ext: string): string {
 
 ---
 
-## Future Extensions (Phase 3 Multi-Tenant)
+## Future Extensions (Multi-Organization Support)
 
-### What Changes:
+### Phase 1 Foundation:
 
-1. **Routing**: Extract `ownerSlug` from path (`/[ownerSlug]/...`).
-2. **Settings Query**: `WHERE owner_id = (SELECT id FROM users WHERE owner_slug = $1)`.
-3. **KV Key**: `theme:{ownerSlug}` instead of hardcoded owner ID.
-4. **Middleware**: Inject tenant-specific theme based on current path.
+Phase 1 already implements organization-scoped architecture:
+- Database uses `organization_id` for isolation
+- R2 uses organization-scoped paths in shared bucket
+- KV keys include `organizationId`
+- All service methods accept `organizationId` parameter
+
+### What Changes in Future Phases:
+
+1. **Dynamic Organization Resolution**: Extract `organizationId` from request context (domain, path, or subdomain) instead of hardcoded value.
+2. **Multi-Organization Support**: Support multiple organizations with proper isolation and routing.
+3. **Per-Organization Themes**: Load different themes based on current organization context.
+4. **Organization Slug Support**: Optionally use organization slugs for routing (`/[orgSlug]/...`).
 
 ### What Stays the Same:
 
-- Database schema (no changes needed).
+- Database schema (already organization-scoped).
 - Theme generation logic.
-- Logo upload logic.
-- KV caching strategy.
+- Logo upload logic (already uses organization-scoped paths).
+- KV caching strategy (already uses `theme:{organizationId}` keys).
+- Service interfaces (already accept `organizationId`).
 
-**Migration Path**: Zero schema changes. Only routing and middleware updates.
+**Migration Path**: The organization-scoped architecture is already in place. Future phases only need to add dynamic organization resolution and multi-organization routing.
 
 ---
 

@@ -4,11 +4,13 @@
 
 The e-commerce system facilitates one-time purchases of digital content using Stripe Checkout. The architecture is designed for security and reliability, ensuring that payment processing is handled by Stripe to minimize our PCI compliance scope, while our backend reliably tracks purchases to grant content access.
 
+> **Phase 1 Architecture Note**: In Phase 1, the e-commerce system uses organization-level isolation. All purchases are scoped to an organization, and all database queries filter by `organizationId`. The authenticated user context automatically provides the `organizationId` for all operations.
+
 **Key Architecture Decisions**:
 
 - **Stripe Checkout (Hosted)**: We will redirect users to a Stripe-hosted page for payment. This is the most secure approach, as sensitive card details never touch our servers.
 - **Webhook-Driven Fulfillment**: Content access is granted only after a verified webhook from Stripe confirms a successful payment. This prevents users from gaining access without a completed payment.
-- **Pending Purchase Record**: A `purchases` record with a `pending` status is created _before_ the user is redirected to Stripe. This record is then updated to `completed` by the webhook, creating a clear audit trail.
+- **Pending Purchase Record**: A `content_purchases` record with a `pending` status is created _before_ the user is redirected to Stripe. This record is then updated to `completed` by the webhook, creating a clear audit trail.
 - **Idempotent Webhook Handler**: The webhook processor is designed to handle duplicate events from Stripe without creating duplicate purchases.
 
 **Architecture Diagram**:
@@ -28,7 +30,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 1.  **Auth System**: An authenticated user is required to link purchases to an account.
 2.  **Content Management System**: Published content with an associated price is needed to be sold.
 3.  **Notification Service**: Required for sending purchase receipts and refund confirmations.
-4.  **Database Schema**: The `purchases` table must be migrated.
+4.  **Database Schema**: The `content_purchases` table must be migrated.
 5.  **Stripe Account Setup**: A Stripe account with API keys and a configured webhook endpoint is necessary.
 
 ---
@@ -46,8 +48,10 @@ export interface IPurchasesService {
   /**
    * Creates a Stripe Checkout session for a given user and a generic purchasable item.
    * Creates a 'pending' purchase record before returning the Stripe session URL.
+   * @param organizationId - The organization ID from authenticated user context
    */
   createCheckoutSession(
+    organizationId: string,
     userId: string,
     itemId: string,
     itemType: string
@@ -61,8 +65,10 @@ export interface IPurchasesService {
 
   /**
    * Instantly creates a 'completed' purchase record for a free item.
+   * @param organizationId - The organization ID from authenticated user context
    */
   grantFreeItemAccess(
+    organizationId: string,
     userId: string,
     itemId: string,
     itemType: string
@@ -70,8 +76,13 @@ export interface IPurchasesService {
 
   /**
    * Initiates a refund via Stripe and updates the purchase record.
+   * @param organizationId - The organization ID from authenticated user context
    */
-  refundPurchase(purchaseId: string, reason: string): Promise<void>;
+  refundPurchase(
+    organizationId: string,
+    purchaseId: string,
+    reason: string
+  ): Promise<void>;
 }
 ```
 
@@ -79,7 +90,7 @@ export interface IPurchasesService {
 
 ```typescript
 import { db } from '$lib/server/db';
-import { content, purchases, users } from '$lib/server/db/schema';
+import { content, contentPurchases, users } from '$lib/server/db/schema';
 import { stripe } from '$lib/server/stripe';
 import { and, eq } from 'drizzle-orm';
 import { notificationService } from '$lib/server/notifications';
@@ -87,6 +98,7 @@ import { error } from '@sveltejs/kit';
 
 export class PurchasesService implements IPurchasesService {
   async createCheckoutSession(
+    organizationId: string,
     userId: string,
     itemId: string,
     itemType: string
@@ -99,11 +111,15 @@ export class PurchasesService implements IPurchasesService {
     }
 
     // 1. Fetch the purchasable item's details based on its type
+    // All queries are scoped to the organization
     let itemDetails;
     switch (itemType) {
       case 'content':
         itemDetails = await db.query.content.findFirst({
-          where: eq(content.id, itemId),
+          where: and(
+            eq(content.id, itemId),
+            eq(content.organizationId, organizationId)
+          ),
         });
         if (!itemDetails) throw error(404, 'Content not found');
         break;
@@ -116,13 +132,14 @@ export class PurchasesService implements IPurchasesService {
         throw error(400, 'Invalid item type');
     }
 
-    // 2. Check if already purchased
-    const existingPurchase = await db.query.purchases.findFirst({
+    // 2. Check if already purchased (organization-scoped)
+    const existingPurchase = await db.query.contentPurchases.findFirst({
       where: and(
-        eq(purchases.customerId, userId),
-        eq(purchases.itemId, itemId),
-        eq(purchases.itemType, itemType),
-        eq(purchases.status, 'completed')
+        eq(contentPurchases.customerId, userId),
+        eq(contentPurchases.itemId, itemId),
+        eq(contentPurchases.itemType, itemType),
+        eq(contentPurchases.organizationId, organizationId),
+        eq(contentPurchases.status, 'completed')
       ),
     });
     if (existingPurchase) {
@@ -131,15 +148,15 @@ export class PurchasesService implements IPurchasesService {
 
     // 3. Handle free items separately
     if (itemDetails.price === 0) {
-      await this.grantFreeItemAccess(userId, itemId, itemType);
+      await this.grantFreeItemAccess(organizationId, userId, itemId, itemType);
       throw error(200, 'Free content access granted');
     }
 
     // Use a transaction to ensure atomicity
     return db.transaction(async (tx) => {
-      // 4. Create a pending purchase record
+      // 4. Create a pending purchase record (organization-scoped)
       const [pendingPurchase] = await tx
-        .insert(purchases)
+        .insert(contentPurchases)
         .values({
           customerId: userId,
           itemId: itemId,
@@ -147,7 +164,7 @@ export class PurchasesService implements IPurchasesService {
           amountPaid: itemDetails.price,
           currency: 'usd',
           status: 'pending',
-          creatorId: itemDetails.ownerId, // Assumes 'ownerId' field exists on all purchasable models
+          organizationId: organizationId, // Phase 1: Organization-level isolation
           platformFeeAmount: 0,
           creatorPayoutAmount: itemDetails.price,
         })
@@ -188,9 +205,9 @@ export class PurchasesService implements IPurchasesService {
 
       // 6. Update purchase record with Stripe session ID
       await tx
-        .update(purchases)
+        .update(contentPurchases)
         .set({ stripeCheckoutSessionId: session.id })
-        .where(eq(purchases.id, pendingPurchase.id));
+        .where(eq(contentPurchases.id, pendingPurchase.id));
 
       return { checkoutUrl: session.url };
     });
@@ -204,8 +221,8 @@ export class PurchasesService implements IPurchasesService {
       throw new Error('Missing required metadata in webhook');
     }
 
-    const purchase = await db.query.purchases.findFirst({
-      where: eq(purchases.id, purchaseId),
+    const purchase = await db.query.contentPurchases.findFirst({
+      where: eq(contentPurchases.id, purchaseId),
     });
 
     if (purchase?.status === 'completed') {
@@ -215,7 +232,7 @@ export class PurchasesService implements IPurchasesService {
 
     // Update purchase to 'completed'
     const [updatedPurchase] = await db
-      .update(purchases)
+      .update(contentPurchases)
       .set({
         status: 'completed',
         purchasedAt: new Date(),
@@ -224,7 +241,7 @@ export class PurchasesService implements IPurchasesService {
             ? session.payment_intent
             : null,
       })
-      .where(eq(purchases.id, purchaseId))
+      .where(eq(contentPurchases.id, purchaseId))
       .returning();
 
     // Trigger access grant logic based on item type
@@ -259,15 +276,20 @@ export class PurchasesService implements IPurchasesService {
   }
 
   async grantFreeItemAccess(
+    organizationId: string,
     userId: string,
     itemId: string,
     itemType: string
   ): Promise<void> {
-    // Logic to grant access to free items
+    // Logic to grant access to free items (organization-scoped)
   }
 
-  async refundPurchase(purchaseId: string, reason: string): Promise<void> {
-    // Logic to refund a purchase via Stripe and update the DB
+  async refundPurchase(
+    organizationId: string,
+    purchaseId: string,
+    reason: string
+  ): Promise<void> {
+    // Logic to refund a purchase via Stripe and update the DB (organization-scoped)
   }
 }
 
@@ -278,6 +300,8 @@ export const purchasesService = new PurchasesService();
 
 **Responsibility**: A protected endpoint that the frontend calls to initiate a purchase.
 
+**Note**: `requireAuth()` returns the authenticated user with their `organizationId` from the session context. In Phase 1, all operations are organization-scoped.
+
 ```typescript
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
@@ -285,6 +309,7 @@ import { requireAuth } from '$lib/server/guards';
 import { purchasesService } from '$lib/server/purchases/service';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
+  // requireAuth provides user context including organizationId
   const user = requireAuth({ locals, url: request.url });
   const { itemId, itemType } = await request.json();
 
@@ -294,6 +319,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
   try {
     const { checkoutUrl } = await purchasesService.createCheckoutSession(
+      user.organizationId, // Phase 1: Organization from user context
       user.id,
       itemId,
       itemType
@@ -364,8 +390,8 @@ export default {
 
 ## Data Models / Schema
 
-**Schema Definition** (`packages/db/src/schema/purchases.ts`):
-This schema is based on the `database-schema.md` document and updated for future extensibility.
+**Schema Definition** (`packages/db/src/schema/content-purchases.ts`):
+This schema is based on the `database-schema.md` document and updated for Phase 1 organization-scoped architecture.
 
 ```typescript
 import {
@@ -379,6 +405,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { users } from './auth';
 import { content } from './content';
+import { organizations } from './organizations';
 
 export const purchaseStatusEnum = pgEnum('purchase_status', [
   'pending',
@@ -387,8 +414,14 @@ export const purchaseStatusEnum = pgEnum('purchase_status', [
   'failed',
 ]);
 
-export const purchases = pgTable('purchases', {
+export const contentPurchases = pgTable('content_purchases', {
   id: uuid('id').primaryKey().defaultRandom(),
+
+  // Phase 1: Organization-scoped isolation
+  organizationId: uuid('organization_id')
+    .references(() => organizations.id)
+    .notNull(),
+
   customerId: uuid('customer_id')
     .references(() => users.id)
     .notNull(),
@@ -396,11 +429,6 @@ export const purchases = pgTable('purchases', {
   // Polymorphic relationship to the purchased item
   itemId: uuid('item_id').notNull(),
   itemType: varchar('item_type', { length: 50 }).notNull(), // e.g., 'content', 'offering', 'subscription_tier'
-
-  // Ownership for revenue tracking
-  creatorId: uuid('creator_id')
-    .references(() => users.id)
-    .notNull(),
 
   // Payment Details
   amountPaid: decimal('amount_paid', { precision: 10, scale: 2 }).notNull(),
@@ -431,6 +459,12 @@ export const purchases = pgTable('purchases', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 ```
+
+**Key Schema Changes for Phase 1**:
+- Table name: `content_purchases` (not just `purchases`)
+- Added `organizationId` field for organization-level isolation
+- Removed `creatorId` in favor of `organizationId` for Phase 1 simplicity
+- All queries must filter by `organizationId` to ensure proper data isolation
 
 ---
 

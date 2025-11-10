@@ -1,5 +1,9 @@
 # Notifications - Phase 1 TDD (Technical Design Document)
 
+## Phase 1 Architecture Notes
+
+> **Organization-Level Isolation**: In Phase 1, email templates are organization-scoped, allowing each organization to customize their notification templates. The notification service accepts an `organizationId` parameter to load the appropriate templates. System-wide default templates are stored with a null `organization_id` and serve as fallbacks.
+
 ## System Overview
 
 The notification system provides email delivery with provider abstraction, ensuring business logic is decoupled from email service providers. Phase 1 implements Resend as the default provider but maintains flexibility for future provider changes.
@@ -49,6 +53,9 @@ export interface EmailPayload {
   /** Recipient email address */
   recipient: string;
 
+  /** Organization ID for template scoping (null for system-wide templates) */
+  organizationId: string | null;
+
   /** Template data for interpolation */
   data: Record<string, any>;
 
@@ -92,11 +99,11 @@ import { logger } from '$lib/server/logger';
 
 export class NotificationService implements INotificationService {
   async sendEmail(payload: EmailPayload): Promise<EmailResult> {
-    const { template, recipient, data, replyTo } = payload;
+    const { template, recipient, organizationId, data, replyTo } = payload;
 
     try {
-      // 1. Load and render template
-      const templateContent = await loadTemplate(template);
+      // 1. Load and render template (with organization scoping)
+      const templateContent = await loadTemplate(template, organizationId);
       const { subject, html, text } = await renderTemplate(
         templateContent,
         data
@@ -339,41 +346,64 @@ export const emailAdapter = createEmailAdapter();
 ```sql
 CREATE TABLE email_templates (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name VARCHAR(100) UNIQUE NOT NULL,           -- e.g., 'email-verification', 'password-reset'
+  organization_id UUID,                         -- NULL for system-wide templates, FK to organizations for custom templates
+  name VARCHAR(100) NOT NULL,                   -- e.g., 'email-verification', 'password-reset'
   subject TEXT NOT NULL,                        -- May contain {{variables}}
   html_body TEXT NOT NULL,                      -- HTML email body
   text_body TEXT NOT NULL,                      -- Plain text fallback
   description TEXT,                             -- Human-readable description
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  -- Unique constraint: template name must be unique per organization (or system-wide)
+  CONSTRAINT unique_template_per_org UNIQUE (organization_id, name),
+
+  -- Foreign key to organizations table
+  CONSTRAINT fk_organization FOREIGN KEY (organization_id)
+    REFERENCES organizations(id) ON DELETE CASCADE
 );
 
--- Index for fast lookups by template name
-CREATE INDEX idx_email_templates_name ON email_templates(name);
+-- Index for fast lookups by organization and template name
+CREATE INDEX idx_email_templates_org_name ON email_templates(organization_id, name);
 
--- Seed data for Phase 1 templates
-INSERT INTO email_templates (name, subject, html_body, text_body, description) VALUES
-  ('email-verification', 'Verify your email address for {{platformName}}', '...', '...', 'Sent after user registration'),
-  ('password-reset', 'Reset your password for {{platformName}}', '...', '...', 'Sent when user requests password reset'),
-  ('password-changed', 'Your password has been changed', '...', '...', 'Sent after successful password change'),
-  ('purchase-receipt', 'Receipt for your purchase (Order #{{orderNumber}})', '...', '...', 'Sent after successful purchase');
+-- Seed data for Phase 1 system-wide templates (organization_id = NULL)
+INSERT INTO email_templates (organization_id, name, subject, html_body, text_body, description) VALUES
+  (NULL, 'email-verification', 'Verify your email address for {{platformName}}', '...', '...', 'Sent after user registration'),
+  (NULL, 'password-reset', 'Reset your password for {{platformName}}', '...', '...', 'Sent when user requests password reset'),
+  (NULL, 'password-changed', 'Your password has been changed', '...', '...', 'Sent after successful password change'),
+  (NULL, 'purchase-receipt', 'Receipt for your purchase (Order #{{orderNumber}})', '...', '...', 'Sent after successful purchase');
 ```
 
 **Drizzle Schema** (`packages/web/src/lib/server/db/schema/notifications.ts`):
 
 ```typescript
-import { pgTable, uuid, varchar, text, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { organizations } from './organizations';
 
 export const emailTemplates = pgTable('email_templates', {
   id: uuid('id').primaryKey().defaultRandom(),
-  name: varchar('name', { length: 100 }).unique().notNull(),
+  organizationId: uuid('organization_id').references(() => organizations.id, {
+    onDelete: 'cascade',
+  }),
+  name: varchar('name', { length: 100 }).notNull(),
   subject: text('subject').notNull(),
   htmlBody: text('html_body').notNull(),
   textBody: text('text_body').notNull(),
   description: text('description'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  // Unique constraint: template name must be unique per organization
+  uniqueTemplatePerOrg: uniqueIndex('unique_template_per_org').on(
+    table.organizationId,
+    table.name
+  ),
+  // Index for fast lookups by organization and template name
+  orgNameIdx: uniqueIndex('idx_email_templates_org_name').on(
+    table.organizationId,
+    table.name
+  ),
+}));
 ```
 
 **Implementation**:
@@ -381,7 +411,7 @@ export const emailTemplates = pgTable('email_templates', {
 ```typescript
 import { db } from '$lib/server/db';
 import { emailTemplates } from '$lib/server/db/schema/notifications';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 
 /**
  * Template content (metadata + body)
@@ -398,15 +428,38 @@ export interface TemplateContent {
 }
 
 /**
- * Load template from database
+ * Load template from database with organization scoping
  * Works in Cloudflare Workers (no filesystem access required)
+ *
+ * Fallback logic:
+ * 1. Try to load organization-specific template (if organizationId provided)
+ * 2. Fall back to system-wide template (organization_id IS NULL)
  */
 export async function loadTemplate(
-  templateName: string
+  templateName: string,
+  organizationId: string | null
 ): Promise<TemplateContent> {
-  const template = await db.query.emailTemplates.findFirst({
-    where: eq(emailTemplates.name, templateName),
-  });
+  let template;
+
+  // 1. Try organization-specific template first (if organizationId provided)
+  if (organizationId) {
+    template = await db.query.emailTemplates.findFirst({
+      where: and(
+        eq(emailTemplates.name, templateName),
+        eq(emailTemplates.organizationId, organizationId)
+      ),
+    });
+  }
+
+  // 2. Fall back to system-wide template
+  if (!template) {
+    template = await db.query.emailTemplates.findFirst({
+      where: and(
+        eq(emailTemplates.name, templateName),
+        isNull(emailTemplates.organizationId)
+      ),
+    });
+  }
 
   if (!template) {
     throw new Error(`Template not found: ${templateName}`);
@@ -424,6 +477,8 @@ export async function loadTemplate(
 
 - ✅ Works in Cloudflare Workers (no filesystem)
 - ✅ Templates can be updated without redeploying code
+- ✅ Organization-level customization (each org can have custom templates)
+- ✅ Fallback to system-wide templates (graceful degradation)
 - ✅ Can add admin UI to manage templates (Phase 2)
 - ✅ Easy to version control via migrations
 - ✅ Can cache templates in memory or KV for performance
@@ -524,7 +579,9 @@ Templates are seeded during initial database setup. Each template includes:
 
 **Template Management**:
 
-- Seeded via database migration or seed script
+- System-wide templates seeded via database migration or seed script (organization_id = NULL)
+- Organization-specific templates can be created per organization
+- Fallback logic ensures system templates are used when org-specific templates don't exist
 - Can be updated directly in database (no code deployment required)
 - Future: Admin UI for template editing (Phase 2)
 - Future: Template caching in KV for performance (Phase 2)
@@ -630,6 +687,7 @@ const user = await createUser({ email, password, name });
 await enqueueEmail(event.platform.env.EMAIL_QUEUE, {
   template: 'email-verification',
   recipient: user.email,
+  organizationId: user.organizationId, // Organization scoping
   data: { userName: user.name, verificationUrl: '...' },
 });
 
@@ -653,11 +711,16 @@ return { success: true };
 
 ```typescript
 import { notificationService } from '$lib/server/notifications';
+import { requireAuth } from '$lib/server/auth/guards';
+
+// Get authenticated user context (includes organizationId)
+const { user } = await requireAuth(event);
 
 // Send email verification (blocks until sent)
 await notificationService.sendEmail({
   template: 'email-verification',
   recipient: user.email,
+  organizationId: user.organizationId, // Organization scoping
   data: {
     userName: user.name,
     verificationUrl: `${AUTH_URL}/verify-email?token=${token}`,
@@ -673,11 +736,16 @@ await notificationService.sendEmail({
 
 ```typescript
 import { notificationService } from '$lib/server/notifications';
+import { requireAuth } from '$lib/server/auth/guards';
+
+// Get authenticated user context (includes organizationId)
+const { user } = await requireAuth(event);
 
 // Send email verification
 await notificationService.sendEmail({
   template: 'email-verification',
   recipient: user.email,
+  organizationId: user.organizationId, // Organization scoping
   data: {
     userName: user.name,
     verificationUrl: `${AUTH_URL}/verify-email?token=${token}`,
@@ -690,6 +758,7 @@ await notificationService.sendEmail({
 await notificationService.sendEmail({
   template: 'password-reset',
   recipient: user.email,
+  organizationId: user.organizationId, // Organization scoping
   data: {
     userName: user.name,
     resetUrl: `${AUTH_URL}/reset-password?token=${token}`,
@@ -703,11 +772,16 @@ await notificationService.sendEmail({
 
 ```typescript
 import { notificationService } from '$lib/server/notifications';
+import { requireAuth } from '$lib/server/auth/guards';
+
+// Get authenticated user context (includes organizationId)
+const { user } = await requireAuth(event);
 
 // Send purchase receipt
 await notificationService.sendEmail({
   template: 'purchase-receipt',
   recipient: customer.email,
+  organizationId: user.organizationId, // Organization scoping
   data: {
     customerName: customer.name,
     orderNumber: order.id,
@@ -747,6 +821,7 @@ describe('NotificationService', () => {
     const result = await service.sendEmail({
       template: 'email-verification',
       recipient: 'test@example.com',
+      organizationId: 'org-123', // Organization scoping
       data: {
         userName: 'Test User',
         verificationUrl: 'https://example.com/verify',
@@ -776,6 +851,7 @@ describe('NotificationService', () => {
     const result = await service.sendEmail({
       template: 'email-verification',
       recipient: 'test@example.com',
+      organizationId: 'org-123', // Organization scoping
       data: {
         userName: 'Test User',
         verificationUrl: 'https://example.com/verify',
@@ -797,11 +873,33 @@ describe('NotificationService', () => {
     const result = await service.sendEmail({
       template: 'non-existent-template',
       recipient: 'test@example.com',
+      organizationId: 'org-123', // Organization scoping
       data: {},
     });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Template not found');
+  });
+
+  it('uses system-wide template when org-specific template not found', async () => {
+    const mockAdapter: IEmailAdapter = {
+      send: vi.fn().mockResolvedValue({ success: true, emailId: '123' }),
+      verify: vi.fn().mockResolvedValue(true),
+    };
+
+    const service = new NotificationService(mockAdapter);
+
+    const result = await service.sendEmail({
+      template: 'email-verification',
+      recipient: 'test@example.com',
+      organizationId: null, // Falls back to system-wide template
+      data: {
+        userName: 'Test User',
+        verificationUrl: 'https://example.com/verify',
+      },
+    });
+
+    expect(result.success).toBe(true);
   });
 });
 ```
@@ -862,6 +960,7 @@ describe('Notification Integration', () => {
     const result = await notificationService.sendEmail({
       template: 'email-verification',
       recipient: 'test@example.com', // Use test email account
+      organizationId: 'test-org-123', // Organization scoping
       data: {
         userName: 'Integration Test',
         verificationUrl: 'https://example.com/verify?token=test',
@@ -875,6 +974,23 @@ describe('Notification Integration', () => {
 
     // Optional: Check test email account to verify delivery
     // (requires test email API access, e.g., Mailinator, Mailtrap)
+  });
+
+  it('falls back to system template when org template not found', async () => {
+    const result = await notificationService.sendEmail({
+      template: 'email-verification',
+      recipient: 'test@example.com',
+      organizationId: null, // Use system-wide template
+      data: {
+        userName: 'Integration Test',
+        verificationUrl: 'https://example.com/verify?token=test',
+        platformName: 'Codex Platform',
+        year: 2025,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.emailId).toBeDefined();
   });
 });
 ```
@@ -1071,6 +1187,6 @@ SENDGRID_API_KEY=SG.xxxxxxxxxxxxxxxxxxxxx
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2025-10-20
-**Status**: Draft - Awaiting Review
+**Document Version**: 1.1
+**Last Updated**: 2025-11-06
+**Status**: Updated - Phase 1 Architecture Alignment

@@ -101,22 +101,36 @@ Organization admin/member
 
 **Database Schema**
 ```sql
+-- Media is creator-owned
+CREATE TABLE media_items (
+  id UUID PRIMARY KEY,
+  creator_id UUID REFERENCES users(id) NOT NULL, -- Creator owns media
+  media_type media_type, -- 'video' | 'audio'
+  status media_status, -- 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed'
+  -- R2 storage in creator's bucket: codex-media-{creator_id}
+  r2_key VARCHAR NOT NULL,
+  hls_master_playlist_key VARCHAR, -- After transcoding
+  thumbnail_key VARCHAR,
+  duration_seconds INTEGER,
+  createdAt TIMESTAMP,
+  updatedAt TIMESTAMP
+);
+
+-- Content references creator-owned media
 CREATE TABLE content (
   id UUID PRIMARY KEY,
-  organizationId UUID REFERENCES organization(id),
-  createdBy UUID REFERENCES "user"(id),
+  creator_id UUID REFERENCES users(id) NOT NULL, -- Who created this post
+  organization_id UUID REFERENCES organizations(id), -- NULL = personal, NOT NULL = org
+  media_item_id UUID REFERENCES media_items(id), -- Links to creator's media
   title VARCHAR NOT NULL,
   description TEXT,
-  contentType content_type, -- 'video' | 'audio' | 'written'
+  content_type content_type, -- 'video' | 'audio' | 'written'
   status publication_status, -- 'draft' | 'published' | 'archived'
   pricing_type VARCHAR, -- 'free' | 'purchase' | 'subscription' (Phase 2+)
   price DECIMAL,
   visibility visibility_type, -- 'public' | 'private' | 'members_only'
-  -- Media storage
-  fileUrl VARCHAR, -- URL to R2 file
-  duration INTEGER, -- seconds for video/audio
   -- Metadata
-  thumbnail TEXT,
+  thumbnail_url TEXT, -- Custom thumbnail, or uses media_items.thumbnail_key
   category VARCHAR,
   tags TEXT[],
   createdAt TIMESTAMP,

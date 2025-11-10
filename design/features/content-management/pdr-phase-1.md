@@ -2,9 +2,12 @@
 
 ## Feature Summary
 
-Content management system for Creators to upload, organize, and manage video and audio content. Phase 1 focuses on core CRUD operations with media library separation, Cloudflare R2 storage via bucket-per-creator architecture, and metadata management in Neon Postgres.
+Content management system for Creators to upload, organize, and manage video and audio content. Phase 1 focuses on core CRUD operations with media library separation, Cloudflare R2 storage via unified buckets with creator-specific folder structure, and metadata management in Neon Postgres.
 
-**Key Concept**: Content entities reference media items (videos/audio) stored in the media library. This separation allows content pricing/packaging while media items handle storage and transcoding.
+**Key Concept**: Media items (videos/audio) are **creator-owned** and stored in creator-specific R2 storage folders within unified buckets. Content posts reference media items and can belong to organizations OR exist on creator's personal profile. This separation allows:
+- Media reusability across multiple content posts/organizations
+- Creator independence (media persists even if they leave an org)
+- Personal creator profiles alongside organizational content
 
 ## Problem Statement
 
@@ -14,7 +17,7 @@ Creators need a way to:
 - Upload audio content (MP3, M4A, WAV) for podcasts or audio lessons
 - Organize content with metadata (title, description, categories, tags)
 - Manage content lifecycle (draft, published, archived)
-- Store media files securely in isolated creator buckets
+- Store media files securely in isolated creator storage folders
 - Prepare content for sale via e-commerce integration
 - Attach downloadable resources (PDFs, workbooks) to content
 
@@ -36,7 +39,7 @@ Without content management:
 5. **Content Organization** - Categorize and tag content for discovery
 6. **Lifecycle Management** - Draft, publish, archive workflow
 7. **Resource Attachments** - Attach PDFs/workbooks to content (reusable across content)
-8. **Storage Integration** - Use Cloudflare R2 bucket-per-creator for scalable storage
+8. **Storage Integration** - Use Cloudflare R2 unified buckets with creator-specific folder structure for scalable storage
 
 ### Success Metrics
 
@@ -44,7 +47,7 @@ Without content management:
 - Uploaded media appears in media library immediately
 - Content can reference existing media items (no re-upload)
 - Metadata stored in database with correct relationships
-- Files stored in creator-specific R2 buckets with proper access control
+- Files stored in creator-specific R2 storage folders with proper access control
 - Published content appears in customer catalog (after purchase)
 - Draft content hidden from customers
 - 100% pass rate on content management unit tests
@@ -93,7 +96,7 @@ Without content management:
   - Content preview
   - Resource attachment management
 - **Storage**:
-  - Cloudflare R2 bucket-per-creator architecture
+  - Cloudflare R2 unified buckets with creator-specific folder structure (see [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
   - Neon Postgres for metadata
   - Presigned URLs for secure file access
 
@@ -134,18 +137,17 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 4. System:
    - Validates file type (MP4, WebM, MOV) and size (max 5GB)
    - Requests presigned upload URL from backend
-   - Backend generates R2 presigned URL for `codex-media-{creatorId}/originals/{mediaId}/original.mp4`
+   - Backend generates R2 presigned URL for creator's bucket: `codex-media-{creatorId}/originals/{mediaId}/original.mp4`
    - Shows upload progress bar
-   - Uploads directly to creator's R2 media bucket
+   - Uploads directly to creator's R2 media bucket (creator-owned storage)
 5. On upload complete:
    - Frontend notifies backend: `POST /api/media/upload-complete`
    - Backend creates `media_items` record:
      - `id = {mediaId}`
-     - `owner_id = {creatorId}`
+     - `creator_id = {creatorId}` ← Media is creator-owned
      - `type = 'video'`
      - `status = 'uploaded'`
-     - `bucket_name = 'codex-media-{creatorId}'`
-     - `file_key = 'originals/{mediaId}/original.mp4'`
+     - `r2_key = 'originals/{mediaId}/original.mp4'`
    - Backend enqueues transcoding job (see [Media Transcoding](../media-transcoding/pdr-phase-1.md))
    - `media_items.status` updated to `'transcoding'`
 6. Creator sees media item in media library with status "Transcoding..."
@@ -167,7 +169,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 
 **As a** Creator
 **I want to** create content that references a video in my media library
-**So that** I can package media with pricing and metadata for sale
+**So that** I can package media with pricing and metadata for sale on my profile or an organization
 
 **Flow:**
 
@@ -178,6 +180,9 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
    - **Content Type**: "Video" (selected)
    - **Media Item**: Dropdown showing creator's video media items
      - Creator selects "typescript-intro.mp4" (uploaded previously)
+   - **Post to**: Dropdown
+     - "My Profile" (personal content, `organization_id = NULL`)
+     - "Acme Org" (organizational content, `organization_id = {orgId}`) [If creator belongs to orgs]
    - **Category**: "Programming"
    - **Tags**: "typescript", "javascript", "tutorial"
    - **Price**: $29.99
@@ -192,7 +197,9 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 5. Creator clicks "Save as Draft"
 6. System:
    - Creates `content` record:
-     - `media_item_id = {mediaId}` (reference to media library)
+     - `creator_id = {creatorId}` ← Creator owns this post
+     - `organization_id = NULL` (if "My Profile") OR `{orgId}` (if posted to org)
+     - `media_item_id = {mediaId}` (reference to creator's media library)
      - `status = 'draft'`
      - `price = 29.99`
      - All metadata fields
@@ -201,18 +208,21 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 7. Creator reviews, then clicks "Publish"
 8. System:
    - Updates `content.status = 'published'`
-   - Content now available for purchase in customer catalog
+   - If personal: Content appears on creator's profile page
+   - If org: Content appears in organization's catalog
 
 **Acceptance Criteria:**
 
 - Content created successfully referencing existing media item
-- No video re-upload required (reuses media library)
-- Metadata stored correctly in `content` table
+- No video re-upload required (reuses creator's media library)
+- Metadata stored correctly in `content` table with `creator_id` and `organization_id`
 - Resources attached correctly (many-to-many via `resource_attachments`)
 - Draft content hidden from customers
-- Published content appears in catalog
+- Published personal content (`organization_id = NULL`) appears on creator's profile
+- Published org content appears in organization's catalog
 - Custom thumbnail stored in creator's asset bucket
 - Media item can be referenced by multiple content entities (reusability)
+- Creator can choose to post to personal profile OR organization
 
 ---
 
@@ -426,8 +436,8 @@ See diagrams:
 ### External Dependencies
 
 - **Cloudflare R2**: Object storage for media, resources, assets
-  - Bucket-per-creator architecture (see [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
-  - Buckets: `codex-media-{creatorId}`, `codex-resources-{creatorId}`, `codex-assets-{creatorId}`
+  - Unified buckets with creator-specific folder structure (see [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
+  - Folder paths: `{creatorId}/originals/`, `{creatorId}/hls/`, `{creatorId}/audio/`
   - Access via R2 API with presigned URLs
 - **Neon Postgres**: Metadata storage
   - `media_items` table (uploaded files)
@@ -440,11 +450,20 @@ See diagrams:
 
 ### Database Schema Dependencies
 
-See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
+See [Database Schema](../../features/shared/database-schema.md) for full schema:
 
-- `media_items` table (videos/audio in media library)
-- `content` table (references media_items via `media_item_id`)
+- `media_items` table
+  - Creator-owned media (videos/audio)
+  - `creator_id` references `users(id)`
+  - Stored in R2 with folder path: `{creator_id}/originals/{media_id}/`
+- `content` table
+  - Content posts (references media_items via `media_item_id`)
+  - `creator_id` references `users(id)` (who created the post)
+  - `organization_id` references `organizations(id)` (NULL = personal, NOT NULL = org)
+  - `media_item_id` references `media_items(id)` (creator's media)
 - `resources` table (PDFs, workbooks)
+  - Creator-owned resources
+  - `creator_id` references `users(id)`
 - `resource_attachments` table (content ↔ resources many-to-many)
 - `categories` table
 - `tags` table
@@ -458,7 +477,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 
 - Creator can upload video files (MP4, WebM, MOV, max 5GB)
 - Creator can upload audio files (MP3, M4A, WAV, max 500MB)
-- Uploads go to creator-specific R2 buckets (bucket-per-creator)
+- Uploads go to creator-specific R2 storage folders within unified buckets
 - Media items stored in separate `media_items` table (media library pattern)
 - Content entities reference media items (no file duplication)
 - Creator can create content from existing media library items
@@ -474,7 +493,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 
 ### Storage Requirements
 
-- Files stored in creator-specific R2 buckets (isolation)
+- Files stored in creator-specific R2 storage folders (isolation via folder structure)
 - Metadata stored in Neon Postgres
 - Presigned URLs for secure file access (not public)
 - File size limits enforced (5GB video, 500MB audio, 100MB PDF)
@@ -493,7 +512,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 ### Security Requirements
 
 - Only Creators can access their own content/media
-- Creators cannot access other creators' buckets
+- Creators cannot access other creators' storage folders
 - R2 files not publicly accessible (presigned URLs only)
 - File type validation (reject non-video/audio)
 - File size limits enforced
@@ -520,7 +539,7 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
   - [Admin Dashboard PRD](../admin-dashboard/pdr-phase-1.md) - Management UI
   - [Auth PRD](../auth/pdr-phase-1.md) - Creator-only access
 - **Infrastructure**:
-  - [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md) - Bucket-per-creator architecture
+  - [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md) - Unified buckets with creator-specific folder structure
   - [Infrastructure Plan](../../infrastructure/infraplan.md)
   - [Database Schema](../../infrastructure/DatabaseSchema.md)
   - [Testing Strategy](../../infrastructure/TestingStrategy.md)
@@ -537,13 +556,13 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 - **Cost Efficiency**: No file duplication in R2
 - **Future-Proof**: Easier to add media management features (folders, galleries)
 
-### Why Bucket-Per-Creator?
+### Why Creator-Specific Folder Structure?
 
-- **Isolation**: Each creator's files physically separated
-- **Security**: Compromised creator doesn't affect others
-- **Permissions**: Easier creator-specific access control
-- **Billing**: Track storage costs per creator
-- **Scale**: Cloudflare allows 1 million buckets
+- **Isolation**: Each creator's files logically separated via folder paths
+- **Security**: Compromised creator doesn't affect others (folder-level access control)
+- **Permissions**: Creator-specific access control via folder prefix matching
+- **Billing**: Track storage costs per creator via folder prefix
+- **Simplicity**: No dynamic bucket provisioning needed on creator onboarding
 
 ### Why Reusable Resources?
 
@@ -553,11 +572,16 @@ See [Database Schema](../../infrastructure/DatabaseSchema.md) for full schema:
 
 ### Content vs Media Items vs Resources
 
-| Entity         | Purpose                               | Storage                     | Reusability                      |
-| -------------- | ------------------------------------- | --------------------------- | -------------------------------- |
-| **Media Item** | Uploaded video/audio file             | R2 (originals + HLS)        | Yes - multiple content items     |
-| **Content**    | Sellable package (pricing + metadata) | Database (references media) | N/A                              |
-| **Resource**   | Downloadable file (PDF, workbook)     | R2 (resources bucket)       | Yes - multiple content/offerings |
+| Entity         | Purpose                               | Ownership    | Storage                               | Reusability                      |
+| -------------- | ------------------------------------- | ------------ | ------------------------------------- | -------------------------------- |
+| **Media Item** | Uploaded video/audio file             | Creator-owned | R2: `{creator_id}/originals/`     | Yes - multiple content items     |
+| **Content**    | Sellable post (pricing + metadata)    | Creator-owned | Database (references media)          | N/A (links to media)             |
+| **Resource**   | Downloadable file (PDF, workbook)     | Creator-owned | R2: `{creator_id}/resources/` | Yes - multiple content/offerings |
+
+**Key Ownership Model:**
+- **Media Items**: Owned by creator, stored in their R2 folder, can be used across multiple content posts
+- **Content Posts**: Created by creator, can belong to their personal profile (`organization_id = NULL`) or an organization (`organization_id = X`)
+- **Resources**: Owned by creator, can be attached to multiple content posts or offerings
 
 ### File Upload Strategy
 
