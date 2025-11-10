@@ -18,6 +18,7 @@
     "dev:build": "pnpm build:packages && pnpm build:workers",
     "dev:clean": "pnpm docker:down && rm -rf node_modules/.cache && rm -rf apps/*/dist && rm -rf workers/*/dist && rm -rf packages/*/dist",
     "stop": "pnpm docker:down",
+    "build:workers": "pnpm -r --filter './workers/*' build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
