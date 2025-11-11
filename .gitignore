@@ -34,5 +34,3 @@ coverage/
 # OS-specific
 .DS_Store
 
-# Claude IDE settings
-.claude/
