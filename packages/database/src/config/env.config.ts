@@ -76,7 +76,7 @@ export const DbEnvConfig = {
   method: process.env.DB_METHOD!,
   out: './src/migrations',
   schema: './src/schema/index.ts',
-  dialetc: 'postgresql' as
+  dialect: 'postgresql' as
     | 'postgresql'
     | 'mysql'
     | 'sqlite'

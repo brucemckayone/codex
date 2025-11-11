@@ -40,6 +40,7 @@
     "act:dry": "act -n",
     "db:gen": "cd packages/database && npx drizzle-kit generate --config ./src/config/drizzle.config.ts",
     "db:push": "cd packages/database && npx drizzle-kit push --config ./src/config/drizzle.config.ts",
+    "db:studio": "cd packages/database && npx drizzle-kit studio --config ./src/config/drizzle.config.ts --port 54321",
     "neon:create": "pnpm --filter @codex/database neon:create",
     "neon:list": "pnpm --filter @codex/database neon:list",
     "neon:delete": "pnpm --filter @codex/database neon:delete",
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",
+    "@cloudflare/workers-types": "^4.20250129.0",
     "@eslint/js": "^9.38.0",
     "@playwright/test": "^1.56.1",
     "@sveltejs/mcp": "^0.1.9",
@@ -84,8 +86,7 @@
     "vite": "^6.4.1",
     "vitest": "^4.0.2",
     "wait-on": "^9.0.1",
-    "wrangler": "^4.45.0",
-    "@cloudflare/workers-types": "^4.20250129.0"
+    "wrangler": "^4.45.0"
   },
   "workspaces": [
     "apps/*",

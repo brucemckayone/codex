@@ -15,6 +15,13 @@
       "when": 1761771451465,
       "tag": "0001_soft_mauler",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1762814779482,
+      "tag": "0002_curved_darwin",
+      "breakpoints": true
     }
   ]
 }

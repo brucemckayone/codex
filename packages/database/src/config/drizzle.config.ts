@@ -12,7 +12,7 @@ if (!DbEnvConfig.method)
 export default defineConfig({
   out: DbEnvConfig.out,
   schema: DbEnvConfig.schema,
-  dialect: DbEnvConfig.dialetc!,
+  dialect: DbEnvConfig.dialect!,
   dbCredentials: {
     url: DbEnvConfig.getDbUrl()!,
   },

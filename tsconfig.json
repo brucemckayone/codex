@@ -25,7 +25,9 @@
       "@codex/security": ["packages/security/src/index.ts"],
       "@codex/security/*": ["packages/security/src/*"],
       "@codex/test-utils": ["packages/test-utils/src/index.ts"],
-      "@codex/test-utils/*": ["packages/test-utils/src/*"]
+      "@codex/test-utils/*": ["packages/test-utils/src/*"],
+      "@codex/content": ["packages/content/src/index.ts"],
+      "@codex/content/*": ["packages/content/src/*"]
     }
   },
   "include": ["workers/**/*", "apps/**/*", "packages/**/*"],

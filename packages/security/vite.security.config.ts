@@ -12,7 +12,13 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
-      external: ['zod', '@neondatabase/serverless', 'hono'], // Node-only deps
+      external: [
+        'zod',
+        '@neondatabase/serverless',
+        'hono',
+        '@codex/database',
+        'drizzle-orm',
+      ], // External dependencies
     },
   },
   plugins: [dts() as PluginOption],

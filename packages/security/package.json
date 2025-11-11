@@ -17,6 +17,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@codex/database": "workspace:*",
+    "drizzle-orm": "^0.37.4",
     "hono": "^4.0.0",
     "vite-plugin-dts": "^4.5.4"
   },

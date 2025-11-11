@@ -9,6 +9,7 @@ export default defineConfig({
       'packages/validation',
       'packages/cloudflare-clients',
       'packages/security',
+      'packages/content',
       'packages/test-utils',
       'workers/auth',
       'workers/stripe-webhook-handler',

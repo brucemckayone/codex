@@ -5,6 +5,7 @@
  * - Security headers middleware
  * - Rate limiting (KV-based)
  * - Worker-to-worker authentication
+ * - User session authentication
  */
 
 export {
@@ -26,3 +27,12 @@ export {
   workerFetch,
   type WorkerAuthOptions,
 } from './worker-auth';
+
+export {
+  optionalAuth,
+  requireAuth,
+  type SessionAuthConfig,
+  type SessionData,
+  type UserData,
+  type CachedSessionData,
+} from './session-auth';
