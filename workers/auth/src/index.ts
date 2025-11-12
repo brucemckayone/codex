@@ -6,7 +6,7 @@ import {
   securityHeaders,
   rateLimit,
   RATE_LIMIT_PRESETS,
-} from 'packages/content-management/src/security/src';
+} from '@codex/security';
 
 type Bindings = {
   ENVIRONMENT?: string;

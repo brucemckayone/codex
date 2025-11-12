@@ -22,7 +22,8 @@
     "@codex/validation": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/security": "workspace:*",
-    "@codex/shared-types": "workspace:*"
+    "@codex/shared-types": "workspace:*",
+    "@codex/worker-utils": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250102.0",

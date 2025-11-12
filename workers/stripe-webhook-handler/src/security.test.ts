@@ -5,7 +5,7 @@ import {
   CSP_PRESETS,
   rateLimit,
   RATE_LIMIT_PRESETS,
-} from 'packages/content-management/src/security/src';
+} from '@codex/security';
 
 /**
  * Integration tests for security middleware in stripe-webhook-handler.

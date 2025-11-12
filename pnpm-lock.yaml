@@ -528,6 +528,9 @@ importers:
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
+      '@codex/worker-utils':
+        specifier: workspace:*
+        version: link:../../packages/worker-utils
       hono:
         specifier: ^4.7.8
         version: 4.10.3
@@ -562,6 +565,9 @@ importers:
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
+      '@codex/worker-utils':
+        specifier: workspace:*
+        version: link:../../packages/worker-utils
       hono:
         specifier: ^4.7.8
         version: 4.10.3
