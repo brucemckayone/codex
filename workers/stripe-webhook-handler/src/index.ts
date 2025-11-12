@@ -5,21 +5,18 @@
  * observability, and security features.
  */
 
-import { Hono, Context, Next } from 'hono';
+import { Hono } from 'hono';
 import {
-  securityHeaders,
-  CSP_PRESETS,
-  rateLimit,
-  RATE_LIMIT_PRESETS,
-} from '@codex/security';
-import { sequence } from '@codex/worker-utils';
+  sequence,
+  createObservabilityMiddleware,
+  createObservabilityErrorHandler,
+  createSecurityHeadersWrapper,
+  createRateLimitWrapper,
+} from '@codex/worker-utils';
+import { CSP_PRESETS } from '@codex/security';
 
 import type { StripeWebhookEnv } from './types';
 import { verifyStripeSignature } from './middleware/verify-signature';
-import {
-  createObservabilityMiddleware,
-  createObservabilityErrorHandler,
-} from './middleware/observability';
 import { createWebhookHandler } from './utils/webhook-handler';
 
 const app = new Hono<StripeWebhookEnv>();
@@ -28,38 +25,12 @@ const app = new Hono<StripeWebhookEnv>();
 // Global Middleware
 // ============================================================================
 
-/**
- * Security headers middleware wrapper
- * Applies restrictive CSP for API worker
- */
-const securityHeadersMiddleware = (
-  c: Context<StripeWebhookEnv>,
-  next: Next
-) => {
-  return securityHeaders({
-    environment: c.env?.ENVIRONMENT || 'development',
-    csp: CSP_PRESETS.api,
-  })(c, next);
-};
-
-/**
- * Rate limiting middleware wrapper
- * Webhooks can be high volume, use appropriate presets
- */
-const rateLimitMiddleware = (c: Context<StripeWebhookEnv>, next: Next) => {
-  return rateLimit({
-    kv: c.env?.RATE_LIMIT_KV as any,
-    ...RATE_LIMIT_PRESETS.webhook,
-  })(c, next);
-};
-
-// Apply global middleware in sequence
 app.use(
   '*',
   sequence(
-    securityHeadersMiddleware,
-    rateLimitMiddleware,
-    createObservabilityMiddleware()
+    createSecurityHeadersWrapper({ csp: CSP_PRESETS.api }),
+    createRateLimitWrapper('webhook'),
+    createObservabilityMiddleware('stripe-webhook-handler')
   )
 );
 

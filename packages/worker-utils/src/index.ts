@@ -17,6 +17,10 @@ export {
   createHealthCheckHandler,
   createNotFoundHandler,
   createErrorHandler,
+  createObservabilityMiddleware,
+  createObservabilityErrorHandler,
+  createSecurityHeadersWrapper,
+  createRateLimitWrapper,
   sequence,
   type MiddlewareConfig,
 } from './middleware';

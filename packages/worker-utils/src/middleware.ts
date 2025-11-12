@@ -6,7 +6,14 @@
 
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { securityHeaders, requireAuth } from '@codex/security';
+import {
+  securityHeaders,
+  requireAuth,
+  rateLimit,
+  RATE_LIMIT_PRESETS,
+  CSP_PRESETS,
+} from '@codex/security';
+import { ObservabilityClient, createRequestTimer } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context, MiddlewareHandler, Next } from 'hono';
 
@@ -179,6 +186,110 @@ export function createErrorHandler(environment?: string) {
       },
       500
     );
+  };
+}
+
+/**
+ * Creates observability middleware with request timing and error tracking
+ *
+ * Provides ObservabilityClient in context as 'obs' for use in all handlers.
+ * Automatically tracks request timing.
+ *
+ * @param serviceName - Name of the service for logging
+ * @returns Middleware handler
+ *
+ * @example
+ * ```typescript
+ * app.use('*', createObservabilityMiddleware('my-api'));
+ *
+ * // In handlers:
+ * app.get('/foo', (c) => {
+ *   const obs = c.get('obs');
+ *   obs.info('Processing request');
+ *   return c.json({ ok: true });
+ * });
+ * ```
+ */
+export function createObservabilityMiddleware<T extends HonoEnv = HonoEnv>(
+  serviceName: string
+) {
+  return async (c: Context<T>, next: Next) => {
+    const obs = new ObservabilityClient(
+      serviceName,
+      c.env.ENVIRONMENT || 'development'
+    );
+
+    // Make observability client available in context
+    c.set('obs' as any, obs);
+
+    // Track request timing
+    const timer = createRequestTimer(obs, c.req);
+    await next();
+    timer.end(c.res.status);
+  };
+}
+
+/**
+ * Creates error handler with observability tracking
+ *
+ * @param serviceName - Name of the service for logging
+ * @param environment - Optional environment override
+ * @returns Error handler function
+ */
+export function createObservabilityErrorHandler(
+  serviceName: string,
+  environment?: string
+) {
+  return (err: Error, c: Context) => {
+    const obs =
+      c.get('obs' as any) ||
+      new ObservabilityClient(serviceName, environment || 'development');
+
+    obs.trackError(err, {
+      url: c.req.url,
+      method: c.req.method,
+    });
+
+    return c.text('Internal Server Error', 500);
+  };
+}
+
+/**
+ * Creates a standardized security headers middleware wrapper
+ *
+ * @param options - Security headers options
+ * @returns Middleware handler
+ */
+export function createSecurityHeadersWrapper(options?: {
+  csp?: (typeof CSP_PRESETS)[keyof typeof CSP_PRESETS];
+}) {
+  return (c: Context<HonoEnv>, next: Next) => {
+    const environment = (c.env?.ENVIRONMENT || 'development') as
+      | 'development'
+      | 'staging'
+      | 'production';
+
+    return securityHeaders({
+      environment,
+      ...options,
+    })(c, next);
+  };
+}
+
+/**
+ * Creates a standardized rate limiting middleware wrapper
+ *
+ * @param preset - Rate limit preset name
+ * @returns Middleware handler
+ */
+export function createRateLimitWrapper(
+  preset: keyof typeof RATE_LIMIT_PRESETS = 'api'
+) {
+  return (c: Context<HonoEnv>, next: Next) => {
+    return rateLimit({
+      kv: c.env?.RATE_LIMIT_KV as any,
+      ...RATE_LIMIT_PRESETS[preset],
+    })(c, next);
   };
 }
 
