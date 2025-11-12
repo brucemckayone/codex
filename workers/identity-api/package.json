@@ -5,11 +5,11 @@
   "description": "Cloudflare Worker for Identity and Organization API endpoints",
   "type": "module",
   "scripts": {
-    "dev": "tsc && wrangler dev",
+    "dev": "pnpm build && wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:production": "wrangler deploy --env production",
-    "build": "tsc",
+    "build": "cd ../.. && tsc --project workers/identity-api/tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest",
