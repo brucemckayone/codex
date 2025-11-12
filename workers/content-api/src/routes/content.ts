@@ -185,10 +185,10 @@ app.delete('/:id', async (c) => {
 
     await service.delete(id, user.id);
     return c.body(null, 204);
-  } catch (err: any) {
+  } catch (err: unknown) {
     const { mapErrorToResponse } = await import('@codex/content');
     const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode as any);
+    return c.json(response, statusCode);
   }
 });
 

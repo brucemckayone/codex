@@ -24,7 +24,7 @@ export function createAuthRateLimiter() {
       const kv = c.env.RATE_LIMIT_KV;
       if (kv) {
         const success = await rateLimit({
-          kv: kv as any, // Type assertion due to @cloudflare/workers-types version mismatch
+          kv,
           keyGenerator: (c: Context) =>
             c.req.header('cf-connecting-ip') || '127.0.0.1',
           ...RATE_LIMIT_PRESETS.auth,

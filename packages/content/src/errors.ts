@@ -6,7 +6,6 @@
  */
 
 import {
-  ServiceError,
   NotFoundError,
   BusinessLogicError,
   ConflictError,

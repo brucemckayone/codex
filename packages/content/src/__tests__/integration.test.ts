@@ -17,8 +17,8 @@ import {
   cleanupDatabase,
   seedTestUsers,
   createUniqueSlug,
+  type Database,
 } from '@codex/test-utils';
-import type { Database } from '@codex/database';
 import { ContentService, MediaItemService } from '../services';
 import { OrganizationService } from '@codex/identity';
 

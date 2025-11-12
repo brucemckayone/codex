@@ -114,6 +114,9 @@ async function querySessionFromDatabase(
       return null;
     }
 
+    // TypeScript type assertion - we've validated user exists above
+    const user = result.user as any;
+
     // Transform database result to cached data structure
     const sessionData: CachedSessionData = {
       session: {
@@ -127,13 +130,13 @@ async function querySessionFromDatabase(
         updatedAt: result.updatedAt,
       },
       user: {
-        id: result.user.id,
-        email: result.user.email,
-        name: result.user.name,
-        emailVerified: result.user.emailVerified,
-        image: result.user.image,
-        createdAt: result.user.createdAt,
-        updatedAt: result.user.updatedAt,
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        emailVerified: user.emailVerified,
+        image: user.image,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       },
     };
 
@@ -285,7 +288,7 @@ export function optionalAuth(config?: SessionAuthConfig) {
                   err
                 )
               );
-          } catch (err) {
+          } catch {
             // Ignore synchronous errors (e.g., if delete is not a function)
           }
         }

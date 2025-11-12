@@ -85,7 +85,7 @@ export class ContentService {
         // The ready check happens during publishing
         if (validated.mediaItemId) {
           await this.validateMediaItem(
-            tx,
+            tx as any,
             validated.mediaItemId,
             creatorId,
             validated.contentType,
@@ -121,10 +121,7 @@ export class ContentService {
     } catch (error) {
       // Handle unique constraint violations (slug conflicts)
       if (isUniqueViolation(error)) {
-        throw new SlugConflictError(
-          validated.slug,
-          validated.organizationId || null
-        );
+        throw new SlugConflictError(validated.slug);
       }
       throw wrapError(error, { creatorId, input: validated });
     }
@@ -281,10 +278,7 @@ export class ContentService {
             );
           }
           if (existing.mediaItem.status !== 'ready') {
-            throw new MediaNotReadyError(
-              existing.mediaItem.id,
-              existing.mediaItem.status
-            );
+            throw new MediaNotReadyError(existing.mediaItem.id);
           }
         }
 
@@ -552,7 +546,7 @@ export class ContentService {
 
     // Only check ready status when required (e.g., during publishing)
     if (requireReady && mediaItem.status !== 'ready') {
-      throw new MediaNotReadyError(mediaItemId, mediaItem.status);
+      throw new MediaNotReadyError(mediaItemId);
     }
 
     // Validate content type matches media type

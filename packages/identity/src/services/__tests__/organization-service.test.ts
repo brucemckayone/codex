@@ -18,15 +18,11 @@ import {
   setupTestDatabase,
   cleanupDatabase,
   createUniqueSlug,
-  expectError,
+  type Database,
 } from '@codex/test-utils';
-import type { Database } from '@codex/database';
 import { OrganizationService } from '../organization-service';
 import { OrganizationNotFoundError, ConflictError } from '../../errors';
-import type {
-  CreateOrganizationInput,
-  UpdateOrganizationInput,
-} from '@codex/validation';
+import type { CreateOrganizationInput } from '@codex/validation';
 
 describe('OrganizationService', () => {
   let db: Database;

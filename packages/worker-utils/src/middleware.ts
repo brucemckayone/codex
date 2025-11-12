@@ -220,7 +220,7 @@ export function createObservabilityMiddleware<T extends HonoEnv = HonoEnv>(
     );
 
     // Make observability client available in context
-    c.set('obs' as any, obs);
+    c.set('obs', obs);
 
     // Track request timing
     const timer = createRequestTimer(obs, c.req);
@@ -242,7 +242,7 @@ export function createObservabilityErrorHandler(
 ) {
   return (err: Error, c: Context) => {
     const obs =
-      c.get('obs' as any) ||
+      (c.get('obs') as ObservabilityClient | undefined) ||
       new ObservabilityClient(serviceName, environment || 'development');
 
     obs.trackError(err, {
@@ -287,7 +287,7 @@ export function createRateLimitWrapper(
 ) {
   return (c: Context<HonoEnv>, next: Next) => {
     return rateLimit({
-      kv: c.env?.RATE_LIMIT_KV as any,
+      kv: c.env?.RATE_LIMIT_KV,
       ...RATE_LIMIT_PRESETS[preset],
     })(c, next);
   };
@@ -316,8 +316,11 @@ export function createRateLimitWrapper(
  * ```
  */
 export function sequence(
-  ...handlers: ((c: Context, next: Next) => Promise<Response | void>)[]
-): (c: Context, next: Next) => Promise<Response | void> {
+  ...handlers: ((
+    c: Context,
+    next: Next
+  ) => Promise<globalThis.Response | void>)[]
+): (c: Context, next: Next) => Promise<globalThis.Response | void> {
   return async (c: Context, next: Next) => {
     for (const handler of handlers) {
       const response = await handler(c, next);

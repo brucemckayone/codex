@@ -6,18 +6,19 @@
 
 import type { Context } from 'hono';
 import type { ZodSchema } from 'zod';
+import type { ZodError } from 'zod';
 import type { HonoEnv, AuthenticatedContext } from '@codex/shared-types';
 import { mapErrorToResponse } from '@codex/service-errors';
 
 /**
  * Format validation error response
  */
-export function formatValidationError(zodError: any) {
+export function formatValidationError(zodError: ZodError) {
   return {
     error: {
       code: 'VALIDATION_ERROR',
       message: 'Invalid request data',
-      details: zodError.errors.map((err: any) => ({
+      details: zodError.errors.map((err) => ({
         path: err.path.join('.'),
         message: err.message,
       })),

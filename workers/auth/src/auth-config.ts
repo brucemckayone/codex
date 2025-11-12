@@ -43,7 +43,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
         enabled: true,
         maxAge: 60 * 5, // 5 minutes (short-lived)
       },
-    } as any, // Type assertion needed due to BetterAuth type definitions
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
@@ -71,7 +71,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
           `Sending password reset email to ${user.email} with url: ${url}`
         );
       },
-    } as any, // Type assertion needed due to BetterAuth type definitions
+    },
     user: {
       additionalFields: {
         role: {

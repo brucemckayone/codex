@@ -18,8 +18,8 @@ import {
   setupTestDatabase,
   cleanupDatabase,
   seedTestUsers,
+  type Database,
 } from '@codex/test-utils';
-import type { Database } from '@codex/database';
 import { MediaItemService } from '../media-service';
 import { MediaNotFoundError } from '../../errors';
 import type { CreateMediaItemInput } from '@codex/validation';
