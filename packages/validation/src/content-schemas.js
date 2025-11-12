@@ -1,4 +1,3 @@
-/* globals URL */
 import { z } from 'zod';
 /**
  * Content Management Validation Schemas
@@ -481,3 +480,4 @@ export const uploadRequestSchema = z.object({
  * const content = await contentService.create(validated, creatorId);
  * ```
  */
+//# sourceMappingURL=content-schemas.js.map

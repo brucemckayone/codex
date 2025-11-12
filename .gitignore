@@ -33,8 +33,8 @@ coverage/
 # TypeScript compiled output (should only be in dist/)
 packages/**/*.js
 packages/**/*.js.map
-!packages/**/*.config.js
 !packages/**/test-client.js
+!packages/validation/src/*.js
 
 # OS-specific
 .DS_Store
