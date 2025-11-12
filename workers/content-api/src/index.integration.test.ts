@@ -9,14 +9,19 @@
  * - Error responses
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import app from './index';
 
-// Mock user for authenticated requests
-const mockUser = {
-  id: 'test-user-123',
-  email: 'test@example.com',
-};
+// Error response type for tests
+interface ErrorResponse {
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+    stack?: string;
+    internalMessage?: string;
+  };
+}
 
 // Helper to create authenticated request
 function createAuthRequest(path: string, options: RequestInit = {}): Request {
@@ -44,7 +49,7 @@ describe('Content API Worker', () => {
       const res = await app.fetch(req, mockEnv);
 
       expect(res.status).toBe(200);
-      const json = await res.json();
+      const json = (await res.json()) as ErrorResponse;
       expect(json).toEqual({
         status: 'healthy',
         service: 'content-api',
@@ -59,7 +64,7 @@ describe('Content API Worker', () => {
       const res = await app.fetch(req, mockEnv);
 
       expect(res.status).toBe(401);
-      const json = await res.json();
+      const json = (await res.json()) as ErrorResponse;
       expect(json.error).toBeDefined();
       expect(json.error.code).toBe('UNAUTHORIZED');
     });
@@ -69,7 +74,7 @@ describe('Content API Worker', () => {
       const res = await app.fetch(req, mockEnv);
 
       expect(res.status).toBe(401);
-      const json = await res.json();
+      const json = (await res.json()) as ErrorResponse;
       expect(json.error).toBeDefined();
       expect(json.error.code).toBe('UNAUTHORIZED');
     });
@@ -90,7 +95,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error).toBeDefined();
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
@@ -108,7 +113,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
 
@@ -125,7 +130,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
         expect(json.error.details).toBeDefined();
       });
@@ -139,7 +144,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(404);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error).toBeDefined();
         expect(json.error.code).toBe('NOT_FOUND');
       });
@@ -168,7 +173,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
 
@@ -186,7 +191,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
 
@@ -204,7 +209,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
     });
@@ -225,7 +230,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
 
@@ -234,7 +239,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
     });
@@ -276,7 +281,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
 
@@ -293,7 +298,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
 
@@ -311,7 +316,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
     });
@@ -324,7 +329,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(404);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('NOT_FOUND');
       });
     });
@@ -344,7 +349,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
     });
@@ -355,7 +360,7 @@ describe('Content API Worker', () => {
 
         const res = await app.fetch(req, mockEnv);
         expect(res.status).toBe(422);
-        const json = await res.json();
+        const json = (await res.json()) as ErrorResponse;
         expect(json.error.code).toBe('VALIDATION_ERROR');
       });
     });
@@ -386,7 +391,7 @@ describe('Content API Worker', () => {
       );
 
       const res = await app.fetch(req, mockEnv);
-      const json = await res.json();
+      const json = (await res.json()) as ErrorResponse;
 
       // Should not expose internal details like stack traces
       expect(json.error).toBeDefined();
