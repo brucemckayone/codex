@@ -79,11 +79,17 @@ jobs:
         id: branch-name
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "name=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
+            # Include run_id for uniqueness across retries and re-runs
+            PR_NUM=${{ github.event.number }}
+            RUN_ID=${{ github.run_id }}
+            # Truncate to fit Neon's 63 char limit
+            BRANCH_NAME="pr-${PR_NUM}-${RUN_ID}"
+            echo "name=${BRANCH_NAME:0:63}" >> $GITHUB_OUTPUT
           else
             SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}"
+            RUN_ID=${{ github.run_id }}
+            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-${RUN_ID}"
             # truncate to 63 chars (Neon limit)
             BRANCH_NAME_TRUNC=${BRANCH_NAME:0:63}
             echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
@@ -186,11 +192,16 @@ jobs:
         id: branch-name
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "name=pr-${{ github.event.number }}-e2e" >> $GITHUB_OUTPUT
+            # Include run_id for uniqueness across retries and re-runs
+            PR_NUM=${{ github.event.number }}
+            RUN_ID=${{ github.run_id }}
+            BRANCH_NAME="pr-${PR_NUM}-${RUN_ID}-e2e"
+            echo "name=${BRANCH_NAME:0:63}" >> $GITHUB_OUTPUT
           else
             SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-e2e"
+            RUN_ID=${{ github.run_id }}
+            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-${RUN_ID}-e2e"
             # truncate to 63 chars (Neon limit)
             BRANCH_NAME_TRUNC=${BRANCH_NAME:0:63}
             echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
