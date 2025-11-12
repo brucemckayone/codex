@@ -96,8 +96,8 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
-          const session = (c.get as any)('session');
+          const user = c.get('user');
+          const session = c.get('session');
           return c.json({ user, session, source: 'cache' });
         });
 
@@ -109,9 +109,9 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).user).toEqual(mockUser);
-        expect((body as any).session).toEqual(mockSession);
+        const body = await res.json();
+        expect(body.user).toEqual(mockUser);
+        expect(body.session).toEqual(mockSession);
         expect(mockKV.get).toHaveBeenCalledWith(
           `session:${mockSessionToken}`,
           'json'
