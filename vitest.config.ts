@@ -11,6 +11,7 @@ export default defineConfig({
       'packages/security',
       'packages/content',
       'packages/test-utils',
+      'packages/identity',
       'workers/auth',
       'workers/stripe-webhook-handler',
     ],

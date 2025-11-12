@@ -1,0 +1,34 @@
+{
+  "name": "@codex/content-api-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker for Content and Media API endpoints",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.7.8",
+    "@codex/database": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "@codex/content": "workspace:*",
+    "@codex/security": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250102.0",
+    "@codex/eslint-config": "workspace:*",
+    "@codex/typescript-config": "workspace:*",
+    "typescript": "^5.7.3",
+    "wrangler": "^3.103.0",
+    "vitest": "^2.1.8"
+  }
+}

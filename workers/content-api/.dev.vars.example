@@ -1,0 +1,15 @@
+# Content API Worker - Development Environment Variables
+# Copy this file to .dev.vars and fill in the values
+
+# Database connection (Neon PostgreSQL)
+DATABASE_URL=postgresql://username:password@host/database
+
+# Environment name
+ENVIRONMENT=development
+
+# Database method (use LOCAL for development with direct connection)
+DB_METHOD=LOCAL
+
+# CORS allowed origins
+WEB_APP_URL=http://localhost:3000
+API_URL=http://localhost:8787

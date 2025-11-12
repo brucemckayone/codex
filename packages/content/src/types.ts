@@ -9,11 +9,10 @@ import type { db } from '@codex/database';
 import type {
   Content,
   MediaItem,
-  Organization,
   NewContent,
   NewMediaItem,
-  NewOrganization,
 } from '@codex/database/schema';
+import type { Organization } from '@codex/identity';
 
 /**
  * Database client type (properly typed from Drizzle)
@@ -99,15 +98,6 @@ export interface MediaItemFilters {
 }
 
 /**
- * Organization query filters
- */
-export interface OrganizationFilters {
-  search?: string;
-  sortBy?: 'createdAt' | 'name';
-  sortOrder?: SortOrder;
-}
-
-/**
  * Content with populated relations
  */
 export interface ContentWithRelations extends Content {
@@ -134,5 +124,5 @@ export interface MediaItemWithRelations extends MediaItem {
 /**
  * Re-export database types for convenience
  */
-export type { Content, MediaItem, Organization };
-export type { NewContent, NewMediaItem, NewOrganization };
+export type { Content, MediaItem };
+export type { NewContent, NewMediaItem };

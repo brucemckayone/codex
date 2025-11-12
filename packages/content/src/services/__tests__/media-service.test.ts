@@ -18,16 +18,11 @@ import {
   setupTestDatabase,
   cleanupDatabase,
   seedTestUsers,
-  expectContentServiceError,
-  expectError,
 } from '@codex/test-utils';
 import type { Database } from '@codex/database';
 import { MediaItemService } from '../media-service';
 import { MediaNotFoundError } from '../../errors';
-import type {
-  CreateMediaItemInput,
-  UpdateMediaItemInput,
-} from '@codex/validation';
+import type { CreateMediaItemInput } from '@codex/validation';
 
 describe('MediaItemService', () => {
   let db: Database;

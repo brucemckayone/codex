@@ -209,6 +209,9 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../database
+      '@codex/identity':
+        specifier: workspace:*
+        version: link:../identity
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
@@ -287,6 +290,37 @@ importers:
         specifier: ^4.0.2
         version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/identity:
+    dependencies:
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../database
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@codex/validation':
+        specifier: workspace:*
+        version: link:../validation
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1)
+    devDependencies:
+      '@codex/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.13.0
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.2
+        version: 4.0.2(@types/node@22.13.0)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)(yaml@2.8.1)
+
   packages/observability:
     dependencies:
       vite-plugin-dts:
@@ -305,6 +339,12 @@ importers:
 
   packages/security:
     dependencies:
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../database
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1)
       hono:
         specifier: ^4.0.0
         version: 4.10.3
@@ -7738,14 +7778,6 @@ snapshots:
       chai: 6.2.0
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))':
-    dependencies:
-      '@vitest/spy': 4.0.2
-      estree-walker: 3.0.3
-      magic-string: 0.30.19
-    optionalDependencies:
-      vite: 6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
-
   '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.18.11)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@vitest/spy': 4.0.2
@@ -10083,7 +10115,7 @@ snapshots:
   vitest@4.0.2(@types/node@22.13.0)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)(yaml@2.8.1):
     dependencies:
       '@vitest/expect': 4.0.2
-      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@24.8.1)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       '@vitest/pretty-format': 4.0.2
       '@vitest/runner': 4.0.2
       '@vitest/snapshot': 4.0.2

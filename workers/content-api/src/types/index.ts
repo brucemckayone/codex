@@ -39,11 +39,6 @@ export type Bindings = {
    * Rate limiting KV namespace
    */
   RATE_LIMIT_KV?: KVNamespace;
-
-  /**
-   * Shared secret for worker-to-worker auth (if calling auth worker)
-   */
-  WORKER_SHARED_SECRET?: string;
 };
 
 /**

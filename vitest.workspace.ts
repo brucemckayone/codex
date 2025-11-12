@@ -13,6 +13,8 @@ export default defineConfig({
       'packages/test-utils',
       'packages/observability',
       'packages/security',
+      'packages/content',
+      'packages/identity',
 
       // Workers (uncomment when ready)
       'workers/auth',

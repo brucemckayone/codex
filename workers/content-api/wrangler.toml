@@ -1,0 +1,47 @@
+name = "content-api"
+main = "dist/index.js"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Observability configuration
+[observability]
+enabled = true
+
+kv_namespaces = [
+  { binding = "RATE_LIMIT_KV", id = "cea7153364974737b16870df08f31083" }
+]
+
+# Production environment
+[env.production]
+name = "content-api-production"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+DB_METHOD = "PRODUCTION"
+WEB_APP_URL = "https://codex.revelations.studio"
+API_URL = "https://api.revelations.studio"
+
+[[env.production.routes]]
+pattern = "content-api.revelations.studio/*"
+custom_domain = true
+
+# Staging environment
+[env.staging]
+name = "content-api-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+DB_METHOD = "PRODUCTION"
+WEB_APP_URL = "https://codex-staging.revelations.studio"
+API_URL = "https://api-staging.revelations.studio"
+
+[[env.staging.routes]]
+pattern = "content-api-staging.revelations.studio/*"
+custom_domain = true
+
+# Note: Secrets to be set via wrangler CLI or CI/CD:
+# - DATABASE_URL
+#
+# Set secrets with:
+#   wrangler secret put DATABASE_URL --env production
+#   wrangler secret put DATABASE_URL --env staging

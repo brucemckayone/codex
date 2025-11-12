@@ -4,7 +4,6 @@
  * Content Management Service Layer for Codex Platform
  *
  * This package provides type-safe, transaction-aware services for managing:
- * - Organizations (content grouping)
  * - Media Items (uploaded videos/audio)
  * - Content (published content with metadata)
  *
@@ -66,8 +65,6 @@ export {
   createContentService,
   MediaItemService,
   createMediaItemService,
-  OrganizationService,
-  createOrganizationService,
 } from './services';
 
 // ============================================================================
@@ -84,15 +81,12 @@ export type {
   SortOrder,
   ContentFilters,
   MediaItemFilters,
-  OrganizationFilters,
   ContentWithRelations,
   MediaItemWithRelations,
   Content,
   MediaItem,
-  Organization,
   NewContent,
   NewMediaItem,
-  NewOrganization,
 } from './types';
 
 // ============================================================================
@@ -110,7 +104,6 @@ export {
   MediaNotFoundError,
   MediaNotReadyError,
   ContentTypeMismatchError,
-  OrganizationNotFoundError,
   ContentNotFoundError,
   SlugConflictError,
   ContentAlreadyPublishedError,
@@ -118,6 +111,14 @@ export {
   isContentServiceError,
   wrapError,
 } from './errors';
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+export { mapErrorToResponse, isKnownError } from './utils/error-mapper';
+
+export type { ErrorResponse, MappedError } from './utils/error-mapper';
 
 // ============================================================================
 // Re-export Validation Schemas (for convenience)
@@ -128,11 +129,8 @@ export type {
   UpdateContentInput,
   CreateMediaItemInput,
   UpdateMediaItemInput,
-  CreateOrganizationInput,
-  UpdateOrganizationInput,
   ContentQueryInput,
   MediaQueryInput,
-  OrganizationQueryInput,
 } from '@codex/validation';
 
 export {
@@ -140,11 +138,8 @@ export {
   updateContentSchema,
   createMediaItemSchema,
   updateMediaItemSchema,
-  createOrganizationSchema,
-  updateOrganizationSchema,
   contentQuerySchema,
   mediaQuerySchema,
-  organizationQuerySchema,
   contentStatusEnum,
   contentTypeEnum,
   visibilityEnum,

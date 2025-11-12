@@ -132,15 +132,6 @@ export class ContentTypeMismatchError extends ValidationError {
 }
 
 /**
- * Specific error: Organization not found
- */
-export class OrganizationNotFoundError extends NotFoundError {
-  constructor(organizationId: string) {
-    super('Organization not found', { organizationId });
-  }
-}
-
-/**
  * Specific error: Content not found
  */
 export class ContentNotFoundError extends NotFoundError {

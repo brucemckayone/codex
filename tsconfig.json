@@ -22,12 +22,16 @@
       "@codex/observability/*": ["packages/observability/src/*"],
       "@codex/cloudflare-clients": ["packages/cloudflare-clients/src/index.ts"],
       "@codex/cloudflare-clients/*": ["packages/cloudflare-clients/src/*"],
-      "@codex/security": ["packages/security/src/index.ts"],
-      "@codex/security/*": ["packages/security/src/*"],
+      "@codex/security": [
+        "packages/content-management/src/security/src/index.ts"
+      ],
+      "@codex/security/*": ["packages/content-management/src/security/src/*"],
       "@codex/test-utils": ["packages/test-utils/src/index.ts"],
       "@codex/test-utils/*": ["packages/test-utils/src/*"],
       "@codex/content": ["packages/content/src/index.ts"],
-      "@codex/content/*": ["packages/content/src/*"]
+      "@codex/content/*": ["packages/content/src/*"],
+      "@codex/identity": ["packages/identity/src/index.ts"],
+      "@codex/identity/*": ["packages/identity/src/*"]
     }
   },
   "include": ["workers/**/*", "apps/**/*", "packages/**/*"],
