@@ -30,6 +30,6 @@
     "esbuild": "^0.21.5",
     "esbuild-node-externals": "^1.13.0",
     "vitest": "^4.0.2",
-    "wrangler": "^4.45.0"
+    "wrangler": "^4.47.0"
   }
 }
