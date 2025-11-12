@@ -16,12 +16,15 @@ import { Hono } from 'hono';
 import type { HonoEnv } from '../types';
 import {
   createMediaItemService,
-  mapErrorToResponse,
   createMediaItemSchema,
   updateMediaItemSchema,
   mediaQuerySchema,
 } from '@codex/content';
 import { dbHttp } from '@codex/database';
+import {
+  createAuthenticatedHandler,
+  createAuthenticatedGetHandler,
+} from '@codex/worker-utils';
 
 const app = new Hono<HonoEnv>();
 
@@ -35,54 +38,20 @@ const app = new Hono<HonoEnv>();
  * Body: CreateMediaItemInput
  * Returns: MediaItem (201)
  */
-app.post('/', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
-
-    const body = await c.req.json();
-
-    // Validate request body
-    const validationResult = createMediaItemSchema.safeParse(body);
-    if (!validationResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid request data',
-            details: validationResult.error.errors.map((err) => ({
-              path: err.path.join('.'),
-              message: err.message,
-            })),
-          },
-        },
-        400
-      );
-    }
-
-    const service = createMediaItemService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const mediaItem = await service.create(validationResult.data, user.id);
-
-    return c.json({ data: mediaItem }, 201);
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+app.post(
+  '/',
+  createAuthenticatedHandler({
+    schema: createMediaItemSchema,
+    handler: async (input, c, ctx) => {
+      const service = createMediaItemService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
+      return service.create(input, ctx.user.id);
+    },
+    successStatus: 201,
+  })
+);
 
 /**
  * GET /api/media/:id
@@ -90,36 +59,19 @@ app.post('/', async (c) => {
  *
  * Returns: MediaItem (200)
  */
-app.get('/:id', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
-
-    const id = c.req.param('id');
-
-    const service = createMediaItemService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const mediaItem = await service.getById(id, user.id);
-
-    return c.json({ data: mediaItem });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+app.get(
+  '/:id',
+  createAuthenticatedGetHandler({
+    handler: async (c, ctx) => {
+      const id = c.req.param('id');
+      const service = createMediaItemService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
+      return service.get(id, ctx.user.id);
+    },
+  })
+);
 
 /**
  * PATCH /api/media/:id
@@ -128,55 +80,20 @@ app.get('/:id', async (c) => {
  * Body: UpdateMediaItemInput
  * Returns: MediaItem (200)
  */
-app.patch('/:id', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
-
-    const id = c.req.param('id');
-    const body = await c.req.json();
-
-    // Validate request body
-    const validationResult = updateMediaItemSchema.safeParse(body);
-    if (!validationResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid request data',
-            details: validationResult.error.errors.map((err) => ({
-              path: err.path.join('.'),
-              message: err.message,
-            })),
-          },
-        },
-        400
-      );
-    }
-
-    const service = createMediaItemService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const mediaItem = await service.update(id, validationResult.data, user.id);
-
-    return c.json({ data: mediaItem });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+app.patch(
+  '/:id',
+  createAuthenticatedHandler({
+    schema: updateMediaItemSchema,
+    handler: async (input, c, ctx) => {
+      const id = c.req.param('id');
+      const service = createMediaItemService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
+      return service.update(id, input, ctx.user.id);
+    },
+  })
+);
 
 /**
  * GET /api/media
@@ -185,62 +102,42 @@ app.patch('/:id', async (c) => {
  * Query params: MediaQueryInput
  * Returns: PaginatedResponse<MediaItem> (200)
  */
-app.get('/', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.get(
+  '/',
+  createAuthenticatedGetHandler({
+    handler: async (c, ctx) => {
+      const query = c.req.query();
 
-    const query = c.req.query();
+      // Validate query parameters
+      const validationResult = mediaQuerySchema.safeParse(query);
+      if (!validationResult.success) {
+        throw {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid query parameters',
+          details: validationResult.error.errors.map((err) => ({
+            path: err.path.join('.'),
+            message: err.message,
+          })),
+        };
+      }
 
-    // Validate query parameters
-    const validationResult = mediaQuerySchema.safeParse(query);
-    if (!validationResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid query parameters',
-            details: validationResult.error.errors.map((err) => ({
-              path: err.path.join('.'),
-              message: err.message,
-            })),
-          },
-        },
-        400
-      );
-    }
+      const service = createMediaItemService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const service = createMediaItemService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
+      const result = await service.list(ctx.user.id, validationResult.data);
 
-    const result = await service.list(user.id, validationResult.data);
-
-    return c.json({
-      data: {
+      return {
         items: result.items,
         page: result.pagination.page,
         limit: result.pagination.limit,
         total: result.pagination.total,
-        hasMore: result.pagination.hasMore,
-      },
-    });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+        totalPages: result.pagination.totalPages,
+      };
+    },
+  })
+);
 
 /**
  * DELETE /api/media/:id
@@ -274,8 +171,10 @@ app.delete('/:id', async (c) => {
 
     return c.body(null, 204);
   } catch (err) {
+    // Import mapErrorToResponse for DELETE handler only
+    const { mapErrorToResponse } = await import('@codex/content');
     const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
+    return c.json(response, statusCode as any);
   }
 });
 

@@ -38,14 +38,24 @@ export function requireUser(c: Context<HonoEnv>) {
 
 /**
  * Create an authenticated route handler with automatic validation and error handling
+ * Handler receives validated input, Hono context (for params), and auth context
  *
  * @example
  * ```typescript
  * app.post('/', createAuthenticatedHandler({
  *   schema: createContentSchema,
- *   handler: async (input, ctx) => {
+ *   handler: async (input, c, ctx) => {
  *     const service = createContentService({ db: dbHttp, environment: ctx.env.ENVIRONMENT });
  *     return service.create(input, ctx.user.id);
+ *   }
+ * }));
+ *
+ * app.patch('/:id', createAuthenticatedHandler({
+ *   schema: updateSchema,
+ *   handler: async (input, c, ctx) => {
+ *     const id = c.req.param('id');
+ *     const service = createService({ db: dbHttp, environment: ctx.env.ENVIRONMENT });
+ *     return service.update(id, input, ctx.user.id);
  *   }
  * }));
  * ```
@@ -54,6 +64,7 @@ export function createAuthenticatedHandler<TInput, TOutput>(options: {
   schema?: ZodSchema<TInput>;
   handler: (
     input: TInput,
+    c: Context<HonoEnv>,
     context: AuthenticatedContext<HonoEnv>
   ) => Promise<TOutput>;
   successStatus?: 200 | 201 | 204;
@@ -97,7 +108,7 @@ export function createAuthenticatedHandler<TInput, TOutput>(options: {
         env: c.env,
       };
 
-      const output = await handler(input, context);
+      const output = await handler(input, c, context);
 
       return c.json({ data: output }, successStatus);
     } catch (error) {
@@ -109,9 +120,13 @@ export function createAuthenticatedHandler<TInput, TOutput>(options: {
 
 /**
  * Create a simple GET handler with authentication
+ * Handler receives the full Hono context for accessing params/query
  */
 export function createAuthenticatedGetHandler<TOutput>(options: {
-  handler: (context: AuthenticatedContext<HonoEnv>) => Promise<TOutput>;
+  handler: (
+    c: Context<HonoEnv>,
+    context: AuthenticatedContext<HonoEnv>
+  ) => Promise<TOutput>;
 }) {
   const { handler } = options;
 
@@ -138,7 +153,7 @@ export function createAuthenticatedGetHandler<TOutput>(options: {
         env: c.env,
       };
 
-      const output = await handler(context);
+      const output = await handler(c, context);
 
       return c.json({ data: output });
     } catch (error) {

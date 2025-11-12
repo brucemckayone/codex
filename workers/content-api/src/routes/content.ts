@@ -18,12 +18,15 @@ import { Hono } from 'hono';
 import type { HonoEnv } from '../types';
 import {
   createContentService,
-  mapErrorToResponse,
   createContentSchema,
   updateContentSchema,
   contentQuerySchema,
 } from '@codex/content';
 import { dbHttp } from '@codex/database';
+import {
+  createAuthenticatedHandler,
+  createAuthenticatedGetHandler,
+} from '@codex/worker-utils';
 
 const app = new Hono<HonoEnv>();
 
@@ -33,332 +36,159 @@ const app = new Hono<HonoEnv>();
 /**
  * POST /api/content
  * Create new content
- *
- * Body: CreateContentInput
- * Returns: Content (201)
  */
-app.post('/', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.post(
+  '/',
+  createAuthenticatedHandler({
+    schema: createContentSchema,
+    handler: async (input, c, ctx) => {
+      const service = createContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const body = await c.req.json();
-
-    // Validate request body
-    const validationResult = createContentSchema.safeParse(body);
-    if (!validationResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid request data',
-            details: validationResult.error.errors.map((err) => ({
-              path: err.path.join('.'),
-              message: err.message,
-            })),
-          },
-        },
-        400
-      );
-    }
-
-    const service = createContentService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    // Extract organizationId from validated data if present
-    const organizationId = validationResult.data.organizationId || null;
-
-    const content = await service.create(
-      validationResult.data,
-      user.id,
-      organizationId
-    );
-
-    return c.json({ data: content }, 201);
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+      return service.create(input, ctx.user.id);
+    },
+    successStatus: 201,
+  })
+);
 
 /**
  * GET /api/content/:id
  * Get content by ID
- *
- * Returns: Content (200)
  */
-app.get('/:id', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.get(
+  '/:id',
+  createAuthenticatedGetHandler({
+    handler: async (c, ctx) => {
+      const id = c.req.param('id');
+      const service = createContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const id = c.req.param('id');
-
-    const service = createContentService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const content = await service.getById(id, user.id);
-
-    return c.json({ data: content });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+      return service.get(id, ctx.user.id);
+    },
+  })
+);
 
 /**
  * PATCH /api/content/:id
  * Update content
- *
- * Body: UpdateContentInput
- * Returns: Content (200)
  */
-app.patch('/:id', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.patch(
+  '/:id',
+  createAuthenticatedHandler({
+    schema: updateContentSchema,
+    handler: async (input, c, ctx) => {
+      const id = c.req.param('id');
+      const service = createContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const id = c.req.param('id');
-    const body = await c.req.json();
-
-    // Validate request body
-    const validationResult = updateContentSchema.safeParse(body);
-    if (!validationResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid request data',
-            details: validationResult.error.errors.map((err) => ({
-              path: err.path.join('.'),
-              message: err.message,
-            })),
-          },
-        },
-        400
-      );
-    }
-
-    const service = createContentService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const content = await service.update(id, validationResult.data, user.id);
-
-    return c.json({ data: content });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+      return service.update(id, input, ctx.user.id);
+    },
+  })
+);
 
 /**
  * GET /api/content
  * List content with filters and pagination
- *
- * Query params: ContentQueryInput
- * Returns: PaginatedResponse<Content> (200)
  */
-app.get('/', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.get(
+  '/',
+  createAuthenticatedGetHandler({
+    handler: async (c, ctx) => {
+      const query = c.req.query();
+      const validationResult = contentQuerySchema.safeParse(query);
 
-    const query = c.req.query();
+      if (!validationResult.success) {
+        throw new Error('Validation failed'); // Will be caught by error handler
+      }
 
-    // Validate query parameters
-    const validationResult = contentQuerySchema.safeParse(query);
-    if (!validationResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid query parameters',
-            details: validationResult.error.errors.map((err) => ({
-              path: err.path.join('.'),
-              message: err.message,
-            })),
-          },
-        },
-        400
-      );
-    }
+      const service = createContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const service = createContentService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
+      const result = await service.list(ctx.user.id, validationResult.data);
 
-    const result = await service.list(user.id, validationResult.data);
-
-    return c.json({
-      data: {
+      return {
         items: result.items,
         page: result.pagination.page,
         limit: result.pagination.limit,
         total: result.pagination.total,
-        hasMore: result.pagination.hasMore,
-      },
-    });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+        totalPages: result.pagination.totalPages,
+      };
+    },
+  })
+);
 
 /**
  * POST /api/content/:id/publish
- * Publish content (mark as published)
- *
- * Returns: Content (200)
+ * Publish content
  */
-app.post('/:id/publish', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.post(
+  '/:id/publish',
+  createAuthenticatedGetHandler({
+    handler: async (c, ctx) => {
+      const id = c.req.param('id');
+      const service = createContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const id = c.req.param('id');
-
-    const service = createContentService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const content = await service.publish(id, user.id);
-
-    return c.json({ data: content });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+      return service.publish(id, ctx.user.id);
+    },
+  })
+);
 
 /**
  * POST /api/content/:id/unpublish
- * Unpublish content (revert to draft)
- *
- * Returns: Content (200)
+ * Unpublish content
  */
-app.post('/:id/unpublish', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.post(
+  '/:id/unpublish',
+  createAuthenticatedGetHandler({
+    handler: async (c, ctx) => {
+      const id = c.req.param('id');
+      const service = createContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const id = c.req.param('id');
-
-    const service = createContentService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const content = await service.unpublish(id, user.id);
-
-    return c.json({ data: content });
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+      return service.unpublish(id, ctx.user.id);
+    },
+  })
+);
 
 /**
  * DELETE /api/content/:id
- * Soft delete content (sets deleted_at)
- *
- * Returns: 204 No Content
+ * Soft delete content
  */
 app.delete('/:id', async (c) => {
+  const user = c.get('user');
+  if (!user) {
+    return c.json(
+      { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } },
+      401
+    );
+  }
+
   try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
-
     const id = c.req.param('id');
-
     const service = createContentService({
       db: dbHttp,
       environment: c.env.ENVIRONMENT || 'development',
     });
 
     await service.delete(id, user.id);
-
     return c.body(null, 204);
-  } catch (err) {
+  } catch (err: any) {
+    const { mapErrorToResponse } = await import('@codex/content');
     const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
+    return c.json(response, statusCode as any);
   }
 });
 
