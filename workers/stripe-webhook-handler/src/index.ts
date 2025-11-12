@@ -1,82 +1,84 @@
-import { Hono } from 'hono';
-import type Stripe from 'stripe';
-import type { KVNamespace } from '@cloudflare/workers-types';
-import { ObservabilityClient, createRequestTimer } from '@codex/observability';
+/**
+ * Stripe Webhook Handler Worker
+ *
+ * Processes Stripe webhook events with signature verification,
+ * observability, and security features.
+ */
+
+import { Hono, Context, Next } from 'hono';
 import {
   securityHeaders,
   CSP_PRESETS,
   rateLimit,
   RATE_LIMIT_PRESETS,
 } from '@codex/security';
+import { sequence } from '@codex/worker-utils';
 
+import type { StripeWebhookEnv } from './types';
 import { verifyStripeSignature } from './middleware/verify-signature';
+import {
+  createObservabilityMiddleware,
+  createObservabilityErrorHandler,
+} from './middleware/observability';
+import { createWebhookHandler } from './utils/webhook-handler';
 
-type Bindings = {
-  ENVIRONMENT?: string;
-  DATABASE_URL?: string;
-  STRIPE_SECRET_KEY?: string;
-  STRIPE_WEBHOOK_SECRET_PAYMENT?: string;
-  STRIPE_WEBHOOK_SECRET_SUBSCRIPTION?: string;
-  STRIPE_WEBHOOK_SECRET_CONNECT?: string;
-  STRIPE_WEBHOOK_SECRET_CUSTOMER?: string;
-  STRIPE_WEBHOOK_SECRET_BOOKING?: string;
-  STRIPE_WEBHOOK_SECRET_DISPUTE?: string;
-  RATE_LIMIT_KV?: KVNamespace;
-};
+const app = new Hono<StripeWebhookEnv>();
 
-type Variables = {
-  stripeEvent: Stripe.Event;
-  stripe: Stripe;
-};
+// ============================================================================
+// Global Middleware
+// ============================================================================
 
-const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-
-// Security headers middleware
-app.use('*', (c, next) => {
+/**
+ * Security headers middleware wrapper
+ * Applies restrictive CSP for API worker
+ */
+const securityHeadersMiddleware = (
+  c: Context<StripeWebhookEnv>,
+  next: Next
+) => {
   return securityHeaders({
     environment: c.env?.ENVIRONMENT || 'development',
-    csp: CSP_PRESETS.api, // Restrictive CSP for API worker
+    csp: CSP_PRESETS.api,
   })(c, next);
-});
+};
 
-// Rate limiting middleware (webhook endpoints can be high volume)
-app.use('*', (c, next) => {
+/**
+ * Rate limiting middleware wrapper
+ * Webhooks can be high volume, use appropriate presets
+ */
+const rateLimitMiddleware = (c: Context<StripeWebhookEnv>, next: Next) => {
   return rateLimit({
-    kv: c.env?.RATE_LIMIT_KV,
+    kv: c.env?.RATE_LIMIT_KV as any,
     ...RATE_LIMIT_PRESETS.webhook,
   })(c, next);
-});
+};
 
-// Request timing middleware
-app.use('*', async (c, next) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
-  const timer = createRequestTimer(obs, c.req);
-  await next();
-  timer.end(c.res.status);
-});
+// Apply global middleware in sequence
+app.use(
+  '*',
+  sequence(
+    securityHeadersMiddleware,
+    rateLimitMiddleware,
+    createObservabilityMiddleware()
+  )
+);
 
-// Error handling
-app.onError((err, c) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
-  obs.trackError(err, { url: c.req.url, method: c.req.method });
-  return c.text('Internal Server Error', 500);
-});
+// ============================================================================
+// Error Handling
+// ============================================================================
+
+app.onError(createObservabilityErrorHandler('stripe-webhook-handler'));
+
+// ============================================================================
+// Health Check Endpoints
+// ============================================================================
 
 app.get('/', (c) => {
   return c.json({ status: 'ok', service: 'stripe-webhook-handler' });
 });
 
 app.get('/health', (c) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
+  const obs = c.get('obs');
   obs.info('Health check endpoint hit');
 
   // ✅ SECURE: Don't leak secret configuration in logs/responses
@@ -88,31 +90,20 @@ app.get('/health', (c) => {
   });
 });
 
-// ========================================
-// Webhook Endpoints with Signature Verification
-// ========================================
+// ============================================================================
+// Webhook Endpoints
+// ============================================================================
 
 /**
  * Payment events webhook
  * Handles: payment_intent.*, charge.*
  */
-app.post('/webhooks/stripe/payment', verifyStripeSignature(), async (c) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
-  const event = c.get('stripeEvent') as Stripe.Event;
-
-  obs.info('Payment webhook received', {
-    type: event.type,
-    id: event.id,
-  });
-
-  // TODO: Implement payment event handlers
-  // See: workers/stripe-webhook-handler/src/handlers/payment.ts (to be created)
-
-  return c.json({ received: true });
-});
+app.post(
+  '/webhooks/stripe/payment',
+  verifyStripeSignature(),
+  createWebhookHandler('Payment')
+  // TODO: Add handler: async (event, stripe, c) => { /* process payment */ }
+);
 
 /**
  * Subscription events webhook
@@ -121,106 +112,52 @@ app.post('/webhooks/stripe/payment', verifyStripeSignature(), async (c) => {
 app.post(
   '/webhooks/stripe/subscription',
   verifyStripeSignature(),
-  async (c) => {
-    const obs = new ObservabilityClient(
-      'stripe-webhook-handler',
-      c.env.ENVIRONMENT || 'development'
-    );
-    const event = c.get('stripeEvent') as Stripe.Event;
-
-    obs.info('Subscription webhook received', {
-      type: event.type,
-      id: event.id,
-    });
-
-    // TODO: Implement subscription event handlers
-
-    return c.json({ received: true });
-  }
+  createWebhookHandler('Subscription')
+  // TODO: Add handler: async (event, stripe, c) => { /* process subscription */ }
 );
 
 /**
  * Connect events webhook
  * Handles: account.*, capability.*, person.*
  */
-app.post('/webhooks/stripe/connect', verifyStripeSignature(), async (c) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
-  const event = c.get('stripeEvent') as Stripe.Event;
-
-  obs.info('Connect webhook received', {
-    type: event.type,
-    id: event.id,
-  });
-
-  // TODO: Implement Connect event handlers
-
-  return c.json({ received: true });
-});
+app.post(
+  '/webhooks/stripe/connect',
+  verifyStripeSignature(),
+  createWebhookHandler('Connect')
+  // TODO: Add handler: async (event, stripe, c) => { /* process connect */ }
+);
 
 /**
  * Customer events webhook
  * Handles: customer.created, customer.updated, customer.deleted
  */
-app.post('/webhooks/stripe/customer', verifyStripeSignature(), async (c) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
-  const event = c.get('stripeEvent') as Stripe.Event;
-
-  obs.info('Customer webhook received', {
-    type: event.type,
-    id: event.id,
-  });
-
-  // TODO: Implement customer event handlers
-
-  return c.json({ received: true });
-});
+app.post(
+  '/webhooks/stripe/customer',
+  verifyStripeSignature(),
+  createWebhookHandler('Customer')
+  // TODO: Add handler: async (event, stripe, c) => { /* process customer */ }
+);
 
 /**
  * Booking events webhook
  * Handles: checkout.session.*
  */
-app.post('/webhooks/stripe/booking', verifyStripeSignature(), async (c) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
-  const event = c.get('stripeEvent') as Stripe.Event;
-
-  obs.info('Booking webhook received', {
-    type: event.type,
-    id: event.id,
-  });
-
-  // TODO: Implement booking event handlers
-
-  return c.json({ received: true });
-});
+app.post(
+  '/webhooks/stripe/booking',
+  verifyStripeSignature(),
+  createWebhookHandler('Booking')
+  // TODO: Add handler: async (event, stripe, c) => { /* process booking */ }
+);
 
 /**
  * Dispute events webhook
  * Handles: charge.dispute.*, radar.early_fraud_warning.*
  */
-app.post('/webhooks/stripe/dispute', verifyStripeSignature(), async (c) => {
-  const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
-    c.env.ENVIRONMENT || 'development'
-  );
-  const event = c.get('stripeEvent') as Stripe.Event;
-
-  obs.info('Dispute webhook received', {
-    type: event.type,
-    id: event.id,
-  });
-
-  // TODO: Implement dispute event handlers
-
-  return c.json({ received: true });
-});
+app.post(
+  '/webhooks/stripe/dispute',
+  verifyStripeSignature(),
+  createWebhookHandler('Dispute')
+  // TODO: Add handler: async (event, stripe, c) => { /* process dispute */ }
+);
 
 export default app;

@@ -602,9 +602,15 @@ importers:
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
+      '@codex/worker-utils':
+        specifier: workspace:*
+        version: link:../../packages/worker-utils
       hono:
         specifier: ^4.6.20
         version: 4.10.3

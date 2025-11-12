@@ -1,28 +1,21 @@
+/**
+ * Stripe Signature Verification Middleware
+ *
+ * CRITICAL SECURITY: Verifies Stripe webhook signatures to prevent spoofing.
+ * This middleware MUST be applied to all webhook endpoints.
+ *
+ * @see https://stripe.com/docs/webhooks/signatures
+ */
+
 import type { Context, Next } from 'hono';
 import Stripe from 'stripe';
-import { ObservabilityClient } from '@codex/observability';
-
-type Bindings = {
-  ENVIRONMENT?: string;
-  STRIPE_SECRET_KEY?: string;
-  STRIPE_WEBHOOK_SECRET_PAYMENT?: string;
-  STRIPE_WEBHOOK_SECRET_SUBSCRIPTION?: string;
-  STRIPE_WEBHOOK_SECRET_CONNECT?: string;
-  STRIPE_WEBHOOK_SECRET_CUSTOMER?: string;
-  STRIPE_WEBHOOK_SECRET_BOOKING?: string;
-  STRIPE_WEBHOOK_SECRET_DISPUTE?: string;
-};
-
-type Variables = {
-  stripeEvent: Stripe.Event;
-  stripe: Stripe;
-};
+import type { StripeWebhookEnv } from '../types';
 
 /**
  * Get the appropriate webhook secret based on the endpoint path
  */
 function getWebhookSecret(
-  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  c: Context<StripeWebhookEnv>,
   path: string
 ): string | undefined {
   if (path.includes('/payment')) {
@@ -44,20 +37,15 @@ function getWebhookSecret(
 /**
  * Middleware to verify Stripe webhook signatures
  *
- * CRITICAL SECURITY: This middleware MUST be applied to all webhook endpoints.
- * It prevents webhook spoofing by verifying the Stripe signature header.
+ * Verifies the Stripe signature header and constructs the event.
+ * On success, sets stripeEvent and stripe in context.
+ * On failure, returns 400/401 error response.
  *
- * @see https://stripe.com/docs/webhooks/signatures
+ * @returns Hono middleware handler
  */
 export function verifyStripeSignature() {
-  return async (
-    c: Context<{ Bindings: Bindings; Variables: Variables }>,
-    next: Next
-  ) => {
-    const obs = new ObservabilityClient(
-      'stripe-webhook-handler',
-      c.env.ENVIRONMENT || 'development'
-    );
+  return async (c: Context<StripeWebhookEnv>, next: Next) => {
+    const obs = c.get('obs');
 
     // Get signature from headers
     const signature = c.req.header('stripe-signature');
