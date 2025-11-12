@@ -296,9 +296,8 @@ export function createRateLimitWrapper(
 /**
  * Chains multiple middleware handlers in sequence
  *
- * Executes handlers one after another. If any handler returns a Response,
- * the sequence stops and that response is returned. Useful for composing
- * multiple middleware functions into a single handler.
+ * Executes handlers one after another. Each handler calls the next one in the chain.
+ * Useful for composing multiple middleware functions into a single handler.
  *
  * @param handlers - Middleware handlers to execute in sequence
  * @returns Combined middleware handler
@@ -322,11 +321,24 @@ export function sequence(
   ) => Promise<globalThis.Response | void>)[]
 ): (c: Context, next: Next) => Promise<globalThis.Response | void> {
   return async (c: Context, next: Next) => {
-    for (const handler of handlers) {
-      const response = await handler(c, next);
-      if (response) {
-        return response;
+    let index = -1;
+
+    const dispatch = async (i: number): Promise<void> => {
+      if (i <= index) {
+        throw new Error('next() called multiple times');
       }
-    }
+      index = i;
+
+      if (i >= handlers.length) {
+        // All handlers completed, call the final next()
+        await next();
+        return;
+      }
+
+      const handler = handlers[i];
+      await handler(c, () => dispatch(i + 1));
+    };
+
+    await dispatch(0);
   };
 }
