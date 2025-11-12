@@ -6,7 +6,7 @@
  */
 
 import { ZodError } from 'zod';
-import { isServiceError } from './base-errors';
+import { isServiceError, type ErrorStatusCode } from './base-errors';
 
 /**
  * Standard HTTP error response structure
@@ -23,7 +23,7 @@ export interface ErrorResponse {
  * Result of error mapping with status code and response body
  */
 export interface MappedError {
-  statusCode: number;
+  statusCode: ErrorStatusCode;
   response: ErrorResponse;
 }
 

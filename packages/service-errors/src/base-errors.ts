@@ -6,6 +6,11 @@
  */
 
 /**
+ * Valid HTTP error status codes for API responses
+ */
+export type ErrorStatusCode = 400 | 401 | 403 | 404 | 409 | 422 | 500;
+
+/**
  * Base error class for all service errors
  * Provides consistent structure and context tracking
  *
@@ -21,12 +26,12 @@
 export abstract class ServiceError extends Error {
   public readonly code: string;
   public readonly context?: Record<string, unknown>;
-  public readonly statusCode: number;
+  public readonly statusCode: ErrorStatusCode;
 
   constructor(
     message: string,
     code: string,
-    statusCode: number,
+    statusCode: ErrorStatusCode,
     context?: Record<string, unknown>
   ) {
     super(message);
