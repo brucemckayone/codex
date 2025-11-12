@@ -1,11 +1,11 @@
 {
-  "name": "@codex/content-api-worker",
+  "name": "content-api",
   "version": "0.1.0",
   "private": true,
   "description": "Cloudflare Worker for Content and Media API endpoints",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "tsc && wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:production": "wrangler deploy --env production",
