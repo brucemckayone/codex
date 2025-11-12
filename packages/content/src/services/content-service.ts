@@ -85,7 +85,7 @@ export class ContentService {
         // The ready check happens during publishing
         if (validated.mediaItemId) {
           await this.validateMediaItem(
-            tx as any,
+            tx as DatabaseTransaction,
             validated.mediaItemId,
             creatorId,
             validated.contentType,

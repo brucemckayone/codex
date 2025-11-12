@@ -37,8 +37,7 @@ export async function waitFor(
  *
  * @returns Object with mock function and call tracking methods
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createMockFn<T extends (...args: any[]) => any>() {
+export function createMockFn<T extends (...args: never[]) => unknown>() {
   const calls: Array<Parameters<T>> = [];
   const mockFn = ((...args: Parameters<T>) => {
     calls.push(args);
@@ -77,7 +76,7 @@ export function expectContentServiceError(
     throw new Error(`Expected ContentServiceError, got ${typeof error}`);
   }
 
-  const err = error as any;
+  const err = error as Error & { code?: string; message: string };
 
   if (!err.code) {
     throw new Error(
@@ -110,7 +109,7 @@ export function expectContentServiceError(
  * @param expectedCode - Optional error code to check (for errors with a code property)
  * @throws Error if error is not an instance of ErrorClass or has wrong code
  */
-export function expectError<T extends new (...args: any[]) => Error>(
+export function expectError<T extends new (...args: never[]) => Error>(
   error: unknown,
   ErrorClass: T,
   expectedCode?: string
@@ -125,7 +124,7 @@ export function expectError<T extends new (...args: any[]) => Error>(
 
   // If expectedCode is provided, check it
   if (expectedCode !== undefined) {
-    const err = error as any;
+    const err = error as Error & { code?: string };
     if (err.code !== expectedCode) {
       throw new Error(
         `Expected error code '${expectedCode}', got '${err.code}': ${error.message}`

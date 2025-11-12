@@ -38,7 +38,11 @@ export function expectContentServiceError(
 ): void {
   expect(error).toBeInstanceOf(Error);
 
-  const err = error as any;
+  const err = error as Error & {
+    code?: string;
+    statusCode?: number;
+    message: string;
+  };
   expect(err.code).toBe(expectedCode);
   expect(err.statusCode).toBeDefined();
   expect(err.message).toBeDefined();
@@ -156,7 +160,11 @@ export function expectPaginationValid(pagination: PaginationMetadata): void {
  * @param content - Content with relations
  */
 export function expectContentWithRelations(
-  content: any,
+  content: Partial<Content> & {
+    mediaItem?: { id: string; [key: string]: unknown };
+    organization?: { id: string; [key: string]: unknown };
+    creator?: { id: string; email: string; [key: string]: unknown };
+  },
   options: {
     expectMediaItem?: boolean;
     expectOrganization?: boolean;
@@ -165,18 +173,18 @@ export function expectContentWithRelations(
 ): void {
   if (options.expectMediaItem) {
     expect(content.mediaItem).toBeDefined();
-    expect(content.mediaItem.id).toBeDefined();
+    expect(content.mediaItem?.id).toBeDefined();
   }
 
   if (options.expectOrganization) {
     expect(content.organization).toBeDefined();
-    expect(content.organization.id).toBeDefined();
+    expect(content.organization?.id).toBeDefined();
   }
 
   if (options.expectCreator) {
     expect(content.creator).toBeDefined();
-    expect(content.creator.id).toBeDefined();
-    expect(content.creator.email).toBeDefined();
+    expect(content.creator?.id).toBeDefined();
+    expect(content.creator?.email).toBeDefined();
   }
 }
 
@@ -186,15 +194,17 @@ export function expectContentWithRelations(
  * @param mediaItem - Media item with relations
  */
 export function expectMediaItemWithRelations(
-  mediaItem: any,
+  mediaItem: Partial<MediaItem> & {
+    creator?: { id: string; email: string; [key: string]: unknown };
+  },
   options: {
     expectCreator?: boolean;
   } = {}
 ): void {
   if (options.expectCreator) {
     expect(mediaItem.creator).toBeDefined();
-    expect(mediaItem.creator.id).toBeDefined();
-    expect(mediaItem.creator.email).toBeDefined();
+    expect(mediaItem.creator?.id).toBeDefined();
+    expect(mediaItem.creator?.email).toBeDefined();
   }
 }
 

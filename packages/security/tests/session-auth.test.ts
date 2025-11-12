@@ -8,6 +8,14 @@ import {
   type CachedSessionData,
 } from '../src/session-auth';
 
+// Define environment type for test Hono app with user and session
+type TestEnv = {
+  Variables: {
+    user?: UserData;
+    session?: SessionData;
+  };
+};
+
 // Mock @codex/database
 vi.mock('@codex/database', () => {
   const mockDbHttp = {
@@ -38,7 +46,7 @@ vi.mock('drizzle-orm', () => ({
 import { dbHttp } from '@codex/database';
 
 describe('Session Authentication Middleware', () => {
-  let app: Hono;
+  let app: Hono<TestEnv>;
   let mockKV: KVNamespace;
   const mockSessionToken = 'session_abc123xyz';
 
@@ -71,7 +79,7 @@ describe('Session Authentication Middleware', () => {
 
   beforeEach(() => {
     // Reset app for each test
-    app = new Hono();
+    app = new Hono<TestEnv>();
 
     // Reset all mocks
     vi.clearAllMocks();
@@ -96,8 +104,8 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
-          const session = (c.get as any)('session');
+          const user = c.get('user');
+          const session = c.get('session');
           return c.json({ user, session, source: 'cache' });
         });
 
@@ -109,9 +117,13 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).user).toEqual(mockUser);
-        expect((body as any).session).toEqual(mockSession);
+        const body = (await res.json()) as {
+          user: UserData;
+          session: SessionData;
+          source: string;
+        };
+        expect(body.user).toEqual(mockUser);
+        expect(body.session).toEqual(mockSession);
         expect(mockKV.get).toHaveBeenCalledWith(
           `session:${mockSessionToken}`,
           'json'
@@ -167,8 +179,8 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
-          const session = (c.get as any)('session');
+          const user = c.get('user');
+          const session = c.get('session');
           return c.json({ user, session, source: 'database' });
         });
 
@@ -179,10 +191,14 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).user).toBeDefined();
-        expect((body as any).user.id).toBe('user_1');
-        expect((body as any).session).toBeDefined();
+        const body = (await res.json()) as {
+          user: UserData;
+          session: SessionData;
+          source: string;
+        };
+        expect(body.user).toBeDefined();
+        expect(body.user.id).toBe('user_1');
+        expect(body.session).toBeDefined();
 
         // Verify database was queried
         expect(dbHttp.query.sessions.findFirst).toHaveBeenCalled();
@@ -213,7 +229,7 @@ describe('Session Authentication Middleware', () => {
         // No KV config provided
         app.use('*', optionalAuth());
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ userId: user?.id });
         });
 
@@ -224,8 +240,8 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).userId).toBe('user_1');
+        const body = (await res.json()) as { userId?: string };
+        expect(body.userId).toBe('user_1');
         expect(dbHttp.query.sessions.findFirst).toHaveBeenCalled();
       });
     });
@@ -249,7 +265,7 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ hasUser: !!user });
         });
 
@@ -260,8 +276,8 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).hasUser).toBe(false);
+        const body = (await res.json()) as { hasUser: boolean };
+        expect(body.hasUser).toBe(false);
 
         // Should delete expired session from cache
         expect(mockKV.delete).toHaveBeenCalledWith(
@@ -279,7 +295,7 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ hasUser: !!user });
         });
 
@@ -290,8 +306,8 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).hasUser).toBe(false);
+        const body = (await res.json()) as { hasUser: boolean };
+        expect(body.hasUser).toBe(false);
       });
     });
 
@@ -299,7 +315,7 @@ describe('Session Authentication Middleware', () => {
       it('should proceed without authentication when no cookie', async () => {
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ hasUser: !!user });
         });
 
@@ -308,8 +324,8 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).hasUser).toBe(false);
+        const body = (await res.json()) as { hasUser: boolean };
+        expect(body.hasUser).toBe(false);
 
         // Should not query cache or database
         expect(mockKV.get).not.toHaveBeenCalled();
@@ -346,7 +362,7 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ hasUser: !!user });
         });
 
@@ -357,8 +373,8 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).hasUser).toBe(false);
+        const body = (await res.json()) as { hasUser: boolean };
+        expect(body.hasUser).toBe(false);
       });
     });
 
@@ -371,7 +387,7 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ hasUser: !!user });
         });
 
@@ -383,8 +399,8 @@ describe('Session Authentication Middleware', () => {
 
         // Should proceed without auth (fail open for optional auth)
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).hasUser).toBe(false);
+        const body = (await res.json()) as { hasUser: boolean };
+        expect(body.hasUser).toBe(false);
       });
 
       it('should handle KV read errors gracefully', async () => {
@@ -407,7 +423,7 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ hasUser: !!user });
         });
 
@@ -419,8 +435,8 @@ describe('Session Authentication Middleware', () => {
 
         // Should fall back to database
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).hasUser).toBe(true);
+        const body = (await res.json()) as { hasUser: boolean };
+        expect(body.hasUser).toBe(true);
         expect(dbHttp.query.sessions.findFirst).toHaveBeenCalled();
       });
 
@@ -445,7 +461,7 @@ describe('Session Authentication Middleware', () => {
 
         app.use('*', optionalAuth({ kv: mockKV }));
         app.get('/test', (c) => {
-          const user = (c.get as any)('user');
+          const user = c.get('user');
           return c.json({ hasUser: !!user });
         });
 
@@ -457,8 +473,8 @@ describe('Session Authentication Middleware', () => {
 
         // Should still authenticate from database (ignore cache write error)
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).hasUser).toBe(true);
+        const body = (await res.json()) as { hasUser: boolean };
+        expect(body.hasUser).toBe(true);
       });
     });
 
@@ -539,8 +555,8 @@ describe('Session Authentication Middleware', () => {
 
         app.use('/protected/*', requireAuth({ kv: mockKV }));
         app.get('/protected/resource', (c) => {
-          const user = (c.get as any)('user');
-          return c.json({ userId: user.id });
+          const user = c.get('user');
+          return c.json({ userId: user?.id });
         });
 
         const res = await app.request('/protected/resource', {
@@ -550,8 +566,8 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as any;
-        expect((body as any).userId).toBe('user_1');
+        const body = (await res.json()) as { userId?: string };
+        expect(body.userId).toBe('user_1');
       });
     });
 
@@ -565,7 +581,7 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(401);
-        const body = (await res.json()) as any;
+        const body = (await res.json()) as Record<string, unknown>;
         expect(body).toEqual({
           error: {
             code: 'UNAUTHORIZED',
@@ -590,8 +606,10 @@ describe('Session Authentication Middleware', () => {
         });
 
         expect(res.status).toBe(401);
-        const body = (await res.json()) as any;
-        expect((body as any).error.code).toBe('UNAUTHORIZED');
+        const body = (await res.json()) as {
+          error: { code: string; message: string };
+        };
+        expect(body.error.code).toBe('UNAUTHORIZED');
       });
 
       it('should return 401 when session expired', async () => {
@@ -654,8 +672,8 @@ describe('Session Authentication Middleware', () => {
         // Public route should work without auth
         const publicRes = await app.request('/public');
         expect(publicRes.status).toBe(200);
-        const publicBody = (await publicRes.json()) as any;
-        expect((publicBody as any).type).toBe('public');
+        const publicBody = (await publicRes.json()) as { type: string };
+        expect(publicBody.type).toBe('public');
 
         // Protected route should require auth
         const protectedRes = await app.request('/protected/secret');
@@ -680,7 +698,7 @@ describe('Session Authentication Middleware', () => {
 
       app.use('*', optionalAuth({ kv: mockKV }));
       app.get('/test', (c) => {
-        const session = (c.get as any)('session');
+        const session = c.get('session');
         return c.json({ session });
       });
 
@@ -690,7 +708,7 @@ describe('Session Authentication Middleware', () => {
         },
       });
 
-      const body = (await res.json()) as any;
+      const body = (await res.json()) as { session: SessionData };
       expect(body.session).toHaveProperty('id');
       expect(body.session).toHaveProperty('userId');
       expect(body.session).toHaveProperty('token');
@@ -708,7 +726,7 @@ describe('Session Authentication Middleware', () => {
 
       app.use('*', optionalAuth({ kv: mockKV }));
       app.get('/test', (c) => {
-        const user = (c.get as any)('user');
+        const user = c.get('user');
         return c.json({ user });
       });
 
@@ -718,7 +736,7 @@ describe('Session Authentication Middleware', () => {
         },
       });
 
-      const body = (await res.json()) as any;
+      const body = (await res.json()) as { user: UserData };
       expect(body.user).toHaveProperty('id');
       expect(body.user).toHaveProperty('email');
       expect(body.user).toHaveProperty('name');
