@@ -56,7 +56,9 @@ export const dbHttp = new Proxy(
         if (!_sqlHttp) {
           _sqlHttp = neon(DbEnvConfig.getDbUrl()!);
         }
-        _dbHttp = drizzleHttp({ client: _sqlHttp, schema }) as any;
+        _dbHttp = drizzleHttp({ client: _sqlHttp, schema }) as ReturnType<
+          typeof drizzleHttp<typeof schema>
+        >;
       }
       return Reflect.get(_dbHttp as object, prop, _dbHttp);
     },

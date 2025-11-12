@@ -5,7 +5,6 @@
  */
 
 import type { Context } from 'hono';
-import type { ZodSchema } from 'zod';
 import type { ZodError } from 'zod';
 import type { HonoEnv, AuthenticatedContext } from '@codex/shared-types';
 import { mapErrorToResponse } from '@codex/service-errors';

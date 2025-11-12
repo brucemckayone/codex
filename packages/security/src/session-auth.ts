@@ -115,7 +115,7 @@ async function querySessionFromDatabase(
     }
 
     // TypeScript type assertion - we've validated user exists above
-    const user = result.user as any;
+    const user = result.user as typeof schema.users.$inferSelect;
 
     // Transform database result to cached data structure
     const sessionData: CachedSessionData = {

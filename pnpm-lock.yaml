@@ -8247,6 +8247,14 @@ snapshots:
     optionalDependencies:
       vite: 5.4.21(@types/node@24.8.1)
 
+  '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@vitest/spy': 4.0.2
+      estree-walker: 3.0.3
+      magic-string: 0.30.19
+    optionalDependencies:
+      vite: 6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
+
   '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.18.11)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@vitest/spy': 4.0.2
@@ -10740,7 +10748,7 @@ snapshots:
   vitest@4.0.2(@types/node@22.13.0)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)(yaml@2.8.1):
     dependencies:
       '@vitest/expect': 4.0.2
-      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@24.8.1)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       '@vitest/pretty-format': 4.0.2
       '@vitest/runner': 4.0.2
       '@vitest/snapshot': 4.0.2
