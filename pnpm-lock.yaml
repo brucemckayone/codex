@@ -215,12 +215,15 @@ importers:
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../service-errors
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
       drizzle-orm:
-        specifier: ^0.36.4
-        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1)
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)
     devDependencies:
       '@codex/test-utils':
         specifier: workspace:*
@@ -298,12 +301,15 @@ importers:
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../service-errors
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
       drizzle-orm:
-        specifier: ^0.36.4
-        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1)
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)
     devDependencies:
       '@codex/test-utils':
         specifier: workspace:*
@@ -343,8 +349,8 @@ importers:
         specifier: workspace:*
         version: link:../database
       drizzle-orm:
-        specifier: ^0.36.4
-        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1)
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)
       hono:
         specifier: ^4.0.0
         version: 4.10.3
@@ -362,6 +368,25 @@ importers:
         specifier: ^4.0.2
         version: 4.0.2(@types/node@24.8.1)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/service-errors:
+    dependencies:
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
+  packages/shared-types:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20250102.0
+        version: 4.20251014.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   packages/test-utils:
     dependencies:
       '@codex/database':
@@ -371,8 +396,8 @@ importers:
         specifier: ^0.10.4
         version: 0.10.4
       drizzle-orm:
-        specifier: ^0.36.4
-        version: 0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1)
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)
       miniflare:
         specifier: ^3.20241129.0
         version: 3.20250718.2
@@ -408,6 +433,31 @@ importers:
       vitest:
         specifier: ^4.0.2
         version: 4.0.2(@types/node@22.18.11)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)(yaml@2.8.1)
+
+  packages/worker-utils:
+    dependencies:
+      '@codex/security':
+        specifier: workspace:*
+        version: link:../security
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../service-errors
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+      hono:
+        specifier: ^4.7.8
+        version: 4.10.3
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20250102.0
+        version: 4.20251014.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
 
   workers/auth:
     dependencies:
@@ -472,6 +522,9 @@ importers:
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
@@ -503,6 +556,9 @@ importers:
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
@@ -3413,98 +3469,6 @@ packages:
       '@electric-sql/pglite':
         optional: true
       '@libsql/client':
-        optional: true
-      '@neondatabase/serverless':
-        optional: true
-      '@op-engineering/op-sqlite':
-        optional: true
-      '@opentelemetry/api':
-        optional: true
-      '@planetscale/database':
-        optional: true
-      '@prisma/client':
-        optional: true
-      '@tidbcloud/serverless':
-        optional: true
-      '@types/better-sqlite3':
-        optional: true
-      '@types/pg':
-        optional: true
-      '@types/react':
-        optional: true
-      '@types/sql.js':
-        optional: true
-      '@vercel/postgres':
-        optional: true
-      '@xata.io/client':
-        optional: true
-      better-sqlite3:
-        optional: true
-      bun-types:
-        optional: true
-      expo-sqlite:
-        optional: true
-      knex:
-        optional: true
-      kysely:
-        optional: true
-      mysql2:
-        optional: true
-      pg:
-        optional: true
-      postgres:
-        optional: true
-      prisma:
-        optional: true
-      react:
-        optional: true
-      sql.js:
-        optional: true
-      sqlite3:
-        optional: true
-
-  drizzle-orm@0.36.4:
-    resolution: {integrity: sha512-1OZY3PXD7BR00Gl61UUOFihslDldfH4NFRH2MbP54Yxi0G/PKn4HfO65JYZ7c16DeP3SpM3Aw+VXVG9j6CRSXA==}
-    peerDependencies:
-      '@aws-sdk/client-rds-data': '>=3'
-      '@cloudflare/workers-types': '>=3'
-      '@electric-sql/pglite': '>=0.2.0'
-      '@libsql/client': '>=0.10.0'
-      '@libsql/client-wasm': '>=0.10.0'
-      '@neondatabase/serverless': '>=0.10.0'
-      '@op-engineering/op-sqlite': '>=2'
-      '@opentelemetry/api': ^1.4.1
-      '@planetscale/database': '>=1'
-      '@prisma/client': '*'
-      '@tidbcloud/serverless': '*'
-      '@types/better-sqlite3': '*'
-      '@types/pg': '*'
-      '@types/react': '>=18'
-      '@types/sql.js': '*'
-      '@vercel/postgres': '>=0.8.0'
-      '@xata.io/client': '*'
-      better-sqlite3: '>=7'
-      bun-types: '*'
-      expo-sqlite: '>=14.0.0'
-      knex: '*'
-      kysely: '*'
-      mysql2: '>=2'
-      pg: '>=8'
-      postgres: '>=3'
-      prisma: '*'
-      react: '>=18'
-      sql.js: '>=1'
-      sqlite3: '>=5'
-    peerDependenciesMeta:
-      '@aws-sdk/client-rds-data':
-        optional: true
-      '@cloudflare/workers-types':
-        optional: true
-      '@electric-sql/pglite':
-        optional: true
-      '@libsql/client':
-        optional: true
-      '@libsql/client-wasm':
         optional: true
       '@neondatabase/serverless':
         optional: true
@@ -8262,14 +8226,6 @@ snapshots:
     optionalDependencies:
       vite: 5.4.21(@types/node@24.8.1)
 
-  '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))':
-    dependencies:
-      '@vitest/spy': 4.0.2
-      estree-walker: 3.0.3
-      magic-string: 0.30.19
-    optionalDependencies:
-      vite: 6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
-
   '@vitest/mocker@4.0.2(vite@6.4.1(@types/node@22.18.11)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@vitest/spy': 4.0.2
@@ -8843,21 +8799,6 @@ snapshots:
       - supports-color
 
   drizzle-orm@0.33.0(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1):
-    optionalDependencies:
-      '@cloudflare/workers-types': 4.20251014.0
-      '@neondatabase/serverless': 0.10.4
-      '@opentelemetry/api': 1.9.0
-      '@prisma/client': 5.22.0(prisma@5.22.0)
-      '@types/better-sqlite3': 7.6.13
-      '@types/pg': 8.15.5
-      better-sqlite3: 12.4.1
-      kysely: 0.28.8
-      mysql2: 3.15.3
-      postgres: 3.4.7
-      prisma: 5.22.0
-      react: 18.3.1
-
-  drizzle-orm@0.36.4(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)(react@18.3.1):
     optionalDependencies:
       '@cloudflare/workers-types': 4.20251014.0
       '@neondatabase/serverless': 0.10.4
@@ -10778,7 +10719,7 @@ snapshots:
   vitest@4.0.2(@types/node@22.13.0)(@vitest/ui@4.0.2)(happy-dom@20.0.8)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(tsx@4.20.6)(yaml@2.8.1):
     dependencies:
       '@vitest/expect': 4.0.2
-      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+      '@vitest/mocker': 4.0.2(vite@6.4.1(@types/node@24.8.1)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       '@vitest/pretty-format': 4.0.2
       '@vitest/runner': 4.0.2
       '@vitest/snapshot': 4.0.2

@@ -1,0 +1,31 @@
+{
+  "name": "@codex/worker-utils",
+  "version": "1.0.0",
+  "description": "Shared utilities and factories for Cloudflare Workers",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "codex",
+    "cloudflare-workers",
+    "hono",
+    "utilities"
+  ],
+  "dependencies": {
+    "@codex/shared-types": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/security": "workspace:*",
+    "hono": "^4.7.8",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250102.0",
+    "typescript": "^5.7.3"
+  }
+}

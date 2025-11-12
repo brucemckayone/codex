@@ -19,11 +19,8 @@ import {
   createUniqueSlug,
 } from '@codex/test-utils';
 import type { Database } from '@codex/database';
-import {
-  ContentService,
-  MediaItemService,
-  OrganizationService,
-} from '../services';
+import { ContentService, MediaItemService } from '../services';
+import { OrganizationService } from '@codex/identity';
 
 describe('Integration Tests', () => {
   let db: Database;

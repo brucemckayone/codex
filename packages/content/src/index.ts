@@ -116,9 +116,12 @@ export {
 // Utilities
 // ============================================================================
 
-export { mapErrorToResponse, isKnownError } from './utils/error-mapper';
-
-export type { ErrorResponse, MappedError } from './utils/error-mapper';
+export {
+  mapErrorToResponse,
+  isKnownError,
+  type ErrorResponse,
+  type MappedError,
+} from '@codex/service-errors';
 
 // ============================================================================
 // Re-export Validation Schemas (for convenience)

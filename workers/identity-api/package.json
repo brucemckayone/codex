@@ -21,7 +21,8 @@
     "@codex/database": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/identity": "workspace:*",
-    "@codex/security": "workspace:*"
+    "@codex/security": "workspace:*",
+    "@codex/shared-types": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250102.0",

@@ -1,12 +1,12 @@
 /**
  * Error to HTTP Response Mapper
  *
- * Converts content service errors to standardized HTTP responses.
- * This utility is designed to be used by any worker/API that uses content services.
+ * Converts service errors to standardized HTTP responses.
+ * Generic implementation that works with any ServiceError subclass.
  */
 
 import { ZodError } from 'zod';
-import { isContentServiceError, ContentServiceError } from '../errors';
+import { isServiceError, type ServiceError } from './base-errors';
 
 /**
  * Standard HTTP error response structure
@@ -28,18 +28,38 @@ export interface MappedError {
 }
 
 /**
+ * Options for error mapping
+ */
+export interface ErrorMapperOptions {
+  /**
+   * Whether to include stack trace in development
+   * @default false
+   */
+  includeStack?: boolean;
+
+  /**
+   * Whether to log internal errors to console
+   * @default true
+   */
+  logError?: boolean;
+}
+
+/**
  * Maps any error to a standardized HTTP error response
  *
- * @param error - The error to map (can be ContentServiceError, ZodError, or unknown)
+ * Handles:
+ * - ServiceError instances (custom errors with status codes)
+ * - ZodError instances (validation errors)
+ * - Unknown errors (wrapped as 500 internal errors)
+ *
+ * @param error - The error to map
  * @param options - Optional configuration
- * @param options.includeStack - Whether to include stack trace in development (default: false)
- * @param options.logError - Whether to log internal errors (default: true)
  * @returns Mapped error with statusCode and response body
  *
  * @example
  * ```typescript
  * try {
- *   await contentService.publish(id, userId);
+ *   await service.create(input);
  * } catch (err) {
  *   const { statusCode, response } = mapErrorToResponse(err);
  *   return c.json(response, statusCode);
@@ -48,15 +68,12 @@ export interface MappedError {
  */
 export function mapErrorToResponse(
   error: unknown,
-  options?: {
-    includeStack?: boolean;
-    logError?: boolean;
-  }
+  options?: ErrorMapperOptions
 ): MappedError {
   const { includeStack = false, logError = true } = options || {};
 
-  // Handle ContentServiceError (already has statusCode and code)
-  if (isContentServiceError(error)) {
+  // Handle ServiceError (already has statusCode and code)
+  if (isServiceError(error)) {
     return {
       statusCode: error.statusCode,
       response: {
@@ -114,8 +131,8 @@ export function mapErrorToResponse(
 
 /**
  * Type guard to check if an error is a known application error
- * (either ContentServiceError or ZodError)
+ * (either ServiceError or ZodError)
  */
 export function isKnownError(error: unknown): boolean {
-  return isContentServiceError(error) || error instanceof ZodError;
+  return isServiceError(error) || error instanceof ZodError;
 }

@@ -21,8 +21,9 @@
     "@codex/database": "workspace:*",
     "@codex/identity": "workspace:*",
     "@codex/observability": "workspace:*",
+    "@codex/service-errors": "workspace:*",
     "@codex/validation": "workspace:*",
-    "drizzle-orm": "^0.36.4"
+    "drizzle-orm": "0.44.7"
   },
   "devDependencies": {
     "@codex/test-utils": "workspace:*",

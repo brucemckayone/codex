@@ -1,0 +1,26 @@
+{
+  "name": "@codex/shared-types",
+  "version": "1.0.0",
+  "description": "Shared TypeScript types for Codex platform workers and services",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker-types.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "codex",
+    "types",
+    "shared",
+    "cloudflare-workers"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250102.0",
+    "typescript": "^5.7.3"
+  }
+}
