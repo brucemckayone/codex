@@ -1,3 +1,5 @@
+/// <reference types="@cloudflare/workers-types" />
+
 import type { Context, Next } from 'hono';
 import { dbHttp, schema } from '@codex/database';
 import { eq, and, gt } from 'drizzle-orm';
@@ -282,7 +284,7 @@ export function optionalAuth(config?: SessionAuthConfig) {
           try {
             config.kv
               .delete(`session:${sessionToken}`)
-              .catch((err) =>
+              .catch((err: unknown) =>
                 console.error(
                   'Failed to delete expired session from cache:',
                   err
