@@ -6,18 +6,19 @@
 
 import type { Context } from 'hono';
 import type { ZodSchema } from 'zod';
+import type { ZodError } from 'zod';
 import type { HonoEnv, AuthenticatedContext } from '@codex/shared-types';
 import { mapErrorToResponse } from '@codex/service-errors';
 
 /**
  * Format validation error response
  */
-export function formatValidationError(zodError: any) {
+export function formatValidationError(zodError: ZodError) {
   return {
     error: {
       code: 'VALIDATION_ERROR',
       message: 'Invalid request data',
-      details: zodError.errors.map((err: any) => ({
+      details: zodError.errors.map((err) => ({
         path: err.path.join('.'),
         message: err.message,
       })),
@@ -61,13 +62,19 @@ export function requireUser(c: Context<HonoEnv>) {
  * ```
  */
 export function createAuthenticatedHandler<TInput, TOutput>(options: {
-  schema?: ZodSchema<TInput>;
+  schema?: {
+    safeParse: (data: unknown) => {
+      success: boolean;
+      data?: TInput;
+      error?: ZodError;
+    };
+  };
   handler: (
     input: TInput,
     c: Context<HonoEnv>,
     context: AuthenticatedContext<HonoEnv>
   ) => Promise<TOutput>;
-  successStatus?: 200 | 201 | 204;
+  successStatus?: 200 | 201;
 }) {
   const { schema, handler, successStatus = 200 } = options;
 
@@ -94,10 +101,10 @@ export function createAuthenticatedHandler<TInput, TOutput>(options: {
         const result = schema.safeParse(body);
 
         if (!result.success) {
-          return c.json(formatValidationError(result.error), 400);
+          return c.json(formatValidationError(result.error!), 400);
         }
 
-        input = result.data;
+        input = result.data!;
       } else {
         input = (await c.req.json()) as TInput;
       }

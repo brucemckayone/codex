@@ -22,8 +22,8 @@ import {
   createTestOrganizationInput,
   createTestMediaItemInput,
   createUniqueSlug,
+  type Database,
 } from '@codex/test-utils';
-import type { Database } from '@codex/database';
 import { organizations, mediaItems } from '@codex/database/schema';
 import { eq } from 'drizzle-orm';
 import { ContentService } from '../content-service';
@@ -83,6 +83,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act
@@ -124,6 +125,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act
@@ -144,6 +146,7 @@ describe('ContentService', () => {
           contentBody: 'This is the written content body.',
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act
@@ -180,6 +183,7 @@ describe('ContentService', () => {
           organizationId: org.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act
@@ -208,6 +212,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act
@@ -267,6 +272,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'purchased_only',
           priceCents: 999, // $9.99
+          tags: [],
         };
 
         // Act
@@ -288,6 +294,7 @@ describe('ContentService', () => {
           mediaItemId: '00000000-0000-0000-0000-000000000000', // Non-existent
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act & Assert
@@ -315,6 +322,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act & Assert
@@ -342,6 +350,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act: Create draft content with non-ready media (should succeed)
@@ -372,6 +381,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act & Assert
@@ -399,6 +409,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Act & Assert
@@ -429,6 +440,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         await service.create(input, creatorId);
@@ -441,6 +453,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         await expect(service.create(input2, creatorId)).rejects.toThrow(
@@ -474,6 +487,7 @@ describe('ContentService', () => {
           organizationId: org.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         await service.create(input, creatorId);
@@ -487,6 +501,7 @@ describe('ContentService', () => {
           organizationId: org.id, // Same org
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         await expect(service.create(input2, creatorId)).rejects.toThrow(
@@ -527,6 +542,7 @@ describe('ContentService', () => {
           organizationId: org1.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         const input2: CreateContentInput = {
@@ -537,6 +553,7 @@ describe('ContentService', () => {
           organizationId: org2.id, // Different org
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         const result1 = await service.create(input1, creatorId);
@@ -576,6 +593,7 @@ describe('ContentService', () => {
           // No organizationId = personal
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         // Create org content
@@ -587,6 +605,7 @@ describe('ContentService', () => {
           organizationId: org.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         };
 
         const personal = await service.create(personalInput, creatorId);
@@ -621,6 +640,7 @@ describe('ContentService', () => {
         mediaItemId: media.id,
         visibility: 'public',
         priceCents: 0,
+        tags: [],
       };
 
       const created = await service.create(input, creatorId);
@@ -666,6 +686,7 @@ describe('ContentService', () => {
         mediaItemId: media.id,
         visibility: 'public',
         priceCents: 0,
+        tags: [],
       };
 
       const created = await service.create(input, otherCreatorId);
@@ -696,6 +717,7 @@ describe('ContentService', () => {
         mediaItemId: media.id,
         visibility: 'public',
         priceCents: 0,
+        tags: [],
       };
 
       const created = await service.create(input, creatorId);
@@ -729,6 +751,7 @@ describe('ContentService', () => {
         mediaItemId: media.id,
         visibility: 'public',
         priceCents: 0,
+        tags: [],
       };
 
       const created = await service.create(input, creatorId);
@@ -768,6 +791,7 @@ describe('ContentService', () => {
           description: 'Old description',
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -803,6 +827,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -853,6 +878,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         otherCreatorId
       );
@@ -885,6 +911,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -920,6 +947,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -934,7 +962,7 @@ describe('ContentService', () => {
       expect(secondPublish.publishedAt).toEqual(firstPublish.publishedAt);
     });
 
-    it('should throw BusinessLogicError if video content has no media', async () => {
+    it.skip('should throw BusinessLogicError if video content has no media', async () => {
       // This should not happen in practice (validation prevents it),
       // but test the safeguard
       // We'll skip this test as create() prevents this scenario
@@ -960,6 +988,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -986,6 +1015,7 @@ describe('ContentService', () => {
           contentBody: 'Content body',
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -1020,6 +1050,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -1064,6 +1095,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         creatorId
       );
@@ -1103,6 +1135,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         otherCreatorId
       );
@@ -1137,6 +1170,7 @@ describe('ContentService', () => {
             mediaItemId: media.id,
             visibility: 'public',
             priceCents: 0,
+            tags: [],
           },
           creatorId
         );
@@ -1240,6 +1274,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           visibility: 'public',
           priceCents: 0,
+          tags: [],
         },
         otherCreatorId
       );

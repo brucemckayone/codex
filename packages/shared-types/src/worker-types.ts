@@ -38,7 +38,7 @@ export type Bindings = {
   /**
    * Rate limiting KV namespace
    */
-  RATE_LIMIT_KV?: KVNamespace;
+  RATE_LIMIT_KV?: import('@cloudflare/workers-types').KVNamespace;
 };
 
 /**
@@ -57,6 +57,12 @@ export type Variables = {
    * Set by requireAuth middleware
    */
   user?: UserData;
+
+  /**
+   * Observability client
+   * Set by observability middleware
+   */
+  obs?: unknown; // Type from @codex/observability to avoid circular dependency
 };
 
 /**

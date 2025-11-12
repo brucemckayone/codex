@@ -1,3 +1,4 @@
+/* globals URL */
 import { z } from 'zod';
 /**
  * Content Management Validation Schemas

@@ -170,11 +170,11 @@ app.delete('/:id', async (c) => {
     await service.delete(id, user.id);
 
     return c.body(null, 204);
-  } catch (err) {
+  } catch (err: unknown) {
     // Import mapErrorToResponse for DELETE handler only
     const { mapErrorToResponse } = await import('@codex/content');
     const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode as any);
+    return c.json(response, statusCode);
   }
 });
 

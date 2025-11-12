@@ -16,6 +16,7 @@ export {
   InternalServiceError,
   isServiceError,
   wrapError,
+  type ErrorStatusCode,
 } from './base-errors';
 
 // Error mapper
