@@ -291,7 +291,7 @@ jobs:
     if: always()
     steps:
       - name: Delete test branch
-        if: needs.test.outputs.branch_id
+        if: needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
         uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
@@ -299,7 +299,7 @@ jobs:
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Delete E2E branch
-        if: needs.e2e-tests.outputs.branch_id
+        if: needs.e2e-tests.result != 'skipped' && needs.e2e-tests.outputs.branch_id && needs.e2e-tests.outputs.branch_id != ''
         uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
