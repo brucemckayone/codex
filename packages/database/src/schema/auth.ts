@@ -1,4 +1,5 @@
 import { pgTable, text, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -61,3 +62,13 @@ export const verificationTokens = pgTable('verification_tokens', {
     .$onUpdate(() => new Date())
     .notNull(),
 });
+
+/**
+ * Relations
+ */
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
+  }),
+}));
