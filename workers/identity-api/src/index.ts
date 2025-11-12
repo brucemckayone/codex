@@ -24,6 +24,7 @@
  */
 
 import { createWorker } from '@codex/worker-utils';
+import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
 
 // Import route modules
 import organizationRoutes from './routes/organizations';
@@ -35,6 +36,21 @@ import organizationRoutes from './routes/organizations';
 const app = createWorker({
   serviceName: 'identity-api',
   version: '1.0.0',
+});
+
+// ============================================================================
+// Rate Limiting
+// ============================================================================
+
+/**
+ * Apply rate limiting to all API routes
+ * Uses moderate preset: 100 requests per minute per IP
+ */
+app.use('/api/*', (c, next) => {
+  return rateLimit({
+    kv: c.env.RATE_LIMIT_KV,
+    ...RATE_LIMIT_PRESETS.api,
+  })(c, next);
 });
 
 // ============================================================================
