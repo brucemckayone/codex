@@ -23,7 +23,6 @@ export {
 /**
  * Identity-specific errors
  */
-
 export class OrganizationNotFoundError extends NotFoundError {
   constructor(organizationId: string) {
     super('Organization not found', { organizationId });
