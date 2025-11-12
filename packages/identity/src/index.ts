@@ -93,6 +93,14 @@ export {
 } from './errors';
 
 // ============================================================================
+// Utilities
+// ============================================================================
+
+export { mapErrorToResponse, isKnownError } from './utils/error-mapper';
+
+export type { ErrorResponse, MappedError } from './utils/error-mapper';
+
+// ============================================================================
 // Re-export Validation Schemas (for convenience)
 // ============================================================================
 

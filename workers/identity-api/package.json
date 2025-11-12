@@ -1,8 +1,8 @@
 {
-  "name": "@codex/content-api-worker",
+  "name": "@codex/identity-api-worker",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloudflare Worker for Content and Media API endpoints",
+  "description": "Cloudflare Worker for Identity and Organization API endpoints",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -20,7 +20,7 @@
     "hono": "^4.7.8",
     "@codex/database": "workspace:*",
     "@codex/validation": "workspace:*",
-    "@codex/content": "workspace:*",
+    "@codex/identity": "workspace:*",
     "@codex/security": "workspace:*"
   },
   "devDependencies": {
