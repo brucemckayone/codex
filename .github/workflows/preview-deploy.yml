@@ -57,6 +57,8 @@ jobs:
         continue-on-error: true
         run: |
           wrangler delete --name stripe-webhook-handler-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name content-api-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name identity-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name auth-worker-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name codex-web-preview-${{ env.PR_NUMBER }} || true
         env:
@@ -232,6 +234,54 @@ jobs:
           echo "url=$API_URL" >> $GITHUB_OUTPUT
           echo "API_URL=$API_URL" >> $GITHUB_ENV
 
+      # Deploy content-api worker
+      - name: Deploy content-api (preview)
+        id: deploy-content-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/content-api
+          command: >
+            deploy --name content-api-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --route "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Set Content API URL
+        id: content-api-url
+        run: |
+          CONTENT_API_URL="https://content-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          echo "url=$CONTENT_API_URL" >> $GITHUB_OUTPUT
+          echo "CONTENT_API_URL=$CONTENT_API_URL" >> $GITHUB_ENV
+
+      # Deploy identity-api worker
+      - name: Deploy identity-api (preview)
+        id: deploy-identity-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/identity-api
+          command: >
+            deploy --name identity-api-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --route "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Set Identity API URL
+        id: identity-api-url
+        run: |
+          IDENTITY_API_URL="https://identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          echo "url=$IDENTITY_API_URL" >> $GITHUB_OUTPUT
+          echo "IDENTITY_API_URL=$IDENTITY_API_URL" >> $GITHUB_ENV
+
       # Set web URL first (needed for auth worker)
       - name: Set Web URL
         run: |
@@ -298,11 +348,15 @@ jobs:
             const prNumber = ${{ env.PR_NUMBER }};
             const webUrl = `https://codex-preview-${prNumber}.revelations.studio`;
             const apiUrl = `https://api-preview-${prNumber}.revelations.studio`;
+            const contentApiUrl = `https://content-api-preview-${prNumber}.revelations.studio`;
+            const identityApiUrl = `https://identity-api-preview-${prNumber}.revelations.studio`;
             const authUrl = `https://auth-preview-${prNumber}.revelations.studio`;
             const comment = `## 🚀 Preview Deployment Ready
 
             **🌐 Web App:** ${webUrl}
             **🔌 API (Stripe Webhooks):** ${apiUrl}
+            **📝 Content API:** ${contentApiUrl}
+            **👤 Identity API:** ${identityApiUrl}
             **🔐 Auth:** ${authUrl}
             **📊 Database:** Neon branch \`${{ env.BRANCH_NAME }}\`
 
@@ -310,11 +364,13 @@ jobs:
             - [ ] Visual confirmation of UI changes
             - [ ] Test user flows end-to-end
             - [ ] Verify database operations
-            - [ ] Check worker functionality (webhooks, auth)
+            - [ ] Check worker functionality (webhooks, auth, content, identity)
 
             ### Preview Stack Details
             - **Web App Worker:** \`codex-web-preview-${prNumber}\`
             - **Stripe Webhook Handler:** \`stripe-webhook-handler-preview-${prNumber}\`
+            - **Content API Worker:** \`content-api-preview-${prNumber}\`
+            - **Identity API Worker:** \`identity-api-preview-${prNumber}\`
             - **Auth Worker:** \`auth-worker-preview-${prNumber}\`
             - **DNS Records:** Automatically created and proxied through Cloudflare
 

@@ -64,6 +64,8 @@ jobs:
         run: |
           echo "🔍 Validating worker builds before database migration..."
           pnpm --filter stripe-webhook-handler build
+          pnpm --filter content-api build
+          pnpm --filter identity-api build
           pnpm --filter auth build
           pnpm --filter web build
           echo "✅ All workers built successfully"
@@ -162,6 +164,104 @@ jobs:
           done
 
           echo "❌ API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
+
+      # Deploy content-api to production
+      - name: Deploy content-api
+        id: deploy-content-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/content-api
+          command: deploy --env production
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+
+      # Verify content-api worker is healthy after deployment
+      - name: Health check - Content API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Content API worker health at https://content-api.revelations.studio..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://content-api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Content API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Content API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Content API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
+
+      # Deploy identity-api to production
+      - name: Deploy identity-api
+        id: deploy-identity-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/identity-api
+          command: deploy --env production
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+
+      # Verify identity-api worker is healthy after deployment
+      - name: Health check - Identity API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Identity API worker health at https://identity-api.revelations.studio..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://identity-api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Identity API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Identity API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Identity API worker health check failed after $MAX_RETRIES attempts"
           echo "Last HTTP code: $HTTP_CODE"
           exit 1
 
@@ -282,7 +382,9 @@ jobs:
         run: |
           echo "✅ Production deployment successful"
           echo "🌐 Web App: https://codex.revelations.studio - Health: OK"
-          echo "🔌 API: https://api.revelations.studio - Health: OK"
+          echo "🔌 API (Stripe): https://api.revelations.studio - Health: OK"
+          echo "📝 Content API: https://content-api.revelations.studio - Health: OK"
+          echo "👤 Identity API: https://identity-api.revelations.studio - Health: OK"
           echo "🔐 Auth: https://auth.revelations.studio - Health: OK"
           echo "💾 Database: Migrations applied successfully"
           echo "⚡ All workers deployed and verified healthy"

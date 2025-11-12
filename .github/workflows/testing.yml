@@ -34,6 +34,8 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       auth-worker: ${{ steps.filter.outputs.auth-worker }}
       stripe-webhook-handler: ${{ steps.filter.outputs.stripe-webhook-handler }}
+      content-api: ${{ steps.filter.outputs.content-api }}
+      identity-api: ${{ steps.filter.outputs.identity-api }}
     steps:
       - uses: actions/checkout@v4
       - name: Filter changed packages
@@ -56,6 +58,10 @@ jobs:
               - 'workers/auth/**'
             stripe-webhook-handler:
               - 'workers/stripe-webhook-handler/**'
+            content-api:
+              - 'workers/content-api/**'
+            identity-api:
+              - 'workers/identity-api/**'
 
   test:
     needs: [changes]
@@ -147,7 +153,7 @@ jobs:
 
       # Run tests for affected packages
       - name: Run tests for affected packages
-        if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
+        if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' || needs.changes.outputs.content-api == 'true' || needs.changes.outputs.identity-api == 'true' }}
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
@@ -160,6 +166,8 @@ jobs:
           if [[ "${{ needs.changes.outputs.web }}" == "true" ]]; then pnpm --filter web test; fi
           if [[ "${{ needs.changes.outputs.auth-worker }}" == "true" ]]; then pnpm --filter auth test; fi
           if [[ "${{ needs.changes.outputs.stripe-webhook-handler }}" == "true" ]]; then pnpm --filter stripe-webhook-handler test; fi
+          if [[ "${{ needs.changes.outputs.content-api }}" == "true" ]]; then pnpm --filter content-api test; fi
+          if [[ "${{ needs.changes.outputs.identity-api }}" == "true" ]]; then pnpm --filter identity-api test; fi
 
   e2e-tests:
     name: E2E Tests
