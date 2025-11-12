@@ -302,7 +302,7 @@ jobs:
     if: always()
     steps:
       - name: Delete test branch
-        if: needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
+        if: needs.test.result != 'skipped' && needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
         uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
