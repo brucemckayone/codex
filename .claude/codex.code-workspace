@@ -2,8 +2,8 @@
   "folders": [
     {
       "path": "..",
-      "name": "Codex"
-    }
+      "name": "Codex",
+    },
   ],
   "settings": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
@@ -11,14 +11,14 @@
     "editor.formatOnPaste": true,
     "[typescript]": {
       "editor.defaultFormatter": "esbenp.prettier-vscode",
-      "editor.formatOnSave": true
+      "editor.formatOnSave": true,
     },
     "[json]": {
-      "editor.defaultFormatter": "esbenp.prettier-vscode"
+      "editor.defaultFormatter": "esbenp.prettier-vscode",
     },
     "[markdown]": {
       "editor.formatOnSave": false,
-      "editor.wordWrap": "on"
+      "editor.wordWrap": "on",
     },
     "files.exclude": {
       "**/node_modules": true,
@@ -26,29 +26,29 @@
       "**/.turbo": true,
       "**/dist": true,
       "**/.next": true,
-      "**/coverage": true
+      "**/coverage": true,
     },
     "search.exclude": {
       "**/node_modules": true,
       "**/.pnpm": true,
       "**/dist": true,
-      "**/coverage": true
+      "**/coverage": true,
     },
     "typescript.tsdk": "node_modules/typescript/lib",
     "typescript.enablePromptUseWorkspaceTsdk": true,
     "typescript.preferGoToProjectRoot": true,
     "[typescriptreact]": {
-      "editor.defaultFormatter": "esbenp.prettier-vscode"
+      "editor.defaultFormatter": "esbenp.prettier-vscode",
     },
     "eslint.validate": [
       "javascript",
       "javascriptreact",
       "typescript",
-      "typescriptreact"
+      "typescriptreact",
     ],
     "claude-code.autoSave": true,
     "claude-code.showInlineChanges": true,
-    "claude-code.enableExtendedThinking": false
+    "claude-code.enableExtendedThinking": false,
   },
   "extensions": {
     "recommendations": [
@@ -59,8 +59,8 @@
       "ms-azuretools.vscode-docker",
       "ms-vscode.makefile-tools",
       "bradlc.vscode-tailwindcss",
-      "eamodio.gitlens"
-    ]
+      "eamodio.gitlens",
+    ],
   },
   "launch": {
     "version": "0.2.0",
@@ -72,7 +72,7 @@
         "program": "${workspaceFolder}/node_modules/.bin/tsx",
         "args": ["${file}"],
         "cwd": "${workspaceFolder}",
-        "skipFiles": ["<node_internals>/**"]
+        "skipFiles": ["<node_internals>/**"],
       },
       {
         "name": "Wrangler Dev: Auth Worker",
@@ -82,7 +82,7 @@
         "args": ["dev"],
         "cwd": "${workspaceFolder}/workers/auth-worker",
         "console": "integratedTerminal",
-        "internalConsoleOptions": "neverOpen"
+        "internalConsoleOptions": "neverOpen",
       },
       {
         "name": "Wrangler Dev: Content Worker",
@@ -92,7 +92,7 @@
         "args": ["dev"],
         "cwd": "${workspaceFolder}/workers/content-management-worker",
         "console": "integratedTerminal",
-        "internalConsoleOptions": "neverOpen"
+        "internalConsoleOptions": "neverOpen",
       },
       {
         "name": "Wrangler Dev: Admin Worker",
@@ -102,9 +102,9 @@
         "args": ["dev"],
         "cwd": "${workspaceFolder}/workers/admin-dashboard-worker",
         "console": "integratedTerminal",
-        "internalConsoleOptions": "neverOpen"
-      }
-    ]
+        "internalConsoleOptions": "neverOpen",
+      },
+    ],
   },
   "tasks": {
     "version": "2.0.0",
@@ -113,23 +113,32 @@
         "label": "Docker: Start Local Services",
         "type": "shell",
         "command": "docker-compose",
-        "args": ["-f", "infrastructure/neon/docker-compose.dev.local.yml", "up", "-d"],
+        "args": [
+          "-f",
+          "infrastructure/neon/docker-compose.dev.local.yml",
+          "up",
+          "-d",
+        ],
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Docker: Stop Local Services",
         "type": "shell",
         "command": "docker-compose",
-        "args": ["-f", "infrastructure/neon/docker-compose.dev.local.yml", "down"],
+        "args": [
+          "-f",
+          "infrastructure/neon/docker-compose.dev.local.yml",
+          "down",
+        ],
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Database: Run Migrations",
@@ -139,8 +148,8 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Database: Seed Test Data",
@@ -150,8 +159,8 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Database: Open Drizzle Studio",
@@ -161,8 +170,8 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Setup: Initialize Local Dev",
@@ -172,8 +181,8 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Test: Run All Tests",
@@ -183,8 +192,8 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Test: Watch Current Package",
@@ -194,15 +203,15 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
+          "panel": "shared",
         },
         "inputs": [
           {
             "id": "packageName",
             "type": "promptString",
-            "description": "Enter package name (e.g., @codex/content-management)"
-          }
-        ]
+            "description": "Enter package name (e.g., @codex/content-management)",
+          },
+        ],
       },
       {
         "label": "Type Check: All Packages",
@@ -212,8 +221,8 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Lint: Check Code Style",
@@ -223,8 +232,8 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
+          "panel": "shared",
+        },
       },
       {
         "label": "Format: Fix with Prettier",
@@ -234,9 +243,9 @@
         "problemMatcher": [],
         "presentation": {
           "reveal": "always",
-          "panel": "shared"
-        }
-      }
-    ]
-  }
+          "panel": "shared",
+        },
+      },
+    ],
+  },
 }
