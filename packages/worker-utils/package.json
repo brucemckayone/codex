@@ -18,6 +18,7 @@
     "utilities"
   ],
   "dependencies": {
+    "@codex/observability": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/security": "workspace:*",

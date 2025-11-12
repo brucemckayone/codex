@@ -436,6 +436,9 @@ importers:
 
   packages/worker-utils:
     dependencies:
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@codex/security':
         specifier: workspace:*
         version: link:../security
