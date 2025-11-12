@@ -8,7 +8,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { securityHeaders, requireAuth } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler, Next } from 'hono';
 
 /**
  * Configuration for worker middleware
@@ -179,5 +179,40 @@ export function createErrorHandler(environment?: string) {
       },
       500
     );
+  };
+}
+
+/**
+ * Chains multiple middleware handlers in sequence
+ *
+ * Executes handlers one after another. If any handler returns a Response,
+ * the sequence stops and that response is returned. Useful for composing
+ * multiple middleware functions into a single handler.
+ *
+ * @param handlers - Middleware handlers to execute in sequence
+ * @returns Combined middleware handler
+ *
+ * @example
+ * ```typescript
+ * app.use('*',
+ *   sequence(
+ *     securityHeaders({ environment: 'production' }),
+ *     rateLimiter,
+ *     sessionCache,
+ *     authHandler
+ *   )
+ * );
+ * ```
+ */
+export function sequence(
+  ...handlers: ((c: Context, next: Next) => Promise<Response | void>)[]
+): (c: Context, next: Next) => Promise<Response | void> {
+  return async (c: Context, next: Next) => {
+    for (const handler of handlers) {
+      const response = await handler(c, next);
+      if (response) {
+        return response;
+      }
+    }
   };
 }

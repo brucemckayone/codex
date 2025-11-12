@@ -17,6 +17,7 @@ export {
   createHealthCheckHandler,
   createNotFoundHandler,
   createErrorHandler,
+  sequence,
   type MiddlewareConfig,
 } from './middleware';
 
