@@ -54,13 +54,17 @@ export function createSessionCacheMiddleware() {
 
     // Cache the session if it was set by BetterAuth
     const session = c.get('session');
+
     if (session && kv) {
       const user = c.get('user');
+
       const expiresAt =
         typeof session.expiresAt === 'string'
           ? new Date(session.expiresAt)
           : session.expiresAt;
+
       const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
+
       await kv.put(
         `session:${sessionCookie}`,
         JSON.stringify({ session, user }),

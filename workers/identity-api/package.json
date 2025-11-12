@@ -5,7 +5,7 @@
   "description": "Cloudflare Worker for Identity and Organization API endpoints",
   "type": "module",
   "scripts": {
-    "dev": "pnpm build && wrangler dev",
+    "dev": "pnpm build && wrangler dev --port 4001",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:production": "wrangler deploy --env production",

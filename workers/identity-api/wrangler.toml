@@ -1,5 +1,5 @@
 name = "identity-api"
-main = "../../dist/workers/identity-api/src/index.js"
+main = "./dist/workers/identity-api/src/index.js"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 

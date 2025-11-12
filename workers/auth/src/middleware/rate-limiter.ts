@@ -22,6 +22,7 @@ export function createAuthRateLimiter() {
     // Only apply rate limiting to login endpoint
     if (c.req.path === '/api/auth/email/login' && c.req.method === 'POST') {
       const kv = c.env.RATE_LIMIT_KV;
+
       if (kv) {
         const success = await rateLimit({
           kv,
@@ -33,6 +34,7 @@ export function createAuthRateLimiter() {
         if (!success) {
           return c.json({ error: 'Too many requests' }, 429);
         }
+
         return next();
       }
     }

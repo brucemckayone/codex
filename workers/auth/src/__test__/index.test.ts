@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import app from './index';
+import app from '../index';
 
 describe('Auth Worker - Unit Tests', () => {
   describe('Hono App Initialization', () => {

@@ -13,13 +13,6 @@
     "esModuleInterop": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src/**/*"],
-  "references": [
-    { "path": "../../packages/database" },
-    { "path": "../../packages/validation" },
-    { "path": "../../packages/content" },
-    { "path": "../../packages/security" },
-    { "path": "../../packages/worker-utils" }
-  ],
+  "include": ["src/**/*", "src/index.integration.test.ts"],
   "exclude": ["node_modules", "dist", "test"]
 }
