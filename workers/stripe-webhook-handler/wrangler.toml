@@ -8,9 +8,9 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 
 # KV Namespaces
-kv_namespaces = [
-  { binding = "RATE_LIMIT_KV", id = "cea7153364974737b16870df08f31083" }
-]
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "cea7153364974737b16870df08f31083"
 
 # Production environment
 [env.production]

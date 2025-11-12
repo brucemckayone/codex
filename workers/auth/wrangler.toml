@@ -7,10 +7,14 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
-kv_namespaces = [
-  { binding = "AUTH_SESSION_KV", id = "82d04a4236df4aac8e9d87793344f0ed" },
-  { binding = "RATE_LIMIT_KV", id = "cea7153364974737b16870df08f31083" }
-]
+# KV Namespaces
+[[kv_namespaces]]
+binding = "AUTH_SESSION_KV"
+id = "82d04a4236df4aac8e9d87793344f0ed"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "cea7153364974737b16870df08f31083"
 
 # Production environment
 [env.production]
