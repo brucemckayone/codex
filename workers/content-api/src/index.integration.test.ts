@@ -35,11 +35,20 @@ function createAuthRequest(path: string, options: RequestInit = {}): Request {
   });
 }
 
+// Mock KV namespace with required methods
+const mockKV: KVNamespace = {
+  get: async () => null,
+  put: async () => {},
+  delete: async () => {},
+  list: async () => ({ keys: [], list_complete: true, cursor: '' }),
+  getWithMetadata: async () => ({ value: null, metadata: null }),
+} as KVNamespace;
+
 // Mock environment
 const mockEnv = {
   DATABASE_URL: 'mock://database',
   ENVIRONMENT: 'test',
-  RATE_LIMIT_KV: {} as KVNamespace,
+  RATE_LIMIT_KV: mockKV,
 };
 
 describe('Content API Worker', () => {
