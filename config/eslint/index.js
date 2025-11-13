@@ -60,7 +60,7 @@ export const cloudFlareWorkerConfig = {
     'packages/cloudflare-clients/**/*.ts',
     'packages/observability/**/*.ts',
     'packages/test-utils/**/*.ts',
-    'packages/validation/**/*.ts',
+    'packages/validation/**/*.{ts,js}',
     'packages/content/**/*.ts',
     'packages/identity/**/*.ts',
     'packages/worker-utils/**/*.ts',

@@ -1,4 +1,5 @@
-import { defineConfig, UserConfig } from 'vitest/config';
+import { defineConfig } from 'vitest/config';
+import type { UserConfig } from 'vite';
 import { config as loadDotenv } from 'dotenv';
 import { resolve } from 'path';
 

@@ -87,6 +87,7 @@
     "tsx": "^4.20.6",
     "typescript": "^5.7.3",
     "vite": "^6.4.1",
+    "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.0.2",
     "wait-on": "^9.0.1",
     "wrangler": "^4.47.0"
