@@ -12,8 +12,14 @@ export default defineConfig({
       'packages/content',
       'packages/test-utils',
       'packages/identity',
+      'packages/worker-utils',
+      'packages/observability',
+      'packages/service-errors',
+      'packages/shared-types',
       'workers/auth',
       'workers/stripe-webhook-handler',
+      'workers/content-api',
+      'workers/identity-api',
     ],
 
     // Global coverage configuration (cannot be overridden in projects)
