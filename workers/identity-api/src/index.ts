@@ -62,17 +62,7 @@ app.use('/api/*', (c, next) => {
  * All routes inherit authentication from createWorker middleware
  */
 app.route('/api/organizations', organizationRoutes);
-app.get('/health', (c) => {
-  return c.json(
-    {
-      status: 'ok',
-      service: 'identity-api',
-      version: '1.0.0',
-      timestamp: new Date().toISOString(),
-    },
-    200
-  );
-});
+
 // ============================================================================
 // Export
 // ============================================================================

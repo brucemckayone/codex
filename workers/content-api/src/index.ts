@@ -65,17 +65,6 @@ app.use('/api/*', (c, next) => {
  */
 app.route('/api/content', contentRoutes);
 app.route('/api/media', mediaRoutes);
-app.get('/health', (c) => {
-  return c.json(
-    {
-      status: 'ok',
-      service: 'content-api',
-      version: '1.0.0',
-      timestamp: new Date().toISOString(),
-    },
-    200
-  );
-});
 
 // ============================================================================
 // Export
