@@ -16,9 +16,11 @@ export default defineConfig({
       'packages/content',
       'packages/identity',
 
-      // Workers (uncomment when ready)
+      // Workers
       'workers/auth',
       'workers/stripe-webhook-handler',
+      'workers/content-api',
+      'workers/identity-api',
     ],
   },
 });
