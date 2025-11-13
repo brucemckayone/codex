@@ -122,6 +122,7 @@ export function createAuthMiddleware(): MiddlewareHandler<HonoEnv> {
           id: 'test-user-id',
           email: 'test@example.com',
           name: 'Test User',
+          role: 'user',
           emailVerified: true,
           image: null,
           createdAt: new Date().toISOString(),

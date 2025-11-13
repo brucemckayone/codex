@@ -36,13 +36,13 @@ function createAuthRequest(path: string, options: RequestInit = {}): Request {
 }
 
 // Mock KV namespace with required methods
-const mockKV: KVNamespace = {
+const mockKV = {
   get: async () => null,
   put: async () => {},
   delete: async () => {},
   list: async () => ({ keys: [], list_complete: true, cursor: '' }),
   getWithMetadata: async () => ({ value: null, metadata: null }),
-} as KVNamespace;
+} as unknown as KVNamespace;
 
 // Mock environment
 const mockEnv = {
