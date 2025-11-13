@@ -480,4 +480,3 @@ export const uploadRequestSchema = z.object({
  * const content = await contentService.create(validated, creatorId);
  * ```
  */
-//# sourceMappingURL=content-schemas.js.map
