@@ -8,7 +8,8 @@ This package provides centralized test utilities including:
 - Database setup and cleanup
 - Test data factories
 - Custom assertion helpers
-- Miniflare helpers for Cloudflare Workers testing
+- Wrangler Dev Server helpers for Cloudflare Workers integration testing (Vitest 4.0+)
+- Miniflare helpers (legacy, Vitest 2.x-3.2.x only)
 
 ## Installation
 
@@ -212,6 +213,273 @@ try {
 }
 ```
 
+## Cloudflare Workers Integration Testing
+
+### Wrangler Dev Server (Vitest 4.0+)
+
+The wrangler dev server approach provides true integration testing for Cloudflare Workers by running actual wrangler dev processes and testing via HTTP endpoints. This is the recommended approach for Vitest 4.0+ projects.
+
+#### Why Wrangler Dev Instead of Miniflare?
+
+- **Vitest Compatibility**: Miniflare requires Vitest 2.x-3.2.x, but this project uses Vitest 4.0+
+- **True Integration**: Tests run against real wrangler dev servers with actual runtime environment
+- **Real Bindings**: KV, R2, D1, and other bindings work exactly as they do in production
+- **Easier Debugging**: Visible dev server output and standard HTTP debugging tools
+
+#### Basic Usage
+
+```typescript
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import {
+  startWranglerDev,
+  createWorkerFetch,
+  type WranglerDevServer,
+} from '@codex/test-utils';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const workerPath = path.resolve(__dirname, '../');
+
+describe('My Worker (integration)', () => {
+  let server: WranglerDevServer;
+  let workerFetch: ReturnType<typeof createWorkerFetch>;
+
+  beforeAll(async () => {
+    // Start wrangler dev server
+    server = await startWranglerDev({
+      workerPath,
+      port: 8787,
+      env: {
+        DATABASE_URL: process.env.DATABASE_URL || '',
+        ENVIRONMENT: 'test',
+      },
+      startupTimeout: 30000,
+      verbose: false,
+    });
+
+    // Create fetch helper bound to worker URL
+    workerFetch = createWorkerFetch(server.url);
+  }, 45000); // Give wrangler dev time to start
+
+  afterAll(async () => {
+    // Stop wrangler dev server
+    if (server) {
+      await server.cleanup();
+    }
+  }, 10000);
+
+  it('should respond to health check', async () => {
+    const response = await workerFetch('/health');
+    expect(response.status).toBe(200);
+
+    const json = await response.json();
+    expect(json.status).toBe('ok');
+  });
+
+  it('should handle POST requests', async () => {
+    const response = await workerFetch('/api/items', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'test item' }),
+    });
+
+    expect(response.status).toBe(201);
+  });
+});
+```
+
+#### Configuration Options
+
+```typescript
+interface WranglerDevOptions {
+  /**
+   * Path to the worker directory (containing wrangler.toml)
+   */
+  workerPath: string;
+
+  /**
+   * Port for the dev server (default: 8787)
+   * Use different ports for testing multiple workers concurrently
+   */
+  port?: number;
+
+  /**
+   * Environment variables to pass to the worker
+   */
+  env?: Record<string, string>;
+
+  /**
+   * Wrangler environment to use (staging, production, etc.)
+   */
+  wranglerEnv?: string;
+
+  /**
+   * Timeout for server startup in milliseconds (default: 30000)
+   */
+  startupTimeout?: number;
+
+  /**
+   * Whether to log wrangler output (default: false)
+   */
+  verbose?: boolean;
+}
+```
+
+#### Testing with Authentication
+
+For workers that require authentication, use real test users and sessions:
+
+```typescript
+import {
+  createTestUser,
+  cleanupTestUser,
+  type TestUser,
+} from '@codex/worker-utils';
+
+describe('Protected Endpoints', () => {
+  let server: WranglerDevServer;
+  let workerFetch: ReturnType<typeof createWorkerFetch>;
+  let testUser: TestUser;
+
+  beforeAll(async () => {
+    server = await startWranglerDev({ /* ... */ });
+    workerFetch = createWorkerFetch(server.url);
+
+    // Create real test user with session
+    testUser = await createTestUser();
+  }, 45000);
+
+  afterAll(async () => {
+    // Cleanup test user
+    if (testUser) {
+      await cleanupTestUser(testUser.user.id);
+    }
+
+    if (server) {
+      await server.cleanup();
+    }
+  }, 10000);
+
+  it('should require authentication', async () => {
+    const response = await workerFetch('/api/content');
+    expect(response.status).toBe(401);
+  });
+
+  it('should allow authenticated requests', async () => {
+    const response = await workerFetch('/api/content', {
+      headers: {
+        Cookie: `codex-session=${testUser.sessionToken}`,
+      },
+    });
+
+    expect(response.status).not.toBe(401);
+  });
+});
+```
+
+#### Testing Multiple Workers
+
+When testing multiple workers, use different ports to avoid conflicts:
+
+```typescript
+describe('Auth Worker', () => {
+  let server: WranglerDevServer;
+
+  beforeAll(async () => {
+    server = await startWranglerDev({
+      workerPath: './workers/auth',
+      port: 8787, // Auth on 8787
+      // ...
+    });
+  }, 45000);
+
+  // tests...
+});
+
+describe('Content API Worker', () => {
+  let server: WranglerDevServer;
+
+  beforeAll(async () => {
+    server = await startWranglerDev({
+      workerPath: './workers/content-api',
+      port: 8788, // Content API on 8788
+      // ...
+    });
+  }, 45000);
+
+  // tests...
+});
+```
+
+#### Best Practices
+
+1. **Use Different Ports**: When testing multiple workers, assign unique ports to each
+   ```typescript
+   port: 8787, // auth worker
+   port: 8788, // content-api worker
+   ```
+
+2. **Set Appropriate Timeouts**: Wrangler dev can take time to start
+   ```typescript
+   beforeAll(async () => {
+     // setup...
+   }, 45000); // 45 seconds for startup
+   ```
+
+3. **Clean Up Resources**: Always cleanup servers and test users
+   ```typescript
+   afterAll(async () => {
+     await cleanupTestUser(testUser.user.id);
+     await server.cleanup();
+   }, 10000);
+   ```
+
+4. **Test Real Scenarios**: Test complete request/response cycles
+   ```typescript
+   it('should validate input and return errors', async () => {
+     const response = await workerFetch('/api/content', {
+       method: 'POST',
+       body: JSON.stringify({ invalid: 'data' }),
+     });
+
+     expect(response.status).toBe(422);
+     const json = await response.json();
+     expect(json.error.code).toBe('VALIDATION_ERROR');
+   });
+   ```
+
+5. **Use Verbose Mode for Debugging**: Enable verbose output when troubleshooting
+   ```typescript
+   server = await startWranglerDev({
+     // ...
+     verbose: true, // Logs wrangler output
+   });
+   ```
+
+#### Troubleshooting
+
+**Server fails to start:**
+- Check that wrangler.toml exists in workerPath
+- Ensure port is not already in use
+- Increase startupTimeout if worker is slow to start
+- Enable verbose: true to see wrangler output
+
+**Tests timeout:**
+- Increase test timeout in beforeAll/afterAll
+- Check that DATABASE_URL and other env vars are set
+- Verify worker health endpoint responds
+
+**Worker not receiving environment variables:**
+- Pass env vars in startWranglerDev options
+- Check that worker code accesses c.env correctly
+
+**Multiple test runs cause port conflicts:**
+- Use unique ports for each worker
+- Ensure cleanup() is called in afterAll
+
 ## Database Utilities
 
 ### Cleanup Functions
@@ -263,6 +531,11 @@ await withTransaction(db, async (tx) => {
 ```
 
 ## Available Functions
+
+### Wrangler Dev Server Functions
+- `startWranglerDev(options)`: Start wrangler dev server for integration tests
+- `stopWranglerDev(server)`: Stop running wrangler dev server
+- `createWorkerFetch(baseUrl)`: Create fetch function bound to worker URL
 
 ### Database Functions
 - `setupTestDatabase()`: Create database client for tests
