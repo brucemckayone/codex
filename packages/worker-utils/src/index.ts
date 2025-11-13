@@ -33,3 +33,11 @@ export {
   formatValidationError,
   requireUser,
 } from './route-helpers';
+
+// Test utilities (for integration tests only)
+export {
+  createTestUser,
+  cleanupTestUser,
+  createAuthenticatedRequest,
+  type TestUser,
+} from './test-utils';

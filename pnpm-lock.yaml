@@ -439,6 +439,9 @@ importers:
 
   packages/worker-utils:
     dependencies:
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../database
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
@@ -451,6 +454,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      drizzle-orm:
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251014.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.15.5)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(postgres@3.4.7)(prisma@5.22.0)
       hono:
         specifier: ^4.7.8
         version: 4.10.3
