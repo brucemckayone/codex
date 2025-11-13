@@ -62,6 +62,10 @@ export const cloudFlareWorkerConfig = {
     'packages/test-utils/**/*.ts',
     'packages/validation/**/*.ts',
     'packages/content/**/*.ts',
+    'packages/identity/**/*.ts',
+    'packages/worker-utils/**/*.ts',
+    'packages/shared-types/**/*.ts',
+    'packages/service-errors/**/*.ts',
   ],
   languageOptions: {
     globals: {
