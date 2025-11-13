@@ -89,7 +89,7 @@ export function mapErrorToResponse(
   // Handle Zod validation errors
   if (error instanceof ZodError) {
     return {
-      statusCode: 400,
+      statusCode: 422,
       response: {
         error: {
           code: 'VALIDATION_ERROR',

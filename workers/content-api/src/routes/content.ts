@@ -104,7 +104,7 @@ app.get(
       const validationResult = contentQuerySchema.safeParse(query);
 
       if (!validationResult.success) {
-        throw new Error('Validation failed'); // Will be caught by error handler
+        throw validationResult.error; // Throw ZodError for proper error mapping
       }
 
       const service = createContentService({
