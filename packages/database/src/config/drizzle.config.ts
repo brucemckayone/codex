@@ -3,11 +3,18 @@ import { defineConfig } from 'drizzle-kit';
 import { resolve } from 'path';
 import { DbEnvConfig } from './env.config';
 
-// Load env.dev from project root (2 levels up from packages/database)
-
-// check against a random env variable, which is defined in CI only load env.dev if no env vars defined
-if (!DbEnvConfig.method)
+/**
+ * Drizzle Kit Configuration
+ *
+ * This config is used for CLI commands (drizzle-kit generate, push, studio).
+ * Environment variables are loaded conditionally:
+ *
+ * - If DB_METHOD is already set (CI/CD, shell): Use existing env vars
+ * - If DB_METHOD is not set (local dev): Load from .env.dev
+ */
+if (!DbEnvConfig.method) {
   config({ path: resolve(__dirname, '../../../../.env.dev') });
+}
 
 export default defineConfig({
   out: DbEnvConfig.out,

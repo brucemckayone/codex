@@ -201,7 +201,7 @@ export async function startWranglerDev(
     const timeout = setTimeout(() => {
       reject(
         new Error(
-          `Wrangler dev server did not start within ${startupTimeout}ms timeout`
+          `Wrangler dev serverclear did not start within ${startupTimeout}ms timeout`
         )
       );
     }, startupTimeout);

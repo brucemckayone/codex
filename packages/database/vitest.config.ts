@@ -1,16 +1,13 @@
 import { defineProject } from 'vitest/config';
-import { config } from 'dotenv';
-import { resolve } from 'path';
 
-// Load env.dev from project root (2 levels up from packages/database)
-config({ path: resolve(__dirname, '../../.env.dev') });
-
+// Environment variables are loaded by root vitest.setup.ts
 export default defineProject({
   test: {
     name: '@codex/database',
     globals: true,
     environment: 'node',
     include: ['src/**/*.{test,spec}.{js,ts}'],
+    setupFiles: ['../../vitest.setup.ts'], // Reference root setup file
     testTimeout: 60000,
     hookTimeout: 60000,
     // Note: coverage is configured at root level

@@ -9,11 +9,14 @@
     "strict": true,
     "preserveConstEnums": true,
     "moduleResolution": "bundler",
-    "types": ["@cloudflare/workers-types/2023-07-01"],
+    "types": [
+      "@cloudflare/workers-types/2023-07-01",
+      "@cloudflare/vitest-pool-workers"
+    ],
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../../config/vitest/cloudflare-test-env.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

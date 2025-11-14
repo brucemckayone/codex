@@ -1,20 +1,22 @@
-import { defineConfig } from 'vitest/config';
 import type { UserConfig } from 'vite';
-import { config as loadDotenv } from 'dotenv';
-import { resolve } from 'path';
+import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
 
-// Load environment variables from root .env.dev
-loadDotenv({ path: resolve(__dirname, '../../.env.dev') });
+// Note: We can't use dotenv here because this config runs in the Workers runtime
+// which doesn't support Node.js built-in modules like 'node:os' that dotenv uses.
+// Environment variables are loaded via Vitest's built-in env support instead.
 
 /**
  * Standard Vitest configuration for Cloudflare Workers
  *
  * This configuration provides consistent test settings across all workers:
  * - Global test APIs enabled (describe, it, expect)
- * - Node environment for testing
+ * - Workers runtime environment (workerd) for testing
+ * - Automatic wrangler.toml binding configuration
  * - Standard test file patterns
  * - Coverage reporting configured
- * - Environment variables loaded from .env.dev
+ *
+ * Tests run in the actual Cloudflare Workers runtime, not Node.js.
+ * Use the `cloudflare:test` module to access env, SELF, etc.
  *
  * Usage:
  * ```typescript
@@ -35,10 +37,15 @@ loadDotenv({ path: resolve(__dirname, '../../.env.dev') });
  * });
  * ```
  */
-export const workerVitestConfig: UserConfig = defineConfig({
+export const workerVitestConfig: UserConfig = defineWorkersConfig({
   test: {
     globals: true,
-    environment: 'node',
+    // Use Workers pool to run tests in workerd runtime (not Node.js)
+    poolOptions: {
+      workers: {
+        wrangler: { configPath: './wrangler.toml' },
+      },
+    },
     include: ['src/**/*.{test,spec}.ts'],
     coverage: {
       provider: 'v8',
@@ -64,7 +71,7 @@ export const workerVitestConfig: UserConfig = defineConfig({
  * @returns Complete Vitest configuration
  */
 export function createWorkerTestConfig(overrides: UserConfig = {}): UserConfig {
-  return defineConfig({
+  return defineWorkersConfig({
     ...workerVitestConfig,
     test: {
       ...workerVitestConfig.test,

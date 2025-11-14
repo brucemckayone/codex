@@ -24,12 +24,16 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.10.0",
     "@codex/test-utils": "workspace:*",
     "@types/node": "22.13.0",
     "@types/service-worker-mock": "^2.0.4",
+    "@vitest/runner": "~3.2.4",
+    "@vitest/snapshot": "~3.2.4",
+    "@vitest/ui": "~3.2.4",
     "esbuild": "^0.21.5",
     "esbuild-node-externals": "^1.13.0",
-    "vitest": "^4.0.2",
+    "vitest": "^3.2.4",
     "wrangler": "^4.47.0"
   }
 }

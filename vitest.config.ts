@@ -2,7 +2,13 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Global setup file - loads environment variables for all tests
+    setupFiles: ['./vitest.setup.ts'],
+
     // Define all projects in the monorepo
+    // NOTE: Workers are excluded because they use Vitest 3.2.x with @cloudflare/vitest-pool-workers
+    // which only supports Vitest 2.0.x - 3.2.x. The root uses Vitest 4.x for the rest of the codebase.
+    // Run worker tests separately: pnpm test:workers or pnpm test:all
     projects: [
       'apps/web',
       'packages/database',
@@ -16,10 +22,6 @@ export default defineConfig({
       'packages/observability',
       'packages/service-errors',
       'packages/shared-types',
-      'workers/auth',
-      'workers/stripe-webhook-handler',
-      'workers/content-api',
-      'workers/identity-api',
     ],
 
     // Global coverage configuration (cannot be overridden in projects)

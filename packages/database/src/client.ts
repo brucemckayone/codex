@@ -5,17 +5,21 @@ import { DbEnvConfig } from './config/env.config';
 import * as schema from './schema';
 import ws from 'ws';
 
-// Load .env for local development only
-// Skip in Cloudflare Workers where import.meta.url is undefined and DB_METHOD is always set
-if (!DbEnvConfig.method && typeof import.meta.url !== 'undefined') {
-  const { config } = await import('dotenv');
-  const { resolve, dirname } = await import('path');
-  const { fileURLToPath } = await import('url');
-
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  config({ path: resolve(__dirname, '../../../../.env.dev') });
-}
+/**
+ * Environment Variable Loading Strategy:
+ *
+ * This package NO LONGER loads .env files directly. Instead:
+ *
+ * - Tests: Environment variables are loaded by root vitest.setup.ts
+ * - Local Dev: Set DB_METHOD and DATABASE_URL in your shell or .env.dev
+ * - CI/CD: GitHub Actions sets environment variables
+ * - Production: Wrangler secrets provide environment variables
+ *
+ * The database client expects these environment variables to be already set:
+ * - DB_METHOD: Connection strategy (LOCAL_PROXY, NEON_BRANCH, PRODUCTION)
+ * - DATABASE_URL: Connection string (for NEON_BRANCH and PRODUCTION)
+ * - DATABASE_URL_LOCAL_PROXY: Connection string (for LOCAL_PROXY mode)
+ */
 
 // Configure WebSocket for Node.js environments (v21 and below)
 // This is required for the Pool client to work in Node.js

@@ -10,8 +10,9 @@
     "preserveConstEnums": true,
     "moduleResolution": "bundler",
     "sourceMap": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"]
   },
-  "include": ["src"],
+  "include": ["src", "../../config/vitest/cloudflare-test-env.d.ts"],
   "exclude": ["node_modules", "dist", "test"]
 }

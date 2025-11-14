@@ -41,3 +41,10 @@ export {
   createAuthenticatedRequest,
   type TestUser,
 } from './test-utils';
+
+// Shared types
+export type {
+  HealthCheckResponse,
+  ErrorResponse,
+  SuccessResponse,
+} from './types';

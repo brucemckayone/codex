@@ -29,9 +29,10 @@
     "test:ui": "vitest --ui",
     "test:web": "pnpm --filter web test",
     "test:packages": "pnpm -r --filter './packages/*' test",
+    "test:workers": "pnpm -r --filter './workers/*' test",
     "test:e2e": "pnpm --filter web test:e2e",
     "test:e2e:ui": "pnpm --filter web test:e2e:ui",
-    "test:all": "pnpm test && pnpm test:e2e",
+    "test:all": "pnpm test && pnpm test:workers && pnpm test:e2e",
     "test:all:coverage": "pnpm test:coverage && pnpm test:e2e",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -54,7 +55,6 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.10.0",
     "@cloudflare/workers-types": "^4.20250129.0",
     "@eslint/js": "^9.38.0",
     "@playwright/test": "^1.56.1",
