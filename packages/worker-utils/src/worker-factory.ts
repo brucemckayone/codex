@@ -2,6 +2,7 @@
  * Worker Factory
  *
  * Creates a fully configured Hono app with standard middleware.
+ * Enhanced with request tracking, network security, and declarative configuration.
  */
 
 import { Hono } from 'hono';
@@ -11,11 +12,54 @@ import {
   createCorsMiddleware,
   createSecurityHeadersMiddleware,
   createAuthMiddleware,
+  createRequestTrackingMiddleware,
   createHealthCheckHandler,
   createNotFoundHandler,
   createErrorHandler,
   type MiddlewareConfig,
 } from './middleware';
+import { workerAuth } from '@codex/security';
+
+/**
+ * CORS configuration
+ */
+export interface CORSConfig {
+  /**
+   * Allowed origins for CORS
+   * Can be specific URLs or extracted from environment variables
+   */
+  allowedOrigins?: string[];
+
+  /**
+   * Allow credentials (cookies, auth headers)
+   * @default true
+   */
+  allowCredentials?: boolean;
+
+  /**
+   * Allowed HTTP methods
+   * @default ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+   */
+  allowMethods?: string[];
+
+  /**
+   * Allowed headers
+   * @default ['Content-Type', 'Authorization', 'Cookie']
+   */
+  allowHeaders?: string[];
+
+  /**
+   * Exposed headers
+   * @default ['Content-Length', 'X-Request-ID']
+   */
+  exposeHeaders?: string[];
+
+  /**
+   * Max age for preflight cache (seconds)
+   * @default 86400 (24 hours)
+   */
+  maxAge?: number;
+}
 
 /**
  * Configuration for creating a worker
@@ -26,23 +70,68 @@ export interface WorkerConfig extends MiddlewareConfig {
    * @default '1.0.0'
    */
   version?: string;
+
+  /**
+   * Enable request tracking (request ID, IP, user agent)
+   * @default true
+   */
+  enableRequestTracking?: boolean;
+
+  /**
+   * Enable global authentication middleware on /api/* routes
+   * Set to false if using route-level withPolicy() instead
+   * @default true
+   */
+  enableGlobalAuth?: boolean;
+
+  /**
+   * Public routes that bypass authentication
+   * @default ['/health']
+   */
+  publicRoutes?: string[];
+
+  /**
+   * Internal route prefix for worker-to-worker communication
+   * These routes require HMAC authentication
+   * @default '/internal'
+   */
+  internalRoutePrefix?: string;
+
+  /**
+   * Worker shared secret for HMAC authentication
+   * Required if using internal routes
+   */
+  workerSharedSecret?: string;
+
+  /**
+   * Allowed worker origins for internal routes
+   * Optional IP/origin whitelist for additional security
+   */
+  allowedWorkerOrigins?: string[];
+
+  /**
+   * CORS configuration
+   * If not provided, uses default config with env variables
+   */
+  cors?: CORSConfig;
 }
 
 /**
  * Creates a fully configured Hono app with standard middleware
  *
- * Includes:
- * - Request logging
- * - CORS configuration
- * - Security headers
+ * Enhanced features:
+ * - Request tracking (request ID, client IP, user agent)
+ * - Configurable CORS (declarative instead of runtime)
+ * - Security headers with CSP
  * - Health check endpoint
- * - Authentication middleware for /api/* routes
+ * - User authentication middleware for /api/* routes
+ * - Worker-to-worker authentication for internal routes
  * - Standard error handlers (404, 500)
  *
  * @param config - Worker configuration
  * @returns Configured Hono app ready for route mounting
  *
- * @example
+ * @example Basic usage
  * ```typescript
  * const app = createWorker({
  *   serviceName: 'content-api',
@@ -55,6 +144,32 @@ export interface WorkerConfig extends MiddlewareConfig {
  *
  * export default app;
  * ```
+ *
+ * @example With internal routes
+ * ```typescript
+ * const app = createWorker({
+ *   serviceName: 'stripe-webhook-handler',
+ *   version: '1.0.0',
+ *   internalRoutePrefix: '/internal',
+ *   workerSharedSecret: c.env.WORKER_SHARED_SECRET,
+ *   allowedWorkerOrigins: ['https://auth.revelations.studio'],
+ * });
+ *
+ * // Mount internal routes (worker-to-worker only)
+ * app.route('/internal/webhook', internalRoutes);
+ * ```
+ *
+ * @example Custom CORS
+ * ```typescript
+ * const app = createWorker({
+ *   serviceName: 'public-api',
+ *   cors: {
+ *     allowedOrigins: ['https://example.com', 'https://partner.com'],
+ *     allowCredentials: false,
+ *     maxAge: 3600,
+ *   },
+ * });
+ * ```
  */
 export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
   const {
@@ -64,13 +179,24 @@ export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
     enableLogging = true,
     enableCors = true,
     enableSecurityHeaders = true,
+    enableRequestTracking = true,
+    enableGlobalAuth = true,
+    publicRoutes: _publicRoutes = ['/health'], // Reserved for future use
+    internalRoutePrefix = '/internal',
+    workerSharedSecret,
+    allowedWorkerOrigins,
   } = config;
 
   const app = new Hono<HonoEnv>();
 
   // ============================================================================
-  // Global Middleware
+  // Global Middleware (Applied to ALL routes)
   // ============================================================================
+
+  // Request tracking should run first to generate IDs for logging
+  if (enableRequestTracking) {
+    app.use('*', createRequestTrackingMiddleware());
+  }
 
   if (enableLogging) {
     app.use('*', createLoggerMiddleware());
@@ -85,16 +211,41 @@ export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
   }
 
   // ============================================================================
-  // Public Routes
+  // Public Routes (No Authentication)
   // ============================================================================
 
+  // Health check is always public
   app.get('/health', createHealthCheckHandler(serviceName, version));
 
+  // Additional public routes if specified
+  // (Currently just health, but could be extended)
+
   // ============================================================================
-  // Protected Routes (Authentication Required)
+  // Internal Routes (Worker-to-Worker HMAC Authentication)
   // ============================================================================
 
-  app.use('/api/*', createAuthMiddleware());
+  if (workerSharedSecret) {
+    app.use(`${internalRoutePrefix}/*`, (c, next) => {
+      return workerAuth({
+        secret: workerSharedSecret,
+        allowedOrigins: allowedWorkerOrigins,
+      })(c, next);
+    });
+
+    // Set flag in context for policy middleware
+    app.use(`${internalRoutePrefix}/*`, async (c, next) => {
+      c.set('workerAuth', true);
+      await next();
+    });
+  }
+
+  // ============================================================================
+  // Protected API Routes (User Authentication Required)
+  // ============================================================================
+
+  if (enableGlobalAuth) {
+    app.use('/api/*', createAuthMiddleware());
+  }
 
   // ============================================================================
   // Error Handlers

@@ -1,9 +1,28 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "files": [],
+  "references": [
+    { "path": "./packages/database" },
+    { "path": "./packages/validation" },
+    { "path": "./packages/observability" },
+    { "path": "./packages/cloudflare-clients" },
+    { "path": "./packages/security" },
+    { "path": "./packages/test-utils" },
+    { "path": "./packages/content" },
+    { "path": "./packages/identity" },
+    { "path": "./packages/worker-utils" },
+    { "path": "./packages/service-errors" },
+    { "path": "./packages/shared-types" },
+    { "path": "./workers/auth" },
+    { "path": "./workers/content-api" },
+    { "path": "./workers/identity-api" },
+    { "path": "./workers/stripe-webhook-handler" }
+  ],
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ESNext", "DOM"],
+    "lib": ["ES2022", "DOM"],
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -12,7 +31,6 @@
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
     "sourceMap": true,
-    "outDir": "dist",
     "baseUrl": ".",
     "paths": {
       "@codex/database": ["packages/database/src/index.ts"],
@@ -30,9 +48,13 @@
       "@codex/content": ["packages/content/src/index.ts"],
       "@codex/content/*": ["packages/content/src/*"],
       "@codex/identity": ["packages/identity/src/index.ts"],
-      "@codex/identity/*": ["packages/identity/src/*"]
+      "@codex/identity/*": ["packages/identity/src/*"],
+      "@codex/worker-utils": ["packages/worker-utils/src/index.ts"],
+      "@codex/worker-utils/*": ["packages/worker-utils/src/*"],
+      "@codex/service-errors": ["packages/service-errors/src/index.ts"],
+      "@codex/service-errors/*": ["packages/service-errors/src/*"],
+      "@codex/shared-types": ["packages/shared-types/src/index.ts"],
+      "@codex/shared-types/*": ["packages/shared-types/src/*"]
     }
-  },
-  "include": ["workers/**/*", "apps/**/*", "packages/**/*"],
-  "exclude": ["node_modules", "dist", "**/.svelte-kit"]
+  }
 }

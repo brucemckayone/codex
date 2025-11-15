@@ -1,4 +1,12 @@
 import { z } from 'zod';
+import {
+  uuidSchema,
+  createSlugSchema,
+  urlSchema,
+  priceCentsSchema,
+  createSanitizedStringSchema,
+  createOptionalTextSchema,
+} from './primitives';
 
 /**
  * Content Management Validation Schemas
@@ -18,86 +26,16 @@ import { z } from 'zod';
 // Reusable Schema Components
 // ============================================================================
 
-const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
 /**
- * UUID validation (v4)
- * Used for all primary/foreign key references
+ * Content slug validation (max 500 chars)
  */
-const uuidSchema = z.string().uuid({
-  message: 'Invalid ID format',
-});
+const slugSchema = createSlugSchema(500);
 
 /**
- * Slug validation
- * - Lowercase alphanumeric + hyphens only
- * - No leading/trailing hyphens
- * - Prevents XSS and path traversal
- */
-const slugSchema = z
-  .string()
-  .trim()
-  .min(1, 'Slug is required')
-  .max(500, 'Slug must be 500 characters or less')
-  .transform((val) => val.toLowerCase())
-  .pipe(
-    z.string().regex(slugRegex, {
-      message:
-        'Slug must contain only lowercase letters, numbers, and hyphens (no leading/trailing hyphens)',
-    })
-  );
-
-/**
- * Organization slug validation (shorter than content slug)
+ * Organization slug validation (max 255 chars)
  * Must be unique across platform
  */
-const organizationSlugSchema = z
-  .string()
-  .trim()
-  .min(1, 'Slug is required')
-  .max(255, 'Slug must be 255 characters or less')
-  .transform((val) => val.toLowerCase())
-  .pipe(
-    z.string().regex(slugRegex, {
-      message:
-        'Slug must contain only lowercase letters, numbers, and hyphens (no leading/trailing hyphens)',
-    })
-  );
-
-/**
- * URL validation
- * - Must be valid HTTP/HTTPS URL
- * - Prevents javascript: and data: URIs (XSS prevention)
- */
-const urlSchema = z
-  .string()
-  .url('Invalid URL format')
-  .refine(
-    (url) => {
-      try {
-        const parsed = new URL(url);
-        return ['http:', 'https:'].includes(parsed.protocol);
-      } catch {
-        return false;
-      }
-    },
-    {
-      message: 'URL must use HTTP or HTTPS protocol',
-    }
-  );
-
-/**
- * Price validation (integer cents)
- * - Non-negative integer only
- * - Max $100,000 (10,000,000 cents)
- * - Null = free content
- */
-const priceCentsSchema = z
-  .number()
-  .int('Price must be a whole number (in cents)')
-  .min(0, 'Price cannot be negative')
-  .max(10000000, 'Price cannot exceed $100,000')
-  .nullable();
+const organizationSlugSchema = createSlugSchema(255);
 
 /**
  * Sanitized string for user-generated content
@@ -105,27 +43,12 @@ const priceCentsSchema = z
  * - Prevents empty strings
  * - Use for titles, descriptions, names
  */
-const sanitizedStringSchema = (
-  minLength: number,
-  maxLength: number,
-  fieldName: string
-) =>
-  z
-    .string()
-    .trim()
-    .min(minLength, `${fieldName} must be at least ${minLength} characters`)
-    .max(maxLength, `${fieldName} must be ${maxLength} characters or less`);
+const sanitizedStringSchema = createSanitizedStringSchema;
 
 /**
  * Optional sanitized text (can be null)
  */
-const optionalTextSchema = (maxLength: number, fieldName: string) =>
-  z
-    .string()
-    .trim()
-    .max(maxLength, `${fieldName} must be ${maxLength} characters or less`)
-    .optional()
-    .nullable();
+const optionalTextSchema = createOptionalTextSchema;
 
 // ============================================================================
 // Organization Schemas
@@ -434,10 +357,11 @@ export type PublishContentInput = z.infer<typeof publishContentSchema>;
 /**
  * Pagination schema
  * Reusable for list queries
+ * Uses z.coerce to handle query string parameters
  */
 export const paginationSchema = z.object({
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 export type PaginationInput = z.infer<typeof paginationSchema>;
@@ -452,12 +376,9 @@ export const sortOrderEnum = z.enum(['asc', 'desc'], {
 /**
  * Content query/filter schema
  * Used for listing and searching content
+ * Extends pagination with content-specific filters and sorting
  */
-export const contentQuerySchema = z.object({
-  // Pagination
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
-
+export const contentQuerySchema = paginationSchema.extend({
   // Filters
   status: contentStatusEnum.optional(),
   contentType: contentTypeEnum.optional(),
@@ -486,10 +407,9 @@ export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
 /**
  * Media item query schema
+ * Extends pagination with media-specific filters and sorting
  */
-export const mediaQuerySchema = z.object({
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+export const mediaQuerySchema = paginationSchema.extend({
   status: mediaStatusEnum.optional(),
   mediaType: mediaTypeEnum.optional(),
   sortBy: z.enum(['createdAt', 'uploadedAt', 'title']).default('createdAt'),
@@ -500,10 +420,9 @@ export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
 /**
  * Organization query schema
+ * Extends pagination with organization-specific filters and sorting
  */
-export const organizationQuerySchema = z.object({
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+export const organizationQuerySchema = paginationSchema.extend({
   search: z.string().max(255).optional(),
   sortBy: z.enum(['createdAt', 'name']).default('createdAt'),
   sortOrder: sortOrderEnum.default('desc'),

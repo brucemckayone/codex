@@ -6,7 +6,11 @@
  */
 
 // Worker factory
-export { createWorker, type WorkerConfig } from './worker-factory';
+export {
+  createWorker,
+  type WorkerConfig,
+  type CORSConfig,
+} from './worker-factory';
 
 // Middleware factories
 export {
@@ -14,25 +18,35 @@ export {
   createCorsMiddleware,
   createSecurityHeadersMiddleware,
   createAuthMiddleware,
+  createRequestTrackingMiddleware,
   createHealthCheckHandler,
   createNotFoundHandler,
   createErrorHandler,
+  createErrorResponse,
   createObservabilityMiddleware,
   createObservabilityErrorHandler,
   createSecurityHeadersWrapper,
   createRateLimitWrapper,
   sequence,
+  ERROR_CODES,
   type MiddlewareConfig,
 } from './middleware';
 
 // Route handler helpers
 export {
   createAuthenticatedHandler,
-  createAuthenticatedGetHandler,
+  createAuthenticatedGetHandler, // Deprecated: alias to createAuthenticatedHandler
   withErrorHandling,
   formatValidationError,
-  requireUser,
 } from './route-helpers';
+
+// Security policy
+export {
+  withPolicy,
+  type RouteSecurityPolicy,
+  POLICY_PRESETS,
+  DEFAULT_SECURITY_POLICY,
+} from './security-policy';
 
 // Test utilities (for integration tests only)
 export {

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "deploy": "pnpm build && wrangler deploy",
-    "dev": "pnpm build && wrangler dev",
+    "dev": "pnpm build && wrangler dev --port 4000",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

@@ -64,8 +64,8 @@ export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
   return cors({
     origin: (origin, c) => {
       const allowedOrigins = [
-        c.env.WEB_APP_URL,
-        c.env.API_URL,
+        c.env?.WEB_APP_URL,
+        c.env?.API_URL,
         'http://localhost:3000',
         'http://localhost:5173',
       ].filter(Boolean) as string[];
@@ -74,8 +74,8 @@ export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
         return origin;
       }
 
-      // Block unknown origins
-      return allowedOrigins[0] || '*';
+      // Block unknown origins (fallback to localhost for tests)
+      return allowedOrigins[0] || 'http://localhost:3000';
     },
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -90,7 +90,7 @@ export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
  */
 export function createSecurityHeadersMiddleware(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
-    const environment = (c.env.ENVIRONMENT || 'development') as
+    const environment = (c.env?.ENVIRONMENT || 'development') as
       | 'development'
       | 'staging'
       | 'production';
@@ -111,13 +111,12 @@ export function createSecurityHeadersMiddleware(): MiddlewareHandler<HonoEnv> {
  */
 export function createAuthMiddleware(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
-    const environment = c.env.ENVIRONMENT;
-    const isDevelopment = environment === 'development';
+    const environment = c.env?.ENVIRONMENT;
 
     // Always use real authentication
     const authMiddleware = requireAuth({
       cookieName: 'codex-session',
-      enableLogging: isDevelopment,
+      enableLogging: environment === 'development',
     });
 
     return authMiddleware(c, next);
@@ -198,6 +197,50 @@ export function createErrorHandler(environment?: string) {
 }
 
 /**
+ * Standard error response codes
+ */
+export const ERROR_CODES = {
+  INVALID_JSON: 'INVALID_JSON',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  NOT_FOUND: 'NOT_FOUND',
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+  BAD_REQUEST: 'BAD_REQUEST',
+} as const;
+
+/**
+ * Creates a standardized error response
+ *
+ * @param c - Hono context
+ * @param code - Error code (use ERROR_CODES constants)
+ * @param message - Human-readable error message
+ * @param status - HTTP status code
+ * @returns JSON error response
+ *
+ * @example
+ * ```typescript
+ * return createErrorResponse(c, ERROR_CODES.INVALID_JSON, 'Request body contains invalid JSON', 400);
+ * ```
+ */
+export function createErrorResponse(
+  c: Context,
+  code: string,
+  message: string,
+  status: number
+) {
+  return c.json(
+    {
+      error: {
+        code,
+        message,
+      },
+    },
+    status as 400 | 401 | 403 | 404 | 500
+  );
+}
+
+/**
  * Creates observability middleware with request timing and error tracking
  *
  * Provides ObservabilityClient in context as 'obs' for use in all handlers.
@@ -224,7 +267,7 @@ export function createObservabilityMiddleware<T extends HonoEnv = HonoEnv>(
   return async (c: Context<T>, next: Next) => {
     const obs = new ObservabilityClient(
       serviceName,
-      c.env.ENVIRONMENT || 'development'
+      c.env?.ENVIRONMENT || 'development'
     );
 
     // Make observability client available in context
@@ -302,6 +345,76 @@ export function createRateLimitWrapper(
 }
 
 /**
+ * Generate a unique request ID (UUID v4)
+ */
+function generateRequestId(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
+ * Extract client IP from Cloudflare headers
+ */
+function getClientIP(c: Context<HonoEnv>): string {
+  return (
+    c.req.header('CF-Connecting-IP') ||
+    c.req.header('X-Real-IP') ||
+    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
+    'unknown'
+  );
+}
+
+/**
+ * Request tracking middleware
+ *
+ * Automatically injects request metadata into context:
+ * - requestId: Unique identifier for correlation across logs
+ * - clientIP: Client IP address from Cloudflare headers
+ * - userAgent: User agent string for analytics/security
+ *
+ * This middleware should be applied early in the chain so all
+ * subsequent middleware and handlers can access this metadata.
+ *
+ * @example
+ * ```typescript
+ * app.use('*', createRequestTrackingMiddleware());
+ *
+ * // In handlers:
+ * app.get('/foo', (c) => {
+ *   const requestId = c.get('requestId');
+ *   const clientIP = c.get('clientIP');
+ *   console.log(`Request ${requestId} from ${clientIP}`);
+ * });
+ * ```
+ */
+export function createRequestTrackingMiddleware(): MiddlewareHandler<HonoEnv> {
+  return async (c: Context<HonoEnv>, next: Next) => {
+    // Generate or use existing request ID
+    const requestId =
+      c.req.header('X-Request-ID') || c.get('requestId') || generateRequestId();
+
+    // Extract client IP
+    const clientIP = getClientIP(c);
+
+    // Get user agent
+    const userAgent = c.req.header('User-Agent') || 'unknown';
+
+    // Set in context for downstream handlers
+    c.set('requestId', requestId);
+    c.set('clientIP', clientIP);
+    c.set('userAgent', userAgent);
+
+    // Also set as response header for debugging/correlation
+    c.header('X-Request-ID', requestId);
+
+    await next();
+  };
+}
+
+/**
  * Chains multiple middleware handlers in sequence
  *
  * Executes handlers one after another. Each handler calls the next one in the chain.
@@ -344,6 +457,9 @@ export function sequence(
       }
 
       const handler = handlers[i];
+      if (!handler) {
+        throw new Error(`Handler at index ${i} is undefined`);
+      }
       await handler(c, () => dispatch(i + 1));
     };
 

@@ -98,8 +98,12 @@ export function extractField<T>(
   if (!metadata || !(field in metadata)) {
     return null;
   }
+  const value = metadata[field];
+  if (typeof value !== 'string') {
+    return null;
+  }
   try {
-    return validator(metadata[field]);
+    return validator(value);
   } catch {
     return null;
   }

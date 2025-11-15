@@ -26,28 +26,36 @@ import { dbHttp } from '@codex/database';
 import {
   createAuthenticatedHandler,
   createAuthenticatedGetHandler,
+  withPolicy,
+  POLICY_PRESETS,
 } from '@codex/worker-utils';
+import { createIdParamsSchema } from '@codex/validation';
 
 const app = new Hono<HonoEnv>();
 
-// Note: Authentication is applied at the app level in index.ts
-// All routes mounted under /api/* inherit requireAuth middleware
+// Note: Route-level security policies applied via withPolicy()
+// Each route declares its own authentication and authorization requirements
 
 /**
  * POST /api/content
  * Create new content
+ *
+ * Security: Creator/Admin only, API rate limit (100 req/min)
  */
 app.post(
   '/',
+  withPolicy(POLICY_PRESETS.creator()),
   createAuthenticatedHandler({
-    schema: createContentSchema,
-    handler: async (input, c, ctx) => {
+    schema: {
+      body: createContentSchema,
+    },
+    handler: async (c, ctx) => {
       const service = createContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.create(input, ctx.user.id);
+      return service.create(ctx.validated.body, ctx.user.id);
     },
     successStatus: 201,
   })
@@ -56,18 +64,23 @@ app.post(
 /**
  * GET /api/content/:id
  * Get content by ID
+ *
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.get(
   '/:id',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedGetHandler({
-    handler: async (c, ctx) => {
-      const id = c.req.param('id');
+    schema: {
+      params: createIdParamsSchema(),
+    },
+    handler: async (_c, ctx) => {
       const service = createContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.get(id, ctx.user.id);
+      return service.get(ctx.validated.params.id, ctx.user.id);
     },
   })
 );
@@ -75,19 +88,28 @@ app.get(
 /**
  * PATCH /api/content/:id
  * Update content
+ *
+ * Security: Creator/Admin only, API rate limit (100 req/min)
  */
 app.patch(
   '/:id',
+  withPolicy(POLICY_PRESETS.creator()),
   createAuthenticatedHandler({
-    schema: updateContentSchema,
-    handler: async (input, c, ctx) => {
-      const id = c.req.param('id');
+    schema: {
+      params: createIdParamsSchema(),
+      body: updateContentSchema,
+    },
+    handler: async (_c, ctx) => {
       const service = createContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.update(id, input, ctx.user.id);
+      return service.update(
+        ctx.validated.params.id,
+        ctx.validated.body,
+        ctx.user.id
+      );
     },
   })
 );
@@ -95,24 +117,23 @@ app.patch(
 /**
  * GET /api/content
  * List content with filters and pagination
+ *
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.get(
   '/',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedGetHandler({
-    handler: async (c, ctx) => {
-      const query = c.req.query();
-      const validationResult = contentQuerySchema.safeParse(query);
-
-      if (!validationResult.success) {
-        throw validationResult.error; // Throw ZodError for proper error mapping
-      }
-
+    schema: {
+      query: contentQuerySchema,
+    },
+    handler: async (_c, ctx) => {
       const service = createContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      const result = await service.list(ctx.user.id, validationResult.data);
+      const result = await service.list(ctx.user.id, ctx.validated.query);
 
       return {
         items: result.items,
@@ -128,18 +149,23 @@ app.get(
 /**
  * POST /api/content/:id/publish
  * Publish content
+ *
+ * Security: Creator/Admin only, API rate limit (100 req/min)
  */
 app.post(
   '/:id/publish',
+  withPolicy(POLICY_PRESETS.creator()),
   createAuthenticatedGetHandler({
-    handler: async (c, ctx) => {
-      const id = c.req.param('id');
+    schema: {
+      params: createIdParamsSchema(),
+    },
+    handler: async (_c, ctx) => {
       const service = createContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.publish(id, ctx.user.id);
+      return service.publish(ctx.validated.params.id, ctx.user.id);
     },
   })
 );
@@ -147,18 +173,23 @@ app.post(
 /**
  * POST /api/content/:id/unpublish
  * Unpublish content
+ *
+ * Security: Creator/Admin only, API rate limit (100 req/min)
  */
 app.post(
   '/:id/unpublish',
+  withPolicy(POLICY_PRESETS.creator()),
   createAuthenticatedGetHandler({
-    handler: async (c, ctx) => {
-      const id = c.req.param('id');
+    schema: {
+      params: createIdParamsSchema(),
+    },
+    handler: async (_c, ctx) => {
       const service = createContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.unpublish(id, ctx.user.id);
+      return service.unpublish(ctx.validated.params.id, ctx.user.id);
     },
   })
 );
@@ -166,30 +197,31 @@ app.post(
 /**
  * DELETE /api/content/:id
  * Soft delete content
+ *
+ * Security: Creator/Admin only, Strict rate limit (5 req/15min)
  */
-app.delete('/:id', async (c) => {
-  const user = c.get('user');
-  if (!user) {
-    return c.json(
-      { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } },
-      401
-    );
-  }
+app.delete(
+  '/:id',
+  withPolicy({
+    auth: 'required',
+    roles: ['creator', 'admin'],
+    rateLimit: 'auth', // Stricter rate limit for deletion
+  }),
+  createAuthenticatedGetHandler({
+    schema: {
+      params: createIdParamsSchema(),
+    },
+    handler: async (_c, ctx) => {
+      const service = createContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-  try {
-    const id = c.req.param('id');
-    const service = createContentService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    await service.delete(id, user.id);
-    return c.body(null, 204);
-  } catch (err: unknown) {
-    const { mapErrorToResponse } = await import('@codex/content');
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+      await service.delete(ctx.validated.params.id, ctx.user.id);
+      return null;
+    },
+    successStatus: 204,
+  })
+);
 
 export default app;

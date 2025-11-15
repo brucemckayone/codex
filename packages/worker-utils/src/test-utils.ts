@@ -84,6 +84,10 @@ export async function createTestUser(
     })
     .returning();
 
+  if (!user) {
+    throw new Error('Failed to create test user');
+  }
+
   // Generate session token and ID
   const sessionId = randomUUID();
   const sessionToken = `test-session-${Date.now()}-${Math.random().toString(36).substring(7)}`;
@@ -102,6 +106,10 @@ export async function createTestUser(
       userAgent: 'test-agent',
     })
     .returning();
+
+  if (!session) {
+    throw new Error('Failed to create test session');
+  }
 
   return {
     user: {

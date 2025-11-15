@@ -102,6 +102,12 @@ export function createWorkerConfig(
       dts({
         outDir: path.resolve(__dirname, `../../workers/${workerName}/dist`),
         include: [path.resolve(__dirname, `../../workers/${workerName}/src`)],
+        exclude: [
+          '**/*.test.ts',
+          '**/*.spec.ts',
+          '**/__test__/**',
+          '**/__tests__/**',
+        ],
       }) as PluginOption,
       ...plugins,
     ],

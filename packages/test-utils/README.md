@@ -4,18 +4,18 @@ Comprehensive test utilities for the Codex Content Management System test suites
 
 ## Overview
 
-This package provides centralized test utilities including:
-- Database setup and cleanup
-- Test data factories
-- Custom assertion helpers
-- Wrangler Dev Server helpers for Cloudflare Workers integration testing (Vitest 4.0+)
-- Miniflare helpers (legacy, Vitest 2.x-3.2.x only)
+This package provides centralized test utilities for testing the Codex platform, including:
+
+- **Test Data Factories**: Generate realistic test data with proper types and unique identifiers
+- **Database Utilities**: Setup, cleanup, and management of test databases
+- **Custom Assertions**: Type-safe assertion helpers for content, media, and organizations
+- **Test Helpers**: Utilities for async testing, error validation, and test isolation
 
 ## Installation
 
 This package is automatically available to all workspace packages via `workspace:*`.
 
-Add to your package.json:
+Add to your `package.json`:
 
 ```json
 {
@@ -25,16 +25,74 @@ Add to your package.json:
 }
 ```
 
+## Quick Start
+
+```typescript
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import {
+  setupTestDatabase,
+  cleanupDatabase,
+  seedTestUsers,
+  createTestContentInput,
+  createTestOrganizationInput,
+} from '@codex/test-utils';
+import { content, organizations } from '@codex/database/schema';
+import type { Database } from '@codex/test-utils';
+
+describe('Content Service', () => {
+  let db: Database;
+  let testUserId: string;
+
+  beforeAll(async () => {
+    db = setupTestDatabase();
+    const [userId] = await seedTestUsers(db, 1);
+    testUserId = userId;
+  });
+
+  beforeEach(async () => {
+    await cleanupDatabase(db);
+  });
+
+  afterAll(async () => {
+    await cleanupDatabase(db);
+  });
+
+  it('should create content', async () => {
+    const contentInput = createTestContentInput(testUserId, {
+      title: 'My Test Video',
+      contentType: 'video',
+    });
+
+    const [newContent] = await db.insert(content).values(contentInput).returning();
+
+    expect(newContent.id).toBeDefined();
+    expect(newContent.title).toBe('My Test Video');
+  });
+});
+```
+
 ## Database Setup
 
-### Environment Variables
+### Environment Configuration
 
-Tests require a database connection string. Set one of the following:
-- `DATABASE_URL_TEST` - Dedicated test database (recommended)
-- `DATABASE_URL` - Falls back to this if _TEST is not set
-- `DATABASE_URL_LOCAL_PROXY` - Local proxy database
+Tests require a database connection string. The package uses the production database client configured via environment variables.
 
-Configure in your vitest.config.ts:
+Set in your `.env.dev` file:
+
+```bash
+# Database connection method (LOCAL_PROXY or WEBSOCKET_POOL)
+DB_METHOD=LOCAL_PROXY
+
+# Local database URL
+DATABASE_URL_LOCAL_PROXY=postgresql://user:pass@localhost:5432/codex
+
+# Or WebSocket pool for transaction support
+DATABASE_URL=postgres://user:pass@host/db
+```
+
+### Vitest Configuration
+
+Configure your `vitest.config.ts` to load environment variables:
 
 ```typescript
 import { defineConfig } from 'vitest/config';
@@ -44,6 +102,8 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Load environment variables from .env.dev
 config({ path: resolve(__dirname, '../../.env.dev') });
 
 export default defineConfig({
@@ -51,533 +111,539 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     env: {
-      DATABASE_URL: process.env.DATABASE_URL || process.env.DATABASE_URL_LOCAL_PROXY || '',
+      DATABASE_URL: process.env.DATABASE_URL || '',
+      DB_METHOD: process.env.DB_METHOD || 'LOCAL_PROXY',
     },
   },
 });
 ```
 
-### Basic Usage
+### Database Functions
+
+#### `setupTestDatabase()`
+
+Returns the WebSocket-based database client with full transaction support. This client is configured via environment variables.
 
 ```typescript
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import {
-  setupTestDatabase,
-  cleanupDatabase,
-  seedTestUsers,
-} from '@codex/test-utils';
-import type { Database } from '@codex/database';
+import { setupTestDatabase, type Database } from '@codex/test-utils';
 
-describe('MyService', () => {
-  let db: Database;
-  let testUserId: string;
+const db: Database = setupTestDatabase();
+```
 
-  beforeAll(async () => {
-    // Setup database connection
-    db = setupTestDatabase();
-    
-    // Create test users
-    const [userId] = await seedTestUsers(db, 1);
-    testUserId = userId;
-  });
+#### `cleanupDatabase(db)`
 
-  beforeEach(async () => {
-    // Clean up between tests
-    await cleanupDatabase(db);
-  });
+Cleans all content tables while preserving users. Use this in `beforeEach` when users are seeded once in `beforeAll`.
 
-  afterAll(async () => {
-    // Final cleanup
-    await cleanupDatabase(db);
-  });
+Deletion order respects foreign key constraints:
+1. content (references media_items, organizations, users)
+2. media_items (references users)
+3. organizations (no foreign keys)
 
-  it('should work with test data', async () => {
-    // Your test here
-  });
+```typescript
+await cleanupDatabase(db);
+```
+
+#### `cleanupDatabaseComplete(db)`
+
+Deletes ALL test data including users. Only use in `afterAll` or when you need a complete reset.
+
+```typescript
+await cleanupDatabaseComplete(db);
+```
+
+#### `cleanupTables(db, tables)`
+
+Clean specific tables only:
+
+```typescript
+await cleanupTables(db, ['content', 'mediaItems']);
+```
+
+#### `seedTestUsers(db, count)`
+
+Creates test users in the `auth.users` table and returns their IDs:
+
+```typescript
+const [userId1, userId2, userId3] = await seedTestUsers(db, 3);
+```
+
+#### `withTransaction(db, testFn)`
+
+Wraps test code in a transaction and rolls back automatically:
+
+```typescript
+import { withTransaction } from '@codex/test-utils';
+
+await withTransaction(db, async (tx) => {
+  const [org] = await tx.insert(organizations).values(orgInput).returning();
+
+  // Test operations here
+  expect(org.id).toBeDefined();
+
+  // Transaction will auto-rollback
 });
+```
+
+#### `executeRawSQL(db, query)`
+
+Execute raw SQL for advanced test scenarios:
+
+```typescript
+await executeRawSQL(db, 'SELECT * FROM content WHERE status = $1');
+```
+
+#### `areTablesEmpty(db)`
+
+Verify that all content tables are empty:
+
+```typescript
+const isEmpty = await areTablesEmpty(db);
+expect(isEmpty).toBe(true);
 ```
 
 ## Test Data Factories
 
-### Creating Test Input (for database insertion)
+Factories generate realistic test data with proper types and unique identifiers. All factories support partial overrides.
+
+### Input Factories (for Database Insertion)
+
+Use these to create data for inserting into the database. They return `NewX` types (without ID and timestamps).
+
+#### `createTestOrganizationInput(overrides?)`
 
 ```typescript
-import {
-  createTestOrganizationInput,
-  createTestMediaItemInput,
-  createTestContentInput,
-  createUniqueSlug,
-} from '@codex/test-utils';
-import { organizations, mediaItems, content } from '@codex/database/schema';
+import { createTestOrganizationInput } from '@codex/test-utils';
+import { organizations } from '@codex/database/schema';
 
-// Create organization
 const orgInput = createTestOrganizationInput({
-  name: 'Custom Organization Name',
+  name: 'Custom Organization',
+  description: 'A test organization',
 });
-const [org] = await db.insert(organizations).values(orgInput).returning();
 
-// Create media item
+const [org] = await db.insert(organizations).values(orgInput).returning();
+```
+
+#### `createTestMediaItemInput(creatorId, overrides?)`
+
+```typescript
+import { createTestMediaItemInput } from '@codex/test-utils';
+import { mediaItems } from '@codex/database/schema';
+
 const mediaInput = createTestMediaItemInput(creatorId, {
   mediaType: 'video',
   status: 'ready',
+  title: 'My Test Video',
 });
-const [media] = await db.insert(mediaItems).values(mediaInput).returning();
 
-// Create content
+const [media] = await db.insert(mediaItems).values(mediaInput).returning();
+```
+
+#### `createTestContentInput(creatorId, overrides?)`
+
+```typescript
+import { createTestContentInput } from '@codex/test-utils';
+import { content } from '@codex/database/schema';
+
 const contentInput = createTestContentInput(creatorId, {
-  title: 'My Test Content',
-  slug: createUniqueSlug('test'),
+  title: 'My Content',
   contentType: 'video',
   mediaItemId: media.id,
-  organizationId: org.id,
+  status: 'published',
 });
+
 const [item] = await db.insert(content).values(contentInput).returning();
 ```
 
-### Creating Mock Entities (with IDs and timestamps)
+### Mock Factories (with IDs and Timestamps)
+
+Use these to create mock entities for testing logic that doesn't need database interaction. They return full entity types with ID, createdAt, updatedAt, etc.
+
+#### `createTestOrganization(overrides?)`
 
 ```typescript
-import {
-  createTestOrganization,
-  createTestMediaItem,
-  createTestContent,
-} from '@codex/test-utils';
+import { createTestOrganization } from '@codex/test-utils';
 
-// Create mock entities for testing logic that doesn't need database
 const mockOrg = createTestOrganization({
   name: 'Mock Organization',
+  id: 'specific-id',
 });
+
+// mockOrg includes: id, createdAt, updatedAt, deletedAt
+```
+
+#### `createTestMediaItem(overrides?)`
+
+```typescript
+import { createTestMediaItem } from '@codex/test-utils';
 
 const mockMedia = createTestMediaItem({
   creatorId: 'user-123',
   status: 'ready',
-});
-
-const mockContent = createTestContent({
-  creatorId: 'user-123',
-  mediaItemId: mockMedia.id,
-  organizationId: mockOrg.id,
+  mediaType: 'audio',
 });
 ```
 
-### Unique Slugs
+#### `createTestContent(overrides?)`
 
-Always use `createUniqueSlug()` to avoid collisions:
+```typescript
+import { createTestContent } from '@codex/test-utils';
+
+const mockContent = createTestContent({
+  creatorId: 'user-123',
+  status: 'published',
+  publishedAt: new Date(),
+});
+```
+
+### Batch Factories
+
+Create multiple entities at once:
+
+#### `createTestOrganizations(count, baseOverrides?)`
+
+```typescript
+import { createTestOrganizations } from '@codex/test-utils';
+
+const orgs = createTestOrganizations(5, {
+  description: 'Batch test org',
+});
+```
+
+#### `createTestMediaItems(count, baseOverrides?)`
+
+```typescript
+import { createTestMediaItems } from '@codex/test-utils';
+
+const mediaItems = createTestMediaItems(10, {
+  creatorId: 'user-123',
+  status: 'ready',
+});
+```
+
+#### `createTestContentItems(count, baseOverrides?)`
+
+```typescript
+import { createTestContentItems } from '@codex/test-utils';
+
+const contentItems = createTestContentItems(20, {
+  creatorId: 'user-123',
+  visibility: 'public',
+});
+```
+
+### Workflow Factory
+
+Create a complete content workflow with related entities:
+
+#### `createTestContentWorkflow(options?)`
+
+```typescript
+import { createTestContentWorkflow } from '@codex/test-utils';
+
+const workflow = createTestContentWorkflow({
+  withOrganization: true,
+  contentType: 'video',
+  status: 'published',
+});
+
+// Returns: { creatorId, organization?, mediaItem, content }
+console.log(workflow.organization?.id);
+console.log(workflow.mediaItem.id);
+console.log(workflow.content.id);
+```
+
+### Utility Functions
+
+#### `createUniqueSlug(prefix?)`
+
+Generate unique slugs to avoid collisions:
 
 ```typescript
 import { createUniqueSlug } from '@codex/test-utils';
 
-const slug1 = createUniqueSlug('video'); // video-1762847839546-abc12
-const slug2 = createUniqueSlug('audio'); // audio-1762847839546-def34
+const slug = createUniqueSlug('video'); // video-1234567890-abc12
+```
+
+#### `createTestUserId()`
+
+Generate a test user ID in UUID format:
+
+```typescript
+import { createTestUserId } from '@codex/test-utils';
+
+const userId = createTestUserId(); // UUID v4 format
 ```
 
 ## Custom Assertions
 
+Type-safe assertion helpers for validating test results.
+
 ### Error Assertions
 
+#### `expectError(error, ErrorClass, expectedCode?)`
+
+Assert that an error is an instance of a specific error class:
+
 ```typescript
-import {
-  expectError,
-  expectContentServiceError,
-  expectErrorMessage,
-} from '@codex/test-utils';
-import {
-  ContentNotFoundError,
-  MediaNotReadyError,
-} from '@codex/content/errors';
+import { expectError } from '@codex/test-utils';
+import { ContentNotFoundError } from '@codex/service-errors';
 
-// Assert error class
-await expect(async () => {
-  await service.get('invalid-id');
-}).rejects.toThrow(ContentNotFoundError);
-
-// Or use expectError helper
 try {
   await service.get('invalid-id');
+  expect.fail('Should have thrown');
 } catch (error) {
   expectError(error, ContentNotFoundError);
 }
+```
 
-// Assert error code
+#### `expectContentServiceError(error, expectedCode)`
+
+Assert error code for content service errors:
+
+```typescript
+import { expectContentServiceError } from '@codex/test-utils';
+
 try {
   await service.create(invalidInput);
 } catch (error) {
   expectContentServiceError(error, 'VALIDATION_ERROR');
 }
+```
 
-// Assert error message contains substring
+#### `expectErrorMessage(error, substring)`
+
+Assert that an error message contains a specific substring:
+
+```typescript
+import { expectErrorMessage } from '@codex/test-utils';
+
 try {
-  await service.update('id', { title: '' });
+  await service.update(id, { title: '' });
 } catch (error) {
   expectErrorMessage(error, 'title is required');
 }
 ```
 
-## Cloudflare Workers Integration Testing
+### Content Assertions
 
-### Wrangler Dev Server (Vitest 4.0+)
+#### `expectContentEqual(actual, expected)`
 
-The wrangler dev server approach provides true integration testing for Cloudflare Workers by running actual wrangler dev processes and testing via HTTP endpoints. This is the recommended approach for Vitest 4.0+ projects.
-
-#### Why Wrangler Dev Instead of Miniflare?
-
-- **Vitest Compatibility**: Miniflare requires Vitest 2.x-3.2.x, but this project uses Vitest 4.0+
-- **True Integration**: Tests run against real wrangler dev servers with actual runtime environment
-- **Real Bindings**: KV, R2, D1, and other bindings work exactly as they do in production
-- **Easier Debugging**: Visible dev server output and standard HTTP debugging tools
-
-#### Basic Usage
+Deep equality check for content objects (ignores timestamp variations):
 
 ```typescript
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import {
-  startWranglerDev,
-  createWorkerFetch,
-  type WranglerDevServer,
-} from '@codex/test-utils';
+import { expectContentEqual } from '@codex/test-utils';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const workerPath = path.resolve(__dirname, '../');
-
-describe('My Worker (integration)', () => {
-  let server: WranglerDevServer;
-  let workerFetch: ReturnType<typeof createWorkerFetch>;
-
-  beforeAll(async () => {
-    // Start wrangler dev server
-    server = await startWranglerDev({
-      workerPath,
-      port: 8787,
-      env: {
-        DATABASE_URL: process.env.DATABASE_URL || '',
-        ENVIRONMENT: 'test',
-      },
-      startupTimeout: 30000,
-      verbose: false,
-    });
-
-    // Create fetch helper bound to worker URL
-    workerFetch = createWorkerFetch(server.url);
-  }, 45000); // Give wrangler dev time to start
-
-  afterAll(async () => {
-    // Stop wrangler dev server
-    if (server) {
-      await server.cleanup();
-    }
-  }, 10000);
-
-  it('should respond to health check', async () => {
-    const response = await workerFetch('/health');
-    expect(response.status).toBe(200);
-
-    const json = await response.json();
-    expect(json.status).toBe('ok');
-  });
-
-  it('should handle POST requests', async () => {
-    const response = await workerFetch('/api/items', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ name: 'test item' }),
-    });
-
-    expect(response.status).toBe(201);
-  });
+expectContentEqual(actualContent, {
+  title: 'Expected Title',
+  status: 'published',
+  visibility: 'public',
 });
 ```
 
-#### Configuration Options
+#### `expectMediaItemEqual(actual, expected)`
+
+Deep equality check for media items:
 
 ```typescript
-interface WranglerDevOptions {
-  /**
-   * Path to the worker directory (containing wrangler.toml)
-   */
-  workerPath: string;
+import { expectMediaItemEqual } from '@codex/test-utils';
 
-  /**
-   * Port for the dev server (default: 8787)
-   * Use different ports for testing multiple workers concurrently
-   */
-  port?: number;
-
-  /**
-   * Environment variables to pass to the worker
-   */
-  env?: Record<string, string>;
-
-  /**
-   * Wrangler environment to use (staging, production, etc.)
-   */
-  wranglerEnv?: string;
-
-  /**
-   * Timeout for server startup in milliseconds (default: 30000)
-   */
-  startupTimeout?: number;
-
-  /**
-   * Whether to log wrangler output (default: false)
-   */
-  verbose?: boolean;
-}
-```
-
-#### Testing with Authentication
-
-For workers that require authentication, use real test users and sessions:
-
-```typescript
-import {
-  createTestUser,
-  cleanupTestUser,
-  type TestUser,
-} from '@codex/worker-utils';
-
-describe('Protected Endpoints', () => {
-  let server: WranglerDevServer;
-  let workerFetch: ReturnType<typeof createWorkerFetch>;
-  let testUser: TestUser;
-
-  beforeAll(async () => {
-    server = await startWranglerDev({ /* ... */ });
-    workerFetch = createWorkerFetch(server.url);
-
-    // Create real test user with session
-    testUser = await createTestUser();
-  }, 45000);
-
-  afterAll(async () => {
-    // Cleanup test user
-    if (testUser) {
-      await cleanupTestUser(testUser.user.id);
-    }
-
-    if (server) {
-      await server.cleanup();
-    }
-  }, 10000);
-
-  it('should require authentication', async () => {
-    const response = await workerFetch('/api/content');
-    expect(response.status).toBe(401);
-  });
-
-  it('should allow authenticated requests', async () => {
-    const response = await workerFetch('/api/content', {
-      headers: {
-        Cookie: `codex-session=${testUser.sessionToken}`,
-      },
-    });
-
-    expect(response.status).not.toBe(401);
-  });
+expectMediaItemEqual(actualMedia, {
+  mediaType: 'video',
+  status: 'ready',
+  mimeType: 'video/mp4',
 });
 ```
 
-#### Testing Multiple Workers
+#### `expectOrganizationEqual(actual, expected)`
 
-When testing multiple workers, use different ports to avoid conflicts:
+Deep equality check for organizations:
 
 ```typescript
-describe('Auth Worker', () => {
-  let server: WranglerDevServer;
+import { expectOrganizationEqual } from '@codex/test-utils';
 
-  beforeAll(async () => {
-    server = await startWranglerDev({
-      workerPath: './workers/auth',
-      port: 8787, // Auth on 8787
-      // ...
-    });
-  }, 45000);
-
-  // tests...
-});
-
-describe('Content API Worker', () => {
-  let server: WranglerDevServer;
-
-  beforeAll(async () => {
-    server = await startWranglerDev({
-      workerPath: './workers/content-api',
-      port: 8788, // Content API on 8788
-      // ...
-    });
-  }, 45000);
-
-  // tests...
+expectOrganizationEqual(actualOrg, {
+  name: 'Expected Org',
+  slug: 'expected-org',
 });
 ```
 
-#### Best Practices
+### Status Assertions
 
-1. **Use Different Ports**: When testing multiple workers, assign unique ports to each
-   ```typescript
-   port: 8787, // auth worker
-   port: 8788, // content-api worker
-   ```
+#### `expectDraft(content)`
 
-2. **Set Appropriate Timeouts**: Wrangler dev can take time to start
-   ```typescript
-   beforeAll(async () => {
-     // setup...
-   }, 45000); // 45 seconds for startup
-   ```
-
-3. **Clean Up Resources**: Always cleanup servers and test users
-   ```typescript
-   afterAll(async () => {
-     await cleanupTestUser(testUser.user.id);
-     await server.cleanup();
-   }, 10000);
-   ```
-
-4. **Test Real Scenarios**: Test complete request/response cycles
-   ```typescript
-   it('should validate input and return errors', async () => {
-     const response = await workerFetch('/api/content', {
-       method: 'POST',
-       body: JSON.stringify({ invalid: 'data' }),
-     });
-
-     expect(response.status).toBe(422);
-     const json = await response.json();
-     expect(json.error.code).toBe('VALIDATION_ERROR');
-   });
-   ```
-
-5. **Use Verbose Mode for Debugging**: Enable verbose output when troubleshooting
-   ```typescript
-   server = await startWranglerDev({
-     // ...
-     verbose: true, // Logs wrangler output
-   });
-   ```
-
-#### Troubleshooting
-
-**Server fails to start:**
-- Check that wrangler.toml exists in workerPath
-- Ensure port is not already in use
-- Increase startupTimeout if worker is slow to start
-- Enable verbose: true to see wrangler output
-
-**Tests timeout:**
-- Increase test timeout in beforeAll/afterAll
-- Check that DATABASE_URL and other env vars are set
-- Verify worker health endpoint responds
-
-**Worker not receiving environment variables:**
-- Pass env vars in startWranglerDev options
-- Check that worker code accesses c.env correctly
-
-**Multiple test runs cause port conflicts:**
-- Use unique ports for each worker
-- Ensure cleanup() is called in afterAll
-
-## Database Utilities
-
-### Cleanup Functions
+Assert content is in draft status:
 
 ```typescript
-import {
-  cleanupDatabase,
-  cleanupTables,
-  areTablesEmpty,
-} from '@codex/test-utils';
+import { expectDraft } from '@codex/test-utils';
 
-// Clean all content tables
-await cleanupDatabase(db);
-
-// Clean specific tables
-await cleanupTables(db, ['content', 'mediaItems']);
-
-// Verify cleanup
-const isEmpty = await areTablesEmpty(db);
-expect(isEmpty).toBe(true);
+expectDraft(content);
+// Checks: status === 'draft' && publishedAt === null
 ```
 
-### Seed Test Users
+#### `expectPublished(content)`
+
+Assert content is published:
 
 ```typescript
-import { seedTestUsers } from '@codex/test-utils';
+import { expectPublished } from '@codex/test-utils';
 
-// Create multiple test users
-const [user1, user2, user3] = await seedTestUsers(db, 3);
-
-// Each user has unique ID and email
-console.log(user1); // test-user-1762847839546-abc12
+expectPublished(content);
+// Checks: status === 'published' && publishedAt !== null
 ```
 
-### Transaction Helpers
+#### `expectArchived(content)`
+
+Assert content is archived:
 
 ```typescript
-import { withTransaction } from '@codex/test-utils';
+import { expectArchived } from '@codex/test-utils';
 
-// Run test in transaction (auto-rollback)
-await withTransaction(db, async (tx) => {
-  const [org] = await tx.insert(organizations).values(orgInput).returning();
-  
-  // Do test operations
-  expect(org.id).toBeDefined();
-  
-  // Transaction will auto-rollback after this function
+expectArchived(content);
+// Checks: status === 'archived'
+```
+
+#### `expectMediaStatus(mediaItem, expectedStatus)`
+
+Assert media item status and related fields:
+
+```typescript
+import { expectMediaStatus } from '@codex/test-utils';
+
+expectMediaStatus(mediaItem, 'ready');
+// For 'ready': also checks hlsMasterPlaylistKey, thumbnailKey, durationSeconds
+```
+
+### Soft Delete Assertions
+
+#### `expectNotDeleted(entity)`
+
+Assert entity is not soft-deleted:
+
+```typescript
+import { expectNotDeleted } from '@codex/test-utils';
+
+expectNotDeleted(content);
+// Checks: deletedAt === null
+```
+
+#### `expectDeleted(entity)`
+
+Assert entity is soft-deleted:
+
+```typescript
+import { expectDeleted } from '@codex/test-utils';
+
+expectDeleted(content);
+// Checks: deletedAt !== null
+```
+
+### Pagination Assertions
+
+#### `expectPaginationValid(pagination)`
+
+Validate pagination metadata structure:
+
+```typescript
+import { expectPaginationValid } from '@codex/test-utils';
+
+const response = await service.list({ page: 1, limit: 10 });
+expectPaginationValid(response.pagination);
+// Validates: page, limit, total, totalPages are correct
+```
+
+#### `expectSorted(items, field, order)`
+
+Assert array is sorted by a specific field:
+
+```typescript
+import { expectSorted } from '@codex/test-utils';
+
+expectSorted(contentItems, 'createdAt', 'desc');
+```
+
+### Relation Assertions
+
+#### `expectContentWithRelations(content, options)`
+
+Assert content has required relations populated:
+
+```typescript
+import { expectContentWithRelations } from '@codex/test-utils';
+
+expectContentWithRelations(content, {
+  expectMediaItem: true,
+  expectOrganization: true,
+  expectCreator: true,
 });
 ```
 
-## Available Functions
+#### `expectMediaItemWithRelations(mediaItem, options)`
 
-### Wrangler Dev Server Functions
-- `startWranglerDev(options)`: Start wrangler dev server for integration tests
-- `stopWranglerDev(server)`: Stop running wrangler dev server
-- `createWorkerFetch(baseUrl)`: Create fetch function bound to worker URL
+Assert media item has required relations:
 
-### Database Functions
-- `setupTestDatabase()`: Create database client for tests
-- `cleanupDatabase(db)`: Clean all content tables
-- `cleanupTables(db, tables)`: Clean specific tables
-- `seedTestUsers(db, count)`: Create test users
-- `areTablesEmpty(db)`: Check if tables are empty
-- `withTransaction(db, fn)`: Run test in transaction
-- `executeRawSQL(db, query)`: Execute raw SQL
-- `closeTestDatabase(db)`: Close database connection
+```typescript
+import { expectMediaItemWithRelations } from '@codex/test-utils';
 
-### Factory Functions (Input - for DB insertion)
-- `createTestOrganizationInput(overrides)`: NewOrganization
-- `createTestMediaItemInput(creatorId, overrides)`: NewMediaItem
-- `createTestContentInput(creatorId, overrides)`: NewContent
+expectMediaItemWithRelations(mediaItem, {
+  expectCreator: true,
+});
+```
 
-### Factory Functions (Mocks - with IDs)
-- `createTestOrganization(overrides)`: Organization
-- `createTestMediaItem(overrides)`: MediaItem
-- `createTestContent(overrides)`: Content
+## Test Helpers
 
-### Batch Factories
-- `createTestOrganizations(count, overrides)`: Organization[]
-- `createTestMediaItems(count, overrides)`: MediaItem[]
-- `createTestContentItems(count, overrides)`: Content[]
-- `createTestContentWorkflow(options)`: Full workflow with org, media, content
+### Async Utilities
 
-### Helper Functions
-- `createUniqueSlug(prefix)`: Generate unique slug
-- `createTestUserId()`: Generate test user ID
+#### `waitFor(condition, timeout?)`
 
-### Assertion Helpers
-- `expectError(error, ErrorClass, code?)`: Assert error class
-- `expectContentServiceError(error, code)`: Assert service error
-- `expectErrorMessage(error, substring)`: Assert error message
-- `waitFor(condition, timeout)`: Wait for async condition
-- `sleep(ms)`: Sleep for milliseconds
+Wait for a condition to become true:
+
+```typescript
+import { waitFor } from '@codex/test-utils';
+
+await waitFor(async () => {
+  const item = await db.query.content.findFirst({ where: eq(content.id, id) });
+  return item?.status === 'ready';
+}, 5000); // timeout in ms
+```
+
+#### `sleep(ms)`
+
+Sleep for specified milliseconds:
+
+```typescript
+import { sleep } from '@codex/test-utils';
+
+await sleep(1000); // Wait 1 second
+```
+
+### Mock Functions
+
+#### `createMockFn()`
+
+Create a mock function with call tracking:
+
+```typescript
+import { createMockFn } from '@codex/test-utils';
+
+const mock = createMockFn<(x: string) => void>();
+
+mock.fn('test');
+mock.fn('hello');
+
+expect(mock.callCount()).toBe(2);
+expect(mock.lastCall()).toEqual(['hello']);
+expect(mock.calls).toHaveLength(2);
+```
 
 ## Type Imports
 
+Import types from the appropriate packages:
+
 ```typescript
-import type { Database } from '@codex/database';
+// Database types
+import type { Database } from '@codex/test-utils';
+
+// Schema types
 import type {
   Organization,
   NewOrganization,
@@ -586,67 +652,320 @@ import type {
   Content,
   NewContent,
 } from '@codex/database/schema';
+
+// Pagination types
+import type {
+  PaginationMetadata,
+  PaginatedResponse,
+} from '@codex/test-utils';
+```
+
+## Complete Example
+
+Here's a comprehensive example showing multiple features:
+
+```typescript
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import {
+  setupTestDatabase,
+  cleanupDatabase,
+  seedTestUsers,
+  createTestOrganizationInput,
+  createTestMediaItemInput,
+  createTestContentInput,
+  createTestContentWorkflow,
+  expectContentEqual,
+  expectPublished,
+  expectPaginationValid,
+  type Database,
+} from '@codex/test-utils';
+import { organizations, mediaItems, content } from '@codex/database/schema';
+
+describe('Content Management', () => {
+  let db: Database;
+  let creatorId: string;
+
+  beforeAll(async () => {
+    db = setupTestDatabase();
+    const [userId] = await seedTestUsers(db, 1);
+    creatorId = userId;
+  });
+
+  beforeEach(async () => {
+    await cleanupDatabase(db);
+  });
+
+  afterAll(async () => {
+    await cleanupDatabase(db);
+  });
+
+  describe('Organization Management', () => {
+    it('should create organization', async () => {
+      const orgInput = createTestOrganizationInput({
+        name: 'Test Org',
+        description: 'Test organization',
+      });
+
+      const [org] = await db.insert(organizations).values(orgInput).returning();
+
+      expect(org.id).toBeDefined();
+      expect(org.name).toBe('Test Org');
+      expect(org.slug).toContain('org-');
+    });
+  });
+
+  describe('Content Creation Workflow', () => {
+    it('should create complete content workflow', async () => {
+      // Create organization
+      const orgInput = createTestOrganizationInput();
+      const [org] = await db.insert(organizations).values(orgInput).returning();
+
+      // Create media item
+      const mediaInput = createTestMediaItemInput(creatorId, {
+        mediaType: 'video',
+        status: 'ready',
+      });
+      const [media] = await db.insert(mediaItems).values(mediaInput).returning();
+
+      // Create content
+      const contentInput = createTestContentInput(creatorId, {
+        title: 'My Video',
+        contentType: 'video',
+        mediaItemId: media.id,
+        organizationId: org.id,
+        status: 'published',
+        publishedAt: new Date(),
+      });
+      const [newContent] = await db.insert(content).values(contentInput).returning();
+
+      // Assertions
+      expectContentEqual(newContent, {
+        title: 'My Video',
+        contentType: 'video',
+        status: 'published',
+      });
+      expectPublished(newContent);
+    });
+
+    it('should use workflow factory', async () => {
+      const workflow = createTestContentWorkflow({
+        withOrganization: true,
+        contentType: 'video',
+        status: 'published',
+      });
+
+      expect(workflow.organization).toBeDefined();
+      expect(workflow.mediaItem.status).toBe('ready');
+      expect(workflow.content.status).toBe('published');
+    });
+  });
+});
 ```
 
 ## Best Practices
 
-1. **Always clean up between tests**
-   ```typescript
-   beforeEach(async () => {
-     await cleanupDatabase(db);
-   });
-   ```
-
-2. **Use unique slugs**
-   ```typescript
-   const slug = createUniqueSlug('my-content');
-   ```
-
-3. **Seed users once per test suite**
-   ```typescript
-   beforeAll(async () => {
-     [userId1, userId2] = await seedTestUsers(db, 2);
-   });
-   ```
-
-4. **Use factory functions for test data**
-   ```typescript
-   const input = createTestMediaItemInput(creatorId, {
-     status: 'ready',
-   });
-   ```
-
-5. **Use type-safe assertions**
-   ```typescript
-   await expect(service.get('id')).rejects.toThrow(NotFoundError);
-   ```
-
-## Troubleshooting
-
-### Database connection errors
-
-Ensure DATABASE_URL is set in your vitest.config.ts:
-
-```typescript
-env: {
-  DATABASE_URL: process.env.DATABASE_URL || process.env.DATABASE_URL_LOCAL_PROXY || '',
-},
-```
-
-### Foreign key constraint errors
-
-Ensure proper cleanup order (content → media → organizations → users):
-
-```typescript
-await cleanupDatabase(db); // Already handles this order
-```
-
-### Test isolation issues
-
-Always clean up between tests:
+### 1. Always Clean Up Between Tests
 
 ```typescript
 beforeEach(async () => {
   await cleanupDatabase(db);
 });
 ```
+
+### 2. Use Unique Slugs
+
+```typescript
+const slug = createUniqueSlug('my-content');
+```
+
+### 3. Seed Users Once Per Test Suite
+
+```typescript
+beforeAll(async () => {
+  const [user1, user2] = await seedTestUsers(db, 2);
+  testUserId = user1;
+});
+```
+
+### 4. Use Factory Functions for Test Data
+
+```typescript
+const input = createTestMediaItemInput(creatorId, {
+  status: 'ready',
+  mediaType: 'video',
+});
+```
+
+### 5. Use Type-Safe Assertions
+
+```typescript
+expectContentEqual(actual, expected);
+expectPublished(content);
+expectPaginationValid(pagination);
+```
+
+### 6. Respect Foreign Key Constraints
+
+Use `cleanupDatabase()` which handles deletion order correctly:
+- content (depends on media, org, user)
+- mediaItems (depends on user)
+- organizations (no dependencies)
+- users (preserved by cleanupDatabase, deleted by cleanupDatabaseComplete)
+
+### 7. Use Transactions for Test Isolation
+
+```typescript
+await withTransaction(db, async (tx) => {
+  // Operations here will be rolled back
+});
+```
+
+## Troubleshooting
+
+### Database Connection Errors
+
+**Problem**: Cannot connect to database
+
+**Solution**: Ensure environment variables are set in `.env.dev` and loaded in `vitest.config.ts`:
+
+```typescript
+env: {
+  DATABASE_URL: process.env.DATABASE_URL || '',
+  DB_METHOD: process.env.DB_METHOD || 'LOCAL_PROXY',
+}
+```
+
+### Foreign Key Constraint Errors
+
+**Problem**: Cannot delete/insert due to foreign key constraints
+
+**Solution**: Use `cleanupDatabase()` which handles deletion order automatically. For manual cleanup, delete in this order:
+1. content
+2. mediaItems
+3. organizations
+4. users
+
+### Test Isolation Issues
+
+**Problem**: Tests interfere with each other
+
+**Solution**: Always clean up in `beforeEach`:
+
+```typescript
+beforeEach(async () => {
+  await cleanupDatabase(db);
+});
+```
+
+### Slug Uniqueness Errors
+
+**Problem**: Unique constraint violations on slugs
+
+**Solution**: Always use `createUniqueSlug()`:
+
+```typescript
+const slug = createUniqueSlug('prefix'); // Guaranteed unique
+```
+
+### Transaction Support Issues
+
+**Problem**: Transaction methods not available
+
+**Solution**: Use `setupTestDatabase()` which returns the WebSocket client with transaction support.
+
+## Migration from Older Versions
+
+### Worker Integration Testing
+
+**Note**: Worker integration test utilities (Miniflare and Wrangler Dev helpers) have been removed from this package in favor of `@cloudflare/vitest-pool-workers` for unit testing in the actual Workers runtime (workerd).
+
+For worker integration testing, use the utilities in `@codex/worker-utils/test-utils` instead.
+
+## API Reference
+
+### Database Functions
+
+| Function | Description | Returns |
+|----------|-------------|---------|
+| `setupTestDatabase()` | Setup database client | `Database` |
+| `cleanupDatabase(db)` | Clean content tables (preserve users) | `Promise<void>` |
+| `cleanupDatabaseComplete(db)` | Clean all tables including users | `Promise<void>` |
+| `cleanupTables(db, tables)` | Clean specific tables | `Promise<void>` |
+| `seedTestUsers(db, count)` | Create test users | `Promise<string[]>` |
+| `withTransaction(db, fn)` | Run test in transaction | `Promise<T>` |
+| `executeRawSQL(db, query)` | Execute raw SQL | `Promise<void>` |
+| `areTablesEmpty(db)` | Check if tables empty | `Promise<boolean>` |
+
+### Factory Functions - Input (for DB Insertion)
+
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `createTestOrganizationInput(overrides?)` | `Partial<NewOrganization>` | `NewOrganization` |
+| `createTestMediaItemInput(creatorId, overrides?)` | `string, Partial<NewMediaItem>` | `NewMediaItem` |
+| `createTestContentInput(creatorId, overrides?)` | `string, Partial<NewContent>` | `NewContent` |
+
+### Factory Functions - Mocks (with IDs)
+
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `createTestOrganization(overrides?)` | `Partial<Organization>` | `Organization` |
+| `createTestMediaItem(overrides?)` | `Partial<MediaItem>` | `MediaItem` |
+| `createTestContent(overrides?)` | `Partial<Content>` | `Content` |
+
+### Batch Factory Functions
+
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `createTestOrganizations(count, overrides?)` | `number, Partial<Organization>` | `Organization[]` |
+| `createTestMediaItems(count, overrides?)` | `number, Partial<MediaItem>` | `MediaItem[]` |
+| `createTestContentItems(count, overrides?)` | `number, Partial<Content>` | `Content[]` |
+| `createTestContentWorkflow(options?)` | `WorkflowOptions` | `Workflow` |
+
+### Utility Functions
+
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `createUniqueSlug(prefix?)` | `string?` | `string` |
+| `createTestUserId()` | - | `string` |
+
+### Assertion Functions
+
+| Function | Parameters | Description |
+|----------|------------|-------------|
+| `expectError(error, ErrorClass, code?)` | `unknown, ErrorClass, string?` | Assert error class |
+| `expectContentServiceError(error, code)` | `unknown, string` | Assert service error code |
+| `expectErrorMessage(error, substring)` | `unknown, string` | Assert error message |
+| `expectContentEqual(actual, expected)` | `Content, Content` | Deep equality check |
+| `expectMediaItemEqual(actual, expected)` | `MediaItem, MediaItem` | Deep equality check |
+| `expectOrganizationEqual(actual, expected)` | `Organization, Organization` | Deep equality check |
+| `expectDraft(content)` | `Content` | Assert draft status |
+| `expectPublished(content)` | `Content` | Assert published status |
+| `expectArchived(content)` | `Content` | Assert archived status |
+| `expectMediaStatus(media, status)` | `MediaItem, string` | Assert media status |
+| `expectNotDeleted(entity)` | `Entity` | Assert not soft-deleted |
+| `expectDeleted(entity)` | `Entity` | Assert soft-deleted |
+| `expectPaginationValid(pagination)` | `PaginationMetadata` | Validate pagination |
+| `expectSorted(items, field, order)` | `T[], keyof T, 'asc'|'desc'` | Assert sorted |
+| `expectContentWithRelations(content, opts)` | `Content, Options` | Assert relations |
+| `expectMediaItemWithRelations(media, opts)` | `MediaItem, Options` | Assert relations |
+
+### Helper Functions
+
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `waitFor(condition, timeout?)` | `() => boolean, number?` | `Promise<void>` |
+| `sleep(ms)` | `number` | `Promise<void>` |
+| `createMockFn<T>()` | - | `MockFunction<T>` |
+
+## Dependencies
+
+This package depends on:
+
+- `@codex/database`: Database client and schema types
+- `@neondatabase/serverless`: Neon database driver
+- `drizzle-orm`: ORM for database operations
+- `vitest`: Testing framework (dev dependency)
+
+## License
+
+Internal package for Codex platform. Not published to npm.

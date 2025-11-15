@@ -40,6 +40,7 @@ export default [
       'test-results',
       '.wrangler',
       '**/.wrangler',
+      '**/*.d.ts',
     ],
   },
 ];

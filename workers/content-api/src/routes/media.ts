@@ -24,12 +24,15 @@ import { dbHttp } from '@codex/database';
 import {
   createAuthenticatedHandler,
   createAuthenticatedGetHandler,
+  withPolicy,
+  POLICY_PRESETS,
 } from '@codex/worker-utils';
+import { createIdParamsSchema } from '@codex/validation';
 
 const app = new Hono<HonoEnv>();
 
-// Note: Authentication is applied at the app level in index.ts
-// All routes mounted under /api/* inherit requireAuth middleware
+// Note: Route-level security policies applied via withPolicy()
+// Each route declares its own authentication and authorization requirements
 
 /**
  * POST /api/media
@@ -37,17 +40,21 @@ const app = new Hono<HonoEnv>();
  *
  * Body: CreateMediaItemInput
  * Returns: MediaItem (201)
+ * Security: Creator/Admin only, API rate limit (100 req/min)
  */
 app.post(
   '/',
+  withPolicy(POLICY_PRESETS.creator()),
   createAuthenticatedHandler({
-    schema: createMediaItemSchema,
-    handler: async (input, c, ctx) => {
+    schema: {
+      body: createMediaItemSchema,
+    },
+    handler: async (c, ctx) => {
       const service = createMediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.create(input, ctx.user.id);
+      return service.create(ctx.validated.body, ctx.user.id);
     },
     successStatus: 201,
   })
@@ -58,17 +65,21 @@ app.post(
  * Get media item by ID
  *
  * Returns: MediaItem (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.get(
   '/:id',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedGetHandler({
-    handler: async (c, ctx) => {
-      const id = c.req.param('id');
+    schema: {
+      params: createIdParamsSchema(),
+    },
+    handler: async (_c, ctx) => {
       const service = createMediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.get(id, ctx.user.id);
+      return service.get(ctx.validated.params.id, ctx.user.id);
     },
   })
 );
@@ -79,18 +90,26 @@ app.get(
  *
  * Body: UpdateMediaItemInput
  * Returns: MediaItem (200)
+ * Security: Creator/Admin only, API rate limit (100 req/min)
  */
 app.patch(
   '/:id',
+  withPolicy(POLICY_PRESETS.creator()),
   createAuthenticatedHandler({
-    schema: updateMediaItemSchema,
-    handler: async (input, c, ctx) => {
-      const id = c.req.param('id');
+    schema: {
+      params: createIdParamsSchema(),
+      body: updateMediaItemSchema,
+    },
+    handler: async (_c, ctx) => {
       const service = createMediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.update(id, input, ctx.user.id);
+      return service.update(
+        ctx.validated.params.id,
+        ctx.validated.body,
+        ctx.user.id
+      );
     },
   })
 );
@@ -101,32 +120,22 @@ app.patch(
  *
  * Query params: MediaQueryInput
  * Returns: PaginatedResponse<MediaItem> (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.get(
   '/',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedGetHandler({
-    handler: async (c, ctx) => {
-      const query = c.req.query();
-
-      // Validate query parameters
-      const validationResult = mediaQuerySchema.safeParse(query);
-      if (!validationResult.success) {
-        throw {
-          code: 'VALIDATION_ERROR',
-          message: 'Invalid query parameters',
-          details: validationResult.error.errors.map((err) => ({
-            path: err.path.join('.'),
-            message: err.message,
-          })),
-        };
-      }
-
+    schema: {
+      query: mediaQuerySchema,
+    },
+    handler: async (_c, ctx) => {
       const service = createMediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      const result = await service.list(ctx.user.id, validationResult.data);
+      const result = await service.list(ctx.user.id, ctx.validated.query);
 
       return {
         items: result.items,
@@ -144,38 +153,30 @@ app.get(
  * Soft delete media item (sets deleted_at)
  *
  * Returns: 204 No Content
+ * Security: Creator/Admin only, Strict rate limit (5 req/15min)
  */
-app.delete('/:id', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
+app.delete(
+  '/:id',
+  withPolicy({
+    auth: 'required',
+    roles: ['creator', 'admin'],
+    rateLimit: 'auth', // Stricter rate limit for deletion
+  }),
+  createAuthenticatedGetHandler({
+    schema: {
+      params: createIdParamsSchema(),
+    },
+    handler: async (_c, ctx) => {
+      const service = createMediaItemService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
 
-    const id = c.req.param('id');
-
-    const service = createMediaItemService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    await service.delete(id, user.id);
-
-    return c.body(null, 204);
-  } catch (err: unknown) {
-    // Import mapErrorToResponse for DELETE handler only
-    const { mapErrorToResponse } = await import('@codex/content');
-    const { statusCode, response } = mapErrorToResponse(err);
-    return c.json(response, statusCode);
-  }
-});
+      await service.delete(ctx.validated.params.id, ctx.user.id);
+      return null;
+    },
+    successStatus: 204,
+  })
+);
 
 export default app;

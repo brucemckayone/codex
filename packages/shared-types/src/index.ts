@@ -15,4 +15,5 @@ export type {
   SuccessResponse,
   HonoEnv,
   AuthenticatedContext,
+  EnrichedAuthContext,
 } from './worker-types';

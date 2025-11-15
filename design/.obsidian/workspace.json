@@ -11,10 +11,12 @@
             "id": "f9e416ad637af1a8",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
-              "icon": "lucide-file",
-              "title": "New tab"
+              "type": "release-notes",
+              "state": {
+                "currentVersion": "1.9.14"
+              },
+              "icon": "lucide-book-up",
+              "title": "Release Notes 1.9.14"
             }
           }
         ]
@@ -156,6 +158,7 @@
   },
   "left-ribbon": {
     "hiddenItems": {
+      "bases:Create new base": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,
@@ -166,6 +169,10 @@
   },
   "active": "f9e416ad637af1a8",
   "lastOpenFiles": [
+    "roadmap/work-packets/README.md",
+    "roadmap/work-packets/ARCHITECTURE-CHANGELOG.md",
+    "roadmap/work-packets/P1-CONTENT-001-content-service.md.tmp.13416.1763231850245",
+    "SECURITY_POLICY_USAGE.md",
     "features/auth/PHASE_1_AUTH_DESIGN.md",
     "PHASE_1_AUTH_DESIGN.md",
     "DOCUMENTATION_INDEX.md",

@@ -3,21 +3,36 @@
  *
  * Processes Stripe webhook events with signature verification,
  * observability, and security features.
+ *
+ * Security Features:
+ * - Request tracking (UUID request IDs, IP tracking, user agent)
+ * - Security headers (CSP, XFO, etc.)
+ * - Rate limiting for webhook endpoints
+ * - Stripe signature verification
+ * - No authentication required (Stripe signature serves as auth)
+ *
+ * Note: This worker uses custom Hono setup instead of createWorker
+ * because it requires StripeWebhookEnv with Stripe-specific variables.
  */
 
 import { Hono } from 'hono';
 import {
-  sequence,
+  createRequestTrackingMiddleware,
+  createLoggerMiddleware,
+  createSecurityHeadersMiddleware,
+  createNotFoundHandler,
   createObservabilityMiddleware,
   createObservabilityErrorHandler,
-  createSecurityHeadersWrapper,
-  createRateLimitWrapper,
 } from '@codex/worker-utils';
-import { CSP_PRESETS } from '@codex/security';
+import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
 
 import type { StripeWebhookEnv } from './types';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import { createWebhookHandler } from './utils/webhook-handler';
+
+// ============================================================================
+// Application Setup
+// ============================================================================
 
 const app = new Hono<StripeWebhookEnv>();
 
@@ -25,20 +40,32 @@ const app = new Hono<StripeWebhookEnv>();
 // Global Middleware
 // ============================================================================
 
-app.use(
-  '*',
-  sequence(
-    createSecurityHeadersWrapper({ csp: CSP_PRESETS.api }),
-    createRateLimitWrapper('webhook'),
-    createObservabilityMiddleware('stripe-webhook-handler')
-  )
-);
+// Request tracking (request ID, IP, user agent)
+app.use('*', createRequestTrackingMiddleware());
+
+// Logging
+app.use('*', createLoggerMiddleware());
+
+// Security headers
+app.use('*', createSecurityHeadersMiddleware());
+
+// Observability middleware for all routes
+app.use('*', createObservabilityMiddleware('stripe-webhook-handler'));
+
+// Rate limiting for webhook endpoints
+app.use('/webhooks/*', (c, next) => {
+  return rateLimit({
+    kv: c.env.RATE_LIMIT_KV,
+    ...RATE_LIMIT_PRESETS.webhook, // 1000 req/min
+  })(c, next);
+});
 
 // ============================================================================
 // Error Handling
 // ============================================================================
 
 app.onError(createObservabilityErrorHandler('stripe-webhook-handler'));
+app.notFound(createNotFoundHandler());
 
 // ============================================================================
 // Health Check Endpoints

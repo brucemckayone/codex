@@ -79,7 +79,7 @@ export class ContentService {
 
     try {
       // Step 2: Use transaction for atomicity
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         // Step 3: Validate media item (if provided)
         // Note: For draft creation, we don't require media to be ready
         // The ready check happens during publishing
@@ -116,8 +116,18 @@ export class ContentService {
           })
           .returning();
 
+        if (!newContent) {
+          throw new Error('Failed to create content');
+        }
+
         return newContent;
       });
+
+      if (!result) {
+        throw new Error('Failed to create content');
+      }
+
+      return result;
     } catch (error) {
       // Handle unique constraint violations (slug conflicts)
       if (isUniqueViolation(error)) {
@@ -193,7 +203,7 @@ export class ContentService {
     const validated = updateContentSchema.parse(input);
 
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         // Verify content exists and belongs to creator
         const existing = await tx.query.content.findFirst({
           where: and(
@@ -217,8 +227,18 @@ export class ContentService {
           .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
           .returning();
 
+        if (!updated) {
+          throw new ContentNotFoundError(id);
+        }
+
         return updated;
       });
+
+      if (!result) {
+        throw new ContentNotFoundError(id);
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
@@ -244,7 +264,7 @@ export class ContentService {
    */
   async publish(id: string, creatorId: string): Promise<Content> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         // Get content with media item
         const existing = await tx.query.content.findFirst({
           where: and(
@@ -293,8 +313,18 @@ export class ContentService {
           .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
           .returning();
 
+        if (!published) {
+          throw new ContentNotFoundError(id);
+        }
+
         return published;
       });
+
+      if (!result) {
+        throw new ContentNotFoundError(id);
+      }
+
+      return result;
     } catch (error) {
       if (
         error instanceof ContentNotFoundError ||
@@ -320,28 +350,36 @@ export class ContentService {
    */
   async unpublish(id: string, creatorId: string): Promise<Content> {
     try {
-      const existing = await this.db.query.content.findFirst({
-        where: and(
-          eq(content.id, id),
-          eq(content.creatorId, creatorId),
-          isNull(content.deletedAt)
-        ),
+      const result = await this.db.transaction(async (tx) => {
+        const existing = await tx.query.content.findFirst({
+          where: and(
+            eq(content.id, id),
+            eq(content.creatorId, creatorId),
+            isNull(content.deletedAt)
+          ),
+        });
+
+        if (!existing) {
+          throw new ContentNotFoundError(id);
+        }
+
+        const [unpublished] = await tx
+          .update(content)
+          .set({
+            status: 'draft',
+            updatedAt: new Date(),
+          })
+          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
+          .returning();
+
+        if (!unpublished) {
+          throw new ContentNotFoundError(id);
+        }
+
+        return unpublished;
       });
 
-      if (!existing) {
-        throw new ContentNotFoundError(id);
-      }
-
-      const [unpublished] = await this.db
-        .update(content)
-        .set({
-          status: 'draft',
-          updatedAt: new Date(),
-        })
-        .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
-        .returning();
-
-      return unpublished;
+      return result;
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
@@ -364,25 +402,27 @@ export class ContentService {
    */
   async delete(id: string, creatorId: string): Promise<void> {
     try {
-      const existing = await this.db.query.content.findFirst({
-        where: and(
-          eq(content.id, id),
-          eq(content.creatorId, creatorId),
-          isNull(content.deletedAt)
-        ),
+      await this.db.transaction(async (tx) => {
+        const existing = await tx.query.content.findFirst({
+          where: and(
+            eq(content.id, id),
+            eq(content.creatorId, creatorId),
+            isNull(content.deletedAt)
+          ),
+        });
+
+        if (!existing) {
+          throw new ContentNotFoundError(id);
+        }
+
+        await tx
+          .update(content)
+          .set({
+            deletedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)));
       });
-
-      if (!existing) {
-        throw new ContentNotFoundError(id);
-      }
-
-      await this.db
-        .update(content)
-        .set({
-          deletedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(content.id, id), eq(content.creatorId, creatorId)));
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
@@ -484,10 +524,17 @@ export class ContentService {
       });
 
       // Get total count
-      const [{ total }] = await this.db
+      const countResult = await this.db
         .select({ total: count() })
         .from(content)
         .where(and(...whereConditions));
+
+      const totalRecord = countResult[0];
+      if (!totalRecord) {
+        throw new Error('Failed to get content count');
+      }
+
+      const { total } = totalRecord;
 
       const totalCount = Number(total);
       const totalPages = Math.ceil(totalCount / limit);

@@ -56,7 +56,7 @@ export const mediaItems = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     creatorId: text('creator_id')
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     // Basic Info
     title: varchar('title', { length: 255 }).notNull(),
@@ -115,11 +115,15 @@ export const content = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     creatorId: text('creator_id')
       .notNull()
-      .references(() => users.id),
-    organizationId: uuid('organization_id').references(() => organizations.id), // NULL = personal profile
+      .references(() => users.id, { onDelete: 'restrict' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'set null',
+    }), // NULL = personal profile
 
     // Media Reference (separates content from media for reusability)
-    mediaItemId: uuid('media_item_id').references(() => mediaItems.id),
+    mediaItemId: uuid('media_item_id').references(() => mediaItems.id, {
+      onDelete: 'set null',
+    }),
     // NULL for written content (Phase 2)
 
     // Basic Info

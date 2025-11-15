@@ -85,6 +85,10 @@ export class MediaItemService {
         })
         .returning();
 
+      if (!newMediaItem) {
+        throw new Error('Failed to create media item');
+      }
+
       return newMediaItem;
     } catch (error) {
       throw wrapError(error, { creatorId, input: validated });
@@ -159,7 +163,7 @@ export class MediaItemService {
     const validated = updateMediaItemSchema.parse(input);
 
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         // Verify media exists and belongs to creator
         const existing = await tx.query.mediaItems.findFirst({
           where: and(
@@ -185,8 +189,18 @@ export class MediaItemService {
           )
           .returning();
 
+        if (!updated) {
+          throw new MediaNotFoundError(id);
+        }
+
         return updated;
       });
+
+      if (!result) {
+        throw new MediaNotFoundError(id);
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof MediaNotFoundError) {
         throw error;
@@ -211,25 +225,29 @@ export class MediaItemService {
    */
   async delete(id: string, creatorId: string): Promise<void> {
     try {
-      const existing = await this.db.query.mediaItems.findFirst({
-        where: and(
-          eq(mediaItems.id, id),
-          eq(mediaItems.creatorId, creatorId),
-          isNull(mediaItems.deletedAt)
-        ),
+      await this.db.transaction(async (tx) => {
+        const existing = await tx.query.mediaItems.findFirst({
+          where: and(
+            eq(mediaItems.id, id),
+            eq(mediaItems.creatorId, creatorId),
+            isNull(mediaItems.deletedAt)
+          ),
+        });
+
+        if (!existing) {
+          throw new MediaNotFoundError(id);
+        }
+
+        await tx
+          .update(mediaItems)
+          .set({
+            deletedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(mediaItems.id, id), eq(mediaItems.creatorId, creatorId))
+          );
       });
-
-      if (!existing) {
-        throw new MediaNotFoundError(id);
-      }
-
-      await this.db
-        .update(mediaItems)
-        .set({
-          deletedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(mediaItems.id, id), eq(mediaItems.creatorId, creatorId)));
     } catch (error) {
       if (error instanceof MediaNotFoundError) {
         throw error;
@@ -304,10 +322,17 @@ export class MediaItemService {
       });
 
       // Get total count
-      const [{ total }] = await this.db
+      const countResult = await this.db
         .select({ total: count() })
         .from(mediaItems)
         .where(and(...whereConditions));
+
+      const totalRecord = countResult[0];
+      if (!totalRecord) {
+        throw new Error('Failed to get media item count');
+      }
+
+      const { total } = totalRecord;
 
       const totalCount = Number(total);
       const totalPages = Math.ceil(totalCount / limit);

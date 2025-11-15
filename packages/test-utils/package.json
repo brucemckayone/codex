@@ -18,7 +18,6 @@
     "@codex/database": "workspace:*",
     "@neondatabase/serverless": "^0.10.4",
     "drizzle-orm": "0.44.7",
-    "miniflare": "^3.20241129.0",
     "vite-plugin-dts": "^4.5.4"
   },
   "devDependencies": {

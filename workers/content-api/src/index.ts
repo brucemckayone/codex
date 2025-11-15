@@ -25,7 +25,6 @@
  */
 
 import { createWorker } from '@codex/worker-utils';
-import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
 
 // Import route modules
 import contentRoutes from './routes/content';
@@ -38,22 +37,19 @@ import mediaRoutes from './routes/media';
 const app = createWorker({
   serviceName: 'content-api',
   version: '1.0.0',
+  enableRequestTracking: true, // UUID request IDs, IP tracking, user agent
+  enableLogging: true,
+  enableCors: true,
+  enableSecurityHeaders: true,
+  enableGlobalAuth: false, // Using route-level withPolicy() instead
 });
 
 // ============================================================================
 // Rate Limiting
 // ============================================================================
 
-/**
- * Apply rate limiting to all API routes
- * Uses moderate preset: 100 requests per minute per IP
- */
-app.use('/api/*', (c, next) => {
-  return rateLimit({
-    kv: c.env.RATE_LIMIT_KV,
-    ...RATE_LIMIT_PRESETS.api,
-  })(c, next);
-});
+// Note: Rate limiting is now applied at the route level via withPolicy()
+// Each route declares its own rate limit preset (api, auth, etc.)
 
 // ============================================================================
 // API Routes

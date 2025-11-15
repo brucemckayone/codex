@@ -22,6 +22,13 @@
       "when": 1762814779482,
       "tag": "0002_curved_darwin",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1763138743532,
+      "tag": "0003_purple_scourge",
+      "breakpoints": true
     }
   ]
 }

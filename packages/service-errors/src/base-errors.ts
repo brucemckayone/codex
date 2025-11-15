@@ -5,6 +5,12 @@
  * These provide consistent error handling with HTTP status codes and context.
  */
 
+// V8-specific Error extension (Node.js, Cloudflare Workers)
+interface ErrorConstructorWithStackTrace {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  captureStackTrace?(targetObject: object, constructorOpt?: Function): void;
+}
+
 /**
  * Valid HTTP error status codes for API responses
  */
@@ -39,7 +45,13 @@ export abstract class ServiceError extends Error {
     this.code = code;
     this.statusCode = statusCode;
     this.context = context;
-    Error.captureStackTrace(this, this.constructor);
+
+    // captureStackTrace is V8-specific (Node.js, Cloudflare Workers)
+    // Gracefully handle its absence in other runtimes
+    const ErrorWithStackTrace = Error as ErrorConstructorWithStackTrace;
+    if (typeof ErrorWithStackTrace.captureStackTrace === 'function') {
+      ErrorWithStackTrace.captureStackTrace(this, this.constructor);
+    }
   }
 }
 

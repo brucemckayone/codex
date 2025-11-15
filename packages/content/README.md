@@ -1,10 +1,10 @@
 # @codex/content
 
-Content Management Service Layer for Codex Platform
+Content Management Service Layer for the Codex Platform
 
 ## Overview
 
-Type-safe, transaction-aware services for managing organizations, media items, and content in the Codex platform.
+Type-safe, transaction-aware services for managing media items (uploaded videos/audio) and content (published content with metadata) in the Codex platform.
 
 ### Features
 

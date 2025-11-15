@@ -77,6 +77,10 @@ export class OrganizationService {
         })
         .returning();
 
+      if (!newOrganization) {
+        throw new Error('Failed to create organization');
+      }
+
       return newOrganization;
     } catch (error) {
       // Handle unique constraint violations (slug conflicts)
@@ -145,7 +149,7 @@ export class OrganizationService {
     const validated = updateOrganizationSchema.parse(input);
 
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         // Verify organization exists
         const existing = await tx.query.organizations.findFirst({
           where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
@@ -165,8 +169,18 @@ export class OrganizationService {
           .where(eq(organizations.id, id))
           .returning();
 
+        if (!updated) {
+          throw new OrganizationNotFoundError(id);
+        }
+
         return updated;
       });
+
+      if (!result) {
+        throw new OrganizationNotFoundError(id);
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof OrganizationNotFoundError) {
         throw error;
@@ -191,21 +205,23 @@ export class OrganizationService {
    */
   async delete(id: string): Promise<void> {
     try {
-      const existing = await this.db.query.organizations.findFirst({
-        where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+      await this.db.transaction(async (tx) => {
+        const existing = await tx.query.organizations.findFirst({
+          where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+        });
+
+        if (!existing) {
+          throw new OrganizationNotFoundError(id);
+        }
+
+        await tx
+          .update(organizations)
+          .set({
+            deletedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(organizations.id, id));
       });
-
-      if (!existing) {
-        throw new OrganizationNotFoundError(id);
-      }
-
-      await this.db
-        .update(organizations)
-        .set({
-          deletedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(organizations.id, id));
     } catch (error) {
       if (error instanceof OrganizationNotFoundError) {
         throw error;
@@ -264,10 +280,17 @@ export class OrganizationService {
       });
 
       // Get total count
-      const [{ total }] = await this.db
+      const countResult = await this.db
         .select({ total: count() })
         .from(organizations)
         .where(and(...whereConditions));
+
+      const totalRecord = countResult[0];
+      if (!totalRecord) {
+        throw new Error('Failed to get organization count');
+      }
+
+      const { total } = totalRecord;
 
       const totalCount = Number(total);
       const totalPages = Math.ceil(totalCount / limit);

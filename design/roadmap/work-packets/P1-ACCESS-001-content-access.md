@@ -1107,13 +1107,19 @@ pnpm --filter auth-worker test:integration
 
 ### Step 4: API Endpoints (1 day)
 
-1. Create `workers/auth/src/routes/content-access.ts`
-2. Implement GET /api/content/:id/stream
-3. Implement POST /api/content/:id/progress
-4. Implement GET /api/content/:id/progress
-5. Implement GET /api/user/library
-6. Add error handling for all error codes
-7. Wire up routes in main worker
+**Implementation Note**: Use standardized `@codex/worker-utils` patterns:
+- Route-level security policies via `withPolicy()` (instead of global auth middleware)
+- `createAuthenticatedHandler()` for automatic validation and error handling
+- `POLICY_PRESETS` for consistent authentication and rate limiting
+- See P1-CONTENT-001 for complete implementation examples
+
+1. Create `workers/content-api/src/routes/content-access.ts` (or appropriate worker)
+2. Implement GET /api/content/:id/stream with `withPolicy(POLICY_PRESETS.authenticated())`
+3. Implement POST /api/content/:id/progress with `withPolicy(POLICY_PRESETS.authenticated())`
+4. Implement GET /api/content/:id/progress with `withPolicy(POLICY_PRESETS.authenticated())`
+5. Implement GET /api/user/library with `withPolicy(POLICY_PRESETS.authenticated())`
+6. Add error handling via `createAuthenticatedHandler()` automatic error formatting
+7. Wire up routes in main worker with `enableGlobalAuth: false`
 8. Write integration tests
 
 **Verification**: Integration tests pass, manual testing with curl/Postman

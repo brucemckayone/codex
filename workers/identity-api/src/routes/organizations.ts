@@ -15,6 +15,7 @@
  */
 
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { HonoEnv } from '../types';
 import {
   createOrganizationService,
@@ -25,12 +26,19 @@ import { dbHttp } from '@codex/database';
 import {
   createAuthenticatedHandler,
   createAuthenticatedGetHandler,
+  withPolicy,
+  POLICY_PRESETS,
 } from '@codex/worker-utils';
+import {
+  organizationQuerySchema,
+  uuidSchema,
+  createSlugSchema,
+} from '@codex/validation';
 
 const app = new Hono<HonoEnv>();
 
-// Note: Authentication is applied at the app level in index.ts
-// All routes mounted under /api/* inherit requireAuth middleware
+// Note: Route-level security policies applied via withPolicy()
+// Each route declares its own authentication and authorization requirements
 
 /**
  * POST /api/organizations
@@ -38,39 +46,76 @@ const app = new Hono<HonoEnv>();
  *
  * Body: CreateOrganizationInput
  * Returns: Organization (201)
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.post(
   '/',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedHandler({
-    schema: createOrganizationSchema,
-    handler: async (input, c, ctx) => {
+    schema: {
+      body: createOrganizationSchema,
+    },
+    handler: async (c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.create(input);
+      return service.create(ctx.validated.body);
     },
     successStatus: 201,
   })
 );
 
 /**
- * GET /api/organizations/:id
- * Get organization by ID
+ * GET /api/organizations/check-slug/:slug
+ * Check if slug is available
  *
- * Returns: Organization (200)
+ * Returns: { available: boolean } (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.get(
-  '/:id',
+  '/check-slug/:slug',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedGetHandler({
+    schema: {
+      params: z.object({ slug: createSlugSchema(255) }),
+    },
     handler: async (c, ctx) => {
-      const id = c.req.param('id');
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      const organization = await service.get(id);
+      const available = await service.isSlugAvailable(
+        ctx.validated.params.slug
+      );
+
+      return { available };
+    },
+  })
+);
+
+/**
+ * GET /api/organizations/slug/:slug
+ * Get organization by slug
+ *
+ * Returns: Organization (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
+ */
+app.get(
+  '/slug/:slug',
+  withPolicy(POLICY_PRESETS.authenticated()),
+  createAuthenticatedGetHandler({
+    schema: {
+      params: z.object({ slug: createSlugSchema(255) }),
+    },
+    handler: async (c, ctx) => {
+      const service = createOrganizationService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT || 'development',
+      });
+
+      const organization = await service.getBySlug(ctx.validated.params.slug);
 
       if (!organization) {
         throw {
@@ -85,22 +130,26 @@ app.get(
 );
 
 /**
- * GET /api/organizations/slug/:slug
- * Get organization by slug
+ * GET /api/organizations/:id
+ * Get organization by ID
  *
  * Returns: Organization (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.get(
-  '/slug/:slug',
+  '/:id',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedGetHandler({
+    schema: {
+      params: z.object({ id: uuidSchema }),
+    },
     handler: async (c, ctx) => {
-      const slug = c.req.param('slug');
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      const organization = await service.getBySlug(slug);
+      const organization = await service.get(ctx.validated.params.id);
 
       if (!organization) {
         throw {
@@ -120,18 +169,22 @@ app.get(
  *
  * Body: UpdateOrganizationInput
  * Returns: Organization (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.patch(
   '/:id',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedHandler({
-    schema: updateOrganizationSchema,
-    handler: async (input, c, ctx) => {
-      const id = c.req.param('id');
+    schema: {
+      params: z.object({ id: uuidSchema }),
+      body: updateOrganizationSchema,
+    },
+    handler: async (c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.update(id, input);
+      return service.update(ctx.validated.params.id, ctx.validated.body);
     },
   })
 );
@@ -142,17 +195,17 @@ app.patch(
  *
  * Query params: search, sortBy, sortOrder, page, limit
  * Returns: PaginatedResponse<Organization> (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
  */
 app.get(
   '/',
+  withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedGetHandler({
+    schema: {
+      query: organizationQuerySchema,
+    },
     handler: async (c, ctx) => {
-      // Extract query parameters
-      const search = c.req.query('search');
-      const sortBy = c.req.query('sortBy') as 'createdAt' | 'name' | undefined;
-      const sortOrder = c.req.query('sortOrder') as 'asc' | 'desc' | undefined;
-      const page = parseInt(c.req.query('page') || '1', 10);
-      const limit = parseInt(c.req.query('limit') || '20', 10);
+      const { search, sortBy, sortOrder, page, limit } = ctx.validated.query;
 
       const service = createOrganizationService({
         db: dbHttp,
@@ -179,48 +232,29 @@ app.get(
  * Soft delete organization
  *
  * Returns: Success message (200)
+ * Security: Authenticated users, Strict rate limit (5 req/15min)
  */
 app.delete(
   '/:id',
+  withPolicy({
+    auth: 'required',
+    rateLimit: 'auth', // Stricter rate limit for deletion
+  }),
   createAuthenticatedGetHandler({
+    schema: {
+      params: z.object({ id: uuidSchema }),
+    },
     handler: async (c, ctx) => {
-      const id = c.req.param('id');
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      await service.delete(id);
+      await service.delete(ctx.validated.params.id);
 
       return {
         success: true,
         message: 'Organization deleted successfully',
-      };
-    },
-  })
-);
-
-/**
- * GET /api/organizations/check-slug/:slug
- * Check if slug is available
- *
- * Returns: { available: boolean } (200)
- */
-app.get(
-  '/check-slug/:slug',
-  createAuthenticatedGetHandler({
-    handler: async (c, ctx) => {
-      const slug = c.req.param('slug');
-      const service = createOrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const available = await service.isSlugAvailable(slug);
-
-      return {
-        slug,
-        available,
       };
     },
   })

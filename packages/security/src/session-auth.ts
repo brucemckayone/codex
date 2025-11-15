@@ -81,7 +81,7 @@ function extractSessionCookie(
   const regex = new RegExp(`${escapedName}=([^;]+)`);
   const match = cookieHeader.match(regex);
 
-  return match ? match[1] : null;
+  return match?.[1] ?? null;
 }
 
 /**
@@ -126,8 +126,8 @@ async function querySessionFromDatabase(
         userId: result.userId,
         token: result.token,
         expiresAt: result.expiresAt,
-        ipAddress: result.ipAddress,
-        userAgent: result.userAgent,
+        ipAddress: result.ipAddress ?? null,
+        userAgent: result.userAgent ?? null,
         createdAt: result.createdAt,
         updatedAt: result.updatedAt,
       },

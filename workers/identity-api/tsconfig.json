@@ -1,22 +1,7 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../config/tsconfig/worker.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "module": "esnext",
-    "target": "esnext",
-    "lib": ["ESNext", "WebWorker"],
-    "alwaysStrict": true,
-    "strict": true,
-    "preserveConstEnums": true,
-    "moduleResolution": "bundler",
-    "types": [
-      "@cloudflare/workers-types/2023-07-01",
-      "@cloudflare/vitest-pool-workers"
-    ],
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "allowSyntheticDefaultImports": true
+    "rootDir": "src"
   },
-  "include": ["src/**/*", "../../config/vitest/cloudflare-test-env.d.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src", "../../config/vitest/cloudflare-test-env.d.ts"]
 }
