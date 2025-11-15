@@ -303,6 +303,7 @@ jobs:
     steps:
       - name: Delete test branch
         if: needs.test.result != 'skipped' && needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
+        continue-on-error: true
         uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
@@ -311,6 +312,7 @@ jobs:
 
       - name: Delete E2E branch
         if: needs.e2e-tests.result != 'skipped' && needs.e2e-tests.outputs.branch_id && needs.e2e-tests.outputs.branch_id != ''
+        continue-on-error: true
         uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
