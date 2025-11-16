@@ -42,3 +42,6 @@ jobs:
 
       - name: Type check with Turborepo
         run: pnpm typecheck
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}

@@ -185,35 +185,46 @@ jobs:
             branch-name.txt
           retention-days: 7 # Keep for workflow_run delays
 
-      # Build packages using Turborepo (handles dependencies automatically)
-      - name: Build packages with Turborepo
-        run: pnpm build:packages
+      # Build all packages and workers in parallel using Turborepo
+      # Turborepo automatically handles dependencies and parallelization
+      - name: Build all with Turborepo (parallel)
+        run: pnpm build
         env:
-          # Enable Turborepo to use GitHub Actions cache
-          TURBO_LOG_VERBOSITY: info
-
-      # Build workers using Turborepo with smart filtering
-      # Turborepo automatically determines what needs to be built based on changes
-      - name: Build changed workers with Turborepo
-        run: |
-          # Build all workers that changed or depend on changed packages
-          # Turborepo handles dependency resolution and caching automatically
-          pnpm build:workers
-        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
 
       # Run tests using Turborepo with smart filtering
       # Turborepo will automatically detect changed packages and their dependents
       - name: Run tests for affected packages with Turborepo
+        id: run-tests
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
         run: |
           echo "::add-mask::$DATABASE_URL"
           # Use Turborepo's built-in change detection instead of manual filtering
           # This runs tests for changed packages and packages that depend on them
           pnpm test
+        continue-on-error: true  # Allow artifact upload even if tests fail
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ github.run_id }}
+          path: |
+            **/coverage/**
+            **/.vitest/**
+            **/test-results/**
+          retention-days: 7
+
+      - name: Fail if tests failed
+        if: steps.run-tests.outcome == 'failure'
+        run: exit 1
 
   e2e-tests:
     name: E2E Tests
@@ -305,6 +316,8 @@ jobs:
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
 
       # Run E2E tests against built worker using wrangler dev
