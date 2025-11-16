@@ -11,8 +11,8 @@
  * ```
  */
 
-import { expect } from 'vitest';
 import type { Content, MediaItem, Organization } from '@codex/database/schema';
+import { expect } from 'vitest';
 import type { PaginationMetadata } from './types';
 
 /**

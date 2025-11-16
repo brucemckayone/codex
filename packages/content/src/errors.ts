@@ -6,22 +6,22 @@
  */
 
 import {
-  NotFoundError,
   BusinessLogicError,
   ConflictError,
   ForbiddenError,
+  NotFoundError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
 export {
-  ServiceError as ContentServiceError,
-  NotFoundError,
-  ValidationError,
-  ForbiddenError,
-  ConflictError,
   BusinessLogicError,
+  ConflictError,
+  ForbiddenError,
   InternalServiceError,
   isServiceError as isContentServiceError,
+  NotFoundError,
+  ServiceError as ContentServiceError,
+  ValidationError,
   wrapError,
 } from '@codex/service-errors';
 

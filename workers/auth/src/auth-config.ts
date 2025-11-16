@@ -6,9 +6,9 @@
  * session management, and database integration.
  */
 
-import { betterAuth, User } from 'better-auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { db, schema } from '@codex/database';
+import { betterAuth, type User } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { AuthBindings } from './types';
 
 export interface AuthConfigOptions {

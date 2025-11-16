@@ -22,6 +22,12 @@ coverage/
 **/.wrangler/
 .svelte-kit/
 
+# Turborepo
+.turbo
+
+# Biome
+.biome-cache/
+
 # IDE settings
 .vscode/
 

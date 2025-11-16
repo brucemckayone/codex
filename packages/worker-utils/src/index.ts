@@ -5,60 +5,55 @@
  * Reduces boilerplate and ensures consistency across all API workers.
  */
 
-// Worker factory
-export {
-  createWorker,
-  type WorkerConfig,
-  type CORSConfig,
-} from './worker-factory';
-
 // Middleware factories
 export {
-  createLoggerMiddleware,
-  createCorsMiddleware,
-  createSecurityHeadersMiddleware,
   createAuthMiddleware,
-  createRequestTrackingMiddleware,
-  createHealthCheckHandler,
-  createNotFoundHandler,
+  createCorsMiddleware,
   createErrorHandler,
   createErrorResponse,
-  createObservabilityMiddleware,
+  createHealthCheckHandler,
+  createLoggerMiddleware,
+  createNotFoundHandler,
   createObservabilityErrorHandler,
-  createSecurityHeadersWrapper,
+  createObservabilityMiddleware,
   createRateLimitWrapper,
-  sequence,
+  createRequestTrackingMiddleware,
+  createSecurityHeadersMiddleware,
+  createSecurityHeadersWrapper,
   ERROR_CODES,
   type MiddlewareConfig,
+  sequence,
 } from './middleware';
-
 // Route handler helpers
 export {
-  createAuthenticatedHandler,
   createAuthenticatedGetHandler, // Deprecated: alias to createAuthenticatedHandler
-  withErrorHandling,
+  createAuthenticatedHandler,
   formatValidationError,
+  withErrorHandling,
 } from './route-helpers';
-
 // Security policy
 export {
-  withPolicy,
-  type RouteSecurityPolicy,
-  POLICY_PRESETS,
   DEFAULT_SECURITY_POLICY,
+  POLICY_PRESETS,
+  type RouteSecurityPolicy,
+  withPolicy,
 } from './security-policy';
-
 // Test utilities (for integration tests only)
 export {
-  createTestUser,
   cleanupTestUser,
   createAuthenticatedRequest,
+  createTestUser,
   type TestUser,
 } from './test-utils';
-
 // Shared types
 export type {
-  HealthCheckResponse,
   ErrorResponse,
+  HealthCheckResponse,
   SuccessResponse,
 } from './types';
+// Worker factory
+export {
+  type CORSConfig,
+  createWorker,
+  type WorkerConfig,
+} from './worker-factory';

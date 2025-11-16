@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 // This test requires a database connection.
 // It will only run if DB_METHOD is set to a value that provides a database.

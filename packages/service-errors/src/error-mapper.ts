@@ -6,7 +6,7 @@
  */
 
 import { ZodError } from 'zod';
-import { isServiceError, type ErrorStatusCode } from './base-errors';
+import { type ErrorStatusCode, isServiceError } from './base-errors';
 
 /**
  * Standard HTTP error response structure

@@ -5,8 +5,8 @@
  * Extends shared types with Stripe-specific bindings.
  */
 
-import type { Bindings as SharedBindings } from '@codex/shared-types';
 import type { ObservabilityClient } from '@codex/observability';
+import type { Bindings as SharedBindings } from '@codex/shared-types';
 import type Stripe from 'stripe';
 
 /**

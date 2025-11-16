@@ -15,19 +15,18 @@
  * because it requires StripeWebhookEnv with Stripe-specific variables.
  */
 
-import { Hono } from 'hono';
+import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
-  createRequestTrackingMiddleware,
   createLoggerMiddleware,
-  createSecurityHeadersMiddleware,
   createNotFoundHandler,
-  createObservabilityMiddleware,
   createObservabilityErrorHandler,
+  createObservabilityMiddleware,
+  createRequestTrackingMiddleware,
+  createSecurityHeadersMiddleware,
 } from '@codex/worker-utils';
-import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
-
-import type { StripeWebhookEnv } from './types';
+import { Hono } from 'hono';
 import { verifyStripeSignature } from './middleware/verify-signature';
+import type { StripeWebhookEnv } from './types';
 import { createWebhookHandler } from './utils/webhook-handler';
 
 // ============================================================================

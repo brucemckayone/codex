@@ -12,22 +12,22 @@
  * - DELETE /api/media/:id    - Soft delete
  */
 
-import { Hono } from 'hono';
-import type { HonoEnv } from '../types';
 import {
-  createMediaItemService,
   createMediaItemSchema,
-  updateMediaItemSchema,
+  createMediaItemService,
   mediaQuerySchema,
+  updateMediaItemSchema,
 } from '@codex/content';
 import { dbHttp } from '@codex/database';
-import {
-  createAuthenticatedHandler,
-  createAuthenticatedGetHandler,
-  withPolicy,
-  POLICY_PRESETS,
-} from '@codex/worker-utils';
 import { createIdParamsSchema } from '@codex/validation';
+import {
+  createAuthenticatedGetHandler,
+  createAuthenticatedHandler,
+  POLICY_PRESETS,
+  withPolicy,
+} from '@codex/worker-utils';
+import { Hono } from 'hono';
+import type { HonoEnv } from '../types';
 
 const app = new Hono<HonoEnv>();
 
@@ -49,7 +49,7 @@ app.post(
     schema: {
       body: createMediaItemSchema,
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const service = createMediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',

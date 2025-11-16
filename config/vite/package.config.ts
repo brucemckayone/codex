@@ -1,5 +1,5 @@
-import { defineConfig, PluginOption, UserConfig } from 'vite';
-import path from 'path';
+import path from 'node:path';
+import { defineConfig, type PluginOption, type UserConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 
 export interface PackageViteConfigOptions {

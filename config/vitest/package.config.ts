@@ -1,6 +1,6 @@
+import path from 'node:path';
 import type { UserConfig } from 'vitest/config';
 import { defineProject } from 'vitest/config';
-import path from 'path';
 
 export interface PackageVitestConfigOptions {
   /**

@@ -2,7 +2,7 @@
   import type { LayoutData } from './$types';
 
   // eslint-disable-next-line no-unused-vars
-  let { data: _, children }: { data: LayoutData; children: any } = $props();
+  const { data: _, children }: { data: LayoutData; children: any } = $props();
 </script>
 
 <div class="app">

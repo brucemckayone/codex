@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import {
-  uuidSchema,
-  createSlugSchema,
-  urlSchema,
-  priceCentsSchema,
-  createSanitizedStringSchema,
   createOptionalTextSchema,
+  createSanitizedStringSchema,
+  createSlugSchema,
+  priceCentsSchema,
+  urlSchema,
+  uuidSchema,
 } from './primitives';
 
 /**

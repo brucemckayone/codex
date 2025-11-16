@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
 import { Hono } from 'hono';
-import { rateLimit, RATE_LIMIT_PRESETS } from '../src/rate-limit';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { RATE_LIMIT_PRESETS, rateLimit } from '../src/rate-limit';
 
 describe('Rate Limiting Middleware', () => {
   let app: Hono;

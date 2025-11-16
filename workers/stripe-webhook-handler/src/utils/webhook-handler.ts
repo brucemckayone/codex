@@ -5,7 +5,7 @@
  * Eliminates duplication across webhook endpoints.
  */
 
-import { Context } from 'hono';
+import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
 

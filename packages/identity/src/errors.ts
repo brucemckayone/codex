@@ -9,14 +9,14 @@ import { NotFoundError } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
 export {
-  ServiceError as IdentityServiceError,
-  NotFoundError,
-  ValidationError,
-  ForbiddenError,
-  ConflictError,
   BusinessLogicError,
+  ConflictError,
+  ForbiddenError,
   InternalServiceError,
   isServiceError as isIdentityServiceError,
+  NotFoundError,
+  ServiceError as IdentityServiceError,
+  ValidationError,
   wrapError,
 } from '@codex/service-errors';
 

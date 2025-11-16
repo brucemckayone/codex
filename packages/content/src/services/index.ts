@@ -9,4 +9,4 @@
 export { ContentService, createContentService } from './content-service';
 
 // Media Item Service
-export { MediaItemService, createMediaItemService } from './media-service';
+export { createMediaItemService, MediaItemService } from './media-service';

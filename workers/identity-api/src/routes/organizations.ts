@@ -14,26 +14,26 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
+import { dbHttp } from '@codex/database';
+import {
+  createOrganizationSchema,
+  createOrganizationService,
+  updateOrganizationSchema,
+} from '@codex/identity';
+import {
+  createSlugSchema,
+  organizationQuerySchema,
+  uuidSchema,
+} from '@codex/validation';
+import {
+  createAuthenticatedGetHandler,
+  createAuthenticatedHandler,
+  POLICY_PRESETS,
+  withPolicy,
+} from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { HonoEnv } from '../types';
-import {
-  createOrganizationService,
-  createOrganizationSchema,
-  updateOrganizationSchema,
-} from '@codex/identity';
-import { dbHttp } from '@codex/database';
-import {
-  createAuthenticatedHandler,
-  createAuthenticatedGetHandler,
-  withPolicy,
-  POLICY_PRESETS,
-} from '@codex/worker-utils';
-import {
-  organizationQuerySchema,
-  uuidSchema,
-  createSlugSchema,
-} from '@codex/validation';
 
 const app = new Hono<HonoEnv>();
 
@@ -55,7 +55,7 @@ app.post(
     schema: {
       body: createOrganizationSchema,
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
@@ -80,7 +80,7 @@ app.get(
     schema: {
       params: z.object({ slug: createSlugSchema(255) }),
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
@@ -109,7 +109,7 @@ app.get(
     schema: {
       params: z.object({ slug: createSlugSchema(255) }),
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
@@ -143,7 +143,7 @@ app.get(
     schema: {
       params: z.object({ id: uuidSchema }),
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
@@ -179,7 +179,7 @@ app.patch(
       params: z.object({ id: uuidSchema }),
       body: updateOrganizationSchema,
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
@@ -204,7 +204,7 @@ app.get(
     schema: {
       query: organizationQuerySchema,
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const { search, sortBy, sortOrder, page, limit } = ctx.validated.query;
 
       const service = createOrganizationService({
@@ -244,7 +244,7 @@ app.delete(
     schema: {
       params: z.object({ id: uuidSchema }),
     },
-    handler: async (c, ctx) => {
+    handler: async (_c, ctx) => {
       const service = createOrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',

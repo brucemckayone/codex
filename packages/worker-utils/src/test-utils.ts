@@ -8,10 +8,10 @@
  * They create real sessions in the test database.
  */
 
-import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { dbHttp, schema } from '@codex/database';
 import type { SessionData, UserData } from '@codex/security';
+import { eq } from 'drizzle-orm';
 
 /**
  * Test user data structure

@@ -13,16 +13,16 @@
  * Test Count: 20+ tests
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import {
-  setupTestDatabase,
   cleanupDatabase,
-  seedTestUsers,
   type Database,
+  seedTestUsers,
+  setupTestDatabase,
 } from '@codex/test-utils';
-import { MediaItemService } from '../media-service';
-import { MediaNotFoundError } from '../../errors';
 import type { CreateMediaItemInput } from '@codex/validation';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { MediaNotFoundError } from '../../errors';
+import { MediaItemService } from '../media-service';
 
 describe('MediaItemService', () => {
   let db: Database;

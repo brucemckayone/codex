@@ -8,21 +8,21 @@
  * requires direct handler delegation. Request tracking is integrated.
  */
 
-import { Hono, Context, Next } from 'hono';
 import { securityHeaders } from '@codex/security';
 import {
-  sequence,
-  createRequestTrackingMiddleware,
-  createHealthCheckHandler,
-  createNotFoundHandler,
   createErrorHandler,
   createErrorResponse,
+  createHealthCheckHandler,
+  createNotFoundHandler,
+  createRequestTrackingMiddleware,
   ERROR_CODES,
+  sequence,
 } from '@codex/worker-utils';
+import { type Context, Hono, type Next } from 'hono';
 import { createAuthInstance } from './auth-config';
 import {
-  createSessionCacheMiddleware,
   createAuthRateLimiter,
+  createSessionCacheMiddleware,
 } from './middleware';
 import type { AuthEnv } from './types';
 
@@ -46,7 +46,7 @@ const authHandler = async (c: Context<AuthEnv>) => {
     c.req.header('content-type')?.includes('application/json')
   ) {
     const rawBody = await c.req.raw.clone().text();
-    if (rawBody && rawBody.trim()) {
+    if (rawBody?.trim()) {
       try {
         JSON.parse(rawBody);
       } catch {
@@ -80,7 +80,10 @@ app.get('/health', createHealthCheckHandler('auth-worker', '1.0.0'));
  * Security headers middleware wrapper
  * Applies appropriate security headers based on environment
  */
-const securityHeadersMiddleware = async (c: Context<AuthEnv>, next: Next) => {
+const securityHeadersMiddleware = async (
+  c: Context<AuthEnv>,
+  next: Next
+): Promise<Response | undefined> => {
   const environment =
     (c.env.ENVIRONMENT as 'development' | 'staging' | 'production') ||
     'development';

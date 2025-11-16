@@ -1,8 +1,8 @@
 <script lang="ts">
-  let count = $state(0);
+  let _count = $state(0);
 
-  function increment() {
-    count += 1;
+  function _increment() {
+    _count += 1;
   }
 </script>
 

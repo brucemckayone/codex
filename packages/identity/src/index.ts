@@ -56,7 +56,7 @@
 // Services
 // ============================================================================
 
-export { OrganizationService, createOrganizationService } from './services';
+export { createOrganizationService, OrganizationService } from './services';
 
 // ============================================================================
 // Types
@@ -65,14 +65,14 @@ export { OrganizationService, createOrganizationService } from './services';
 export type {
   Database,
   DatabaseTransaction,
-  ServiceConfig,
-  PaginationParams,
-  PaginationMetadata,
-  PaginatedResponse,
-  SortOrder,
-  OrganizationFilters,
-  Organization,
   NewOrganization,
+  Organization,
+  OrganizationFilters,
+  PaginatedResponse,
+  PaginationMetadata,
+  PaginationParams,
+  ServiceConfig,
+  SortOrder,
 } from './types';
 
 // ============================================================================
@@ -80,15 +80,15 @@ export type {
 // ============================================================================
 
 export {
-  IdentityServiceError,
-  NotFoundError,
-  ValidationError,
-  ForbiddenError,
-  ConflictError,
   BusinessLogicError,
+  ConflictError,
+  ForbiddenError,
+  IdentityServiceError,
   InternalServiceError,
-  OrganizationNotFoundError,
   isIdentityServiceError,
+  NotFoundError,
+  OrganizationNotFoundError,
+  ValidationError,
   wrapError,
 } from './errors';
 
@@ -97,10 +97,10 @@ export {
 // ============================================================================
 
 export {
-  mapErrorToResponse,
-  isKnownError,
   type ErrorResponse,
+  isKnownError,
   type MappedError,
+  mapErrorToResponse,
 } from '@codex/service-errors';
 
 // ============================================================================
@@ -109,12 +109,12 @@ export {
 
 export type {
   CreateOrganizationInput,
-  UpdateOrganizationInput,
   OrganizationQueryInput,
+  UpdateOrganizationInput,
 } from '@codex/validation';
 
 export {
   createOrganizationSchema,
-  updateOrganizationSchema,
   organizationQuerySchema,
+  updateOrganizationSchema,
 } from '@codex/validation';

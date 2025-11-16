@@ -11,14 +11,14 @@
  * - Supports enriched context for advanced use cases
  */
 
-import type { Context } from 'hono';
-import { z, type ZodSchema, type ZodError } from 'zod';
+import { mapErrorToResponse } from '@codex/service-errors';
 import type {
-  HonoEnv,
   AuthenticatedContext,
   EnrichedAuthContext,
+  HonoEnv,
 } from '@codex/shared-types';
-import { mapErrorToResponse } from '@codex/service-errors';
+import type { Context } from 'hono';
+import { type ZodError, type ZodSchema, z } from 'zod';
 
 /**
  * Format validation error response

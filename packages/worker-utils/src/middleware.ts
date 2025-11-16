@@ -4,18 +4,18 @@
  * Creates standard middleware for Cloudflare Workers using Hono.
  */
 
-import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
+import { createRequestTimer, ObservabilityClient } from '@codex/observability';
 import {
-  securityHeaders,
-  requireAuth,
-  rateLimit,
+  type CSP_PRESETS,
   RATE_LIMIT_PRESETS,
-  CSP_PRESETS,
+  rateLimit,
+  requireAuth,
+  securityHeaders,
 } from '@codex/security';
-import { ObservabilityClient, createRequestTimer } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context, MiddlewareHandler, Next } from 'hono';
+import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
 
 /**
  * Configuration for worker middleware
@@ -436,11 +436,8 @@ export function createRequestTrackingMiddleware(): MiddlewareHandler<HonoEnv> {
  * ```
  */
 export function sequence(
-  ...handlers: ((
-    c: Context,
-    next: Next
-  ) => Promise<globalThis.Response | void>)[]
-): (c: Context, next: Next) => Promise<globalThis.Response | void> {
+  ...handlers: ((c: Context, next: Next) => Promise<Response | undefined>)[]
+): (c: Context, next: Next) => Promise<Response | undefined> {
   return async (c: Context, next: Next) => {
     let index = -1;
 
@@ -464,5 +461,6 @@ export function sequence(
     };
 
     await dispatch(0);
+    return undefined;
   };
 }

@@ -5,8 +5,8 @@
  * Protects against brute force attacks on login endpoints.
  */
 
-import { Context, Next } from 'hono';
-import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
+import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
+import type { Context, Next } from 'hono';
 import type { AuthEnv } from '../types';
 
 /**
@@ -35,9 +35,11 @@ export function createAuthRateLimiter() {
           return c.json({ error: 'Too many requests' }, 429);
         }
 
-        return next();
+        await next();
+        return undefined;
       }
     }
-    return next();
+    await next();
+    return undefined;
   };
 }

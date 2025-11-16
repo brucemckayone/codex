@@ -14,7 +14,12 @@
   "scripts": {
     "build": "vite build --config vite.config.worker-utils",
     "dev": "vite build --config vite.config.worker-utils --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.worker-utils.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
   },
   "keywords": [
     "codex",

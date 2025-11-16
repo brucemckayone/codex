@@ -13,8 +13,8 @@
  */
 
 import { env, SELF } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
 import type { HealthCheckResponse } from '@codex/worker-utils';
+import { describe, expect, it } from 'vitest';
 
 describe('Content API Worker', () => {
   describe('Health Check', () => {

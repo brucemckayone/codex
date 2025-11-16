@@ -5,20 +5,20 @@
  * Enhanced with request tracking, network security, and declarative configuration.
  */
 
-import { Hono } from 'hono';
+import { workerAuth } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
+import { Hono } from 'hono';
 import {
-  createLoggerMiddleware,
-  createCorsMiddleware,
-  createSecurityHeadersMiddleware,
   createAuthMiddleware,
-  createRequestTrackingMiddleware,
-  createHealthCheckHandler,
-  createNotFoundHandler,
+  createCorsMiddleware,
   createErrorHandler,
+  createHealthCheckHandler,
+  createLoggerMiddleware,
+  createNotFoundHandler,
+  createRequestTrackingMiddleware,
+  createSecurityHeadersMiddleware,
   type MiddlewareConfig,
 } from './middleware';
-import { workerAuth } from '@codex/security';
 
 /**
  * CORS configuration

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { redactSensitiveData, REDACTION_PRESETS } from '../redact';
+import { describe, expect, it } from 'vitest';
+import { REDACTION_PRESETS, redactSensitiveData } from '../redact';
 
 describe('redactSensitiveData', () => {
   describe('sensitive keys', () => {

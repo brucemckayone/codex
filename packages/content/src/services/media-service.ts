@@ -12,7 +12,7 @@
  * - Soft deletes only (sets deleted_at)
  */
 
-import { and, eq, isNull, desc, asc, count } from 'drizzle-orm';
+import { mediaItems } from '@codex/database/schema';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -21,17 +21,17 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { mediaItems } from '@codex/database/schema';
+import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
+import { MediaNotFoundError, wrapError } from '../errors';
 import type {
   Database,
-  ServiceConfig,
-  PaginationParams,
-  PaginatedResponse,
-  MediaItemFilters,
   MediaItem,
+  MediaItemFilters,
   MediaItemWithRelations,
+  PaginatedResponse,
+  PaginationParams,
+  ServiceConfig,
 } from '../types';
-import { MediaNotFoundError, wrapError } from '../errors';
 
 /**
  * Media Item Service Class

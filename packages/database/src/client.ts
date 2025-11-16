@@ -1,9 +1,9 @@
+import { neon, neonConfig, Pool } from '@neondatabase/serverless';
 import { drizzle as drizzleHttp } from 'drizzle-orm/neon-http';
 import { drizzle as drizzleWs } from 'drizzle-orm/neon-serverless';
-import { neon, Pool, neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
 import { DbEnvConfig } from './config/env.config';
 import * as schema from './schema';
-import ws from 'ws';
 
 /**
  * Environment Variable Loading Strategy:

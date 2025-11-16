@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { Hono } from 'hono';
 import type { HonoEnv } from '@codex/shared-types';
+import { Hono } from 'hono';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  withPolicy,
-  POLICY_PRESETS,
   DEFAULT_SECURITY_POLICY,
   mergePolicy,
+  POLICY_PRESETS,
+  withPolicy,
 } from '../security-policy';
 
 describe('Security Policy', () => {

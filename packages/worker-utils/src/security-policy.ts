@@ -5,9 +5,9 @@
  * Provides a unified way to configure auth, RBAC, rate limiting, and network restrictions.
  */
 
-import type { Context, MiddlewareHandler } from 'hono';
+import type { RATE_LIMIT_PRESETS } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
-import { RATE_LIMIT_PRESETS } from '@codex/security';
+import type { Context, MiddlewareHandler } from 'hono';
 
 /**
  * Security policy configuration for individual routes

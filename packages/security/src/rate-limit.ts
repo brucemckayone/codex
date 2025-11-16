@@ -1,5 +1,5 @@
-import type { Context, Next } from 'hono';
 import type { KVNamespace } from '@cloudflare/workers-types';
+import type { Context, Next } from 'hono';
 
 export interface RateLimitOptions {
   /**

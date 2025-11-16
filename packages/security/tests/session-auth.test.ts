@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  type CachedSessionData,
   optionalAuth,
   requireAuth,
   type SessionData,
   type UserData,
-  type CachedSessionData,
 } from '../src/session-auth';
 
 // Define environment type for test Hono app with user and session

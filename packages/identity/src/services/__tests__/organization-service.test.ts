@@ -13,16 +13,16 @@
  * Test Count: 20+ tests
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import {
-  setupTestDatabase,
   cleanupDatabase,
   createUniqueSlug,
   type Database,
+  setupTestDatabase,
 } from '@codex/test-utils';
-import { OrganizationService } from '../organization-service';
-import { OrganizationNotFoundError, ConflictError } from '../../errors';
 import type { CreateOrganizationInput } from '@codex/validation';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { ConflictError, OrganizationNotFoundError } from '../../errors';
+import { OrganizationService } from '../organization-service';
 
 describe('OrganizationService', () => {
   let db: Database;

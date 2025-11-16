@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { Hono } from 'hono';
 import {
-  securityHeaders,
   CSP_PRESETS,
-  rateLimit,
   RATE_LIMIT_PRESETS,
+  rateLimit,
+  securityHeaders,
 } from '@codex/security';
+import { Hono } from 'hono';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Integration tests for security middleware in stripe-webhook-handler.

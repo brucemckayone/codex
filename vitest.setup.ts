@@ -14,8 +14,8 @@
  * - Worker Vitest 3.2.x tests (via process.env inheritance)
  */
 
+import { resolve } from 'node:path';
 import { config } from 'dotenv';
-import { resolve } from 'path';
 
 // Load .env.dev for local development
 // CI/CD environments will have these vars already set, which take precedence

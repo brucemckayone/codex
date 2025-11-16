@@ -1,9 +1,9 @@
 import ts from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 import svelte from 'eslint-plugin-svelte';
-import svelteParser from 'svelte-eslint-parser';
 import vitest from 'eslint-plugin-vitest';
 import globals from 'globals';
+import svelteParser from 'svelte-eslint-parser';
 
 export const baseEsLintConfig = {
   files: ['**/*.{js,ts}'],

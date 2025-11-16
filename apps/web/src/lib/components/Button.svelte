@@ -6,7 +6,7 @@
     children?: any;
   }
 
-  let {
+  const {
     variant = 'primary',
     disabled = false,
     onclick,

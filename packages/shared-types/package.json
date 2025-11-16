@@ -18,7 +18,9 @@
   "scripts": {
     "build": "vite build --config vite.config.shared-types",
     "dev": "vite build --config vite.config.shared-types --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
   },
   "keywords": [
     "codex",

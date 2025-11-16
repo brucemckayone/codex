@@ -13,11 +13,10 @@
  * in the actual Workers runtime (workerd).
  */
 
-// Test Data Factories
-export * from './factories';
-
 // Database Utilities
 export * from './database';
+// Test Data Factories
+export * from './factories';
 
 // Test Helpers and Assertions
 export * from './helpers';

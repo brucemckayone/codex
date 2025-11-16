@@ -11,16 +11,16 @@
  * Test Count: 15+ tests
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { OrganizationService } from '@codex/identity';
 import {
-  setupTestDatabase,
   cleanupDatabase,
-  seedTestUsers,
   createUniqueSlug,
   type Database,
+  seedTestUsers,
+  setupTestDatabase,
 } from '@codex/test-utils';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ContentService, MediaItemService } from '../services';
-import { OrganizationService } from '@codex/identity';
 
 describe('Integration Tests', () => {
   let db: Database;

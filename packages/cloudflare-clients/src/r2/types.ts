@@ -1,2 +1,2 @@
 // R2-specific types
-export interface R2Dummy {}
+export type R2Dummy = {};

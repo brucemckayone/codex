@@ -5,9 +5,9 @@
  * Implements a read-through cache pattern with automatic TTL based on session expiry.
  */
 
-import { Context, Next } from 'hono';
-import type { AuthEnv } from '../types';
 import type { SessionData, UserData } from '@codex/shared-types';
+import type { Context, Next } from 'hono';
+import type { AuthEnv } from '../types';
 
 /**
  * Cached session data structure
@@ -32,7 +32,8 @@ export function createSessionCacheMiddleware() {
       ?.match(/codex-session=([^;]+)/)?.[1];
 
     if (!sessionCookie) {
-      return next();
+      await next();
+      return undefined;
     }
 
     const kv = c.env.AUTH_SESSION_KV;
@@ -45,7 +46,8 @@ export function createSessionCacheMiddleware() {
       if (cachedSession) {
         c.set('session', cachedSession.session);
         c.set('user', cachedSession.user);
-        return next();
+        await next();
+        return undefined;
       }
     }
 
@@ -71,5 +73,7 @@ export function createSessionCacheMiddleware() {
         { expirationTtl: ttl }
       );
     }
+
+    return undefined;
   };
 }

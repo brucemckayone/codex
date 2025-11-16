@@ -6,7 +6,7 @@
  */
 
 import type { db, dbWs } from '@codex/database';
-import type { Organization, NewOrganization } from '@codex/database/schema';
+import type { NewOrganization, Organization } from '@codex/database/schema';
 
 /**
  * Database client type (properly typed from Drizzle)

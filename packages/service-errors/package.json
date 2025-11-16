@@ -14,7 +14,9 @@
   "scripts": {
     "build": "vite build --config vite.config.service-errors",
     "dev": "vite build --config vite.config.service-errors --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
   },
   "keywords": [
     "codex",

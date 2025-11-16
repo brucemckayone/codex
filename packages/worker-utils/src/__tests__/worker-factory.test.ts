@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
-import { Hono } from 'hono';
 import type { HonoEnv } from '@codex/shared-types';
-import { createWorker } from '../worker-factory';
-import { createAuthenticatedHandler } from '../route-helpers';
+import { Hono } from 'hono';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { createRequestTrackingMiddleware } from '../middleware';
+import { createAuthenticatedHandler } from '../route-helpers';
+import { createWorker } from '../worker-factory';
 
 describe('Worker Factory Integration', () => {
   describe('basic worker creation', () => {

@@ -40,9 +40,9 @@
  * ```
  */
 
-import { sql as sqlOperator } from 'drizzle-orm';
+import { type DatabaseWs, dbWs as productionDbWs } from '@codex/database';
 import * as schema from '@codex/database/schema';
-import { dbWs as productionDbWs, type DatabaseWs } from '@codex/database';
+import { sql as sqlOperator } from 'drizzle-orm';
 
 /**
  * Database type - import from @codex/database for type safety

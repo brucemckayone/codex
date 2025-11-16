@@ -1,6 +1,6 @@
-import { defineProject } from 'vitest/config';
+import path from 'node:path';
 import { sveltekit } from '@sveltejs/kit/vite';
-import path from 'path';
+import { defineProject } from 'vitest/config';
 
 export default defineProject({
   plugins: [sveltekit()],

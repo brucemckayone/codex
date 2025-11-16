@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ObservabilityClient, createRequestTimer } from '../index';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRequestTimer, ObservabilityClient } from '../index';
 
 describe('ObservabilityClient', () => {
   let consoleSpy: {

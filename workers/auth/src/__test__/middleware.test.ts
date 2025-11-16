@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { Context, Next } from 'hono';
+import type { Context, Next } from 'hono';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('Auth Worker Middleware - Unit Tests', () => {
   describe('Sequence Handler', () => {
@@ -49,13 +49,17 @@ describe('Auth Worker Middleware - Unit Tests', () => {
 
       const handler2 = async (_c: Context, _next: Next) => {
         executionOrder.push(2);
+        return undefined;
       };
 
       const mockContext = {} as Context;
       const mockNext = vi.fn();
 
       const sequence = (
-        ...handlers: ((c: Context, next: Next) => Promise<Response | void>)[]
+        ...handlers: ((
+          c: Context,
+          next: Next
+        ) => Promise<Response | undefined>)[]
       ) => {
         return async (c: Context, next: Next) => {
           for (const handler of handlers) {
@@ -64,6 +68,7 @@ describe('Auth Worker Middleware - Unit Tests', () => {
               return response;
             }
           }
+          return undefined;
         };
       };
 

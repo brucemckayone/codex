@@ -31,6 +31,13 @@ jobs:
       validation: ${{ steps.filter.outputs.validation }}
       cloudflare-clients: ${{ steps.filter.outputs.cloudflare-clients }}
       test-utils: ${{ steps.filter.outputs.test-utils }}
+      security: ${{ steps.filter.outputs.security }}
+      observability: ${{ steps.filter.outputs.observability }}
+      worker-utils: ${{ steps.filter.outputs.worker-utils }}
+      content: ${{ steps.filter.outputs.content }}
+      identity: ${{ steps.filter.outputs.identity }}
+      service-errors: ${{ steps.filter.outputs.service-errors }}
+      shared-types: ${{ steps.filter.outputs.shared-types }}
       web: ${{ steps.filter.outputs.web }}
       auth-worker: ${{ steps.filter.outputs.auth-worker }}
       stripe-webhook-handler: ${{ steps.filter.outputs.stripe-webhook-handler }}
@@ -52,6 +59,20 @@ jobs:
               - 'packages/cloudflare-clients/**'
             test-utils:
               - 'packages/test-utils/**'
+            security:
+              - 'packages/security/**'
+            observability:
+              - 'packages/observability/**'
+            worker-utils:
+              - 'packages/worker-utils/**'
+            content:
+              - 'packages/content/**'
+            identity:
+              - 'packages/identity/**'
+            service-errors:
+              - 'packages/service-errors/**'
+            shared-types:
+              - 'packages/shared-types/**'
             web:
               - 'apps/web/**'
             auth-worker:
@@ -117,6 +138,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Turborepo local cache - optimized for test job
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-test-
+            ${{ runner.os }}-turbo-
+
       # Database Setup: Generate and apply migrations to ephemeral branch
       # Note: Static analysis (typecheck, lint, format) runs in separate workflow
       # Note: db_url_with_pooler from create-branch step is available in this job
@@ -153,35 +185,35 @@ jobs:
             branch-name.txt
           retention-days: 7 # Keep for workflow_run delays
 
-      # Build packages
-      - name: Build packages
+      # Build packages using Turborepo (handles dependencies automatically)
+      - name: Build packages with Turborepo
         run: pnpm build:packages
+        env:
+          # Enable Turborepo to use GitHub Actions cache
+          TURBO_LOG_VERBOSITY: info
 
-      # Build workers (required for cloudflare:test in worker tests)
-      - name: Build workers for testing
+      # Build workers using Turborepo with smart filtering
+      # Turborepo automatically determines what needs to be built based on changes
+      - name: Build changed workers with Turborepo
         run: |
-          if [[ "${{ needs.changes.outputs.auth-worker }}" == "true" ]]; then pnpm --filter auth build; fi
-          if [[ "${{ needs.changes.outputs.stripe-webhook-handler }}" == "true" ]]; then pnpm --filter stripe-webhook-handler build; fi
-          if [[ "${{ needs.changes.outputs.content-api }}" == "true" ]]; then pnpm --filter content-api build; fi
-          if [[ "${{ needs.changes.outputs.identity-api }}" == "true" ]]; then pnpm --filter identity-api build; fi
+          # Build all workers that changed or depend on changed packages
+          # Turborepo handles dependency resolution and caching automatically
+          pnpm build:workers
+        env:
+          TURBO_LOG_VERBOSITY: info
 
-      # Run tests for affected packages
-      - name: Run tests for affected packages
-        if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' || needs.changes.outputs.content-api == 'true' || needs.changes.outputs.identity-api == 'true' }}
+      # Run tests using Turborepo with smart filtering
+      # Turborepo will automatically detect changed packages and their dependents
+      - name: Run tests for affected packages with Turborepo
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
+          TURBO_LOG_VERBOSITY: info
         run: |
           echo "::add-mask::$DATABASE_URL"
-          if [[ "${{ needs.changes.outputs.database }}" == "true" ]]; then pnpm --filter @codex/database test; fi
-          if [[ "${{ needs.changes.outputs.validation }}" == "true" ]]; then pnpm --filter @codex/validation test; fi
-          if [[ "${{ needs.changes.outputs.cloudflare-clients }}" == "true" ]]; then pnpm --filter @codex/cloudflare-clients test; fi
-          if [[ "${{ needs.changes.outputs.test-utils }}" == "true" ]]; then pnpm --filter @codex/test-utils test; fi
-          if [[ "${{ needs.changes.outputs.web }}" == "true" ]]; then pnpm --filter web test; fi
-          if [[ "${{ needs.changes.outputs.auth-worker }}" == "true" ]]; then pnpm --filter auth test; fi
-          if [[ "${{ needs.changes.outputs.stripe-webhook-handler }}" == "true" ]]; then pnpm --filter stripe-webhook-handler test; fi
-          if [[ "${{ needs.changes.outputs.content-api }}" == "true" ]]; then pnpm --filter content-api test; fi
-          if [[ "${{ needs.changes.outputs.identity-api }}" == "true" ]]; then pnpm --filter identity-api test; fi
+          # Use Turborepo's built-in change detection instead of manual filtering
+          # This runs tests for changed packages and packages that depend on them
+          pnpm test
 
   e2e-tests:
     name: E2E Tests
@@ -237,6 +269,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Turborepo local cache - optimized for E2E job
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-e2e-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-e2e-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-e2e-
+            ${{ runner.os }}-turbo-
+
       # Database Setup: Generate and apply migrations before E2E tests
       - name: Generate migrations
         env:
@@ -254,14 +297,15 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           pnpm --filter @codex/database db:migrate
 
-      # Build SvelteKit for Cloudflare Workers
-      - name: Build SvelteKit app
+      # Build SvelteKit for Cloudflare Workers using Turborepo
+      - name: Build SvelteKit app with Turborepo
         run: |
           echo "::add-mask::$DATABASE_URL"
-          pnpm --filter web build
+          pnpm build:web
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
+          TURBO_LOG_VERBOSITY: info
 
       # Run E2E tests against built worker using wrangler dev
       - name: Install Playwright browsers

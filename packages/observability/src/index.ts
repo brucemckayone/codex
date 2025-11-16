@@ -5,7 +5,7 @@
  * Designed to be extended with services like Axiom, Baselime, or custom solutions
  */
 
-import { redactSensitiveData, type RedactionOptions } from './redact';
+import { type RedactionOptions, redactSensitiveData } from './redact';
 
 export interface LogEvent {
   level: 'debug' | 'info' | 'warn' | 'error';
@@ -234,9 +234,9 @@ export function trackRequestError(
 
 // Re-export redaction utilities
 export {
+  REDACTION_PRESETS,
+  type RedactionMode,
+  type RedactionOptions,
   redactSensitiveData,
   redactSensitiveDataAsync,
-  REDACTION_PRESETS,
-  type RedactionOptions,
-  type RedactionMode,
 } from './redact';

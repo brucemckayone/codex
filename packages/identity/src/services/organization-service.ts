@@ -11,7 +11,8 @@
  * - Slug uniqueness enforced
  */
 
-import { and, eq, isNull, desc, asc, count, ilike, or } from 'drizzle-orm';
+import { isUniqueViolation } from '@codex/database';
+import { organizations } from '@codex/database/schema';
 import type {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -20,17 +21,16 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/validation';
-import { organizations } from '@codex/database/schema';
-import { isUniqueViolation } from '@codex/database';
+import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
+import { ConflictError, OrganizationNotFoundError, wrapError } from '../errors';
 import type {
   Database,
-  ServiceConfig,
-  PaginationParams,
-  PaginatedResponse,
-  OrganizationFilters,
   Organization,
+  OrganizationFilters,
+  PaginatedResponse,
+  PaginationParams,
+  ServiceConfig,
 } from '../types';
-import { OrganizationNotFoundError, ConflictError, wrapError } from '../errors';
 
 /**
  * Organization Service Class

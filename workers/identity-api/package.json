@@ -11,7 +11,8 @@
     "deploy:production": "wrangler deploy --env production",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts,.tsx",
+    "lint": "biome lint --write .",
+    "format": "biome format --write .",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "cf-typegen": "wrangler types"

@@ -14,27 +14,27 @@
  * Test Count: 40+ tests
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { mediaItems, organizations } from '@codex/database/schema';
 import {
-  setupTestDatabase,
   cleanupDatabase,
-  seedTestUsers,
-  createTestOrganizationInput,
   createTestMediaItemInput,
+  createTestOrganizationInput,
   createUniqueSlug,
   type Database,
+  seedTestUsers,
+  setupTestDatabase,
 } from '@codex/test-utils';
-import { organizations, mediaItems } from '@codex/database/schema';
+import type { CreateContentInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
-import { ContentService } from '../content-service';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ContentNotFoundError,
+  ContentTypeMismatchError,
   MediaNotFoundError,
   MediaNotReadyError,
-  ContentTypeMismatchError,
   SlugConflictError,
 } from '../../errors';
-import type { CreateContentInput } from '@codex/validation';
+import { ContentService } from '../content-service';
 
 describe('ContentService', () => {
   let db: Database;

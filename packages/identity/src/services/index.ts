@@ -6,6 +6,6 @@
  */
 // Organization Service
 export {
-  OrganizationService,
   createOrganizationService,
+  OrganizationService,
 } from './organization-service';

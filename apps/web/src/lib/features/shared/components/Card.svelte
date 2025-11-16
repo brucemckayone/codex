@@ -5,7 +5,7 @@
     children?: any;
   }
 
-  let { title, description, children }: Props = $props();
+  const { title, description, children }: Props = $props();
 </script>
 
 <div class="card">

@@ -1,5 +1,5 @@
-import type { UserConfig } from 'vite';
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import type { UserConfig } from 'vite';
 
 // Note: We can't use dotenv here because this config runs in the Workers runtime
 // which doesn't support Node.js built-in modules like 'node:os' that dotenv uses.
