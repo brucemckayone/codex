@@ -14,7 +14,8 @@
     "test": {
       "dependsOn": ["^build"],
       "cache": true,
-      "outputs": ["coverage/**"]
+      "outputs": ["coverage/**"],
+      "env": ["DATABASE_URL", "DB_METHOD", "NODE_ENV", "CI"]
     },
     "test:watch": {
       "cache": false,
