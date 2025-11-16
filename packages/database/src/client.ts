@@ -21,10 +21,12 @@ import * as schema from './schema';
  * - DATABASE_URL_LOCAL_PROXY: Connection string (for LOCAL_PROXY mode)
  */
 
-// Configure WebSocket for Node.js environments (v21 and below)
-// This is required for the Pool client to work in Node.js
-if (typeof process !== 'undefined' && typeof WebSocket === 'undefined') {
-  neonConfig.webSocketConstructor = ws as typeof WebSocket;
+// Configure WebSocket for Node.js environments
+// This is ALWAYS required for the Pool client to work in Node.js (including CI)
+// Even if global WebSocket exists, the ws package provides better compatibility
+if (typeof process !== 'undefined') {
+  // Type assertion needed due to incompatibility between 'ws' and DOM WebSocket types
+  neonConfig.webSocketConstructor = ws as unknown as typeof WebSocket;
 }
 
 // Apply Neon configuration

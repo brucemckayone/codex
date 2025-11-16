@@ -12,19 +12,8 @@ import { DbEnvConfig } from './env.config';
  * - If DB_METHOD is already set (CI/CD, shell): Use existing env vars
  * - If DB_METHOD is not set (local dev): Load from .env.dev
  */
-console.log(
-  '[drizzle.config] DB_METHOD before loading .env:',
-  process.env.DB_METHOD
-);
-console.log('[drizzle.config] CI:', process.env.CI);
 if (!DbEnvConfig.method) {
   config({ path: resolve(__dirname, '../../../../.env.dev') });
-  console.log('[drizzle.config] Loaded .env.dev');
-} else {
-  console.log(
-    '[drizzle.config] Using existing env vars, DB_METHOD:',
-    DbEnvConfig.method
-  );
 }
 
 export default defineConfig({

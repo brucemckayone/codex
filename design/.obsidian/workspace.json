@@ -11,12 +11,14 @@
             "id": "f9e416ad637af1a8",
             "type": "leaf",
             "state": {
-              "type": "release-notes",
+              "type": "markdown",
               "state": {
-                "currentVersion": "1.9.14"
+                "file": "roadmap/work-packets/P1-CONTENT-001-content-service.md",
+                "mode": "source",
+                "source": false
               },
-              "icon": "lucide-book-up",
-              "title": "Release Notes 1.9.14"
+              "icon": "lucide-file",
+              "title": "P1-CONTENT-001-content-service"
             }
           }
         ]
@@ -169,6 +171,7 @@
   },
   "active": "f9e416ad637af1a8",
   "lastOpenFiles": [
+    "features/auth/pdr-phase-1.md",
     "roadmap/work-packets/README.md",
     "roadmap/work-packets/ARCHITECTURE-CHANGELOG.md",
     "roadmap/work-packets/P1-CONTENT-001-content-service.md.tmp.13416.1763231850245",

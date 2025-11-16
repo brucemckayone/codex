@@ -191,15 +191,6 @@ export class OrganizationService {
           slug: validated.slug,
         });
       }
-      // Debug logging for CI failures
-      console.error('[OrganizationService.update] Unexpected error:', {
-        error,
-        errorName: error instanceof Error ? error.name : 'unknown',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        organizationId: id,
-        input: validated,
-      });
       throw wrapError(error, { organizationId: id, input: validated });
     }
   }
@@ -235,14 +226,6 @@ export class OrganizationService {
       if (error instanceof OrganizationNotFoundError) {
         throw error;
       }
-      // Debug logging for CI failures
-      console.error('[OrganizationService.delete] Unexpected error:', {
-        error,
-        errorName: error instanceof Error ? error.name : 'unknown',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        organizationId: id,
-      });
       throw wrapError(error, { organizationId: id });
     }
   }
