@@ -17,10 +17,12 @@
 import { resolve } from 'node:path';
 import { config } from 'dotenv';
 
-// Load .env.dev for local development ONLY if not in CI
-// CI/CD environments will have these vars already set via workflow env
-// Using override: false ensures existing env vars take precedence
-config({ path: resolve(__dirname, '.env.dev'), override: false });
+// Load .env.dev for local development ONLY (not in CI)
+// In CI, environment variables are already set in the workflow
+// Check for CI environment before loading .env.dev
+if (!process.env.CI) {
+  config({ path: resolve(__dirname, '.env.dev') });
+}
 
 // Ensure DB_METHOD is set for tests (default to LOCAL_PROXY for local dev)
 if (!process.env.DB_METHOD) {
