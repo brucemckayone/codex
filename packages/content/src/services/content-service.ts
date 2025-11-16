@@ -488,12 +488,13 @@ export class ContentService {
         }
       }
       if (filters.search) {
-        whereConditions.push(
-          or(
-            ilike(content.title, `%${filters.search}%`),
-            ilike(content.description ?? '', `%${filters.search}%`)
-          )!
+        const searchCondition = or(
+          ilike(content.title, `%${filters.search}%`),
+          ilike(content.description ?? '', `%${filters.search}%`)
         );
+        if (searchCondition) {
+          whereConditions.push(searchCondition);
+        }
       }
 
       // Determine sort column and order

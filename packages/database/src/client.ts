@@ -58,7 +58,8 @@ export const dbHttp = new Proxy(
     get(_target, prop) {
       if (!_dbHttp) {
         if (!_sqlHttp) {
-          _sqlHttp = neon(DbEnvConfig.getDbUrl()!);
+          const dbUrl = DbEnvConfig.getDbUrl();
+          _sqlHttp = neon(dbUrl);
         }
         _dbHttp = drizzleHttp({ client: _sqlHttp, schema }) as ReturnType<
           typeof drizzleHttp<typeof schema>
@@ -151,15 +152,18 @@ export const db = dbHttp;
 export const sql = new Proxy({} as ReturnType<typeof neon>, {
   get(_target, prop) {
     if (!_sqlHttp) {
-      _sqlHttp = neon(DbEnvConfig.getDbUrl()!);
+      const dbUrl = DbEnvConfig.getDbUrl();
+      _sqlHttp = neon(dbUrl);
     }
     return Reflect.get(_sqlHttp, prop, _sqlHttp);
   },
   apply(_target, thisArg, args) {
     if (!_sqlHttp) {
-      _sqlHttp = neon(DbEnvConfig.getDbUrl()!);
+      const dbUrl = DbEnvConfig.getDbUrl();
+      _sqlHttp = neon(dbUrl);
     }
-    return Reflect.apply(_sqlHttp!, thisArg, args);
+    // _sqlHttp is guaranteed to be initialized at this point
+    return Reflect.apply(_sqlHttp, thisArg, args);
   },
 });
 

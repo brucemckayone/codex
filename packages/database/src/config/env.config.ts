@@ -11,19 +11,37 @@ function getDbUrl(): string {
     case 'LOCAL_PROXY': {
       // Local PostgreSQL instance (Docker Compose)
       if (!isProd()) {
-        return process.env.DATABASE_URL_LOCAL_PROXY!;
+        const dbUrl = process.env.DATABASE_URL_LOCAL_PROXY;
+        if (!dbUrl) {
+          throw new Error(
+            'DATABASE_URL_LOCAL_PROXY environment variable is required for LOCAL_PROXY method'
+          );
+        }
+        return dbUrl;
       }
       throw new Error(
-        `Attempting to use Local Database in production environment: ${process.env.NODE_ENV!}`
+        `Attempting to use Local Database in production environment: ${process.env.NODE_ENV ?? 'unknown'}`
       );
     }
     case 'NEON_BRANCH': {
       // Neon ephemeral branch for testing (CI or local)
-      return process.env.DATABASE_URL!;
+      const dbUrl = process.env.DATABASE_URL;
+      if (!dbUrl) {
+        throw new Error(
+          'DATABASE_URL environment variable is required for NEON_BRANCH method'
+        );
+      }
+      return dbUrl;
     }
     case 'PRODUCTION': {
       // Production database connection
-      return process.env.DATABASE_URL!;
+      const dbUrl = process.env.DATABASE_URL;
+      if (!dbUrl) {
+        throw new Error(
+          'DATABASE_URL environment variable is required for PRODUCTION method'
+        );
+      }
+      return dbUrl;
     }
     default:
       throw new Error(
@@ -73,7 +91,7 @@ export const DbEnvConfig = {
   rootEnvPath: '../../../../env.dev',
   isProd,
   getDbUrl,
-  method: process.env.DB_METHOD!,
+  method: process.env.DB_METHOD ?? '',
   out: './src/migrations',
   schema: './src/schema/index.ts',
   dialect: 'postgresql' as

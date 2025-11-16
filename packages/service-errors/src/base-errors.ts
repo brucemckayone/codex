@@ -7,7 +7,7 @@
 
 // V8-specific Error extension (Node.js, Cloudflare Workers)
 interface ErrorConstructorWithStackTrace {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  // biome-ignore lint/complexity/noBannedTypes: Error.captureStackTrace API requires Function type
   captureStackTrace?(targetObject: object, constructorOpt?: Function): void;
 }
 

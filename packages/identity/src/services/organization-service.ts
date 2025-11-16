@@ -255,12 +255,13 @@ export class OrganizationService {
 
       // Add search filter
       if (filters.search) {
-        whereConditions.push(
-          or(
-            ilike(organizations.name, `%${filters.search}%`),
-            ilike(organizations.description ?? '', `%${filters.search}%`)
-          )!
+        const searchCondition = or(
+          ilike(organizations.name, `%${filters.search}%`),
+          ilike(organizations.description ?? '', `%${filters.search}%`)
         );
+        if (searchCondition) {
+          whereConditions.push(searchCondition);
+        }
       }
 
       // Determine sort column and order

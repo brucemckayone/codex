@@ -191,7 +191,9 @@ describe('Request Tracking Middleware', () => {
 
     app.get('/', (c) => {
       const requestId = c.get('requestId');
-      requestIds.add(requestId!);
+      if (requestId) {
+        requestIds.add(requestId);
+      }
       return c.json({ requestId });
     });
 

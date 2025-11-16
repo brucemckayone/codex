@@ -422,7 +422,7 @@ describe('Worker Factory Integration', () => {
         await next();
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // biome-ignore lint/suspicious/noExplicitAny: Test needs to capture dynamic context for assertion
       let capturedContext: any;
 
       app.post(

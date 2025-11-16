@@ -1,8 +1,9 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
 
-  // eslint-disable-next-line no-unused-vars
-  const { data: _, children }: { data: LayoutData; children: any } = $props();
+  // biome-ignore lint/correctness/noUnusedVariables: Svelte 5 $props() destructuring - children is used in template
+  const { data: _, children }: { data: LayoutData; children: Snippet } = $props();
 </script>
 
 <div class="app">

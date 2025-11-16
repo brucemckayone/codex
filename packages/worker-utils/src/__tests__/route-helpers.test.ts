@@ -519,7 +519,7 @@ describe('Route Helpers', () => {
       });
 
       it('should provide enriched context when enabled', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: Test needs to capture dynamic context for assertion
         let capturedContext: any;
 
         app.post(
@@ -574,7 +574,7 @@ describe('Route Helpers', () => {
           await next();
         });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: Test needs to capture dynamic context for assertion
         let capturedContext: any;
 
         freshApp.get(
@@ -644,7 +644,7 @@ describe('Route Helpers', () => {
       });
 
       it('should provide user in context', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: Test needs to capture dynamic context for assertion
         let capturedUser: any;
 
         app.get(
@@ -666,7 +666,7 @@ describe('Route Helpers', () => {
       });
 
       it('should provide session in context', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: Test needs to capture dynamic context for assertion
         let capturedSession: any;
 
         app.get(
@@ -688,7 +688,7 @@ describe('Route Helpers', () => {
       });
 
       it('should provide env in context', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // biome-ignore lint/suspicious/noExplicitAny: Test needs to capture dynamic context for assertion
         let capturedEnv: any;
 
         app.get(
