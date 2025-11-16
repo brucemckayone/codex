@@ -1,0 +1,63 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    # Only run on PRs, skip for automated commits
+    if: |
+      !contains(github.event.pull_request.title, 'chore:') &&
+      !contains(github.event.pull_request.title, 'deps:')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better context
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are reviewing a pull request in a Cloudflare Workers monorepo with:
+            - SvelteKit web app
+            - Cloudflare Workers (auth, stripe-webhook-handler, content-api, identity-api)
+            - Shared packages (database with Drizzle ORM, validation with Zod, test-utils)
+            - Neon Postgres database
+            - Better Auth for authentication
+            - Stripe for payments
+
+            Review this PR focusing on:
+            1. **Security**: Auth flows, input validation, SQL injection, XSS, secrets handling
+            2. **Database**: Migration safety, transaction boundaries, organization scoping
+            3. **Type Safety**: Drizzle schema alignment, Zod validation, TypeScript strictness
+            4. **Worker Compatibility**: Cloudflare Workers limitations, environment bindings
+            5. **Testing**: Test coverage for critical paths, integration test completeness
+            6. **Performance**: N+1 queries, unnecessary database calls, caching opportunities
+            7. **Code Quality**: Following patterns in CLAUDE.md, proper error handling
+
+            Reference CLAUDE.md for project conventions and standards.
+
+            Use `gh pr comment` to post your review. Be constructive and specific with examples.
+
+          claude_args: |
+            --allowed-tools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue:*),Bash(gh search:*)"

@@ -10,7 +10,9 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "test": "vitest run",
+    "build": "vite build --config vite.config.test-utils",
+    "dev": "vite build --config vite.config.test-utils  --watch",
+    "test": "vitest run --config vitest.config.test-utils.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

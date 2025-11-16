@@ -223,8 +223,11 @@ export function expectSorted<T>(
   if (items.length <= 1) return;
 
   for (let i = 1; i < items.length; i++) {
-    const prev = items[i - 1][field];
-    const curr = items[i][field];
+    const prev = items[i - 1]?.[field];
+    const curr = items[i]?.[field];
+
+    expect(prev).toBeDefined();
+    expect(curr).toBeDefined();
 
     if (order === 'asc') {
       expect(Number(curr)).toBeGreaterThanOrEqual(Number(prev));

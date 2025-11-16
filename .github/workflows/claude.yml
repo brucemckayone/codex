@@ -1,0 +1,58 @@
+name: Claude Code Assistant
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code Assistant
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          additional_permissions: |
+            contents: write
+            pull-requests: write
+            issues: write
+            actions: read
+
+          # Claude will use the instruction from the @claude mention
+          # Context about the project:
+          # - Cloudflare Workers monorepo (pnpm workspace)
+          # - SvelteKit + Drizzle ORM + Neon Postgres + Better Auth + Stripe
+          # - See CLAUDE.md for conventions
+          # - CI uses ephemeral Neon branches for testing
+          # - All monetary values stored as integer cents
+          # - Multi-tenant with organization scoping
+
+          # Allow Claude to use gh CLI and standard tools
+          claude_args: |
+            --allowed-tools "Bash(gh:*),Bash(pnpm:*),Bash(git:*),Bash(node:*),Bash(npm:*)"

@@ -9,7 +9,7 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --config vitest.config.cloudflare-clients.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

@@ -1,24 +1,11 @@
-import { defineProject } from 'vitest/config';
-import path from 'path';
+import { packageVitestConfig } from '../../config/vitest/package.config';
 
 // Note: @cloudflare/vitest-pool-workers currently only supports Vitest 2.x-3.x
 // For now, we'll use standard Node environment for testing
 // When Cloudflare updates the package for Vitest 4+, uncomment the workers pool config below
 
-export default defineProject({
-  test: {
-    name: '@codex/cloudflare-clients',
-    globals: true,
-    environment: 'node',
-    include: ['src/**/*.{test,spec}.{js,ts}'],
-    testTimeout: 10000,
-    hookTimeout: 10000,
-  },
-  resolve: {
-    alias: {
-      '@codex/cloudflare-clients': path.resolve(__dirname, './src'),
-    },
-  },
+export default packageVitestConfig({
+  packageName: 'cloudflare-clients',
 });
 
 // Future Workers Pool Configuration (for Vitest 4+ compatibility):

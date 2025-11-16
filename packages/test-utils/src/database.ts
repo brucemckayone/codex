@@ -236,8 +236,8 @@ export async function areTablesEmpty(db: Database): Promise<boolean> {
     .from(schema.organizations);
 
   return (
-    Number(contentCount.count) === 0 &&
-    Number(mediaCount.count) === 0 &&
-    Number(orgCount.count) === 0
+    Number(contentCount?.count) === 0 &&
+    Number(mediaCount?.count) === 0 &&
+    Number(orgCount?.count) === 0
   );
 }
