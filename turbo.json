@@ -26,6 +26,14 @@
       "cache": true,
       "outputs": ["coverage/**"]
     },
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:e2e:ui": {
+      "cache": false,
+      "persistent": true
+    },
     "lint": {
       "cache": true
     },

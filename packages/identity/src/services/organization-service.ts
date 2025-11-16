@@ -83,6 +83,17 @@ export class OrganizationService {
 
       return newOrganization;
     } catch (error) {
+      // Diagnostic logging in CI to help debug connection/constraint issues
+      if (process.env.CI === 'true' || process.env.DEBUG_IDENTITY === 'true') {
+        console.error('[OrganizationService.create] Error occurred:', {
+          errorName: error instanceof Error ? error.name : 'unknown',
+          errorMessage: error instanceof Error ? error.message : String(error),
+          isUniqueViolation: isUniqueViolation(error),
+          slug: validated.slug,
+          environment: this.environment,
+        });
+      }
+
       // Handle unique constraint violations (slug conflicts)
       if (isUniqueViolation(error)) {
         throw new ConflictError('Organization slug already exists', {

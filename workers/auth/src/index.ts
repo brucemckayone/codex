@@ -39,7 +39,7 @@ app.use('*', createRequestTrackingMiddleware());
  * Delegates all auth operations to BetterAuth
  * Wrapped with error handling to gracefully handle malformed requests
  */
-const authHandler = async (c: Context<AuthEnv>) => {
+const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
   //  Validate JSON body if present
   if (
     c.req.method !== 'GET' &&
@@ -62,7 +62,19 @@ const authHandler = async (c: Context<AuthEnv>) => {
 
   try {
     const auth = createAuthInstance({ env: c.env });
-    return await auth.handler(c.req.raw);
+    const response = await auth.handler(c.req.raw);
+
+    // BetterAuth might return null/undefined for unrecognized routes
+    if (!response) {
+      return createErrorResponse(
+        c,
+        ERROR_CODES.NOT_FOUND,
+        'Auth endpoint not found',
+        404
+      );
+    }
+
+    return response;
   } catch (error) {
     // BetterAuth threw an error - let error handler deal with it
     console.error('BetterAuth handler error:', error);

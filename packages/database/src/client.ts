@@ -21,11 +21,45 @@ import * as schema from './schema';
  * - DATABASE_URL_LOCAL_PROXY: Connection string (for LOCAL_PROXY mode)
  */
 
-// Configure WebSocket for Node.js environments
-// This is ALWAYS required for the Pool client to work in Node.js (including CI)
-// Even if global WebSocket exists, the ws package provides better compatibility
-if (typeof process !== 'undefined') {
-  // Type assertion needed due to incompatibility between 'ws' and DOM WebSocket types
+/**
+ * WebSocket Configuration for Neon Pool Client
+ *
+ * Neon's Pool client (used for database transactions) requires explicit WebSocket
+ * configuration in Node.js environments. While Node.js v22+ has native WebSocket
+ * support, the 'ws' package provides better compatibility with Neon's implementation.
+ *
+ * Runtime Detection:
+ * - Node.js (local dev, CI/CD): Uses 'ws' package ✓
+ * - Cloudflare Workers: Uses native WebSocket ✓ (process.versions.node is undefined)
+ * - Edge runtimes: Uses native WebSocket ✓
+ *
+ * Why this is needed:
+ * - CI environments (GitHub Actions) may have a global WebSocket defined, but it's
+ *   not compatible with Neon's Pool client implementation
+ * - The 'ws' package provides a consistent, battle-tested WebSocket implementation
+ * - This fixes: "All attempts to open a WebSocket to connect to the database failed"
+ *
+ * Detection Strategy:
+ * - We check for process.versions.node (only defined in actual Node.js runtime)
+ * - Cloudflare Workers with nodejs_compat have 'process' but NOT process.versions.node
+ * - This prevents the ws package from being used in Workers where it would fail
+ *
+ * Type Assertion:
+ * The 'as unknown as typeof WebSocket' is required because the 'ws' package types
+ * are structurally different from DOM WebSocket types, even though they're API-compatible.
+ *
+ * References:
+ * - https://github.com/neondatabase/serverless/blob/main/CONFIG.md
+ * - https://neon.com/docs/serverless/serverless-driver
+ *
+ * @see https://github.com/neondatabase/serverless#pool-and-client
+ */
+const isNodeRuntime =
+  typeof process !== 'undefined' &&
+  typeof process.versions !== 'undefined' &&
+  typeof process.versions.node !== 'undefined';
+
+if (isNodeRuntime) {
   neonConfig.webSocketConstructor = ws as unknown as typeof WebSocket;
 }
 

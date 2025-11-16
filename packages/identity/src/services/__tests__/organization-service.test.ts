@@ -18,6 +18,7 @@ import {
   createUniqueSlug,
   type Database,
   setupTestDatabase,
+  validateDatabaseConnection,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -30,6 +31,11 @@ describe('OrganizationService', () => {
 
   beforeAll(async () => {
     db = setupTestDatabase();
+
+    // Validate database connection before running tests
+    // This helps catch connection issues early with better error messages
+    await validateDatabaseConnection(db);
+
     service = new OrganizationService({ db, environment: 'test' });
   });
 

@@ -440,6 +440,7 @@ export function sequence(
 ): (c: Context, next: Next) => Promise<Response | undefined> {
   return async (c: Context, next: Next) => {
     let index = -1;
+    let response: Response | undefined;
 
     const dispatch = async (i: number): Promise<void> => {
       if (i <= index) {
@@ -457,10 +458,15 @@ export function sequence(
       if (!handler) {
         throw new Error(`Handler at index ${i} is undefined`);
       }
-      await handler(c, () => dispatch(i + 1));
+      const result = await handler(c, () => dispatch(i + 1));
+
+      // Capture the response from any handler that returns one
+      if (result && !response) {
+        response = result;
+      }
     };
 
     await dispatch(0);
-    return undefined;
+    return response;
   };
 }

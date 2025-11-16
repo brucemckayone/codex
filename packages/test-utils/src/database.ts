@@ -51,6 +51,71 @@ import { sql as sqlOperator } from 'drizzle-orm';
 export type Database = DatabaseWs;
 
 /**
+ * Validate database connection health
+ *
+ * Tests that the database Pool connection is working properly before running tests.
+ * This helps catch connection issues early and provides better error messages.
+ *
+ * @param db - Database client to validate
+ * @param retries - Number of retry attempts (default: 3)
+ * @param delayMs - Delay between retries in milliseconds (default: 1000)
+ * @returns Promise that resolves if connection is healthy
+ * @throws Error if connection fails after all retries
+ */
+export async function validateDatabaseConnection(
+  db: Database,
+  retries: number = 3,
+  delayMs: number = 1000
+): Promise<void> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // Test basic connectivity with a simple query
+      const result = await db.execute(sqlOperator`SELECT 1 as test`);
+
+      if (
+        !result ||
+        !Array.isArray(result.rows) ||
+        result.rows.length === 0 ||
+        (result.rows[0] as { test: number }).test !== 1
+      ) {
+        throw new Error('Database query did not return expected result');
+      }
+
+      // Connection is healthy
+      if (attempt > 1) {
+        console.log(
+          `[test-utils] Database connection established after ${attempt} attempts`
+        );
+      }
+      return;
+    } catch (error) {
+      lastError = error as Error;
+      console.error(
+        `[test-utils] Database connection attempt ${attempt}/${retries} failed:`,
+        {
+          error: lastError.message,
+          name: lastError.name,
+          DB_METHOD: process.env.DB_METHOD,
+          CI: process.env.CI,
+        }
+      );
+
+      if (attempt < retries) {
+        // Wait before retrying
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  // All retries failed
+  throw new Error(
+    `Database connection validation failed after ${retries} attempts. Last error: ${lastError?.message}. Check DATABASE_URL and DB_METHOD environment variables.`
+  );
+}
+
+/**
  * Setup test database connection
  *
  * Returns the WebSocket-based database client with full transaction support.
