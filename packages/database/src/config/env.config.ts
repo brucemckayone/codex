@@ -71,7 +71,11 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
       // When poolQueryViaFetch is true, Pool.query() uses HTTP and transactions fail
       neonConfigInstance.poolQueryViaFetch = false;
       neonConfigInstance.useSecureWebSocket = true;
-      neonConfigInstance.pipelineConnect = 'password'; // Optimized for CI
+      // pipelineConnect is for HTTP connections only, not compatible with WebSocket Pool
+      // neonConfigInstance.pipelineConnect = 'password';
+
+      // Enable connection caching for read-your-writes consistency
+      neonConfigInstance.fetchConnectionCache = true;
     },
   },
   PRODUCTION: {
