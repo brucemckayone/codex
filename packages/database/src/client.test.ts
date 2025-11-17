@@ -1,15 +1,14 @@
-import { beforeAll, describe, expect, it } from 'vitest';
-import { withNeonTestBranch } from '../../config/vitest/test-setup';
+import { describe, expect, it } from 'vitest';
+import { withNeonTestBranch } from '../../../config/vitest/test-setup';
 
 // This test requires a database connection.
 // It will only run if DB_METHOD is set to a value that provides a database.
 
-describe('Database Client', () => {
-  // Use hybrid testing strategy: neon-testing in CI, LOCAL_PROXY locally
-  beforeAll(async () => {
-    await withNeonTestBranch();
-  });
+// Use hybrid testing strategy: neon-testing in CI, LOCAL_PROXY locally
+// Must be called at module level, not inside beforeAll
+withNeonTestBranch();
 
+describe('Database Client', () => {
   if (['LOCAL_PROXY', 'NEON_BRANCH'].includes(process.env.DB_METHOD || '')) {
     it('should connect and execute a query (drizzle client)', async () => {
       // Dynamically import dbHttp to avoid initialization errors in other environments
