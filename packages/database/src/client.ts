@@ -70,9 +70,6 @@ DbEnvConfig.applyNeonConfig(neonConfig);
 // HTTP Client - Stateless, for one-off queries
 // ============================================================================
 
-let _sqlHttp: ReturnType<typeof neon> | null = null;
-let _dbHttp: ReturnType<typeof drizzleHttp<typeof schema>> | null = null;
-
 /**
  * HTTP Database Client (neon function)
  *
@@ -88,20 +85,23 @@ let _dbHttp: ReturnType<typeof drizzleHttp<typeof schema>> | null = null;
  * @example
  * const users = await dbHttp.select().from(usersTable);
  */
+let _dbHttp: ReturnType<typeof drizzleHttp<typeof schema>> | null = null;
+
+function getDbHttp(): ReturnType<typeof drizzleHttp<typeof schema>> {
+  if (!_dbHttp) {
+    const dbUrl = DbEnvConfig.getDbUrl();
+    const sqlHttp = neon(dbUrl);
+    _dbHttp = drizzleHttp({ client: sqlHttp, schema });
+  }
+  return _dbHttp;
+}
+
 export const dbHttp = new Proxy(
   {} as ReturnType<typeof drizzleHttp<typeof schema>>,
   {
     get(_target, prop) {
-      if (!_dbHttp) {
-        if (!_sqlHttp) {
-          const dbUrl = DbEnvConfig.getDbUrl();
-          _sqlHttp = neon(dbUrl);
-        }
-        _dbHttp = drizzleHttp({ client: _sqlHttp, schema }) as ReturnType<
-          typeof drizzleHttp<typeof schema>
-        >;
-      }
-      return Reflect.get(_dbHttp as object, prop, _dbHttp);
+      const db = getDbHttp();
+      return Reflect.get(db, prop, db);
     },
   }
 );
@@ -173,35 +173,8 @@ function createDbWsProxy() {
 export const dbWs = createDbWsProxy();
 
 // ============================================================================
-// Default Export (HTTP for backward compatibility)
+// Utility Functions
 // ============================================================================
-
-/**
- * Default database client (HTTP)
- * Alias for dbHttp
- */
-export const db = dbHttp;
-
-/**
- * SQL client for HTTP queries
- */
-export const sql = new Proxy({} as ReturnType<typeof neon>, {
-  get(_target, prop) {
-    if (!_sqlHttp) {
-      const dbUrl = DbEnvConfig.getDbUrl();
-      _sqlHttp = neon(dbUrl);
-    }
-    return Reflect.get(_sqlHttp, prop, _sqlHttp);
-  },
-  apply(_target, thisArg, args) {
-    if (!_sqlHttp) {
-      const dbUrl = DbEnvConfig.getDbUrl();
-      _sqlHttp = neon(dbUrl);
-    }
-    // _sqlHttp is guaranteed to be initialized at this point
-    return Reflect.apply(_sqlHttp, thisArg, args);
-  },
-});
 
 /**
  * Test database connection
@@ -222,6 +195,25 @@ export async function testDbConnection(): Promise<boolean> {
     throw new Error(
       `Database connection test failed: ${(err as Error).message}`
     );
+  }
+}
+
+/**
+ * Close database Pool connection
+ *
+ * This should be called in test cleanup (afterAll) to ensure the Pool
+ * connection is properly closed and the test process can exit cleanly.
+ *
+ * @example
+ * afterAll(async () => {
+ *   await closeDbPool();
+ * });
+ */
+export async function closeDbPool(): Promise<void> {
+  if (_pool) {
+    await _pool.end();
+    _pool = null;
+    _dbWs = null;
   }
 }
 

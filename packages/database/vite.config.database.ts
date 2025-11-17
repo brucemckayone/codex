@@ -11,5 +11,6 @@ export default createPackageConfig({
     'drizzle-kit',
     'better-auth',
     'better-auth/adapters/drizzle',
+    'ws', // External: Node.js WebSocket package (must not be bundled/stubbed)
   ],
 });

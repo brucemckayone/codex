@@ -6,7 +6,7 @@
  * session management, and database integration.
  */
 
-import { db, schema } from '@codex/database';
+import { dbHttp, schema } from '@codex/database';
 import { betterAuth, type User } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { AuthBindings } from './types';
@@ -25,7 +25,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
   const { env } = options;
 
   return betterAuth({
-    database: drizzleAdapter(db, {
+    database: drizzleAdapter(dbHttp, {
       provider: 'pg',
       schema: {
         ...schema,
