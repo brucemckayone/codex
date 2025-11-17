@@ -63,12 +63,47 @@ import {
 } from '@codex/database';
 import * as schema from '@codex/database/schema';
 import { sql as sqlOperator } from 'drizzle-orm';
+import { makeNeonTesting } from 'neon-testing';
 
 /**
  * Database type - import from @codex/database for type safety
  * This ensures we use the same type as the content service
  */
 export type Database = DatabaseWs;
+
+/**
+ * Setup neon-testing for database integration tests
+ *
+ * Creates ephemeral Neon branches for test isolation in CI.
+ * In local development, uses existing DATABASE_URL (no branch creation).
+ *
+ * **MUST be called at module level**, not inside beforeAll/beforeEach.
+ *
+ * Usage:
+ * ```typescript
+ * import { withNeonTestBranch } from '@codex/test-utils';
+ *
+ * // Call at module level
+ * withNeonTestBranch();
+ *
+ * describe('My tests', () => {
+ *   // Tests run with isolated database in CI
+ * });
+ * ```
+ */
+export function withNeonTestBranch() {
+  // Lazy initialization - only create the fixture when actually called
+  // This ensures environment variables are loaded by vitest.setup.ts first
+  if (process.env.CI === 'true') {
+    const fixture = makeNeonTesting({
+      apiKey: process.env.NEON_API_KEY!,
+      projectId: process.env.NEON_PROJECT_ID!,
+      autoCloseWebSockets: true,
+    });
+    fixture();
+  }
+  // No-op in local development - use existing DATABASE_URL
+}
 
 /**
  * Validate database connection health
