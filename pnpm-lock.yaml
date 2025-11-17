@@ -265,9 +265,6 @@ importers:
       '@better-auth/cli':
         specifier: ^1.3.34
         version: 1.3.34(@cloudflare/workers-types@4.20251113.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(kysely@0.28.8)(magicast@0.5.1)(mysql2@3.15.3)(svelte@5.43.6)
-      '@codex/test-utils':
-        specifier: workspace:*
-        version: link:../test-utils
       '@types/node':
         specifier: ^22.0.0
         version: 22.13.0

@@ -1,5 +1,5 @@
-import { withNeonTestBranch } from '@codex/test-utils';
 import { describe, expect, it } from 'vitest';
+import { withNeonTestBranch } from '../../../config/vitest/test-setup';
 
 // This test requires a database connection.
 // It will only run if DB_METHOD is set to a value that provides a database.
