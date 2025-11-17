@@ -36,7 +36,8 @@
     },
     "test:e2e": {
       "dependsOn": ["^build"],
-      "cache": false
+      "cache": false,
+      "env": ["DATABASE_URL", "DB_METHOD", "PLAYWRIGHT_BASE_URL", "CI"]
     },
     "test:e2e:ui": {
       "cache": false,
