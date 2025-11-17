@@ -77,7 +77,7 @@ export interface PackageVitestConfigOptions {
    * Additional test configuration overrides
    * @default {}
    */
-  additionalTestConfig?: Partial<UserConfig['test']>;
+  additionalTestConfig?: Record<string, unknown>;
 }
 
 /**
@@ -170,15 +170,12 @@ export function packageVitestConfig(
   const shouldUseNeonTesting = enableNeonTesting && process.env.CI === 'true';
   const plugins = shouldUseNeonTesting ? [neonTesting()] : [];
 
-  // Use 'edge' environment when neon-testing is enabled to provide WebSocket support
-  const environment = shouldUseNeonTesting ? 'edge' : 'node';
-
   return defineProject({
     plugins,
     test: {
       name: `@codex/${packageName}`,
       globals: true,
-      environment,
+      environment: 'node',
       include,
       setupFiles,
       testTimeout,

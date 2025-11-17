@@ -37,6 +37,13 @@
  */
 
 import { makeNeonTesting } from 'neon-testing';
+import { WebSocket as NodeWebSocket } from 'ws';
+
+// Polyfill WebSocket for Node.js environment when neon-testing is used in CI
+// neon-testing requires WebSocket to connect to Neon databases
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
+}
 
 /**
  * Create neonTesting fixture (CI only) or no-op (local development)
