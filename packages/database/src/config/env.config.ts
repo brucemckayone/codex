@@ -66,7 +66,10 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
     },
     applyNeonConfig: (neonConfigInstance: NeonConfig) => {
       // Configuration for ephemeral branches
-      neonConfigInstance.poolQueryViaFetch = true;
+      // DO NOT set poolQueryViaFetch = true - it breaks transaction support!
+      // Tests use dbWs (Pool) which requires WebSocket for transactions
+      // When poolQueryViaFetch is true, Pool.query() uses HTTP and transactions fail
+      neonConfigInstance.poolQueryViaFetch = false;
       neonConfigInstance.useSecureWebSocket = true;
       neonConfigInstance.pipelineConnect = 'password'; // Optimized for CI
     },
