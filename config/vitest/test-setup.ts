@@ -68,23 +68,9 @@ export function withNeonTestBranch() {
   // Lazy initialization - only create the fixture when actually called
   // This ensures environment variables are loaded by vitest.setup.ts first
   if (process.env.CI === 'true') {
-    // Debug logging to verify environment variables
-    if (!process.env.NEON_API_KEY) {
-      console.error('[withNeonTestBranch] NEON_API_KEY is not set!');
-      console.error(
-        '[withNeonTestBranch] Available env vars:',
-        Object.keys(process.env).filter((k) => k.includes('NEON'))
-      );
-      throw new Error('NEON_API_KEY environment variable is required in CI');
-    }
-    if (!process.env.NEON_PROJECT_ID) {
-      console.error('[withNeonTestBranch] NEON_PROJECT_ID is not set!');
-      throw new Error('NEON_PROJECT_ID environment variable is required in CI');
-    }
-
     const fixture = makeNeonTesting({
-      apiKey: process.env.NEON_API_KEY,
-      projectId: process.env.NEON_PROJECT_ID,
+      apiKey: process.env.NEON_API_KEY!,
+      projectId: process.env.NEON_PROJECT_ID!,
       autoCloseWebSockets: true,
     });
     fixture();
