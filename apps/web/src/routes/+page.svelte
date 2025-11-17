@@ -12,8 +12,8 @@
 
 <main>
   <h1>Welcome to Codex</h1>
-  <p>Counter: {count}</p>
-  <button onclick={increment}>Increment</button>
+  <p>Counter: {_count}</p>
+  <button onclick={_increment}>Increment</button>
 </main>
 
 <style>
