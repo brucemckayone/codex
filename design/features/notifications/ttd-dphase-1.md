@@ -614,7 +614,7 @@ Cloudflare Worker (Consumer)
 - ✅ Scales independently of web requests
 - ✅ Resilient (Queue persists messages if Worker crashes)
 
-**Queue Configuration** (`wrangler.toml`):
+**Queue Configuration** (`wrangler.jsonc`):
 
 ```toml
 [[queues.producers]]

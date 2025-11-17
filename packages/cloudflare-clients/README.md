@@ -521,7 +521,7 @@ R2_ACCESS_KEY_ID=your-r2-access-key
 R2_SECRET_ACCESS_KEY=your-r2-secret-key
 ```
 
-**KV Bindings (in wrangler.toml):**
+**KV Bindings (in wrangler.jsonc):**
 ```toml
 kv_namespaces = [
   { binding = "AUTH_SESSION_KV", id = "your-kv-namespace-id" },

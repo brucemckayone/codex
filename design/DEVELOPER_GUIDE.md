@@ -137,12 +137,12 @@ Codex/
 │   │   │   ├── index.ts        # Main worker handler
 │   │   │   ├── index.test.ts   # Unit tests
 │   │   │   └── middleware.test.ts # Middleware tests
-│   │   ├── wrangler.toml        # Cloudflare config
+│   │   ├── wrangler.jsonc        # Cloudflare config
 │   │   └── vite.auth-worker.config.ts
 │   │
 │   └── stripe-webhook-handler/ # Stripe webhook handler
 │       ├── src/
-│       ├── wrangler.toml
+│       ├── wrangler.jsonc
 │       └── vite.stripe-webhook-handler.config.ts
 │
 ├── packages/
@@ -1027,7 +1027,7 @@ pnpm test -- --reporter=verbose
 | `pnpm-lock.yaml` | Dependency lockfile |
 | `.env.dev` | Development environment (gitignored) |
 | `packages/*/package.json` | Package metadata |
-| `workers/*/wrangler.toml` | Cloudflare Worker config |
+| `workers/*/wrangler.jsonc` | Cloudflare Worker config |
 | `packages/database/src/schema/*` | Database schemas |
 | `design/security/SECURITY.md` | Security architecture |
 

@@ -812,7 +812,7 @@ export const GET: RequestHandler = async ({ request }) => {
 };
 ```
 
-**Cloudflare Cron Trigger** (`wrangler.toml`):
+**Cloudflare Cron Trigger** (`wrangler.jsonc`):
 
 ```toml
 [triggers]
@@ -843,7 +843,7 @@ R2_SECRET_ACCESS_KEY=your-r2-secret-key
 APP_URL=https://codex.example.com
 ```
 
-**wrangler.toml** (Queue Worker):
+**wrangler.jsonc** (Queue Worker):
 
 ```toml
 name = "transcoding-queue-consumer"

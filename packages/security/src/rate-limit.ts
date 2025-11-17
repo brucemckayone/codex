@@ -146,7 +146,7 @@ function defaultKeyGenerator(c: Context): string {
  *
  * @example
  * ```ts
- * // In wrangler.toml
+ * // In wrangler.jsonc
  * // [[kv_namespaces]]
  * // binding = "RATE_LIMIT_KV"
  * // id = "your-kv-namespace-id"

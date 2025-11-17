@@ -7,7 +7,7 @@
  *
  * Benefits of this approach:
  * - Tests run in the same runtime as production
- * - Real KV namespace bindings from wrangler.toml
+ * - Real KV namespace bindings from wrangler.jsonc
  * - Automatic storage isolation between tests
  * - Fast execution (no server startup required)
  */

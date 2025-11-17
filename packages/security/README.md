@@ -31,7 +31,7 @@ Authenticate users based on session cookies stored in the database with optional
 **Setup KV Namespace** (optional, recommended for performance):
 
 ```toml
-# wrangler.toml
+# wrangler.jsonc
 [[kv_namespaces]]
 binding = "AUTH_SESSION_KV"
 id = "your-session-kv-namespace-id"
@@ -186,7 +186,7 @@ app.use('*', (c, next) => {
 
 Rate limit endpoints using Cloudflare KV:
 
-**Setup KV Namespace** (in `wrangler.toml`):
+**Setup KV Namespace** (in `wrangler.jsonc`):
 
 ```toml
 [[kv_namespaces]]
@@ -634,7 +634,7 @@ securityHeaders({
 
 **Rate Limiting Not Working:**
 
-1. Verify KV namespace is bound in `wrangler.toml`
+1. Verify KV namespace is bound in `wrangler.jsonc`
 2. Check worker logs for "Using in-memory store" warning
 3. Ensure multiple worker instances are using the same KV namespace
 

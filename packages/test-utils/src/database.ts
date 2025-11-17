@@ -40,7 +40,11 @@
  * ```
  */
 
-import { type DatabaseWs, dbWs as productionDbWs } from '@codex/database';
+import {
+  closeDbPool,
+  type DatabaseWs,
+  dbWs as productionDbWs,
+} from '@codex/database';
 import * as schema from '@codex/database/schema';
 import { sql as sqlOperator } from 'drizzle-orm';
 
@@ -72,13 +76,15 @@ export async function validateDatabaseConnection(
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       // Test basic connectivity with a simple query
-      const result = await db.execute(sqlOperator`SELECT 1 as test`);
+      const result =
+        await db.execute(sqlOperator<{ test: number }>`SELECT 1 as test`);
 
       if (
         !result ||
         !Array.isArray(result.rows) ||
         result.rows.length === 0 ||
-        (result.rows[0] as { test: number }).test !== 1
+        !result.rows[0] ||
+        result.rows[0].test !== 1
       ) {
         throw new Error('Database query did not return expected result');
       }
@@ -171,6 +177,22 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   await db.delete(schema.mediaItems);
   await db.delete(schema.organizations);
   await db.delete(schema.users);
+}
+
+/**
+ * Teardown test database connection
+ *
+ * Closes the database Pool connection to allow the test process to exit cleanly.
+ * This should be called in afterAll to prevent tests from hanging.
+ *
+ * @example
+ * afterAll(async () => {
+ *   await cleanupDatabase(db);
+ *   await teardownTestDatabase();
+ * });
+ */
+export async function teardownTestDatabase(): Promise<void> {
+  await closeDbPool();
 }
 
 /**

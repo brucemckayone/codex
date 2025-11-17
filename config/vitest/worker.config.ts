@@ -11,7 +11,7 @@ import type { UserConfig } from 'vite';
  * This configuration provides consistent test settings across all workers:
  * - Global test APIs enabled (describe, it, expect)
  * - Workers runtime environment (workerd) for testing
- * - Automatic wrangler.toml binding configuration
+ * - Automatic wrangler.jsonc binding configuration
  * - Standard test file patterns
  * - Coverage reporting configured
  *
@@ -43,7 +43,7 @@ export const workerVitestConfig: UserConfig = defineWorkersConfig({
     // Use Workers pool to run tests in workerd runtime (not Node.js)
     poolOptions: {
       workers: {
-        wrangler: { configPath: './wrangler.toml' },
+        wrangler: { configPath: './wrangler.jsonc' },
       },
     },
     include: ['src/**/*.{test,spec}.ts'],

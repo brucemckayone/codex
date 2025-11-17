@@ -489,7 +489,7 @@ R2_BUCKET_ASSETS=codex-assets-production
 R2_BUCKET_PLATFORM=codex-platform-production
 ```
 
-### Cloudflare R2 Bindings (wrangler.toml)
+### Cloudflare R2 Bindings (wrangler.jsonc)
 
 ```toml
 # SvelteKit app / Workers that need R2 access

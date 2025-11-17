@@ -990,7 +990,7 @@ ENVIRONMENT=local
 
 **Preview Environments** (Cloudflare Workers):
 ```bash
-# Set in wrangler.toml [env.preview] or Cloudflare dashboard
+# Set in wrangler.jsonc [env.preview] or Cloudflare dashboard
 DATABASE_URL=<neon-preview-branch-url>
 ORGANIZATION_ID=preview-org
 ENVIRONMENT=preview

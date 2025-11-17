@@ -56,7 +56,7 @@ export default defineConfig({
         // Configuration files
         '**/vitest.config.{js,ts}',
         '**/vite.config.{js,ts}',
-        '**/wrangler.toml',
+        '**/wrangler.jsonc',
 
         // Entry points (usually just re-exports)
         '**/index.{js,ts}',

@@ -33,7 +33,7 @@ enabled = true
 | Rate Limiting | `RATE_LIMIT_KV` | `cea7153364974737b16870df08f31083` | All workers | Rate limiting for API endpoints |
 | Auth Sessions | `AUTH_SESSION_KV` | `82d04a4236df4aac8e9d87793344f0ed` | auth only | Session storage for Better Auth |
 
-### Adding to wrangler.toml
+### Adding to wrangler.jsonc
 
 ```toml
 # Rate limiting (all workers)
@@ -86,7 +86,7 @@ AUTH_WORKER_URL = "https://auth-staging.revelations.studio"
 
 ## Secrets Management
 
-Secrets are **never** stored in wrangler.toml. They must be set via CLI or CI/CD.
+Secrets are **never** stored in wrangler.jsonc. They must be set via CLI or CI/CD.
 
 ### Common Secrets
 
@@ -200,8 +200,8 @@ When creating a new Cloudflare Worker:
 
 1. **Copy an existing worker** (e.g., `content-api`) as a starting point
 2. **Update worker-specific values:**
-   - Name in `package.json` and `wrangler.toml`
-   - Routes in `wrangler.toml`
+   - Name in `package.json` and `wrangler.jsonc`
+   - Routes in `wrangler.jsonc`
    - Service name in worker setup code
 3. **Keep standard values** from this document
 4. **Add KV namespaces** only if needed (RATE_LIMIT_KV is standard)
@@ -225,7 +225,7 @@ When adding new environment variables:
 
 1. Determine if it's worker-specific or shared
 2. Update this document
-3. Update all affected `wrangler.toml` files
+3. Update all affected `wrangler.jsonc` files
 4. Update CI/CD if needed
 
 ### KV Namespace IDs

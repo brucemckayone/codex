@@ -18,6 +18,7 @@ import {
   createUniqueSlug,
   type Database,
   setupTestDatabase,
+  teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
@@ -34,7 +35,15 @@ describe('OrganizationService', () => {
 
     // Validate database connection before running tests
     // This helps catch connection issues early with better error messages
-    await validateDatabaseConnection(db);
+    try {
+      await validateDatabaseConnection(db);
+    } catch (error) {
+      console.warn(
+        'Database connection failed - tests will be skipped:',
+        (error as Error).message
+      );
+      throw error; // Re-throw to fail the test suite if database is expected but not available
+    }
 
     service = new OrganizationService({ db, environment: 'test' });
   });
@@ -45,6 +54,7 @@ describe('OrganizationService', () => {
 
   afterAll(async () => {
     await cleanupDatabase(db);
+    await teardownTestDatabase();
   });
 
   describe('create', () => {

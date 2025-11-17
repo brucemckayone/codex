@@ -1239,7 +1239,7 @@ ENVIRONMENT=local
 
 **Preview Environments** (Cloudflare Workers):
 ```bash
-# Set in wrangler.toml [env.preview] or Cloudflare dashboard
+# Set in wrangler.jsonc [env.preview] or Cloudflare dashboard
 RESEND_API_KEY=re_preview_key123...
 FROM_EMAIL=noreply@preview.yourdomain.com
 REPLY_TO_EMAIL=support@yourdomain.com
