@@ -205,6 +205,8 @@ jobs:
           # neon-testing environment variables for automatic branch provisioning
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          # Database method for test environment
+          DB_METHOD: NEON_BRANCH
           # Turborepo configuration
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
