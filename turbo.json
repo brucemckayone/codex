@@ -21,7 +21,8 @@
         "NODE_ENV",
         "CI",
         "NEON_API_KEY",
-        "NEON_PROJECT_ID"
+        "NEON_PROJECT_ID",
+        "NEON_PARENT_BRANCH_ID"
       ]
     },
     "test:watch": {
