@@ -15,7 +15,14 @@
       "dependsOn": ["^build"],
       "cache": true,
       "outputs": ["coverage/**"],
-      "env": ["DATABASE_URL", "DB_METHOD", "NODE_ENV", "CI"]
+      "env": [
+        "DATABASE_URL",
+        "DB_METHOD",
+        "NODE_ENV",
+        "CI",
+        "NEON_API_KEY",
+        "NEON_PROJECT_ID"
+      ]
     },
     "test:watch": {
       "cache": false,
