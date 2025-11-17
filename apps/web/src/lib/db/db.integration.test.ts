@@ -1,8 +1,12 @@
+// @vitest-environment node
+
 import { testDbConnection } from '@codex/database';
 import { withNeonTestBranch } from '@codex/test-utils';
 import { describe, expect, it } from 'vitest';
 
 // Web app database integration test
+// Uses Node environment (not happy-dom) to allow neon-testing API calls
+// happy-dom blocks CORS requests to Neon API, causing test failures
 // Uses hybrid testing strategy: LOCAL_PROXY locally, neon-testing in CI
 withNeonTestBranch();
 
