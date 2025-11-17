@@ -161,6 +161,24 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   await db.delete(schema.mediaItems);
   await db.delete(schema.organizations);
   // NOTE: Users are NOT deleted - preserve them across tests
+
+  // In CI with connection pooling, ensure deletions are visible
+  // Wait for confirmation that tables are empty
+  if (process.env.CI === 'true' || process.env.DB_METHOD === 'NEON_BRANCH') {
+    let retries = 3;
+    while (retries > 0) {
+      const isEmpty = await areTablesEmpty(db);
+      if (isEmpty) break;
+
+      // Tables still have data, wait and retry
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      retries--;
+
+      if (retries === 0) {
+        console.warn('[test-utils] Warning: Tables not empty after cleanup');
+      }
+    }
+  }
 }
 
 /**
