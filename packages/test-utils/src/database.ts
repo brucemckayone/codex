@@ -165,17 +165,23 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   // In CI with connection pooling, ensure deletions are visible
   // Wait for confirmation that tables are empty
   if (process.env.CI === 'true' || process.env.DB_METHOD === 'NEON_BRANCH') {
-    let retries = 3;
+    let retries = 5; // Increased from 3 to 5
     while (retries > 0) {
       const isEmpty = await areTablesEmpty(db);
       if (isEmpty) break;
 
       // Tables still have data, wait and retry
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 200)); // Increased from 100ms to 200ms
       retries--;
 
       if (retries === 0) {
-        console.warn('[test-utils] Warning: Tables not empty after cleanup');
+        console.warn(
+          '[test-utils] Warning: Tables not empty after cleanup, forcing re-delete'
+        );
+        // Force another delete attempt
+        await db.delete(schema.content);
+        await db.delete(schema.mediaItems);
+        await db.delete(schema.organizations);
       }
     }
   }
