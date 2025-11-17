@@ -64,13 +64,16 @@ if (typeof globalThis.WebSocket === 'undefined') {
  * 2. Uses existing DATABASE_URL from .env.dev
  * 3. Tests run against LOCAL_PROXY connection
  */
-export const withNeonTestBranch =
-  process.env.CI === 'true'
-    ? makeNeonTesting({
-        apiKey: process.env.NEON_API_KEY!,
-        projectId: process.env.NEON_PROJECT_ID!,
-        autoCloseWebSockets: true,
-      })
-    : () => {
-        // No-op in local development - use existing DATABASE_URL
-      };
+export function withNeonTestBranch() {
+  // Lazy initialization - only create the fixture when actually called
+  // This ensures environment variables are loaded by vitest.setup.ts first
+  if (process.env.CI === 'true') {
+    const fixture = makeNeonTesting({
+      apiKey: process.env.NEON_API_KEY!,
+      projectId: process.env.NEON_PROJECT_ID!,
+      autoCloseWebSockets: true,
+    });
+    fixture();
+  }
+  // No-op in local development - use existing DATABASE_URL
+}
