@@ -64,6 +64,13 @@ import {
 import * as schema from '@codex/database/schema';
 import { sql as sqlOperator } from 'drizzle-orm';
 import { makeNeonTesting } from 'neon-testing';
+import { WebSocket as NodeWebSocket } from 'ws';
+
+// Polyfill WebSocket for Node.js environment when neon-testing is used in CI
+// neon-testing requires WebSocket to connect to Neon databases
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
+}
 
 /**
  * Database type - import from @codex/database for type safety

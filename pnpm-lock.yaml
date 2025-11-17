@@ -425,10 +425,16 @@ importers:
       vite-plugin-dts:
         specifier: ^4.5.4
         version: 4.5.4(@types/node@22.13.0)(rollup@4.53.2)(typescript@5.9.3)(vite@7.2.2(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+      ws:
+        specifier: ^8.18.3
+        version: 8.18.3
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20241127.0
         version: 4.20251113.0
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       neon-testing:
         specifier: ^2.2.0
         version: 2.2.0(vite@7.2.2(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.9)
