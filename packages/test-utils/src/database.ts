@@ -91,6 +91,10 @@ export type Database = DatabaseWs;
  *
  * **MUST be called at module level**, not inside beforeAll/beforeEach.
  *
+ * **IMPORTANT**: In CI, ephemeral branches are cloned from NEON_PARENT_BRANCH_ID
+ * if provided, otherwise from the project's default branch. The parent branch
+ * MUST have all migrations applied for tests to work correctly.
+ *
  * Usage:
  * ```typescript
  * import { withNeonTestBranch } from '@codex/test-utils';
@@ -107,11 +111,29 @@ export function withNeonTestBranch() {
   // Lazy initialization - only create the fixture when actually called
   // This ensures environment variables are loaded by vitest.setup.ts first
   if (process.env.CI === 'true') {
-    const fixture = makeNeonTesting({
+    const config: {
+      apiKey: string;
+      projectId: string;
+      autoCloseWebSockets: boolean;
+      parentBranchId?: string;
+    } = {
       apiKey: process.env.NEON_API_KEY!,
       projectId: process.env.NEON_PROJECT_ID!,
       autoCloseWebSockets: true,
-    });
+    };
+
+    // If NEON_PARENT_BRANCH_ID is provided, use it as the parent branch
+    // This ensures ephemeral branches have the correct schema
+    if (process.env.NEON_PARENT_BRANCH_ID) {
+      config.parentBranchId = process.env.NEON_PARENT_BRANCH_ID;
+      console.log('[test-utils] Using parent branch:', config.parentBranchId);
+    } else {
+      console.warn(
+        '[test-utils] No NEON_PARENT_BRANCH_ID provided, using project default branch'
+      );
+    }
+
+    const fixture = makeNeonTesting(config);
     fixture();
   }
   // No-op in local development - use existing DATABASE_URL

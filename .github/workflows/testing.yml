@@ -205,6 +205,8 @@ jobs:
           # neon-testing environment variables for automatic branch provisioning
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          # CRITICAL: Parent branch ID for neon-testing to clone from (has migrations applied)
+          NEON_PARENT_BRANCH_ID: ${{ steps.create-branch.outputs.branch_id }}
           # Database method for test environment
           DB_METHOD: NEON_BRANCH
           # Turborepo configuration
@@ -215,7 +217,7 @@ jobs:
           echo "::add-mask::$NEON_API_KEY"
           # Use Turborepo's built-in change detection instead of manual filtering
           # This runs tests for changed packages and packages that depend on them
-          # neon-testing creates ephemeral branches per test file automatically
+          # neon-testing creates ephemeral branches per test file from the migrated parent branch
           pnpm test
         continue-on-error: true  # Allow artifact upload even if tests fail
 
