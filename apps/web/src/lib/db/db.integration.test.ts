@@ -1,10 +1,10 @@
 import { testDbConnection } from '@codex/database';
+import { withNeonTestBranch } from '@codex/test-utils';
 import { describe, expect, it } from 'vitest';
 
 // Web app database integration test
-// Note: Does not use withNeonTestBranch() to avoid Vite version conflicts
-// Database integration testing is handled at the package level (@codex/database, @codex/identity, @codex/content)
-// This test simply verifies the web app can connect to the database
+// Uses hybrid testing strategy: LOCAL_PROXY locally, neon-testing in CI
+withNeonTestBranch();
 
 describe('Web App - Database Integration', () => {
   if (['LOCAL_PROXY', 'NEON_BRANCH'].includes(process.env.DB_METHOD || '')) {

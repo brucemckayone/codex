@@ -1,13 +1,16 @@
 import path from 'node:path';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { neonTesting } from 'neon-testing/vite';
 import { defineProject } from 'vitest/config';
 
-// Note: Web app does not use neon-testing due to Vite version conflicts
-// Database integration testing is handled at the package level
-// This keeps the web app focused on component and route testing
+// COST OPTIMIZATION: Only use neon-testing in CI to avoid local branch creation costs
+const shouldUseNeonTesting = process.env.CI === 'true';
+const plugins = shouldUseNeonTesting
+  ? [sveltekit(), neonTesting()]
+  : [sveltekit()];
 
 export default defineProject({
-  plugins: [sveltekit()],
+  plugins,
   test: {
     name: 'web',
     globals: true,
