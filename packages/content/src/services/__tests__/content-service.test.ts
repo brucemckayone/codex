@@ -28,11 +28,11 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
+  withNeonTestBranch,
 } from '@codex/test-utils';
 import type { CreateContentInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { withNeonTestBranch } from '../../../../../config/vitest/test-setup';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ContentNotFoundError,
   ContentTypeMismatchError,

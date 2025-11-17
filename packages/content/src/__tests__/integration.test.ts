@@ -23,9 +23,9 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
+  withNeonTestBranch,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { withNeonTestBranch } from '../../../../config/vitest/test-setup';
 import { ContentService, MediaItemService } from '../services';
 
 // Enable ephemeral Neon branch for this test file

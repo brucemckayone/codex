@@ -23,10 +23,10 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
+  withNeonTestBranch,
 } from '@codex/test-utils';
 import type { CreateMediaItemInput } from '@codex/validation';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { withNeonTestBranch } from '../../../../../config/vitest/test-setup';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MediaNotFoundError } from '../../errors';
 import { MediaItemService } from '../media-service';
 

@@ -24,10 +24,10 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
   validateDatabaseConnection,
+  withNeonTestBranch,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { withNeonTestBranch } from '../../../../../config/vitest/test-setup';
 import { ConflictError, OrganizationNotFoundError } from '../../errors';
 import { OrganizationService } from '../organization-service';
 
