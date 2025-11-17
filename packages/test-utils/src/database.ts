@@ -62,14 +62,19 @@ import {
   dbWs as productionDbWs,
 } from '@codex/database';
 import * as schema from '@codex/database/schema';
+import { neonConfig } from '@neondatabase/serverless';
 import { sql as sqlOperator } from 'drizzle-orm';
 import { makeNeonTesting } from 'neon-testing';
-import { WebSocket as NodeWebSocket } from 'ws';
+import ws from 'ws';
 
-// Polyfill WebSocket for Node.js environment when neon-testing is used in CI
-// neon-testing requires WebSocket to connect to Neon databases
+// Configure Neon serverless WebSocket for Node.js environment
+// This is required for @neondatabase/serverless in Node.js v21 and earlier
+// and for neon-testing to work properly in test environments
+neonConfig.webSocketConstructor = ws;
+
+// Also polyfill global WebSocket for other code that might need it
 if (typeof globalThis.WebSocket === 'undefined') {
-  globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
+  globalThis.WebSocket = ws as unknown as typeof WebSocket;
 }
 
 /**
