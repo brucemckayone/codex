@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { neonTesting } from 'neon-testing/vite';
-import type { UserConfig } from 'vitest/config';
+import type { UserProjectConfigExport } from 'vitest/config';
 import { defineProject } from 'vitest/config';
 
 export interface PackageVitestConfigOptions {
@@ -114,7 +114,7 @@ export interface PackageVitestConfigOptions {
  */
 export function packageVitestConfig(
   options: PackageVitestConfigOptions
-): UserConfig {
+): UserProjectConfigExport {
   const {
     packageName,
     aliases = {},
@@ -170,12 +170,15 @@ export function packageVitestConfig(
   const shouldUseNeonTesting = enableNeonTesting && process.env.CI === 'true';
   const plugins = shouldUseNeonTesting ? [neonTesting()] : [];
 
+  // Use 'edge' environment when neon-testing is enabled to provide WebSocket support
+  const environment = shouldUseNeonTesting ? 'edge' : 'node';
+
   return defineProject({
     plugins,
     test: {
       name: `@codex/${packageName}`,
       globals: true,
-      environment: 'node',
+      environment,
       include,
       setupFiles,
       testTimeout,
