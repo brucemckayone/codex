@@ -15,6 +15,7 @@ You are a master of:
 - Vitest (modern test framework, mocking, coverage, snapshot testing)
 - Playwright (E2E testing, browser automation, visual testing)
 - Neon Postgres (ephemeral database branches for integration testing)
+- neon-testing (Vitest plugin for automatic ephemeral branch provisioning per test file)
 - TypeScript (type-safe test utilities, factory patterns, test helpers)
 
 **Testing Methodologies:**
@@ -197,43 +198,213 @@ describe('ServiceName', () => {
 });
 ```
 
-### Integration Test Pattern
+### Integration Test Pattern (with neon-testing)
 ```typescript
+import { withNeonTestBranch } from '../../config/vitest/test-setup';
+import { setupTestDatabase, teardownTestDatabase, seedTestUsers } from '@codex/test-utils';
+
+// Enable ephemeral Neon branch for this test file
+// Each test file gets its own fresh database automatically!
+withNeonTestBranch();
+
 describe('Feature Integration', () => {
   let db: Database;
-  let testContext: TestContext;
+  let userId: string;
 
   beforeAll(async () => {
-    // Create ephemeral Neon branch
-    db = await createTestDatabase();
-    testContext = await setupTestContext(db);
+    // Setup database client - DATABASE_URL is automatically set by neon-testing
+    db = setupTestDatabase();
+
+    // Seed test users (persisted for all tests in this file)
+    const [testUserId] = await seedTestUsers(db, 1);
+    userId = testUserId;
   });
+
+  // NO beforeEach cleanup needed! Each test file gets a fresh database.
+  // Tests within the same file share the database but run sequentially.
 
   afterAll(async () => {
-    await cleanupTestDatabase(db);
-  });
-
-  beforeEach(async () => {
-    // Clean relevant tables
-    await cleanupTables(db, ['table1', 'table2']);
+    // Close database connections
+    await teardownTestDatabase();
   });
 
   it('should complete full workflow successfully', async () => {
-    // Arrange
-    const testData = await createTestData(db);
-    
+    // Arrange - Each test creates its own data (idempotent)
+    const testData = await createTestData(db, userId);
+
     // Act
     const result = await executeWorkflow(testData);
-    
+
     // Assert
     expect(result).toMatchObject({ /* expected outcome */ });
-    
+
     // Verify database state
     const dbState = await db.select().from(table).execute();
     expect(dbState).toHaveLength(expectedCount);
   });
 });
 ```
+
+## Database Integration Testing with neon-testing
+
+**CRITICAL: All database integration tests MUST use neon-testing for ephemeral branch isolation.**
+
+### How neon-testing Works
+
+1. **Each test file gets its own ephemeral Neon branch**
+   - Branch is created automatically when the test file starts
+   - Branch contains full production schema and constraints
+   - Branch is deleted automatically after tests complete
+   - Complete isolation between test files
+
+2. **DATABASE_URL is automatically provisioned**
+   - No manual branch creation needed
+   - No manual DATABASE_URL configuration
+   - Tests just call `setupTestDatabase()` and it works
+
+3. **Tests within a file share the branch**
+   - All tests in `organization-service.test.ts` use the same branch
+   - Tests run sequentially within the file (no race conditions)
+   - Fresh database state for each test file
+
+### Required Setup Steps
+
+**1. Enable neon-testing in vitest config:**
+```typescript
+// packages/identity/vitest.config.identity.ts
+export default packageVitestConfig({
+  packageName: 'identity',
+  setupFiles: ['../../vitest.setup.ts'],
+  testTimeout: 60000,
+  hookTimeout: 60000,
+  enableNeonTesting: true, // Enable ephemeral branches
+});
+```
+
+**2. Add `withNeonTestBranch()` to test file:**
+```typescript
+import { withNeonTestBranch } from '../../config/vitest/test-setup';
+
+// MUST be called at the top level, before any describe blocks
+withNeonTestBranch();
+
+describe('MyService', () => {
+  // Tests here
+});
+```
+
+**3. Use standard test-utils functions:**
+```typescript
+import {
+  setupTestDatabase,
+  teardownTestDatabase,
+  seedTestUsers
+} from '@codex/test-utils';
+
+let db: Database;
+let userId: string;
+
+beforeAll(async () => {
+  db = setupTestDatabase();
+  const [testUserId] = await seedTestUsers(db, 1);
+  userId = testUserId;
+});
+
+afterAll(async () => {
+  await teardownTestDatabase();
+});
+
+// NO beforeEach cleanup! Each test file gets fresh database.
+```
+
+### Idempotent Test Design
+
+**Each test MUST create its own data:**
+```typescript
+// ❌ BAD - Relies on shared state from beforeEach
+describe('list', () => {
+  beforeEach(async () => {
+    // Creates 5 orgs for all tests
+    for (let i = 0; i < 5; i++) {
+      await service.create({ name: `Org ${i}`, slug: `org-${i}` });
+    }
+  });
+
+  it('should list all organizations', async () => {
+    const result = await service.list();
+    expect(result.items).toHaveLength(5); // Hard-coded expectation fails if other tests ran
+  });
+});
+
+// ✅ GOOD - Each test creates and verifies its own data
+describe('list', () => {
+  it('should list all organizations', async () => {
+    // Create specific data for THIS test
+    const org1 = await service.create({ name: 'Org 1', slug: createUniqueSlug('org1') });
+    const org2 = await service.create({ name: 'Org 2', slug: createUniqueSlug('org2') });
+    const org3 = await service.create({ name: 'Org 3', slug: createUniqueSlug('org3') });
+
+    const result = await service.list();
+
+    // Verify based on what WE created
+    expect(result.items.length).toBeGreaterThanOrEqual(3);
+    expect(result.items).toContainEqual(expect.objectContaining({ id: org1.id }));
+    expect(result.items).toContainEqual(expect.objectContaining({ id: org2.id }));
+    expect(result.items).toContainEqual(expect.objectContaining({ id: org3.id }));
+  });
+
+  it('should paginate results', async () => {
+    // Create specific data for THIS test
+    for (let i = 0; i < 10; i++) {
+      await service.create({ name: `Org ${i}`, slug: createUniqueSlug(`org-${i}`) });
+    }
+
+    const page1 = await service.list({}, { page: 1, limit: 5 });
+    const page2 = await service.list({}, { page: 2, limit: 5 });
+
+    expect(page1.items).toHaveLength(5);
+    expect(page2.items).toHaveLength(5);
+    expect(page1.items[0].id).not.toBe(page2.items[0].id);
+  });
+});
+```
+
+### When to Use cleanupDatabase()
+
+**Generally NOT needed** - Each test file gets fresh database.
+
+**Only use if:**
+- You need to clean up between tests WITHIN the same file
+- You have shared state in beforeEach that multiple tests depend on
+- You're testing delete/soft-delete behavior and need clean state
+
+```typescript
+import { cleanupDatabase } from '@codex/test-utils';
+
+beforeEach(async () => {
+  // Only if you REALLY need cleanup between tests in this file
+  await cleanupDatabase(db);
+});
+```
+
+### Environment Variables
+
+**COST OPTIMIZATION - HYBRID STRATEGY:**
+
+**Local Development (FREE - uses LOCAL_PROXY):**
+- Set `DB_METHOD=LOCAL_PROXY` in `.env.dev`
+- Set `DATABASE_URL` to your local proxy connection in `.env.dev`
+- **NO** `NEON_API_KEY` needed - tests use existing DATABASE_URL
+- **NO** branch creation costs
+- Fast, unlimited test runs
+- Same test code works as CI
+
+**CI/CD (Isolated - uses neon-testing):**
+- `NEON_API_KEY` provided by GitHub Secrets
+- `NEON_PROJECT_ID` provided by GitHub Variables
+- `CI=true` triggers ephemeral branch creation automatically
+- Complete isolation per test file
+- Worth the minimal cost for reliability
 
 ### E2E Test Pattern
 ```typescript
@@ -275,20 +446,31 @@ export const createTestEntity = (overrides = {}) => ({
 });
 ```
 
-**Database Helpers:**
+**Database Helpers (with neon-testing):**
 ```typescript
-export const createTestDatabase = async () => {
-  // Create ephemeral Neon branch
-  const db = await neon.createBranch();
-  await runMigrations(db);
-  return db;
-};
+// Import from test-utils - no manual branch creation needed!
+import {
+  setupTestDatabase,
+  teardownTestDatabase,
+  seedTestUsers,
+  cleanupDatabase // Only use if cleanup needed between tests in same file
+} from '@codex/test-utils';
 
-export const cleanupTables = async (db: Database, tables: string[]) => {
-  for (const table of tables) {
-    await db.delete(table).execute();
-  }
-};
+// Test setup is simple with neon-testing:
+let db: Database;
+let userId: string;
+
+beforeAll(async () => {
+  db = setupTestDatabase(); // DATABASE_URL already set by neon-testing
+  const [testUserId] = await seedTestUsers(db, 1);
+  userId = testUserId;
+});
+
+afterAll(async () => {
+  await teardownTestDatabase(); // Close connections
+});
+
+// No beforeEach cleanup needed - each test file gets fresh database!
 ```
 
 **Fixtures:**
@@ -303,23 +485,28 @@ export const testFixtures = {
 
 **Never Do:**
 - ❌ Write tests that depend on execution order
-- ❌ Share state between tests
+- ❌ Share state between tests (use idempotent tests with neon-testing)
 - ❌ Create flaky tests with timing issues
 - ❌ Over-mock (test the mocks instead of behavior)
-- ❌ Skip cleanup after tests
+- ❌ Skip cleanup after tests (call teardownTestDatabase())
 - ❌ Use hardcoded IDs or timestamps
 - ❌ Test implementation details instead of behavior
 - ❌ Write vague test names like "it works"
+- ❌ Forget to call `withNeonTestBranch()` in database integration tests
+- ❌ Use beforeEach cleanup with neon-testing (not needed - fresh DB per file)
+- ❌ Hard-code expected counts in tests (e.g., expect(result).toHaveLength(5))
 
 **Always Do:**
-- ✅ Make tests completely independent
-- ✅ Clean up database between tests
-- ✅ Use dynamic test data (factories, UUIDs)
+- ✅ Make tests completely independent and idempotent
+- ✅ Call `withNeonTestBranch()` at the top of database integration test files
+- ✅ Each test creates its own data (don't rely on beforeEach shared state)
+- ✅ Use dynamic test data (factories, createUniqueSlug())
 - ✅ Proper async/await usage
 - ✅ Clear, descriptive test names
 - ✅ Test behavior, not implementation
 - ✅ Provide actionable error messages
 - ✅ Run tests multiple times to verify stability
+- ✅ Close database connections in afterAll (teardownTestDatabase())
 
 ## Agent Coordination
 

@@ -11,18 +11,27 @@
  * - Error handling
  *
  * Test Count: 20+ tests
+ *
+ * Database Isolation:
+ * - Uses neon-testing for ephemeral branch per test file
+ * - Each test creates its own data (idempotent tests)
+ * - No cleanup needed - fresh database for this file
  */
 
 import {
-  cleanupDatabase,
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  teardownTestDatabase,
 } from '@codex/test-utils';
 import type { CreateMediaItemInput } from '@codex/validation';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { withNeonTestBranch } from '../../../../../config/vitest/test-setup';
 import { MediaNotFoundError } from '../../errors';
 import { MediaItemService } from '../media-service';
+
+// Enable ephemeral Neon branch for this test file
+withNeonTestBranch();
 
 describe('MediaItemService', () => {
   let db: Database;
@@ -38,12 +47,10 @@ describe('MediaItemService', () => {
     [creatorId, otherCreatorId] = userIds;
   });
 
-  beforeEach(async () => {
-    await cleanupDatabase(db);
-  });
+  // No cleanup needed - neon-testing provides fresh database per file
 
   afterAll(async () => {
-    await cleanupDatabase(db);
+    await teardownTestDatabase();
   });
 
   describe('create', () => {
@@ -384,10 +391,15 @@ describe('MediaItemService', () => {
   });
 
   describe('list', () => {
+    let createdMediaIds: string[] = [];
+
     beforeEach(async () => {
-      // Create test media
+      // Reset the array for each test
+      createdMediaIds = [];
+
+      // Create test media and track their IDs
       for (let i = 0; i < 5; i++) {
-        await service.create(
+        const created = await service.create(
           {
             title: `Media ${i}`,
             mediaType: i % 2 === 0 ? 'video' : 'audio',
@@ -397,22 +409,29 @@ describe('MediaItemService', () => {
           },
           creatorId
         );
+        createdMediaIds.push(created.id);
       }
     });
 
     it('should list all media for creator', async () => {
       const result = await service.list(creatorId);
 
-      expect(result.items).toHaveLength(5);
-      expect(result.pagination.total).toBe(5);
+      // Assert: Verify we have at least the media we created
+      expect(result.items.length).toBeGreaterThanOrEqual(5);
+      expect(result.pagination.total).toBeGreaterThanOrEqual(5);
       expect(result.pagination.page).toBe(1);
+
+      // Verify our created media items are in the list
+      for (const mediaId of createdMediaIds) {
+        expect(result.items.some((item) => item.id === mediaId)).toBe(true);
+      }
     });
 
     it('should paginate media list', async () => {
       const page1 = await service.list(creatorId, {}, { page: 1, limit: 2 });
 
       expect(page1.items).toHaveLength(2);
-      expect(page1.pagination.totalPages).toBe(3);
+      expect(page1.pagination.totalPages).toBeGreaterThanOrEqual(3);
 
       const page2 = await service.list(creatorId, {}, { page: 2, limit: 2 });
 
@@ -459,19 +478,34 @@ describe('MediaItemService', () => {
 
       const result = await service.list(creatorId);
 
-      expect(result.items).toHaveLength(5);
+      // Assert: Should have our media and only see own media
+      expect(result.items.length).toBeGreaterThanOrEqual(5);
+      for (const mediaId of createdMediaIds) {
+        expect(result.items.some((item) => item.id === mediaId)).toBe(true);
+      }
       result.items.forEach((item) => {
         expect(item.creatorId).toBe(creatorId);
       });
     });
 
     it('should not return soft-deleted media', async () => {
-      const all = await service.list(creatorId);
-      await service.delete(all.items[0].id, creatorId);
+      // Arrange: Delete one of our created media items
+      const mediaToDelete = createdMediaIds[0];
+      await service.delete(mediaToDelete, creatorId);
 
+      // Act
       const result = await service.list(creatorId);
 
-      expect(result.items).toHaveLength(4);
+      // Assert: The deleted item should not be in the results
+      expect(result.items.some((item) => item.id === mediaToDelete)).toBe(
+        false
+      );
+
+      // The remaining items we created should still be there
+      const remainingIds = createdMediaIds.slice(1);
+      for (const mediaId of remainingIds) {
+        expect(result.items.some((item) => item.id === mediaId)).toBe(true);
+      }
     });
   });
 });

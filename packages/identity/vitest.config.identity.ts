@@ -1,12 +1,13 @@
 import { packageVitestConfig } from '../../config/vitest/package.config';
 
 // Environment variables are loaded by root vitest.setup.ts
-// No need to load dotenv here
+// Neon Testing plugin will provision ephemeral branches for each test file
 
 export default packageVitestConfig({
   packageName: 'identity',
   setupFiles: ['../../vitest.setup.ts'],
   testTimeout: 60000,
   hookTimeout: 60000,
-  sequentialTests: true, // Run tests sequentially to avoid database conflicts
+  enableNeonTesting: true, // Enable ephemeral Neon branches for test isolation
+  // sequentialTests no longer needed - each test file gets its own database
 });

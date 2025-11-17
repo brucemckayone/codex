@@ -9,18 +9,27 @@
  * - Organization management with content
  *
  * Test Count: 15+ tests
+ *
+ * Database Isolation:
+ * - Uses neon-testing for ephemeral branch per test file
+ * - Each test creates its own data (idempotent tests)
+ * - No cleanup needed - fresh database for this file
  */
 
 import { OrganizationService } from '@codex/identity';
 import {
-  cleanupDatabase,
   createUniqueSlug,
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  teardownTestDatabase,
 } from '@codex/test-utils';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { withNeonTestBranch } from '../../../../config/vitest/test-setup';
 import { ContentService, MediaItemService } from '../services';
+
+// Enable ephemeral Neon branch for this test file
+withNeonTestBranch();
 
 describe('Integration Tests', () => {
   let db: Database;
@@ -42,12 +51,10 @@ describe('Integration Tests', () => {
     [creatorId, otherCreatorId] = userIds;
   });
 
-  beforeEach(async () => {
-    await cleanupDatabase(db);
-  });
+  // No cleanup needed - neon-testing provides fresh database per file
 
   afterAll(async () => {
-    await cleanupDatabase(db);
+    await teardownTestDatabase();
   });
 
   describe('full content creation workflow', () => {
@@ -584,7 +591,7 @@ describe('Integration Tests', () => {
       await mediaService.updateStatus(media.id, 'ready', creatorId);
 
       // Create org content
-      await contentService.create(
+      const orgContentCreated = await contentService.create(
         {
           title: 'Org Content',
           slug: createUniqueSlug('org'),
@@ -599,7 +606,7 @@ describe('Integration Tests', () => {
       );
 
       // Create personal content
-      await contentService.create(
+      const personalContentCreated = await contentService.create(
         {
           title: 'Personal Content',
           slug: createUniqueSlug('personal'),
@@ -618,16 +625,28 @@ describe('Integration Tests', () => {
         organizationId: org.id,
       });
 
-      expect(orgContent.items).toHaveLength(1);
-      expect(orgContent.items[0].organizationId).toBe(org.id);
+      expect(orgContent.items.length).toBeGreaterThanOrEqual(1);
+      expect(
+        orgContent.items.some((item) => item.id === orgContentCreated.id)
+      ).toBe(true);
+      orgContent.items.forEach((item) => {
+        expect(item.organizationId).toBe(org.id);
+      });
 
       // List personal content (organizationId = null)
       const personalContent = await contentService.list(creatorId, {
         organizationId: null,
       });
 
-      expect(personalContent.items).toHaveLength(1);
-      expect(personalContent.items[0].organizationId).toBeNull();
+      expect(personalContent.items.length).toBeGreaterThanOrEqual(1);
+      expect(
+        personalContent.items.some(
+          (item) => item.id === personalContentCreated.id
+        )
+      ).toBe(true);
+      personalContent.items.forEach((item) => {
+        expect(item.organizationId).toBeNull();
+      });
     });
 
     it('should handle organization deletion with existing content', async () => {

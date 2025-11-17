@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { neonTesting } from 'neon-testing/vite';
 import type { UserConfig } from 'vitest/config';
 import { defineProject } from 'vitest/config';
 
@@ -40,6 +41,13 @@ export interface PackageVitestConfigOptions {
    * @default false
    */
   sequentialTests?: boolean;
+
+  /**
+   * Enable Neon Testing plugin for database integration tests
+   * Creates ephemeral Neon branches for each test file
+   * @default false
+   */
+  enableNeonTesting?: boolean;
 
   /**
    * Custom test file patterns
@@ -114,6 +122,7 @@ export function packageVitestConfig(
     testTimeout = 10000,
     hookTimeout = 10000,
     sequentialTests = false,
+    enableNeonTesting = false,
     include = ['src/**/*.{test,spec}.{js,ts}'],
     enableCoverage = true,
     coverageInclude = ['src/**/*.ts'],
@@ -155,7 +164,14 @@ export function packageVitestConfig(
       }
     : {};
 
+  // COST OPTIMIZATION: Only use neon-testing in CI to avoid local branch creation costs
+  // Local development uses DATABASE_URL from .env.dev (LOCAL_PROXY method - FREE)
+  // CI uses neon-testing to create ephemeral branches per test file (Isolated)
+  const shouldUseNeonTesting = enableNeonTesting && process.env.CI === 'true';
+  const plugins = shouldUseNeonTesting ? [neonTesting()] : [];
+
   return defineProject({
+    plugins,
     test: {
       name: `@codex/${packageName}`,
       globals: true,

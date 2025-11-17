@@ -116,8 +116,10 @@ jobs:
             echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
           fi
 
-      # Create Neon branch
-      - name: Create Neon branch
+      # Create Neon branch for preview deployments
+      # NOTE: Tests use neon-testing which creates ephemeral branches automatically
+      # This branch is for storing deployment connection details, not for running tests
+      - name: Create Neon branch for preview deployment
         id: create-branch
         uses: neondatabase/create-branch-action@v5
         with:
@@ -196,18 +198,22 @@ jobs:
 
       # Run tests using Turborepo with smart filtering
       # Turborepo will automatically detect changed packages and their dependents
+      # neon-testing will create ephemeral branches automatically for each test file
       - name: Run tests for affected packages with Turborepo
         id: run-tests
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
+          # neon-testing environment variables for automatic branch provisioning
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          # Turborepo configuration
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
         run: |
-          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$NEON_API_KEY"
           # Use Turborepo's built-in change detection instead of manual filtering
           # This runs tests for changed packages and packages that depend on them
+          # neon-testing creates ephemeral branches per test file automatically
           pnpm test
         continue-on-error: true  # Allow artifact upload even if tests fail
 

@@ -12,21 +12,27 @@
  * - Error handling (all error types)
  *
  * Test Count: 40+ tests
+ *
+ * Database Isolation:
+ * - Uses neon-testing for ephemeral branch per test file
+ * - Each test creates its own data (idempotent tests)
+ * - No cleanup needed - fresh database for this file
  */
 
 import { mediaItems, organizations } from '@codex/database/schema';
 import {
-  cleanupDatabase,
   createTestMediaItemInput,
   createTestOrganizationInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  teardownTestDatabase,
 } from '@codex/test-utils';
 import type { CreateContentInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { withNeonTestBranch } from '../../../../../config/vitest/test-setup';
 import {
   ContentNotFoundError,
   ContentTypeMismatchError,
@@ -35,6 +41,9 @@ import {
   SlugConflictError,
 } from '../../errors';
 import { ContentService } from '../content-service';
+
+// Enable ephemeral Neon branch for this test file
+withNeonTestBranch();
 
 describe('ContentService', () => {
   let db: Database;
@@ -51,14 +60,10 @@ describe('ContentService', () => {
     [creatorId, otherCreatorId] = userIds;
   });
 
-  beforeEach(async () => {
-    // Clean up all content tables between tests
-    await cleanupDatabase(db);
-  });
+  // No cleanup needed - neon-testing provides fresh database per file
 
   afterAll(async () => {
-    // Final cleanup
-    await cleanupDatabase(db);
+    await teardownTestDatabase();
   });
 
   describe('create', () => {
@@ -1148,7 +1153,12 @@ describe('ContentService', () => {
   });
 
   describe('list', () => {
+    let createdContentIds: string[] = [];
+
     beforeEach(async () => {
+      // Reset the array for each test
+      createdContentIds = [];
+
       // Create test content for list tests
       const [media] = await db
         .insert(mediaItems)
@@ -1160,9 +1170,9 @@ describe('ContentService', () => {
         )
         .returning();
 
-      // Create 5 content items
+      // Create 5 content items and track their IDs
       for (let i = 0; i < 5; i++) {
-        await service.create(
+        const created = await service.create(
           {
             title: `Content ${i}`,
             slug: createUniqueSlug(`list-${i}`),
@@ -1174,6 +1184,7 @@ describe('ContentService', () => {
           },
           creatorId
         );
+        createdContentIds.push(created.id);
       }
     });
 
@@ -1181,12 +1192,16 @@ describe('ContentService', () => {
       // Act
       const result = await service.list(creatorId);
 
-      // Assert
-      expect(result.items).toHaveLength(5);
-      expect(result.pagination.total).toBe(5);
+      // Assert: Verify we have at least the content we created
+      expect(result.items.length).toBeGreaterThanOrEqual(5);
+      expect(result.pagination.total).toBeGreaterThanOrEqual(5);
       expect(result.pagination.page).toBe(1);
       expect(result.pagination.limit).toBe(20);
-      expect(result.pagination.totalPages).toBe(1);
+
+      // Verify our created content items are in the list
+      for (const contentId of createdContentIds) {
+        expect(result.items.some((item) => item.id === contentId)).toBe(true);
+      }
     });
 
     it('should paginate content list', async () => {
@@ -1197,8 +1212,8 @@ describe('ContentService', () => {
       expect(page1.items).toHaveLength(2);
       expect(page1.pagination.page).toBe(1);
       expect(page1.pagination.limit).toBe(2);
-      expect(page1.pagination.total).toBe(5);
-      expect(page1.pagination.totalPages).toBe(3);
+      expect(page1.pagination.total).toBeGreaterThanOrEqual(5);
+      expect(page1.pagination.totalPages).toBeGreaterThanOrEqual(3);
 
       // Act: Get page 2
       const page2 = await service.list(creatorId, {}, { page: 2, limit: 2 });
@@ -1212,22 +1227,31 @@ describe('ContentService', () => {
     });
 
     it('should filter by status', async () => {
-      // Arrange: Publish one content
-      const allContent = await service.list(creatorId);
-      await service.publish(allContent.items[0].id, creatorId);
+      // Arrange: Publish one of our created content items
+      const contentToPublish = createdContentIds[0];
+      await service.publish(contentToPublish, creatorId);
 
       // Act: Filter by published
       const published = await service.list(creatorId, { status: 'published' });
 
-      // Assert
-      expect(published.items).toHaveLength(1);
-      expect(published.items[0].status).toBe('published');
+      // Assert: Verify the published item is in the results
+      expect(published.items.length).toBeGreaterThanOrEqual(1);
+      expect(published.items.some((item) => item.id === contentToPublish)).toBe(
+        true
+      );
+      published.items.forEach((item) => {
+        expect(item.status).toBe('published');
+      });
 
       // Act: Filter by draft
       const drafts = await service.list(creatorId, { status: 'draft' });
 
-      // Assert
-      expect(drafts.items).toHaveLength(4);
+      // Assert: Verify our unpublished items are in drafts
+      const unpublishedIds = createdContentIds.slice(1);
+      expect(drafts.items.length).toBeGreaterThanOrEqual(4);
+      for (const draftId of unpublishedIds) {
+        expect(drafts.items.some((item) => item.id === draftId)).toBe(true);
+      }
       drafts.items.forEach((item) => {
         expect(item.status).toBe('draft');
       });
@@ -1237,8 +1261,14 @@ describe('ContentService', () => {
       // Act
       const videos = await service.list(creatorId, { contentType: 'video' });
 
-      // Assert: All content is video in this test
-      expect(videos.items).toHaveLength(5);
+      // Assert: All our created content is video
+      expect(videos.items.length).toBeGreaterThanOrEqual(5);
+      for (const contentId of createdContentIds) {
+        expect(videos.items.some((item) => item.id === contentId)).toBe(true);
+      }
+      videos.items.forEach((item) => {
+        expect(item.contentType).toBe('video');
+      });
     });
 
     it('should filter by visibility', async () => {
@@ -1247,8 +1277,13 @@ describe('ContentService', () => {
         visibility: 'public',
       });
 
-      // Assert
-      expect(publicContent.items).toHaveLength(5);
+      // Assert: All our created content is public
+      expect(publicContent.items.length).toBeGreaterThanOrEqual(5);
+      for (const contentId of createdContentIds) {
+        expect(publicContent.items.some((item) => item.id === contentId)).toBe(
+          true
+        );
+      }
       publicContent.items.forEach((item) => {
         expect(item.visibility).toBe('public');
       });
@@ -1282,23 +1317,34 @@ describe('ContentService', () => {
       // Act
       const result = await service.list(creatorId);
 
-      // Assert: Should only see own content
-      expect(result.items).toHaveLength(5);
+      // Assert: Should have our content and only see own content
+      expect(result.items.length).toBeGreaterThanOrEqual(5);
+      for (const contentId of createdContentIds) {
+        expect(result.items.some((item) => item.id === contentId)).toBe(true);
+      }
       result.items.forEach((item) => {
         expect(item.creatorId).toBe(creatorId);
       });
     });
 
     it('should not return soft-deleted content', async () => {
-      // Arrange: Delete one content
-      const allContent = await service.list(creatorId);
-      await service.delete(allContent.items[0].id, creatorId);
+      // Arrange: Delete one of our created content items
+      const contentToDelete = createdContentIds[0];
+      await service.delete(contentToDelete, creatorId);
 
       // Act
       const result = await service.list(creatorId);
 
-      // Assert
-      expect(result.items).toHaveLength(4);
+      // Assert: The deleted item should not be in the results
+      expect(result.items.some((item) => item.id === contentToDelete)).toBe(
+        false
+      );
+
+      // The remaining items we created should still be there
+      const remainingIds = createdContentIds.slice(1);
+      for (const contentId of remainingIds) {
+        expect(result.items.some((item) => item.id === contentId)).toBe(true);
+      }
     });
   });
 });

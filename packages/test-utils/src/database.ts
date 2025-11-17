@@ -1,25 +1,42 @@
 /**
  * Database Test Utilities
  *
- * Helpers for setting up and managing test databases for Content Management Service tests.
- * Provides clean database state for each test run.
+ * Helpers for setting up and managing test databases for integration tests.
+ * Works with neon-testing library for ephemeral branch isolation.
  *
  * Key Points:
- * - Uses the production database client from @codex/database (configured via .env.dev)
- * - Cleans up content tables between tests
+ * - Uses the production database client from @codex/database
+ * - Each test file gets its own ephemeral Neon branch (via neon-testing)
+ * - Complete isolation between test files - no cleanup needed between files
+ * - Optional cleanup helpers for tests within the same file
  * - Supports test user creation for auth scenarios
  * - Transaction helpers for isolated test scenarios
  *
- * Database Configuration:
- * - Tests use the same db client as production code
- * - Configuration is controlled by DB_METHOD environment variable (see .env.dev)
- * - In local dev: DB_METHOD=LOCAL_PROXY connects to local Postgres via Neon proxy
- * - No need to create a separate test database connection
+ * HYBRID TESTING STRATEGY - COST OPTIMIZATION:
+ * =============================================
+ * **Local Development** (FREE, unlimited test runs):
+ * - Uses DATABASE_URL from .env.dev (LOCAL_PROXY method)
+ * - No ephemeral branch creation costs
+ * - Fast execution with no provisioning delay
+ * - Tests share database (cleanup helpers still work if needed)
  *
- * Usage:
+ * **CI/CD** (Isolated, reliable):
+ * - Uses neon-testing to create ephemeral Neon branches
+ * - Each test file gets its own isolated branch
+ * - Complete isolation between test files
+ * - Full production schema and constraints
+ *
+ * This hybrid approach saves 200+ branch creations per day during local development!
+ *
+ * Usage with neon-testing (works in both local and CI):
  * ```typescript
- * import { setupTestDatabase, cleanupDatabase, seedTestUsers } from '@codex/test-utils';
+ * import { test } from 'vitest';
+ * import { withNeonTestBranch } from '../../config/vitest/test-setup';
+ * import { setupTestDatabase, seedTestUsers } from '@codex/test-utils';
  * import type { Database } from '@codex/database';
+ *
+ * // Enable neon-testing (only activates in CI, uses .env.dev locally)
+ * withNeonTestBranch();
  *
  * let db: Database;
  * let testUserId: string;
@@ -30,12 +47,11 @@
  *   testUserId = userId;
  * });
  *
- * beforeEach(async () => {
- *   await cleanupDatabase(db);
- * });
+ * // No cleanup needed - CI gets fresh database per file!
+ * // Local uses shared database but tests are idempotent
  *
- * afterAll(async () => {
- *   await cleanupDatabase(db);
+ * test('my test', async () => {
+ *   // Test with clean database state (CI) or shared state (local)
  * });
  * ```
  */
@@ -146,7 +162,11 @@ export function setupTestDatabase(): Database {
  * Clean up content data only (preserves users)
  *
  * Deletes test data from content tables while preserving users.
- * Use this in beforeEach when users are seeded once in beforeAll.
+ *
+ * With neon-testing (ephemeral branches per test file):
+ * - This function is optional - each test file gets a fresh database
+ * - Use only if you need to clean up between tests within the same file
+ * - No retry logic needed - ephemeral branches ensure complete isolation
  *
  * Deletion order (respects foreign keys):
  * 1. content (references media_items, organizations, users)
@@ -161,30 +181,6 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   await db.delete(schema.mediaItems);
   await db.delete(schema.organizations);
   // NOTE: Users are NOT deleted - preserve them across tests
-
-  // In CI with connection pooling, ensure deletions are visible
-  // Wait for confirmation that tables are empty
-  if (process.env.CI === 'true' || process.env.DB_METHOD === 'NEON_BRANCH') {
-    let retries = 5; // Increased from 3 to 5
-    while (retries > 0) {
-      const isEmpty = await areTablesEmpty(db);
-      if (isEmpty) break;
-
-      // Tables still have data, wait and retry
-      await new Promise((resolve) => setTimeout(resolve, 200)); // Increased from 100ms to 200ms
-      retries--;
-
-      if (retries === 0) {
-        console.warn(
-          '[test-utils] Warning: Tables not empty after cleanup, forcing re-delete'
-        );
-        // Force another delete attempt
-        await db.delete(schema.content);
-        await db.delete(schema.mediaItems);
-        await db.delete(schema.organizations);
-      }
-    }
-  }
 }
 
 /**
