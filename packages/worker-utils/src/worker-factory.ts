@@ -62,6 +62,24 @@ export interface CORSConfig {
 }
 
 /**
+ * Health check options
+ */
+export interface HealthCheckOptions {
+  /**
+   * Optional database connectivity check
+   * Should return { status: 'ok' } on success or { status: 'error', message: string } on failure
+   */
+  checkDatabase?: (
+    c: any
+  ) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+
+  /**
+   * Optional KV connectivity check
+   */
+  checkKV?: (c: any) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+}
+
+/**
  * Configuration for creating a worker
  */
 export interface WorkerConfig extends MiddlewareConfig {
@@ -114,6 +132,12 @@ export interface WorkerConfig extends MiddlewareConfig {
    * If not provided, uses default config with env variables
    */
   cors?: CORSConfig;
+
+  /**
+   * Health check options
+   * Configure optional health checks for database, KV, etc.
+   */
+  healthCheck?: HealthCheckOptions;
 }
 
 /**
@@ -185,6 +209,7 @@ export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
     internalRoutePrefix = '/internal',
     workerSharedSecret,
     allowedWorkerOrigins,
+    healthCheck,
   } = config;
 
   const app = new Hono<HonoEnv>();
@@ -215,7 +240,10 @@ export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
   // ============================================================================
 
   // Health check is always public
-  app.get('/health', createHealthCheckHandler(serviceName, version));
+  app.get(
+    '/health',
+    createHealthCheckHandler(serviceName, version, healthCheck)
+  );
 
   // Additional public routes if specified
   // (Currently just health, but could be extended)

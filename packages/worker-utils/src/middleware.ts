@@ -59,23 +59,52 @@ export function createLoggerMiddleware(): MiddlewareHandler {
 
 /**
  * Creates CORS middleware with standard configuration
+ *
+ * Supports:
+ * - Production URLs (from WEB_APP_URL, API_URL env vars)
+ * - Preview deployments (e.g., codex-preview-123.revelations.studio)
+ * - Staging deployments (e.g., codex-staging.revelations.studio)
+ * - Local development (localhost on various ports)
  */
 export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
   return cors({
     origin: (origin, c) => {
-      const allowedOrigins = [
+      // Exact match origins from environment
+      const exactMatchOrigins = [
         c.env?.WEB_APP_URL,
         c.env?.API_URL,
         'http://localhost:3000',
         'http://localhost:5173',
+        'http://localhost:8787',
+        'http://localhost:8788',
+        'http://localhost:8789',
+        'http://localhost:4001',
+        'http://localhost:4002',
       ].filter(Boolean) as string[];
 
-      if (allowedOrigins.includes(origin)) {
+      // Check exact matches
+      if (exactMatchOrigins.includes(origin)) {
         return origin;
       }
 
-      // Block unknown origins (fallback to localhost for tests)
-      return allowedOrigins[0] || 'http://localhost:3000';
+      // Pattern-based matching for preview and staging deployments
+      const allowedPatterns = [
+        // Preview deployments: *-preview-{PR}.revelations.studio
+        /^https:\/\/[\w-]+-preview-\d+\.revelations\.studio$/,
+        // Staging deployments: *-staging.revelations.studio
+        /^https:\/\/[\w-]+-staging\.revelations\.studio$/,
+        // Production deployments: *.revelations.studio (any subdomain)
+        /^https:\/\/[\w-]+\.revelations\.studio$/,
+      ];
+
+      for (const pattern of allowedPatterns) {
+        if (pattern.test(origin)) {
+          return origin;
+        }
+      }
+
+      // Default fallback for development/testing
+      return exactMatchOrigins[0] || 'http://localhost:3000';
     },
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -125,18 +154,97 @@ export function createAuthMiddleware(): MiddlewareHandler<HonoEnv> {
 
 /**
  * Creates health check handler
+ *
+ * @param serviceName - Name of the service
+ * @param version - Version string (default: '1.0.0')
+ * @param options - Optional health check configuration
+ * @returns Hono handler for /health endpoint
+ *
+ * @example Basic health check
+ * ```typescript
+ * app.get('/health', createHealthCheckHandler('content-api', '1.0.0'));
+ * ```
+ *
+ * @example With database check
+ * ```typescript
+ * app.get('/health', createHealthCheckHandler('content-api', '1.0.0', {
+ *   checkDatabase: async (c) => {
+ *     try {
+ *       await c.env.DB.prepare('SELECT 1').run();
+ *       return { status: 'ok' };
+ *     } catch (error) {
+ *       return { status: 'error', message: error.message };
+ *     }
+ *   }
+ * }));
+ * ```
  */
 export function createHealthCheckHandler(
   serviceName: string,
-  version: string = '1.0.0'
+  version: string = '1.0.0',
+  options?: {
+    /**
+     * Optional database connectivity check
+     * Should return { status: 'ok' } on success or { status: 'error', message: string } on failure
+     */
+    checkDatabase?: (
+      c: Context
+    ) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+    /**
+     * Optional KV connectivity check
+     */
+    checkKV?: (
+      c: Context
+    ) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+  }
 ) {
-  return (c: Context) => {
-    return c.json({
-      status: 'healthy',
+  return async (c: Context) => {
+    const checks: Record<string, string> = {};
+    let isHealthy = true;
+
+    // Run database check if provided
+    if (options?.checkDatabase) {
+      try {
+        const result = await options.checkDatabase(c);
+        checks.database = result.status;
+        if (result.status === 'error') {
+          isHealthy = false;
+          if (result.message) {
+            checks.database = `error: ${result.message}`;
+          }
+        }
+      } catch (error) {
+        checks.database = 'error';
+        isHealthy = false;
+      }
+    }
+
+    // Run KV check if provided
+    if (options?.checkKV) {
+      try {
+        const result = await options.checkKV(c);
+        checks.kv = result.status;
+        if (result.status === 'error') {
+          isHealthy = false;
+          if (result.message) {
+            checks.kv = `error: ${result.message}`;
+          }
+        }
+      } catch (error) {
+        checks.kv = 'error';
+        isHealthy = false;
+      }
+    }
+
+    const response = {
+      status: isHealthy ? 'healthy' : 'unhealthy',
       service: serviceName,
       version,
       timestamp: new Date().toISOString(),
-    });
+      ...(Object.keys(checks).length > 0 && { checks }),
+    };
+
+    return c.json(response, isHealthy ? 200 : 503);
   };
 }
 

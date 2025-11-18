@@ -55,22 +55,24 @@ jobs:
             ${{ runner.os }}-turbo-production-
             ${{ runner.os }}-turbo-
 
-      # NOTE: DNS records are now managed automatically by Cloudflare Workers custom domains.
-      # Manual DNS creation is not needed and will conflict with Workers' automatic management.
-      # Keeping this step commented out for reference.
-      # - name: Verify production DNS records
-      #   id: verify-dns
-      #   run: |
-      #     echo "🔍 Verifying production DNS configuration..."
-      #     chmod +x .github/scripts/manage-production-dns.sh
-      #
-      #     # First verify, if missing then create
-      #     if ! .github/scripts/manage-production-dns.sh verify ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}; then
-      #       echo "⚠️  Some DNS records missing, creating them..."
-      #       .github/scripts/manage-production-dns.sh create ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
-      #     fi
-      #
-      #     echo "✅ Production DNS verified"
+      # Verify production DNS records exist
+      # NOTE: While Cloudflare Workers custom domains handle routing, the underlying
+      # DNS records must exist first. This step verifies all required DNS records are
+      # in place, and creates them if missing (only on first deployment).
+      # After initial setup, this step will just verify and pass quickly.
+      - name: Verify production DNS records
+        id: verify-dns
+        run: |
+          echo "🔍 Verifying production DNS configuration..."
+          chmod +x .github/scripts/manage-production-dns.sh
+
+          # First verify, if missing then create
+          if ! .github/scripts/manage-production-dns.sh verify ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}; then
+            echo "⚠️  Some DNS records missing, creating them..."
+            .github/scripts/manage-production-dns.sh create ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          fi
+
+          echo "✅ Production DNS verified"
 
       # Pre-deployment validation: Build all workers BEFORE touching database
       # Using Turborepo for parallel builds and caching

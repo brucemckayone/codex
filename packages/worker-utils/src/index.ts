@@ -55,5 +55,6 @@ export type {
 export {
   type CORSConfig,
   createWorker,
+  type HealthCheckOptions,
   type WorkerConfig,
 } from './worker-factory';
