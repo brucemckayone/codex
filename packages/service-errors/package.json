@@ -15,6 +15,9 @@
     "build": "vite build --config vite.config.service-errors",
     "dev": "vite build --config vite.config.service-errors --watch",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.service-errors.ts",
+    "test:watch": "vitest --config vitest.config.service-errors.ts",
+    "test:coverage": "vitest run --coverage --config vitest.config.service-errors.ts",
     "lint": "biome lint --write .",
     "format": "biome format --write ."
   },
@@ -29,6 +32,7 @@
   "devDependencies": {
     "typescript": "^5.7.3",
     "vite": "^7.2.2",
-    "vite-plugin-dts": "^4.5.4"
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^4.0.2"
   }
 }
