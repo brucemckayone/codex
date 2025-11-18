@@ -63,6 +63,7 @@ You MUST follow these principles without exception:
 ## Required Documentation Review
 
 Before starting any testing work, you MUST review:
+- `docs/testing/neon-testing-setup.md` - **CRITICAL** - Complete neon-testing setup and troubleshooting
 - `design/infrastructure/Testing.md` - Complete testing strategy
 - `design/roadmap/testing/content-testing-definition.md` - Content testing patterns
 - `design/roadmap/testing/ecommerce-testing-definition.md` - E-commerce testing patterns
@@ -430,6 +431,78 @@ describe('User Journey', () => {
   });
 });
 ```
+
+## CRITICAL: Turborepo Environment Variable Configuration
+
+**This is the #1 cause of test failures in CI. Read carefully.**
+
+### The Problem
+
+Turborepo's caching mechanism does NOT automatically pass environment variables to task processes. Without explicit declaration, environment variables will appear set in CI logs but be undefined when tests actually run.
+
+### The Solution
+
+**EVERY environment variable needed by tests MUST be declared in `turbo.json` for the specific task.**
+
+### Required Configuration
+
+**For Database Integration Tests (`pnpm test`):**
+```json
+{
+  "tasks": {
+    "test": {
+      "env": [
+        "DATABASE_URL",
+        "DB_METHOD",
+        "NODE_ENV",
+        "CI",
+        "NEON_API_KEY",
+        "NEON_PROJECT_ID",
+        "NEON_PARENT_BRANCH_ID"  // CRITICAL - without this, tests fail with "Failed query" errors
+      ]
+    }
+  }
+}
+```
+
+**For E2E Tests (`pnpm test:e2e`):**
+```json
+{
+  "tasks": {
+    "test:e2e": {
+      "env": [
+        "DATABASE_URL",
+        "DB_METHOD",
+        "PLAYWRIGHT_BASE_URL",  // CRITICAL - without this, E2E tests connect to wrong port
+        "CI"
+      ]
+    }
+  }
+}
+```
+
+### Troubleshooting Checklist
+
+If tests fail in CI but pass locally:
+
+1. **Check CI logs** - Is the environment variable set in the CI step?
+2. **Check turbo.json** - Is the variable in the `env` array for the task?
+3. **Check test logs** - Add `console.log(process.env.VARIABLE_NAME)` to verify
+4. **Verify task name** - Must match exactly (e.g., `test`, not `tests`)
+
+### Common Failures
+
+**"Failed query: insert into organizations..."**
+- **Cause**: `NEON_PARENT_BRANCH_ID` not in `turbo.json` `test` task
+- **Fix**: Add to `env` array in `turbo.json`
+
+**"ERR_CONNECTION_REFUSED at http://localhost:5173"**
+- **Cause**: `PLAYWRIGHT_BASE_URL` not in `turbo.json` `test:e2e` task
+- **Fix**: Add to `env` array in `turbo.json`
+
+**"ReferenceError: variable is not defined" (Svelte SSR)**
+- **Cause**: Variable naming mismatch in Svelte component
+- **Fix**: Verify variable names match in declarations and template usage
 
 ## Test Data Management
 
