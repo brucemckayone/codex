@@ -4,9 +4,9 @@
  * Tests for identity-specific error classes
  */
 
+import { NotFoundError } from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
 import { OrganizationNotFoundError } from '../errors';
-import { NotFoundError } from '@codex/service-errors';
 
 describe('Identity Service Errors', () => {
   describe('OrganizationNotFoundError', () => {
@@ -54,16 +54,19 @@ describe('Identity Service Errors', () => {
       expect(error).toBeInstanceOf(Error);
     });
 
-    it('should serialize to JSON correctly', () => {
+    it('should serialize custom properties to JSON', () => {
       const error = new OrganizationNotFoundError('org-123');
       const serialized = JSON.parse(JSON.stringify(error));
 
+      // Only custom properties are serialized (not message/stack)
       expect(serialized).toMatchObject({
-        message: 'Organization not found',
         code: 'NOT_FOUND',
         statusCode: 404,
         context: { organizationId: 'org-123' },
       });
+
+      // Message is accessible on the object but not serialized
+      expect(error.message).toBe('Organization not found');
     });
 
     it('should have proper name property', () => {

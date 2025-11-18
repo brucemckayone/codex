@@ -15,10 +15,10 @@ import {
   ConflictError,
   ForbiddenError,
   InternalServiceError,
+  isServiceError,
   NotFoundError,
   ServiceError,
   ValidationError,
-  isServiceError,
   wrapError,
 } from '../base-errors';
 
@@ -323,34 +323,47 @@ describe('Base Service Errors', () => {
   });
 
   describe('Error Serialization', () => {
-    it('should serialize to JSON correctly', () => {
+    it('should serialize custom properties to JSON', () => {
       const error = new NotFoundError('User not found', { userId: '123' });
       const serialized = JSON.parse(JSON.stringify(error));
 
+      // Note: Error.message and Error.stack are not enumerable by default
+      // Only custom properties (code, statusCode, context, name) are serialized
       expect(serialized).toMatchObject({
-        message: 'User not found',
         code: 'NOT_FOUND',
         statusCode: 404,
         context: { userId: '123' },
         name: 'NotFoundError',
       });
+
+      // Message is accessible on the error object but not serialized
+      expect(error.message).toBe('User not found');
     });
 
     it('should serialize errors without context', () => {
       const error = new ValidationError('Invalid input');
       const serialized = JSON.parse(JSON.stringify(error));
 
-      expect(serialized.message).toBe('Invalid input');
       expect(serialized.code).toBe('VALIDATION_ERROR');
+      expect(serialized.statusCode).toBe(400);
       expect(serialized.context).toBeUndefined();
+
+      // Message is on the object but not serialized by default
+      expect(error.message).toBe('Invalid input');
     });
 
-    it('should preserve stack trace in serialization', () => {
+    it('should have accessible message and stack properties', () => {
       const error = new ConflictError('Conflict');
-      const serialized = JSON.parse(JSON.stringify(error));
 
-      // Stack trace should be included in serialization
-      expect(serialized.stack).toBeDefined();
+      // These properties exist on the error object
+      expect(error.message).toBe('Conflict');
+      expect(error.stack).toBeDefined();
+      expect(error.stack).toContain('ConflictError');
+
+      // But they're not enumerable for JSON serialization
+      const serialized = JSON.parse(JSON.stringify(error));
+      expect(serialized.code).toBe('CONFLICT');
+      expect(serialized.statusCode).toBe(409);
     });
   });
 

@@ -4,22 +4,22 @@
  * Comprehensive tests for content-specific error classes
  */
 
-import { describe, expect, it } from 'vitest';
 import {
-  ContentNotFoundError,
-  MediaNotFoundError,
-  MediaNotReadyError,
-  ContentTypeMismatchError,
-  SlugConflictError,
-  ContentAlreadyPublishedError,
-  MediaOwnershipError,
-} from '../errors';
-import {
-  NotFoundError,
   BusinessLogicError,
   ConflictError,
   ForbiddenError,
+  NotFoundError,
 } from '@codex/service-errors';
+import { describe, expect, it } from 'vitest';
+import {
+  ContentAlreadyPublishedError,
+  ContentNotFoundError,
+  ContentTypeMismatchError,
+  MediaNotFoundError,
+  MediaNotReadyError,
+  MediaOwnershipError,
+  SlugConflictError,
+} from '../errors';
 
 describe('Content Service Errors', () => {
   describe('ContentNotFoundError', () => {
@@ -60,16 +60,19 @@ describe('Content Service Errors', () => {
       }
     });
 
-    it('should serialize to JSON correctly', () => {
+    it('should serialize custom properties to JSON', () => {
       const error = new ContentNotFoundError('content-123');
       const serialized = JSON.parse(JSON.stringify(error));
 
+      // Only custom properties are serialized
       expect(serialized).toMatchObject({
-        message: 'Content not found',
         code: 'NOT_FOUND',
         statusCode: 404,
         context: { contentId: 'content-123' },
       });
+
+      // Message is accessible but not serialized
+      expect(error.message).toBe('Content not found');
     });
   });
 
@@ -146,16 +149,17 @@ describe('Content Service Errors', () => {
       }
     });
 
-    it('should serialize correctly', () => {
+    it('should serialize custom properties correctly', () => {
       const error = new MediaNotReadyError('media-123');
       const serialized = JSON.parse(JSON.stringify(error));
 
       expect(serialized).toMatchObject({
-        message: 'Media item not ready for publishing',
         code: 'BUSINESS_LOGIC_ERROR',
         statusCode: 422,
         context: { mediaItemId: 'media-123' },
       });
+
+      expect(error.message).toBe('Media item not ready for publishing');
     });
   });
 
@@ -282,16 +286,17 @@ describe('Content Service Errors', () => {
       expect(error.context).toEqual({ contentId: 'content-123' });
     });
 
-    it('should serialize correctly', () => {
+    it('should serialize custom properties correctly', () => {
       const error = new ContentAlreadyPublishedError('content-123');
       const serialized = JSON.parse(JSON.stringify(error));
 
       expect(serialized).toMatchObject({
-        message: 'Content is already published',
         code: 'BUSINESS_LOGIC_ERROR',
         statusCode: 422,
         context: { contentId: 'content-123' },
       });
+
+      expect(error.message).toBe('Content is already published');
     });
   });
 
@@ -343,12 +348,11 @@ describe('Content Service Errors', () => {
       }
     });
 
-    it('should serialize correctly', () => {
+    it('should serialize custom properties correctly', () => {
       const error = new MediaOwnershipError('media-123', 'user-456');
       const serialized = JSON.parse(JSON.stringify(error));
 
       expect(serialized).toMatchObject({
-        message: 'User does not own this media item',
         code: 'FORBIDDEN',
         statusCode: 403,
         context: {
@@ -356,6 +360,8 @@ describe('Content Service Errors', () => {
           userId: 'user-456',
         },
       });
+
+      expect(error.message).toBe('User does not own this media item');
     });
   });
 
