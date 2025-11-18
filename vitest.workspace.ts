@@ -7,16 +7,21 @@ export default defineConfig({
       'apps/web',
 
       // Packages
-      'packages/database',
-      'packages/validation',
-      'packages/cloudflare-clients',
-      'packages/test-utils',
-      'packages/observability',
-      'packages/security',
+      'packages/database/vitest.config.database.ts',
+      'packages/validation/vitest.config.validation.ts',
+      'packages/cloudflare-clients/vitest.config.cloudflare-clients.ts',
+      'packages/test-utils/vitest.config.test-utils.ts',
+      'packages/observability/vitest.config.observability.ts',
+      'packages/security/vitest.config.security.ts',
+      'packages/content/vitest.config.content.ts',
+      'packages/identity/vitest.config.identity.ts',
+      'packages/worker-utils/vitest.config.worker-utils.ts',
 
-      // Workers (uncomment when ready)
+      // Workers
       'workers/auth',
       'workers/stripe-webhook-handler',
+      'workers/content-api',
+      'workers/identity-api',
     ],
   },
 });

@@ -278,7 +278,7 @@ describe('rateLimit', () => {
 # Create KV namespace for local development
 npx wrangler kv:namespace create RATE_LIMIT_KV --preview
 
-# Add to wrangler.toml
+# Add to wrangler.jsonc
 kv_namespaces = [
   { binding = "KV", id = "your-kv-id", preview_id = "your-preview-id" }
 ]

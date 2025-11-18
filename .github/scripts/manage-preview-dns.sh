@@ -20,6 +20,8 @@ BASE_DOMAIN="revelations.studio"
 PREVIEW_SUBDOMAINS=(
   "codex-preview-${PR_NUMBER}"
   "api-preview-${PR_NUMBER}"
+  "content-api-preview-${PR_NUMBER}"
+  "identity-api-preview-${PR_NUMBER}"
   "auth-preview-${PR_NUMBER}"
 )
 

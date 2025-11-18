@@ -10,17 +10,26 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "test": "vitest run",
+    "build": "vite build --config vite.config.test-utils",
+    "dev": "vite build --config vite.config.test-utils  --watch",
+    "test": "vitest run --config vitest.config.test-utils.ts",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@codex/database": "workspace:*",
-    "miniflare": "^3.20241129.0",
-    "vite-plugin-dts": "^4.5.4"
+    "@neondatabase/serverless": "^0.10.4",
+    "drizzle-orm": "0.44.7",
+    "vite-plugin-dts": "^4.5.4",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
+    "@types/ws": "^8.18.1",
+    "neon-testing": "^2.2.0",
     "typescript": "^5.6.3",
     "vitest": "^4.0.2"
   }

@@ -320,7 +320,7 @@ async function getTranscodingStatus(mediaId: string): Promise<MediaStatus> {
 # Create preview namespace (points to production KV)
 npx wrangler kv:namespace create AUTH_SESSION_KV --preview
 
-# Add to wrangler.toml
+# Add to wrangler.jsonc
 kv_namespaces = [
   { binding = "AUTH_SESSION_KV", id = "prod-id", preview_id = "preview-id" }
 ]
@@ -331,7 +331,7 @@ kv_namespaces = [
 # Use --kv flag with Miniflare
 npx wrangler dev --kv AUTH_SESSION_KV
 
-# Or configure in wrangler.toml
+# Or configure in wrangler.jsonc
 [miniflare]
 kv_persist = true  # Persist KV data between restarts
 ```
@@ -343,7 +343,7 @@ kv_persist = true  # Persist KV data between restarts
 npx wrangler kv:namespace create AUTH_SESSION_KV --env staging
 npx wrangler kv:namespace create CACHE_KV --env staging
 
-# Configure in wrangler.toml
+# Configure in wrangler.jsonc
 [env.staging]
 kv_namespaces = [
   { binding = "AUTH_SESSION_KV", id = "staging-auth-session-id" },
@@ -358,7 +358,7 @@ kv_namespaces = [
 npx wrangler kv:namespace create AUTH_SESSION_KV
 npx wrangler kv:namespace create CACHE_KV
 
-# Configure in wrangler.toml
+# Configure in wrangler.jsonc
 [env.production]
 kv_namespaces = [
   { binding = "AUTH_SESSION_KV", id = "production-auth-session-id" },
@@ -1313,7 +1313,7 @@ import { workerSpecificHelper } from './utils/helpers';
 
 ## Wrangler Configuration
 
-**`wrangler.toml`**:
+**`wrangler.jsonc`**:
 ```toml
 name = "codex-web"
 main = "build/index.js"  # SvelteKit adapter output

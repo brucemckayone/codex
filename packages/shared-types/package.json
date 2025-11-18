@@ -1,0 +1,37 @@
+{
+  "name": "@codex/shared-types",
+  "version": "1.0.0",
+  "description": "Shared TypeScript types for Codex platform workers and services",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker-types.d.ts",
+      "default": "./dist/worker-types.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.shared-types",
+    "dev": "vite build --config vite.config.shared-types --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
+  },
+  "keywords": [
+    "codex",
+    "types",
+    "shared",
+    "cloudflare-workers"
+  ],
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250102.0",
+    "typescript": "^5.7.3",
+    "vite": "^7.2.2",
+    "vite-plugin-dts": "^4.5.4"
+  }
+}

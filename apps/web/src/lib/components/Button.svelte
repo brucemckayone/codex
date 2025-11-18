@@ -1,20 +1,26 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   interface Props {
     variant?: 'primary' | 'secondary';
     disabled?: boolean;
     onclick?: () => void;
-    children?: any;
+    children?: Snippet;
   }
 
-  let {
+  const {
+    // biome-ignore lint/correctness/noUnusedVariables: used in template
     variant = 'primary',
+    // biome-ignore lint/correctness/noUnusedVariables: used in template
     disabled = false,
+    // biome-ignore lint/correctness/noUnusedVariables: used in template
     onclick,
+    // biome-ignore lint/correctness/noUnusedVariables: used in template
     children,
   }: Props = $props();
 </script>
 
-<button class="btn btn-{variant}" {disabled} {onclick}>
+<button class="btn btn-{variant}" disabled={disabled} onclick={onclick}>
   {@render children?.()}
 </button>
 

@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
 import { Hono } from 'hono';
-import { securityHeaders, CSP_PRESETS } from '../src/headers';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { CSP_PRESETS, securityHeaders } from '../src/headers';
 
 describe('Security Headers Middleware', () => {
   let app: Hono;

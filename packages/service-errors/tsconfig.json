@@ -1,0 +1,9 @@
+{
+  "extends": "../../config/tsconfig/package.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "lib": ["ES2022", "WebWorker"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}

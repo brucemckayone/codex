@@ -5,24 +5,32 @@
  * - Security headers middleware
  * - Rate limiting (KV-based)
  * - Worker-to-worker authentication
+ * - User session authentication
  */
 
 export {
-  securityHeaders,
   CSP_PRESETS,
-  type SecurityHeadersOptions,
   type CSPDirectives,
+  type SecurityHeadersOptions,
+  securityHeaders,
 } from './headers';
 
 export {
-  rateLimit,
   RATE_LIMIT_PRESETS,
   type RateLimitOptions,
+  rateLimit,
 } from './rate-limit';
-
 export {
-  workerAuth,
+  type CachedSessionData,
+  optionalAuth,
+  requireAuth,
+  type SessionAuthConfig,
+  type SessionData,
+  type UserData,
+} from './session-auth';
+export {
   generateWorkerSignature,
-  workerFetch,
   type WorkerAuthOptions,
+  workerAuth,
+  workerFetch,
 } from './worker-auth';

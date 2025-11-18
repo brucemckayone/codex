@@ -1,0 +1,12 @@
+# Database connection (local development)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/main
+
+# Environment
+ENVIRONMENT=development
+
+# Database method (use LOCAL for development)
+DB_METHOD=LOCAL
+
+# CORS URLs
+WEB_APP_URL=http://localhost:3000
+API_URL=http://localhost:8787

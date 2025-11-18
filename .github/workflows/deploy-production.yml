@@ -29,6 +29,8 @@ jobs:
     environment:
       name: production
       url: https://codex.revelations.studio
+      # IMPORTANT: Configure required reviewers in GitHub Settings → Environments → production
+      # This requires manual approval before any production deployment
 
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +43,17 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Turborepo local cache for production builds
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-production-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-production-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-production-
+            ${{ runner.os }}-turbo-
 
       # NOTE: DNS records are now managed automatically by Cloudflare Workers custom domains.
       # Manual DNS creation is not needed and will conflict with Workers' automatic management.
@@ -60,13 +73,17 @@ jobs:
       #     echo "✅ Production DNS verified"
 
       # Pre-deployment validation: Build all workers BEFORE touching database
-      - name: Validate all workers build successfully
+      # Using Turborepo for parallel builds and caching
+      - name: Validate all workers build successfully with Turborepo
         run: |
           echo "🔍 Validating worker builds before database migration..."
-          pnpm --filter stripe-webhook-handler build
-          pnpm --filter auth build
-          pnpm --filter web build
-          echo "✅ All workers built successfully"
+          # Build all workers and the web app in parallel using Turborepo
+          pnpm build
+          echo "✅ All workers and web app built successfully"
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
 
       # Test migrations on a temporary branch first (dry run)
       - name: Test migrations on temporary Neon branch
@@ -165,6 +182,104 @@ jobs:
           echo "Last HTTP code: $HTTP_CODE"
           exit 1
 
+      # Deploy content-api to production
+      - name: Deploy content-api
+        id: deploy-content-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/content-api
+          command: deploy --env production
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+
+      # Verify content-api worker is healthy after deployment
+      - name: Health check - Content API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Content API worker health at https://content-api.revelations.studio..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://content-api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Content API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Content API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Content API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
+
+      # Deploy identity-api to production
+      - name: Deploy identity-api
+        id: deploy-identity-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/identity-api
+          command: deploy --env production
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+
+      # Verify identity-api worker is healthy after deployment
+      - name: Health check - Identity API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Identity API worker health at https://identity-api.revelations.studio..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://identity-api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Identity API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Identity API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Identity API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
+
       # Deploy auth-worker to production
       - name: Deploy auth-worker
         id: deploy-auth
@@ -220,12 +335,16 @@ jobs:
           echo "Last HTTP code: $HTTP_CODE"
           exit 1
 
-      # Build SvelteKit app (NOTE: Build was already validated earlier)
-      - name: Build SvelteKit app for production
-        run: pnpm --filter web build
+      # Build SvelteKit app using Turborepo (NOTE: Build was already validated earlier)
+      # This rebuild ensures fresh artifacts with production env vars
+      - name: Build SvelteKit app for production with Turborepo
+        run: pnpm build:web
         env:
           DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
           PUBLIC_APP_URL: https://codex.revelations.studio
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
 
       # Deploy SvelteKit to production
       - name: Deploy SvelteKit to production
@@ -277,15 +396,103 @@ jobs:
           echo "Last HTTP code: $HTTP_CODE"
           exit 1
 
-      - name: Deployment notification
+      # Comprehensive smoke tests for all 5 services
+      - name: Comprehensive smoke tests
+        timeout-minutes: 5
+        run: |
+          echo "🧪 Running comprehensive smoke tests on all services..."
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 Production Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          FAILED=0
+
+          # Test 1: Stripe Webhook Handler
+          echo "Testing Stripe webhook handler..."
+          if curl -f -s https://api.revelations.studio/health > /dev/null 2>&1; then
+            echo "✅ Stripe webhook handler (api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Stripe webhook handler (api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
+
+          # Test 2: Content API
+          echo "Testing Content API..."
+          if curl -f -s https://content-api.revelations.studio/health > /dev/null 2>&1; then
+            echo "✅ Content API (content-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Content API (content-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
+
+          # Test 3: Identity API
+          echo "Testing Identity API..."
+          if curl -f -s https://identity-api.revelations.studio/health > /dev/null 2>&1; then
+            echo "✅ Identity API (identity-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Identity API (identity-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
+
+          # Test 4: Auth Worker
+          echo "Testing Auth worker..."
+          if curl -f -s https://auth.revelations.studio/health > /dev/null 2>&1; then
+            echo "✅ Auth worker (auth.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Auth worker (auth.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
+
+          # Test 5: Web App
+          echo "Testing Web app..."
+          if curl -f -s https://codex.revelations.studio > /dev/null 2>&1; then
+            echo "✅ Web app (codex.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Web app (codex.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ $FAILED -eq 0 ]; then
+            echo "✅ **All 5 services passed smoke tests**" >> $GITHUB_STEP_SUMMARY
+            echo "✅ All smoke tests passed"
+            exit 0
+          else
+            echo "❌ **Some services failed smoke tests**" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Smoke tests failed"
+            exit 1
+          fi
+
+      - name: Deployment notification with metrics
         if: success()
         run: |
           echo "✅ Production deployment successful"
           echo "🌐 Web App: https://codex.revelations.studio - Health: OK"
-          echo "🔌 API: https://api.revelations.studio - Health: OK"
+          echo "🔌 API (Stripe): https://api.revelations.studio - Health: OK"
+          echo "📝 Content API: https://content-api.revelations.studio - Health: OK"
+          echo "👤 Identity API: https://identity-api.revelations.studio - Health: OK"
           echo "🔐 Auth: https://auth.revelations.studio - Health: OK"
           echo "💾 Database: Migrations applied successfully"
           echo "⚡ All workers deployed and verified healthy"
+
+          # Add deployment metrics to job summary
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ⚡ Deployment Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** Merged to main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Completed:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workers deployed:** 5 (stripe, content, identity, auth, web)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health checks:** All passed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Smoke tests:** All passed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Services" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ api.revelations.studio" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ content-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ identity-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ auth.revelations.studio" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ codex.revelations.studio" >> $GITHUB_STEP_SUMMARY
 
       - name: Rollback instructions on failure
         if: failure()

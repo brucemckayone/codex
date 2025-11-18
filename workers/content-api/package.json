@@ -1,0 +1,42 @@
+{
+  "name": "content-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker for Content and Media API endpoints",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm build && wrangler dev --port 4001 --inspector-port 9233",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint --write .",
+    "format": "biome format --write .",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@codex/content": "workspace:*",
+    "@codex/database": "workspace:*",
+    "@codex/security": "workspace:*",
+    "@codex/shared-types": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "@codex/worker-utils": "workspace:*",
+    "hono": "^4.7.8",
+    "vite-plugin-dts": "^4.5.4"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.10.0",
+    "@cloudflare/workers-types": "^4.20250102.0",
+    "@codex/test-utils": "workspace:*",
+    "@vitest/runner": "~3.2.4",
+    "@vitest/snapshot": "~3.2.4",
+    "@vitest/ui": "~3.2.4",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.11",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.47.0"
+  }
+}

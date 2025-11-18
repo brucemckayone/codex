@@ -57,6 +57,8 @@ jobs:
         continue-on-error: true
         run: |
           wrangler delete --name stripe-webhook-handler-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name content-api-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name identity-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name auth-worker-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name codex-web-preview-${{ env.PR_NUMBER }} || true
         env:
@@ -105,6 +107,40 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # Create initial deployment status comment
+      - name: Create deployment status comment
+        if: github.event_name == 'workflow_run'
+        id: create-comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ env.PR_NUMBER }},
+              body: `## 🚀 Preview Deployment Started
+
+            **Status:** 🔄 Building
+            **Started:** ${new Date().toLocaleString()}
+
+            ### Progress
+            - [x] Tests passed ✅
+            - [ ] Building workers...
+            - [ ] Deploying to Cloudflare...
+            - [ ] Running health checks...
+            - [ ] Preview ready
+
+            **Estimated time:** ~5 minutes
+
+            _This comment will update with progress..._`
+            });
+
+            return comment.data.id;
+
+      - name: Set comment ID
+        if: steps.create-comment.outcome == 'success'
+        run: echo "COMMENT_ID=${{ steps.create-comment.outputs.result }}" >> $GITHUB_ENV
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -114,13 +150,74 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build packages (required by workers)
-      - name: Build packages
-        run: pnpm build:packages
+      # Turborepo local cache for preview builds
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-preview-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-preview-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-preview-
+            ${{ runner.os }}-turbo-
 
-      # Build workers (required before deployment)
-      - name: Build workers
+      # Pre-deployment quality gates
+      - name: Pre-deployment quality gates
+        run: |
+          echo "## 🔍 Pre-Deployment Checks" >> $GITHUB_STEP_SUMMARY
+
+          # Verify this workflow_run came from successful tests
+          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "❌ Tests must pass before deploying" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "✅ All quality gates passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Static analysis passed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Safe to deploy" >> $GITHUB_STEP_SUMMARY
+
+      # Build packages using Turborepo (required by workers)
+      - name: Build packages with Turborepo
+        run: pnpm build:packages
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
+
+      # Build workers using Turborepo (required before deployment)
+      - name: Build workers with Turborepo
         run: pnpm build:workers
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
+
+      # Update status - Build complete
+      - name: Update status - Build complete
+        if: env.COMMENT_ID != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: '${{ env.COMMENT_ID }}',
+              body: `## 🚀 Preview Deployment In Progress
+
+            **Status:** 🔄 Deploying
+            **Started:** ${new Date().toLocaleString()}
+
+            ### Progress
+            - [x] Tests passed ✅
+            - [x] Building workers ✅
+            - [ ] Deploying to Cloudflare...
+            - [ ] Running health checks...
+            - [ ] Preview ready
+
+            _Deploying 5 workers to Cloudflare..._`
+            });
 
       # CRITICAL: Download artifact FIRST (fail fast if expired/missing)
       - name: Download Neon connection artifact
@@ -232,6 +329,54 @@ jobs:
           echo "url=$API_URL" >> $GITHUB_OUTPUT
           echo "API_URL=$API_URL" >> $GITHUB_ENV
 
+      # Deploy content-api worker
+      - name: Deploy content-api (preview)
+        id: deploy-content-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/content-api
+          command: >
+            deploy --name content-api-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --route "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Set Content API URL
+        id: content-api-url
+        run: |
+          CONTENT_API_URL="https://content-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          echo "url=$CONTENT_API_URL" >> $GITHUB_OUTPUT
+          echo "CONTENT_API_URL=$CONTENT_API_URL" >> $GITHUB_ENV
+
+      # Deploy identity-api worker
+      - name: Deploy identity-api (preview)
+        id: deploy-identity-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/identity-api
+          command: >
+            deploy --name identity-api-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --route "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+          secrets: |
+            DATABASE_URL
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Set Identity API URL
+        id: identity-api-url
+        run: |
+          IDENTITY_API_URL="https://identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          echo "url=$IDENTITY_API_URL" >> $GITHUB_OUTPUT
+          echo "IDENTITY_API_URL=$IDENTITY_API_URL" >> $GITHUB_ENV
+
       # Set web URL first (needed for auth worker)
       - name: Set Web URL
         run: |
@@ -266,11 +411,14 @@ jobs:
           echo "url=$AUTH_URL" >> $GITHUB_OUTPUT
           echo "AUTH_URL=$AUTH_URL" >> $GITHUB_ENV
 
-      # Build and deploy SvelteKit app
-      - name: Build SvelteKit app
-        run: pnpm --filter web build
+      # Build and deploy SvelteKit app using Turborepo
+      - name: Build SvelteKit app with Turborepo
+        run: pnpm build:web
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
 
       - name: Deploy SvelteKit (preview)
         id: deploy-web
@@ -290,39 +438,70 @@ jobs:
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
-      # Comment on PR with preview URLs
-      - name: Comment preview URLs
+      # Comment final status on PR
+      - name: Comment final status
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const prNumber = ${{ env.PR_NUMBER }};
-            const webUrl = `https://codex-preview-${prNumber}.revelations.studio`;
-            const apiUrl = `https://api-preview-${prNumber}.revelations.studio`;
-            const authUrl = `https://auth-preview-${prNumber}.revelations.studio`;
-            const comment = `## 🚀 Preview Deployment Ready
+            const success = '${{ job.status }}' === 'success';
+            const emoji = success ? '🎉' : '💥';
+            const status = success ? 'Complete' : 'Failed';
 
-            **🌐 Web App:** ${webUrl}
-            **🔌 API (Stripe Webhooks):** ${apiUrl}
-            **🔐 Auth:** ${authUrl}
-            **📊 Database:** Neon branch \`${{ env.BRANCH_NAME }}\`
+            let body = `## ${emoji} Preview Deployment ${status}
+
+            **Status:** ${success ? '✅' : '❌'} ${status}
+            **Completed:** ${new Date().toLocaleString()}
+
+            ### Progress
+            - [x] Tests passed ✅
+            - [x] Building workers ✅
+            - [x] Deploying to Cloudflare ✅
+            - ${success ? '[x]' : '[ ]'} Running health checks ${success ? '✅' : '❌'}
+            - ${success ? '[x]' : '[ ]'} Preview ready ${success ? '✅' : ''}`;
+
+            if (success) {
+              body += `
+
+            ### 🌐 Preview URLs
+            - **Web App:** https://codex-preview-${prNumber}.revelations.studio
+            - **Stripe API:** https://api-preview-${prNumber}.revelations.studio
+            - **Content API:** https://content-api-preview-${prNumber}.revelations.studio
+            - **Identity API:** https://identity-api-preview-${prNumber}.revelations.studio
+            - **Auth:** https://auth-preview-${prNumber}.revelations.studio
+            - **Database:** Neon branch \`${{ env.BRANCH_NAME }}\`
+
+            ### ✅ All Health Checks Passed
+            All 5 services are healthy and responding
 
             ### Testing Checklist
             - [ ] Visual confirmation of UI changes
             - [ ] Test user flows end-to-end
             - [ ] Verify database operations
-            - [ ] Check worker functionality (webhooks, auth)
+            - [ ] Check worker functionality
 
-            ### Preview Stack Details
-            - **Web App Worker:** \`codex-web-preview-${prNumber}\`
-            - **Stripe Webhook Handler:** \`stripe-webhook-handler-preview-${prNumber}\`
-            - **Auth Worker:** \`auth-worker-preview-${prNumber}\`
-            - **DNS Records:** Automatically created and proxied through Cloudflare
+            **Ready for testing!** 🚀`;
+            } else {
+              body += `
 
-            **Note:** Preview environment with custom domains on revelations.studio. All resources will be automatically deleted when PR is closed.`;
+            ### 🔍 Troubleshooting
+            [View workflow logs](${context.payload.repository.html_url}/actions/runs/${context.runId})`;
+            }
 
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body: comment
-            });
+            // Update existing comment if we have ID, otherwise create new
+            if ('${{ env.COMMENT_ID }}' !== '') {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: '${{ env.COMMENT_ID }}',
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }

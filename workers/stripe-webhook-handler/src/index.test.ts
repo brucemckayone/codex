@@ -1,16 +1,35 @@
-import { describe, it, expect } from 'vitest';
-
 /**
- * Stripe Webhook Handler - Test Scaffolds
+ * Stripe Webhook Handler - Unit Tests
  *
- * These are minimal tests to demonstrate testing patterns.
- * Expand these as the worker functionality grows.
+ * These tests run in the actual Cloudflare Workers runtime (workerd).
+ * They use the `cloudflare:test` module to access environment bindings
+ * and test the worker's fetch handler.
  */
 
+import { env, SELF } from 'cloudflare:test';
+import type { HealthCheckResponse } from '@codex/worker-utils';
+import { describe, expect, it } from 'vitest';
+
 describe('Stripe Webhook Handler', () => {
-  it('should have a test environment configured', () => {
-    // This test ensures Vitest is properly configured
-    expect(true).toBe(true);
+  describe('Health Check', () => {
+    it('should return healthy status', async () => {
+      const response = await SELF.fetch('http://localhost/health');
+      expect(response.status).toBe(200);
+
+      const json = (await response.json()) as HealthCheckResponse;
+      expect(json.status).toBeDefined();
+    });
+  });
+
+  describe('Webhook Endpoint', () => {
+    // TODO: Implement when webhook endpoint is added
+    it.todo('should reject requests without stripe signature');
+  });
+
+  describe('Environment Bindings', () => {
+    it('should have environment bindings available', () => {
+      expect(env).toBeDefined();
+    });
   });
 
   // TODO: Implement when webhook validation logic is added
@@ -21,14 +40,4 @@ describe('Stripe Webhook Handler', () => {
 
   // TODO: Implement when database integration is complete
   it.todo('writes payment data to database');
-
-  // TODO: Implement when error handling is added
-  it.todo('handles malformed webhook payloads gracefully');
-});
-
-describe('Integration Tests', () => {
-  // TODO: Add integration tests when Miniflare is configured
-  it.todo('connects to test database successfully');
-
-  it.todo('handles end-to-end webhook flow');
 });

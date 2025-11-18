@@ -331,7 +331,7 @@ packages/api/src/
 
 ### Wrangler Configuration
 ```toml
-# wrangler.toml
+# wrangler.jsonc
 name = "codex-api"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"

@@ -50,9 +50,9 @@ echo "Account ID: $ACCOUNT_ID"
 
 ## Workers Configuration
 
-All workers are configured via `wrangler.toml` files:
+All workers are configured via `wrangler.jsonc` files:
 
-### Web App (`apps/web/wrangler.toml`)
+### Web App (`apps/web/wrangler.jsonc`)
 
 ```toml
 name = "codex-web"
@@ -81,7 +81,7 @@ pattern = "codex.revelations.studio"
 custom_domain = true
 ```
 
-### Auth Worker (`workers/auth/wrangler.toml`)
+### Auth Worker (`workers/auth/wrangler.jsonc`)
 
 ```toml
 name = "auth-worker"
@@ -104,7 +104,7 @@ pattern = "auth.revelations.studio/*"
 custom_domain = true
 ```
 
-### Stripe Webhook Handler (`workers/stripe-webhook-handler/wrangler.toml`)
+### Stripe Webhook Handler (`workers/stripe-webhook-handler/wrangler.jsonc`)
 
 ```toml
 name = "stripe-webhook-handler"
@@ -321,7 +321,7 @@ The following Cloudflare features are **NOT** used:
 
 **Current Setup:**
 - ✅ All apps deployed as Cloudflare Workers
-- ✅ Custom domains configured via `wrangler.toml`
+- ✅ Custom domains configured via `wrangler.jsonc`
 - ✅ DNS managed automatically by CI/CD
 - ✅ SSL certificates auto-provisioned
 - ✅ Secrets managed via `wrangler secret`

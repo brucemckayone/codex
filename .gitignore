@@ -22,6 +22,12 @@ coverage/
 **/.wrangler/
 .svelte-kit/
 
+# Turborepo
+.turbo
+
+# Biome
+.biome-cache/
+
 # IDE settings
 .vscode/
 
@@ -30,9 +36,12 @@ coverage/
 
 # Build output
 **/dist/
+# TypeScript compiled output (should only be in dist/)
+packages/**/*.js
+packages/**/*.js.map
+!packages/**/test-client.js
+!packages/validation/src/*.js
 
 # OS-specific
 .DS_Store
 
-# Claude IDE settings
-.claude/

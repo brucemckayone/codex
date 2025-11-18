@@ -1,178 +1,133 @@
-import { Hono, Next, Context } from 'hono';
-import { betterAuth, User } from 'better-auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { db, schema } from '@codex/database';
+/**
+ * Auth Worker
+ *
+ * Authentication service using BetterAuth.
+ * Handles user authentication, session management, and email verification.
+ *
+ * Note: This worker uses custom middleware setup because BetterAuth
+ * requires direct handler delegation. Request tracking is integrated.
+ */
+
+import { securityHeaders } from '@codex/security';
 import {
-  securityHeaders,
-  rateLimit,
-  RATE_LIMIT_PRESETS,
-} from '@codex/security';
+  createErrorHandler,
+  createErrorResponse,
+  createHealthCheckHandler,
+  createNotFoundHandler,
+  createRequestTrackingMiddleware,
+  ERROR_CODES,
+  sequence,
+} from '@codex/worker-utils';
+import { type Context, Hono, type Next } from 'hono';
+import { createAuthInstance } from './auth-config';
+import {
+  createAuthRateLimiter,
+  createSessionCacheMiddleware,
+} from './middleware';
+import type { AuthEnv } from './types';
 
-type Bindings = {
-  ENVIRONMENT?: string;
-  DATABASE_URL?: string;
-  SESSION_SECRET?: string;
-  BETTER_AUTH_SECRET?: string;
-  WEB_APP_URL?: string;
-  API_URL?: string;
-  AUTH_SESSION_KV: KVNamespace;
-  RATE_LIMIT_KV: KVNamespace;
-};
+const app = new Hono<AuthEnv>();
 
-const app = new Hono<{ Bindings: Bindings }>();
+/**
+ * Request tracking middleware
+ * Adds request ID, client IP, and user agent tracking
+ */
+app.use('*', createRequestTrackingMiddleware());
 
-// A simple sequence handler to chain multiple handlers
-const sequence = (
-  ...handlers: ((c: Context, next: Next) => Promise<Response | void>)[]
-): ((c: Context, next: Next) => Promise<Response | void>) => {
-  return async (c: Context, next: Next) => {
-    for (const handler of handlers) {
-      const response = await handler(c, next);
-      if (response) {
-        return response;
+/**
+ * BetterAuth handler
+ * Delegates all auth operations to BetterAuth
+ * Wrapped with error handling to gracefully handle malformed requests
+ */
+const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
+  //  Validate JSON body if present
+  if (
+    c.req.method !== 'GET' &&
+    c.req.header('content-type')?.includes('application/json')
+  ) {
+    const rawBody = await c.req.raw.clone().text();
+    if (rawBody?.trim()) {
+      try {
+        JSON.parse(rawBody);
+      } catch {
+        return createErrorResponse(
+          c,
+          ERROR_CODES.INVALID_JSON,
+          'Request body contains invalid JSON',
+          400
+        );
       }
     }
-  };
-};
-
-const authHandler = async (c: Context, _next: Next) => {
-  // Initialize BetterAuth
-  // Secrets are accessed from the environment, not hardcoded.
-  const auth = betterAuth({
-    database: drizzleAdapter(db, {
-      provider: 'pg',
-      schema: {
-        ...schema,
-        // Map BetterAuth expected names to our schema
-        user: schema.users,
-        session: schema.sessions,
-        verification: schema.verificationTokens,
-      },
-    }),
-    session: {
-      expiresIn: 60 * 60 * 24, // 24 hours
-      updateAge: 60 * 60 * 24, // Update session every 24 hours
-      cookieName: 'codex-session',
-      cookieCache: {
-        enabled: true,
-        maxAge: 60 * 5, // 5 minutes (short-lived)
-      },
-    },
-    emailAndPassword: {
-      enabled: true,
-      requireEmailVerification: true,
-      sendVerificationEmail: async ({
-        user,
-        url,
-      }: {
-        user: User;
-        url: string;
-      }) => {
-        // TODO: Implement email sending via notification service
-        console.log(
-          `Sending verification email to ${user.email} with url: ${url}`
-        );
-      },
-      sendResetPasswordEmail: async ({
-        user,
-        url,
-      }: {
-        user: User;
-        url: string;
-      }) => {
-        // TODO: Implement email sending via notification service
-        console.log(
-          `Sending password reset email to ${user.email} with url: ${url}`
-        );
-      },
-    },
-    user: {
-      additionalFields: {
-        role: {
-          type: 'string',
-          required: true,
-          defaultValue: 'customer',
-        },
-      },
-    },
-    secret: c.env.BETTER_AUTH_SECRET,
-    baseURL: c.env.WEB_APP_URL,
-    trustedOrigins: [c.env.WEB_APP_URL, c.env.API_URL].filter(Boolean),
-  });
-
-  return auth.handler(c.req.raw);
-};
-
-const sessionHandler = async (c: Context, next: Next) => {
-  const sessionCookie = c.req
-    .header('cookie')
-    ?.match(/codex-session=([^;]+)/)?.[1];
-
-  if (!sessionCookie) {
-    return next();
   }
 
-  const kv = c.env.AUTH_SESSION_KV;
-  if (kv) {
-    const cachedSession = await kv.get(`session:${sessionCookie}`, 'json');
-    if (cachedSession) {
-      c.set('session', cachedSession.session);
-      c.set('user', cachedSession.user);
-      return next();
+  try {
+    const auth = createAuthInstance({ env: c.env });
+    const response = await auth.handler(c.req.raw);
+
+    // BetterAuth might return null/undefined for unrecognized routes
+    if (!response) {
+      return createErrorResponse(
+        c,
+        ERROR_CODES.NOT_FOUND,
+        'Auth endpoint not found',
+        404
+      );
     }
-  }
 
-  // If not in cache, BetterAuth will handle it and we can cache it on the way out
-  await next();
-
-  if (c.get('session') && kv) {
-    const session = c.get('session');
-    const user = c.get('user');
-    const ttl = Math.floor(
-      (new Date(session.expiresAt).getTime() - Date.now()) / 1000
-    );
-    await kv.put(
-      `session:${sessionCookie}`,
-      JSON.stringify({ session, user }),
-      { expirationTtl: ttl }
-    );
+    return response;
+  } catch (error) {
+    // BetterAuth threw an error - let error handler deal with it
+    console.error('BetterAuth handler error:', error);
+    throw error;
   }
 };
 
-const rateLimiter = async (c: Context, next: Next) => {
-  if (c.req.path === '/api/auth/email/login' && c.req.method === 'POST') {
-    const kv = c.env.RATE_LIMIT_KV;
-    if (kv) {
-      const success = await rateLimit({
-        kv,
-        keyGenerator: (c: Context) =>
-          c.req.header('cf-connecting-ip') || '127.0.0.1',
-        ...RATE_LIMIT_PRESETS.auth,
-      })(c, next);
+/**
+ * Health check endpoint
+ * Must be registered before the catch-all auth handler
+ */
+app.get('/health', createHealthCheckHandler('auth-worker', '1.0.0'));
 
-      console.log('success', success);
-      if (!success) {
-        return c.json({ error: 'Too many requests' }, 429);
-      }
-      return next();
-    }
-  }
-  return next();
+/**
+ * Security headers middleware wrapper
+ * Applies appropriate security headers based on environment
+ */
+const securityHeadersMiddleware = async (
+  c: Context<AuthEnv>,
+  next: Next
+): Promise<Response | undefined> => {
+  const environment =
+    (c.env.ENVIRONMENT as 'development' | 'staging' | 'production') ||
+    'development';
+  return securityHeaders({ environment })(c, next);
 };
 
-// Health check endpoint (must be before the catch-all auth handler)
-app.get('/health', (c) => {
-  return c.json({ status: 'ok', service: 'auth-worker' }, 200);
-});
-
+/**
+ * Middleware chain for auth routes
+ * Applies security headers, rate limiting, session caching, and auth handling
+ * Excludes /health endpoint
+ */
 app.use(
-  '*',
+  '/api/*',
   sequence(
-    securityHeaders({ environment: 'development' }),
-    rateLimiter,
-    sessionHandler,
+    securityHeadersMiddleware,
+    createAuthRateLimiter(),
+    createSessionCacheMiddleware(),
     authHandler
   )
 );
+
+/**
+ * 404 handler for unknown routes
+ */
+app.notFound(createNotFoundHandler());
+
+/**
+ * Global error handler
+ */
+app.onError((err, c) => {
+  const environment = c.env?.ENVIRONMENT || 'development';
+  return createErrorHandler(environment)(err, c);
+});
 
 export default app;

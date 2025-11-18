@@ -11,12 +11,18 @@
     }
   },
   "scripts": {
-    "build": "vite build --config vite.security.config",
-    "dev": "vite dev --config vite.security.config",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "build": "vite build --config vite.config.security",
+    "dev": "vite dev --config vite.config.security",
+    "test": "vitest run --config vitest.config.security.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codex/database": "workspace:*",
+    "drizzle-orm": "0.44.7",
     "hono": "^4.0.0",
     "vite-plugin-dts": "^4.5.4"
   },

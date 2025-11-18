@@ -5,8 +5,8 @@
  * Schemas can be defined per-endpoint as needed.
  */
 
-import { z } from 'zod';
 import type Stripe from 'stripe';
+import { z } from 'zod';
 
 // ========================================
 // Generic Validation Types
@@ -98,8 +98,12 @@ export function extractField<T>(
   if (!metadata || !(field in metadata)) {
     return null;
   }
+  const value = metadata[field];
+  if (typeof value !== 'string') {
+    return null;
+  }
   try {
-    return validator(metadata[field]);
+    return validator(value);
   } catch {
     return null;
   }

@@ -223,8 +223,6 @@ export function redactSensitiveData(
     // Check if key is sensitive
     if (isSensitiveKey(key, customKeys)) {
       if (mode === 'remove') {
-        // Don't add to redacted object
-        continue;
       } else {
         redacted[key] = redactValue(String(value), mode, keepChars);
       }

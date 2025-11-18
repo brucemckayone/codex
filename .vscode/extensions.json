@@ -2,8 +2,7 @@
   "recommendations": [
     // Essential
     "svelte.svelte-vscode",
-    "esbenp.prettier-vscode",
-    "dbaeumer.vscode-eslint",
+    "biomejs.biome",
 
     // Testing
     "vitest.explorer",

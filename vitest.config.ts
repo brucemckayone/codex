@@ -2,16 +2,27 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Global setup file - loads environment variables for all tests
+    setupFiles: ['./vitest.setup.ts'],
+
     // Define all projects in the monorepo
+    // NOTE: Workers are excluded because they use Vitest 3.2.x with @cloudflare/vitest-pool-workers
+    // which only supports Vitest 2.0.x - 3.2.x. The root uses Vitest 4.x for the rest of the codebase.
+    // Run worker tests separately: pnpm test:workers or pnpm test:all
+    // Package projects use custom config file naming (vitest.PACKAGENAME.config.ts)
     projects: [
       'apps/web',
-      'packages/database',
-      'packages/validation',
-      'packages/cloudflare-clients',
-      'packages/security',
-      'packages/test-utils',
-      'workers/auth',
-      'workers/stripe-webhook-handler',
+      'packages/database/vitest.config.database.ts',
+      'packages/validation/vitest.config.validation.ts',
+      'packages/cloudflare-clients/vitest.config.cloudflare-clients.ts',
+      'packages/security/vitest.config.security.ts',
+      'packages/content/vitest.config.content.ts',
+      'packages/test-utils/vitest.config.test-utils.ts',
+      'packages/identity/vitest.config.identity.ts',
+      'packages/worker-utils/vitest.config.worker-utils.ts',
+      'packages/observability/vitest.config.observability.ts',
+      'packages/service-errors',
+      'packages/shared-types',
     ],
 
     // Global coverage configuration (cannot be overridden in projects)
@@ -45,7 +56,7 @@ export default defineConfig({
         // Configuration files
         '**/vitest.config.{js,ts}',
         '**/vite.config.{js,ts}',
-        '**/wrangler.toml',
+        '**/wrangler.jsonc',
 
         // Entry points (usually just re-exports)
         '**/index.{js,ts}',

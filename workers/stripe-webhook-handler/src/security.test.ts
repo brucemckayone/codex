@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { Hono } from 'hono';
 import {
-  securityHeaders,
   CSP_PRESETS,
-  rateLimit,
   RATE_LIMIT_PRESETS,
+  rateLimit,
+  securityHeaders,
 } from '@codex/security';
+import { Hono } from 'hono';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Integration tests for security middleware in stripe-webhook-handler.
@@ -14,6 +14,14 @@ import {
  * The actual middleware functionality is tested in @codex/security package.
  * Here we only test that the middleware is properly configured and integrated.
  */
+
+// Test environment bindings type
+type TestEnv = {
+  ENVIRONMENT?: string;
+  DATABASE_URL?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET_PAYMENT?: string;
+};
 describe('Stripe Webhook Handler - Security Integration', () => {
   describe('Security Headers Middleware', () => {
     it('should apply security headers middleware to all routes', async () => {
@@ -43,12 +51,11 @@ describe('Stripe Webhook Handler - Security Integration', () => {
     });
 
     it('should use API CSP preset for restrictive policy', async () => {
-      const app = new Hono();
-      const mockEnv = { ENVIRONMENT: 'development' };
+      const app = new Hono<{ Bindings: TestEnv }>();
+      const mockEnv: TestEnv = { ENVIRONMENT: 'development' };
 
       app.use('*', (c, next) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (c as any).env = mockEnv;
+        c.env = mockEnv;
         return securityHeaders({
           environment: mockEnv.ENVIRONMENT || 'development',
           csp: CSP_PRESETS.api,
@@ -95,9 +102,8 @@ describe('Stripe Webhook Handler - Security Integration', () => {
 
   describe('Health Endpoint Security', () => {
     it('should not expose sensitive environment variables in responses', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app = new Hono<{ Bindings: any }>();
-      const mockEnv = {
+      const app = new Hono<{ Bindings: TestEnv }>();
+      const mockEnv: TestEnv = {
         ENVIRONMENT: 'development',
         DATABASE_URL: 'postgresql://secret:secret@localhost:5432/db',
         STRIPE_SECRET_KEY: 'sk_test_secret123',
@@ -106,8 +112,7 @@ describe('Stripe Webhook Handler - Security Integration', () => {
 
       app.get('/health', (c) => {
         // Simulate worker health endpoint
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (c as any).env = mockEnv;
+        c.env = mockEnv;
 
         return c.json({
           status: 'healthy',

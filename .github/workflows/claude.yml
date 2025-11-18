@@ -1,4 +1,4 @@
-name: Claude Code
+name: Claude Code Assistant
 
 on:
   issue_comment:
@@ -10,6 +10,13 @@ on:
   pull_request_review:
     types: [submitted]
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
 jobs:
   claude:
     if: |
@@ -18,33 +25,34 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-      issues: read
-      id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Run Claude Code
+      - name: Run Claude Code Assistant
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
+            contents: write
+            pull-requests: write
+            issues: write
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          # Claude will use the instruction from the @claude mention
+          # Context about the project:
+          # - Cloudflare Workers monorepo (pnpm workspace)
+          # - SvelteKit + Drizzle ORM + Neon Postgres + Better Auth + Stripe
+          # - See CLAUDE.md for conventions
+          # - CI uses ephemeral Neon branches for testing
+          # - All monetary values stored as integer cents
+          # - Multi-tenant with organization scoping
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
-
+          # Allow Claude to use gh CLI and standard tools
+          claude_args: |
+            --allowed-tools "Bash(gh:*),Bash(pnpm:*),Bash(git:*),Bash(node:*),Bash(npm:*)"

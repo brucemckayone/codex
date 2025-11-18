@@ -135,6 +135,8 @@ export function securityHeaders(options: SecurityHeadersOptions = {}) {
         'max-age=31536000; includeSubDomains; preload'
       );
     }
+
+    return undefined;
   };
 }
 

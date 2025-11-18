@@ -1,9 +1,22 @@
-import { defineProject } from 'vitest/config';
+import path from 'node:path';
 import { sveltekit } from '@sveltejs/kit/vite';
-import path from 'path';
+import { neonTesting } from 'neon-testing/vite';
+import { defineProject } from 'vitest/config';
+
+// Web app testing strategy:
+// - Component tests: Use happy-dom environment (default)
+// - Database integration tests: Use node environment (via @vitest-environment comment)
+// - E2E tests: Use Playwright with real environment
+//
+// COST OPTIMIZATION: Only use neon-testing in CI to avoid local branch creation costs
+// Note: neon-testing creates ephemeral branches that clone schema from parent branch
+const shouldUseNeonTesting = process.env.CI === 'true';
+const plugins = shouldUseNeonTesting
+  ? [sveltekit(), neonTesting()]
+  : [sveltekit()];
 
 export default defineProject({
-  plugins: [sveltekit()],
+  plugins,
   test: {
     name: 'web',
     globals: true,
@@ -21,7 +34,7 @@ export default defineProject({
       '**/*.spec.ts', // Playwright tests
       '**/test-results/**', // Playwright test results
     ],
-    setupFiles: ['./src/tests/setup.ts'],
+    setupFiles: ['../../vitest.setup.ts', './src/tests/setup.ts'],
     testTimeout: 10000,
     hookTimeout: 10000,
     // Note: coverage is configured at root level

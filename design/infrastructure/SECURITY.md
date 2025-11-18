@@ -156,7 +156,7 @@
 | # | Item | Risk | Effort | Files/Areas |
 |---|------|------|--------|-------------|
 | 16 | **Implement preview environment TTL (auto-delete after 7 days)** | 2/5 | M | `.github/workflows/preview-deploy.yml` |
-| 17 | **Add WAF rules for Cloudflare Workers** | 2/5 | L | Cloudflare dashboard, `wrangler.toml` |
+| 17 | **Add WAF rules for Cloudflare Workers** | 2/5 | L | Cloudflare dashboard, `wrangler.jsonc` |
 | 18 | **Implement artifact signing and verification** | 2/5 | L | `.github/workflows/testing.yml`, deployment workflows |
 
 ---

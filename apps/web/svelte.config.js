@@ -11,6 +11,7 @@ const config = {
       '@codex/database': '../../packages/database/src',
       '@codex/validation': '../../packages/validation/src',
       '@codex/cloudflare-clients': '../../packages/cloudflare-clients/src',
+      '@codex/test-utils': '../../packages/test-utils/src',
     },
   },
 };

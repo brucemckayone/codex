@@ -283,7 +283,7 @@ workers/stripe-webhook-handler/
    # Create KV namespace for rate limiting
    wrangler kv:namespace create "RATE_LIMIT_KV"
 
-   # Add to wrangler.toml:
+   # Add to wrangler.jsonc:
    [[kv_namespaces]]
    binding = "RATE_LIMIT_KV"
    id = "your-kv-namespace-id"

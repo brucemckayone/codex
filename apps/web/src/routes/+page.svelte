@@ -1,8 +1,8 @@
 <script lang="ts">
-  let count = $state(0);
+  let _count = $state(0);
 
-  function increment() {
-    count += 1;
+  function _increment() {
+    _count += 1;
   }
 </script>
 
@@ -12,8 +12,8 @@
 
 <main>
   <h1>Welcome to Codex</h1>
-  <p>Counter: {count}</p>
-  <button onclick={increment}>Increment</button>
+  <p>Counter: {_count}</p>
+  <button onclick={_increment}>Increment</button>
 </main>
 
 <style>

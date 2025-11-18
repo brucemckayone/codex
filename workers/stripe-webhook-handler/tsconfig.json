@@ -1,17 +1,7 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../config/tsconfig/worker.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "module": "esnext",
-    "target": "esnext",
-    "lib": ["esnext"],
-    "alwaysStrict": true,
-    "strict": true,
-    "preserveConstEnums": true,
-    "moduleResolution": "bundler",
-    "sourceMap": true,
-    "esModuleInterop": true
+    "rootDir": "src"
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["src", "../../config/vitest/cloudflare-test-env.d.ts"]
 }

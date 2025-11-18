@@ -23,7 +23,14 @@ export default defineConfig({
     },
   ],
 
-  // Note: webServer removed - start server manually before running E2E tests
-  // Local: pnpm --filter web dev
-  // CI: wrangler dev is started in GitHub Actions workflow
+  // Start dev server automatically for local e2e tests
+  // In CI, PLAYWRIGHT_BASE_URL is set and this is skipped
+  webServer: process.env.CI
+    ? undefined
+    : {
+        command: 'pnpm dev',
+        url: 'http://localhost:5173',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120000,
+      },
 });

@@ -900,7 +900,7 @@ export const platformSettings = pgTable(
 
 ### KV Namespace Setup
 
-**`wrangler.toml`**:
+**`wrangler.jsonc`**:
 
 ```toml
 [[kv_namespaces]]

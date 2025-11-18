@@ -637,7 +637,7 @@ TTL: Auto
 **Why CNAME to apex?**
 - Cloudflare Workers custom domains work by intercepting at the edge
 - DNS just routes traffic to Cloudflare proxy
-- Worker route configuration (in `wrangler.toml`) handles the rest
+- Worker route configuration (in `wrangler.jsonc`) handles the rest
 
 ### SSL Certificates
 

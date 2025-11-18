@@ -141,7 +141,7 @@ export function workerAuth(options: WorkerAuthOptions) {
 
     // Validate timestamp
     const timestamp = parseInt(timestampStr, 10);
-    if (isNaN(timestamp)) {
+    if (Number.isNaN(timestamp)) {
       return c.json({ error: 'Invalid timestamp format' }, 401);
     }
 

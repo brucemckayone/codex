@@ -21,6 +21,8 @@ declare -A PRODUCTION_DOMAINS=(
   ["codex"]="codex-web-production"
   ["auth"]="auth-worker-production"
   ["api"]="stripe-webhook-handler-production"
+  ["content-api"]="content-api-production"
+  ["identity-api"]="identity-api-production"
 )
 
 # Cloudflare API endpoint

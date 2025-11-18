@@ -1,11 +1,14 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   interface Props {
     title: string;
     description?: string;
-    children?: any;
+    children?: Snippet;
   }
 
-  let { title, description, children }: Props = $props();
+  // biome-ignore lint/correctness/noUnusedVariables: Svelte 5 $props() destructuring - these are used in template
+  const { title, description, children }: Props = $props();
 </script>
 
 <div class="card">

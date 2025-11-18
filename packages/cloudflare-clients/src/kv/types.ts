@@ -1,2 +1,2 @@
 // KV-specific types
-export interface KVDummy {}
+export type KVDummy = Record<string, never>;

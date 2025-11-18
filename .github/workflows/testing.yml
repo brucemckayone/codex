@@ -31,9 +31,18 @@ jobs:
       validation: ${{ steps.filter.outputs.validation }}
       cloudflare-clients: ${{ steps.filter.outputs.cloudflare-clients }}
       test-utils: ${{ steps.filter.outputs.test-utils }}
+      security: ${{ steps.filter.outputs.security }}
+      observability: ${{ steps.filter.outputs.observability }}
+      worker-utils: ${{ steps.filter.outputs.worker-utils }}
+      content: ${{ steps.filter.outputs.content }}
+      identity: ${{ steps.filter.outputs.identity }}
+      service-errors: ${{ steps.filter.outputs.service-errors }}
+      shared-types: ${{ steps.filter.outputs.shared-types }}
       web: ${{ steps.filter.outputs.web }}
       auth-worker: ${{ steps.filter.outputs.auth-worker }}
       stripe-webhook-handler: ${{ steps.filter.outputs.stripe-webhook-handler }}
+      content-api: ${{ steps.filter.outputs.content-api }}
+      identity-api: ${{ steps.filter.outputs.identity-api }}
     steps:
       - uses: actions/checkout@v4
       - name: Filter changed packages
@@ -50,12 +59,30 @@ jobs:
               - 'packages/cloudflare-clients/**'
             test-utils:
               - 'packages/test-utils/**'
+            security:
+              - 'packages/security/**'
+            observability:
+              - 'packages/observability/**'
+            worker-utils:
+              - 'packages/worker-utils/**'
+            content:
+              - 'packages/content/**'
+            identity:
+              - 'packages/identity/**'
+            service-errors:
+              - 'packages/service-errors/**'
+            shared-types:
+              - 'packages/shared-types/**'
             web:
               - 'apps/web/**'
             auth-worker:
               - 'workers/auth/**'
             stripe-webhook-handler:
               - 'workers/stripe-webhook-handler/**'
+            content-api:
+              - 'workers/content-api/**'
+            identity-api:
+              - 'workers/identity-api/**'
 
   test:
     needs: [changes]
@@ -73,18 +100,26 @@ jobs:
         id: branch-name
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "name=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
+            # Include run_id for uniqueness across retries and re-runs
+            PR_NUM=${{ github.event.number }}
+            RUN_ID=${{ github.run_id }}
+            # Truncate to fit Neon's 63 char limit
+            BRANCH_NAME="pr-${PR_NUM}-${RUN_ID}"
+            echo "name=${BRANCH_NAME:0:63}" >> $GITHUB_OUTPUT
           else
             SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}"
+            RUN_ID=${{ github.run_id }}
+            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-${RUN_ID}"
             # truncate to 63 chars (Neon limit)
             BRANCH_NAME_TRUNC=${BRANCH_NAME:0:63}
             echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
           fi
 
-      # Create Neon branch
-      - name: Create Neon branch
+      # Create Neon branch for preview deployments
+      # NOTE: Tests use neon-testing which creates ephemeral branches automatically
+      # This branch is for storing deployment connection details, not for running tests
+      - name: Create Neon branch for preview deployment
         id: create-branch
         uses: neondatabase/create-branch-action@v5
         with:
@@ -104,6 +139,17 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Turborepo local cache - optimized for test job
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-test-
+            ${{ runner.os }}-turbo-
 
       # Database Setup: Generate and apply migrations to ephemeral branch
       # Note: Static analysis (typecheck, lint, format) runs in separate workflow
@@ -141,25 +187,54 @@ jobs:
             branch-name.txt
           retention-days: 7 # Keep for workflow_run delays
 
-      # Build packages
-      - name: Build packages
-        run: pnpm build:packages
-
-      # Run tests for affected packages
-      - name: Run tests for affected packages
-        if: ${{ needs.changes.outputs.database == 'true' || needs.changes.outputs.validation == 'true' || needs.changes.outputs.cloudflare-clients == 'true' || needs.changes.outputs.test-utils == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.auth-worker == 'true' || needs.changes.outputs.stripe-webhook-handler == 'true' }}
+      # Build all packages and workers in parallel using Turborepo
+      # Turborepo automatically handles dependencies and parallelization
+      - name: Build all with Turborepo (parallel)
+        run: pnpm build
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
+
+      # Run tests using Turborepo with smart filtering
+      # Turborepo will automatically detect changed packages and their dependents
+      # neon-testing will create ephemeral branches automatically for each test file
+      - name: Run tests for affected packages with Turborepo
+        id: run-tests
+        env:
+          # neon-testing environment variables for automatic branch provisioning
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          # CRITICAL: Parent branch ID for neon-testing to clone from (has migrations applied)
+          NEON_PARENT_BRANCH_ID: ${{ steps.create-branch.outputs.branch_id }}
+          # Database method for test environment
           DB_METHOD: NEON_BRANCH
+          # Turborepo configuration
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
         run: |
-          echo "::add-mask::$DATABASE_URL"
-          if [[ "${{ needs.changes.outputs.database }}" == "true" ]]; then pnpm --filter @codex/database test; fi
-          if [[ "${{ needs.changes.outputs.validation }}" == "true" ]]; then pnpm --filter @codex/validation test; fi
-          if [[ "${{ needs.changes.outputs.cloudflare-clients }}" == "true" ]]; then pnpm --filter @codex/cloudflare-clients test; fi
-          if [[ "${{ needs.changes.outputs.test-utils }}" == "true" ]]; then pnpm --filter @codex/test-utils test; fi
-          if [[ "${{ needs.changes.outputs.web }}" == "true" ]]; then pnpm --filter web test; fi
-          if [[ "${{ needs.changes.outputs.auth-worker }}" == "true" ]]; then pnpm --filter auth test; fi
-          if [[ "${{ needs.changes.outputs.stripe-webhook-handler }}" == "true" ]]; then pnpm --filter stripe-webhook-handler test; fi
+          echo "::add-mask::$NEON_API_KEY"
+          # Use Turborepo's built-in change detection instead of manual filtering
+          # This runs tests for changed packages and packages that depend on them
+          # neon-testing creates ephemeral branches per test file from the migrated parent branch
+          pnpm test
+        continue-on-error: true  # Allow artifact upload even if tests fail
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ github.run_id }}
+          path: |
+            **/coverage/**
+            **/.vitest/**
+            **/test-results/**
+          retention-days: 7
+
+      - name: Fail if tests failed
+        if: steps.run-tests.outcome == 'failure'
+        run: exit 1
 
   e2e-tests:
     name: E2E Tests
@@ -178,11 +253,16 @@ jobs:
         id: branch-name
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "name=pr-${{ github.event.number }}-e2e" >> $GITHUB_OUTPUT
+            # Include run_id for uniqueness across retries and re-runs
+            PR_NUM=${{ github.event.number }}
+            RUN_ID=${{ github.run_id }}
+            BRANCH_NAME="pr-${PR_NUM}-${RUN_ID}-e2e"
+            echo "name=${BRANCH_NAME:0:63}" >> $GITHUB_OUTPUT
           else
             SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-e2e"
+            RUN_ID=${{ github.run_id }}
+            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-${RUN_ID}-e2e"
             # truncate to 63 chars (Neon limit)
             BRANCH_NAME_TRUNC=${BRANCH_NAME:0:63}
             echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
@@ -210,6 +290,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Turborepo local cache - optimized for E2E job
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-e2e-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-e2e-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-e2e-
+            ${{ runner.os }}-turbo-
+
       # Database Setup: Generate and apply migrations before E2E tests
       - name: Generate migrations
         env:
@@ -227,14 +318,17 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           pnpm --filter @codex/database db:migrate
 
-      # Build SvelteKit for Cloudflare Workers
-      - name: Build SvelteKit app
+      # Build SvelteKit for Cloudflare Workers using Turborepo
+      - name: Build SvelteKit app with Turborepo
         run: |
           echo "::add-mask::$DATABASE_URL"
-          pnpm --filter web build
+          pnpm build:web
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
 
       # Run E2E tests against built worker using wrangler dev
       - name: Install Playwright browsers
@@ -283,7 +377,8 @@ jobs:
     if: always()
     steps:
       - name: Delete test branch
-        if: needs.test.outputs.branch_id
+        if: needs.test.result != 'skipped' && needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
+        continue-on-error: true
         uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
@@ -291,7 +386,8 @@ jobs:
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Delete E2E branch
-        if: needs.e2e-tests.outputs.branch_id
+        if: needs.e2e-tests.result != 'skipped' && needs.e2e-tests.outputs.branch_id && needs.e2e-tests.outputs.branch_id != ''
+        continue-on-error: true
         uses: neondatabase/delete-branch-action@v3
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
