@@ -86,7 +86,15 @@ export function withNeonTestBranch() {
         "CI",
         "NEON_API_KEY",
         "NEON_PROJECT_ID",
-        "NEON_PARENT_BRANCH_ID"  // CRITICAL
+        "NEON_PARENT_BRANCH_ID"  // CRITICAL for database tests
+      ]
+    },
+    "test:e2e": {
+      "env": [
+        "DATABASE_URL",
+        "DB_METHOD",
+        "PLAYWRIGHT_BASE_URL",  // CRITICAL for E2E tests
+        "CI"
       ]
     }
   }
@@ -94,9 +102,11 @@ export function withNeonTestBranch() {
 ```
 
 **Key Points**:
-- Turborepo requires explicit declaration of environment variables
-- Without this, the parent branch ID won't reach test processes
-- This was a key issue that caused initial test failures
+- Turborepo requires explicit declaration of environment variables for caching
+- Without this, environment variables won't reach test processes
+- `NEON_PARENT_BRANCH_ID` is required for database integration tests
+- `PLAYWRIGHT_BASE_URL` is required for E2E tests to connect to correct port
+- This was a critical issue that caused both database and E2E test failures
 
 ### 4. WebSocket Configuration
 
@@ -142,6 +152,53 @@ describe('Database Integration', () => {
 - happy-dom enforces CORS restrictions
 - neon-testing needs to make API calls to `console.neon.tech`
 - Node environment allows unrestricted HTTP requests
+
+### 6. E2E Testing Configuration
+
+**Location**: `apps/web/playwright.config.ts`
+
+```typescript
+export default defineConfig({
+  use: {
+    // Use environment variable in CI (wrangler dev on 8787), default to dev server locally
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
+  },
+  webServer: process.env.CI
+    ? undefined  // In CI, server is started separately
+    : {
+        command: 'pnpm dev',
+        url: 'http://localhost:5173',
+        reuseExistingServer: !process.env.CI,
+      },
+});
+```
+
+**CI Workflow Setup** (`.github/workflows/testing.yml`):
+
+```yaml
+- name: Start Wrangler dev server in background
+  run: |
+    cd apps/web
+    pnpm wrangler dev --port 8787 --local &
+    echo $! > wrangler.pid
+    timeout 60 bash -c 'until curl -f http://localhost:8787 > /dev/null 2>&1; do sleep 1; done'
+  env:
+    DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+- name: Run E2E tests
+  env:
+    DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+    DB_METHOD: NEON_BRANCH
+    PLAYWRIGHT_BASE_URL: http://localhost:8787  # CRITICAL - override default port
+  run: pnpm test:e2e
+```
+
+**Key Points**:
+- E2E tests run against Cloudflare Workers environment using Wrangler dev server
+- CI uses port 8787 (Wrangler default), local dev uses 5173 (Vite dev server)
+- `PLAYWRIGHT_BASE_URL` must be set in CI to override default
+- Server must be fully started before E2E tests begin (use curl polling)
+- DATABASE_URL from ephemeral branch enables real database testing
 
 ## Usage in Test Files
 
@@ -238,6 +295,28 @@ describe('My Service Tests', () => {
 - Ensure `teardownTestDatabase()` is called
 - Add logging to verify DATABASE_URL value
 
+### E2E Tests Connect to Wrong Port
+
+**Symptom**: E2E tests fail with `ERR_CONNECTION_REFUSED` at `http://localhost:5173`
+
+**Cause**: `PLAYWRIGHT_BASE_URL` environment variable not passed through Turborepo
+
+**Solution**:
+1. Add `PLAYWRIGHT_BASE_URL` to `test:e2e` task in `turbo.json`
+2. Verify CI workflow sets `PLAYWRIGHT_BASE_URL=http://localhost:8787`
+3. Check Playwright config uses `process.env.PLAYWRIGHT_BASE_URL`
+
+### Variable Reference Errors in Server-Side Rendering
+
+**Symptom**: E2E tests fail with `ReferenceError: variable is not defined`
+
+**Cause**: Svelte variable naming mismatch between declaration and usage
+
+**Solution**:
+- Verify variable names match in both declaration and template usage
+- Check for underscore prefixes (_count vs count)
+- Use TypeScript/Svelte language server to catch these errors early
+
 ## Environment Variables
 
 ### Required in CI
@@ -246,9 +325,10 @@ describe('My Service Tests', () => {
 |----------|--------|---------|
 | `NEON_API_KEY` | GitHub Secrets | API key for Neon console access |
 | `NEON_PROJECT_ID` | GitHub Variables | Neon project identifier |
-| `NEON_PARENT_BRANCH_ID` | CI workflow output | Branch to clone ephemeral branches from |
-| `DATABASE_URL` | Set by neon-testing | Connection string to ephemeral branch |
+| `NEON_PARENT_BRANCH_ID` | CI workflow output | Branch to clone ephemeral branches from (database tests) |
+| `DATABASE_URL` | Set by neon-testing or CI | Connection string to ephemeral branch |
 | `DB_METHOD` | CI workflow | Set to `NEON_BRANCH` for CI tests |
+| `PLAYWRIGHT_BASE_URL` | CI workflow | Override Playwright base URL for E2E tests (port 8787) |
 | `CI` | GitHub Actions | Triggers neon-testing activation |
 
 ### Local Development
@@ -345,16 +425,32 @@ This ensures the database client picks up the ephemeral branch's DATABASE_URL.
 
 ## Testing Agent Guidelines
 
-When working with database tests:
+### For Database Integration Tests:
 
 1. **Always use withNeonTestBranch()** at module level
-2. **Verify environment variable passthrough** in turbo.json
+2. **Verify environment variable passthrough** in turbo.json for `test` task
 3. **Check parent branch has migrations** before running tests
 4. **Use node environment** for tests that need neon-testing API access
 5. **Close connections properly** in afterAll hooks
 6. **Don't modify cached database clients** - let Proxy pattern handle it
 7. **Test locally first** with LOCAL_PROXY to avoid costs
 8. **Monitor CI logs** for parent branch ID confirmation
+
+### For E2E Tests:
+
+1. **Verify PLAYWRIGHT_BASE_URL in turbo.json** for `test:e2e` task
+2. **Check port configuration** - CI uses 8787 (Wrangler), local uses 5173 (Vite)
+3. **Ensure server starts before tests** - use curl polling in CI workflow
+4. **Test variable names match** - declarations and template usage must align
+5. **Run against Cloudflare Workers env** - tests real deployment environment
+6. **Use real database connections** - E2E tests use ephemeral branches
+7. **Monitor server startup logs** - catch configuration issues early
+
+### Critical Turborepo Pattern:
+
+**Environment variables MUST be declared explicitly in turbo.json for each task that needs them.**
+
+Without explicit declaration, Turborepo's caching mechanism will not pass environment variables to the task process, causing mysterious failures where the variable appears set in CI logs but is undefined in the actual test.
 
 ## Common Patterns
 
@@ -417,9 +513,24 @@ it('should rollback on error', async () => {
 
 ## Changelog
 
-### 2025-11-17 - Initial neon-testing Implementation
-- Configured neon-testing with parent branch support
-- Added WebSocket configuration for Node.js
-- Fixed CORS issues with node environment
-- Added Turborepo environment variable passthrough
-- All database integration tests now passing in CI
+### 2025-11-17 - Complete Testing Infrastructure
+**Database Integration Tests**:
+- Configured neon-testing with parent branch support via `NEON_PARENT_BRANCH_ID`
+- Added WebSocket configuration (`neonConfig.webSocketConstructor = ws`) for Node.js
+- Fixed CORS issues with `@vitest-environment node` directive
+- Added Turborepo environment variable passthrough for `test` task
+- All 68+ database integration tests passing in CI (identity, content, worker-utils)
+
+**E2E Testing**:
+- Configured Playwright to use `PLAYWRIGHT_BASE_URL` for CI environment
+- Added Turborepo environment variable passthrough for `test:e2e` task
+- Fixed Wrangler dev server port mismatch (8787 in CI vs 5173 locally)
+- Fixed Svelte variable naming issues causing SSR errors
+- E2E tests now running against Cloudflare Workers with real database
+
+**Key Insights**:
+- Turborepo requires **explicit** env var declaration in `turbo.json` for caching
+- Without env passthrough, variables don't reach test processes (caused both DB and E2E failures)
+- neon-testing requires proper parent branch configuration to clone from migrated schema
+- E2E tests need separate port configuration from local dev environment
+- Complete CI pipeline now passing: static analysis → unit tests → integration tests → E2E tests
