@@ -110,15 +110,19 @@ export type Database = DatabaseWs;
 export function withNeonTestBranch() {
   // Lazy initialization - only create the fixture when actually called
   // This ensures environment variables are loaded by vitest.setup.ts first
-  if (process.env.CI === 'true') {
+  if (
+    process.env.CI === 'true' &&
+    process.env.NEON_API_KEY &&
+    process.env.NEON_PROJECT_ID
+  ) {
     const config: {
       apiKey: string;
       projectId: string;
       autoCloseWebSockets: boolean;
       parentBranchId?: string;
     } = {
-      apiKey: process.env.NEON_API_KEY!,
-      projectId: process.env.NEON_PROJECT_ID!,
+      apiKey: process.env.NEON_API_KEY,
+      projectId: process.env.NEON_PROJECT_ID,
       autoCloseWebSockets: true,
     };
 
@@ -135,6 +139,8 @@ export function withNeonTestBranch() {
 
     const fixture = makeNeonTesting(config);
     fixture();
+  } else {
+    console.error('invalid enviroment variables or enviroment');
   }
   // No-op in local development - use existing DATABASE_URL
 }

@@ -213,7 +213,7 @@ export function createHealthCheckHandler(
             checks.database = `error: ${result.message}`;
           }
         }
-      } catch (error) {
+      } catch (_error) {
         checks.database = 'error';
         isHealthy = false;
       }
@@ -230,7 +230,7 @@ export function createHealthCheckHandler(
             checks.kv = `error: ${result.message}`;
           }
         }
-      } catch (error) {
+      } catch (_error) {
         checks.kv = 'error';
         isHealthy = false;
       }

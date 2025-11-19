@@ -67,10 +67,14 @@ if (typeof globalThis.WebSocket === 'undefined') {
 export function withNeonTestBranch() {
   // Lazy initialization - only create the fixture when actually called
   // This ensures environment variables are loaded by vitest.setup.ts first
-  if (process.env.CI === 'true') {
+  if (
+    process.env.CI === 'true' &&
+    process.env.NEON_API_KEY &&
+    process.env.NEON_PROJECT_ID
+  ) {
     const fixture = makeNeonTesting({
-      apiKey: process.env.NEON_API_KEY!,
-      projectId: process.env.NEON_PROJECT_ID!,
+      apiKey: process.env.NEON_API_KEY,
+      projectId: process.env.NEON_PROJECT_ID,
       autoCloseWebSockets: true,
     });
     fixture();

@@ -7,7 +7,7 @@
 
 import { workerAuth } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import {
   createAuthMiddleware,
   createCorsMiddleware,
@@ -70,13 +70,15 @@ export interface HealthCheckOptions {
    * Should return { status: 'ok' } on success or { status: 'error', message: string } on failure
    */
   checkDatabase?: (
-    c: any
+    c: Context
   ) => Promise<{ status: 'ok' | 'error'; message?: string }>;
 
   /**
    * Optional KV connectivity check
    */
-  checkKV?: (c: any) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+  checkKV?: (
+    c: Context
+  ) => Promise<{ status: 'ok' | 'error'; message?: string }>;
 }
 
 /**
