@@ -202,7 +202,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept maximum length slug', () => {
         const input = {
           name: 'Test',
-          slug: 'a' + '-b'.repeat(126), // 255 chars
+          slug: `a${'-b'.repeat(126)}`, // 255 chars
         };
         const result = createOrganizationSchema.safeParse(input);
         expect(result.success).toBe(true);

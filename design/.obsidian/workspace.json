@@ -11,14 +11,10 @@
             "id": "f9e416ad637af1a8",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "roadmap/work-packets/P1-CONTENT-001-content-service.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "P1-CONTENT-001-content-service"
+              "title": "New tab"
             }
           }
         ]
@@ -171,11 +167,21 @@
   },
   "active": "f9e416ad637af1a8",
   "lastOpenFiles": [
-    "features/auth/pdr-phase-1.md",
+    "code-review/pr-36/validation-review.md",
+    "code-review/pr-36/test-coverage-review.md",
+    "code-review/pr-36/service-layer-review.md",
+    "code-review/pr-36/security-review.md",
+    "code-review/pr-36/integration-deployment-review.md",
+    "code-review/pr-36/database-schema-review.md",
+    "code-review/pr-36/api-endpoint-review.md",
+    "code-review/pr-36",
+    "code-review",
     "roadmap/work-packets/README.md",
     "roadmap/work-packets/ARCHITECTURE-CHANGELOG.md",
-    "roadmap/work-packets/P1-CONTENT-001-content-service.md.tmp.13416.1763231850245",
     "SECURITY_POLICY_USAGE.md",
+    "roadmap/work-packets/P1-CONTENT-001-content-service.md",
+    "features/auth/pdr-phase-1.md",
+    "roadmap/work-packets/P1-CONTENT-001-content-service.md.tmp.13416.1763231850245",
     "features/auth/PHASE_1_AUTH_DESIGN.md",
     "PHASE_1_AUTH_DESIGN.md",
     "DOCUMENTATION_INDEX.md",
@@ -188,11 +194,6 @@
     "documentation-index.md",
     "infrastructure/R2BucketStructure.md",
     "infrastructure/SECURITY.md",
-    "infrastructure/README.md",
-    "infrastructure/Testing.md",
-    "infrastructure/KV-Namespaces.md",
-    "README_DOCUMENTATION.md",
-    "infrastructure/Database-Integration-Tests.md",
-    "infrastructure/CLOUDFLARE-SETUP.md"
+    "infrastructure/README.md"
   ]
 }
