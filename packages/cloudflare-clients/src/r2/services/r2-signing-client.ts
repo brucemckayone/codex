@@ -17,12 +17,8 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-export interface R2SigningConfig {
-  accountId: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  bucketName: string;
-}
+// Import from r2-service (exported via index.ts)
+import type { R2SigningConfig } from './r2-service';
 
 export class R2SigningClient {
   private s3Client: S3Client;
