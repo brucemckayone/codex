@@ -14,6 +14,7 @@ import {
   createErrorHandler,
   createErrorResponse,
   createHealthCheckHandler,
+  createKvCheck,
   createNotFoundHandler,
   createRequestTrackingMiddleware,
   ERROR_CODES,
@@ -90,10 +91,7 @@ const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
 app.get(
   '/health',
   createHealthCheckHandler('auth-worker', '1.0.0', {
-    checkKV: createKvCheck([
-      { name: 'AUTH_SESSION_KV', kv: c.env.AUTH_SESSION_KV },
-      { name: 'RATE_LIMIT_KV', kv: c.env.RATE_LIMIT_KV },
-    ]),
+    checkKV: createKvCheck(['AUTH_SESSION_KV', 'RATE_LIMIT_KV']),
     checkDatabase: async (_c: Context) => {
       const isConnected = await testDbConnection();
       return {

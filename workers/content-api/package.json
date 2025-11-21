@@ -18,6 +18,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@codex/access": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/security": "workspace:*",

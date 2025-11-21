@@ -39,6 +39,31 @@ export type Bindings = {
    * Rate limiting KV namespace
    */
   RATE_LIMIT_KV?: import('@cloudflare/workers-types').KVNamespace;
+
+  /**
+   * R2 bucket binding for media storage
+   */
+  MEDIA_BUCKET?: import('@cloudflare/workers-types').R2Bucket;
+
+  /**
+   * Cloudflare Account ID for R2 endpoint
+   */
+  R2_ACCOUNT_ID?: string;
+
+  /**
+   * R2 API token Access Key ID
+   */
+  R2_ACCESS_KEY_ID?: string;
+
+  /**
+   * R2 API token Secret Access Key
+   */
+  R2_SECRET_ACCESS_KEY?: string;
+
+  /**
+   * R2 bucket name for media storage
+   */
+  R2_BUCKET_MEDIA?: string;
 };
 
 /**

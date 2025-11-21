@@ -433,20 +433,23 @@ export class ContentAccessService {
 
 /**
  * Environment configuration for ContentAccessService
+ *
+ * This type uses Partial to align with the shared Bindings type,
+ * but the factory function validates all required fields are present.
  */
 export interface ContentAccessEnv {
   /** R2 bucket binding from Cloudflare Workers */
-  MEDIA_BUCKET: R2Bucket;
+  MEDIA_BUCKET?: R2Bucket;
   /** Environment name (development, staging, production) */
-  ENVIRONMENT: string;
+  ENVIRONMENT?: string;
   /** Cloudflare Account ID for R2 endpoint */
-  R2_ACCOUNT_ID: string;
+  R2_ACCOUNT_ID?: string;
   /** R2 API token Access Key ID */
-  R2_ACCESS_KEY_ID: string;
+  R2_ACCESS_KEY_ID?: string;
   /** R2 API token Secret Access Key */
-  R2_SECRET_ACCESS_KEY: string;
+  R2_SECRET_ACCESS_KEY?: string;
   /** R2 bucket name for media (e.g., codex-media-production) */
-  R2_BUCKET_MEDIA: string;
+  R2_BUCKET_MEDIA?: string;
 }
 
 /**
@@ -454,13 +457,32 @@ export interface ContentAccessEnv {
  *
  * Used in API endpoints to create service instance with environment config.
  * Requires R2 signing credentials for presigned URL generation.
+ *
+ * @throws Error if required environment variables are missing
  */
 export function createContentAccessService(
   env: ContentAccessEnv
 ): ContentAccessService {
+  // Validate required environment variables
+  if (!env.MEDIA_BUCKET) {
+    throw new Error('MEDIA_BUCKET binding is required');
+  }
+  if (!env.R2_ACCOUNT_ID) {
+    throw new Error('R2_ACCOUNT_ID environment variable is required');
+  }
+  if (!env.R2_ACCESS_KEY_ID) {
+    throw new Error('R2_ACCESS_KEY_ID environment variable is required');
+  }
+  if (!env.R2_SECRET_ACCESS_KEY) {
+    throw new Error('R2_SECRET_ACCESS_KEY environment variable is required');
+  }
+  if (!env.R2_BUCKET_MEDIA) {
+    throw new Error('R2_BUCKET_MEDIA environment variable is required');
+  }
+
   const obs = new ObservabilityClient(
     'content-access-service',
-    env.ENVIRONMENT
+    env.ENVIRONMENT ?? 'development'
   );
 
   const signingConfig: R2SigningConfig = {
