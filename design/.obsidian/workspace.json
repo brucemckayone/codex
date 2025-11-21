@@ -168,6 +168,13 @@
   },
   "active": "f9e416ad637af1a8",
   "lastOpenFiles": [
+    "code-review/pr-44-test-coverage-review.md",
+    "code-review/pr-44-integration-review.md",
+    "code-review/pr-44-security-review.md",
+    "code-review/pr-44-service-layer-review.md",
+    "code-review/pr-44-api-endpoints-review.md",
+    "code-review/pr-44-validation-review.md",
+    "code-review/pr-44-database-review.md",
     "Excalidraw/Drawing 2025-11-19 21.29.19.excalidraw.md",
     "Excalidraw",
     "infrastructure/R2BucketStructure.md",
@@ -190,12 +197,6 @@
     "PHASE_1_AUTH_DESIGN.md",
     "DOCUMENTATION_INDEX.md",
     "DEVELOPER_GUIDE.md",
-    "CODEBASE_ANALYSIS.md",
-    "ARCHITECTURE.md",
-    "QUICK_REFERENCE.md",
-    "QUICK_START.md",
-    "START_HERE.md",
-    "documentation-index.md",
-    "infrastructure/SECURITY.md"
+    "CODEBASE_ANALYSIS.md"
   ]
 }
