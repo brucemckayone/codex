@@ -12,6 +12,7 @@ export default defineConfig({
     // Package projects use custom config file naming (vitest.PACKAGENAME.config.ts)
     projects: [
       'apps/web',
+      'packages/access/vitest.config.access.ts',
       'packages/database/vitest.config.database.ts',
       'packages/validation/vitest.config.validation.ts',
       'packages/cloudflare-clients/vitest.config.cloudflare-clients.ts',

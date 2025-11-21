@@ -12,7 +12,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { users } from './auth';
+import { users } from './users';
 
 /**
  * Organizations table
@@ -65,7 +65,7 @@ export const mediaItems = pgTable(
     status: varchar('status', { length: 50 }).default('uploading').notNull(),
     // 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed'
 
-    // R2 Storage (in creator's bucket: codex-media-{creator_id})
+    // R2 Storage (in creator's bucket: codex-media-{creator_id}) // TODO: double check this is correct becuase it should be that we are 4 buckets and each has its own creator id subfolder within
     r2Key: varchar('r2_key', { length: 500 }).notNull(), // "originals/{media_id}/video.mp4"
     fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
     mimeType: varchar('mime_type', { length: 100 }),

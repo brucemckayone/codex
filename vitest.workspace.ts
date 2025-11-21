@@ -7,6 +7,7 @@ export default defineConfig({
       'apps/web',
 
       // Packages
+      'packages/access/vitest.config.access.ts',
       'packages/database/vitest.config.database.ts',
       'packages/validation/vitest.config.validation.ts',
       'packages/cloudflare-clients/vitest.config.cloudflare-clients.ts',

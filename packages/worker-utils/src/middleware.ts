@@ -193,28 +193,32 @@ export function createHealthCheckHandler(
     /**
      * Optional KV connectivity check
      */
-    checkKV?: (
-      c: Context
-    ) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+    checkKV?: (c: Context) => Promise<{
+      status: 'ok' | 'error';
+      message?: string;
+      details?: unknown;
+    }>;
   }
 ) {
   return async (c: Context) => {
-    const checks: Record<string, string> = {};
+    const checks: Record<
+      string,
+      { status: 'ok' | 'error'; message?: string; details?: unknown }
+    > = {};
     let isHealthy = true;
 
     // Run database check if provided
     if (options?.checkDatabase) {
       try {
         const result = await options.checkDatabase(c);
-        checks.database = result.status;
+        checks.database = { status: result.status };
         if (result.status === 'error') {
           isHealthy = false;
-          if (result.message) {
-            checks.database = `error: ${result.message}`;
-          }
+          checks.database.message = result.message;
         }
-      } catch (_error) {
-        checks.database = 'error';
+      } catch (error) {
+        const e = error as Error;
+        checks.database = { status: 'error', message: e.message };
         isHealthy = false;
       }
     }
@@ -223,15 +227,14 @@ export function createHealthCheckHandler(
     if (options?.checkKV) {
       try {
         const result = await options.checkKV(c);
-        checks.kv = result.status;
+        checks.kv = { status: result.status, details: result.details };
         if (result.status === 'error') {
           isHealthy = false;
-          if (result.message) {
-            checks.kv = `error: ${result.message}`;
-          }
+          checks.kv.message = result.message;
         }
-      } catch (_error) {
-        checks.kv = 'error';
+      } catch (error) {
+        const e = error as Error;
+        checks.kv = { status: 'error', message: e.message };
         isHealthy = false;
       }
     }
@@ -241,10 +244,78 @@ export function createHealthCheckHandler(
       service: serviceName,
       version,
       timestamp: new Date().toISOString(),
-      ...(Object.keys(checks).length > 0 && { checks }),
+      checks,
     };
 
     return c.json(response, isHealthy ? 200 : 503);
+  };
+}
+
+/**
+ * Creates a reusable KV health check handler.
+ *
+ * @param bindings - An array of objects with the name and binding of the KV namespaces to check.
+ * @returns An async function that performs the health check for the specified KV namespaces.
+ *
+ * @example
+ * ```typescript
+ * createKvCheck([
+ *   { name: 'SESSIONS_KV', kv: c.env.SESSIONS_KV },
+ *   { name: 'RATE_LIMIT_KV', kv: c.env.RATE_LIMIT_KV },
+ * ])
+ * ```
+ */
+export function createKvCheck(bindingNames: string[]): (
+  c: Context<HonoEnv>
+) => Promise<{
+  status: 'ok' | 'error';
+  message: string;
+  details?: unknown;
+}> {
+  return async (c: Context<HonoEnv>) => {
+    const bindings = bindingNames.map((name) => ({
+      name,
+      kv: (c.env as Record<string, KVNamespace | undefined>)[name],
+    }));
+
+    const results = await Promise.all(
+      bindings.map(async ({ name, kv }) => {
+        if (!kv) {
+          return {
+            name,
+            status: 'error',
+            message: `KV namespace '${name}' is not bound.`,
+          };
+        }
+        try {
+          await kv.list({ limit: 1 });
+          return { name, status: 'ok', message: `'${name}' is accessible.` };
+        } catch (e) {
+          const error = e instanceof Error ? e.message : 'Unknown error';
+          console.error(`Health check for KV '${name}' failed: ${error}`);
+          return {
+            name,
+            status: 'error',
+            message: `Failed to access KV namespace '${name}'.`,
+          };
+        }
+      })
+    );
+
+    const failed = results.filter((res) => res.status === 'error');
+
+    if (failed.length > 0) {
+      return {
+        status: 'error' as const,
+        message: 'One or more KV namespaces are unhealthy.',
+        details: failed,
+      };
+    }
+
+    return {
+      status: 'ok' as const,
+      message: 'All KV namespaces are healthy.',
+    };
   };
 }
 

@@ -49,7 +49,7 @@
             "state": {
               "type": "search",
               "state": {
-                "query": "",
+                "query": "r2bucketstruc",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
@@ -162,11 +162,15 @@
       "canvas:Create new canvas": false,
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
-      "command-palette:Open command palette": false
+      "command-palette:Open command palette": false,
+      "obsidian-excalidraw-plugin:New drawing": false
     }
   },
   "active": "f9e416ad637af1a8",
   "lastOpenFiles": [
+    "Excalidraw/Drawing 2025-11-19 21.29.19.excalidraw.md",
+    "Excalidraw",
+    "infrastructure/R2BucketStructure.md",
     "code-review/pr-36/validation-review.md",
     "code-review/pr-36/test-coverage-review.md",
     "code-review/pr-36/service-layer-review.md",
@@ -192,8 +196,6 @@
     "QUICK_START.md",
     "START_HERE.md",
     "documentation-index.md",
-    "infrastructure/R2BucketStructure.md",
-    "infrastructure/SECURITY.md",
-    "infrastructure/README.md"
+    "infrastructure/SECURITY.md"
   ]
 }

@@ -22,6 +22,25 @@
     }
   ],
 
+  "r2_buckets": [
+    {
+      "binding": "R2_ASSETS",
+      "bucket_name": "codex-assets-production"
+    },
+    {
+      "binding": "R2_MEDIA",
+      "bucket_name": "codex-media-production"
+    },
+    {
+      "binding": "R2_PLATFORM",
+      "bucket_name": "codex-platform-production"
+    },
+    {
+      "binding": "R2_RESOURCES",
+      "bucket_name": "codex-resources-production"
+    }
+  ],
+
   // Environment configurations
   "env": {
     // Production environment

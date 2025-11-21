@@ -173,10 +173,62 @@ importers:
         specifier: ^4.0.2
         version: 4.0.9(@types/node@22.13.0)(@vitest/ui@4.0.9)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/access:
+    dependencies:
+      '@codex/cloudflare-clients':
+        specifier: workspace:*
+        version: link:../cloudflare-clients
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../database
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../service-errors
+      '@codex/validation':
+        specifier: workspace:*
+        version: link:../validation
+      drizzle-orm:
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251113.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/better-sqlite3@7.6.13)(@types/pg@8.11.6)(better-sqlite3@12.4.1)(kysely@0.28.8)(mysql2@3.15.3)(prisma@5.22.0)
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20241127.0
+        version: 4.20251113.0
+      '@codex/content':
+        specifier: workspace:*
+        version: link:../content
+      '@codex/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.13.0
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
+      neon-testing:
+        specifier: ^2.2.0
+        version: 2.2.0(vite@7.2.2(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.9)
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.2.2
+        version: 7.2.2(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-dts:
+        specifier: ^4.5.4
+        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.2)(typescript@5.9.3)(vite@7.2.2(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+      vitest:
+        specifier: ^4.0.2
+        version: 4.0.9(@types/node@22.13.0)(@vitest/ui@4.0.9)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
+
   packages/cloudflare-clients:
     dependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.914.0
+        specifier: ^3.931.0
         version: 3.931.0
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.914.0

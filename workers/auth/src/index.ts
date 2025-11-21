@@ -8,6 +8,7 @@
  * requires direct handler delegation. Request tracking is integrated.
  */
 
+import { testDbConnection } from '@codex/database';
 import { securityHeaders } from '@codex/security';
 import {
   createErrorHandler,
@@ -86,7 +87,24 @@ const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
  * Health check endpoint
  * Must be registered before the catch-all auth handler
  */
-app.get('/health', createHealthCheckHandler('auth-worker', '1.0.0'));
+app.get(
+  '/health',
+  createHealthCheckHandler('auth-worker', '1.0.0', {
+    checkKV: createKvCheck([
+      { name: 'AUTH_SESSION_KV', kv: c.env.AUTH_SESSION_KV },
+      { name: 'RATE_LIMIT_KV', kv: c.env.RATE_LIMIT_KV },
+    ]),
+    checkDatabase: async (_c: Context) => {
+      const isConnected = await testDbConnection();
+      return {
+        status: isConnected ? 'ok' : 'error',
+        message: isConnected
+          ? 'Database connection is healthy.'
+          : 'Database connection failed.',
+      };
+    },
+  })
+);
 
 /**
  * Security headers middleware wrapper

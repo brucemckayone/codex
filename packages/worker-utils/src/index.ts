@@ -12,6 +12,7 @@ export {
   createErrorHandler,
   createErrorResponse,
   createHealthCheckHandler,
+  createKvCheck,
   createLoggerMiddleware,
   createNotFoundHandler,
   createObservabilityErrorHandler,

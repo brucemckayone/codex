@@ -45,6 +45,8 @@
       "**/apps/**/*.{ts,js,svelte,json}",
       "**/config/**/*.{ts,js,json}",
       "**/*.{ts,js,json}",
+      "!**/.obsidian",
+      "!**/.obsidian",
       "!**/node_modules",
       "!**/dist",
       "!**/.wrangler",

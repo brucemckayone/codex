@@ -2,6 +2,7 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "files": [],
   "references": [
+    { "path": "./packages/access" },
     { "path": "./packages/database" },
     { "path": "./packages/validation" },
     { "path": "./packages/observability" },
@@ -23,6 +24,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM"],
+    "types": ["@cloudflare/vitest-pool-workers"],
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -33,6 +35,8 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
+      "@codex/access": ["packages/access/src/index.ts"],
+      "@codex/access/*": ["packages/access/src/*"],
       "@codex/database": ["packages/database/src/index.ts"],
       "@codex/database/*": ["packages/database/src/*"],
       "@codex/validation": ["packages/validation/src/index.ts"],

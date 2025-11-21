@@ -2,8 +2,10 @@
 // Exports all Zod schemas for use across the application
 
 // Content management schemas
-export * from './content-schemas';
+export * from './content/content-schemas';
+// User schemas
+export * from './identity/user-schema';
 // Primitive validation schemas (reusable)
 export * from './primitives';
-// User schemas
-export * from './user-schema';
+// Access schemas
+export * from './schemas/access';

@@ -13,7 +13,7 @@ import {
   organizationQuerySchema,
   organizationStatusEnum,
   updateOrganizationSchema,
-} from '../content-schemas';
+} from '../content/content-schemas';
 
 describe('Organization Validation Schemas', () => {
   describe('createOrganizationSchema', () => {
@@ -155,7 +155,7 @@ describe('Organization Validation Schemas', () => {
             name: 'Test',
             slug,
           });
-          expect(result.success).toBe(true, `Slug "${slug}" should be valid`);
+          expect(result.success).toBe(true);
         }
       });
 
@@ -175,10 +175,7 @@ describe('Organization Validation Schemas', () => {
             name: 'Test',
             slug,
           });
-          expect(result.success).toBe(
-            false,
-            `Slug "${slug}" should be invalid`
-          );
+          expect(result.success).toBe(false);
         }
       });
 
@@ -295,7 +292,7 @@ describe('Organization Validation Schemas', () => {
             logoUrl: url,
             websiteUrl: url,
           });
-          expect(result.success).toBe(true, `URL "${url}" should be valid`);
+          expect(result.success).toBe(true);
         }
       });
 
@@ -324,7 +321,7 @@ describe('Organization Validation Schemas', () => {
             slug: 'test',
             websiteUrl: url,
           });
-          expect(result.success).toBe(false, `URL "${url}" should be invalid`);
+          expect(result.success).toBe(false);
         }
       });
 
@@ -392,10 +389,7 @@ describe('Organization Validation Schemas', () => {
 
       for (const update of updates) {
         const result = updateOrganizationSchema.safeParse(update);
-        expect(result.success).toBe(
-          true,
-          `Update ${JSON.stringify(update)} should be valid`
-        );
+        expect(result.success).toBe(true);
       }
     });
 
@@ -415,10 +409,7 @@ describe('Organization Validation Schemas', () => {
 
       for (const update of invalidUpdates) {
         const result = updateOrganizationSchema.safeParse(update);
-        expect(result.success).toBe(
-          false,
-          `Update ${JSON.stringify(update)} should be invalid`
-        );
+        expect(result.success).toBe(false);
       }
     });
 
@@ -500,7 +491,7 @@ describe('Organization Validation Schemas', () => {
 
       for (const sortBy of validSortBy) {
         const result = organizationQuerySchema.safeParse({ sortBy });
-        expect(result.success).toBe(true, `sortBy "${sortBy}" should be valid`);
+        expect(result.success).toBe(true);
       }
     });
 
@@ -516,10 +507,7 @@ describe('Organization Validation Schemas', () => {
 
       for (const sortOrder of validSortOrder) {
         const result = organizationQuerySchema.safeParse({ sortOrder });
-        expect(result.success).toBe(
-          true,
-          `sortOrder "${sortOrder}" should be valid`
-        );
+        expect(result.success).toBe(true);
       }
     });
 
@@ -577,7 +565,7 @@ describe('Organization Validation Schemas', () => {
 
       for (const status of validStatuses) {
         const result = organizationStatusEnum.safeParse(status);
-        expect(result.success).toBe(true, `Status "${status}" should be valid`);
+        expect(result.success).toBe(true);
       }
     });
 
@@ -593,10 +581,7 @@ describe('Organization Validation Schemas', () => {
 
       for (const status of invalidStatuses) {
         const result = organizationStatusEnum.safeParse(status);
-        expect(result.success).toBe(
-          false,
-          `Status "${status}" should be invalid`
-        );
+        expect(result.success).toBe(false);
       }
     });
 

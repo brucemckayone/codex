@@ -1,0 +1,56 @@
+{
+  "name": "@codex/access",
+  "version": "1.0.0",
+  "description": "Access control and permissions service for Codex platform",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./services": {
+      "types": "./dist/services/index.d.ts",
+      "default": "./dist/services/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.access.ts",
+    "dev": "vite build --config vite.config.access.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.access.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@codex/database": "workspace:*",
+    "@codex/observability": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "@codex/cloudflare-clients": "workspace:*",
+    "drizzle-orm": "0.44.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "@codex/content": "workspace:*",
+    "@codex/test-utils": "workspace:*",
+    "@types/node": "^22.0.0",
+    "dotenv": "^17.2.3",
+    "neon-testing": "^2.2.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.2.2",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^4.0.2"
+  }
+}
