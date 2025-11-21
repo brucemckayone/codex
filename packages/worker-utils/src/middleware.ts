@@ -4,6 +4,7 @@
  * Creates standard middleware for Cloudflare Workers using Hono.
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
 import { createRequestTimer, ObservabilityClient } from '@codex/observability';
 import {
   type CSP_PRESETS,
