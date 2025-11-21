@@ -34,7 +34,7 @@ export class R2Service {
   constructor(
     private bucket: R2Bucket,
     private opts: R2Opts = {},
-    private signingConfig?: R2SigningConfig
+    signingConfig?: R2SigningConfig
   ) {
     this.opts.maxRetries = this.opts.maxRetries ?? 3;
     this.opts.baseDelayMs = this.opts.baseDelayMs ?? 100;
