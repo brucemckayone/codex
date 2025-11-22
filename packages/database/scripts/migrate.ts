@@ -70,6 +70,7 @@ const main = async () => {
 
     // Test connection with retry logic
     try {
+      // biome-ignore lint/style/noNonNullAssertion: pool is guaranteed to exist here
       await retryWithBackoff(() => pool!.query('SELECT 1'), 3, 1000);
       console.log('✓ Database connection established\n');
     } catch (connError) {
@@ -109,7 +110,7 @@ const main = async () => {
     if (pool) {
       try {
         await pool.end();
-      } catch (closeError) {
+      } catch (_closeError) {
         // Ignore close errors during error handling
       }
     }

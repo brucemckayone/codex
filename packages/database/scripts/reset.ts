@@ -58,7 +58,7 @@ const main = async () => {
         [dbName]
       );
       console.log('✓ Active connections terminated\n');
-    } catch (error) {
+    } catch (_error) {
       console.warn(
         '⚠ Warning: Could not terminate connections (continuing anyway)\n'
       );
@@ -79,14 +79,14 @@ const main = async () => {
             `DROP SCHEMA IF EXISTS "${schema.schema_name}" CASCADE`
           );
           console.log(`  ✓ Dropped schema: ${schema.schema_name}`);
-        } catch (dropError) {
+        } catch (_dropError) {
           console.warn(
             `  ⚠ Could not drop schema ${schema.schema_name} (continuing)`
           );
         }
       }
       console.log('');
-    } catch (error) {
+    } catch (_error) {
       console.warn('⚠ Warning: Could not drop schemas (continuing anyway)\n');
     }
 
@@ -153,7 +153,7 @@ const main = async () => {
     if (pool) {
       try {
         await pool.end();
-      } catch (closeError) {
+      } catch (_closeError) {
         // Ignore close errors
       }
     }

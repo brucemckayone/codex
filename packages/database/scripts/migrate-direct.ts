@@ -133,7 +133,7 @@ const main = async () => {
     if (client) {
       try {
         await client.end();
-      } catch (closeError) {
+      } catch (_closeError) {
         // Ignore close errors during error handling
       }
     }

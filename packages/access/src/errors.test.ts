@@ -172,3 +172,156 @@ describe('AccessDeniedError', () => {
     });
   });
 });
+
+describe('ContentNotFoundError', () => {
+  it('should create error with correct code in context', () => {
+    const error = new ContentNotFoundError('content-123');
+    expect(error.context).toHaveProperty('code', 'CONTENT_NOT_FOUND');
+  });
+
+  it('should have correct message', () => {
+    const error = new ContentNotFoundError('content-123');
+    expect(error.message).toBe('Content not found or not accessible');
+  });
+
+  it('should include contentId in context', () => {
+    const error = new ContentNotFoundError('content-123');
+    expect(error.context).toHaveProperty('contentId', 'content-123');
+  });
+
+  it('should be throwable and catchable', () => {
+    expect(() => {
+      throw new ContentNotFoundError('content-123');
+    }).toThrow('Content not found or not accessible');
+  });
+});
+
+describe('R2SigningError', () => {
+  it('should create error with correct code in context', () => {
+    const error = new R2SigningError(
+      'path/to/file.pdf',
+      new Error('Sign failed')
+    );
+    expect(error.context).toHaveProperty('code', 'R2_SIGNING_ERROR');
+  });
+
+  it('should have correct message', () => {
+    const error = new R2SigningError(
+      'path/to/file.pdf',
+      new Error('Sign failed')
+    );
+    expect(error.message).toBe('Failed to generate R2 signed URL');
+  });
+
+  it('should include r2Key in context', () => {
+    const error = new R2SigningError(
+      'path/to/file.pdf',
+      new Error('Sign failed')
+    );
+    expect(error.context).toHaveProperty('r2Key', 'path/to/file.pdf');
+  });
+});
+
+describe('MediaNotFoundError', () => {
+  it('should create error with correct code in context', () => {
+    const error = new MediaNotFoundError('r2-key-123', 'content-123');
+    expect(error.context).toHaveProperty('code', 'MEDIA_NOT_FOUND');
+  });
+
+  it('should have correct message', () => {
+    const error = new MediaNotFoundError('r2-key-123', 'content-123');
+    expect(error.message).toBe('Media file not found in storage');
+  });
+
+  it('should include r2Key and contentId in context', () => {
+    const error = new MediaNotFoundError('r2-key-123', 'content-123');
+    expect(error.context).toMatchObject({
+      r2Key: 'r2-key-123',
+      contentId: 'content-123',
+      code: 'MEDIA_NOT_FOUND',
+    });
+  });
+});
+
+describe('InvalidContentTypeError', () => {
+  it('should create error with correct code in context', () => {
+    const error = new InvalidContentTypeError('content-123', 'audio/mp3');
+    expect(error.context).toHaveProperty('code', 'INVALID_CONTENT_TYPE');
+  });
+
+  it('should have correct message', () => {
+    const error = new InvalidContentTypeError('content-123', 'audio/mp3');
+    expect(error.message).toBe('Invalid media type for streaming');
+  });
+
+  it('should include contentId and mediaType in context', () => {
+    const error = new InvalidContentTypeError('content-123', 'audio/mp3');
+    expect(error.context).toMatchObject({
+      contentId: 'content-123',
+      mediaType: 'audio/mp3',
+      code: 'INVALID_CONTENT_TYPE',
+    });
+  });
+
+  it('should handle null mediaType', () => {
+    const error = new InvalidContentTypeError('content-123', null);
+    expect(error.context).toMatchObject({
+      contentId: 'content-123',
+      mediaType: null,
+      code: 'INVALID_CONTENT_TYPE',
+    });
+  });
+});
+
+describe('OrganizationMismatchError', () => {
+  it('should create error with correct code', () => {
+    const error = new OrganizationMismatchError(
+      'content-123',
+      'org-456',
+      'org-789'
+    );
+    expect(error.code).toBe('ORGANIZATION_MISMATCH');
+  });
+
+  it('should have correct message', () => {
+    const error = new OrganizationMismatchError(
+      'content-123',
+      'org-456',
+      'org-789'
+    );
+    expect(error.message).toBe(
+      'Content does not belong to the specified organization'
+    );
+  });
+
+  it('should have 403 status code', () => {
+    const error = new OrganizationMismatchError(
+      'content-123',
+      'org-456',
+      'org-789'
+    );
+    expect(error.statusCode).toBe(403);
+  });
+
+  it('should include organization IDs in context', () => {
+    const error = new OrganizationMismatchError(
+      'content-123',
+      'org-456',
+      'org-789'
+    );
+    expect(error.context).toMatchObject({
+      contentId: 'content-123',
+      expectedOrganizationId: 'org-456',
+      actualOrganizationId: 'org-789',
+    });
+  });
+
+  it('should handle null actualOrganizationId', () => {
+    const error = new OrganizationMismatchError('content-123', 'org-456', null);
+    expect(error.context).toMatchObject({
+      contentId: 'content-123',
+      expectedOrganizationId: 'org-456',
+      actualOrganizationId: null,
+    });
+  });
+});
