@@ -4,7 +4,7 @@
  * Creates standard middleware for Cloudflare Workers using Hono.
  */
 
-import type { KVNamespace } from '@cloudflare/workers-types';
+import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { createRequestTimer, ObservabilityClient } from '@codex/observability';
 import {
   type CSP_PRESETS,
@@ -74,7 +74,7 @@ export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
       const exactMatchOrigins = [
         c.env?.WEB_APP_URL,
         c.env?.API_URL,
-        'http://localhost:3000',
+        'http://localhost:3000', ///TODO: lets verify these are the real ports we are supposed to be authorizing against
         'http://localhost:5173',
         'http://localhost:8787',
         'http://localhost:8788',
@@ -199,6 +199,14 @@ export function createHealthCheckHandler(
       message?: string;
       details?: unknown;
     }>;
+    /**
+     * Optional R2 bucket connectivity check
+     */
+    checkR2?: (c: Context) => Promise<{
+      status: 'ok' | 'error';
+      message?: string;
+      details?: unknown;
+    }>;
   }
 ) {
   return async (c: Context) => {
@@ -236,6 +244,22 @@ export function createHealthCheckHandler(
       } catch (error) {
         const e = error as Error;
         checks.kv = { status: 'error', message: e.message };
+        isHealthy = false;
+      }
+    }
+
+    // Run R2 check if provided
+    if (options?.checkR2) {
+      try {
+        const result = await options.checkR2(c);
+        checks.r2 = { status: result.status, details: result.details };
+        if (result.status === 'error') {
+          isHealthy = false;
+          checks.r2.message = result.message;
+        }
+      } catch (error) {
+        const e = error as Error;
+        checks.r2 = { status: 'error', message: e.message };
         isHealthy = false;
       }
     }
@@ -316,6 +340,74 @@ export function createKvCheck(bindingNames: string[]): (
     return {
       status: 'ok' as const,
       message: 'All KV namespaces are healthy.',
+    };
+  };
+}
+
+/**
+ * Creates R2 bucket health check function
+ *
+ * @param bindingNames - Array of R2 bucket binding names to check
+ * @returns Health check function for use with createHealthCheckHandler
+ *
+ * @example
+ * ```typescript
+ * createR2Check(['MEDIA_BUCKET'])
+ * ```
+ */
+export function createR2Check(bindingNames: string[]): (
+  c: Context<HonoEnv>
+) => Promise<{
+  status: 'ok' | 'error';
+  message: string;
+  details?: unknown;
+}> {
+  return async (c: Context<HonoEnv>) => {
+    const bindings = bindingNames.map((name) => ({
+      name,
+      bucket: (c.env as Record<string, R2Bucket | undefined>)[name],
+    }));
+
+    const results = await Promise.all(
+      bindings.map(async ({ name, bucket }) => {
+        if (!bucket) {
+          return {
+            name,
+            status: 'error',
+            message: `R2 bucket '${name}' is not bound.`,
+          };
+        }
+        try {
+          // Simple health check - list with limit 1
+          await bucket.list({ limit: 1 });
+          return { name, status: 'ok', message: `'${name}' is accessible.` };
+        } catch (e) {
+          const error = e instanceof Error ? e.message : 'Unknown error';
+          console.error(
+            `Health check for R2 bucket '${name}' failed: ${error}`
+          );
+          return {
+            name,
+            status: 'error',
+            message: `Failed to access R2 bucket '${name}'.`,
+          };
+        }
+      })
+    );
+
+    const failed = results.filter((res) => res.status === 'error');
+
+    if (failed.length > 0) {
+      return {
+        status: 'error' as const,
+        message: 'One or more R2 buckets are unhealthy.',
+        details: failed,
+      };
+    }
+
+    return {
+      status: 'ok' as const,
+      message: 'All R2 buckets are healthy.',
     };
   };
 }

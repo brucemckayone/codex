@@ -50,6 +50,7 @@
     "db:studio": "pnpm --filter @codex/database db:studio",
     "db:local:gen": "pnpm --filter @codex/database db:generate",
     "db:local:migrate": "pnpm --filter @codex/database db:migrate",
+    "db:local:reset": "pnpm --filter @codex/database db:reset",
     "db:local:push": "pnpm --filter @codex/database db:push",
     "db:local:studio": "pnpm --filter @codex/database db:studio",
     "neon:create": "pnpm --filter @codex/database neon:create",

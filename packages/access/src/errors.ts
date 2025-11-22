@@ -1,7 +1,7 @@
 import {
-  ForbiddenError,
   InternalServiceError,
   NotFoundError,
+  ServiceError,
 } from '@codex/service-errors';
 
 /**
@@ -22,18 +22,33 @@ export class ContentNotFoundError extends NotFoundError {
  * Access denied error
  * Thrown when user doesn't have permission to access paid content
  */
-export class AccessDeniedError extends ForbiddenError {
+export class AccessDeniedError extends ServiceError {
   constructor(
-    userId: string,
-    contentId: string,
+    userIdOrMessage: string,
+    contentId?: string,
     context?: Record<string, unknown>
   ) {
-    super('User does not have access to this content', {
-      userId,
-      contentId,
-      code: 'ACCESS_DENIED',
-      ...context,
-    });
+    // Support both single-message and (userId, contentId) signatures
+    const isMessageOnly = contentId === undefined;
+    let message = isMessageOnly
+      ? userIdOrMessage
+      : 'User does not have access to this content';
+
+    // Allow message override via context
+    if (context?.message && typeof context.message === 'string') {
+      message = context.message;
+    }
+
+    const contextData = isMessageOnly
+      ? context || {}
+      : {
+          userId: userIdOrMessage,
+          contentId,
+          code: 'ACCESS_DENIED',
+          ...context,
+        };
+
+    super(message, 'ACCESS_DENIED', 403, contextData);
   }
 }
 
@@ -83,17 +98,21 @@ export class InvalidContentTypeError extends InternalServiceError {
  * Organization mismatch error
  * Thrown when content belongs to a different organization than expected
  */
-export class OrganizationMismatchError extends ForbiddenError {
+export class OrganizationMismatchError extends ServiceError {
   constructor(
     contentId: string,
     expectedOrgId: string,
     actualOrgId: string | null
   ) {
-    super('Content does not belong to the specified organization', {
-      contentId,
-      expectedOrganizationId: expectedOrgId,
-      actualOrganizationId: actualOrgId,
-      code: 'ORGANIZATION_MISMATCH',
-    });
+    super(
+      'Content does not belong to the specified organization',
+      'ORGANIZATION_MISMATCH',
+      403,
+      {
+        contentId,
+        expectedOrganizationId: expectedOrgId,
+        actualOrganizationId: actualOrgId,
+      }
+    );
   }
 }

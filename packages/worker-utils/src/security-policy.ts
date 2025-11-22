@@ -116,7 +116,7 @@ export const DEFAULT_SECURITY_POLICY: Required<RouteSecurityPolicy> = {
  */
 async function extractOrganizationFromSubdomain(
   hostname: string,
-  env: HonoEnv['Bindings']
+  env: HonoEnv['Bindings'] //TODO: we have an unused variable here does may not seem wuite right to be if soits a linting issue
 ): Promise<string | null> {
   // Parse subdomain from hostname
   // Examples:

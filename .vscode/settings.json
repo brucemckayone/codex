@@ -59,7 +59,7 @@
   ],
 
   "editor.fontFamily": "Operator Mono, Menlo, Monaco, 'Courier New', monospace",
-  "workbench.colorTheme": "Bearded Theme Light",
+  "workbench.colorTheme": "Cobalt2",
   "editor.fontSize": 17,
   "editor.lineHeight": 25,
   "editor.letterSpacing": 0.5,

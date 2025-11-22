@@ -5,11 +5,7 @@ import {
   listUserLibrarySchema,
   savePlaybackProgressSchema,
 } from '@codex/validation';
-import {
-  createAuthenticatedHandler,
-  POLICY_PRESETS,
-  withPolicy,
-} from '@codex/worker-utils';
+import { createAuthenticatedHandler, withPolicy } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono();

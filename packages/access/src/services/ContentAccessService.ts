@@ -17,7 +17,7 @@ import type {
   ListUserLibraryInput,
   SavePlaybackProgressInput,
 } from '@codex/validation';
-import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   AccessDeniedError,
   ContentNotFoundError,
@@ -237,10 +237,10 @@ export class ContentAccessService {
             const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
 
             // Step 4: Validate media type (defense-in-depth)
-            const allowedTypes = ['video', 'audio'] as const;
+
             const mediaType = contentRecord.mediaItem.mediaType;
 
-            if (!allowedTypes.includes(mediaType as any)) {
+            if (!['video', 'audio'].includes(mediaType)) {
               obs.error('Invalid media type', {
                 mediaType,
                 contentId: input.contentId,
@@ -394,6 +394,12 @@ export class ContentAccessService {
     userId: string,
     input: ListUserLibraryInput
   ): Promise<{
+    //TODO this return type expressed in this way is unacceptable. we should have this defined with zod.this should be true for every endpoint if its
+    // not true then we need to establsh
+    // a way of working with this. i am noticing that we are going to be interacting with out backend through a frontend rest api.
+    // this means that we are going to loos type information. iwe will have to define a wayb to deal with this perhaps a repository layer that has type
+    // infoamtinot attached to endpoint fetching and the seraialization etc
+    // happens automaticly as a result of the calling of the repository something like api.content.access.id.get.post etc.
     items: Array<{
       content: {
         id: string;

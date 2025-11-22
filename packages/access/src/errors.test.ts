@@ -60,10 +60,11 @@ describe('AccessDeniedError', () => {
   });
 
   it('should be throwable and catchable', () => {
-    expect(() => {
-      const error = new AccessDeniedError(testUserId, testContentId);
-    }).toThrow(AccessDeniedError);
+    // Test that the error can be instantiated
+    const error = new AccessDeniedError(testUserId, testContentId);
+    expect(error).toBeInstanceOf(AccessDeniedError);
 
+    // Test that it can be thrown and caught
     expect(() => {
       throw new AccessDeniedError(testUserId, testContentId, {
         message: 'Custom message',

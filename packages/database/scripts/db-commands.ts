@@ -71,6 +71,15 @@ try {
   console.log(`Executing: ${drizzleCommand}`);
   execSync(drizzleCommand, { stdio: 'inherit' });
 } catch (error) {
-  console.error(`Failed to run drizzle-kit ${command}:`, error);
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  console.error(`\n❌ Failed to run drizzle-kit ${command}:`);
+  console.error(errorMsg);
+
+  if (process.env.DB_METHOD === 'LOCAL_PROXY') {
+    console.error(
+      '\n💡 Tip: For LOCAL_PROXY environment, use `pnpm db:local:migrate` to apply migrations.'
+    );
+  }
+
   process.exit(1);
 }

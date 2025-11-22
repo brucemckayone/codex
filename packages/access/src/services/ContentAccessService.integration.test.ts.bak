@@ -22,11 +22,7 @@ import {
   type R2SigningClient,
 } from '@codex/cloudflare-clients';
 import { ContentService, MediaItemService } from '@codex/content';
-import {
-  contentAccess,
-  organizations,
-  purchases,
-} from '@codex/database/schema';
+import { contentAccess, organizations, purchases } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
 import {
   createUniqueSlug,
@@ -118,7 +114,6 @@ describe('ContentAccessService Integration', () => {
 
       const freeContent = await contentService.create(
         {
-          organizationId,
           title: 'Free Tutorial',
           slug: createUniqueSlug('free-tutorial'),
           contentType: 'video',
@@ -170,7 +165,6 @@ describe('ContentAccessService Integration', () => {
 
       const paidContent = await contentService.create(
         {
-          organizationId,
           title: 'Premium Course',
           slug: createUniqueSlug('premium-course'),
           contentType: 'video',
@@ -188,7 +182,6 @@ describe('ContentAccessService Integration', () => {
       await db.insert(contentAccess).values({
         userId: otherUserId,
         contentId: paidContent.id,
-        organizationId,
         accessType: 'purchased',
       });
 
@@ -227,7 +220,6 @@ describe('ContentAccessService Integration', () => {
 
       const exclusiveContent = await contentService.create(
         {
-          organizationId,
           title: 'Exclusive Content',
           slug: createUniqueSlug('exclusive'),
           contentType: 'video',
@@ -274,7 +266,6 @@ describe('ContentAccessService Integration', () => {
 
       const draftContent = await contentService.create(
         {
-          organizationId,
           title: 'Draft Content',
           slug: createUniqueSlug('draft'),
           contentType: 'video',
@@ -322,7 +313,6 @@ describe('ContentAccessService Integration', () => {
 
       const testContent = await contentService.create(
         {
-          organizationId,
           title: 'Progress Test',
           slug: createUniqueSlug('progress-test'),
           contentType: 'video',
@@ -379,7 +369,6 @@ describe('ContentAccessService Integration', () => {
 
       const testContent = await contentService.create(
         {
-          organizationId,
           title: 'Upsert Test',
           slug: createUniqueSlug('upsert-test'),
           contentType: 'video',
@@ -440,7 +429,6 @@ describe('ContentAccessService Integration', () => {
 
       const testContent = await contentService.create(
         {
-          organizationId,
           title: 'Completion Test',
           slug: createUniqueSlug('completion-test'),
           contentType: 'video',
@@ -495,7 +483,6 @@ describe('ContentAccessService Integration', () => {
 
       const testContent = await contentService.create(
         {
-          organizationId,
           title: 'No Progress',
           slug: createUniqueSlug('no-progress'),
           contentType: 'video',
@@ -559,7 +546,6 @@ describe('ContentAccessService Integration', () => {
 
       const libraryContent = await contentService.create(
         {
-          organizationId,
           title: 'Library Test Content',
           slug: createUniqueSlug('library-test'),
           contentType: 'video',
@@ -575,7 +561,6 @@ describe('ContentAccessService Integration', () => {
 
       // Simulate purchase by otherUser
       await db.insert(purchases).values({
-        organizationId,
         customerId: otherUserId,
         contentId: libraryContent.id,
         status: 'completed',
@@ -636,7 +621,6 @@ describe('ContentAccessService Integration', () => {
 
       const content1 = await contentService.create(
         {
-          organizationId,
           title: 'In Progress Content',
           slug: createUniqueSlug('in-progress'),
           contentType: 'video',
@@ -652,7 +636,6 @@ describe('ContentAccessService Integration', () => {
 
       // Purchase and add partial progress
       await db.insert(purchases).values({
-        organizationId,
         customerId: testUserId,
         contentId: content1.id,
         status: 'completed',
@@ -706,7 +689,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Exact 95% Boundary',
             slug: createUniqueSlug('exact-95'),
             contentType: 'video',
@@ -761,7 +743,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Below 95% Boundary',
             slug: createUniqueSlug('below-95'),
             contentType: 'video',
@@ -816,7 +797,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Zero Duration',
             slug: createUniqueSlug('zero-duration'),
             contentType: 'video',
@@ -871,7 +851,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Position Overflow',
             slug: createUniqueSlug('overflow'),
             contentType: 'video',
@@ -929,7 +908,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Long Duration Video',
             slug: createUniqueSlug('long-video'),
             contentType: 'video',
@@ -987,7 +965,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Special Characters',
             slug: createUniqueSlug('special-chars'),
             contentType: 'video',
@@ -1035,7 +1012,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Spaces in Key',
             slug: createUniqueSlug('spaces'),
             contentType: 'video',
@@ -1083,7 +1059,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Unicode in Key',
             slug: createUniqueSlug('unicode'),
             contentType: 'video',
@@ -1133,7 +1108,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'To Be Deleted',
             slug: createUniqueSlug('to-delete'),
             contentType: 'video',
@@ -1183,7 +1157,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Free Content',
             slug: createUniqueSlug('free'),
             contentType: 'video',
@@ -1230,7 +1203,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Very Expensive',
             slug: createUniqueSlug('expensive'),
             contentType: 'video',
@@ -1317,7 +1289,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Concurrent Saves',
             slug: createUniqueSlug('concurrent'),
             contentType: 'video',
@@ -1389,7 +1360,6 @@ describe('ContentAccessService Integration', () => {
 
         const testContent = await contentService.create(
           {
-            organizationId,
             title: 'Concurrent Stream Requests',
             slug: createUniqueSlug('concurrent-stream'),
             contentType: 'video',
