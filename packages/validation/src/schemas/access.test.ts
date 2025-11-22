@@ -31,15 +31,27 @@ describe('Content Access Validation Schemas', () => {
     it('should throw an error for expiry below the minimum', () => {
       const input = { contentId: validUUID, expirySeconds: 299 };
       expect(() => getStreamingUrlSchema.parse(input)).toThrow(
-        'Minimum expiry is 5 minutes (300 seconds)'
+        'Must be at least 5 minutes (300 seconds)'
       );
     });
 
     it('should throw an error for expiry above the maximum', () => {
-      const input = { contentId: validUUID, expirySeconds: 86401 };
+      const input = { contentId: validUUID, expirySeconds: 7201 };
       expect(() => getStreamingUrlSchema.parse(input)).toThrow(
-        'Maximum expiry is 24 hours (86400 seconds)'
+        'Must be 2 hours or less (7200 seconds)'
       );
+    });
+
+    it('should accept valid expiry at minimum boundary', () => {
+      const input = { contentId: validUUID, expirySeconds: 300 };
+      const result = getStreamingUrlSchema.parse(input);
+      expect(result.expirySeconds).toBe(300);
+    });
+
+    it('should accept valid expiry at maximum boundary', () => {
+      const input = { contentId: validUUID, expirySeconds: 7200 };
+      const result = getStreamingUrlSchema.parse(input);
+      expect(result.expirySeconds).toBe(7200);
     });
   });
 
@@ -73,6 +85,27 @@ describe('Content Access Validation Schemas', () => {
       };
       expect(() => savePlaybackProgressSchema.parse(input)).toThrow(
         'Must be 0 or greater'
+      );
+    });
+
+    it('should accept position of 0', () => {
+      const input = {
+        contentId: validUUID,
+        positionSeconds: 0,
+        durationSeconds: 600,
+      };
+      const result = savePlaybackProgressSchema.parse(input);
+      expect(result.positionSeconds).toBe(0);
+    });
+
+    it('should throw an error for duration less than 1', () => {
+      const input = {
+        contentId: validUUID,
+        positionSeconds: 0,
+        durationSeconds: 0,
+      };
+      expect(() => savePlaybackProgressSchema.parse(input)).toThrow(
+        'Must be greater than 0'
       );
     });
   });
@@ -121,6 +154,32 @@ describe('Content Access Validation Schemas', () => {
     it('should throw an error for invalid sortBy value', () => {
       const input = { sortBy: 'invalid-sort' };
       expect(() => listUserLibrarySchema.parse(input)).toThrow(ZodError);
+    });
+
+    it('should throw an error for page number above maximum', () => {
+      const input = { page: 1001 };
+      expect(() => listUserLibrarySchema.parse(input)).toThrow(
+        'Must be 1000 or less'
+      );
+    });
+
+    it('should throw an error for limit above maximum', () => {
+      const input = { limit: 101 };
+      expect(() => listUserLibrarySchema.parse(input)).toThrow(
+        'Must be 100 or less'
+      );
+    });
+
+    it('should accept page at maximum boundary', () => {
+      const input = { page: 1000 };
+      const result = listUserLibrarySchema.parse(input);
+      expect(result.page).toBe(1000);
+    });
+
+    it('should accept limit at maximum boundary', () => {
+      const input = { limit: 100 };
+      const result = listUserLibrarySchema.parse(input);
+      expect(result.limit).toBe(100);
     });
   });
 });

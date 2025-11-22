@@ -251,7 +251,7 @@ export function rateLimit(options: RateLimitOptions = {}) {
  */
 export const RATE_LIMIT_PRESETS = {
   /**
-   * Strict - for authentication endpoints (5 requests per 15 minutes)
+   * Auth - for authentication endpoints (5 requests per 15 minutes)
    */
   auth: {
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -259,7 +259,25 @@ export const RATE_LIMIT_PRESETS = {
   },
 
   /**
-   * Moderate - for API endpoints (100 requests per minute)
+   * Strict - for sensitive operations like streaming URLs (20 requests per minute)
+   */
+  strict: {
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 20,
+  },
+
+  /**
+   * Streaming - for presigned URL generation (60 requests per minute)
+   * Prevents abuse while allowing legitimate HLS segment refreshes
+   */
+  streaming: {
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 60,
+    keyPrefix: 'rl:stream:',
+  },
+
+  /**
+   * API - for standard API endpoints (100 requests per minute)
    */
   api: {
     windowMs: 60 * 1000, // 1 minute
@@ -267,7 +285,7 @@ export const RATE_LIMIT_PRESETS = {
   },
 
   /**
-   * Lenient - for webhooks (1000 requests per minute)
+   * Webhook - for webhooks (1000 requests per minute)
    */
   webhook: {
     windowMs: 60 * 1000, // 1 minute
@@ -275,7 +293,7 @@ export const RATE_LIMIT_PRESETS = {
   },
 
   /**
-   * Generous - for general web traffic (300 requests per minute)
+   * Web - for general web traffic (300 requests per minute)
    */
   web: {
     windowMs: 60 * 1000, // 1 minute

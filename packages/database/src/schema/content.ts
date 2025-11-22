@@ -45,6 +45,74 @@ export const organizations = pgTable(
 );
 
 /**
+ * Organization Memberships
+ * Tracks user membership in organizations with roles and status
+ *
+ * Roles:
+ * - owner: Organization creator, full control
+ * - admin: Administrative access, can manage members
+ * - creator: Can publish content to the organization
+ * - subscriber: Paid subscriber access to org content
+ * - member: Basic member access
+ *
+ * Status:
+ * - active: Current member with full access
+ * - inactive: Suspended or lapsed membership
+ * - invited: Pending invitation acceptance
+ */
+export const organizationMemberships = pgTable(
+  'organization_memberships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    // Role and status with CHECK constraints
+    role: varchar('role', { length: 50 }).notNull().default('member'),
+    status: varchar('status', { length: 50 }).notNull().default('active'),
+
+    // Invitation tracking
+    invitedBy: text('invited_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+
+    // Timestamps
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // Indexes
+    uniqueIndex('idx_unique_org_membership').on(
+      table.organizationId,
+      table.userId
+    ),
+    index('idx_org_memberships_org_id').on(table.organizationId),
+    index('idx_org_memberships_user_id').on(table.userId),
+    index('idx_org_memberships_role').on(table.organizationId, table.role),
+    index('idx_org_memberships_status').on(table.organizationId, table.status),
+
+    // CHECK constraints for enum values
+    check(
+      'check_membership_role',
+      sql`${table.role} IN ('owner', 'admin', 'creator', 'subscriber', 'member')`
+    ),
+    check(
+      'check_membership_status',
+      sql`${table.status} IN ('active', 'inactive', 'invited')`
+    ),
+  ]
+);
+
+/**
  * Media items (uploaded videos/audio)
  * Aligned with database-schema.md lines 130-183
  * Creator-owned, stored in creator's R2 bucket
@@ -213,7 +281,26 @@ export const content = pgTable(
 // Relations
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   content: many(content),
+  memberships: many(organizationMemberships),
 }));
+
+export const organizationMembershipsRelations = relations(
+  organizationMemberships,
+  ({ one }) => ({
+    organization: one(organizations, {
+      fields: [organizationMemberships.organizationId],
+      references: [organizations.id],
+    }),
+    user: one(users, {
+      fields: [organizationMemberships.userId],
+      references: [users.id],
+    }),
+    inviter: one(users, {
+      fields: [organizationMemberships.invitedBy],
+      references: [users.id],
+    }),
+  })
+);
 
 export const mediaItemsRelations = relations(mediaItems, ({ one }) => ({
   creator: one(users, {
@@ -240,6 +327,10 @@ export const contentRelations = relations(content, ({ one }) => ({
 // Type exports
 export type Organization = typeof organizations.$inferSelect;
 export type NewOrganization = typeof organizations.$inferInsert;
+export type OrganizationMembership =
+  typeof organizationMemberships.$inferSelect;
+export type NewOrganizationMembership =
+  typeof organizationMemberships.$inferInsert;
 export type MediaItem = typeof mediaItems.$inferSelect;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type Content = typeof content.$inferSelect;

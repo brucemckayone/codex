@@ -93,6 +93,82 @@ gh secret set NEON_PRODUCTION_URL
 # Paste: postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/codex?sslmode=require
 ```
 
+### Step 2.5: Cloudflare R2 Storage Secrets
+
+R2 is used for media storage (videos, images, assets). You need to create R2 buckets and generate API credentials.
+
+#### 2.5.1 Create R2 Buckets
+
+1. Go to https://dash.cloudflare.com
+2. Navigate to R2 Object Storage in the sidebar
+3. Click "Create bucket"
+4. Create the following buckets:
+
+**Production Buckets:**
+- `codex-media-production` - Media files (videos, audio)
+- `codex-assets-production` - Static assets
+- `codex-resources-production` - User resources
+- `codex-platform-production` - Platform files
+
+**Test Bucket:**
+- `codex-media-test` - Used for CI tests and preview deployments
+
+**Note:** Test bucket is shared between CI and preview environments for cost efficiency. Data is isolated via object key prefixes.
+
+#### 2.5.2 Generate R2 API Credentials
+
+1. Go to https://dash.cloudflare.com → R2
+2. Click "Manage R2 API Tokens"
+3. Click "Create API token"
+4. Set permissions:
+   - Token name: "Codex R2 API Access"
+   - Permissions: "Admin Read & Write" (for all buckets)
+   - TTL: Never expire (or set appropriate expiration)
+5. Click "Create API Token"
+6. Copy the following values:
+   - **Access Key ID** (looks like: 32-character hex string)
+   - **Secret Access Key** (looks like: 64-character base64 string)
+   - **Account ID** (shown in the R2 dashboard overview)
+
+**IMPORTANT:** Copy the Secret Access Key immediately - it won't be shown again!
+
+#### 2.5.3 Set R2 Secrets in GitHub
+
+```bash
+# R2 Account ID (found in R2 dashboard overview)
+gh secret set R2_ACCOUNT_ID
+# Paste your R2 account ID (32-character hex)
+
+# R2 API credentials
+gh secret set R2_ACCESS_KEY_ID
+# Paste your access key ID
+
+gh secret set R2_SECRET_ACCESS_KEY
+# Paste your secret access key
+```
+
+#### 2.5.4 Verify R2 Configuration
+
+Test that credentials work:
+
+```bash
+# Install wrangler if not already installed
+npm install -g wrangler
+
+# Login to Cloudflare
+wrangler login
+
+# List your R2 buckets (should show all buckets you created)
+wrangler r2 bucket list
+
+# Expected output:
+# [
+#   { "name": "codex-media-production", "creation_date": "..." },
+#   { "name": "codex-media-test", "creation_date": "..." },
+#   ...
+# ]
+```
+
 ### Step 3: Application Secrets (Production)
 
 #### 3.1 Generate Session Secrets
@@ -280,9 +356,27 @@ cd workers/content-api
 wrangler secret put DATABASE_URL --env production
 # Paste your production database URL (with -pooler)
 
+wrangler secret put R2_ACCOUNT_ID --env production
+# Paste your R2 account ID
+
+wrangler secret put R2_ACCESS_KEY_ID --env production
+# Paste your R2 access key ID
+
+wrangler secret put R2_SECRET_ACCESS_KEY --env production
+# Paste your R2 secret access key
+
+wrangler secret put R2_BUCKET_MEDIA --env production
+# Enter: codex-media-production
+
 # Staging environment (optional)
 wrangler secret put DATABASE_URL --env staging
 # Paste staging database URL
+
+wrangler secret put R2_ACCOUNT_ID --env staging
+wrangler secret put R2_ACCESS_KEY_ID --env staging
+wrangler secret put R2_SECRET_ACCESS_KEY --env staging
+wrangler secret put R2_BUCKET_MEDIA --env staging
+# Enter: codex-media-test (same as CI for cost efficiency)
 ```
 
 ### Worker: identity-api
@@ -616,6 +710,45 @@ To rotate secrets without downtime:
 6. **Remove old secret from GitHub Actions**
    Only after confirming the new secret works.
 
+### R2 API Key Rotation
+
+To rotate R2 credentials without downtime:
+
+1. **Generate new R2 API token**
+   - Go to https://dash.cloudflare.com → R2 → Manage R2 API Tokens
+   - Create new token with same permissions
+   - Copy new Access Key ID and Secret Access Key
+
+2. **Set new secrets in GitHub**
+   ```bash
+   gh secret set R2_ACCESS_KEY_ID
+   gh secret set R2_SECRET_ACCESS_KEY
+   ```
+
+3. **Set new secrets in Cloudflare Workers**
+   ```bash
+   cd workers/content-api
+   wrangler secret put R2_ACCESS_KEY_ID --env production
+   wrangler secret put R2_SECRET_ACCESS_KEY --env production
+   ```
+
+4. **Deploy workers with new credentials**
+   - Push to main branch to trigger production deployment
+   - Or manually deploy: `wrangler deploy --env production`
+
+5. **Verify new credentials work**
+   - Test content access endpoints
+   - Check worker logs for R2 errors: `wrangler tail content-api-production`
+
+6. **Revoke old R2 API token**
+   - Go to R2 → Manage R2 API Tokens
+   - Delete old token only after verifying new one works
+
+**Impact of R2 Key Rotation:**
+- Affects: content-api worker (presigned URL generation)
+- Downtime: None if done correctly (new secrets deployed before old revoked)
+- Testing: Test in staging first before production rotation
+
 ---
 
 ## Security Best Practices
@@ -655,6 +788,9 @@ Use this checklist to ensure all secrets are configured:
 - [ ] CLOUDFLARE_ACCOUNT_ID
 - [ ] CLOUDFLARE_ZONE_ID
 - [ ] NEON_PRODUCTION_URL
+- [ ] R2_ACCOUNT_ID
+- [ ] R2_ACCESS_KEY_ID
+- [ ] R2_SECRET_ACCESS_KEY
 - [ ] SESSION_SECRET_PRODUCTION
 - [ ] BETTER_AUTH_SECRET_PRODUCTION
 - [ ] STRIPE_PRODUCTION_KEY
@@ -677,7 +813,7 @@ Use this checklist to ensure all secrets are configured:
 
 - [ ] stripe-webhook-handler (production): DATABASE_URL, STRIPE_SECRET_KEY, all webhook secrets
 - [ ] auth (production): DATABASE_URL, SESSION_SECRET, BETTER_AUTH_SECRET
-- [ ] content-api (production): DATABASE_URL
+- [ ] content-api (production): DATABASE_URL, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_MEDIA
 - [ ] identity-api (production): DATABASE_URL
 - [ ] codex-web (production): DATABASE_URL
 
@@ -688,6 +824,16 @@ Use this checklist to ensure all secrets are configured:
 - [ ] RATE_LIMIT_KV (preview) created
 - [ ] AUTH_SESSION_KV (preview) created
 - [ ] All wrangler.jsonc files updated with correct IDs
+
+### R2 Buckets
+
+- [ ] codex-media-production bucket created
+- [ ] codex-assets-production bucket created
+- [ ] codex-resources-production bucket created
+- [ ] codex-platform-production bucket created
+- [ ] codex-media-test bucket created
+- [ ] R2 API credentials generated and secrets set in GitHub
+- [ ] R2 bucket bindings configured in wrangler.jsonc files
 
 ### Verification
 

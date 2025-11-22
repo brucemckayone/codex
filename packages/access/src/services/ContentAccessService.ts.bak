@@ -5,7 +5,6 @@ import { dbHttp } from '@codex/database';
 import {
   content,
   contentAccess,
-  organizationMemberships,
   purchases,
   videoPlayback,
 } from '@codex/database/schema';
@@ -21,8 +20,6 @@ import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import {
   AccessDeniedError,
   ContentNotFoundError,
-  InvalidContentTypeError,
-  MediaNotFoundError,
   OrganizationMismatchError,
   R2SigningError,
 } from '../errors';
@@ -68,26 +65,27 @@ export class ContentAccessService {
    * Generate signed streaming URL for content
    *
    * Access control flow:
-   * 1. Verify content exists and is published (any organization)
-   * 2. Check if content is free (price_cents = 0) → grant access
-   * 3. If paid, check if user has purchased this content → grant access
-   * 4. If no purchase, check if user is member of content's organization → grant access
-   * 5. Otherwise → ACCESS_DENIED
-   * 6. Generate time-limited signed R2 URL
+   * 1. Verify content exists, is published, and belongs to organization
+   * 2. Check if content is free (price_cents = 0)
+   * 3. If paid, verify user has completed purchase
+   * 4. Generate time-limited signed R2 URL
    *
    * Transaction safety:
    * - All queries wrapped in transaction for consistent snapshot
    * - Read committed isolation level for access verification
    *
    * @param userId - Authenticated user ID
+   * @param organizationId - Organization ID for multi-tenant scoping
    * @param input - Content ID and optional expiry
    * @returns Streaming URL and expiration timestamp
    * @throws {ContentNotFoundError} Content doesn't exist, is draft, or is deleted
-   * @throws {AccessDeniedError} User hasn't purchased content and isn't org member
+   * @throws {OrganizationMismatchError} Content doesn't belong to organization
+   * @throws {AccessDeniedError} User hasn't purchased paid content
    * @throws {R2SigningError} Failed to generate signed URL
    */
   async getStreamingUrl(
     userId: string,
+    organizationId: string,
     input: GetStreamingUrlInput
   ): Promise<{
     streamingUrl: string;
@@ -98,6 +96,7 @@ export class ContentAccessService {
 
     obs.info('Getting streaming URL', {
       userId,
+      organizationId,
       contentId: input.contentId,
       expirySeconds: input.expirySeconds,
     });
@@ -106,10 +105,11 @@ export class ContentAccessService {
       // Wrap in transaction for consistent snapshot of access verification
       return await db.transaction(
         async (tx) => {
-          // Step 1: Get content with media details (any organization)
+          // Step 1: Get content with media details and verify organization scoping
           const contentRecord = await tx.query.content.findFirst({
             where: and(
               eq(content.id, input.contentId),
+              eq(content.organizationId, organizationId), // CRITICAL: Organization scoping
               eq(content.status, 'published'),
               isNull(content.deletedAt)
             ),
@@ -121,96 +121,51 @@ export class ContentAccessService {
           if (!contentRecord) {
             obs.warn('Content not found or not accessible', {
               contentId: input.contentId,
-              userId,
+              organizationId,
             });
-
-            throw new ContentNotFoundError(input.contentId);
+            throw new ContentNotFoundError(input.contentId, { organizationId });
           }
 
           if (!contentRecord.mediaItem) {
             obs.warn('Content has no associated media item', {
               contentId: input.contentId,
-              userId,
+              organizationId,
             });
             throw new ContentNotFoundError(input.contentId, {
               reason: 'no_media_item',
             });
           }
 
-          // Step 2: Check access - free content, purchase, or org membership
+          // Step 2: Check access (free content or purchased)
           if (contentRecord.priceCents && contentRecord.priceCents > 0) {
-            // Paid content - check purchase first
+            // Paid content - verify purchase or content_access with organization scoping
             const hasAccess = await tx.query.contentAccess.findFirst({
               where: and(
                 eq(contentAccess.userId, userId),
                 eq(contentAccess.contentId, input.contentId),
-                eq(contentAccess.accessType, 'purchased')
+                eq(contentAccess.accessType, 'purchased') // Phase 1: Only purchased access
               ),
             });
 
-            if (hasAccess) {
-              obs.info('Access granted via purchase', {
+            if (!hasAccess) {
+              obs.warn('Access denied - no purchase found', {
                 userId,
                 contentId: input.contentId,
+                organizationId,
+                priceCents: contentRecord.priceCents,
+                securityEvent: 'UNAUTHORIZED_ACCESS_ATTEMPT',
+                severity: 'MEDIUM',
+                eventType: 'access_control',
               });
-            } else {
-              // No purchase - check organization membership
-              const contentOrgId = contentRecord.organizationId;
-
-              if (!contentOrgId) {
-                // Personal content with no org - requires purchase
-                obs.warn(
-                  'Access denied - paid personal content requires purchase',
-                  {
-                    userId,
-                    contentId: input.contentId,
-                    priceCents: contentRecord.priceCents,
-                    securityEvent: 'UNAUTHORIZED_ACCESS_ATTEMPT',
-                    severity: 'MEDIUM',
-                    eventType: 'access_control',
-                  }
-                );
-                throw new AccessDeniedError(userId, input.contentId, {
-                  priceCents: contentRecord.priceCents,
-                });
-              }
-
-              // Check if user is active member of content's organization
-              const membership =
-                await tx.query.organizationMemberships.findFirst({
-                  where: and(
-                    eq(organizationMemberships.organizationId, contentOrgId),
-                    eq(organizationMemberships.userId, userId),
-                    eq(organizationMemberships.status, 'active')
-                  ),
-                });
-
-              if (!membership) {
-                obs.warn('Access denied - no purchase and not org member', {
-                  userId,
-                  contentId: input.contentId,
-                  organizationId: contentOrgId,
-                  priceCents: contentRecord.priceCents,
-                  securityEvent: 'UNAUTHORIZED_ACCESS_ATTEMPT',
-                  severity: 'MEDIUM',
-                  eventType: 'access_control',
-                });
-                throw new AccessDeniedError(userId, input.contentId, {
-                  priceCents: contentRecord.priceCents,
-                  organizationId: contentOrgId,
-                });
-              }
-
-              obs.info('Access granted via organization membership', {
-                userId,
-                contentId: input.contentId,
-                organizationId: contentOrgId,
-                membershipRole: membership.role,
+              throw new AccessDeniedError(userId, input.contentId, {
+                priceCents: contentRecord.priceCents,
+                organizationId,
               });
             }
           } else {
-            obs.info('Free content - access granted', {
+            obs.info('Free content - skipping purchase check', {
               contentId: input.contentId,
+              organizationId,
             });
           }
 
@@ -220,12 +175,10 @@ export class ContentAccessService {
           if (!r2Key) {
             obs.error('Media item missing R2 key', {
               contentId: input.contentId,
+              organizationId,
               mediaItemId: contentRecord.mediaItem.id,
             });
-            throw new R2SigningError(
-              'missing_r2_key',
-              new Error('R2 key is null')
-            );
+            throw new R2SigningError('missing_r2_key', new Error('R2 key is null'));
           }
 
           // Generate signed URL
@@ -244,6 +197,7 @@ export class ContentAccessService {
               obs.error('Invalid media type', {
                 mediaType,
                 contentId: input.contentId,
+                organizationId,
                 mediaItemId: contentRecord.mediaItem.id,
               });
               throw new Error('INVALID_MEDIA_TYPE');
@@ -251,6 +205,7 @@ export class ContentAccessService {
 
             obs.info('Streaming URL generated successfully', {
               userId,
+              organizationId,
               contentId: input.contentId,
               contentType: mediaType,
               expiresAt: expiresAt.toISOString(),
@@ -265,6 +220,7 @@ export class ContentAccessService {
             obs.error('Failed to generate signed R2 URL', {
               error: err,
               userId,
+              organizationId,
               contentId: input.contentId,
               r2Key,
             });
@@ -288,9 +244,10 @@ export class ContentAccessService {
       obs.error('Unexpected error in getStreamingUrl', {
         error,
         userId,
+        organizationId,
         contentId: input.contentId,
       });
-      throw wrapError(error, { userId, contentId: input.contentId });
+      throw wrapError(error, { userId, organizationId, contentId: input.contentId });
     }
   }
 

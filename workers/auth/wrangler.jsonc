@@ -22,24 +22,8 @@
     }
   ],
 
-  "r2_buckets": [
-    {
-      "binding": "R2_ASSETS",
-      "bucket_name": "codex-assets-production"
-    },
-    {
-      "binding": "R2_MEDIA",
-      "bucket_name": "codex-media-production"
-    },
-    {
-      "binding": "R2_PLATFORM",
-      "bucket_name": "codex-platform-production"
-    },
-    {
-      "binding": "R2_RESOURCES",
-      "bucket_name": "codex-resources-production"
-    }
-  ],
+  // Note: R2 buckets are not used by auth worker
+  // R2 storage is only used by content-api worker for media management
 
   // Environment configurations
   "env": {

@@ -18,6 +18,15 @@
     }
   ],
 
+  // R2 Buckets
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "codex-media-production",
+      "preview_bucket_name": "codex-media-test"
+    }
+  ],
+
   // Environment configurations
   "env": {
     // Production environment
@@ -57,8 +66,21 @@
 
   // Note: Secrets to be set via wrangler CLI or CI/CD:
   // - DATABASE_URL
+  // - R2_ACCOUNT_ID
+  // - R2_ACCESS_KEY_ID
+  // - R2_SECRET_ACCESS_KEY
+  // - R2_BUCKET_MEDIA
   //
   // Set secrets with:
   //   wrangler secret put DATABASE_URL --env production
+  //   wrangler secret put R2_ACCOUNT_ID --env production
+  //   wrangler secret put R2_ACCESS_KEY_ID --env production
+  //   wrangler secret put R2_SECRET_ACCESS_KEY --env production
+  //   wrangler secret put R2_BUCKET_MEDIA --env production
+  //
   //   wrangler secret put DATABASE_URL --env staging
+  //   wrangler secret put R2_ACCOUNT_ID --env staging
+  //   wrangler secret put R2_ACCESS_KEY_ID --env staging
+  //   wrangler secret put R2_SECRET_ACCESS_KEY --env staging
+  //   wrangler secret put R2_BUCKET_MEDIA --env staging
 }

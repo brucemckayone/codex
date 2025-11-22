@@ -43,11 +43,13 @@ export const videoPlayback = pgTable(
     completed: boolean('completed').notNull().default(false), // Watched >= 95%
 
     // Timestamps
-    updatedAt: timestamp('updated_at')
+    updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     // One playback record per user per video

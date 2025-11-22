@@ -26,6 +26,7 @@
  */
 
 import { testDbConnection } from '@codex/database';
+import type { Bindings } from '@codex/shared-types';
 import { createKvCheck, createWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 // Import route modules
@@ -56,6 +57,48 @@ const app = createWorker({
       };
     },
     checkKV: createKvCheck(['RATE_LIMIT_KV']),
+    checkR2: async (c: Context) => {
+      try {
+        const env = c.env as Bindings;
+
+        // Check if R2 bucket binding is available
+        if (!env.MEDIA_BUCKET) {
+          return {
+            status: 'error',
+            message: 'R2 bucket binding (MEDIA_BUCKET) not configured',
+          };
+        }
+
+        // Check if R2 credentials are configured
+        if (
+          !env.R2_ACCOUNT_ID ||
+          !env.R2_ACCESS_KEY_ID ||
+          !env.R2_SECRET_ACCESS_KEY
+        ) {
+          return {
+            status: 'error',
+            message:
+              'R2 credentials not configured (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY required)',
+          };
+        }
+
+        // Test bucket accessibility by attempting to list objects (limited to 1)
+        // This verifies both bucket binding and credentials without creating objects
+        await env.MEDIA_BUCKET.list({ limit: 1 });
+
+        return {
+          status: 'ok',
+          message: 'R2 bucket accessible',
+        };
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown R2 error';
+        return {
+          status: 'error',
+          message: `R2 bucket check failed: ${errorMessage}`,
+        };
+      }
+    },
   },
 });
 

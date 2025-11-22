@@ -118,6 +118,22 @@ export type Variables = {
    * Set when route is organization-scoped
    */
   organizationId?: string;
+
+  /**
+   * User's role within the organization
+   * Set by withPolicy middleware when requireOrgMembership is true
+   */
+  organizationRole?: string;
+
+  /**
+   * Full organization membership details
+   * Set by withPolicy middleware when requireOrgMembership is true
+   */
+  organizationMembership?: {
+    role: string;
+    status: string;
+    joinedAt: Date;
+  };
 };
 
 /**
