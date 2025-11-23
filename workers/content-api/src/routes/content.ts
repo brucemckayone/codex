@@ -21,6 +21,15 @@ import {
   updateContentSchema,
 } from '@codex/content';
 import { dbHttp } from '@codex/database';
+import type {
+  ContentListResponse,
+  ContentResponse,
+  CreateContentResponse,
+  DeleteContentResponse,
+  PublishContentResponse,
+  UnpublishContentResponse,
+  UpdateContentResponse,
+} from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
   createAuthenticatedHandler,
@@ -40,6 +49,7 @@ const app = new Hono<HonoEnv>();
  * Create new content
  *
  * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {CreateContentResponse}
  */
 app.post(
   '/',
@@ -48,13 +58,14 @@ app.post(
     schema: {
       body: createContentSchema,
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<CreateContentResponse> => {
       const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.create(ctx.validated.body, ctx.user.id);
+      const content = await service.create(ctx.validated.body, ctx.user.id);
+      return { data: content };
     },
     successStatus: 201,
   })
@@ -65,6 +76,7 @@ app.post(
  * Get content by ID
  *
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {ContentResponse}
  */
 app.get(
   '/:id',
@@ -73,13 +85,14 @@ app.get(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<ContentResponse> => {
       const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.get(ctx.validated.params.id, ctx.user.id);
+      const content = await service.get(ctx.validated.params.id, ctx.user.id);
+      return { data: content };
     },
   })
 );
@@ -89,6 +102,7 @@ app.get(
  * Update content
  *
  * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {UpdateContentResponse}
  */
 app.patch(
   '/:id',
@@ -98,17 +112,18 @@ app.patch(
       params: createIdParamsSchema(),
       body: updateContentSchema,
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<UpdateContentResponse> => {
       const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.update(
+      const content = await service.update(
         ctx.validated.params.id,
         ctx.validated.body,
         ctx.user.id
       );
+      return { data: content };
     },
   })
 );
@@ -118,6 +133,7 @@ app.patch(
  * List content with filters and pagination
  *
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {ContentListResponse}
  */
 app.get(
   '/',
@@ -126,7 +142,7 @@ app.get(
     schema: {
       query: contentQuerySchema,
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<ContentListResponse> => {
       const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
@@ -134,13 +150,8 @@ app.get(
 
       const result = await service.list(ctx.user.id, ctx.validated.query);
 
-      return {
-        items: result.items,
-        page: result.pagination.page,
-        limit: result.pagination.limit,
-        total: result.pagination.total,
-        totalPages: result.pagination.totalPages,
-      };
+      // Service returns PaginatedResponse<T> which already matches our response type
+      return result;
     },
   })
 );
@@ -150,6 +161,7 @@ app.get(
  * Publish content
  *
  * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {PublishContentResponse}
  */
 app.post(
   '/:id/publish',
@@ -158,13 +170,17 @@ app.post(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<PublishContentResponse> => {
       const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.publish(ctx.validated.params.id, ctx.user.id);
+      const content = await service.publish(
+        ctx.validated.params.id,
+        ctx.user.id
+      );
+      return { data: content };
     },
   })
 );
@@ -174,6 +190,7 @@ app.post(
  * Unpublish content
  *
  * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {UnpublishContentResponse}
  */
 app.post(
   '/:id/unpublish',
@@ -182,13 +199,17 @@ app.post(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<UnpublishContentResponse> => {
       const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.unpublish(ctx.validated.params.id, ctx.user.id);
+      const content = await service.unpublish(
+        ctx.validated.params.id,
+        ctx.user.id
+      );
+      return { data: content };
     },
   })
 );
@@ -198,6 +219,7 @@ app.post(
  * Soft delete content
  *
  * Security: Creator/Admin only, Strict rate limit (5 req/15min)
+ * @returns {DeleteContentResponse}
  */
 app.delete(
   '/:id',
@@ -210,7 +232,7 @@ app.delete(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<DeleteContentResponse> => {
       const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
