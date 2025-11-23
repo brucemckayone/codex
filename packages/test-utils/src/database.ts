@@ -141,6 +141,8 @@ export function withNeonTestBranch() {
 
     const fixture = makeNeonTesting(config);
     fixture();
+  } else {
+    console.error('invalid enviroment variables or enviroment');
   }
   // In local development - use existing DATABASE_URL (no-op)
 }
