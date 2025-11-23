@@ -15,19 +15,15 @@
  * because it requires StripeWebhookEnv with Stripe-specific variables.
  */
 
-import { testDbConnection } from '@codex/database';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
   createHealthCheckHandler,
   createKvCheck,
-  createLoggerMiddleware,
   createNotFoundHandler,
   createObservabilityErrorHandler,
-  createObservabilityMiddleware,
-  createRequestTrackingMiddleware,
-  createSecurityHeadersMiddleware,
+  createStandardMiddlewareChain,
+  standardDatabaseCheck,
 } from '@codex/worker-utils';
-import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import type { StripeWebhookEnv } from './types';
@@ -43,17 +39,18 @@ const app = new Hono<StripeWebhookEnv>();
 // Global Middleware
 // ============================================================================
 
-// Request tracking (request ID, IP, user agent)
-app.use('*', createRequestTrackingMiddleware());
+/**
+ * Global middleware chain
+ * Applies request tracking, logging, security headers, and observability to all routes
+ */
+const globalMiddleware = createStandardMiddlewareChain({
+  serviceName: 'stripe-webhook-handler',
+  enableObservability: true,
+});
 
-// Logging
-app.use('*', createLoggerMiddleware());
-
-// Security headers
-app.use('*', createSecurityHeadersMiddleware());
-
-// Observability middleware for all routes
-app.use('*', createObservabilityMiddleware('stripe-webhook-handler'));
+for (const middleware of globalMiddleware) {
+  app.use('*', middleware);
+}
 
 // Rate limiting for webhook endpoints
 app.use('/webhooks/*', (c, next) => {
@@ -81,15 +78,7 @@ app.get('/', (c) => {
 app.get(
   '/health',
   createHealthCheckHandler('stripe-webhook-handler', '1.0.0', {
-    checkDatabase: async (_c: Context) => {
-      const isConnected = await testDbConnection();
-      return {
-        status: isConnected ? 'ok' : 'error',
-        message: isConnected
-          ? 'Database connection is healthy.'
-          : 'Database connection failed.',
-      };
-    },
+    checkDatabase: standardDatabaseCheck,
     checkKV: createKvCheck(['RATE_LIMIT_KV']),
   })
 );

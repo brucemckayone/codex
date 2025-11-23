@@ -25,13 +25,12 @@
  * - /api/access - Content access and playback endpoints
  */
 
-import { testDbConnection } from '@codex/database';
 import {
   createKvCheck,
   createR2Check,
   createWorker,
+  standardDatabaseCheck,
 } from '@codex/worker-utils';
-import type { Context } from 'hono';
 // Import route modules
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
@@ -50,15 +49,7 @@ const app = createWorker({
   enableSecurityHeaders: true,
   enableGlobalAuth: false, // Using route-level withPolicy() instead
   healthCheck: {
-    checkDatabase: async (_c: Context) => {
-      const isConnected = await testDbConnection();
-      return {
-        status: isConnected ? 'ok' : 'error',
-        message: isConnected
-          ? 'Database connection is healthy.'
-          : 'Database connection failed.',
-      };
-    },
+    checkDatabase: standardDatabaseCheck,
     checkKV: createKvCheck(['RATE_LIMIT_KV']),
     checkR2: createR2Check(['MEDIA_BUCKET']),
   },
