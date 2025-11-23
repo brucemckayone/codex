@@ -15,6 +15,7 @@
  */
 
 import {
+  ContentNotFoundError,
   ContentService,
   contentQuerySchema,
   createContentSchema,
@@ -92,6 +93,10 @@ app.get(
       });
 
       const content = await service.get(ctx.validated.params.id, ctx.user.id);
+      if (!content) {
+        throw new ContentNotFoundError(ctx.validated.params.id);
+      }
+
       return { data: content };
     },
   })

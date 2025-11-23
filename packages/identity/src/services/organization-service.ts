@@ -17,7 +17,7 @@ import {
   withPagination,
 } from '@codex/database';
 import { organizations } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { BaseService } from '@codex/service-errors';
 import type {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -45,10 +45,6 @@ import type {
  * - List organizations with filters
  */
 export class OrganizationService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
   /**
    * Create new organization
    *

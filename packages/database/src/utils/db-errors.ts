@@ -5,6 +5,25 @@
  */
 
 /**
+ * Query condition construction error
+ * Used when a helper fails to produce a SQL condition (e.g., and() returns undefined)
+ */
+export interface QueryConditionContext {
+  scope?: 'creator' | 'organization';
+  table?: string;
+}
+
+export class QueryConditionError extends Error {
+  constructor(
+    message: string,
+    public readonly context?: QueryConditionContext
+  ) {
+    super(message);
+    this.name = 'QueryConditionError';
+  }
+}
+
+/**
  * Postgres Error Interface
  * Represents the structure of errors returned by Postgres/Neon
  */

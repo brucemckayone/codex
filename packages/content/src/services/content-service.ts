@@ -15,12 +15,11 @@
 import {
   isUniqueViolation,
   scopedNotDeleted,
-  whereNotDeleted,
   withCreatorScope,
   withPagination,
 } from '@codex/database';
 import { content, mediaItems } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { BaseService } from '@codex/service-errors';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
 import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
@@ -53,10 +52,6 @@ import type {
  * - List content with filters
  */
 export class ContentService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
   /**
    * Create new content
    *

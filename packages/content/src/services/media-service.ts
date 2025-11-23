@@ -18,7 +18,7 @@ import {
   withPagination,
 } from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { BaseService } from '@codex/service-errors';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -48,10 +48,6 @@ import type {
  * - List media items with filters
  */
 export class MediaItemService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
   /**
    * Create new media item
    *
