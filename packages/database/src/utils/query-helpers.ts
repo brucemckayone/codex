@@ -34,7 +34,19 @@
  */
 
 import { and, eq, isNull, type SQL } from 'drizzle-orm';
-import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
+import type { PgColumn } from 'drizzle-orm/pg-core';
+import { type QueryConditionContext, QueryConditionError } from './db-errors';
+
+function ensureCondition(
+  condition: SQL<unknown> | undefined,
+  context: QueryConditionContext
+): SQL<unknown> {
+  if (!condition) {
+    throw new QueryConditionError('Failed to build query condition', context);
+  }
+
+  return condition;
+}
 
 /**
  * Type for a table with a deletedAt column
@@ -291,7 +303,12 @@ export function scopedNotDeleted<
   T extends TableWithDeletedAt & TableWithCreatorId,
 >(table: T, creatorId: string): SQL<unknown> {
   // Note: We compose conditions using and() from drizzle-orm
-  return and(isNull(table.deletedAt), eq(table.creatorId, creatorId))!;
+  const condition = and(
+    isNull(table.deletedAt),
+    eq(table.creatorId, creatorId)
+  );
+
+  return ensureCondition(condition, { scope: 'creator' });
 }
 
 /**
@@ -333,8 +350,10 @@ export function orgScopedNotDeleted<
   T extends TableWithDeletedAt & TableWithOrganizationId,
 >(table: T, organizationId: string): SQL<unknown> {
   // Note: We compose conditions using and() from drizzle-orm
-  return and(
+  const condition = and(
     isNull(table.deletedAt),
     eq(table.organizationId, organizationId)
-  )!;
+  );
+
+  return ensureCondition(condition, { scope: 'organization' });
 }

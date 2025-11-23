@@ -1,8 +1,4 @@
-import {
-  InternalServiceError,
-  NotFoundError,
-  ServiceError,
-} from '@codex/service-errors';
+import { InternalServiceError, ServiceError } from '@codex/service-errors';
 
 // Re-export error classes from @codex/content (canonical source)
 export {

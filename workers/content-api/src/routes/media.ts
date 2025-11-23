@@ -15,6 +15,7 @@
 import {
   createMediaItemSchema,
   MediaItemService,
+  MediaNotFoundError,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
@@ -89,6 +90,10 @@ app.get(
         environment: ctx.env.ENVIRONMENT || 'development',
       });
       const media = await service.get(ctx.validated.params.id, ctx.user.id);
+      if (!media) {
+        throw new MediaNotFoundError(ctx.validated.params.id);
+      }
+
       return { data: media };
     },
   })

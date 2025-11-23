@@ -17,7 +17,7 @@ import {
   withPagination,
 } from '@codex/database';
 import { organizations } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { BaseService } from '@codex/service-errors';
 import type {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -26,7 +26,7 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { ConflictError, OrganizationNotFoundError, wrapError } from '../errors';
 import type {
   Organization,
@@ -45,10 +45,6 @@ import type {
  * - List organizations with filters
  */
 export class OrganizationService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
   /**
    * Create new organization
    *
