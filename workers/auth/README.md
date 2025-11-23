@@ -1,1 +1,0 @@
-// a dedicated auth worker.
