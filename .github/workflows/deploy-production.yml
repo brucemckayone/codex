@@ -195,8 +195,16 @@ jobs:
           command: deploy --env production
           secrets: |
             DATABASE_URL
+            R2_ACCOUNT_ID
+            R2_ACCESS_KEY_ID
+            R2_SECRET_ACCESS_KEY
+            R2_BUCKET_MEDIA
         env:
           DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: codex-media-production
 
       # Verify content-api worker is healthy after deployment
       - name: Health check - Content API worker

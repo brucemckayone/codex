@@ -12,10 +12,12 @@ export {
   createErrorHandler,
   createErrorResponse,
   createHealthCheckHandler,
+  createKvCheck,
   createLoggerMiddleware,
   createNotFoundHandler,
   createObservabilityErrorHandler,
   createObservabilityMiddleware,
+  createR2Check,
   createRateLimitWrapper,
   createRequestTrackingMiddleware,
   createSecurityHeadersMiddleware,
@@ -26,7 +28,6 @@ export {
 } from './middleware';
 // Route handler helpers
 export {
-  createAuthenticatedGetHandler, // Deprecated: alias to createAuthenticatedHandler
   createAuthenticatedHandler,
   formatValidationError,
   withErrorHandling,

@@ -21,7 +21,6 @@ import {
 import { dbHttp } from '@codex/database';
 import { createIdParamsSchema } from '@codex/validation';
 import {
-  createAuthenticatedGetHandler,
   createAuthenticatedHandler,
   POLICY_PRESETS,
   withPolicy,
@@ -70,7 +69,7 @@ app.post(
 app.get(
   '/:id',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: createIdParamsSchema(),
     },
@@ -125,7 +124,7 @@ app.patch(
 app.get(
   '/',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       query: mediaQuerySchema,
     },
@@ -162,7 +161,7 @@ app.delete(
     roles: ['creator', 'admin'],
     rateLimit: 'auth', // Stricter rate limit for deletion
   }),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: createIdParamsSchema(),
     },

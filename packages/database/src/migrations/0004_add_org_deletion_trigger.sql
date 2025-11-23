@@ -15,6 +15,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS trigger_unpublish_on_org_delete ON content;
+--> statement-breakpoint
 CREATE TRIGGER trigger_unpublish_on_org_delete
   BEFORE UPDATE ON content
   FOR EACH ROW

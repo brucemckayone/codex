@@ -30,6 +30,7 @@ import type {
   MediaItemWithRelations,
   PaginatedResponse,
   PaginationParams,
+  //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ServiceConfig,
 } from '../types';
 
@@ -277,6 +278,7 @@ export class MediaItemService {
     creatorId: string,
     filters: MediaItemFilters = {},
     pagination: PaginationParams = { page: 1, limit: 20 }
+    //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedResponse<MediaItemWithRelations>> {
     try {
       const { page, limit } = pagination;

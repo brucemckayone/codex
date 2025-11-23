@@ -1,0 +1,1435 @@
+/**
+ * Content Access Service Integration Tests
+ *
+ * Integration tests covering:
+ * - Streaming URL generation for free and paid content
+ * - Access control verification (purchases, content_access)
+ * - Playback progress tracking (save/get/upsert)
+ * - User library listing with filters and pagination
+ *
+ * Database Isolation:
+ * - Uses neon-testing for ephemeral branch per test file
+ * - Each test creates its own data (idempotent tests)
+ * - No cleanup needed - fresh database for this file
+ *
+ * R2 Integration:
+ * - Uses real R2SigningClient with test bucket credentials
+ * - Generates real presigned URLs (verified in cloudflare-clients tests)
+ */
+
+import {
+  createR2SigningClientFromEnv,
+  type R2SigningClient,
+} from '@codex/cloudflare-clients';
+import { ContentService, MediaItemService } from '@codex/content';
+import {
+  contentAccess,
+  organizations,
+  purchases,
+} from '@codex/database/schema';
+import { ObservabilityClient } from '@codex/observability';
+import {
+  createUniqueSlug,
+  type Database,
+  seedTestUsers,
+  setupTestDatabase,
+  teardownTestDatabase,
+  withNeonTestBranch,
+} from '@codex/test-utils';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ContentAccessService } from './ContentAccessService';
+
+// Enable ephemeral Neon branch for this test file
+withNeonTestBranch();
+
+describe('ContentAccessService Integration', () => {
+  let db: Database;
+  let accessService: ContentAccessService;
+  let contentService: ContentService;
+  let mediaService: MediaItemService;
+  let r2Client: R2SigningClient;
+  let userId: string;
+  let otherUserId: string;
+  let organizationId: string;
+
+  beforeAll(async () => {
+    db = setupTestDatabase();
+    const config = { db, environment: 'test' };
+
+    contentService = new ContentService(config);
+    mediaService = new MediaItemService(config);
+
+    // Use real R2 signing client with test bucket credentials
+    r2Client = createR2SigningClientFromEnv();
+
+    const obs = new ObservabilityClient('content-access-test', 'test');
+    accessService = new ContentAccessService({
+      db,
+      r2: r2Client,
+      obs,
+    });
+
+    const userIds = await seedTestUsers(db, 2);
+    [userId, otherUserId] = userIds;
+
+    // Create test organization
+    const [org] = await db
+      .insert(organizations)
+      .values({
+        name: 'Test Organization',
+        slug: createUniqueSlug('test-org'),
+        ownerId: userId,
+      })
+      .returning();
+
+    if (!org) {
+      throw new Error('Failed to create test organization');
+    }
+    organizationId = org.id;
+  });
+
+  afterAll(async () => {
+    await teardownTestDatabase();
+  });
+
+  describe('getStreamingUrl', () => {
+    it('should return streaming URL for free content without purchase', async () => {
+      // Create media and content
+      const media = await mediaService.create(
+        {
+          title: 'Free Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/free-video.mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/free-video/master.m3u8',
+          thumbnailKey: 'thumbnails/free-video.jpg',
+          durationSeconds: 120,
+        },
+        userId
+      );
+
+      const freeContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Free Tutorial',
+          slug: createUniqueSlug('free-tutorial'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          priceCents: 0, // Free!
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(freeContent.id, userId);
+
+      // Any user should be able to stream free content
+      const result = await accessService.getStreamingUrl(otherUserId, {
+        contentId: freeContent.id,
+        expirySeconds: 3600,
+      });
+
+      // Verify real presigned URL structure
+      expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      expect(result.streamingUrl).toContain('X-Amz-Signature');
+      expect(result.contentType).toBe('video');
+      expect(result.expiresAt).toBeInstanceOf(Date);
+    });
+
+    it('should return streaming URL for paid content with purchase', async () => {
+      // Create media and paid content
+      const media = await mediaService.create(
+        {
+          title: 'Premium Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/premium-video.mp4',
+          fileSizeBytes: 1024 * 1024 * 100,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/premium-video/master.m3u8',
+          thumbnailKey: 'thumbnails/premium-video.jpg',
+          durationSeconds: 600,
+        },
+        userId
+      );
+
+      const paidContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Premium Course',
+          slug: createUniqueSlug('premium-course'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          priceCents: 1999, // $19.99
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(paidContent.id, userId);
+
+      // Grant access to otherUser via content_access
+      await db.insert(contentAccess).values({
+        userId: otherUserId,
+        contentId: paidContent.id,
+        organizationId,
+        accessType: 'purchased',
+      });
+
+      // User with access should be able to stream
+      const result = await accessService.getStreamingUrl(otherUserId, {
+        contentId: paidContent.id,
+        expirySeconds: 3600,
+      });
+
+      expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      expect(result.contentType).toBe('video');
+    });
+
+    it('should throw ACCESS_DENIED for paid content without purchase', async () => {
+      // Create media and paid content
+      const media = await mediaService.create(
+        {
+          title: 'Exclusive Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/exclusive-video.mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/exclusive/master.m3u8',
+          thumbnailKey: 'thumbnails/exclusive.jpg',
+          durationSeconds: 300,
+        },
+        userId
+      );
+
+      const exclusiveContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Exclusive Content',
+          slug: createUniqueSlug('exclusive'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          priceCents: 4999, // $49.99
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(exclusiveContent.id, userId);
+
+      // User without access should be denied
+      await expect(
+        accessService.getStreamingUrl(otherUserId, {
+          contentId: exclusiveContent.id,
+          expirySeconds: 3600,
+        })
+      ).rejects.toThrow('User does not have access to this content');
+    });
+
+    it('should throw CONTENT_NOT_FOUND for unpublished content', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Draft Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/draft-video.mp4',
+          fileSizeBytes: 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/draft/master.m3u8',
+          thumbnailKey: 'thumbnails/draft.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+
+      const draftContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Draft Content',
+          slug: createUniqueSlug('draft'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          priceCents: 0,
+          tags: [],
+        },
+        userId
+      );
+
+      // Don't publish - stays in draft
+
+      await expect(
+        accessService.getStreamingUrl(userId, {
+          contentId: draftContent.id,
+          expirySeconds: 3600,
+        })
+      ).rejects.toThrow('Content not found or not accessible');
+    });
+  });
+
+  describe('savePlaybackProgress', () => {
+    it('should save new playback progress', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Progress Test Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/progress-test.mp4',
+          fileSizeBytes: 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/progress-test/master.m3u8',
+          thumbnailKey: 'thumbnails/progress-test.jpg',
+          durationSeconds: 600,
+        },
+        userId
+      );
+
+      const testContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Progress Test',
+          slug: createUniqueSlug('progress-test'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          priceCents: 0,
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(testContent.id, userId);
+
+      // Save progress
+      await accessService.savePlaybackProgress(userId, {
+        contentId: testContent.id,
+        positionSeconds: 120,
+        durationSeconds: 600,
+        completed: false,
+      });
+
+      // Verify progress was saved
+      const progress = await accessService.getPlaybackProgress(userId, {
+        contentId: testContent.id,
+      });
+
+      expect(progress).not.toBeNull();
+      expect(progress?.positionSeconds).toBe(120);
+      expect(progress?.durationSeconds).toBe(600);
+      expect(progress?.completed).toBe(false);
+    });
+
+    it('should update existing playback progress (upsert)', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Upsert Test Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/upsert-test.mp4',
+          fileSizeBytes: 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/upsert-test/master.m3u8',
+          thumbnailKey: 'thumbnails/upsert-test.jpg',
+          durationSeconds: 300,
+        },
+        userId
+      );
+
+      const testContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Upsert Test',
+          slug: createUniqueSlug('upsert-test'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          priceCents: 0,
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(testContent.id, userId);
+
+      // Save initial progress
+      await accessService.savePlaybackProgress(userId, {
+        contentId: testContent.id,
+        positionSeconds: 50,
+        durationSeconds: 300,
+        completed: false,
+      });
+
+      // Update progress
+      await accessService.savePlaybackProgress(userId, {
+        contentId: testContent.id,
+        positionSeconds: 150,
+        durationSeconds: 300,
+        completed: false,
+      });
+
+      const progress = await accessService.getPlaybackProgress(userId, {
+        contentId: testContent.id,
+      });
+
+      expect(progress?.positionSeconds).toBe(150);
+    });
+
+    it('should auto-complete when progress >= 95%', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Completion Test Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/completion-test.mp4',
+          fileSizeBytes: 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/completion-test/master.m3u8',
+          thumbnailKey: 'thumbnails/completion-test.jpg',
+          durationSeconds: 100,
+        },
+        userId
+      );
+
+      const testContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Completion Test',
+          slug: createUniqueSlug('completion-test'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          priceCents: 0,
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(testContent.id, userId);
+
+      // Save progress at 96%
+      await accessService.savePlaybackProgress(userId, {
+        contentId: testContent.id,
+        positionSeconds: 96,
+        durationSeconds: 100,
+        completed: false,
+      });
+
+      const progress = await accessService.getPlaybackProgress(userId, {
+        contentId: testContent.id,
+      });
+
+      expect(progress?.completed).toBe(true);
+    });
+  });
+
+  describe('getPlaybackProgress', () => {
+    it('should return null for content with no progress', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'No Progress Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/no-progress.mp4',
+          fileSizeBytes: 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/no-progress/master.m3u8',
+          thumbnailKey: 'thumbnails/no-progress.jpg',
+          durationSeconds: 200,
+        },
+        userId
+      );
+
+      const testContent = await contentService.create(
+        {
+          organizationId,
+          title: 'No Progress',
+          slug: createUniqueSlug('no-progress'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          priceCents: 0,
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(testContent.id, userId);
+
+      const progress = await accessService.getPlaybackProgress(userId, {
+        contentId: testContent.id,
+      });
+
+      expect(progress).toBeNull();
+    });
+  });
+
+  describe('listUserLibrary', () => {
+    it('should return empty list for user with no purchases', async () => {
+      // Create a fresh user with no purchases
+      const userIds = await seedTestUsers(db, 1);
+      const freshUserId = userIds[0];
+
+      const result = await accessService.listUserLibrary(freshUserId, {
+        page: 1,
+        limit: 20,
+        filter: 'all',
+        sortBy: 'recent',
+      });
+
+      expect(result.items).toHaveLength(0);
+      expect(result.pagination.total).toBe(0);
+    });
+
+    it('should return purchased content with progress', async () => {
+      // Create content
+      const media = await mediaService.create(
+        {
+          title: 'Library Test Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/library-test.mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/library-test/master.m3u8',
+          thumbnailKey: 'thumbnails/library-test.jpg',
+          durationSeconds: 600,
+        },
+        userId
+      );
+
+      const libraryContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Library Test Content',
+          slug: createUniqueSlug('library-test'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          priceCents: 999,
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(libraryContent.id, userId);
+
+      // Simulate purchase by otherUser
+      await db.insert(purchases).values({
+        organizationId,
+        customerId: otherUserId,
+        contentId: libraryContent.id,
+        status: 'completed',
+        amountPaidCents: 999,
+        stripePaymentIntentId: `pi_test_${Date.now()}_${otherUserId}`,
+      });
+
+      // Add some progress
+      await accessService.savePlaybackProgress(otherUserId, {
+        contentId: libraryContent.id,
+        positionSeconds: 300,
+        durationSeconds: 600,
+        completed: false,
+      });
+
+      // List library
+      const result = await accessService.listUserLibrary(otherUserId, {
+        page: 1,
+        limit: 20,
+        filter: 'all',
+        sortBy: 'recent',
+      });
+
+      expect(result.items.length).toBeGreaterThan(0);
+
+      const item = result.items.find((i) => i.content.id === libraryContent.id);
+      expect(item).toBeDefined();
+      expect(item?.content.title).toBe('Library Test Content');
+      expect(item?.purchase.priceCents).toBe(999);
+      expect(item?.progress?.positionSeconds).toBe(300);
+      expect(item?.progress?.percentComplete).toBe(50);
+    });
+
+    it('should filter by in-progress content', async () => {
+      // Create multiple content items
+      const userIds = await seedTestUsers(db, 1);
+      const testUserId = userIds[0];
+
+      const media1 = await mediaService.create(
+        {
+          title: 'In Progress Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/in-progress.mp4',
+          fileSizeBytes: 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media1.id,
+        {
+          hlsMasterPlaylistKey: 'hls/in-progress/master.m3u8',
+          thumbnailKey: 'thumbnails/in-progress.jpg',
+          durationSeconds: 100,
+        },
+        userId
+      );
+
+      const content1 = await contentService.create(
+        {
+          organizationId,
+          title: 'In Progress Content',
+          slug: createUniqueSlug('in-progress'),
+          contentType: 'video',
+          mediaItemId: media1.id,
+          visibility: 'purchased_only',
+          priceCents: 500,
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(content1.id, userId);
+
+      // Purchase and add partial progress
+      await db.insert(purchases).values({
+        organizationId,
+        customerId: testUserId,
+        contentId: content1.id,
+        status: 'completed',
+        amountPaidCents: 500,
+        stripePaymentIntentId: `pi_test_${Date.now()}_${testUserId}`,
+      });
+
+      await accessService.savePlaybackProgress(testUserId, {
+        contentId: content1.id,
+        positionSeconds: 50,
+        durationSeconds: 100,
+        completed: false,
+      });
+
+      // Filter for in-progress
+      const result = await accessService.listUserLibrary(testUserId, {
+        page: 1,
+        limit: 20,
+        filter: 'in-progress',
+        sortBy: 'recent',
+      });
+
+      expect(
+        result.items.every((item) => item.progress && !item.progress.completed)
+      ).toBe(true);
+    });
+  });
+
+  describe('Edge Cases and Boundary Conditions', () => {
+    describe('Progress Tracking Edge Cases', () => {
+      it('should handle progress at exactly 95.0%', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Exact 95% Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/exact-95.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/exact-95/master.m3u8',
+            thumbnailKey: 'thumbnails/exact-95.jpg',
+            durationSeconds: 100,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Exact 95% Boundary',
+            slug: createUniqueSlug('exact-95'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Save progress at exactly 95.0%
+        await accessService.savePlaybackProgress(userId, {
+          contentId: testContent.id,
+          positionSeconds: 95,
+          durationSeconds: 100,
+          completed: false,
+        });
+
+        const progress = await accessService.getPlaybackProgress(userId, {
+          contentId: testContent.id,
+        });
+
+        // At exactly 95%, should be auto-completed
+        expect(progress?.completed).toBe(true);
+        expect(progress?.positionSeconds).toBe(95);
+      });
+
+      it('should handle progress at 94.9% (just below threshold)', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Below 95% Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/below-95.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/below-95/master.m3u8',
+            thumbnailKey: 'thumbnails/below-95.jpg',
+            durationSeconds: 1000,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Below 95% Boundary',
+            slug: createUniqueSlug('below-95'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Save progress at 94.9%
+        await accessService.savePlaybackProgress(userId, {
+          contentId: testContent.id,
+          positionSeconds: 949,
+          durationSeconds: 1000,
+          completed: false,
+        });
+
+        const progress = await accessService.getPlaybackProgress(userId, {
+          contentId: testContent.id,
+        });
+
+        // Below 95%, should NOT be auto-completed
+        expect(progress?.completed).toBe(false);
+        expect(progress?.positionSeconds).toBe(949);
+      });
+
+      it('should handle zero duration seconds', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Zero Duration Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/zero-duration.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/zero-duration/master.m3u8',
+            thumbnailKey: 'thumbnails/zero-duration.jpg',
+            durationSeconds: 0,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Zero Duration',
+            slug: createUniqueSlug('zero-duration'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Save progress with 0 duration
+        await accessService.savePlaybackProgress(userId, {
+          contentId: testContent.id,
+          positionSeconds: 0,
+          durationSeconds: 0,
+          completed: false,
+        });
+
+        const progress = await accessService.getPlaybackProgress(userId, {
+          contentId: testContent.id,
+        });
+
+        expect(progress).not.toBeNull();
+        expect(progress?.positionSeconds).toBe(0);
+        expect(progress?.durationSeconds).toBe(0);
+      });
+
+      it('should handle position > duration', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Position Overflow Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/overflow.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/overflow/master.m3u8',
+            thumbnailKey: 'thumbnails/overflow.jpg',
+            durationSeconds: 100,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Position Overflow',
+            slug: createUniqueSlug('overflow'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Position exceeds duration (can happen with live video or player bugs)
+        await accessService.savePlaybackProgress(userId, {
+          contentId: testContent.id,
+          positionSeconds: 150,
+          durationSeconds: 100,
+          completed: false,
+        });
+
+        const progress = await accessService.getPlaybackProgress(userId, {
+          contentId: testContent.id,
+        });
+
+        expect(progress).not.toBeNull();
+        expect(progress?.positionSeconds).toBe(150);
+        // Should be auto-completed since 150 > 95
+        expect(progress?.completed).toBe(true);
+      });
+
+      it('should handle very large duration (multi-hour video)', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Long Video Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/long-video.mp4',
+            fileSizeBytes: 1024 * 1024 * 1024,
+          },
+          userId
+        );
+
+        const longDuration = 10800; // 3 hours
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/long-video/master.m3u8',
+            thumbnailKey: 'thumbnails/long-video.jpg',
+            durationSeconds: longDuration,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Long Duration Video',
+            slug: createUniqueSlug('long-video'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Save progress at halfway point
+        await accessService.savePlaybackProgress(userId, {
+          contentId: testContent.id,
+          positionSeconds: 5400,
+          durationSeconds: longDuration,
+          completed: false,
+        });
+
+        const progress = await accessService.getPlaybackProgress(userId, {
+          contentId: testContent.id,
+        });
+
+        expect(progress?.positionSeconds).toBe(5400);
+        expect(progress?.durationSeconds).toBe(longDuration);
+        expect(progress?.completed).toBe(false);
+      });
+    });
+
+    describe('R2 Key Edge Cases', () => {
+      it('should handle R2 keys with special characters', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Special Chars Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/test-video_with-special-chars-2024.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey:
+              'hls/test-video_with-special-chars-2024/master.m3u8',
+            thumbnailKey: 'thumbnails/special-chars.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Special Characters',
+            slug: createUniqueSlug('special-chars'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        const result = await accessService.getStreamingUrl(userId, {
+          contentId: testContent.id,
+          expirySeconds: 3600,
+        });
+
+        // URL should be properly encoded
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('X-Amz-Signature');
+      });
+
+      it('should handle R2 keys with underscores and hyphens', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Underscores and Hyphens Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/test_video-with-underscores_and-hyphens.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey:
+              'hls/test_video-with-underscores_and-hyphens/master.m3u8',
+            thumbnailKey: 'thumbnails/underscores_hyphens.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Spaces in Key',
+            slug: createUniqueSlug('spaces'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        const result = await accessService.getStreamingUrl(userId, {
+          contentId: testContent.id,
+          expirySeconds: 3600,
+        });
+
+        // URL should be properly URL-encoded
+        expect(result.streamingUrl).toBeDefined();
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      });
+
+      it('should handle R2 keys with deep directory paths', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Deep Path Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/2024/november/videos/test.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/2024/november/videos/master.m3u8',
+            thumbnailKey: 'thumbnails/deep-path.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Unicode in Key',
+            slug: createUniqueSlug('unicode'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        const result = await accessService.getStreamingUrl(userId, {
+          contentId: testContent.id,
+          expirySeconds: 3600,
+        });
+
+        // URL should handle unicode characters
+        expect(result.streamingUrl).toBeDefined();
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      });
+    });
+
+    describe('Access Control Edge Cases', () => {
+      it('should handle deleted content (soft delete)', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'To Be Deleted',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/to-delete.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/to-delete/master.m3u8',
+            thumbnailKey: 'thumbnails/to-delete.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'To Be Deleted',
+            slug: createUniqueSlug('to-delete'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Delete content
+        await contentService.delete(testContent.id, userId);
+
+        // Should not be accessible after deletion
+        await expect(
+          accessService.getStreamingUrl(userId, {
+            contentId: testContent.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow('Content not found or not accessible');
+      });
+
+      it('should handle content with priceCents = 0 (free)', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Free Content Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/free.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/free/master.m3u8',
+            thumbnailKey: 'thumbnails/free.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Free Content',
+            slug: createUniqueSlug('free'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0, // Explicitly free
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Should be accessible without purchase
+        const result = await accessService.getStreamingUrl(otherUserId, {
+          contentId: testContent.id,
+          expirySeconds: 3600,
+        });
+
+        expect(result.streamingUrl).toBeDefined();
+      });
+
+      it('should handle content with very high price', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Expensive Content',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/expensive.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/expensive/master.m3u8',
+            thumbnailKey: 'thumbnails/expensive.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Very Expensive',
+            slug: createUniqueSlug('expensive'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'purchased_only',
+            priceCents: 9999999, // $99,999.99 (max allowed is $100,000)
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Without purchase, should be denied
+        await expect(
+          accessService.getStreamingUrl(otherUserId, {
+            contentId: testContent.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow('User does not have access to this content');
+      });
+    });
+
+    describe('Pagination Edge Cases', () => {
+      it('should handle page beyond total pages', async () => {
+        const result = await accessService.listUserLibrary(userId, {
+          page: 999,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        expect(result.items).toHaveLength(0);
+        expect(result.pagination.page).toBe(999);
+      });
+
+      it('should handle limit = 1 (minimum)', async () => {
+        const result = await accessService.listUserLibrary(userId, {
+          page: 1,
+          limit: 1,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        expect(result.items.length).toBeLessThanOrEqual(1);
+        expect(result.pagination.limit).toBe(1);
+      });
+
+      it('should handle limit = 100 (maximum)', async () => {
+        const result = await accessService.listUserLibrary(userId, {
+          page: 1,
+          limit: 100,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        expect(result.items.length).toBeLessThanOrEqual(100);
+        expect(result.pagination.limit).toBe(100);
+      });
+    });
+
+    describe('Concurrent Operations', () => {
+      it('should handle multiple concurrent progress saves for same user/content', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Concurrent Test',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/concurrent.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/concurrent/master.m3u8',
+            thumbnailKey: 'thumbnails/concurrent.jpg',
+            durationSeconds: 100,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Concurrent Saves',
+            slug: createUniqueSlug('concurrent'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Simulate concurrent saves from different devices/tabs
+        const saves = [
+          accessService.savePlaybackProgress(userId, {
+            contentId: testContent.id,
+            positionSeconds: 10,
+            durationSeconds: 100,
+            completed: false,
+          }),
+          accessService.savePlaybackProgress(userId, {
+            contentId: testContent.id,
+            positionSeconds: 20,
+            durationSeconds: 100,
+            completed: false,
+          }),
+          accessService.savePlaybackProgress(userId, {
+            contentId: testContent.id,
+            positionSeconds: 30,
+            durationSeconds: 100,
+            completed: false,
+          }),
+        ];
+
+        // All saves should succeed (last write wins with upsert)
+        await Promise.all(saves);
+
+        const progress = await accessService.getPlaybackProgress(userId, {
+          contentId: testContent.id,
+        });
+
+        // One of the positions should be saved
+        expect(progress).not.toBeNull();
+        expect([10, 20, 30]).toContain(progress?.positionSeconds);
+      });
+
+      it('should handle concurrent streaming URL requests', async () => {
+        const media = await mediaService.create(
+          {
+            title: 'Concurrent Streaming',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: 'originals/concurrent-stream.mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/concurrent-stream/master.m3u8',
+            thumbnailKey: 'thumbnails/concurrent-stream.jpg',
+            durationSeconds: 100,
+          },
+          userId
+        );
+
+        const testContent = await contentService.create(
+          {
+            organizationId,
+            title: 'Concurrent Stream Requests',
+            slug: createUniqueSlug('concurrent-stream'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(testContent.id, userId);
+
+        // Simulate multiple devices requesting stream simultaneously
+        const requests = [
+          accessService.getStreamingUrl(userId, {
+            contentId: testContent.id,
+            expirySeconds: 3600,
+          }),
+          accessService.getStreamingUrl(userId, {
+            contentId: testContent.id,
+            expirySeconds: 3600,
+          }),
+          accessService.getStreamingUrl(userId, {
+            contentId: testContent.id,
+            expirySeconds: 3600,
+          }),
+        ];
+
+        const results = await Promise.all(requests);
+
+        // All requests should succeed with valid URLs
+        for (const result of results) {
+          expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+          expect(result.streamingUrl).toContain('X-Amz-Signature');
+        }
+      });
+    });
+  });
+});

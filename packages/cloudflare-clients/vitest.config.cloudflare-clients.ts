@@ -6,6 +6,8 @@ import { packageVitestConfig } from '../../config/vitest/package.config';
 
 export default packageVitestConfig({
   packageName: 'cloudflare-clients',
+  // Load .env.test for R2 credentials
+  setupFiles: ['../../vitest.setup.ts'],
 });
 
 // Future Workers Pool Configuration (for Vitest 4+ compatibility):

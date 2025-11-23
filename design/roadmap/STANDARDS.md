@@ -502,6 +502,102 @@ function process(data: ProcessInput): string {
 
 ---
 
+## 9. Validation Error Messages
+
+### 9.1 Error Message Pattern: Imperative + Context
+
+**Standard Pattern**:
+```
+"Must be [constraint] ([additional context])"
+```
+
+**Examples**:
+- `"Must be at least 5 minutes (300 seconds)"`
+- `"Must be a whole number"`
+- `"Must be 0 or greater"`
+- `"Must use HTTP or HTTPS protocol"`
+- `"Must be 1000 or less"`
+
+### 9.2 Context Guidelines
+
+**Include context when**:
+- Converting units (seconds to minutes/hours)
+- Explaining technical terms (UUID = "ID format")
+- Providing examples ("e.g., video, audio")
+- Clarifying numeric limits with human-readable values
+
+**Omit context for obvious validations**:
+- `"Must be a whole number"` (no need to explain integers)
+- `"Must be greater than 0"` (self-explanatory)
+
+### 9.3 Anti-Patterns
+
+**❌ Avoid these patterns**:
+- `"Invalid value"` (not specific enough)
+- `"Value must match regex ^[0-9]+$"` (leaks implementation)
+- `"Database constraint violated"` (leaks architecture)
+- `"Expiry must be an integer"` (use "Must be a whole number")
+- `"Minimum expiry is 5 minutes"` (use "Must be at least 5 minutes")
+
+### 9.4 Security Considerations
+
+**Never leak system internals**:
+- ❌ `"Database connection failed at postgres://user:pass@host"`
+- ✅ `"Unable to process request"`
+
+**Keep errors generic but helpful**:
+- ❌ `"Email regex failed: ^[a-z]..."`
+- ✅ `"Invalid email format"`
+
+**Don't expose database structure**:
+- ❌ `"Column 'priceCents' must be integer"`
+- ✅ `"Price must be a whole number (in cents)"`
+
+### 9.5 Implementation Examples
+
+**Zod Schema with Imperative Messages**:
+```typescript
+// ✅ Correct: Imperative pattern
+export const expirySchema = z
+  .number()
+  .int('Must be a whole number')
+  .min(300, 'Must be at least 5 minutes (300 seconds)')
+  .max(7200, 'Must be 2 hours or less (7200 seconds)');
+
+// ❌ Wrong: Inconsistent patterns
+export const expirySchema = z
+  .number()
+  .int('Expiry must be an integer')
+  .min(300, 'Minimum expiry is 5 minutes')
+  .max(7200, 'Maximum expiry is 24 hours');
+```
+
+**Refinement with Custom Path**:
+```typescript
+.refine(
+  (data) => {
+    if (['video', 'audio'].includes(data.contentType)) {
+      return !!data.mediaItemId;
+    }
+    return true;
+  },
+  {
+    message: 'Media item is required for video and audio content',
+    path: ['mediaItemId'], // Shows error on specific field
+  }
+)
+```
+
+### 9.6 Localization Readiness
+
+Design messages to be easily translatable:
+- Use consistent structure (`"Must be..."`)
+- Avoid complex sentences with multiple clauses
+- Include numeric values separately when possible
+- Consider future i18n keys: `validation.min_value` → `"Must be at least {min}"`
+
+---
+
 ## Design Patterns
 
 ### Repository Pattern (Not Currently Used)

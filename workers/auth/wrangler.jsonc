@@ -22,6 +22,9 @@
     }
   ],
 
+  // Note: R2 buckets are not used by auth worker
+  // R2 storage is only used by content-api worker for media management
+
   // Environment configurations
   "env": {
     // Production environment

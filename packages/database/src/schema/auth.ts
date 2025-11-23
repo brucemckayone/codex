@@ -1,18 +1,15 @@
+/**
+ * Auth-specific tables (Better Auth integration)
+ *
+ * These tables handle authentication concerns: accounts, sessions, tokens.
+ * The users table is in ./users.ts (identity concern).
+ */
 import { relations } from 'drizzle-orm';
-import { boolean, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { users } from './users';
 
-export const users = pgTable('users', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull().unique(),
-  emailVerified: boolean('email_verified').default(false).notNull(),
-  image: text('image'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at')
-    .defaultNow()
-    .$onUpdate(() => new Date())
-    .notNull(),
-});
+// Re-export users for backwards compatibility
+export { users } from './users';
 
 export const accounts = pgTable('accounts', {
   id: text('id').primaryKey(),

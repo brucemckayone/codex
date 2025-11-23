@@ -5,7 +5,7 @@
  * Supports GET, POST, PATCH, DELETE with automatic body parsing detection.
  *
  * Changes from previous version:
- * - Merged createAuthenticatedHandler and createAuthenticatedGetHandler
+ * - Merged createAuthenticatedHandler and createAuthenticatedHandler
  * - Auto-detects when to parse body based on schema
  * - Enriches context with request metadata (ID, IP, user agent)
  * - Supports enriched context for advanced use cases
@@ -112,7 +112,7 @@ function getUserPermissions(
 /**
  * Unified authenticated route handler with automatic body parsing detection
  *
- * Replaces both createAuthenticatedHandler and createAuthenticatedGetHandler.
+ * Replaces both createAuthenticatedHandler and createAuthenticatedHandler.
  * Auto-detects whether to parse body based on presence of `body` in schema.
  *
  * Features:
@@ -320,16 +320,6 @@ export function createAuthenticatedHandler<
     }
   };
 }
-
-/**
- * Deprecated: Use createAuthenticatedHandler instead
- *
- * This function is kept for backwards compatibility.
- * It's now just an alias to createAuthenticatedHandler.
- *
- * @deprecated Use createAuthenticatedHandler - it auto-detects body parsing
- */
-export const createAuthenticatedGetHandler = createAuthenticatedHandler;
 
 /**
  * Wrap a handler function with error handling

@@ -26,7 +26,6 @@ import {
   uuidSchema,
 } from '@codex/validation';
 import {
-  createAuthenticatedGetHandler,
   createAuthenticatedHandler,
   POLICY_PRESETS,
   withPolicy,
@@ -76,7 +75,7 @@ app.post(
 app.get(
   '/check-slug/:slug',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: z.object({ slug: createSlugSchema(255) }),
     },
@@ -105,7 +104,7 @@ app.get(
 app.get(
   '/slug/:slug',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: z.object({ slug: createSlugSchema(255) }),
     },
@@ -139,7 +138,7 @@ app.get(
 app.get(
   '/:id',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: z.object({ id: uuidSchema }),
     },
@@ -200,7 +199,7 @@ app.patch(
 app.get(
   '/',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       query: organizationQuerySchema,
     },
@@ -240,7 +239,7 @@ app.delete(
     auth: 'required',
     rateLimit: 'auth', // Stricter rate limit for deletion
   }),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: z.object({ id: uuidSchema }),
     },

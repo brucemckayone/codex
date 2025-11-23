@@ -23,7 +23,9 @@
  * - /api/organizations - Organization management endpoints
  */
 
-import { createWorker } from '@codex/worker-utils';
+import { testDbConnection } from '@codex/database';
+import { createKvCheck, createWorker } from '@codex/worker-utils';
+import type { Context } from 'hono';
 
 // Import route modules
 import organizationRoutes from './routes/organizations';
@@ -40,6 +42,18 @@ const app = createWorker({
   enableCors: true,
   enableSecurityHeaders: true,
   enableGlobalAuth: false, // Using route-level withPolicy() instead
+  healthCheck: {
+    checkDatabase: async (_c: Context) => {
+      const isConnected = await testDbConnection();
+      return {
+        status: isConnected ? 'ok' : 'error',
+        message: isConnected
+          ? 'Database connection is healthy.'
+          : 'Database connection failed.',
+      };
+    },
+    checkKV: createKvCheck(['RATE_LIMIT_KV']),
+  },
 });
 
 // ============================================================================

@@ -23,7 +23,6 @@ import {
 import { dbHttp } from '@codex/database';
 import { createIdParamsSchema } from '@codex/validation';
 import {
-  createAuthenticatedGetHandler,
   createAuthenticatedHandler,
   POLICY_PRESETS,
   withPolicy,
@@ -70,7 +69,7 @@ app.post(
 app.get(
   '/:id',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: createIdParamsSchema(),
     },
@@ -123,7 +122,7 @@ app.patch(
 app.get(
   '/',
   withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       query: contentQuerySchema,
     },
@@ -155,7 +154,7 @@ app.get(
 app.post(
   '/:id/publish',
   withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: createIdParamsSchema(),
     },
@@ -179,7 +178,7 @@ app.post(
 app.post(
   '/:id/unpublish',
   withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: createIdParamsSchema(),
     },
@@ -207,7 +206,7 @@ app.delete(
     roles: ['creator', 'admin'],
     rateLimit: 'auth', // Stricter rate limit for deletion
   }),
-  createAuthenticatedGetHandler({
+  createAuthenticatedHandler({
     schema: {
       params: createIdParamsSchema(),
     },

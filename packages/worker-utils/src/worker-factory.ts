@@ -79,6 +79,13 @@ export interface HealthCheckOptions {
   checkKV?: (
     c: Context
   ) => Promise<{ status: 'ok' | 'error'; message?: string }>;
+
+  /**
+   * Optional R2 bucket connectivity check
+   */
+  checkR2?: (
+    c: Context
+  ) => Promise<{ status: 'ok' | 'error'; message?: string; details?: unknown }>;
 }
 
 /**

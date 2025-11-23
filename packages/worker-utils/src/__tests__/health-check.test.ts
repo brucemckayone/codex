@@ -24,13 +24,12 @@ describe('Health Check Enhancements', () => {
       expect(res.status).toBe(200);
 
       const data = await res.json();
-      expect(data).toEqual({
+      expect(data).toMatchObject({
         status: 'healthy',
         service: 'test-service',
         version: '1.0.0',
         timestamp: expect.any(String),
       });
-      expect(data.checks).toBeUndefined();
     });
   });
 
@@ -52,15 +51,8 @@ describe('Health Check Enhancements', () => {
       expect(res.status).toBe(200);
 
       const data = await res.json();
-      expect(data).toEqual({
-        status: 'healthy',
-        service: 'test-service',
-        version: '1.0.0',
-        timestamp: expect.any(String),
-        checks: {
-          database: 'ok',
-        },
-      });
+      expect(data.status).toBe('healthy');
+      expect(data.checks.database).toEqual({ status: 'ok' });
     });
 
     it('should return 503 when database check fails', async () => {
@@ -83,14 +75,10 @@ describe('Health Check Enhancements', () => {
       expect(res.status).toBe(503);
 
       const data = await res.json();
-      expect(data).toEqual({
-        status: 'unhealthy',
-        service: 'test-service',
-        version: '1.0.0',
-        timestamp: expect.any(String),
-        checks: {
-          database: 'error: Connection refused',
-        },
+      expect(data.status).toBe('unhealthy');
+      expect(data.checks.database).toEqual({
+        status: 'error',
+        message: 'Connection refused',
       });
     });
 
@@ -114,7 +102,10 @@ describe('Health Check Enhancements', () => {
 
       const data = await res.json();
       expect(data.status).toBe('unhealthy');
-      expect(data.checks.database).toBe('error');
+      expect(data.checks.database).toEqual({
+        status: 'error',
+        message: 'Database connection failed',
+      });
     });
   });
 
@@ -136,15 +127,8 @@ describe('Health Check Enhancements', () => {
       expect(res.status).toBe(200);
 
       const data = await res.json();
-      expect(data).toEqual({
-        status: 'healthy',
-        service: 'test-service',
-        version: '1.0.0',
-        timestamp: expect.any(String),
-        checks: {
-          kv: 'ok',
-        },
-      });
+      expect(data.status).toBe('healthy');
+      expect(data.checks.kv).toEqual({ status: 'ok' });
     });
 
     it('should return 503 when KV check fails', async () => {
@@ -167,14 +151,10 @@ describe('Health Check Enhancements', () => {
       expect(res.status).toBe(503);
 
       const data = await res.json();
-      expect(data).toEqual({
-        status: 'unhealthy',
-        service: 'test-service',
-        version: '1.0.0',
-        timestamp: expect.any(String),
-        checks: {
-          kv: 'error: KV namespace not found',
-        },
+      expect(data.status).toBe('unhealthy');
+      expect(data.checks.kv).toEqual({
+        status: 'error',
+        message: 'KV namespace not found',
       });
     });
   });
@@ -198,16 +178,9 @@ describe('Health Check Enhancements', () => {
       expect(res.status).toBe(200);
 
       const data = await res.json();
-      expect(data).toEqual({
-        status: 'healthy',
-        service: 'test-service',
-        version: '1.0.0',
-        timestamp: expect.any(String),
-        checks: {
-          database: 'ok',
-          kv: 'ok',
-        },
-      });
+      expect(data.status).toBe('healthy');
+      expect(data.checks.database).toEqual({ status: 'ok' });
+      expect(data.checks.kv).toEqual({ status: 'ok' });
     });
 
     it('should return 503 if any check fails', async () => {
@@ -229,8 +202,11 @@ describe('Health Check Enhancements', () => {
 
       const data = await res.json();
       expect(data.status).toBe('unhealthy');
-      expect(data.checks.database).toBe('ok');
-      expect(data.checks.kv).toBe('error: KV error');
+      expect(data.checks.database).toEqual({ status: 'ok' });
+      expect(data.checks.kv).toEqual({
+        status: 'error',
+        message: 'KV error',
+      });
     });
   });
 });

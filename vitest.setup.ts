@@ -17,11 +17,11 @@
 import { resolve } from 'node:path';
 import { config } from 'dotenv';
 
-// Load .env.dev for local development ONLY (not in CI)
-// In CI, environment variables are already set in the workflow
-// Check for CI environment before loading .env.dev
+// Load environment variables for tests
+// - CI: Variables are set in GitHub Actions workflow
+// - Local: Load from .env.test (test-specific config with test buckets)
 if (!process.env.CI) {
-  config({ path: resolve(__dirname, '.env.dev') });
+  config({ path: resolve(__dirname, '.env.test') });
 }
 
 // Ensure DB_METHOD is set for tests (default to LOCAL_PROXY for local dev)

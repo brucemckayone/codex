@@ -32,9 +32,8 @@ This is the gateway between customers and content. Every content access request 
 
 ### ✅ Already Implemented
 
-- **R2 Client**: Signed URL generation available at `packages/cloudflare-clients/src/r2/client.ts`
+ 
 - **Content Schema**: From P1-CONTENT-001 (`content`, `media_items` tables)
-- **Purchase Schema**: From P1-ECOM-001 (`purchases`, `content_access` tables)
 - **Authentication Middleware**: User context available in all routes
 
 ### 🚧 Needs Implementation

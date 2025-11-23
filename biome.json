@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.3.5/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.3.7/schema.json",
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
@@ -45,6 +45,8 @@
       "**/apps/**/*.{ts,js,svelte,json}",
       "**/config/**/*.{ts,js,json}",
       "**/*.{ts,js,json}",
+      "!**/.obsidian",
+      "!**/.obsidian",
       "!**/node_modules",
       "!**/dist",
       "!**/.wrangler",

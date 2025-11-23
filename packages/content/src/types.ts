@@ -36,6 +36,7 @@ export interface ServiceConfig {
   environment: string;
 }
 
+//TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
 /**
  * Pagination parameters for list queries
  */
@@ -44,6 +45,7 @@ export interface PaginationParams {
   limit: number;
 }
 
+//TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder
 /**
  * Pagination metadata in responses
  */
@@ -54,6 +56,7 @@ export interface PaginationMetadata {
   totalPages: number;
 }
 
+//TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
 /**
  * Paginated response structure
  */

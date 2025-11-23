@@ -15,8 +15,11 @@
  * because it requires StripeWebhookEnv with Stripe-specific variables.
  */
 
+import { testDbConnection } from '@codex/database';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
+  createHealthCheckHandler,
+  createKvCheck,
   createLoggerMiddleware,
   createNotFoundHandler,
   createObservabilityErrorHandler,
@@ -24,6 +27,7 @@ import {
   createRequestTrackingMiddleware,
   createSecurityHeadersMiddleware,
 } from '@codex/worker-utils';
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import type { StripeWebhookEnv } from './types';
@@ -74,18 +78,21 @@ app.get('/', (c) => {
   return c.json({ status: 'ok', service: 'stripe-webhook-handler' });
 });
 
-app.get('/health', (c) => {
-  const obs = c.get('obs');
-  obs.info('Health check endpoint hit');
-
-  // ✅ SECURE: Don't leak secret configuration in logs/responses
-  return c.json({
-    status: 'healthy',
-    worker: 'stripe-webhook-handler',
-    environment: c.env.ENVIRONMENT || 'development',
-    timestamp: new Date().toISOString(),
-  });
-});
+app.get(
+  '/health',
+  createHealthCheckHandler('stripe-webhook-handler', '1.0.0', {
+    checkDatabase: async (_c: Context) => {
+      const isConnected = await testDbConnection();
+      return {
+        status: isConnected ? 'ok' : 'error',
+        message: isConnected
+          ? 'Database connection is healthy.'
+          : 'Database connection failed.',
+      };
+    },
+    checkKV: createKvCheck(['RATE_LIMIT_KV']),
+  })
+);
 
 // ============================================================================
 // Webhook Endpoints

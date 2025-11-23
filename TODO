@@ -1,1 +1,3 @@
 -[ ] dont for get to gdpr for tracking on worker utils tracking middle ware
+- unify pagnination structure and treturn types
+- create repository layer between api workers and calling which handles type checking etc and so on.
