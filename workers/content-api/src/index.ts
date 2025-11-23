@@ -26,7 +26,6 @@
  */
 
 import { testDbConnection } from '@codex/database';
-import type { Bindings } from '@codex/shared-types';
 import {
   createKvCheck,
   createR2Check,
