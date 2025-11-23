@@ -34,16 +34,16 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@codex/cloudflare-clients": "workspace:*",
+    "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/validation": "workspace:*",
-    "@codex/cloudflare-clients": "workspace:*",
     "drizzle-orm": "0.44.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
-    "@codex/content": "workspace:*",
     "@codex/test-utils": "workspace:*",
     "@types/node": "^22.0.0",
     "dotenv": "^17.2.3",

@@ -293,7 +293,7 @@ describe('ContentAccessService Integration', () => {
           contentId: draftContent.id,
           expirySeconds: 3600,
         })
-      ).rejects.toThrow('Content not found or not accessible');
+      ).rejects.toThrow('Content not found');
     });
   });
 
@@ -1159,7 +1159,7 @@ describe('ContentAccessService Integration', () => {
             contentId: testContent.id,
             expirySeconds: 3600,
           })
-        ).rejects.toThrow('Content not found or not accessible');
+        ).rejects.toThrow('Content not found');
       });
 
       it('should handle content with priceCents = 0 (free)', async () => {

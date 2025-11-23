@@ -4,19 +4,11 @@ import {
   ServiceError,
 } from '@codex/service-errors';
 
-/**
- * Content not found or not accessible error
- * Thrown when content doesn't exist, is not published, or is deleted
- */
-export class ContentNotFoundError extends NotFoundError {
-  constructor(contentId: string, context?: Record<string, unknown>) {
-    super('Content not found or not accessible', {
-      contentId,
-      code: 'CONTENT_NOT_FOUND',
-      ...context,
-    });
-  }
-}
+// Re-export error classes from @codex/content (canonical source)
+export {
+  ContentNotFoundError,
+  MediaNotFoundError,
+} from '@codex/content';
 
 /**
  * Access denied error
@@ -62,20 +54,6 @@ export class R2SigningError extends InternalServiceError {
       r2Key,
       cause,
       code: 'R2_SIGNING_ERROR',
-    });
-  }
-}
-
-/**
- * Media not found error
- * Thrown when media file doesn't exist in R2 storage
- */
-export class MediaNotFoundError extends NotFoundError {
-  constructor(r2Key: string, contentId: string) {
-    super('Media file not found in storage', {
-      r2Key,
-      contentId,
-      code: 'MEDIA_NOT_FOUND',
     });
   }
 }

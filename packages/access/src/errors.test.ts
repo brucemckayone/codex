@@ -181,7 +181,7 @@ describe('ContentNotFoundError', () => {
 
   it('should have correct message', () => {
     const error = new ContentNotFoundError('content-123');
-    expect(error.message).toBe('Content not found or not accessible');
+    expect(error.message).toBe('Content not found');
   });
 
   it('should include contentId in context', () => {
@@ -192,7 +192,18 @@ describe('ContentNotFoundError', () => {
   it('should be throwable and catchable', () => {
     expect(() => {
       throw new ContentNotFoundError('content-123');
-    }).toThrow('Content not found or not accessible');
+    }).toThrow('Content not found');
+  });
+
+  it('should accept optional context parameter', () => {
+    const error = new ContentNotFoundError('content-123', {
+      reason: 'deleted',
+    });
+    expect(error.context).toMatchObject({
+      contentId: 'content-123',
+      code: 'CONTENT_NOT_FOUND',
+      reason: 'deleted',
+    });
   });
 });
 
@@ -223,22 +234,30 @@ describe('R2SigningError', () => {
 });
 
 describe('MediaNotFoundError', () => {
-  it('should create error with correct code in context', () => {
+  it('should create error with correct code in context (new signature)', () => {
     const error = new MediaNotFoundError('r2-key-123', 'content-123');
     expect(error.context).toHaveProperty('code', 'MEDIA_NOT_FOUND');
   });
 
-  it('should have correct message', () => {
+  it('should have correct message (new signature)', () => {
     const error = new MediaNotFoundError('r2-key-123', 'content-123');
     expect(error.message).toBe('Media file not found in storage');
   });
 
-  it('should include r2Key and contentId in context', () => {
+  it('should include r2Key and contentId in context (new signature)', () => {
     const error = new MediaNotFoundError('r2-key-123', 'content-123');
     expect(error.context).toMatchObject({
       r2Key: 'r2-key-123',
       contentId: 'content-123',
       code: 'MEDIA_NOT_FOUND',
+    });
+  });
+
+  it('should support old signature with mediaItemId', () => {
+    const error = new MediaNotFoundError('media-item-456');
+    expect(error.message).toBe('Media item not found');
+    expect(error.context).toMatchObject({
+      mediaItemId: 'media-item-456',
     });
   });
 });
