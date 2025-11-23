@@ -582,16 +582,3 @@ export class ContentService extends BaseService {
     }
   }
 }
-
-/**
- * Factory function to create ContentService instance
- *
- * Usage:
- * ```typescript
- * const service = createContentService({ db, environment: 'production' });
- * const content = await service.create(input, creatorId);
- * ```
- */
-export function createContentService(config: ServiceConfig): ContentService {
-  return new ContentService(config);
-}

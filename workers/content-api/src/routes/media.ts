@@ -14,7 +14,7 @@
 
 import {
   createMediaItemSchema,
-  createMediaItemService,
+  MediaItemService,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
@@ -49,7 +49,7 @@ app.post(
       body: createMediaItemSchema,
     },
     handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -74,7 +74,7 @@ app.get(
       params: createIdParamsSchema(),
     },
     handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -100,7 +100,7 @@ app.patch(
       body: updateMediaItemSchema,
     },
     handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -129,7 +129,7 @@ app.get(
       query: mediaQuerySchema,
     },
     handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -166,7 +166,7 @@ app.delete(
       params: createIdParamsSchema(),
     },
     handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });

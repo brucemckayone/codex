@@ -15,9 +15,9 @@
  */
 
 import {
+  ContentService,
   contentQuerySchema,
   createContentSchema,
-  createContentService,
   updateContentSchema,
 } from '@codex/content';
 import { dbHttp } from '@codex/database';
@@ -49,7 +49,7 @@ app.post(
       body: createContentSchema,
     },
     handler: async (_c, ctx) => {
-      const service = createContentService({
+      const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -74,7 +74,7 @@ app.get(
       params: createIdParamsSchema(),
     },
     handler: async (_c, ctx) => {
-      const service = createContentService({
+      const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -99,7 +99,7 @@ app.patch(
       body: updateContentSchema,
     },
     handler: async (_c, ctx) => {
-      const service = createContentService({
+      const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -127,7 +127,7 @@ app.get(
       query: contentQuerySchema,
     },
     handler: async (_c, ctx) => {
-      const service = createContentService({
+      const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -159,7 +159,7 @@ app.post(
       params: createIdParamsSchema(),
     },
     handler: async (_c, ctx) => {
-      const service = createContentService({
+      const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -183,7 +183,7 @@ app.post(
       params: createIdParamsSchema(),
     },
     handler: async (_c, ctx) => {
-      const service = createContentService({
+      const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -211,7 +211,7 @@ app.delete(
       params: createIdParamsSchema(),
     },
     handler: async (_c, ctx) => {
-      const service = createContentService({
+      const service = new ContentService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });

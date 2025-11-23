@@ -344,18 +344,3 @@ export class OrganizationService extends BaseService {
     }
   }
 }
-
-/**
- * Factory function to create OrganizationService instance
- *
- * Usage:
- * ```typescript
- * const service = createOrganizationService({ db, environment: 'production' });
- * const org = await service.create(input);
- * ```
- */
-export function createOrganizationService(
-  config: ServiceConfig
-): OrganizationService {
-  return new OrganizationService(config);
-}

@@ -5,7 +5,4 @@
  * Provides both service classes and factory functions.
  */
 // Organization Service
-export {
-  createOrganizationService,
-  OrganizationService,
-} from './organization-service';
+export { OrganizationService } from './organization-service';

@@ -405,18 +405,3 @@ export class MediaItemService extends BaseService {
     );
   }
 }
-
-/**
- * Factory function to create MediaItemService instance
- *
- * Usage:
- * ```typescript
- * const service = createMediaItemService({ db, environment: 'production' });
- * const mediaItem = await service.create(input, creatorId);
- * ```
- */
-export function createMediaItemService(
-  config: ServiceConfig
-): MediaItemService {
-  return new MediaItemService(config);
-}

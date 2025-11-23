@@ -17,7 +17,7 @@
 import { dbHttp } from '@codex/database';
 import {
   createOrganizationSchema,
-  createOrganizationService,
+  OrganizationService,
   updateOrganizationSchema,
 } from '@codex/identity';
 import {
@@ -55,7 +55,7 @@ app.post(
       body: createOrganizationSchema,
     },
     handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -80,7 +80,7 @@ app.get(
       params: z.object({ slug: createSlugSchema(255) }),
     },
     handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -109,7 +109,7 @@ app.get(
       params: z.object({ slug: createSlugSchema(255) }),
     },
     handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -143,7 +143,7 @@ app.get(
       params: z.object({ id: uuidSchema }),
     },
     handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -179,7 +179,7 @@ app.patch(
       body: updateOrganizationSchema,
     },
     handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -206,7 +206,7 @@ app.get(
     handler: async (_c, ctx) => {
       const { search, sortBy, sortOrder, page, limit } = ctx.validated.query;
 
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -244,7 +244,7 @@ app.delete(
       params: z.object({ id: uuidSchema }),
     },
     handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
