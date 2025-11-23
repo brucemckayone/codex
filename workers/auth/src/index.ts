@@ -8,7 +8,6 @@
  * requires direct handler delegation. Request tracking is integrated.
  */
 
-import { testDbConnection } from '@codex/database';
 import { securityHeaders } from '@codex/security';
 import {
   createErrorHandler,
@@ -16,9 +15,10 @@ import {
   createHealthCheckHandler,
   createKvCheck,
   createNotFoundHandler,
-  createRequestTrackingMiddleware,
+  createStandardMiddlewareChain,
   ERROR_CODES,
   sequence,
+  standardDatabaseCheck,
 } from '@codex/worker-utils';
 import { type Context, Hono, type Next } from 'hono';
 import { createAuthInstance } from './auth-config';
@@ -31,10 +31,18 @@ import type { AuthEnv } from './types';
 const app = new Hono<AuthEnv>();
 
 /**
- * Request tracking middleware
- * Adds request ID, client IP, and user agent tracking
+ * Global middleware chain
+ * Applies request tracking to all routes
  */
-app.use('*', createRequestTrackingMiddleware());
+const globalMiddleware = createStandardMiddlewareChain({
+  serviceName: 'auth-worker',
+  skipLogging: true,
+  skipSecurityHeaders: true,
+});
+
+for (const middleware of globalMiddleware) {
+  app.use('*', middleware);
+}
 
 /**
  * BetterAuth handler
@@ -92,15 +100,7 @@ app.get(
   '/health',
   createHealthCheckHandler('auth-worker', '1.0.0', {
     checkKV: createKvCheck(['AUTH_SESSION_KV', 'RATE_LIMIT_KV']),
-    checkDatabase: async (_c: Context) => {
-      const isConnected = await testDbConnection();
-      return {
-        status: isConnected ? 'ok' : 'error',
-        message: isConnected
-          ? 'Database connection is healthy.'
-          : 'Database connection failed.',
-      };
-    },
+    checkDatabase: standardDatabaseCheck,
   })
 );
 

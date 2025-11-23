@@ -16,10 +16,10 @@
  *
  * Usage Example:
  * ```typescript
- * import { createOrganizationService } from '@codex/identity';
+ * import { OrganizationService } from '@codex/identity';
  * import { dbHttp } from '@codex/database';
  *
- * const service = createOrganizationService({
+ * const service = new OrganizationService({
  *   db: dbHttp,
  *   environment: 'production',
  * });
@@ -56,7 +56,7 @@
 // Services
 // ============================================================================
 
-export { createOrganizationService, OrganizationService } from './services';
+export { OrganizationService } from './services';
 
 // ============================================================================
 // Types

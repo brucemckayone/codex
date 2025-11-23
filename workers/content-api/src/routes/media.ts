@@ -14,11 +14,19 @@
 
 import {
   createMediaItemSchema,
-  createMediaItemService,
+  MediaItemService,
+  MediaNotFoundError,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
 import { dbHttp } from '@codex/database';
+import type {
+  CreateMediaResponse,
+  DeleteMediaResponse,
+  MediaListResponse,
+  MediaResponse,
+  UpdateMediaResponse,
+} from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
   createAuthenticatedHandler,
@@ -40,6 +48,7 @@ const app = new Hono<HonoEnv>();
  * Body: CreateMediaItemInput
  * Returns: MediaItem (201)
  * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {CreateMediaResponse}
  */
 app.post(
   '/',
@@ -48,12 +57,13 @@ app.post(
     schema: {
       body: createMediaItemSchema,
     },
-    handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+    handler: async (_c, ctx): Promise<CreateMediaResponse> => {
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.create(ctx.validated.body, ctx.user.id);
+      const media = await service.create(ctx.validated.body, ctx.user.id);
+      return { data: media };
     },
     successStatus: 201,
   })
@@ -65,6 +75,7 @@ app.post(
  *
  * Returns: MediaItem (200)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {MediaResponse}
  */
 app.get(
   '/:id',
@@ -73,12 +84,17 @@ app.get(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+    handler: async (_c, ctx): Promise<MediaResponse> => {
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.get(ctx.validated.params.id, ctx.user.id);
+      const media = await service.get(ctx.validated.params.id, ctx.user.id);
+      if (!media) {
+        throw new MediaNotFoundError(ctx.validated.params.id);
+      }
+
+      return { data: media };
     },
   })
 );
@@ -90,6 +106,7 @@ app.get(
  * Body: UpdateMediaItemInput
  * Returns: MediaItem (200)
  * Security: Creator/Admin only, API rate limit (100 req/min)
+ * @returns {UpdateMediaResponse}
  */
 app.patch(
   '/:id',
@@ -99,16 +116,17 @@ app.patch(
       params: createIdParamsSchema(),
       body: updateMediaItemSchema,
     },
-    handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+    handler: async (_c, ctx): Promise<UpdateMediaResponse> => {
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.update(
+      const media = await service.update(
         ctx.validated.params.id,
         ctx.validated.body,
         ctx.user.id
       );
+      return { data: media };
     },
   })
 );
@@ -120,6 +138,7 @@ app.patch(
  * Query params: MediaQueryInput
  * Returns: PaginatedResponse<MediaItem> (200)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {MediaListResponse}
  */
 app.get(
   '/',
@@ -128,21 +147,16 @@ app.get(
     schema: {
       query: mediaQuerySchema,
     },
-    handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+    handler: async (_c, ctx): Promise<MediaListResponse> => {
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
       const result = await service.list(ctx.user.id, ctx.validated.query);
 
-      return {
-        items: result.items,
-        page: result.pagination.page,
-        limit: result.pagination.limit,
-        total: result.pagination.total,
-        totalPages: result.pagination.totalPages,
-      };
+      // Service returns PaginatedResponse<T> which already matches our response type
+      return result;
     },
   })
 );
@@ -153,6 +167,7 @@ app.get(
  *
  * Returns: 204 No Content
  * Security: Creator/Admin only, Strict rate limit (5 req/15min)
+ * @returns {DeleteMediaResponse}
  */
 app.delete(
   '/:id',
@@ -165,8 +180,8 @@ app.delete(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx) => {
-      const service = createMediaItemService({
+    handler: async (_c, ctx): Promise<DeleteMediaResponse> => {
+      const service = new MediaItemService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });

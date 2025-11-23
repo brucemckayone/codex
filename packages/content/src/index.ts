@@ -16,11 +16,11 @@
  *
  * Usage Example:
  * ```typescript
- * import { createContentService } from '@codex/content';
- * import { db } from '@codex/database';
+ * import { ContentService } from '@codex/content';
+ * import { dbHttp } from '@codex/database';
  *
- * const service = createContentService({
- *   db,
+ * const service = new ContentService({
+ *   db: dbHttp,
  *   environment: 'production',
  * });
  *
@@ -62,8 +62,6 @@
 
 export {
   ContentService,
-  createContentService,
-  createMediaItemService,
   MediaItemService,
 } from './services';
 

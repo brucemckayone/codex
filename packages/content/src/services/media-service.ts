@@ -12,7 +12,13 @@
  * - Soft deletes only (sets deleted_at)
  */
 
+import {
+  scopedNotDeleted,
+  withCreatorScope,
+  withPagination,
+} from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
+import { BaseService } from '@codex/service-errors';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -21,17 +27,15 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq } from 'drizzle-orm';
 import { MediaNotFoundError, wrapError } from '../errors';
 import type {
-  Database,
   MediaItem,
   MediaItemFilters,
   MediaItemWithRelations,
   PaginatedResponse,
   PaginationParams,
   //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
-  ServiceConfig,
 } from '../types';
 
 /**
@@ -43,15 +47,7 @@ import type {
  * - Delete media items (soft delete)
  * - List media items with filters
  */
-export class MediaItemService {
-  private db: Database;
-  private environment: string;
-
-  constructor(config: ServiceConfig) {
-    this.db = config.db;
-    this.environment = config.environment;
-  }
-
+export class MediaItemService extends BaseService {
   /**
    * Create new media item
    *
@@ -116,8 +112,7 @@ export class MediaItemService {
       const result = await this.db.query.mediaItems.findFirst({
         where: and(
           eq(mediaItems.id, id),
-          eq(mediaItems.creatorId, creatorId),
-          isNull(mediaItems.deletedAt)
+          scopedNotDeleted(mediaItems, creatorId)
         ),
         with: {
           creator: {
@@ -169,8 +164,7 @@ export class MediaItemService {
         const existing = await tx.query.mediaItems.findFirst({
           where: and(
             eq(mediaItems.id, id),
-            eq(mediaItems.creatorId, creatorId),
-            isNull(mediaItems.deletedAt)
+            scopedNotDeleted(mediaItems, creatorId)
           ),
         });
 
@@ -186,7 +180,7 @@ export class MediaItemService {
             updatedAt: new Date(),
           })
           .where(
-            and(eq(mediaItems.id, id), eq(mediaItems.creatorId, creatorId))
+            and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           )
           .returning();
 
@@ -230,8 +224,7 @@ export class MediaItemService {
         const existing = await tx.query.mediaItems.findFirst({
           where: and(
             eq(mediaItems.id, id),
-            eq(mediaItems.creatorId, creatorId),
-            isNull(mediaItems.deletedAt)
+            scopedNotDeleted(mediaItems, creatorId)
           ),
         });
 
@@ -246,7 +239,7 @@ export class MediaItemService {
             updatedAt: new Date(),
           })
           .where(
-            and(eq(mediaItems.id, id), eq(mediaItems.creatorId, creatorId))
+            and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           );
       });
     } catch (error) {
@@ -281,14 +274,10 @@ export class MediaItemService {
     //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedResponse<MediaItemWithRelations>> {
     try {
-      const { page, limit } = pagination;
-      const offset = (page - 1) * limit;
+      const { limit, offset } = withPagination(pagination);
 
       // Build WHERE conditions
-      const whereConditions = [
-        eq(mediaItems.creatorId, creatorId),
-        isNull(mediaItems.deletedAt),
-      ];
+      const whereConditions = [scopedNotDeleted(mediaItems, creatorId)];
 
       // Add filters
       if (filters.status) {
@@ -342,7 +331,7 @@ export class MediaItemService {
       return {
         items,
         pagination: {
-          page,
+          page: pagination.page,
           limit,
           total: totalCount,
           totalPages,
@@ -411,19 +400,4 @@ export class MediaItemService {
       creatorId
     );
   }
-}
-
-/**
- * Factory function to create MediaItemService instance
- *
- * Usage:
- * ```typescript
- * const service = createMediaItemService({ db, environment: 'production' });
- * const mediaItem = await service.create(input, creatorId);
- * ```
- */
-export function createMediaItemService(
-  config: ServiceConfig
-): MediaItemService {
-  return new MediaItemService(config);
 }

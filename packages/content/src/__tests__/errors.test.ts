@@ -46,7 +46,10 @@ describe('Content Service Errors', () => {
 
     it('should include contentId in context', () => {
       const error = new ContentNotFoundError('content-123');
-      expect(error.context).toEqual({ contentId: 'content-123' });
+      expect(error.context).toMatchObject({
+        contentId: 'content-123',
+        code: 'CONTENT_NOT_FOUND',
+      });
     });
 
     it('should be catchable as Error', () => {

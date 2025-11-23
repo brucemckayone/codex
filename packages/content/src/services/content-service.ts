@@ -12,8 +12,14 @@
  * - Soft deletes only (sets deleted_at)
  */
 
-import { isUniqueViolation } from '@codex/database';
+import {
+  isUniqueViolation,
+  scopedNotDeleted,
+  withCreatorScope,
+  withPagination,
+} from '@codex/database';
 import { content, mediaItems } from '@codex/database/schema';
+import { BaseService } from '@codex/service-errors';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
 import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
@@ -30,11 +36,9 @@ import type {
   Content,
   ContentFilters,
   ContentWithRelations,
-  Database,
   DatabaseTransaction,
   PaginatedResponse,
   PaginationParams,
-  ServiceConfig,
 } from '../types';
 
 /**
@@ -47,15 +51,7 @@ import type {
  * - Delete content (soft delete)
  * - List content with filters
  */
-export class ContentService {
-  private db: Database;
-  private environment: string;
-
-  constructor(config: ServiceConfig) {
-    this.db = config.db;
-    this.environment = config.environment;
-  }
-
+export class ContentService extends BaseService {
   /**
    * Create new content
    *
@@ -155,11 +151,7 @@ export class ContentService {
   ): Promise<ContentWithRelations | null> {
     try {
       const result = await this.db.query.content.findFirst({
-        where: and(
-          eq(content.id, id),
-          eq(content.creatorId, creatorId),
-          isNull(content.deletedAt)
-        ),
+        where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         with: {
           mediaItem: true,
           organization: true,
@@ -206,11 +198,7 @@ export class ContentService {
       const result = await this.db.transaction(async (tx) => {
         // Verify content exists and belongs to creator
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         });
 
         if (!existing) {
@@ -224,7 +212,7 @@ export class ContentService {
             ...validated,
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
           .returning();
 
         if (!updated) {
@@ -267,11 +255,7 @@ export class ContentService {
       const result = await this.db.transaction(async (tx) => {
         // Get content with media item
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
           with: {
             mediaItem: true,
           },
@@ -310,7 +294,7 @@ export class ContentService {
             publishedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
           .returning();
 
         if (!published) {
@@ -352,11 +336,7 @@ export class ContentService {
     try {
       const result = await this.db.transaction(async (tx) => {
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         });
 
         if (!existing) {
@@ -369,7 +349,7 @@ export class ContentService {
             status: 'draft',
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
           .returning();
 
         if (!unpublished) {
@@ -404,11 +384,7 @@ export class ContentService {
     try {
       await this.db.transaction(async (tx) => {
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         });
 
         if (!existing) {
@@ -421,7 +397,7 @@ export class ContentService {
             deletedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)));
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)));
       });
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
@@ -456,14 +432,10 @@ export class ContentService {
     pagination: PaginationParams = { page: 1, limit: 20 }
   ): Promise<PaginatedResponse<ContentWithRelations>> {
     try {
-      const { page, limit } = pagination;
-      const offset = (page - 1) * limit;
+      const { limit, offset } = withPagination(pagination);
 
       // Build WHERE conditions
-      const whereConditions = [
-        eq(content.creatorId, creatorId),
-        isNull(content.deletedAt),
-      ];
+      const whereConditions = [scopedNotDeleted(content, creatorId)];
 
       // Add filters
       if (filters.status) {
@@ -543,7 +515,7 @@ export class ContentService {
       return {
         items,
         pagination: {
-          page,
+          page: pagination.page,
           limit,
           total: totalCount,
           totalPages,
@@ -583,8 +555,7 @@ export class ContentService {
     const mediaItem = await tx.query.mediaItems.findFirst({
       where: and(
         eq(mediaItems.id, mediaItemId),
-        eq(mediaItems.creatorId, creatorId),
-        isNull(mediaItems.deletedAt)
+        scopedNotDeleted(mediaItems, creatorId)
       ),
     });
 
@@ -605,17 +576,4 @@ export class ContentService {
       throw new ContentTypeMismatchError(contentType, mediaItem.mediaType);
     }
   }
-}
-
-/**
- * Factory function to create ContentService instance
- *
- * Usage:
- * ```typescript
- * const service = createContentService({ db, environment: 'production' });
- * const content = await service.create(input, creatorId);
- * ```
- */
-export function createContentService(config: ServiceConfig): ContentService {
-  return new ContentService(config);
 }

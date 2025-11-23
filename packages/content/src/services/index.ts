@@ -6,7 +6,7 @@
  */
 
 // Content Service
-export { ContentService, createContentService } from './content-service';
+export { ContentService } from './content-service';
 
 // Media Item Service
-export { createMediaItemService, MediaItemService } from './media-service';
+export { MediaItemService } from './media-service';

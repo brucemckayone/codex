@@ -17,9 +17,18 @@
 import { dbHttp } from '@codex/database';
 import {
   createOrganizationSchema,
-  createOrganizationService,
+  OrganizationService,
   updateOrganizationSchema,
 } from '@codex/identity';
+import type {
+  CheckSlugResponse,
+  CreateOrganizationResponse,
+  DeleteOrganizationResponse,
+  OrganizationBySlugResponse,
+  OrganizationListResponse,
+  OrganizationResponse,
+  UpdateOrganizationResponse,
+} from '@codex/shared-types';
 import {
   createSlugSchema,
   organizationQuerySchema,
@@ -46,6 +55,7 @@ const app = new Hono<HonoEnv>();
  * Body: CreateOrganizationInput
  * Returns: Organization (201)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {CreateOrganizationResponse}
  */
 app.post(
   '/',
@@ -54,12 +64,13 @@ app.post(
     schema: {
       body: createOrganizationSchema,
     },
-    handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+    handler: async (_c, ctx): Promise<CreateOrganizationResponse> => {
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.create(ctx.validated.body);
+      const organization = await service.create(ctx.validated.body);
+      return { data: organization };
     },
     successStatus: 201,
   })
@@ -71,6 +82,7 @@ app.post(
  *
  * Returns: { available: boolean } (200)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {CheckSlugResponse}
  */
 app.get(
   '/check-slug/:slug',
@@ -79,8 +91,8 @@ app.get(
     schema: {
       params: z.object({ slug: createSlugSchema(255) }),
     },
-    handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+    handler: async (_c, ctx): Promise<CheckSlugResponse> => {
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -100,6 +112,7 @@ app.get(
  *
  * Returns: Organization (200)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {OrganizationBySlugResponse}
  */
 app.get(
   '/slug/:slug',
@@ -108,8 +121,8 @@ app.get(
     schema: {
       params: z.object({ slug: createSlugSchema(255) }),
     },
-    handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+    handler: async (_c, ctx): Promise<OrganizationBySlugResponse> => {
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -123,7 +136,7 @@ app.get(
         };
       }
 
-      return organization;
+      return { data: organization };
     },
   })
 );
@@ -134,6 +147,7 @@ app.get(
  *
  * Returns: Organization (200)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {OrganizationResponse}
  */
 app.get(
   '/:id',
@@ -142,8 +156,8 @@ app.get(
     schema: {
       params: z.object({ id: uuidSchema }),
     },
-    handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+    handler: async (_c, ctx): Promise<OrganizationResponse> => {
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
@@ -157,7 +171,7 @@ app.get(
         };
       }
 
-      return organization;
+      return { data: organization };
     },
   })
 );
@@ -169,6 +183,7 @@ app.get(
  * Body: UpdateOrganizationInput
  * Returns: Organization (200)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {UpdateOrganizationResponse}
  */
 app.patch(
   '/:id',
@@ -178,12 +193,16 @@ app.patch(
       params: z.object({ id: uuidSchema }),
       body: updateOrganizationSchema,
     },
-    handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+    handler: async (_c, ctx): Promise<UpdateOrganizationResponse> => {
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
-      return service.update(ctx.validated.params.id, ctx.validated.body);
+      const organization = await service.update(
+        ctx.validated.params.id,
+        ctx.validated.body
+      );
+      return { data: organization };
     },
   })
 );
@@ -195,6 +214,7 @@ app.patch(
  * Query params: search, sortBy, sortOrder, page, limit
  * Returns: PaginatedResponse<Organization> (200)
  * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {OrganizationListResponse}
  */
 app.get(
   '/',
@@ -203,15 +223,15 @@ app.get(
     schema: {
       query: organizationQuerySchema,
     },
-    handler: async (_c, ctx) => {
+    handler: async (_c, ctx): Promise<OrganizationListResponse> => {
       const { search, sortBy, sortOrder, page, limit } = ctx.validated.query;
 
-      const service = createOrganizationService({
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
-      return service.list(
+      const result = await service.list(
         {
           search,
           sortBy,
@@ -222,6 +242,9 @@ app.get(
           limit,
         }
       );
+
+      // Service returns PaginatedResponse<T> which already matches our response type
+      return result;
     },
   })
 );
@@ -232,6 +255,7 @@ app.get(
  *
  * Returns: Success message (200)
  * Security: Authenticated users, Strict rate limit (5 req/15min)
+ * @returns {DeleteOrganizationResponse}
  */
 app.delete(
   '/:id',
@@ -243,8 +267,8 @@ app.delete(
     schema: {
       params: z.object({ id: uuidSchema }),
     },
-    handler: async (_c, ctx) => {
-      const service = createOrganizationService({
+    handler: async (_c, ctx): Promise<DeleteOrganizationResponse> => {
+      const service = new OrganizationService({
         db: dbHttp,
         environment: ctx.env.ENVIRONMENT || 'development',
       });

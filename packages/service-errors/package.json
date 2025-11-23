@@ -27,6 +27,7 @@
     "service-layer"
   ],
   "dependencies": {
+    "@codex/database": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {

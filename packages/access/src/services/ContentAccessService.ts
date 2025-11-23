@@ -23,6 +23,7 @@ import {
   ContentNotFoundError,
   R2SigningError,
 } from '../errors';
+import type { UserLibraryResponse } from '../types';
 
 /**
  * Interface for R2 signing functionality.
@@ -390,41 +391,7 @@ export class ContentAccessService {
   async listUserLibrary(
     userId: string,
     input: ListUserLibraryInput
-  ): Promise<{
-    //TODO this return type expressed in this way is unacceptable. we should have this defined with zod.this should be true for every endpoint if its
-    // not true then we need to establsh
-    // a way of working with this. i am noticing that we are going to be interacting with out backend through a frontend rest api.
-    // this means that we are going to loos type information. iwe will have to define a wayb to deal with this perhaps a repository layer that has type
-    // infoamtinot attached to endpoint fetching and the seraialization etc
-    // happens automaticly as a result of the calling of the repository something like api.content.access.id.get.post etc.
-    items: Array<{
-      content: {
-        id: string;
-        title: string;
-        description: string | null;
-        thumbnailUrl: string | null;
-        contentType: 'video' | 'audio';
-        durationSeconds: number | null;
-      };
-      purchase: {
-        purchasedAt: Date;
-        priceCents: number;
-      };
-      progress: {
-        positionSeconds: number;
-        durationSeconds: number;
-        completed: boolean;
-        percentComplete: number;
-        updatedAt: Date;
-      } | null;
-    }>;
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-      hasMore: boolean;
-    };
-  }> {
+  ): Promise<UserLibraryResponse> {
     const { db, obs } = this.config;
 
     obs.info('Listing user library', {
@@ -467,7 +434,7 @@ export class ContentAccessService {
           page: input.page,
           limit: input.limit,
           total: 0,
-          hasMore: false,
+          totalPages: 0,
         },
       };
     }
@@ -495,14 +462,14 @@ export class ContentAccessService {
           content: {
             id: content.id,
             title: content.title,
-            description: content.description,
+            description: content.description || '',
             thumbnailUrl:
               content.thumbnailUrl ?? mediaItem?.thumbnailKey ?? null,
-            contentType: (mediaItem?.mediaType as 'video' | 'audio') ?? 'video',
-            durationSeconds: mediaItem?.durationSeconds ?? null,
+            contentType: mediaItem?.mediaType ?? 'video',
+            durationSeconds: mediaItem?.durationSeconds ?? 0,
           },
           purchase: {
-            purchasedAt: purchase.createdAt,
+            purchasedAt: purchase.createdAt.toISOString(),
             priceCents: purchase.amountPaidCents,
           },
           progress: progress
@@ -513,7 +480,7 @@ export class ContentAccessService {
                 percentComplete: Math.round(
                   (progress.positionSeconds / progress.durationSeconds) * 100
                 ),
-                updatedAt: progress.updatedAt,
+                updatedAt: progress.updatedAt.toISOString(),
               }
             : null,
         };
@@ -541,13 +508,15 @@ export class ContentAccessService {
     }
     // 'recent' is already sorted by purchase.createdAt DESC
 
+    const totalPages = Math.ceil(items.length / input.limit);
+
     return {
       items,
       pagination: {
         page: input.page,
         limit: input.limit,
-        total: items.length, // Note: This is filtered total, not total purchases
-        hasMore,
+        total: items.length,
+        totalPages,
       },
     };
   }

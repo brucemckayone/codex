@@ -30,14 +30,37 @@ export {
  */
 
 export class ContentNotFoundError extends NotFoundError {
-  constructor(contentId: string) {
-    super('Content not found', { contentId });
+  constructor(contentId: string, context?: Record<string, unknown>) {
+    super('Content not found', {
+      contentId,
+      code: 'CONTENT_NOT_FOUND',
+      ...context,
+    });
   }
 }
 
 export class MediaNotFoundError extends NotFoundError {
-  constructor(mediaItemId: string) {
-    super('Media item not found', { mediaItemId });
+  constructor(
+    mediaItemIdOrR2Key: string,
+    contentId?: string,
+    context?: Record<string, unknown>
+  ) {
+    // Support both old signature (mediaItemId) and new signature (r2Key, contentId)
+    const isOldSignature = contentId === undefined;
+    const message = isOldSignature
+      ? 'Media item not found'
+      : 'Media file not found in storage';
+
+    const contextData = isOldSignature
+      ? { mediaItemId: mediaItemIdOrR2Key, ...context }
+      : {
+          r2Key: mediaItemIdOrR2Key,
+          contentId,
+          code: 'MEDIA_NOT_FOUND',
+          ...context,
+        };
+
+    super(message, contextData);
   }
 }
 

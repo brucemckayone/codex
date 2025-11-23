@@ -11,8 +11,13 @@
  * - Slug uniqueness enforced
  */
 
-import { isUniqueViolation } from '@codex/database';
+import {
+  isUniqueViolation,
+  whereNotDeleted,
+  withPagination,
+} from '@codex/database';
 import { organizations } from '@codex/database/schema';
+import { BaseService } from '@codex/service-errors';
 import type {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -21,15 +26,13 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { ConflictError, OrganizationNotFoundError, wrapError } from '../errors';
 import type {
-  Database,
   Organization,
   OrganizationFilters,
   PaginatedResponse,
   PaginationParams,
-  ServiceConfig,
 } from '../types';
 
 /**
@@ -41,15 +44,7 @@ import type {
  * - Delete organizations (soft delete)
  * - List organizations with filters
  */
-export class OrganizationService {
-  private db: Database;
-  private environment: string;
-
-  constructor(config: ServiceConfig) {
-    this.db = config.db;
-    this.environment = config.environment;
-  }
-
+export class OrganizationService extends BaseService {
   /**
    * Create new organization
    *
@@ -113,7 +108,7 @@ export class OrganizationService {
   async get(id: string): Promise<Organization | null> {
     try {
       const result = await this.db.query.organizations.findFirst({
-        where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+        where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
       });
 
       return result || null;
@@ -133,7 +128,7 @@ export class OrganizationService {
       const result = await this.db.query.organizations.findFirst({
         where: and(
           eq(organizations.slug, slug.toLowerCase()),
-          isNull(organizations.deletedAt)
+          whereNotDeleted(organizations)
         ),
       });
 
@@ -163,7 +158,7 @@ export class OrganizationService {
       const result = await this.db.transaction(async (tx) => {
         // Verify organization exists
         const existing = await tx.query.organizations.findFirst({
-          where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+          where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
         });
 
         if (!existing) {
@@ -218,7 +213,7 @@ export class OrganizationService {
     try {
       await this.db.transaction(async (tx) => {
         const existing = await tx.query.organizations.findFirst({
-          where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+          where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
         });
 
         if (!existing) {
@@ -259,11 +254,10 @@ export class OrganizationService {
     //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedResponse<Organization>> {
     try {
-      const { page, limit } = pagination;
-      const offset = (page - 1) * limit;
+      const { limit, offset } = withPagination(pagination);
 
       // Build WHERE conditions
-      const whereConditions = [isNull(organizations.deletedAt)];
+      const whereConditions = [whereNotDeleted(organizations)];
 
       // Add search filter
       if (filters.search) {
@@ -311,7 +305,7 @@ export class OrganizationService {
       return {
         items,
         pagination: {
-          page,
+          page: pagination.page,
           limit,
           total: totalCount,
           totalPages,
@@ -335,7 +329,7 @@ export class OrganizationService {
       const existing = await this.db.query.organizations.findFirst({
         where: and(
           eq(organizations.slug, slug.toLowerCase()),
-          isNull(organizations.deletedAt)
+          whereNotDeleted(organizations)
         ),
         columns: { id: true },
       });
@@ -345,19 +339,4 @@ export class OrganizationService {
       throw wrapError(error, { slug });
     }
   }
-}
-
-/**
- * Factory function to create OrganizationService instance
- *
- * Usage:
- * ```typescript
- * const service = createOrganizationService({ db, environment: 'production' });
- * const org = await service.create(input);
- * ```
- */
-export function createOrganizationService(
-  config: ServiceConfig
-): OrganizationService {
-  return new OrganizationService(config);
 }

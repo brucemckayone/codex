@@ -5,6 +5,11 @@
  * Reduces boilerplate and ensures consistency across all API workers.
  */
 
+// Health check utilities
+export {
+  type HealthCheckResult,
+  standardDatabaseCheck,
+} from './health-checks';
 // Middleware factories
 export {
   createAuthMiddleware,
@@ -26,6 +31,14 @@ export {
   type MiddlewareConfig,
   sequence,
 } from './middleware';
+// Middleware chain utilities
+export {
+  type ApplyMiddlewareChainOptions,
+  applyMiddlewareChain,
+  createMiddlewareChainBuilder,
+  createStandardMiddlewareChain,
+  type MiddlewareChainOptions,
+} from './middleware-chain';
 // Route handler helpers
 export {
   createAuthenticatedHandler,
