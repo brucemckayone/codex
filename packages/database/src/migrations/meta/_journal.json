@@ -5,8 +5,43 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1763937109899,
-      "tag": "0000_flimsy_taskmaster",
+      "when": 1761604472711,
+      "tag": "0000_clammy_dreadnoughts",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1761771451465,
+      "tag": "0001_soft_mauler",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1762814779482,
+      "tag": "0002_curved_darwin",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1763138743532,
+      "tag": "0003_purple_scourge",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1763138800000,
+      "tag": "0004_add_org_deletion_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1763898839399,
+      "tag": "0005_fast_old_lace",
       "breakpoints": true
     }
   ]
