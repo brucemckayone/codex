@@ -14,6 +14,7 @@
 
 import { isUniqueViolation } from '@codex/database';
 import { content, mediaItems } from '@codex/database/schema';
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
 import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
@@ -30,11 +31,9 @@ import type {
   Content,
   ContentFilters,
   ContentWithRelations,
-  Database,
   DatabaseTransaction,
   PaginatedResponse,
   PaginationParams,
-  ServiceConfig,
 } from '../types';
 
 /**
@@ -47,13 +46,9 @@ import type {
  * - Delete content (soft delete)
  * - List content with filters
  */
-export class ContentService {
-  private db: Database;
-  private environment: string;
-
+export class ContentService extends BaseService {
   constructor(config: ServiceConfig) {
-    this.db = config.db;
-    this.environment = config.environment;
+    super(config);
   }
 
   /**

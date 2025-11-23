@@ -13,6 +13,7 @@
  */
 
 import { mediaItems } from '@codex/database/schema';
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -24,14 +25,12 @@ import {
 import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
 import { MediaNotFoundError, wrapError } from '../errors';
 import type {
-  Database,
   MediaItem,
   MediaItemFilters,
   MediaItemWithRelations,
   PaginatedResponse,
   PaginationParams,
   //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
-  ServiceConfig,
 } from '../types';
 
 /**
@@ -43,13 +42,9 @@ import type {
  * - Delete media items (soft delete)
  * - List media items with filters
  */
-export class MediaItemService {
-  private db: Database;
-  private environment: string;
-
+export class MediaItemService extends BaseService {
   constructor(config: ServiceConfig) {
-    this.db = config.db;
-    this.environment = config.environment;
+    super(config);
   }
 
   /**

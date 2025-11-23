@@ -18,7 +18,11 @@ export {
   ValidationError,
   wrapError,
 } from './base-errors';
-
+// Base service class
+export {
+  BaseService,
+  type ServiceConfig,
+} from './base-service';
 // Error mapper
 export {
   type ErrorMapperOptions,

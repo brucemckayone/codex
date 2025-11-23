@@ -37,7 +37,7 @@ import {
   withNeonTestBranch,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ContentAccessService } from './ContentAccessService';
+import { ContentAccessService } from '../services/ContentAccessService';
 
 // Enable ephemeral Neon branch for this test file
 withNeonTestBranch();

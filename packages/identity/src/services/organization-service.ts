@@ -13,6 +13,7 @@
 
 import { isUniqueViolation } from '@codex/database';
 import { organizations } from '@codex/database/schema';
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -24,12 +25,10 @@ import {
 import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
 import { ConflictError, OrganizationNotFoundError, wrapError } from '../errors';
 import type {
-  Database,
   Organization,
   OrganizationFilters,
   PaginatedResponse,
   PaginationParams,
-  ServiceConfig,
 } from '../types';
 
 /**
@@ -41,13 +40,9 @@ import type {
  * - Delete organizations (soft delete)
  * - List organizations with filters
  */
-export class OrganizationService {
-  private db: Database;
-  private environment: string;
-
+export class OrganizationService extends BaseService {
   constructor(config: ServiceConfig) {
-    this.db = config.db;
-    this.environment = config.environment;
+    super(config);
   }
 
   /**
