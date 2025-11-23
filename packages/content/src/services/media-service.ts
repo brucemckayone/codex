@@ -12,6 +12,11 @@
  * - Soft deletes only (sets deleted_at)
  */
 
+import {
+  scopedNotDeleted,
+  withCreatorScope,
+  withPagination,
+} from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
@@ -22,7 +27,7 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq } from 'drizzle-orm';
 import { MediaNotFoundError, wrapError } from '../errors';
 import type {
   MediaItem,
@@ -111,8 +116,7 @@ export class MediaItemService extends BaseService {
       const result = await this.db.query.mediaItems.findFirst({
         where: and(
           eq(mediaItems.id, id),
-          eq(mediaItems.creatorId, creatorId),
-          isNull(mediaItems.deletedAt)
+          scopedNotDeleted(mediaItems, creatorId)
         ),
         with: {
           creator: {
@@ -164,8 +168,7 @@ export class MediaItemService extends BaseService {
         const existing = await tx.query.mediaItems.findFirst({
           where: and(
             eq(mediaItems.id, id),
-            eq(mediaItems.creatorId, creatorId),
-            isNull(mediaItems.deletedAt)
+            scopedNotDeleted(mediaItems, creatorId)
           ),
         });
 
@@ -181,7 +184,7 @@ export class MediaItemService extends BaseService {
             updatedAt: new Date(),
           })
           .where(
-            and(eq(mediaItems.id, id), eq(mediaItems.creatorId, creatorId))
+            and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           )
           .returning();
 
@@ -225,8 +228,7 @@ export class MediaItemService extends BaseService {
         const existing = await tx.query.mediaItems.findFirst({
           where: and(
             eq(mediaItems.id, id),
-            eq(mediaItems.creatorId, creatorId),
-            isNull(mediaItems.deletedAt)
+            scopedNotDeleted(mediaItems, creatorId)
           ),
         });
 
@@ -241,7 +243,7 @@ export class MediaItemService extends BaseService {
             updatedAt: new Date(),
           })
           .where(
-            and(eq(mediaItems.id, id), eq(mediaItems.creatorId, creatorId))
+            and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           );
       });
     } catch (error) {
@@ -276,14 +278,10 @@ export class MediaItemService extends BaseService {
     //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedResponse<MediaItemWithRelations>> {
     try {
-      const { page, limit } = pagination;
-      const offset = (page - 1) * limit;
+      const { limit, offset } = withPagination(pagination);
 
       // Build WHERE conditions
-      const whereConditions = [
-        eq(mediaItems.creatorId, creatorId),
-        isNull(mediaItems.deletedAt),
-      ];
+      const whereConditions = [scopedNotDeleted(mediaItems, creatorId)];
 
       // Add filters
       if (filters.status) {
@@ -337,7 +335,7 @@ export class MediaItemService extends BaseService {
       return {
         items,
         pagination: {
-          page,
+          page: pagination.page,
           limit,
           total: totalCount,
           totalPages,

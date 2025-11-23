@@ -11,7 +11,11 @@
  * - Slug uniqueness enforced
  */
 
-import { isUniqueViolation } from '@codex/database';
+import {
+  isUniqueViolation,
+  whereNotDeleted,
+  withPagination,
+} from '@codex/database';
 import { organizations } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
@@ -108,7 +112,7 @@ export class OrganizationService extends BaseService {
   async get(id: string): Promise<Organization | null> {
     try {
       const result = await this.db.query.organizations.findFirst({
-        where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+        where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
       });
 
       return result || null;
@@ -128,7 +132,7 @@ export class OrganizationService extends BaseService {
       const result = await this.db.query.organizations.findFirst({
         where: and(
           eq(organizations.slug, slug.toLowerCase()),
-          isNull(organizations.deletedAt)
+          whereNotDeleted(organizations)
         ),
       });
 
@@ -158,7 +162,7 @@ export class OrganizationService extends BaseService {
       const result = await this.db.transaction(async (tx) => {
         // Verify organization exists
         const existing = await tx.query.organizations.findFirst({
-          where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+          where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
         });
 
         if (!existing) {
@@ -213,7 +217,7 @@ export class OrganizationService extends BaseService {
     try {
       await this.db.transaction(async (tx) => {
         const existing = await tx.query.organizations.findFirst({
-          where: and(eq(organizations.id, id), isNull(organizations.deletedAt)),
+          where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
         });
 
         if (!existing) {
@@ -254,11 +258,10 @@ export class OrganizationService extends BaseService {
     //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedResponse<Organization>> {
     try {
-      const { page, limit } = pagination;
-      const offset = (page - 1) * limit;
+      const { limit, offset } = withPagination(pagination);
 
       // Build WHERE conditions
-      const whereConditions = [isNull(organizations.deletedAt)];
+      const whereConditions = [whereNotDeleted(organizations)];
 
       // Add search filter
       if (filters.search) {
@@ -306,7 +309,7 @@ export class OrganizationService extends BaseService {
       return {
         items,
         pagination: {
-          page,
+          page: pagination.page,
           limit,
           total: totalCount,
           totalPages,
@@ -330,7 +333,7 @@ export class OrganizationService extends BaseService {
       const existing = await this.db.query.organizations.findFirst({
         where: and(
           eq(organizations.slug, slug.toLowerCase()),
-          isNull(organizations.deletedAt)
+          whereNotDeleted(organizations)
         ),
         columns: { id: true },
       });

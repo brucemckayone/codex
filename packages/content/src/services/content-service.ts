@@ -12,7 +12,13 @@
  * - Soft deletes only (sets deleted_at)
  */
 
-import { isUniqueViolation } from '@codex/database';
+import {
+  isUniqueViolation,
+  scopedNotDeleted,
+  whereNotDeleted,
+  withCreatorScope,
+  withPagination,
+} from '@codex/database';
 import { content, mediaItems } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
@@ -150,11 +156,7 @@ export class ContentService extends BaseService {
   ): Promise<ContentWithRelations | null> {
     try {
       const result = await this.db.query.content.findFirst({
-        where: and(
-          eq(content.id, id),
-          eq(content.creatorId, creatorId),
-          isNull(content.deletedAt)
-        ),
+        where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         with: {
           mediaItem: true,
           organization: true,
@@ -201,11 +203,7 @@ export class ContentService extends BaseService {
       const result = await this.db.transaction(async (tx) => {
         // Verify content exists and belongs to creator
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         });
 
         if (!existing) {
@@ -219,7 +217,7 @@ export class ContentService extends BaseService {
             ...validated,
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
           .returning();
 
         if (!updated) {
@@ -262,11 +260,7 @@ export class ContentService extends BaseService {
       const result = await this.db.transaction(async (tx) => {
         // Get content with media item
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
           with: {
             mediaItem: true,
           },
@@ -305,7 +299,7 @@ export class ContentService extends BaseService {
             publishedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
           .returning();
 
         if (!published) {
@@ -347,11 +341,7 @@ export class ContentService extends BaseService {
     try {
       const result = await this.db.transaction(async (tx) => {
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         });
 
         if (!existing) {
@@ -364,7 +354,7 @@ export class ContentService extends BaseService {
             status: 'draft',
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)))
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
           .returning();
 
         if (!unpublished) {
@@ -399,11 +389,7 @@ export class ContentService extends BaseService {
     try {
       await this.db.transaction(async (tx) => {
         const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(content.id, id),
-            eq(content.creatorId, creatorId),
-            isNull(content.deletedAt)
-          ),
+          where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         });
 
         if (!existing) {
@@ -416,7 +402,7 @@ export class ContentService extends BaseService {
             deletedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(eq(content.id, id), eq(content.creatorId, creatorId)));
+          .where(and(eq(content.id, id), withCreatorScope(content, creatorId)));
       });
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
@@ -451,14 +437,10 @@ export class ContentService extends BaseService {
     pagination: PaginationParams = { page: 1, limit: 20 }
   ): Promise<PaginatedResponse<ContentWithRelations>> {
     try {
-      const { page, limit } = pagination;
-      const offset = (page - 1) * limit;
+      const { limit, offset } = withPagination(pagination);
 
       // Build WHERE conditions
-      const whereConditions = [
-        eq(content.creatorId, creatorId),
-        isNull(content.deletedAt),
-      ];
+      const whereConditions = [scopedNotDeleted(content, creatorId)];
 
       // Add filters
       if (filters.status) {
@@ -538,7 +520,7 @@ export class ContentService extends BaseService {
       return {
         items,
         pagination: {
-          page,
+          page: pagination.page,
           limit,
           total: totalCount,
           totalPages,
@@ -578,8 +560,7 @@ export class ContentService extends BaseService {
     const mediaItem = await tx.query.mediaItems.findFirst({
       where: and(
         eq(mediaItems.id, mediaItemId),
-        eq(mediaItems.creatorId, creatorId),
-        isNull(mediaItems.deletedAt)
+        scopedNotDeleted(mediaItems, creatorId)
       ),
     });
 
