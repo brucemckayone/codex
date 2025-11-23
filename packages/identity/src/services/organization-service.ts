@@ -26,7 +26,7 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { ConflictError, OrganizationNotFoundError, wrapError } from '../errors';
 import type {
   Organization,
