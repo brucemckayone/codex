@@ -1,1528 +1,1019 @@
-# Work Packet: P1-ECOM-001 - Stripe Checkout Integration
+# P1-ECOM-001: Stripe Checkout Integration
 
-**Status**: 🚧 To Be Implemented
 **Priority**: P0 (Critical - revenue generation)
+**Status**: 🚧 Not Implemented
 **Estimated Effort**: 4-5 days
-**Branch**: `feature/P1-ECOM-001-stripe-checkout`
 
 ---
 
-## Current State
+## Table of Contents
 
-**✅ Already Implemented:**
-- Stripe webhook worker skeleton (`workers/stripe-webhook-handler/src/index.ts`)
-- Webhook signature verification (`workers/stripe-webhook-handler/src/middleware/verify-signature.ts`)
-- Security middleware (headers, rate limiting, CSP)
-- Database client with Drizzle ORM
-- Validation package for input validation
+- [Overview](#overview)
+- [System Context](#system-context)
+- [Database Schema](#database-schema)
+- [Service Architecture](#service-architecture)
+- [Implementation Patterns](#implementation-patterns)
+- [API Integration](#api-integration)
+- [Available Patterns & Utilities](#available-patterns--utilities)
+- [Dependencies](#dependencies)
+- [Implementation Checklist](#implementation-checklist)
+- [Testing Strategy](#testing-strategy)
+- [Notes](#notes)
 
-**🚧 Needs Implementation:**
-- Purchase database schema (content_purchases table)
-- Purchase validation schemas
-- Checkout service (create Stripe sessions)
-- Purchase API endpoints
-- Tests
+---
+
+## Overview
+
+Stripe Checkout Integration enables creators to monetize their content by accepting one-time payments for content access. This service creates Stripe Checkout sessions, tracks purchase records, and enables content access after successful payment.
+
+The checkout flow bridges content discovery with payment processing. When a customer wants to purchase paid content, this service creates a Stripe-hosted checkout page, handles the payment redirect flow, and records the completed purchase in the database for access control verification.
+
+Key capabilities:
+- **Checkout Session Creation**: Generate Stripe Checkout sessions with content pricing and customer info
+- **Purchase Recording**: Create purchase records after successful payment (via webhook from P1-ECOM-002)
+- **Idempotency**: Prevent duplicate purchases using Stripe Payment Intent ID as unique identifier
+- **Revenue Tracking**: Calculate and store revenue splits (Phase 1: 100% to creator, future: platform/org fees)
+- **Purchase Verification**: Query purchases to verify content access (consumed by P1-ACCESS-001)
+
+This service is consumed by:
+- **Frontend**: Creates checkout sessions when user clicks "Purchase"
+- **Access Control** (P1-ACCESS-001): Verifies purchase exists before granting streaming access
+- **Stripe Webhooks** (P1-ECOM-002): Completes purchase after payment success event
+- **Admin Dashboard** (P1-ADMIN-001): Displays revenue analytics and purchase history
+
+---
+
+## System Context
+
+### Upstream Dependencies
+
+**Content Service** (P1-CONTENT-001) (✅ Complete):
+- Queries `content` table to get pricing (`priceCents`)
+- Verifies content exists and is published before creating checkout
+- Reads creator ID for revenue routing
+
+**Stripe API** (External Service):
+- Creates Checkout Sessions via Stripe SDK
+- Redirects customer to Stripe-hosted payment page
+- Sends webhooks on payment completion (handled by P1-ECOM-002)
+
+**Auth Service** (✅ Available):
+- Provides authenticated customer context (user ID, email)
+- Session validation for checkout endpoints
+
+### Downstream Consumers
+
+**Stripe Webhooks** (P1-ECOM-002):
+- Receives `checkout.session.completed` event from Stripe
+- Creates purchase record using `PurchaseService.completePurchase()`
+- Integration: Webhook handler calls purchase service after signature verification
+
+**Access Control** (P1-ACCESS-001):
+- Queries `purchases` table to verify customer has purchased content
+- Purchase must have `status = 'completed'` for access
+- Integration: Access service checks for purchase record before streaming URL generation
+
+**Admin Dashboard** (P1-ADMIN-001):
+- Displays revenue analytics (total sales, revenue splits)
+- Shows purchase history per creator
+- Integration: Queries purchases table with aggregations
+
+### External Services
+
+**Stripe**: Payment processing, checkout sessions, webhooks
+**Neon PostgreSQL**: Purchase records and revenue tracking
+**Cloudflare Workers**: Checkout API and webhook handler
+
+### Integration Flow
+
+```
+Customer clicks "Purchase"
+    ↓
+POST /api/checkout (create session)
+    ↓
+Checkout Service validates content + pricing
+    ↓
+Create Stripe Checkout Session
+    ↓
+Return session URL to frontend
+    ↓
+Frontend redirects to Stripe
+    ↓
+Customer completes payment on Stripe
+    ↓
+Stripe sends webhook (checkout.session.completed)
+    ↓
+Webhook Handler (P1-ECOM-002) creates purchase record
+    ↓
+Access Control grants streaming access
+```
+
+---
+
+## Database Schema
+
+### Tables
+
+#### `purchases`
+
+**Purpose**: One-time content purchase records linking customers to purchased content. Enables access verification and revenue tracking.
+
+**Key Fields**:
+- `id` (text, PK): Unique purchase identifier
+- `customerId` (text, FK → users.id): Purchasing customer
+- `contentId` (text, FK → content.id): Purchased content
+- `amountPaidCents` (integer): Total paid by customer in cents (e.g., 999 = $9.99)
+- `currency` (text): Currency code (default: 'usd')
+- `stripePaymentIntentId` (text, unique): Stripe Payment Intent ID (idempotency key)
+- `status` (text): 'pending' | 'completed' | 'refunded' | 'failed'
+- `platformFeeCents` (integer): Platform fee (Phase 1: 0, Phase 2+: configurable)
+- `organizationFeeCents` (integer): Org fee (Phase 1: 0, Phase 2+: configurable)
+- `creatorPayoutCents` (integer): Creator payout (Phase 1: 100% of amount)
+- `purchasedAt` (timestamp): When payment completed
+- `refundedAt`, `refundReason`, `refundAmountCents`, `stripeRefundId`: Refund tracking
+- `createdAt`, `updatedAt`: Timestamps
+
+**Constraints**:
+- Primary Key: `id`
+- Foreign Keys:
+  - `customerId` → `users.id`
+  - `contentId` → `content.id`
+- Unique: `stripePaymentIntentId` (prevents duplicate purchases)
+- Unique: `(customerId, contentId)` WHERE `status = 'completed'` (one purchase per customer per content)
+- Check: `amountPaidCents = platformFeeCents + organizationFeeCents + creatorPayoutCents` (revenue must add up)
+- Check: `amountPaidCents >= 0`
+- Check: `status` IN ('pending', 'completed', 'refunded', 'failed')
+
+**Indexes**:
+- `idx_purchases_customer_id` ON `customerId`: Customer purchase history
+- `idx_purchases_content_id` ON `contentId`: Content purchase count
+- `idx_purchases_status` ON `status`: Filter by purchase status
+- `idx_purchases_stripe_payment_intent_id` ON `stripePaymentIntentId`: Idempotency lookups
+
+**Phase 1 Revenue Model**:
+```
+amountPaidCents = creatorPayoutCents
+platformFeeCents = 0
+organizationFeeCents = 0
+```
+
+**Future Phases**:
+- Phase 2: Platform takes percentage fee
+- Phase 3: Stripe Connect automated payouts
+
+### Relationships
+
+```
+users (1) ─────< purchases (N)
+  └─ customerId (customer who purchased)
+
+content (1) ─────< purchases (N)
+  └─ contentId (what was purchased)
+```
+
+### Migration Considerations
+
+**Manual Steps Required**:
+- CHECK constraints must be added manually to migration SQL
+- Partial unique index: `WHERE status = 'completed' AND refundedAt IS NULL`
+- Verify revenue split adds up: `amount = platform + org + creator`
+
+**Idempotency Pattern**:
+```sql
+-- Prevent duplicate purchases with same Payment Intent ID
+CREATE UNIQUE INDEX idx_purchases_stripe_payment_intent_unique
+ON purchases (stripe_payment_intent_id);
+
+-- Prevent multiple completed purchases for same customer + content
+CREATE UNIQUE INDEX idx_no_duplicate_purchases
+ON purchases (customer_id, content_id)
+WHERE status = 'completed' AND refunded_at IS NULL;
+```
+
+---
+
+## Service Architecture
+
+### Service Responsibilities
+
+**PurchaseService** (extends `BaseService` from `@codex/service-errors`):
+- **Primary Responsibility**: Manage purchase lifecycle from checkout to completion
+- **Key Operations**:
+  - `createCheckoutSession(contentId, customerId)`: Create Stripe checkout session
+  - `completePurchase(paymentIntentId)`: Record completed purchase (called by webhook)
+  - `verifyPurchase(contentId, customerId)`: Check if customer has purchased content
+  - `getPurchaseHistory(customerId, filters)`: List customer's purchases
+  - `refundPurchase(purchaseId, reason)`: Process refund (Phase 2+)
+
+### Key Business Rules
+
+1. **Content Pricing Validation**:
+   - Content must exist and be published (`status = 'published'`, `deletedAt IS NULL`)
+   - Content must have `priceCents > 0` (cannot checkout free content)
+   - Content must not already be purchased by customer
+
+2. **Checkout Session Creation**:
+   - Read content pricing from `content.priceCents`
+   - Create Stripe Checkout Session with content details
+   - Mode: 'payment' (one-time purchase, not subscription)
+   - Success/cancel URLs redirect back to frontend
+   - Customer email pre-filled from auth context
+
+3. **Purchase Completion** (via webhook):
+   - Extract `paymentIntentId` from Stripe event
+   - Create purchase record with `status = 'completed'`
+   - Calculate revenue split (Phase 1: 100% creator, 0% platform/org)
+   - Set `purchasedAt` timestamp
+   - Idempotency: If payment intent already recorded, return existing purchase
+
+4. **Purchase Verification** (for access control):
+   - Query: `WHERE customerId = ? AND contentId = ? AND status = 'completed'`
+   - Returns boolean: has purchase or not
+   - Used by access service before granting streaming URL
+
+### Design Patterns
+
+#### Pattern 1: Service Factory with Stripe SDK
+
+**Problem**: Stripe SDK needs API key from environment, service needs dependency injection
+
+**Solution**: Factory function that initializes both service and Stripe client
+
+```typescript
+// Base service class (all services extend this)
+export abstract class BaseService {
+  protected db: DrizzleDB;
+  protected environment: string;
+
+  constructor(config: ServiceConfig) {
+    this.db = config.db;
+    this.environment = config.environment;
+  }
+}
+
+// Purchase service extends BaseService + adds Stripe client
+export class PurchaseService extends BaseService {
+  private stripe: Stripe;
+
+  constructor(config: ServiceConfig & { stripeSecretKey: string }) {
+    super(config); // Call BaseService constructor
+    this.stripe = new Stripe(config.stripeSecretKey, {
+      apiVersion: '2024-11-20.acacia', // Use latest API version
+    });
+  }
+
+  // Service methods use this.stripe and this.db
+}
+
+// Factory function creates service with all dependencies
+export function createPurchaseService(env: {
+  DATABASE_URL: string;
+  STRIPE_SECRET_KEY: string;
+  ENVIRONMENT: string;
+}): PurchaseService {
+  const db = getDatabaseClient(env.DATABASE_URL);
+
+  return new PurchaseService({
+    db,
+    environment: env.ENVIRONMENT,
+    stripeSecretKey: env.STRIPE_SECRET_KEY,
+  });
+}
+```
+
+#### Pattern 2: Idempotent Purchase Recording
+
+**Problem**: Webhook may be called multiple times with same payment intent
+
+**Solution**: Use payment intent ID as idempotency key with database unique constraint
+
+```typescript
+async completePurchase(paymentIntentId: string): Promise<Purchase> {
+  // Step 1: Check if purchase already recorded (idempotency)
+  const existing = await this.db.query.purchases.findFirst({
+    where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+  });
+
+  if (existing) {
+    // Already processed, return existing record
+    return existing;
+  }
+
+  // Step 2: Fetch Stripe Payment Intent for details
+  const paymentIntent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+
+  // Step 3: Extract metadata (contentId stored when creating checkout)
+  const contentId = paymentIntent.metadata.contentId;
+  const customerId = paymentIntent.metadata.customerId;
+
+  // Step 4: Get content to calculate revenue split
+  const content = await this.db.query.content.findFirst({
+    where: eq(content.id, contentId),
+  });
+
+  if (!content) {
+    throw new NotFoundError(`Content ${contentId} not found`);
+  }
+
+  // Step 5: Calculate revenue split (Phase 1: simple)
+  const amountPaidCents = paymentIntent.amount; // Stripe stores in cents
+  const platformFeeCents = 0; // Phase 1: no platform fee
+  const organizationFeeCents = 0; // Phase 1: no org fee
+  const creatorPayoutCents = amountPaidCents; // Phase 1: 100% to creator
+
+  // Step 6: Insert purchase record (atomic)
+  const [purchase] = await this.db.insert(purchases).values({
+    customerId,
+    contentId,
+    stripePaymentIntentId: paymentIntentId,
+    amountPaidCents,
+    currency: paymentIntent.currency,
+    platformFeeCents,
+    organizationFeeCents,
+    creatorPayoutCents,
+    status: 'completed',
+    purchasedAt: new Date(),
+  }).returning();
+
+  return purchase;
+}
+```
+
+#### Pattern 3: Content Validation Pipeline
+
+**Problem**: Multiple validation checks before creating checkout
+
+**Solution**: Validation pipeline with early returns and specific errors
+
+```typescript
+async createCheckoutSession(
+  contentId: string,
+  customerId: string,
+  successUrl: string,
+  cancelUrl: string
+): Promise<{ sessionUrl: string; sessionId: string }> {
+  // Validation Pipeline
+
+  // 1. Validate content exists and is published
+  const content = await this.db.query.content.findFirst({
+    where: and(
+      eq(content.id, contentId),
+      eq(content.status, 'published'),
+      isNull(content.deletedAt)
+    ),
+  });
+
+  if (!content) {
+    throw new NotFoundError('Content not found or not published');
+  }
+
+  // 2. Validate content has a price
+  if (!content.priceCents || content.priceCents <= 0) {
+    throw new ValidationError('Cannot create checkout for free content');
+  }
+
+  // 3. Check if customer already purchased
+  const existingPurchase = await this.db.query.purchases.findFirst({
+    where: and(
+      eq(purchases.customerId, customerId),
+      eq(purchases.contentId, contentId),
+      eq(purchases.status, 'completed')
+    ),
+  });
+
+  if (existingPurchase) {
+    throw new ConflictError('Customer has already purchased this content');
+  }
+
+  // 4. Create Stripe Checkout Session
+  const session = await this.stripe.checkout.sessions.create({
+    mode: 'payment',
+    line_items: [{
+      price_data: {
+        currency: 'usd',
+        product_data: {
+          name: content.title,
+          description: content.description || undefined,
+        },
+        unit_amount: content.priceCents, // Stripe expects cents
+      },
+      quantity: 1,
+    }],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    customer_email: customerId, // Pre-fill from auth context
+    metadata: {
+      contentId,
+      customerId,
+    },
+  });
+
+  return {
+    sessionUrl: session.url!,
+    sessionId: session.id,
+  };
+}
+```
+
+### Error Handling Approach
+
+**Custom Error Classes** (extend base errors from `@codex/service-errors`):
+- `ContentNotFoundError`: Content doesn't exist or isn't published → HTTP 404
+- `ValidationError`: Free content, invalid pricing → HTTP 400
+- `AlreadyPurchasedError`: Customer already owns content → HTTP 409
+- `StripeError`: Stripe API failure → HTTP 502 (Bad Gateway)
+
+**Error Propagation**:
+- Service throws specific error classes
+- Worker catches via `mapErrorToResponse()` from `@codex/service-errors`
+- Frontend receives actionable error messages
+
+### Transaction Boundaries
+
+**Operations requiring `db.transaction()`**:
+- None in Phase 1 (all operations are single inserts)
+- Future: Refund processing (update purchase + create refund record)
+
+**Single-operation methods**:
+- `completePurchase()`: Single INSERT (idempotent via unique constraint)
+- `verifyPurchase()`: Single SELECT
+- `getPurchaseHistory()`: Single SELECT with joins
+
+---
+
+## Implementation Patterns
+
+### Pseudocode: Create Checkout Session
+
+```
+FUNCTION createCheckoutSession(contentId, customerId, successUrl, cancelUrl):
+  // Step 1: Validate inputs
+  VALIDATE contentId is UUID
+  VALIDATE customerId is UUID
+  VALIDATE successUrl is valid URL
+  VALIDATE cancelUrl is valid URL
+
+  // Step 2: Fetch content from database
+  content = DATABASE.query(
+    SELECT * FROM content
+    WHERE id = contentId
+      AND status = 'published'
+      AND deleted_at IS NULL
+  )
+
+  IF content is NULL:
+    THROW ContentNotFoundError("Content not found")
+  END IF
+
+  // Step 3: Validate content is purchasable
+  IF content.priceCents <= 0 OR content.priceCents IS NULL:
+    THROW ValidationError("Content is free, cannot create checkout")
+  END IF
+
+  // Step 4: Check for existing purchase
+  existingPurchase = DATABASE.query(
+    SELECT * FROM purchases
+    WHERE customer_id = customerId
+      AND content_id = contentId
+      AND status = 'completed'
+    LIMIT 1
+  )
+
+  IF existingPurchase exists:
+    THROW AlreadyPurchasedError("Already purchased")
+  END IF
+
+  // Step 5: Create Stripe Checkout Session
+  stripeSession = STRIPE_API.createCheckoutSession({
+    mode: 'payment',
+    lineItems: [{
+      priceData: {
+        currency: 'usd',
+        productData: {
+          name: content.title,
+          description: content.description
+        },
+        unitAmount: content.priceCents
+      },
+      quantity: 1
+    }],
+    successUrl: successUrl,
+    cancelUrl: cancelUrl,
+    customerEmail: getCustomerEmail(customerId),
+    metadata: {
+      contentId: contentId,
+      customerId: customerId
+    }
+  })
+
+  // Step 6: Return session URL for frontend redirect
+  RETURN {
+    sessionUrl: stripeSession.url,
+    sessionId: stripeSession.id
+  }
+END FUNCTION
+```
+
+### Pseudocode: Complete Purchase (Webhook Handler)
+
+```
+FUNCTION completePurchase(paymentIntentId):
+  // Step 1: Idempotency check
+  existingPurchase = DATABASE.query(
+    SELECT * FROM purchases
+    WHERE stripe_payment_intent_id = paymentIntentId
+    LIMIT 1
+  )
+
+  IF existingPurchase exists:
+    // Already processed, return existing
+    RETURN existingPurchase
+  END IF
+
+  // Step 2: Fetch Payment Intent from Stripe
+  paymentIntent = STRIPE_API.retrievePaymentIntent(paymentIntentId)
+
+  IF paymentIntent.status != 'succeeded':
+    THROW ValidationError("Payment intent not succeeded")
+  END IF
+
+  // Step 3: Extract metadata
+  contentId = paymentIntent.metadata.contentId
+  customerId = paymentIntent.metadata.customerId
+
+  // Step 4: Fetch content for creator info
+  content = DATABASE.query(
+    SELECT * FROM content WHERE id = contentId
+  )
+
+  IF content is NULL:
+    THROW NotFoundError("Content not found")
+  END IF
+
+  // Step 5: Calculate revenue split (Phase 1: simple)
+  amountPaidCents = paymentIntent.amount
+  platformFeeCents = 0              // Phase 1: no fees
+  organizationFeeCents = 0          // Phase 1: no fees
+  creatorPayoutCents = amountPaidCents  // Phase 1: 100% to creator
+
+  // Step 6: Insert purchase record
+  purchase = DATABASE.insert(purchases, {
+    id: generateUUID(),
+    customerId: customerId,
+    contentId: contentId,
+    stripePaymentIntentId: paymentIntentId,
+    amountPaidCents: amountPaidCents,
+    currency: paymentIntent.currency,
+    platformFeeCents: platformFeeCents,
+    organizationFeeCents: organizationFeeCents,
+    creatorPayoutCents: creatorPayoutCents,
+    status: 'completed',
+    purchasedAt: NOW(),
+    createdAt: NOW(),
+    updatedAt: NOW()
+  })
+
+  // Step 7: Log purchase for analytics
+  LOG.info("Purchase completed", {
+    purchaseId: purchase.id,
+    customerId: customerId,
+    contentId: contentId,
+    amountCents: amountPaidCents
+  })
+
+  RETURN purchase
+END FUNCTION
+```
+
+### Pseudocode: Verify Purchase (Access Control)
+
+```
+FUNCTION verifyPurchase(contentId, customerId):
+  // Simple query to check purchase exists
+  purchase = DATABASE.query(
+    SELECT id FROM purchases
+    WHERE customer_id = customerId
+      AND content_id = contentId
+      AND status = 'completed'
+    LIMIT 1
+  )
+
+  RETURN purchase IS NOT NULL
+END FUNCTION
+```
+
+---
+
+## API Integration
+
+### Endpoints
+
+| Method | Path | Purpose | Security Policy |
+|--------|------|---------|-----------------|
+| POST | `/api/checkout` | Create Stripe checkout session | `POLICY_PRESETS.authenticated()` |
+| GET | `/api/purchases` | List customer's purchases | `POLICY_PRESETS.authenticated()` |
+| GET | `/api/purchases/:id` | Get single purchase | `POLICY_PRESETS.authenticated()` |
+
+### Standard Pattern
+
+```typescript
+// POST /api/checkout - Create checkout session
+app.post('/api/checkout',
+  withPolicy(POLICY_PRESETS.authenticated()),
+  createAuthenticatedHandler({
+    inputSchema: createCheckoutSchema, // Zod validation
+    handler: async ({ input, context }) => {
+      const service = createPurchaseService(context.env);
+
+      const { sessionUrl, sessionId } = await service.createCheckoutSession(
+        input.contentId,
+        context.user.id,
+        input.successUrl,
+        input.cancelUrl
+      );
+
+      return { sessionUrl, sessionId };
+    }
+  })
+);
+
+// GET /api/purchases - List purchases
+app.get('/api/purchases',
+  withPolicy(POLICY_PRESETS.authenticated()),
+  createAuthenticatedGetHandler({
+    inputSchema: purchaseQuerySchema,
+    handler: async ({ input, context }) => {
+      const service = createPurchaseService(context.env);
+
+      const purchases = await service.getPurchaseHistory(
+        context.user.id,
+        input // filters
+      );
+
+      return {
+        data: purchases.items,
+        pagination: purchases.pagination
+      };
+    }
+  })
+);
+```
+
+### Request/Response Examples
+
+**Create Checkout Request**:
+```typescript
+POST /api/checkout
+{
+  "contentId": "abc-123",
+  "successUrl": "https://example.com/success",
+  "cancelUrl": "https://example.com/cancel"
+}
+```
+
+**Create Checkout Response**:
+```typescript
+{
+  "sessionUrl": "https://checkout.stripe.com/pay/cs_test_...",
+  "sessionId": "cs_test_abc123"
+}
+```
+
+**List Purchases Response**:
+```typescript
+{
+  "data": [{
+    "id": "purchase-123",
+    "contentId": "abc-123",
+    "content": {
+      "title": "Introduction to TypeScript",
+      "slug": "intro-typescript"
+    },
+    "amountPaidCents": 999,
+    "currency": "usd",
+    "status": "completed",
+    "purchasedAt": "2025-01-15T10:30:00Z"
+  }],
+  "pagination": {
+    "page": 1,
+    "pageSize": 20,
+    "totalCount": 5,
+    "totalPages": 1
+  }
+}
+```
+
+---
+
+## Available Patterns & Utilities
+
+### Foundation Packages
+
+#### `@codex/database`
+
+**Query Helpers**:
+- `scopedNotDeleted(table, userId)`: Creator scoping (not needed for purchases - no creator scope)
+- `withPagination(query, page, pageSize)`: Purchase history pagination
+
+**When to use**: Purchase queries don't use creator scoping (customer scoping instead). Use standard Drizzle queries with `eq(purchases.customerId, userId)`.
+
+---
+
+#### `@codex/service-errors`
+
+**BaseService** (extend this):
+```typescript
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
+
+export class PurchaseService extends BaseService {
+  private stripe: Stripe;
+
+  constructor(config: ServiceConfig & { stripeSecretKey: string }) {
+    super(config); // Provides this.db, this.environment
+    this.stripe = new Stripe(config.stripeSecretKey);
+  }
+}
+```
+
+**Error Classes**:
+- `NotFoundError`: Content not found
+- `ValidationError`: Free content, invalid input
+- `ConflictError`: Already purchased
+
+**When to use**: Extend BaseService for dependency injection. Throw specific errors for business logic failures.
+
+---
+
+#### `@codex/validation`
+
+**Purchase Schemas** (to be created):
+```typescript
+// @codex/validation/purchase-schemas.ts
+export const createCheckoutSchema = z.object({
+  contentId: z.string().uuid(),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+});
+
+export const purchaseQuerySchema = z.object({
+  status: z.enum(['completed', 'refunded']).optional(),
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(100).default(20),
+});
+```
+
+**When to use**: Validate all API inputs. Validation happens in `createAuthenticatedHandler()`.
+
+---
+
+### Utility Packages
+
+#### `@codex/worker-utils`
+
+**Worker Setup**:
+```typescript
+import { createWorker } from '@codex/worker-utils';
+
+const app = createWorker({
+  serviceName: 'checkout-api',
+  enableCors: true,
+  enableSecurityHeaders: true,
+});
+
+// Mount routes
+app.route('/api/checkout', checkoutRoutes);
+```
+
+**When to use**: Use `createWorker()` for all workers. Use `createAuthenticatedHandler()` for all authenticated routes.
+
+---
+
+#### `@codex/observability`
+
+**Logging**:
+```typescript
+const obs = new ObservabilityClient('purchase-service', env.ENVIRONMENT);
+
+// Log purchase completion
+obs.info('Purchase completed', {
+  purchaseId: purchase.id,
+  customerId,
+  contentId,
+  amountCents: purchase.amountPaidCents,
+});
+
+// Log Stripe errors
+obs.error('Stripe API error', error);
+```
+
+**When to use**: Log all purchase events for revenue tracking and debugging.
+
+---
+
+### External SDKs
+
+#### Stripe SDK
+
+**Installation**:
+```bash
+pnpm add stripe
+```
+
+**Usage**:
+```typescript
+import Stripe from 'stripe';
+
+const stripe = new Stripe(env.STRIPE_SECRET_KEY, {
+  apiVersion: '2024-11-20.acacia',
+});
+
+// Create checkout session
+const session = await stripe.checkout.sessions.create({ ... });
+
+// Retrieve payment intent (in webhook)
+const paymentIntent = await stripe.paymentIntents.retrieve(id);
+```
+
+**When to use**: All Stripe API calls. Always use latest API version.
 
 ---
 
 ## Dependencies
 
-### Required Packages (Already Available)
-```typescript
-import { db } from '@codex/database';
-import Stripe from 'stripe'; // Install: pnpm add stripe
-import { z } from 'zod';
-import { ObservabilityClient } from '@codex/observability';
-import { securityHeaders, rateLimit } from '@codex/security';
-```
+### Required (Blocking)
 
-### Required Secrets (Configure in Cloudflare)
-```bash
-STRIPE_SECRET_KEY              # Stripe API key
-STRIPE_WEBHOOK_SECRET_PAYMENT  # Already in use
-```
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| Content Service (P1-CONTENT-001) | ✅ Complete | Need `content` table for pricing and creator info |
+| Auth Service | ✅ Available | Customer authentication and context |
+| Stripe Account | ✅ Available | Stripe API keys configured |
 
-### Required Documentation
-- [E-Commerce TDD](../../features/e-commerce/ttd-dphase-1.md) - Feature specification
-- [STANDARDS.md](../STANDARDS.md) - Coding patterns
-- [Database Schema Design](../../infrastructure/DATABASE_SCHEMA_DESIGN.md) - Schema structure
+### Optional (Nice to Have)
+
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| Stripe Webhooks (P1-ECOM-002) | 🚧 Parallel | Webhook handler completes purchases. Can develop checkout first, webhook second. |
+
+### Infrastructure Ready
+
+- ✅ Database schema tooling (Drizzle ORM)
+- ✅ Worker deployment pipeline
+- ✅ Stripe SDK support
+- ✅ Error handling (@codex/service-errors)
+- ✅ Validation (@codex/validation)
 
 ---
 
-## Implementation Steps
-
-### Step 1: Create Purchase Schema
-
-**Note**: Schema aligns with `design/features/shared/database-schema.md` v2.0 (lines 320-410). Phase 1 uses simple revenue model: 100% to creator, no platform/org fees.
-
-**File**: `packages/database/src/schema/purchases.ts`
-
-```typescript
-import { pgTable, uuid, varchar, integer, text, timestamp, index, unique, check, sql } from 'drizzle-orm/pg-core';
-import { users } from './auth';
-import { content } from './content';
-import { revenueSplitConfigurations } from './revenue-splits'; // Phase 2+
-
-/**
- * Purchase records (one-time content purchases)
- * Aligned with database-schema.md lines 320-410
- *
- * Phase 1: Simple purchases with 100% to creator
- * Phase 2+: Revenue splitting with platform/org fees
- * Phase 3+: Stripe Connect automated payouts
- */
-export const purchases = pgTable('purchases', {
-  id: uuid('id').primaryKey().defaultRandom(),
-
-  // Relationships
-  customerId: uuid('customer_id').notNull().references(() => users.id),
-  contentId: uuid('content_id').notNull().references(() => content.id),
-
-  // Payment (integer cents to avoid rounding errors - ACID compliant)
-  amountPaidCents: integer('amount_paid_cents').notNull(), // Total amount customer paid
-  currency: varchar('currency', { length: 3 }).default('usd').notNull(),
-  stripePaymentIntentId: varchar('stripe_payment_intent_id', { length: 255 }).unique().notNull(),
-  // Note: Payment Intent ID is unique identifier from Stripe, used for idempotency
-
-  // Revenue Split (calculated at purchase time)
-  revenueSplitConfigId: uuid('revenue_split_config_id').references(() => revenueSplitConfigurations.id),
-  // Tracks which configuration was used (Phase 2+, NULL in Phase 1)
-
-  platformFeeCents: integer('platform_fee_cents').default(0).notNull(),
-  // Phase 1: 0 (no platform fee)
-  // Phase 2+: Based on revenue_split_configuration
-
-  organizationFeeCents: integer('organization_fee_cents').default(0).notNull(),
-  // Phase 1: 0 (no organization fee)
-  // Phase 2+: Based on revenue_split_configuration (only if content.organization_id NOT NULL)
-
-  creatorPayoutCents: integer('creator_payout_cents').notNull(),
-  // Phase 1: = amount_paid_cents (100% to creator)
-  // Phase 2+: = amount_paid_cents - platform_fee_cents - organization_fee_cents
-
-  // Payout Tracking (Phase 3+ - Stripe Connect)
-  creatorPayoutStatus: varchar('creator_payout_status', { length: 50 }).default('pending'),
-  // 'pending' | 'paid' | 'failed'
-  creatorStripeTransferId: varchar('creator_stripe_transfer_id', { length: 255 }),
-  creatorPayoutAt: timestamp('creator_payout_at', { withTimezone: true }),
-
-  organizationPayoutStatus: varchar('organization_payout_status', { length: 50 }).default('pending'),
-  // 'pending' | 'paid' | 'failed'
-  organizationStripeTransferId: varchar('organization_stripe_transfer_id', { length: 255 }),
-  organizationPayoutAt: timestamp('organization_payout_at', { withTimezone: true }),
-
-  // Status
-  status: varchar('status', { length: 50 }).default('pending').notNull(),
-  // 'pending' | 'completed' | 'refunded' | 'failed'
-
-  // Refund Tracking
-  purchasedAt: timestamp('purchased_at', { withTimezone: true }),
-  refundedAt: timestamp('refunded_at', { withTimezone: true }),
-  refundReason: text('refund_reason'),
-  refundAmountCents: integer('refund_amount_cents'), // Can be partial refund (Phase 2+)
-  stripeRefundId: varchar('stripe_refund_id', { length: 255 }),
-
-  // Timestamps
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
-    .$onUpdate(() => new Date()),
-}, (table) => ({
-  // Indexes
-  customerIdIdx: index('idx_purchases_customer_id').on(table.customerId),
-  contentIdIdx: index('idx_purchases_content_id').on(table.contentId),
-  statusIdx: index('idx_purchases_status').on(table.status),
-  createdAtIdx: index('idx_purchases_created_at').on(table.createdAt),
-  stripePaymentIntentIdx: index('idx_purchases_stripe_payment_intent_id').on(table.stripePaymentIntentId),
-  payoutStatusIdx: index('idx_purchases_payout_status').on(table.creatorPayoutStatus, table.organizationPayoutStatus),
-
-  // Prevent duplicate completed purchases (partial unique index)
-  // Only one completed purchase per customer per content (excluding refunded)
-  noDuplicatePurchases: unique('idx_no_duplicate_purchases').on(table.customerId, table.contentId)
-    // Note: Drizzle doesn't support WHERE clause in unique constraints yet
-    // Apply manually: WHERE status = 'completed' AND refunded_at IS NULL
-
-  // Revenue split validation (ensure cents add up exactly)
-  // Note: Drizzle doesn't support CHECK constraints yet - apply in migration SQL
-  // CHECK (amount_paid_cents = platform_fee_cents + organization_fee_cents + creator_payout_cents)
-  // CHECK (amount_paid_cents >= 0)
-}));
-
-export type Purchase = typeof purchases.$inferSelect;
-export type NewPurchase = typeof purchases.$inferInsert;
-```
-
-**Migration Notes**:
-
-After generating migration with `pnpm --filter @codex/database db:gen:drizzle`, manually add these constraints to the migration SQL:
-
-```sql
--- Add partial unique index (prevent duplicate purchases)
-CREATE UNIQUE INDEX idx_no_duplicate_purchases
-  ON purchases(customer_id, content_id)
-  WHERE status = 'completed' AND refunded_at IS NULL;
-
--- Add CHECK constraints for revenue split validation
-ALTER TABLE purchases
-  ADD CONSTRAINT check_revenue_split_adds_up
-  CHECK (amount_paid_cents = platform_fee_cents + organization_fee_cents + creator_payout_cents);
-
-ALTER TABLE purchases
-  ADD CONSTRAINT check_amount_non_negative
-  CHECK (amount_paid_cents >= 0);
-
--- Add CHECK constraints for status values
-ALTER TABLE purchases
-  ADD CONSTRAINT check_status_values
-  CHECK (status IN ('pending', 'completed', 'refunded', 'failed'));
-
-ALTER TABLE purchases
-  ADD CONSTRAINT check_creator_payout_status
-  CHECK (creator_payout_status IN ('pending', 'paid', 'failed'));
-
-ALTER TABLE purchases
-  ADD CONSTRAINT check_organization_payout_status
-  CHECK (organization_payout_status IN ('pending', 'paid', 'failed'));
-```
-
-**Apply migration**:
-```bash
-# Generate migration
-pnpm --filter @codex/database db:gen:drizzle
-
-# Edit migration file to add CHECK constraints and partial unique index
-
-# Apply to local DB
-pnpm --filter @codex/database db:migrate
-```
-
-### Step 2: Create Purchase Validation
-
-**Note**: Validation schemas are pure functions (no DB dependency). Phase 1 checkout only needs contentId - customer comes from auth context.
-
-**File**: `packages/validation/src/purchase-schemas.ts`
-
-```typescript
-import { z } from 'zod';
-
-/**
- * Validation for creating checkout session
- * Customer ID comes from auth context, not client input
- */
-export const createCheckoutSchema = z.object({
-  contentId: z.string().uuid('Invalid content ID format'),
-});
-
-/**
- * Validation for checking purchase access
- * Used by content player to verify customer has purchased
- */
-export const checkAccessSchema = z.object({
-  contentId: z.string().uuid('Invalid content ID format'),
-});
-
-export type CreateCheckoutInput = z.infer<typeof createCheckoutSchema>;
-export type CheckAccessInput = z.infer<typeof checkAccessSchema>;
-```
-
-**Testing**: See `design/roadmap/testing/ecommerce-testing-definition.md` for comprehensive validation test patterns (pure functions, 100% coverage, no DB).
-
-### Step 3: Create Purchase Service
-
-**Note**: Service uses dependency injection pattern. Phase 1 implements simple revenue model: 100% to creator, no platform/org fees.
-
-**File**: `packages/purchases/src/service.ts`
-
-```typescript
-import { db } from '@codex/database';
-import { content, purchases, type Purchase } from '@codex/database/schema';
-import { eq, and, isNull } from 'drizzle-orm';
-import Stripe from 'stripe';
-import { ObservabilityClient } from '@codex/observability';
-
-export interface PurchaseServiceConfig {
-  db: typeof db;
-  stripe: Stripe;
-  obs: ObservabilityClient;
-}
-
-export interface IPurchaseService {
-  createCheckoutSession(
-    customerId: string,
-    contentId: string
-  ): Promise<{ checkoutUrl: string; sessionId: string }>;
-
-  hasAccess(customerId: string, contentId: string): Promise<boolean>;
-
-  handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void>;
-}
-
-export class PurchaseService implements IPurchaseService {
-  private config: PurchaseServiceConfig;
-
-  constructor(config: PurchaseServiceConfig) {
-    this.config = config;
-  }
-
-  async createCheckoutSession(
-    customerId: string,
-    contentId: string
-  ): Promise<{ checkoutUrl: string; sessionId: string }> {
-    const { db, stripe, obs } = this.config;
-
-    // Step 1: Get content details (must be published and not deleted)
-    const contentItem = await db.query.content.findFirst({
-      where: and(
-        eq(content.id, contentId),
-        eq(content.status, 'published'),
-        isNull(content.deletedAt)
-      ),
-    });
-
-    if (!contentItem) {
-      throw new Error('CONTENT_NOT_FOUND');
-    }
-
-    if (contentItem.priceCents === null || contentItem.priceCents === 0) {
-      throw new Error('CONTENT_IS_FREE'); // Free content doesn't need checkout
-    }
-
-    // Step 2: Check for existing purchase (prevent duplicates)
-    const existingPurchase = await db.query.purchases.findFirst({
-      where: and(
-        eq(purchases.customerId, customerId),
-        eq(purchases.contentId, contentId),
-        eq(purchases.status, 'completed'),
-        isNull(purchases.refundedAt)
-      ),
-    });
-
-    if (existingPurchase) {
-      throw new Error('ALREADY_PURCHASED');
-    }
-
-    // Step 3: Create Stripe Checkout Session
-    // Note: We don't create purchase record yet - webhook does that on completion
-    // This prevents pending records for abandoned checkouts
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      payment_method_types: ['card'],
-      line_items: [{
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: contentItem.title,
-            description: contentItem.description || undefined,
-          },
-          unit_amount: contentItem.priceCents,
-        },
-        quantity: 1,
-      }],
-      success_url: `${process.env.WEB_APP_URL}/content/${contentId}?purchase=success`,
-      cancel_url: `${process.env.WEB_APP_URL}/content/${contentId}?purchase=cancel`,
-      metadata: {
-        customerId,
-        contentId,
-        creatorId: contentItem.creatorId,
-        organizationId: contentItem.organizationId || '',
-        priceCents: contentItem.priceCents.toString(),
-      },
-    });
-
-    obs.info('Checkout session created', {
-      sessionId: session.id,
-      customerId,
-      contentId,
-      amountCents: contentItem.priceCents,
-    });
-
-    if (!session.url) {
-      throw new Error('STRIPE_SESSION_URL_MISSING');
-    }
-
-    return {
-      checkoutUrl: session.url,
-      sessionId: session.id,
-    };
-  }
-
-  async hasAccess(customerId: string, contentId: string): Promise<boolean> {
-    const { db } = this.config;
-
-    const purchase = await db.query.purchases.findFirst({
-      where: and(
-        eq(purchases.customerId, customerId),
-        eq(purchases.contentId, contentId),
-        eq(purchases.status, 'completed'),
-        isNull(purchases.refundedAt)
-      ),
-    });
-
-    return !!purchase;
-  }
-
-  async handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
-    const { db, obs } = this.config;
-
-    const { customerId, contentId, creatorId, organizationId, priceCents } = session.metadata || {};
-
-    if (!customerId || !contentId || !creatorId || !priceCents) {
-      throw new Error('MISSING_METADATA');
-    }
-
-    const paymentIntentId = session.payment_intent as string;
-    if (!paymentIntentId) {
-      throw new Error('MISSING_PAYMENT_INTENT');
-    }
-
-    const amountPaidCents = parseInt(priceCents, 10);
-
-    // Idempotency: Check if purchase with this payment intent already exists
-    const existingPurchase = await db.query.purchases.findFirst({
-      where: eq(purchases.stripePaymentIntentId, paymentIntentId),
-    });
-
-    if (existingPurchase) {
-      obs.info('Purchase already recorded', { purchaseId: existingPurchase.id, paymentIntentId });
-      return; // Already processed (duplicate webhook)
-    }
-
-    // Phase 1: Simple revenue model (100% to creator, no fees)
-    const platformFeeCents = 0;
-    const organizationFeeCents = 0;
-    const creatorPayoutCents = amountPaidCents;
-
-    // Create completed purchase record
-    const [purchase] = await db.insert(purchases).values({
-      customerId,
-      contentId,
-      amountPaidCents,
-      currency: 'usd',
-      stripePaymentIntentId: paymentIntentId,
-      platformFeeCents,
-      organizationFeeCents,
-      creatorPayoutCents,
-      status: 'completed',
-      purchasedAt: new Date(),
-      creatorPayoutStatus: 'pending', // Phase 3: Stripe Connect will handle payout
-      organizationPayoutStatus: organizationId ? 'pending' : null,
-    }).returning();
-
-    obs.info('Purchase completed', {
-      purchaseId: purchase.id,
-      customerId,
-      contentId,
-      amountPaidCents,
-      paymentIntentId,
-    });
-
-    // TODO: Send purchase confirmation email (P1-NOTIFY-001)
-    // TODO: Phase 3 - Trigger Stripe Connect payout to creator
-  }
-}
-
-/**
- * Factory function for dependency injection
- */
-export function getPurchaseService(env: {
-  DATABASE_URL: string;
-  STRIPE_SECRET_KEY: string;
-  ENVIRONMENT: string;
-}): PurchaseService {
-  const database = getDbClient(env.DATABASE_URL);
-  const stripe = new Stripe(env.STRIPE_SECRET_KEY, {
-    apiVersion: '2024-11-20.acacia',
-    typescript: true,
-  });
-  const obs = new ObservabilityClient('purchase-service', env.ENVIRONMENT);
-
-  return new PurchaseService({
-    db: database,
-    stripe,
-    obs,
-  });
-}
-```
-
-### Step 4: Create Checkout API Endpoints
-
-**Note**: All endpoints require authentication. Customer ID comes from auth context, not client input (prevents spoofing).
-
-**File**: `workers/purchase-api/src/routes/checkout.ts` (or add to existing worker)
-
-```typescript
-import { Hono } from 'hono';
-import type { Context } from 'hono';
-import { getPurchaseService } from '@codex/purchases';
-import { createCheckoutSchema, checkAccessSchema } from '@codex/validation';
-import { requireAuth } from '../middleware/auth';
-import { securityHeaders, rateLimit } from '@codex/security';
-import { ZodError } from 'zod';
-import { ObservabilityClient } from '@codex/observability';
-
-type Bindings = {
-  DATABASE_URL: string;
-  STRIPE_SECRET_KEY: string;
-  ENVIRONMENT: string;
-};
-
-type AuthContext = {
-  Bindings: Bindings;
-  Variables: {
-    user: { id: string; email: string; role: string };
-  };
-};
-
-const app = new Hono<AuthContext>();
-
-// Security middleware
-app.use('*', securityHeaders());
-app.use('/api/checkout', rateLimit({ windowMs: 60000, max: 10 })); // 10 checkouts/min per IP
-
-/**
- * POST /api/checkout - Create Stripe checkout session
- */
-app.post('/api/checkout', requireAuth(), async (c: Context<AuthContext>) => {
-  const obs = new ObservabilityClient('purchase-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const body = await c.req.json();
-    const validated = createCheckoutSchema.parse(body);
-
-    const service = getPurchaseService(c.env);
-    const result = await service.createCheckoutSession(
-      user.id, // Customer ID from auth, not client input!
-      validated.contentId
-    );
-
-    return c.json({ data: result }, 201);
-  } catch (err) {
-    if (err instanceof ZodError) {
-      return c.json({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: err.errors }
-      }, 400);
-    }
-
-    const errorMessage = (err as Error).message;
-    if (errorMessage === 'CONTENT_NOT_FOUND') {
-      return c.json({
-        error: { code: 'CONTENT_NOT_FOUND', message: 'Content not found or not published' }
-      }, 404);
-    }
-    if (errorMessage === 'CONTENT_IS_FREE') {
-      return c.json({
-        error: { code: 'CONTENT_IS_FREE', message: 'Free content does not require checkout' }
-      }, 400);
-    }
-    if (errorMessage === 'ALREADY_PURCHASED') {
-      return c.json({
-        error: { code: 'ALREADY_PURCHASED', message: 'You have already purchased this content' }
-      }, 409);
-    }
-
-    obs.trackError(err as Error, { userId: user.id, contentId: validated.contentId });
-    return c.json({
-      error: { code: 'INTERNAL_ERROR', message: 'Failed to create checkout session' }
-    }, 500);
-  }
-});
-
-/**
- * GET /api/purchases/access/:contentId - Check if user has access to content
- * Used by content player to verify purchase before streaming
- */
-app.get('/api/purchases/access/:contentId', requireAuth(), async (c: Context<AuthContext>) => {
-  const obs = new ObservabilityClient('purchase-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-  const contentId = c.req.param('contentId');
-
-  try {
-    const validated = checkAccessSchema.parse({ contentId });
-
-    const service = getPurchaseService(c.env);
-    const hasAccess = await service.hasAccess(user.id, validated.contentId);
-
-    return c.json({ data: { hasAccess } });
-  } catch (err) {
-    if (err instanceof ZodError) {
-      return c.json({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid content ID', details: err.errors }
-      }, 400);
-    }
-
-    obs.trackError(err as Error, { userId: user.id, contentId });
-    return c.json({
-      error: { code: 'INTERNAL_ERROR', message: 'Failed to check access' }
-    }, 500);
-  }
-});
-
-export default app;
-```
+## Implementation Checklist
+
+- [ ] **Database Setup**
+  - [ ] Create `purchases` schema in `packages/database/src/schema/purchases.ts`
+  - [ ] Generate migration with CHECK constraints
+  - [ ] Add unique constraint on `stripePaymentIntentId`
+  - [ ] Add partial unique index on `(customerId, contentId)` WHERE status='completed'
+  - [ ] Run migration in development
+
+- [ ] **Service Layer**
+  - [ ] Create `packages/purchase/src/services/purchase-service.ts`
+  - [ ] Implement `PurchaseService` extending `BaseService`
+  - [ ] Add Stripe SDK initialization in constructor
+  - [ ] Implement `createCheckoutSession()` method
+  - [ ] Implement `completePurchase()` method (for webhook)
+  - [ ] Implement `verifyPurchase()` method (for access control)
+  - [ ] Implement `getPurchaseHistory()` method
+  - [ ] Add custom error classes
+  - [ ] Add unit tests with mocked Stripe API
+
+- [ ] **Validation**
+  - [ ] Add `createCheckoutSchema` to `@codex/validation`
+  - [ ] Add `purchaseQuerySchema`
+  - [ ] Add schema tests (100% coverage)
+
+- [ ] **Worker/API**
+  - [ ] Create checkout routes or add to existing worker
+  - [ ] Implement `POST /api/checkout` endpoint
+  - [ ] Implement `GET /api/purchases` endpoint
+  - [ ] Implement `GET /api/purchases/:id` endpoint
+  - [ ] Apply route-level security
+  - [ ] Add integration tests
+
+- [ ] **Integration**
+  - [ ] Test checkout session creation end-to-end
+  - [ ] Test idempotency (multiple webhook calls)
+  - [ ] Test purchase verification (with access service)
+  - [ ] Test already-purchased error
+  - [ ] Update package documentation
+
+- [ ] **Deployment**
+  - [ ] Configure STRIPE_SECRET_KEY in Cloudflare
+  - [ ] Update wrangler.jsonc with Stripe bindings
+  - [ ] Test in preview environment
+  - [ ] Deploy to production
 
 ---
 
 ## Testing Strategy
 
-**Test Specifications**: See `design/roadmap/testing/ecommerce-testing-definition.md` for comprehensive test patterns, including:
-- Validation tests (Zod schemas, pure functions, no DB, 100% coverage)
-- Service tests (mocked Stripe API, mocked DB, business logic isolation)
-- Integration tests (real DB, real Stripe test mode, end-to-end checkout flow)
-- Webhook handler tests (signature verification, idempotency, duplicate handling)
-- Common testing patterns and test data factories
+### Unit Tests
 
-**To Run Tests**:
-```bash
-# Validation tests (fast, no DB, no Stripe)
-pnpm --filter @codex/validation test
+**Service Layer** (`packages/purchase/src/__tests__/`):
+- Test checkout session creation (mock Stripe API)
+- Test purchase completion idempotency
+- Test revenue split calculation (Phase 1: 100% creator)
+- Test validation errors (free content, already purchased)
+- Mock database and Stripe SDK
 
-# Service tests (fast, mocked DB, mocked Stripe)
-pnpm --filter @codex/purchases test
+**Validation Layer**:
+- 100% coverage for purchase schemas
+- Test checkout URL validation
+- Test query parameter validation
 
-# Integration tests (slow, real DB, Stripe test mode)
-STRIPE_SECRET_KEY=sk_test_... DATABASE_URL=postgresql://... pnpm --filter @codex/purchases test:integration
+### Integration Tests
 
-# All tests
-pnpm test
+**API Endpoints** (`workers/checkout-api/src/__tests__/`):
+- Test checkout endpoint with real database
+- Test purchase history endpoint
+- Test error responses (404, 409, 400)
+- Mock Stripe API calls
 
-# With coverage
-pnpm test --coverage
-```
+### E2E Scenarios
 
----
+**Successful Purchase Flow**:
+1. Customer requests checkout for content
+2. Checkout service creates Stripe session
+3. Frontend redirects to Stripe
+4. Customer completes payment (simulated in test)
+5. Webhook receives `checkout.session.completed`
+6. Purchase service records completed purchase
+7. Access service verifies purchase exists
+8. Customer can stream content
 
-## Definition of Done
+**Already Purchased Scenario**:
+1. Customer requests checkout for already-owned content
+2. Service checks for existing purchase
+3. Throws `AlreadyPurchasedError`
+4. Frontend receives 409 error
+5. Frontend shows "You already own this content"
 
-### Code Implementation
-- [ ] Purchase schema created in `packages/database/src/schema/purchases.ts`
-  - [ ] `purchases` table with all fields from database-schema.md v2.0
-  - [ ] UUID primary keys, integer cents for money
-  - [ ] Revenue split fields (Phase 1: platformFeeCents=0, organizationFeeCents=0)
-  - [ ] Payout tracking fields (Phase 3+)
-  - [ ] Proper indexes and constraints
-  - [ ] CHECK constraint: amount = platform + org + creator
-  - [ ] Partial unique index: prevent duplicate purchases
-- [ ] Migration generated and applied
-  - [ ] SQL matches database-schema.md lines 320-410
-  - [ ] CHECK constraints added manually to migration
-  - [ ] Partial unique index added manually
-  - [ ] Migration tested on local DB
-- [ ] Validation schemas in `packages/validation/src/purchase-schemas.ts`
-  - [ ] `createCheckoutSchema` (contentId only)
-  - [ ] `checkAccessSchema`
-- [ ] Purchase service implemented in `packages/purchases/src/service.ts`
-  - [ ] `createCheckoutSession()` method
-  - [ ] `hasAccess()` method (check if customer purchased content)
-  - [ ] `handleCheckoutCompleted()` method (webhook handler)
-  - [ ] Dependency injection pattern with PurchaseServiceConfig
-  - [ ] Factory function `getPurchaseService()`
-  - [ ] Phase 1 revenue model: 100% to creator
-- [ ] API endpoints created in `workers/purchase-api/src/routes/checkout.ts`
-  - [ ] POST /api/checkout (create session)
-  - [ ] GET /api/purchases/access/:contentId (check access)
+**Idempotency Scenario**:
+1. Webhook receives payment intent ID
+2. Purchase service checks if already recorded
+3. Finds existing purchase record
+4. Returns existing record (no duplicate)
 
-### Testing
-- [ ] Validation tests passing (100% coverage, no DB, no Stripe)
-  - [ ] All validation rules tested
-  - [ ] Edge cases covered
-- [ ] Service tests passing (mocked DB, mocked Stripe)
-  - [ ] All public methods tested
-  - [ ] Error paths tested
-  - [ ] Business logic verified
-  - [ ] Stripe API mocked (no real calls)
-- [ ] Integration tests passing (with test DB, Stripe test mode)
-  - [ ] End-to-end checkout flow
-  - [ ] Duplicate purchase prevention
-  - [ ] Webhook idempotency
-  - [ ] Revenue split calculations (Phase 1)
-- [ ] API tests passing
-  - [ ] Authentication required
-  - [ ] All endpoints tested
-  - [ ] Error responses verified
+### Local Development Testing
 
-### Quality & Security
-- [ ] Customer ID from auth context only (never from client input)
-- [ ] Content must be published to purchase
-- [ ] Duplicate purchase prevention working
-- [ ] Webhook idempotency working (payment_intent_id as key)
-- [ ] Revenue split validation (CHECK constraint enforced)
-- [ ] Observability logging added
-  - [ ] All operations logged
-  - [ ] No PII in logs (only IDs)
-- [ ] Error handling comprehensive
-  - [ ] All error codes documented
-  - [ ] Proper HTTP status codes
-- [ ] Input validation with Zod
-- [ ] TypeScript types exported
+**Tools**:
+- `pnpm test`: Run all tests
+- `pnpm --filter @codex/purchase test:watch`: Watch mode
+- Stripe CLI: `stripe listen --forward-to localhost:8787/webhooks/stripe`
+- Mock Stripe API in tests
 
-### Documentation
-- [ ] Schema fields documented
-- [ ] API endpoints documented
-- [ ] Error codes documented
-- [ ] Service interfaces documented
-- [ ] Integration points documented
-- [ ] Stripe API version noted (2024-11-20.acacia)
-
-### DevOps
-- [ ] CI passing (tests + typecheck + lint)
-- [ ] No new ESLint warnings
-- [ ] No new TypeScript errors
-- [ ] Code reviewed against STANDARDS.md
-- [ ] Branch deployed to staging
-- [ ] Stripe test mode keys configured in staging
+**Test Data**:
+- Seed test content with various prices
+- Use Stripe test mode API keys
+- Mock successful payment intents
 
 ---
 
-## Interfaces & Integration Points
+## Notes
 
-### Upstream Dependencies
+### Phase 1 Simplifications
 
-**P1-CONTENT-001** (Content Management):
-- **Dependency**: Checkout requires published content with pricing
-- **Tables**: `content` (lines 185-254 in database-schema.md)
-- **Fields Used**:
-  - `id` - Referenced by `purchases.content_id`
-  - `title`, `description` - Stripe product data
-  - `price_cents` - Stripe amount (must be > 0)
-  - `status` - Must be 'published'
-  - `creator_id` - For revenue routing (Phase 1: 100% to creator)
-  - `organization_id` - For org revenue (Phase 2+)
-  - `deleted_at` - Must be NULL
-- **Query Example**:
-```typescript
-// Purchase service validates content before checkout
-const contentItem = await db.query.content.findFirst({
-  where: and(
-    eq(content.id, contentId),
-    eq(content.status, 'published'),
-    isNull(content.deletedAt)
-  ),
-});
+**Revenue Split**:
+- 100% to creator (`creatorPayoutCents = amountPaidCents`)
+- No platform fee (`platformFeeCents = 0`)
+- No organization fee (`organizationFeeCents = 0`)
 
-if (!contentItem) throw new Error('CONTENT_NOT_FOUND');
-if (contentItem.priceCents === null || contentItem.priceCents === 0) {
-  throw new Error('CONTENT_IS_FREE');
-}
-```
+**Future Phases**:
+- Phase 2: Configurable platform/org fees
+- Phase 3: Stripe Connect automated payouts
 
-**Auth Middleware**:
-- **Dependency**: All API endpoints require authenticated customer
-- **Context Required**: `user.id` (used as customerId)
-- **Middleware**: `requireAuth()` sets `c.get('user')`
-- **Security**: Customer ID from auth prevents spoofing (user cannot purchase as someone else)
+### Security Considerations
 
-**Stripe API**:
-- **Dependency**: Stripe SDK for checkout sessions and webhooks
-- **API Version**: `2024-11-20.acacia`
-- **Secrets Required**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET_PAYMENT`
-- **Test Mode**: Always use `sk_test_*` keys in development/CI
-- **Integration**: Create checkout session → redirect to Stripe → webhook on completion
+**Payment Intent ID as Idempotency Key**:
+- Stripe guarantees Payment Intent IDs are unique
+- Database unique constraint prevents duplicate purchases
+- Webhook can safely be called multiple times
 
-### Downstream Consumers
+**Customer Verification**:
+- Customer ID from auth context (cannot spoof)
+- Checkout session metadata validated in webhook
+- Access control queries completed purchases only
 
-**P1-ECOM-002** (Stripe Webhooks):
-- **Consumes**: `handleCheckoutCompleted()` method from purchase service
-- **Webhook Event**: `checkout.session.completed`
-- **Integration**:
-```typescript
-// Webhook handler calls purchase service
-app.post('/webhooks/stripe/payment', verifySignature(), async (c) => {
-  const event = await stripe.webhooks.constructEvent(body, signature, secret);
+### Performance Considerations
 
-  if (event.type === 'checkout.session.completed') {
-    const service = getPurchaseService(c.env);
-    await service.handleCheckoutCompleted(event.data.object);
-  }
-});
-```
-- **Idempotency**: Uses `stripe_payment_intent_id` (unique per payment)
-- **Metadata Required**: `customerId`, `contentId`, `creatorId`, `priceCents`
+**Expected Load** (Phase 1):
+- Checkout sessions: ~10-100/day
+- Purchase completions: ~10-100/day (webhook calls)
+- Purchase verifications: ~1,000-10,000/day (access checks)
 
-**P1-ACCESS-001** (Content Access):
-- **Consumes**: `hasAccess()` method to check if customer purchased content
-- **Integration**:
-```typescript
-// Access service checks purchase before granting access
-const service = getPurchaseService(env);
-const hasPurchased = await service.hasAccess(customerId, contentId);
-
-if (!hasPurchased && content.visibility === 'purchased_only') {
-  throw new Error('PURCHASE_REQUIRED');
-}
-```
-- **Fields Read**: `customer_id`, `content_id`, `status`, `refunded_at`
-- **Query Pattern**: Only completed, non-refunded purchases grant access
-
-**P1-NOTIFY-001** (Email Service):
-- **Consumes**: `purchases` table for purchase confirmation emails
-- **Trigger**: After `handleCheckoutCompleted()` creates purchase
-- **TODO**: Call email service from purchase service (not yet implemented)
-- **Email Data**: Customer email, content title, amount paid, receipt URL
-
-**P1-ADMIN-001** (Admin Dashboard):
-- **Consumes**: `purchases` table for platform analytics
-- **Access Pattern**: Platform owners view all purchases
-- **Query**: No customer filtering (admin sees all)
-- **Use Case**: Revenue tracking, purchase analytics, support
-
-### Error Propagation
-
-| Service Error | HTTP Status | Error Code | Downstream Impact |
-|---------------|-------------|------------|-------------------|
-| `CONTENT_NOT_FOUND` | 404 | `CONTENT_NOT_FOUND` | Customer cannot purchase unpublished/deleted content |
-| `CONTENT_IS_FREE` | 400 | `CONTENT_IS_FREE` | Customer should access free content directly |
-| `ALREADY_PURCHASED` | 409 | `ALREADY_PURCHASED` | Customer already owns content (access granted) |
-| `STRIPE_SESSION_URL_MISSING` | 500 | `INTERNAL_ERROR` | Stripe API failure (retry or contact support) |
-| `MISSING_METADATA` | 500 | `INTERNAL_ERROR` | Webhook missing data (investigate Stripe integration) |
-| `MISSING_PAYMENT_INTENT` | 500 | `INTERNAL_ERROR` | Webhook missing payment intent (Stripe error) |
-| `VALIDATION_ERROR` | 400 | `VALIDATION_ERROR` | Client receives field-level validation errors |
-
-### Business Rules
-
-1. **Content Must Be Published**: Only published content can be purchased
-   - Enforced in service: `eq(content.status, 'published')`
-   - Prevents purchasing draft/archived content
-
-2. **Duplicate Purchase Prevention**: Customer cannot purchase same content twice
-   - Database constraint: Unique index on (customer_id, content_id) WHERE status='completed' AND refunded_at IS NULL
-   - Service checks existing purchase before creating session
-
-3. **Free Content No Checkout**: Free content (priceCents=0 or NULL) doesn't use Stripe
-   - Enforced in service: Throw error if price is 0
-   - Customer accesses free content directly (no purchase record)
-
-4. **Revenue Split Validation**: Money splits must add up exactly (no rounding errors)
-   - Database CHECK constraint: `amount_paid_cents = platform_fee_cents + organization_fee_cents + creator_payout_cents`
-   - Phase 1: `platform_fee_cents = 0`, `organization_fee_cents = 0`, `creator_payout_cents = amount_paid_cents`
-
-5. **Webhook Idempotency**: Duplicate webhooks don't create duplicate purchases
-   - Enforced by: `stripe_payment_intent_id` UNIQUE constraint
-   - Service checks existing purchase with payment_intent_id before insert
-
-6. **Customer ID from Auth**: Customer ID always from auth context, never client input
-   - Security: Prevents user purchasing as someone else
-   - Enforced in API: `customerId = user.id` (from JWT)
-
-### Data Flow Examples
-
-**Purchase Flow**:
-```
-Customer              API                Service              Stripe
-  |                    |                    |                    |
-  | POST /api/checkout |                    |                    |
-  |------------------->|                    |                    |
-  |                    | validate content   |                    |
-  |                    |------------------->|                    |
-  |                    |                    | check published    |
-  |                    |                    | check not purchased|
-  |                    |                    | create session     |
-  |                    |                    |------------------->|
-  |                    |                    |<-------------------|
-  |                    |<-------------------|                    |
-  | {checkoutUrl}      |                    |                    |
-  |<-------------------|                    |                    |
-  | redirect to Stripe |                    |                    |
-  |------------------------------------------->                  |
-  | enters card, pays  |                    |                    |
-  |------------------------------------------->                  |
-  |                    |                    |                    |
-  |                    |      (webhook: checkout.session.completed)
-  |                    |                    |<-------------------|
-  |                    |                    | create purchase    |
-  |                    |                    | status='completed' |
-  |                    | redirect success   |                    |
-  |<----------------------------------------|                    |
-```
-
-**Access Check Flow**:
-```
-Content Player      Access API          Purchase Service      Database
-  |                    |                       |                   |
-  | GET /api/access/:id|                       |                   |
-  |------------------->|                       |                   |
-  |                    | hasAccess(customer,id)|                   |
-  |                    |---------------------->|                   |
-  |                    |                       | query purchases   |
-  |                    |                       |------------------>|
-  |                    |                       |<------------------|
-  |                    |<----------------------|                   |
-  | {hasAccess: true}  |                       |                   |
-  |<-------------------|                       |                   |
-```
+**Indexes**:
+- `customer_id` index: Purchase history queries
+- `stripe_payment_intent_id` unique index: Idempotency
+- `(customer_id, content_id)` unique index: Already-purchased checks
 
 ---
 
-## Business Context
-
-### Why This Matters
-
-Stripe checkout is the **revenue generation engine** of the platform - creators monetize content, customers purchase access. This work packet enables:
-
-1. **Creator Monetization**: Creators set prices, customers pay, money flows
-2. **Transaction Security**: Stripe handles PCI compliance (no card storage)
-3. **Revenue Splitting**: Foundation for Phase 2+ platform/org fees
-4. **Purchase Tracking**: Audit trail for accounting, support, refunds
-
-### User Personas
-
-**Customer (Primary)**:
-- Discovers paid content via marketplace/search
-- Clicks "Purchase" → redirected to Stripe Checkout
-- Enters payment info (card, Apple Pay, Google Pay)
-- Redirected back to platform with access granted
-- Receives purchase confirmation email (P1-NOTIFY-001)
-
-**Creator**:
-- Sets content pricing via P1-CONTENT-001
-- Receives 100% of revenue (Phase 1)
-- Views purchase analytics in dashboard
-- Can issue refunds (Phase 2+)
-
-**Platform Owner** (via P1-ADMIN-001):
-- Views all purchases across platform
-- Monitors revenue metrics
-- Handles customer support (refunds, disputes)
-- Tracks Stripe fees and payouts (Phase 3+)
-
-### Business Rules (Expanded)
-
-**Purchase Lifecycle**:
-```
-pending (Stripe checkout) → completed (payment success) → [refunded] (optional)
-                         ↓
-                     failed (payment declined)
-```
-
-**Revenue Model (Phase 1)**:
-- `platform_fee_cents` = 0 (no platform fee)
-- `organization_fee_cents` = 0 (no org fee)
-- `creator_payout_cents` = `amount_paid_cents` (100% to creator)
-- Constraint: `amount_paid_cents = 0 + 0 + creator_payout_cents`
-
-**Revenue Model (Phase 2+)**:
-- Platform fee: Configurable % or flat fee
-- Organization fee: Configurable % or flat fee (if content belongs to org)
-- Creator payout: Remainder after fees
-- Constraint ensures exact cent allocation (no rounding errors)
-
----
-
-## Security Considerations
-
-### Authentication & Authorization
-
-**Layer 1: API Authentication**:
-- All endpoints require `requireAuth()` middleware
-- JWT token validated, customer context injected
-- No anonymous purchases
-
-**Layer 2: Customer ID Security**:
-- Customer ID from auth context: `customerId = user.id`
-- NEVER from client input (prevents spoofing)
-- User cannot purchase as someone else
-
-**Layer 3: Content Validation**:
-- Content must be published (not draft/archived)
-- Content must have price > 0
-- Content must not be deleted
-
-**Layer 4: Webhook Verification**:
-- Stripe webhook signature verified (P1-ECOM-002)
-- Prevents malicious webhook injection
-- Uses `STRIPE_WEBHOOK_SECRET_PAYMENT`
-
-### PCI Compliance
-
-- **No Card Storage**: Stripe handles all payment data
-- **No Card Processing**: Platform never sees card numbers
-- **Stripe Checkout**: PCI-compliant hosted page
-- **Tokens Only**: Platform stores `stripe_payment_intent_id` (safe identifier)
-
-### Duplicate Purchase Prevention
-
-**Database Level**:
-```sql
-CREATE UNIQUE INDEX idx_no_duplicate_purchases
-  ON purchases(customer_id, content_id)
-  WHERE status = 'completed' AND refunded_at IS NULL;
-```
-
-**Service Level**:
-```typescript
-const existingPurchase = await db.query.purchases.findFirst({
-  where: and(
-    eq(purchases.customerId, customerId),
-    eq(purchases.contentId, contentId),
-    eq(purchases.status, 'completed'),
-    isNull(purchases.refundedAt)
-  ),
-});
-
-if (existingPurchase) throw new Error('ALREADY_PURCHASED');
-```
-
-### Webhook Idempotency
-
-**Payment Intent as Key**:
-- Stripe sends duplicate webhooks (network retries)
-- `stripe_payment_intent_id` is UNIQUE identifier
-- Service checks existing purchase before insert
-- Prevents double-charging
-
-**Observability Pattern**:
-```typescript
-const existingPurchase = await db.query.purchases.findFirst({
-  where: eq(purchases.stripePaymentIntentId, paymentIntentId),
-});
-
-if (existingPurchase) {
-  obs.info('Purchase already recorded', { purchaseId: existingPurchase.id });
-  return; // Already processed
-}
-```
-
-### Threat Scenarios
-
-| Threat | Mitigation |
-|--------|------------|
-| User purchases as another user | Customer ID from auth only, not client input |
-| User purchases unpublished content | Service validates `status = 'published'` |
-| User purchases same content twice | Unique constraint + service check |
-| Malicious webhook injection | Signature verification in P1-ECOM-002 |
-| Payment intent replay | UNIQUE constraint on `stripe_payment_intent_id` |
-| Revenue split manipulation | CHECK constraint enforces sum validation |
-
----
-
-## Performance Considerations
-
-### Database Indexes
-
-**Critical Indexes** (from schema):
-```sql
--- Customer purchase lookup (access check)
-CREATE INDEX idx_purchases_customer_id ON purchases(customer_id);
-
--- Content sales analytics
-CREATE INDEX idx_purchases_content_id ON purchases(content_id);
-
--- Purchase status filtering
-CREATE INDEX idx_purchases_status ON purchases(status);
-
--- Recent purchases (admin dashboard)
-CREATE INDEX idx_purchases_created_at ON purchases(created_at);
-
--- Webhook idempotency lookup
-CREATE INDEX idx_purchases_stripe_payment_intent_id ON purchases(stripe_payment_intent_id);
-
--- Payout tracking (Phase 3+)
-CREATE INDEX idx_purchases_payout_status ON purchases(creator_payout_status, organization_payout_status);
-```
-
-**Index Usage**:
-- `customer_id` index: Access check (most frequent query)
-- `stripe_payment_intent_id` index: Webhook idempotency check
-- `created_at` index: Recent purchases for admin
-- `status` index: Filtering completed/pending/refunded
-
-### Expected Load (Phase 1)
-
-- **Purchases**: ~10-50 per day (customer activity)
-- **Access Checks**: ~1,000-10,000 per day (content streaming)
-- **Webhooks**: Same as purchases (1:1 ratio)
-- **Checkout Sessions**: ~15-75 per day (some abandoned, ~66% conversion)
-
-**Database Sizing**:
-- `purchases` table: ~500 rows (Phase 1)
-- Total storage: < 100 KB (metadata only)
-
-### Stripe API Performance
-
-- **Checkout Session Creation**: ~300-500ms (Stripe API call)
-- **Webhook Processing**: ~50-100ms (database insert)
-- **Access Check**: < 10ms (indexed query)
-
-**Rate Limiting**:
-- Checkout: 10 requests/min per IP (prevents abuse)
-- Stripe API: 100 requests/second (default limit)
-
----
-
-## Monitoring & Observability
-
-### Logging Strategy
-
-**Service Logs** (ObservabilityClient):
-```typescript
-// Checkout session created
-obs.info('Checkout session created', {
-  sessionId: session.id,
-  customerId,
-  contentId,
-  amountCents: contentItem.priceCents,
-});
-
-// Purchase completed
-obs.info('Purchase completed', {
-  purchaseId: purchase.id,
-  customerId,
-  contentId,
-  amountPaidCents,
-  paymentIntentId,
-});
-
-// Errors
-obs.trackError(err, { userId: user.id, contentId });
-```
-
-**API Logs**:
-```typescript
-obs.info('Checkout API request', {
-  method: 'POST',
-  path: '/api/checkout',
-  userId: user.id,
-  contentId: validated.contentId,
-});
-```
-
-### Metrics to Track
-
-**Purchase Metrics**:
-- `purchases.created.count` - Total purchases (by content, by customer)
-- `purchases.revenue.sum` - Total revenue in cents
-- `purchases.revenue.avg` - Average purchase price
-- `purchases.completed.count` - Successful purchases
-- `purchases.failed.count` - Failed payments
-
-**Checkout Metrics**:
-- `checkout.sessions.created.count` - Sessions created
-- `checkout.conversion.rate` - Sessions → completed purchases (%)
-- `checkout.abandoned.count` - Sessions without completion
-
-**API Metrics**:
-- `api.checkout.requests.count` - By endpoint
-- `api.checkout.latency.p95` - 95th percentile latency
-- `api.checkout.errors.count` - By error code
-
-### Alerts
-
-**Critical Alerts**:
-- `purchases.failed.rate > 10%` - High payment failure rate
-- `api.checkout.errors.rate > 5%` - High API error rate
-- `stripe.api.latency > 2000ms` - Stripe API slow
-
-**Warning Alerts**:
-- `checkout.conversion.rate < 50%` - Low conversion (abandoned checkouts)
-- `purchases.created.count = 0` for 24h - No revenue
-
----
-
-## Rollout Plan
-
-### Pre-Deployment
-
-1. **Stripe Account Setup**:
-   - Create Stripe account (or use existing test account)
-   - Generate API keys: `STRIPE_SECRET_KEY` (sk_test_* for staging)
-   - Generate webhook secret: `STRIPE_WEBHOOK_SECRET_PAYMENT`
-   - Configure webhook endpoint in Stripe dashboard
-
-2. **Database Migration**:
-```bash
-# Generate migration
-pnpm --filter @codex/database db:gen:drizzle
-
-# Edit migration to add CHECK constraints and partial unique index
-
-# Apply to staging DB
-DATABASE_URL=<staging> pnpm --filter @codex/database db:migrate
-
-# Verify table exists
-psql <staging_db> -c "\d purchases"
-```
-
-3. **Seed Test Data**:
-```sql
--- Insert test purchase (for testing hasAccess)
-INSERT INTO purchases (id, customer_id, content_id, amount_paid_cents, currency, stripe_payment_intent_id, platform_fee_cents, organization_fee_cents, creator_payout_cents, status, purchased_at)
-VALUES (
-  '00000000-0000-0000-0000-000000000001',
-  '<test_customer_id>',
-  '<test_content_id>',
-  999,
-  'usd',
-  'pi_test_123',
-  0,
-  0,
-  999,
-  'completed',
-  NOW()
-);
-```
-
-### Deployment Steps
-
-1. **Deploy Code**:
-   - Merge feature branch to main
-   - CI builds and deploys to staging
-   - Smoke test: `curl -X POST https://staging.codex.app/api/checkout -H "Authorization: Bearer <token>" -d '{"contentId":"<uuid>"}'`
-
-2. **Verify Stripe Integration**:
-   - Create test checkout session
-   - Complete payment in Stripe test mode
-   - Verify webhook received (P1-ECOM-002)
-   - Verify purchase record created
-
-3. **Test Access Check**:
-   - Call `/api/purchases/access/:contentId` with purchased content
-   - Verify `{hasAccess: true}` response
-
-4. **Monitor**:
-   - Watch logs for errors
-   - Check metrics dashboard
-   - Verify Stripe dashboard shows test payments
-
-### Rollback Plan
-
-**If Issues Detected**:
-1. **Code Rollback**: Revert deploy via CI
-2. **Database Rollback** (if schema issues):
-```sql
--- Drop table (only if no production data!)
-DROP TABLE purchases CASCADE;
-
--- Revert migration
-DELETE FROM drizzle_migrations WHERE name = '000X_purchases';
-```
-
-**Rollback Criteria**:
-- Error rate > 10%
-- Stripe API failures
-- Webhook processing errors
-- Revenue split constraint violations
-
----
-
-## Known Limitations (Phase 1)
-
-### Simplified Revenue Model
-
-1. **No Platform Fee**:
-   - Phase 1: 100% to creator (`platform_fee_cents = 0`)
-   - Limitation: Platform doesn't earn revenue yet
-   - Future: Configurable platform fee (% or flat)
-
-2. **No Organization Fee**:
-   - Phase 1: No org cut (`organization_fee_cents = 0`)
-   - Future: Orgs can take % of creator sales
-
-3. **No Stripe Connect Payouts**:
-   - Phase 1: Manual payouts (outside platform)
-   - Future (Phase 3+): Automated payouts via Stripe Connect
-
-### Missing Features
-
-1. **No Refunds**:
-   - Phase 1: No refund UI/API
-   - Workaround: Manual refund in Stripe dashboard
-   - Future: Refund endpoint, partial refunds
-
-2. **No Subscriptions**:
-   - Phase 1: One-time purchases only
-   - Future: Monthly/annual subscriptions (Stripe Subscriptions)
-
-3. **No Bundles/Discounts**:
-   - Phase 1: Individual content purchases
-   - Future: Content bundles, promo codes, discounts
-
-4. **No Multi-Currency**:
-   - Phase 1: USD only
-   - Future: Support EUR, GBP, etc.
-
-### Technical Debt
-
-1. **No Abandoned Cart Recovery**:
-   - Phase 1: No pending purchase records
-   - Impact: Cannot email customers who abandoned checkout
-   - Future: Track checkout sessions, send reminder emails
-
-2. **No Purchase Analytics**:
-   - Phase 1: Basic count/sum metrics
-   - Future: Detailed analytics (conversion funnel, revenue by content)
-
-3. **No Fraud Detection**:
-   - Phase 1: Relies on Stripe Radar (default)
-   - Future: Custom fraud rules, velocity checks
-
----
-
-## Questions & Clarifications
-
-### Resolved
-
-**Q: Should we create purchase record before or after Stripe checkout?**
-A: After (in webhook). Creating before leads to abandoned purchase records. Webhook ensures only successful payments create records.
-
-**Q: How to prevent duplicate purchases?**
-A: Two layers: (1) Service checks existing purchase before creating session, (2) Database unique constraint on (customer_id, content_id) WHERE status='completed'.
-
-**Q: How to handle duplicate webhooks?**
-A: Use `stripe_payment_intent_id` as idempotency key. Check if purchase with that payment_intent_id exists before inserting.
-
-**Q: Should free content use purchase records?**
-A: No. Free content (price=0 or NULL) throws `CONTENT_IS_FREE` error. Customer accesses directly without purchase flow.
-
-**Q: How to calculate revenue splits in Phase 1?**
-A: Simple: `platform_fee_cents = 0`, `organization_fee_cents = 0`, `creator_payout_cents = amount_paid_cents`. CHECK constraint enforces sum.
-
-### Open
-
-**Q: Should we support Apple Pay / Google Pay?**
-Current: Stripe Checkout supports them automatically (payment_method_types: ['card'])
-- **Recommendation**: Phase 1 - default Stripe handling. Phase 2 - explicitly list payment methods.
-
-**Q: Should we track abandoned checkouts?**
-Current: No tracking (no pending purchase record)
-- **Recommendation**: Phase 2 - track checkout sessions, send reminder emails after 24h.
-
-**Q: How to handle Stripe fees?**
-Current: Stripe deducts ~2.9% + 30¢ from each payment (standard pricing)
-- **Impact**: Creator receives net amount (Stripe fee already deducted)
-- **Future**: Store Stripe fee in purchase record for accounting
-
----
-
-## Success Criteria
-
-### Functional Goals
-
-- [ ] Customer can purchase paid content via Stripe Checkout
-- [ ] Customer redirected to Stripe → enters payment → redirected back
-- [ ] Purchase record created on successful payment (via webhook)
-- [ ] Duplicate purchase prevention working (both service + DB)
-- [ ] Access check returns `true` for purchased content
-- [ ] Webhook idempotency working (duplicate webhooks handled)
-- [ ] Revenue split calculated correctly (Phase 1: 100% to creator)
-- [ ] Free content throws error (no checkout for free)
-- [ ] Content must be published to purchase
-
-### Non-Functional Goals
-
-- [ ] Checkout latency < 1 second (Stripe API call)
-- [ ] Access check latency < 50ms (database query)
-- [ ] Webhook processing < 200ms
-- [ ] All operations logged to observability (no PII)
-- [ ] 100% test coverage for validation schemas
-- [ ] 80%+ test coverage for service logic
-- [ ] Stripe API mocked in tests (no real calls in CI)
-- [ ] Proper error codes and HTTP status
-
-### Business Goals
-
-- [ ] P1-ECOM-002 can process checkout webhooks successfully
-- [ ] P1-ACCESS-001 can check purchase before granting access
-- [ ] P1-ADMIN-001 can view purchase analytics
-- [ ] Creators receive 100% of revenue (Phase 1)
-- [ ] Stripe handles PCI compliance (no card storage)
-- [ ] Purchase flow is intuitive (minimal friction)
-
----
-
-## Related Documentation
-
-**Database Schema** (Source of Truth):
-- [database-schema.md](../../features/shared/database-schema.md) - v2.0
-  - Lines 320-410: `purchases` table (revenue splits, payout tracking)
-  - Lines 185-254: `content` table (referenced by purchases)
-  - Lines 65-127: `users` table (customer_id, creator_id FK)
-
-**Architecture & Patterns**:
-- [STANDARDS.md](../STANDARDS.md) - Coding patterns
-  - § 1.2: Validation separation (Zod schemas separate from DB)
-  - § 2.1: Service layer patterns (dependency injection)
-  - § 2.3: Payment security (PCI compliance, customer ID from auth)
-  - § 3.1: Error handling (error codes, observability)
-- [Stripe Integration Guide](../../infrastructure/StripeIntegration.md) - Stripe patterns
-  - § 2: Checkout Sessions (hosted checkout)
-  - § 4: Webhook handling (signature verification, idempotency)
-  - § 6: Test mode best practices
-
-**Testing Strategy**:
-- [ecommerce-testing-definition.md](../testing/ecommerce-testing-definition.md) - Test specifications
-  - Lines 1-80: Validation test patterns
-  - Lines 81-200: Service test patterns (mocked Stripe)
-  - Lines 201-300: Integration test patterns (Stripe test mode)
-  - Lines 301-350: Webhook test patterns (signature, idempotency)
-- [Testing.md](../../infrastructure/Testing.md) - General testing approach
-  - § 2: Unit vs integration tests
-  - § 5: Mocking external APIs (Stripe)
-
-**Feature Specifications**:
-- [ttd-dphase-1.md](../../features/e-commerce/ttd-dphase-1.md) - E-commerce requirements
-  - § 1: Purchase flow (customer → checkout → webhook → access)
-  - § 3: Revenue model (Phase 1: 100% to creator)
-  - § 5: Duplicate prevention (idempotency)
-
-**Related Work Packets**:
-- [P1-CONTENT-001](./P1-CONTENT-001-content-service.md) - Content must be published to purchase (upstream)
-- [P1-ECOM-002](./P1-ECOM-002-stripe-webhooks.md) - Webhook handler calls handleCheckoutCompleted() (downstream)
-- [P1-ACCESS-001](./P1-ACCESS-001-content-access.md) - Checks hasAccess() before streaming (downstream)
-- [P1-NOTIFY-001](./P1-NOTIFY-001-email-service.md) - Purchase confirmation emails (downstream)
-- [P1-ADMIN-001](./P1-ADMIN-001-admin-dashboard.md) - Purchase analytics (downstream)
-
-**Code Examples**:
-- Webhook handler skeleton: `workers/stripe-webhook-handler/src/index.ts`
-- Signature verification: `workers/stripe-webhook-handler/src/middleware/verify-signature.ts`
-- Auth middleware: `workers/auth/src/middleware/auth.ts` - Hono auth pattern
-- Validation: `packages/validation/src/user-schema.ts` - Zod schema examples
-
-**Infrastructure**:
-- [CI/CD Guide](../../infrastructure/CICD.md) - Deployment automation
-  - § 3: Path-based test filtering
-  - § 7: Stripe test mode in CI
-- [Observability](../../infrastructure/Observability.md) - Logging and metrics
-  - § 2: PII redaction patterns
-  - § 4: Error tracking
-
----
-
-## Notes for LLM Developer
-
-### Critical Patterns
-
-1. **Customer ID from Auth**: ALWAYS use customer ID from auth context
-   - Customer ID = `user.id` from JWT
-   - NEVER from client input (prevents spoofing)
-   - User cannot purchase as someone else
-
-2. **Stripe SDK Setup**:
-   ```typescript
-   import Stripe from 'stripe';
-
-   const stripe = new Stripe(env.STRIPE_SECRET_KEY, {
-     apiVersion: '2024-11-20.acacia', // Pin API version
-     typescript: true,
-   });
-   ```
-
-3. **Mock Stripe in Tests**: Never make real Stripe API calls in CI
-   ```typescript
-   vi.spyOn(stripe.checkout.sessions, 'create').mockResolvedValue({
-     id: 'cs_test_123',
-     url: 'https://checkout.stripe.com/test',
-   } as any);
-   ```
-
-4. **Webhook Idempotency**: Use payment_intent_id as key
-   ```typescript
-   const existingPurchase = await db.query.purchases.findFirst({
-     where: eq(purchases.stripePaymentIntentId, paymentIntentId),
-   });
-
-   if (existingPurchase) {
-     obs.info('Purchase already recorded');
-     return; // Already processed
-   }
-   ```
-
-5. **Revenue Split Validation**: Phase 1 simple model
-   ```typescript
-   const platformFeeCents = 0;
-   const organizationFeeCents = 0;
-   const creatorPayoutCents = amountPaidCents; // 100% to creator
-
-   // Database CHECK constraint enforces:
-   // amountPaidCents = platformFeeCents + organizationFeeCents + creatorPayoutCents
-   ```
-
-### Common Pitfalls
-
-1. **Taking customer ID from client input**:
-   ```typescript
-   // ❌ WRONG - client can spoof customer ID
-   const body = await c.req.json();
-   const service = getPurchaseService(c.env);
-   await service.createCheckoutSession(body.customerId, body.contentId);
-
-   // ✅ CORRECT - customer ID from auth
-   const user = c.get('user');
-   const service = getPurchaseService(c.env);
-   await service.createCheckoutSession(user.id, validated.contentId);
-   ```
-
-2. **Creating purchase record before Stripe checkout**:
-   ```typescript
-   // ❌ WRONG - creates abandoned purchase records
-   const [purchase] = await db.insert(purchases).values({ status: 'pending' });
-   const session = await stripe.checkout.sessions.create({...});
-   // User abandons checkout → pending purchase stays forever
-
-   // ✅ CORRECT - create purchase in webhook only
-   const session = await stripe.checkout.sessions.create({...});
-   // Webhook creates purchase only if payment succeeds
-   ```
-
-3. **Not checking webhook idempotency**:
-   ```typescript
-   // ❌ WRONG - duplicate webhooks create duplicate purchases
-   async handleCheckoutCompleted(session) {
-     await db.insert(purchases).values({...});
-   }
-
-   // ✅ CORRECT - check payment_intent_id first
-   async handleCheckoutCompleted(session) {
-     const existing = await db.query.purchases.findFirst({
-       where: eq(purchases.stripePaymentIntentId, paymentIntentId),
-     });
-     if (existing) return; // Already processed
-
-     await db.insert(purchases).values({...});
-   }
-   ```
-
-4. **Using DECIMAL for money**:
-   ```typescript
-   // ❌ WRONG - DECIMAL has rounding errors
-   amountPaidCents: decimal('amount_paid_cents', { precision: 10, scale: 2 })
-
-   // ✅ CORRECT - INTEGER cents (ACID-compliant)
-   amountPaidCents: integer('amount_paid_cents')
-   ```
-
-5. **Forgetting CHECK constraint for revenue splits**:
-   ```sql
-   -- ❌ WRONG - no validation, cents can leak
-   CREATE TABLE purchases (
-     amount_paid_cents INTEGER,
-     creator_payout_cents INTEGER
-   );
-
-   -- ✅ CORRECT - CHECK constraint enforces sum
-   ALTER TABLE purchases
-     ADD CONSTRAINT check_revenue_split_adds_up
-     CHECK (amount_paid_cents = platform_fee_cents + organization_fee_cents + creator_payout_cents);
-   ```
-
-### Testing Checklist
-
-- [ ] Validation tests run WITHOUT database, WITHOUT Stripe API
-- [ ] Service tests mock Stripe API (no real calls)
-- [ ] Integration tests use Stripe test mode (`sk_test_*`)
-- [ ] All error paths tested (CONTENT_NOT_FOUND, ALREADY_PURCHASED, etc.)
-- [ ] Duplicate purchase prevention tested (both service + DB)
-- [ ] Webhook idempotency tested (duplicate webhooks)
-- [ ] Revenue split validation tested (CHECK constraint)
-
-### If Stuck
-
-- **Schema questions**: Check `design/features/shared/database-schema.md` lines 320-410
-- **Stripe patterns**: Check `design/infrastructure/StripeIntegration.md`
-- **Testing patterns**: Check `design/roadmap/testing/ecommerce-testing-definition.md`
-- **Auth context**: Check `workers/auth/src/middleware/auth.ts`
-- **Standards**: Check `STANDARDS.md` § 2.3 (payment security)
-
-**Finding Documentation**: Use Context-7 map or [CONTEXT_MAP.md](../CONTEXT_MAP.md) for architecture navigation.
-
----
-
-**Last Updated**: 2025-11-05
+**Last Updated**: 2025-11-23
+**Version**: 2.0 (Enhanced with implementation patterns and pseudocode)

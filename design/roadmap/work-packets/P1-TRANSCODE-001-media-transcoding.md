@@ -1,1984 +1,1128 @@
-# Work Packet: P1-TRANSCODE-001 - Media Transcoding Service
+# P1-TRANSCODE-001: Media Transcoding Service
 
-**Status**: 🚧 To Be Implemented
 **Priority**: P1 (High - enables streaming)
+**Status**: 🚧 Not Implemented
 **Estimated Effort**: 5-7 days
-**Branch**: `feature/P1-TRANSCODE-001-media-transcoding`
 
 ---
 
-## Current State
+## Table of Contents
 
-**✅ Already Implemented:**
-- R2 client for file storage (`packages/cloudflare-clients/src/r2/client.ts`)
-- Database client with Drizzle ORM (`packages/database/src/client.ts`)
-- Content schema with `media_items` table (from P1-CONTENT-001)
-- Observability package for logging
-- Security middleware (headers, rate limiting)
-- Validation package with Zod schemas
+- [Overview](#overview)
+- [System Context](#system-context)
+- [Database Schema](#database-schema)
+- [Service Architecture](#service-architecture)
+- [Implementation Patterns](#implementation-patterns)
+- [API Integration](#api-integration)
+- [Available Patterns & Utilities](#available-patterns--utilities)
+- [Dependencies](#dependencies)
+- [Implementation Checklist](#implementation-checklist)
+- [Testing Strategy](#testing-strategy)
+- [Notes](#notes)
 
-**🚧 Needs Implementation:**
-- Extended media_items schema (transcoding fields)
-- Transcoding service (trigger jobs, handle webhooks)
-- Transcoding API endpoints (webhook, retry)
-- RunPod integration (GPU transcoding)
-- Tests (unit + integration)
+---
+
+## Overview
+
+Media Transcoding Service converts uploaded video and audio files into streamable HLS format using GPU-accelerated transcoding via RunPod. This service bridges the gap between content upload and content delivery, transforming raw media into optimized streaming assets.
+
+The transcoding pipeline processes uploaded media through multiple stages: triggering GPU jobs on RunPod, monitoring job progress, receiving webhook callbacks, and updating media status. For videos, it generates multi-quality HLS streams, preview clips, and thumbnails. For audio, it creates HLS audio streams and visual waveforms.
+
+Key capabilities:
+- **GPU Transcoding**: Serverless GPU processing via RunPod for fast video/audio encoding
+- **HLS Generation**: Multi-quality adaptive bitrate streaming (1080p, 720p, 480p, 360p)
+- **Preview Clips**: 30-second video previews for content discovery
+- **Thumbnail Extraction**: Auto-generated thumbnails at 10% mark
+- **Audio Waveforms**: Visual waveform data for audio playback UI
+- **Webhook Integration**: Asynchronous job completion via RunPod callbacks
+- **Retry Logic**: One manual retry allowed for failed jobs
+
+This service is consumed by:
+- **Content Service** (P1-CONTENT-001): Triggers transcoding after upload completion
+- **Access Service** (P1-ACCESS-001): Reads HLS keys for streaming URL generation
+- **Frontend**: Displays transcoding status and allows manual retries
+
+---
+
+## System Context
+
+### Upstream Dependencies
+
+**Content Service** (P1-CONTENT-001) (✅ Complete):
+- Calls `TranscodingService.triggerJob()` after media upload
+- Reads media status to prevent publishing un-transcoded content
+- Integration: Content service waits for `status = 'ready'` before allowing publish
+
+**R2 Storage** (✅ Available via `@codex/cloudflare-clients`):
+- Stores original uploaded files (input for transcoding)
+- Stores transcoded HLS outputs, previews, thumbnails, waveforms
+- Integration: R2Service provides upload/download/delete operations
+
+**RunPod API** (External Service):
+- GPU-accelerated transcoding service
+- Receives job requests via REST API
+- Sends results via webhook callback
+- Integration: HTTP POST to RunPod endpoint, webhook receiver for results
+
+### Downstream Consumers
+
+**Access Service** (P1-ACCESS-001):
+- Reads `hlsMasterPlaylistKey` to generate streaming URLs
+- Verifies media `status = 'ready'` before streaming
+- Integration: Access service generates presigned R2 URL for HLS master playlist
+
+**Content Service** (P1-CONTENT-001):
+- Checks media `status` before allowing content publication
+- Displays transcoding progress to creators
+- Integration: Content cannot be published until media ready
+
+**Admin Dashboard** (P1-ADMIN-001):
+- Monitors transcoding success/failure rates
+- Provides manual retry functionality
+- Integration: Queries media_items for transcoding metrics
+
+### External Services
+
+**RunPod**: GPU transcoding (FFmpeg, audiowaveform)
+**Cloudflare R2**: Media file storage
+**Neon PostgreSQL**: Transcoding job tracking
+**Cloudflare Workers**: Webhook receiver
+
+### Integration Flow
+
+```
+Media Upload Completes
+    ↓
+Content Service triggers transcoding
+    ↓
+TranscodingService.triggerJob(mediaId)
+    ↓
+Fetch media from database (creatorId, inputKey)
+    ↓
+Call RunPod API (POST /run with media details)
+    ↓
+Update media status = 'transcoding'
+    ↓
+RunPod processes video (GPU FFmpeg encoding)
+    ↓
+RunPod uploads HLS to R2 (multi-quality variants)
+    ↓
+RunPod sends webhook (POST /api/transcoding/webhook)
+    ↓
+Webhook handler updates media_items
+    ↓
+Update status = 'ready', save HLS keys
+    ↓
+Access Service can generate streaming URLs
+```
+
+---
+
+## Database Schema
+
+### Extended Media Items Fields
+
+**Purpose**: Track transcoding job state and output asset locations.
+
+**New Fields** (added to existing `media_items` table from P1-CONTENT-001):
+
+- `hlsMasterPlaylistKey` (text, nullable): HLS master playlist R2 path
+  - Example: `{creatorId}/hls/{mediaId}/master.m3u8`
+  - Populated after transcoding completes
+  - Used by access service to generate streaming URLs
+
+- `hlsPreviewKey` (text, nullable): 30-second preview clip HLS path
+  - Example: `{creatorId}/hls/{mediaId}/preview/preview.m3u8`
+  - For content discovery (show preview before purchase)
+
+- `thumbnailKey` (text, nullable): Auto-generated thumbnail image
+  - Example: `{creatorId}/thumbnails/media/{mediaId}/auto-generated.jpg`
+  - Extracted at 10% mark of video
+
+- `waveformKey` (text, nullable): Audio waveform data (JSON)
+  - Example: `{creatorId}/waveforms/{mediaId}/waveform.json`
+  - Only for audio media type
+  - Used for visual playback UI
+
+- `transcodingError` (text, nullable): Error message if transcoding fails
+  - Stored for debugging and user-facing error messages
+
+- `transcodingAttempts` (integer, default 0): Retry count
+  - Maximum 1 retry allowed
+  - Prevents infinite retry loops
+
+- `runpodJobId` (text, nullable): RunPod job identifier
+  - For tracking job status and debugging
+
+**Media Status Enum** (already in P1-CONTENT-001, clarified here):
+- `uploading`: Upload in progress
+- `uploaded`: Upload complete, ready for transcoding
+- `transcoding`: RunPod job in progress
+- `ready`: Transcoding complete, media streamable
+- `failed`: Transcoding failed (check transcodingError)
+
+### Migration Considerations
+
+**Manual Steps**:
+- Add new fields to existing `media_items` table migration
+- No new tables needed (extends P1-CONTENT-001 schema)
+
+**Database Constraints**:
+- `hlsMasterPlaylistKey` required when `status = 'ready'`
+- `transcodingAttempts` max value = 1 (enforced in service logic)
+
+---
+
+## Service Architecture
+
+### Service Responsibilities
+
+**TranscodingService** (extends `BaseService` from `@codex/service-errors`):
+- **Primary Responsibility**: Manage media transcoding lifecycle via RunPod integration
+- **Key Operations**:
+  - `triggerJob(mediaId)`: Start transcoding job on RunPod
+  - `handleWebhook(payload)`: Process RunPod completion webhook
+  - `retryTranscoding(mediaId)`: Manually retry failed job (1 attempt max)
+  - `getTranscodingStatus(mediaId)`: Query current job status
+  - `cancelJob(mediaId)`: Cancel in-progress job (admin only)
+
+### Key Business Rules
+
+1. **Job Triggering**:
+   - Media must have `status = 'uploaded'` to trigger transcoding
+   - Input file must exist in R2 (`r2Key` populated)
+   - Media type must be 'video' or 'audio'
+   - Creator must own the media (scoping check)
+
+2. **RunPod Job Configuration**:
+   - Video: Generate HLS with 4 quality levels (1080p, 720p, 480p, 360p)
+   - Video: Extract 30-second preview starting at 10% mark
+   - Video: Generate thumbnail at 10% mark
+   - Audio: Generate HLS audio stream
+   - Audio: Generate waveform visualization data (JSON)
+
+3. **Webhook Processing**:
+   - Verify webhook signature (HMAC from RunPod)
+   - Extract job ID, status, output keys
+   - Update media_items atomically (status + keys)
+   - If failed: Store error message, allow retry (max 1)
+
+4. **Retry Logic**:
+   - Only 1 retry allowed (`transcodingAttempts < 1`)
+   - Reset status to 'uploaded' before retrying
+   - Increment transcodingAttempts counter
+   - Manual trigger only (no automatic retries)
+
+5. **Error Handling**:
+   - RunPod API failures: Log error, keep status as 'uploaded', allow retry
+   - Webhook failures: Mark status = 'failed', store error message
+   - Invalid media: Fail immediately, no retry
+
+### Design Patterns
+
+#### Pattern 1: Async Job with Webhook Callback
+
+**Problem**: Transcoding takes minutes, can't block HTTP request
+
+**Solution**: Fire-and-forget job trigger + webhook callback for results
+
+```typescript
+// Service extends BaseService
+export class TranscodingService extends BaseService {
+  private runpodApiKey: string;
+  private runpodEndpointId: string;
+  private webhookBaseUrl: string;
+
+  constructor(config: ServiceConfig & {
+    runpodApiKey: string;
+    runpodEndpointId: string;
+    webhookBaseUrl: string;
+  }) {
+    super(config); // BaseService provides this.db, this.environment
+    this.runpodApiKey = config.runpodApiKey;
+    this.runpodEndpointId = config.runpodEndpointId;
+    this.webhookBaseUrl = config.webhookBaseUrl;
+  }
+
+  async triggerJob(mediaId: string, userId: string): Promise<void> {
+    // Step 1: Fetch media from database
+    const media = await this.db.query.mediaItems.findFirst({
+      where: and(
+        eq(mediaItems.id, mediaId),
+        eq(mediaItems.creatorId, userId), // Scoping check
+        eq(mediaItems.status, 'uploaded')
+      ),
+    });
+
+    if (!media) {
+      throw new NotFoundError('Media not found or not ready for transcoding');
+    }
+
+    // Step 2: Construct webhook URL
+    const webhookUrl = `${this.webhookBaseUrl}/api/transcoding/webhook`;
+
+    // Step 3: Call RunPod API (async job)
+    const response = await fetch(
+      `https://api.runpod.ai/v2/${this.runpodEndpointId}/run`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.runpodApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: {
+            mediaId: media.id,
+            type: media.mediaType,
+            creatorId: media.creatorId,
+            inputKey: media.r2Key, // Where to fetch input file
+            webhookUrl,
+          },
+        }),
+      }
+    );
+
+    const result = await response.json();
+
+    // Step 4: Update media status = 'transcoding'
+    await this.db.update(mediaItems)
+      .set({
+        status: 'transcoding',
+        runpodJobId: result.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(mediaItems.id, mediaId));
+
+    // Job is now running, webhook will update when complete
+  }
+}
+```
+
+#### Pattern 2: Webhook Handler with HMAC Verification
+
+**Problem**: Webhook endpoints are public, need to verify authenticity
+
+**Solution**: HMAC signature verification from RunPod
+
+```typescript
+export async function handleTranscodingWebhook(
+  payload: RunPodWebhookPayload,
+  signature: string,
+  webhookSecret: string
+): Promise<void> {
+  // Step 1: Verify webhook signature
+  const computedSignature = createHmac('sha256', webhookSecret)
+    .update(JSON.stringify(payload))
+    .digest('hex');
+
+  if (computedSignature !== signature) {
+    throw new ForbiddenError('Invalid webhook signature');
+  }
+
+  // Step 2: Call service to process webhook
+  const service = new TranscodingService(config);
+  await service.handleWebhook(payload);
+}
+```
+
+#### Pattern 3: Atomic Status Update
+
+**Problem**: Webhook must update multiple fields atomically
+
+**Solution**: Single UPDATE statement with all fields
+
+```typescript
+async handleWebhook(payload: RunPodWebhookPayload): Promise<void> {
+  const mediaId = payload.output?.mediaId || payload.jobId; // Fallback to job ID
+
+  if (payload.status === 'completed') {
+    // Success: Update all fields atomically
+    await this.db.update(mediaItems)
+      .set({
+        status: 'ready',
+        hlsMasterPlaylistKey: payload.output!.hlsMasterKey,
+        hlsPreviewKey: payload.output!.hlsPreviewKey,
+        thumbnailKey: payload.output!.thumbnailKey,
+        waveformKey: payload.output!.waveformKey, // Audio only
+        durationSeconds: payload.output!.durationSeconds,
+        width: payload.output!.width,
+        height: payload.output!.height,
+        updatedAt: new Date(),
+      })
+      .where(eq(mediaItems.id, mediaId));
+  } else {
+    // Failure: Store error message
+    await this.db.update(mediaItems)
+      .set({
+        status: 'failed',
+        transcodingError: payload.error || 'Unknown transcoding error',
+        updatedAt: new Date(),
+      })
+      .where(eq(mediaItems.id, mediaId));
+  }
+}
+```
+
+#### Pattern 4: Retry with Attempt Counter
+
+**Problem**: Allow retry but prevent infinite loops
+
+**Solution**: Counter with max value check
+
+```typescript
+async retryTranscoding(mediaId: string, userId: string): Promise<void> {
+  // Step 1: Fetch media and check retry eligibility
+  const media = await this.db.query.mediaItems.findFirst({
+    where: and(
+      eq(mediaItems.id, mediaId),
+      eq(mediaItems.creatorId, userId),
+      eq(mediaItems.status, 'failed')
+    ),
+  });
+
+  if (!media) {
+    throw new NotFoundError('Media not found or not failed');
+  }
+
+  // Step 2: Check retry limit
+  if (media.transcodingAttempts >= 1) {
+    throw new ValidationError('Maximum retry attempts reached (1)');
+  }
+
+  // Step 3: Reset status and increment attempts
+  await this.db.update(mediaItems)
+    .set({
+      status: 'uploaded',
+      transcodingAttempts: media.transcodingAttempts + 1,
+      transcodingError: null, // Clear previous error
+      updatedAt: new Date(),
+    })
+    .where(eq(mediaItems.id, mediaId));
+
+  // Step 4: Trigger new job
+  await this.triggerJob(mediaId, userId);
+}
+```
+
+---
+
+## Implementation Patterns
+
+### Pseudocode: Trigger Transcoding Job
+
+```
+FUNCTION triggerJob(mediaId, userId):
+  // Step 1: Fetch media from database
+  media = DATABASE.query(
+    SELECT * FROM media_items
+    WHERE id = mediaId
+      AND creator_id = userId
+      AND status = 'uploaded'
+      AND deleted_at IS NULL
+  )
+
+  IF media IS NULL:
+    THROW NotFoundError("Media not found or not ready")
+  END IF
+
+  // Step 2: Validate input file exists
+  IF media.r2Key IS NULL:
+    THROW ValidationError("Input file not uploaded")
+  END IF
+
+  // Step 3: Construct webhook URL
+  webhookUrl = webhookBaseUrl + "/api/transcoding/webhook"
+
+  // Step 4: Prepare RunPod job input
+  jobInput = {
+    mediaId: media.id,
+    type: media.mediaType,  // 'video' | 'audio'
+    creatorId: media.creatorId,
+    inputKey: media.r2Key,  // R2 path to original file
+    webhookUrl: webhookUrl
+  }
+
+  // Step 5: Call RunPod API (async job)
+  response = HTTP.POST("https://api.runpod.ai/v2/{endpointId}/run", {
+    headers: {
+      Authorization: "Bearer " + runpodApiKey,
+      ContentType: "application/json"
+    },
+    body: JSON.stringify({
+      input: jobInput
+    })
+  })
+
+  IF response.status != 200:
+    LOG.error("RunPod API error", response.error)
+    THROW InternalServiceError("Failed to start transcoding job")
+  END IF
+
+  result = response.json()
+  runpodJobId = result.id
+
+  // Step 6: Update media status = 'transcoding'
+  DATABASE.update(media_items, {
+    status: 'transcoding',
+    runpod_job_id: runpodJobId,
+    updated_at: NOW()
+  }, WHERE id = mediaId)
+
+  // Step 7: Log job started
+  LOG.info("Transcoding job started", {
+    mediaId: mediaId,
+    runpodJobId: runpodJobId,
+    type: media.mediaType
+  })
+
+  // Job is running, webhook will handle completion
+END FUNCTION
+```
+
+### Pseudocode: Handle Webhook Callback
+
+```
+FUNCTION handleWebhook(payload):
+  // Step 1: Extract job info
+  jobId = payload.jobId
+  status = payload.status  // 'completed' | 'failed'
+  output = payload.output
+
+  // Step 2: Find media by job ID or media ID
+  mediaId = output?.mediaId OR jobId
+
+  media = DATABASE.query(
+    SELECT * FROM media_items
+    WHERE runpod_job_id = jobId
+       OR id = mediaId
+  )
+
+  IF media IS NULL:
+    LOG.warn("Webhook received for unknown media", { jobId })
+    RETURN  // Ignore unknown webhooks
+  END IF
+
+  // Step 3: Process based on status
+  IF status == 'completed':
+    // Success: Update with transcoded assets
+    DATABASE.update(media_items, {
+      status: 'ready',
+      hls_master_playlist_key: output.hlsMasterKey,
+      hls_preview_key: output.hlsPreviewKey,
+      thumbnail_key: output.thumbnailKey,
+      waveform_key: output.waveformKey,  // Audio only
+      duration_seconds: output.durationSeconds,
+      width: output.width,
+      height: output.height,
+      updated_at: NOW()
+    }, WHERE id = media.id)
+
+    LOG.info("Transcoding completed successfully", {
+      mediaId: media.id,
+      jobId: jobId
+    })
+  ELSE:
+    // Failure: Store error
+    errorMessage = payload.error OR "Unknown transcoding error"
+
+    DATABASE.update(media_items, {
+      status: 'failed',
+      transcoding_error: errorMessage,
+      updated_at: NOW()
+    }, WHERE id = media.id)
+
+    LOG.error("Transcoding failed", {
+      mediaId: media.id,
+      jobId: jobId,
+      error: errorMessage
+    })
+  END IF
+END FUNCTION
+```
+
+### Pseudocode: Retry Failed Transcoding
+
+```
+FUNCTION retryTranscoding(mediaId, userId):
+  // Step 1: Fetch failed media
+  media = DATABASE.query(
+    SELECT * FROM media_items
+    WHERE id = mediaId
+      AND creator_id = userId
+      AND status = 'failed'
+  )
+
+  IF media IS NULL:
+    THROW NotFoundError("Media not found or not in failed state")
+  END IF
+
+  // Step 2: Check retry limit
+  IF media.transcodingAttempts >= 1:
+    THROW ValidationError("Maximum retry attempts reached")
+  END IF
+
+  // Step 3: Reset status and increment counter
+  DATABASE.update(media_items, {
+    status: 'uploaded',
+    transcoding_attempts: media.transcodingAttempts + 1,
+    transcoding_error: NULL,  // Clear previous error
+    runpod_job_id: NULL,      // Clear old job ID
+    updated_at: NOW()
+  }, WHERE id = mediaId)
+
+  // Step 4: Trigger new transcoding job
+  triggerJob(mediaId, userId)
+
+  LOG.info("Retrying transcoding", {
+    mediaId: mediaId,
+    attempt: media.transcodingAttempts + 1
+  })
+END FUNCTION
+```
+
+---
+
+## API Integration
+
+### Endpoints
+
+| Method | Path | Purpose | Security Policy |
+|--------|------|---------|-----------------|
+| POST | `/api/transcoding/webhook` | Receive RunPod completion webhook | HMAC signature verification |
+| POST | `/api/media/:id/retry-transcoding` | Manually retry failed job | `POLICY_PRESETS.creator()` |
+| GET | `/api/media/:id/transcoding-status` | Get current transcoding status | `POLICY_PRESETS.authenticated()` |
+
+### Webhook Handler
+
+```typescript
+// Webhook endpoint (no auth, uses HMAC verification)
+app.post('/api/transcoding/webhook',
+  async (c) => {
+    const signature = c.req.header('x-runpod-signature');
+    const webhookSecret = c.env.RUNPOD_WEBHOOK_SECRET;
+
+    if (!signature || !webhookSecret) {
+      return c.json({ error: 'Missing signature' }, 401);
+    }
+
+    const payload = await c.req.json() as RunPodWebhookPayload;
+
+    // Verify HMAC signature
+    const computedSignature = createHmac('sha256', webhookSecret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+
+    if (computedSignature !== signature) {
+      return c.json({ error: 'Invalid signature' }, 401);
+    }
+
+    // Process webhook
+    const service = new TranscodingService(c.env);
+    await service.handleWebhook(payload);
+
+    return c.json({ received: true }, 200);
+  }
+);
+```
+
+### Retry Endpoint
+
+```typescript
+// Manual retry endpoint (creator only)
+app.post('/api/media/:id/retry-transcoding',
+  withPolicy(POLICY_PRESETS.creator()),
+  createAuthenticatedHandler({
+    inputSchema: z.object({ id: z.string().uuid() }),
+    handler: async ({ input, context }) => {
+      const service = new TranscodingService(context.env);
+
+      await service.retryTranscoding(input.id, context.user.id);
+
+      return { message: 'Transcoding retry triggered' };
+    }
+  })
+);
+```
+
+### Status Check Endpoint
+
+```typescript
+// Get transcoding status
+app.get('/api/media/:id/transcoding-status',
+  withPolicy(POLICY_PRESETS.authenticated()),
+  createAuthenticatedGetHandler({
+    inputSchema: z.object({ id: z.string().uuid() }),
+    handler: async ({ input, context }) => {
+      const media = await db.query.mediaItems.findFirst({
+        where: eq(mediaItems.id, input.id),
+      });
+
+      if (!media) {
+        throw new NotFoundError('Media not found');
+      }
+
+      return {
+        status: media.status,
+        transcodingAttempts: media.transcodingAttempts,
+        transcodingError: media.transcodingError,
+        runpodJobId: media.runpodJobId,
+      };
+    }
+  })
+);
+```
+
+---
+
+## Available Patterns & Utilities
+
+### Foundation Packages
+
+#### `@codex/database`
+
+**Schema Extensions**:
+```typescript
+import { mediaItems } from '@codex/database/schema';
+
+// Extended fields available after migration
+media.hlsMasterPlaylistKey
+media.hlsPreviewKey
+media.thumbnailKey
+media.waveformKey
+media.transcodingError
+media.transcodingAttempts
+media.runpodJobId
+```
+
+**Query Helpers**:
+- `scopedNotDeleted(mediaItems, userId)`: Creator scoping for media queries
+
+**When to use**: All transcoding service queries use standard Drizzle with media_items table.
+
+---
+
+#### `@codex/service-errors`
+
+**BaseService** (extend this):
+```typescript
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
+
+export class TranscodingService extends BaseService {
+  private runpodApiKey: string;
+  // ... RunPod config
+
+  constructor(config: ServiceConfig & {
+    runpodApiKey: string;
+    runpodEndpointId: string;
+    webhookBaseUrl: string;
+  }) {
+    super(config); // Provides this.db, this.environment
+    this.runpodApiKey = config.runpodApiKey;
+    // ... initialize RunPod config
+  }
+}
+```
+
+**Error Classes**:
+- `NotFoundError`: Media not found
+- `ValidationError`: Max retries reached, invalid state
+- `InternalServiceError`: RunPod API failure
+
+**When to use**: Extend BaseService for transcoding service. Throw specific errors for failures.
+
+---
+
+#### `@codex/validation`
+
+**Transcoding Schemas** (to be created):
+```typescript
+// Webhook payload validation
+export const runpodWebhookSchema = z.object({
+  jobId: z.string(),
+  status: z.enum(['completed', 'failed']),
+  output: z.object({
+    mediaId: z.string().uuid(),
+    type: z.enum(['video', 'audio']),
+    hlsMasterKey: z.string().optional(),
+    hlsPreviewKey: z.string().optional(),
+    thumbnailKey: z.string().optional(),
+    waveformKey: z.string().optional(),
+    durationSeconds: z.number().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+  }).optional(),
+  error: z.string().optional(),
+});
+
+// Retry request validation
+export const retryTranscodingSchema = z.object({
+  id: z.string().uuid(),
+});
+```
+
+**When to use**: Validate webhook payloads and API inputs.
+
+---
+
+### Utility Packages
+
+#### `@codex/cloudflare-clients`
+
+**R2 Service**:
+```typescript
+import { R2Service } from '@codex/cloudflare-clients';
+
+const r2 = new R2Service(env.MEDIA_BUCKET);
+
+// Verify input file exists before triggering job
+const exists = await r2.exists(media.r2Key);
+if (!exists) {
+  throw new ValidationError('Input file not found in R2');
+}
+```
+
+**When to use**: Verify input files exist before triggering transcoding jobs.
+
+---
+
+#### `@codex/worker-utils`
+
+**Worker Setup**:
+```typescript
+import { createWorker } from '@codex/worker-utils';
+
+const app = createWorker({
+  serviceName: 'transcoding-api',
+  enableCors: true,
+  enableSecurityHeaders: true,
+});
+
+// Mount routes
+app.route('/api/transcoding', transcodingRoutes);
+```
+
+**When to use**: Standard worker setup for transcoding API.
+
+---
+
+#### `@codex/observability`
+
+**Logging**:
+```typescript
+const obs = new ObservabilityClient('transcoding-service', env.ENVIRONMENT);
+
+// Log job started
+obs.info('Transcoding job triggered', {
+  mediaId,
+  runpodJobId,
+  type: media.mediaType,
+});
+
+// Log job completed
+obs.info('Transcoding completed', {
+  mediaId,
+  duration: media.durationSeconds,
+});
+
+// Log errors
+obs.error('Transcoding failed', error, {
+  mediaId,
+  runpodJobId,
+});
+```
+
+**When to use**: Log all transcoding events for monitoring and debugging.
+
+---
+
+### External SDKs
+
+#### RunPod API
+
+**Installation**: No SDK needed, use native `fetch`
+
+**Trigger Job**:
+```typescript
+const response = await fetch(
+  `https://api.runpod.ai/v2/${endpointId}/run`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      input: {
+        mediaId,
+        type: 'video',
+        inputKey: 'creator-123/originals/media-456/video.mp4',
+        webhookUrl: 'https://yourapp.com/api/transcoding/webhook',
+      },
+    }),
+  }
+);
+
+const result = await response.json();
+// result.id = RunPod job ID
+```
+
+**When to use**: Trigger transcoding jobs, poll job status (optional).
 
 ---
 
 ## Dependencies
 
-### Required Work Packets
-- **P1-CONTENT-001** (Content Service) - MUST complete first for `media_items` schema
+### Required (Blocking)
 
-### Required External Services
-- **RunPod**: Serverless GPU endpoint with custom Docker image (FFmpeg + audiowaveform)
-- **Cloudflare R2**: Storage for input/output media files
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| Content Service (P1-CONTENT-001) | ✅ Complete | Need `media_items` table and media upload flow |
+| R2 Storage (@codex/cloudflare-clients) | ✅ Available | Input/output file storage |
+| RunPod Account | ⚠️ Required | GPU transcoding service (requires setup) |
 
-### Required Packages (Already Available)
-```typescript
-import { db } from '@codex/database';
-import { R2Service } from '@codex/cloudflare-clients/r2';
-import { ObservabilityClient } from '@codex/observability';
-import { z } from 'zod';
-```
+### Optional (Nice to Have)
 
-### Required Documentation
-- [Media Transcoding PRD](../../features/media-transcoding/pdr-phase-1.md)
-- [Media Transcoding TDD](../../features/media-transcoding/ttd-dphase-1.md)
-- [Database Schema](../../features/shared/database-schema.md) - Lines 130-183 (media_items)
-- [STANDARDS.md](../STANDARDS.md)
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| Access Service (P1-ACCESS-001) | 🚧 Not Started | Will consume HLS keys for streaming. Transcoding can be built first. |
 
----
+### Infrastructure Ready
 
-## System Architecture
+- ✅ Database schema tooling (Drizzle ORM)
+- ✅ Worker deployment pipeline
+- ✅ R2 storage service
+- ✅ Error handling (@codex/service-errors)
+- ✅ Validation (@codex/validation)
 
-```
-┌─────────────────┐       ┌──────────────────┐       ┌─────────────────┐
-│  Content Upload │──────>│ Transcoding      │──────>│  RunPod GPU     │
-│   (Completes)   │ Call  │    Service       │ HTTP  │  Serverless     │
-└─────────────────┘       │ .triggerJob()    │ POST  │                 │
-                          └──────────────────┘       │  - FFmpeg       │
-                                                      │  - HLS transcode│
-                                                      │  - Preview gen  │
-                                                      │  - Waveform gen │
-                                                      └─────────────────┘
-                                                               │
-                                                               │ Webhook callback
-                                                               ▼
-┌─────────────────┐       ┌──────────────────┐       ┌─────────────────┐
-│ Update DB Status│<──────│  Webhook Handler │<──────│  RunPod Result  │
-│ media_items     │       │  POST /api/      │       │  (Success/Fail) │
-└─────────────────┘       │   transcode/     │       └─────────────────┘
-                          │   webhook        │
-                          └──────────────────┘
-```
+### RunPod Setup Required
 
-**Key Flows:**
+**Before Implementation**:
+1. Create RunPod account
+2. Deploy custom Docker image with FFmpeg + audiowaveform
+3. Create serverless endpoint
+4. Configure webhook URL
+5. Get API key and endpoint ID
 
-1. **Upload Complete** → Content service calls `TranscodingService.triggerJob(mediaId)`
-2. **Trigger Job** → Service calls RunPod API with media details → Status: `transcoding`
-3. **RunPod Processing** → GPU transcodes video (HLS + preview + thumbnail)
-4. **Webhook Callback** → RunPod calls `/api/transcoding/webhook` with results
-5. **Update Status** → Webhook updates `media_items` → Status: `ready` or `failed`
-6. **Retry Logic** → On failure, allow manual retry (1 attempt max)
-
-**No Queues**: Direct HTTP calls to RunPod API, webhook callbacks for results.
+**Docker Image Requirements**:
+- FFmpeg with H.264/H.265 encoding
+- HLS segmentation support
+- Thumbnail extraction
+- audiowaveform binary (for audio media)
 
 ---
 
-## Implementation Steps
+## Implementation Checklist
 
-### Step 1: Extend Media Items Schema for Transcoding
+- [ ] **Database Setup**
+  - [ ] Extend `media_items` schema with transcoding fields
+  - [ ] Generate migration with new columns
+  - [ ] Run migration in development
+  - [ ] Verify media status enum includes 'transcoding', 'ready', 'failed'
 
-**File**: `packages/database/src/schema/content.ts` (modify existing)
+- [ ] **RunPod Setup**
+  - [ ] Create RunPod account and API key
+  - [ ] Build custom Docker image (FFmpeg + audiowaveform)
+  - [ ] Deploy serverless endpoint
+  - [ ] Test endpoint with sample video
+  - [ ] Configure webhook URL in RunPod dashboard
 
-Add transcoding-specific fields to `mediaItems` table:
+- [ ] **Service Layer**
+  - [ ] Create `packages/transcoding/src/services/transcoding-service.ts`
+  - [ ] Implement `TranscodingService` extending `BaseService`
+  - [ ] Implement `triggerJob()` method (call RunPod API)
+  - [ ] Implement `handleWebhook()` method (process completion)
+  - [ ] Implement `retryTranscoding()` method (1 attempt max)
+  - [ ] Implement `getTranscodingStatus()` method
+  - [ ] Add unit tests with mocked RunPod API
 
-```typescript
-export const mediaItems = pgTable('media_items', {
-  // ... existing fields from P1-CONTENT-001 ...
+- [ ] **Validation**
+  - [ ] Add `runpodWebhookSchema` to `@codex/validation`
+  - [ ] Add `retryTranscodingSchema`
+  - [ ] Add schema tests (100% coverage)
 
-  // Status already exists in base schema:
-  // status: varchar('status', { length: 50 }).default('uploading').notNull(),
-  // Enum: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed'
+- [ ] **Worker/API**
+  - [ ] Create transcoding routes or add to existing worker
+  - [ ] Implement `POST /api/transcoding/webhook` endpoint
+  - [ ] Implement `POST /api/media/:id/retry-transcoding` endpoint
+  - [ ] Implement `GET /api/media/:id/transcoding-status` endpoint
+  - [ ] Add HMAC signature verification for webhooks
+  - [ ] Add integration tests
 
-  // HLS output keys (populated after transcoding)
-  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }),
-  // e.g., "{creator_id}/hls/{media_id}/master.m3u8"
+- [ ] **Integration**
+  - [ ] Wire transcoding trigger into content upload flow
+  - [ ] Test end-to-end transcoding (video)
+  - [ ] Test end-to-end transcoding (audio)
+  - [ ] Test webhook callback handling
+  - [ ] Test retry logic (max 1 attempt)
+  - [ ] Test failed transcoding error handling
 
-  hlsPreviewKey: varchar('hls_preview_key', { length: 500 }),
-  // e.g., "{creator_id}/hls/{media_id}/preview/preview.m3u8" (30-second preview)
-
-  // Thumbnails (already in base schema, clarify usage)
-  thumbnailKey: varchar('thumbnail_key', { length: 500 }),
-  // e.g., "{creator_id}/thumbnails/media/{media_id}/auto-generated.jpg"
-  // Auto-generated at 10% mark for videos
-
-  // Audio-specific
-  waveformKey: varchar('waveform_key', { length: 500 }),
-  // e.g., "{creator_id}/waveforms/{media_id}/waveform.json"
-  // Only populated for audio media_type
-
-  // Metadata (already in base schema: duration_seconds, width, height)
-  // These are populated after transcoding completes
-
-  // Error tracking
-  transcodingError: text('transcoding_error'),
-  // Error message if status = 'failed'
-
-  transcodingAttempts: integer('transcoding_attempts').default(0).notNull(),
-  // Track retry attempts (max 1 retry)
-
-  runpodJobId: varchar('runpod_job_id', { length: 255 }),
-  // RunPod job ID for tracking/debugging
-
-  // ... existing timestamps ...
-});
-```
-
-**Migration**:
-```bash
-pnpm --filter @codex/database db:gen:drizzle
-pnpm --filter @codex/database db:migrate
-```
-
-**Alignment**: This schema aligns with `design/features/shared/database-schema.md` lines 130-183 (MediaItems table).
+- [ ] **Deployment**
+  - [ ] Configure RUNPOD_API_KEY in Cloudflare
+  - [ ] Configure RUNPOD_ENDPOINT_ID
+  - [ ] Configure RUNPOD_WEBHOOK_SECRET
+  - [ ] Update wrangler.jsonc with environment variables
+  - [ ] Test in preview environment
+  - [ ] Deploy to production
+  - [ ] Monitor transcoding success rate
 
 ---
 
-### Step 2: Create Transcoding Service
-
-**File**: `packages/web/src/lib/server/transcoding/service.ts`
-
-```typescript
-import { db } from '@codex/database';
-import { mediaItems } from '@codex/database/schema';
-import { eq } from 'drizzle-orm';
-import { ObservabilityClient } from '@codex/observability';
-
-export interface RunPodJobInput {
-  mediaId: string;
-  type: 'video' | 'audio';
-  creatorId: string;
-  inputKey: string; // R2 key: "{creator_id}/originals/{media_id}/file.mp4"
-  webhookUrl: string; // Where RunPod should send results
-}
-
-export interface RunPodWebhookPayload {
-  jobId: string;
-  status: 'completed' | 'failed';
-  output?: {
-    mediaId: string;
-    type: 'video' | 'audio';
-
-    // Video/Audio outputs
-    hlsMasterKey?: string; // "{creator_id}/hls/{media_id}/master.m3u8"
-    hlsPreviewKey?: string; // "{creator_id}/hls/{media_id}/preview/preview.m3u8" (30s)
-    thumbnailKey?: string; // "{creator_id}/thumbnails/media/{media_id}/auto-generated.jpg"
-    durationSeconds?: number;
-    width?: number;
-    height?: number;
-
-    // Audio-specific
-    waveformKey?: string; // "{creator_id}/waveforms/{media_id}/waveform.json"
-  };
-  error?: string;
-}
-
-export class TranscodingService {
-  private logger: ObservabilityClient;
-
-  constructor(
-    private runpodApiKey: string,
-    private runpodEndpointId: string,
-    private webhookBaseUrl: string // e.g., "https://yourapp.com"
-  ) {
-    this.logger = new ObservabilityClient('TranscodingService');
-  }
-
-  /**
-   * Trigger transcoding job (called after media upload completes)
-   */
-  async triggerJob(mediaId: string, creatorId: string): Promise<void> {
-    this.logger.info('Triggering transcoding job', { mediaId, creatorId });
-
-    // Fetch media item
-    const media = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, mediaId),
-    });
-
-    if (!media) {
-      throw new Error(`Media item not found: ${mediaId}`);
-    }
-
-    if (media.status !== 'uploaded') {
-      throw new Error(`Media item not in uploaded state: ${media.status}`);
-    }
-
-    // Build RunPod job input
-    const jobInput: RunPodJobInput = {
-      mediaId,
-      type: media.mediaType as 'video' | 'audio',
-      creatorId,
-      inputKey: media.r2Key,
-      webhookUrl: `${this.webhookBaseUrl}/api/transcoding/webhook`,
-    };
-
-    // Update status to transcoding
-    await db
-      .update(mediaItems)
-      .set({
-        status: 'transcoding',
-        transcodingAttempts: media.transcodingAttempts + 1,
-      })
-      .where(eq(mediaItems.id, mediaId));
-
-    // Call RunPod API
-    try {
-      const response = await fetch(
-        `https://api.runpod.ai/v2/${this.runpodEndpointId}/run`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.runpodApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ input: jobInput }),
-        }
-      );
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`RunPod API error: ${response.status} - ${error}`);
-      }
-
-      const result = await response.json();
-
-      // Store RunPod job ID for tracking
-      await db
-        .update(mediaItems)
-        .set({ runpodJobId: result.id })
-        .where(eq(mediaItems.id, mediaId));
-
-      this.logger.info('RunPod job started', { mediaId, runpodJobId: result.id });
-    } catch (error) {
-      this.logger.error('Failed to trigger RunPod job', { mediaId, error });
-
-      // Mark as failed
-      await db
-        .update(mediaItems)
-        .set({
-          status: 'failed',
-          transcodingError: error instanceof Error ? error.message : 'Unknown error',
-        })
-        .where(eq(mediaItems.id, mediaId));
-
-      throw error;
-    }
-  }
-
-  /**
-   * Handle webhook callback from RunPod
-   */
-  async handleWebhook(payload: RunPodWebhookPayload): Promise<void> {
-    this.logger.info('Received RunPod webhook', { jobId: payload.jobId, status: payload.status });
-
-    const { status, output, error } = payload;
-
-    if (!output?.mediaId) {
-      this.logger.error('Webhook missing mediaId', { payload });
-      return;
-    }
-
-    const mediaId = output.mediaId;
-
-    if (status === 'completed' && output) {
-      // Success - update media item with transcoded outputs
-      await db
-        .update(mediaItems)
-        .set({
-          status: 'ready',
-          hlsMasterPlaylistKey: output.hlsMasterKey,
-          hlsPreviewKey: output.hlsPreviewKey,
-          thumbnailKey: output.thumbnailKey,
-          waveformKey: output.waveformKey,
-          durationSeconds: output.durationSeconds,
-          width: output.width,
-          height: output.height,
-          transcodingError: null, // Clear any previous errors
-        })
-        .where(eq(mediaItems.id, mediaId));
-
-      this.logger.info('Media transcoding completed', { mediaId });
-    } else {
-      // Failure - mark as failed
-      const media = await db.query.mediaItems.findFirst({
-        where: eq(mediaItems.id, mediaId),
-      });
-
-      if (!media) {
-        this.logger.error('Media item not found for failed job', { mediaId });
-        return;
-      }
-
-      await db
-        .update(mediaItems)
-        .set({
-          status: 'failed',
-          transcodingError: error || 'Unknown transcoding error',
-        })
-        .where(eq(mediaItems.id, mediaId));
-
-      this.logger.error('Media transcoding failed', { mediaId, error });
-    }
-  }
-
-  /**
-   * Manual retry (creator triggers from UI)
-   * Only allowed if status = 'failed' and attempts < 2
-   */
-  async retryTranscoding(mediaId: string, creatorId: string): Promise<void> {
-    const media = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, mediaId),
-    });
-
-    if (!media || media.creatorId !== creatorId) {
-      throw new Error('Media item not found or unauthorized');
-    }
-
-    if (media.status !== 'failed') {
-      throw new Error('Can only retry failed transcoding jobs');
-    }
-
-    if (media.transcodingAttempts >= 2) {
-      throw new Error('Maximum retry attempts exceeded (2 max)');
-    }
-
-    // Reset to uploaded state and retry
-    await db
-      .update(mediaItems)
-      .set({
-        status: 'uploaded',
-        transcodingError: null,
-        runpodJobId: null,
-      })
-      .where(eq(mediaItems.id, mediaId));
-
-    await this.triggerJob(mediaId, creatorId);
-
-    this.logger.info('Transcoding retry triggered', { mediaId, attempt: media.transcodingAttempts + 1 });
-  }
-
-  /**
-   * Get transcoding status for a media item
-   */
-  async getStatus(mediaId: string, creatorId: string) {
-    const media = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, mediaId),
-    });
-
-    if (!media || media.creatorId !== creatorId) {
-      throw new Error('Media item not found or unauthorized');
-    }
-
-    return {
-      status: media.status,
-      error: media.transcodingError,
-      attempts: media.transcodingAttempts,
-      runpodJobId: media.runpodJobId,
-      outputs: {
-        hlsMasterPlaylistKey: media.hlsMasterPlaylistKey,
-        hlsPreviewKey: media.hlsPreviewKey,
-        thumbnailKey: media.thumbnailKey,
-        waveformKey: media.waveformKey,
-      },
-    };
-  }
-}
-```
-
-**Tests**: `packages/web/src/lib/server/transcoding/service.test.ts`
-
-```typescript
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { TranscodingService } from './service';
-import { db } from '@codex/database';
-import { mediaItems } from '@codex/database/schema';
-import { eq } from 'drizzle-orm';
-
-describe('TranscodingService', () => {
-  let service: TranscodingService;
-  let mockFetch: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    mockFetch = vi.fn();
-    global.fetch = mockFetch;
-
-    service = new TranscodingService(
-      'test-api-key',
-      'test-endpoint-id',
-      'https://test.com'
-    );
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('triggerJob', () => {
-    it('should trigger RunPod job and update status to transcoding', async () => {
-      // Arrange
-      const mediaId = 'test-media-id';
-      const creatorId = 'test-creator-id';
-
-      // Mock database query
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: mediaId,
-        creatorId,
-        mediaType: 'video',
-        status: 'uploaded',
-        r2Key: 'originals/test/video.mp4',
-        transcodingAttempts: 0,
-      } as any);
-
-      // Mock database update
-      const updateSpy = vi.spyOn(db, 'update').mockReturnValue({
-        set: vi.fn().mockReturnThis(),
-        where: vi.fn().mockResolvedValue([]),
-      } as any);
-
-      // Mock RunPod API response
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({ id: 'runpod-job-123', status: 'IN_QUEUE' }),
-      });
-
-      // Act
-      await service.triggerJob(mediaId, creatorId);
-
-      // Assert
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.runpod.ai/v2/test-endpoint-id/run',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'Authorization': 'Bearer test-api-key',
-          }),
-        })
-      );
-
-      expect(updateSpy).toHaveBeenCalled();
-    });
-
-    it('should throw error if media item not in uploaded state', async () => {
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: 'test-media-id',
-        status: 'ready', // Already processed
-      } as any);
-
-      await expect(
-        service.triggerJob('test-media-id', 'creator-id')
-      ).rejects.toThrow('not in uploaded state');
-    });
-
-    it('should mark as failed if RunPod API call fails', async () => {
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: 'test-media-id',
-        creatorId: 'creator-id',
-        mediaType: 'video',
-        status: 'uploaded',
-        r2Key: 'test.mp4',
-        transcodingAttempts: 0,
-      } as any);
-
-      const updateSpy = vi.spyOn(db, 'update').mockReturnValue({
-        set: vi.fn().mockReturnThis(),
-        where: vi.fn().mockResolvedValue([]),
-      } as any);
-
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: async () => 'Internal Server Error',
-      });
-
-      await expect(
-        service.triggerJob('test-media-id', 'creator-id')
-      ).rejects.toThrow('RunPod API error');
-
-      // Should update to failed status
-      expect(updateSpy).toHaveBeenCalled();
-    });
-  });
-
-  describe('handleWebhook', () => {
-    it('should update media item on successful completion', async () => {
-      const payload = {
-        jobId: 'runpod-job-123',
-        status: 'completed' as const,
-        output: {
-          mediaId: 'test-media-id',
-          type: 'video' as const,
-          hlsMasterKey: '{creator_id}/hls/test/master.m3u8',
-          hlsPreviewKey: '{creator_id}/hls/test/preview/preview.m3u8',
-          thumbnailKey: '{creator_id}/thumbnails/test.jpg',
-          durationSeconds: 300,
-          width: 1920,
-          height: 1080,
-        },
-      };
-
-      const updateSpy = vi.spyOn(db, 'update').mockReturnValue({
-        set: vi.fn().mockReturnThis(),
-        where: vi.fn().mockResolvedValue([]),
-      } as any);
-
-      await service.handleWebhook(payload);
-
-      expect(updateSpy).toHaveBeenCalled();
-      const setCall = (updateSpy.mock.results[0].value as any).set.mock.calls[0][0];
-      expect(setCall.status).toBe('ready');
-      expect(setCall.hlsMasterPlaylistKey).toBe(payload.output.hlsMasterKey);
-    });
-
-    it('should mark as failed on error status', async () => {
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: 'test-media-id',
-      } as any);
-
-      const updateSpy = vi.spyOn(db, 'update').mockReturnValue({
-        set: vi.fn().mockReturnThis(),
-        where: vi.fn().mockResolvedValue([]),
-      } as any);
-
-      const payload = {
-        jobId: 'runpod-job-123',
-        status: 'failed' as const,
-        output: { mediaId: 'test-media-id', type: 'video' as const },
-        error: 'FFmpeg encoding failed',
-      };
-
-      await service.handleWebhook(payload);
-
-      const setCall = (updateSpy.mock.results[0].value as any).set.mock.calls[0][0];
-      expect(setCall.status).toBe('failed');
-      expect(setCall.transcodingError).toBe('FFmpeg encoding failed');
-    });
-  });
-
-  describe('retryTranscoding', () => {
-    it('should allow retry for failed transcoding', async () => {
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: 'test-media-id',
-        creatorId: 'creator-id',
-        mediaType: 'video',
-        status: 'failed',
-        r2Key: 'test.mp4',
-        transcodingAttempts: 1,
-      } as any);
-
-      const updateSpy = vi.spyOn(db, 'update').mockReturnValue({
-        set: vi.fn().mockReturnThis(),
-        where: vi.fn().mockResolvedValue([]),
-      } as any);
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({ id: 'runpod-job-456' }),
-      });
-
-      await service.retryTranscoding('test-media-id', 'creator-id');
-
-      expect(updateSpy).toHaveBeenCalled();
-      expect(mockFetch).toHaveBeenCalled();
-    });
-
-    it('should reject retry if max attempts exceeded', async () => {
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: 'test-media-id',
-        creatorId: 'creator-id',
-        status: 'failed',
-        transcodingAttempts: 2, // Already tried twice
-      } as any);
-
-      await expect(
-        service.retryTranscoding('test-media-id', 'creator-id')
-      ).rejects.toThrow('Maximum retry attempts exceeded');
-    });
-
-    it('should reject retry if status is not failed', async () => {
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: 'test-media-id',
-        creatorId: 'creator-id',
-        status: 'ready',
-        transcodingAttempts: 0,
-      } as any);
-
-      await expect(
-        service.retryTranscoding('test-media-id', 'creator-id')
-      ).rejects.toThrow('Can only retry failed transcoding jobs');
-    });
-  });
-
-  describe('getStatus', () => {
-    it('should return transcoding status and outputs', async () => {
-      vi.spyOn(db.query.mediaItems, 'findFirst').mockResolvedValue({
-        id: 'test-media-id',
-        creatorId: 'creator-id',
-        status: 'ready',
-        transcodingError: null,
-        transcodingAttempts: 1,
-        runpodJobId: 'runpod-job-123',
-        hlsMasterPlaylistKey: 'hls/test/master.m3u8',
-        hlsPreviewKey: 'hls/test/preview/preview.m3u8',
-        thumbnailKey: 'thumbnails/test.jpg',
-        waveformKey: null,
-      } as any);
-
-      const result = await service.getStatus('test-media-id', 'creator-id');
-
-      expect(result.status).toBe('ready');
-      expect(result.attempts).toBe(1);
-      expect(result.outputs.hlsMasterPlaylistKey).toBe('hls/test/master.m3u8');
-    });
-  });
-});
-```
-
----
-
-### Step 3: Create API Endpoints
-
-#### Webhook Endpoint
-
-**File**: `apps/web/src/routes/api/transcoding/webhook/+server.ts`
-
-```typescript
-import { json, error } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
-import { TranscodingService } from '$lib/server/transcoding/service';
-import type { RunPodWebhookPayload } from '$lib/server/transcoding/service';
-import { ObservabilityClient } from '@codex/observability';
-
-const logger = new ObservabilityClient('TranscodingWebhook');
-
-export const POST: RequestHandler = async ({ request, platform }) => {
-  try {
-    const payload: RunPodWebhookPayload = await request.json();
-
-    logger.info('Received transcoding webhook', { jobId: payload.jobId, status: payload.status });
-
-    // Verify webhook signature (if RunPod supports it)
-    // const signature = request.headers.get('x-runpod-signature');
-    // if (!verifySignature(signature, payload)) {
-    //   logger.error('Invalid webhook signature');
-    //   throw error(401, 'Invalid signature');
-    // }
-
-    const service = new TranscodingService(
-      platform?.env.RUNPOD_API_KEY || process.env.RUNPOD_API_KEY!,
-      platform?.env.RUNPOD_ENDPOINT_ID || process.env.RUNPOD_ENDPOINT_ID!,
-      platform?.env.PUBLIC_APP_URL || process.env.PUBLIC_APP_URL!
-    );
-
-    await service.handleWebhook(payload);
-
-    logger.info('Webhook processed successfully', { jobId: payload.jobId });
-
-    return json({ success: true });
-  } catch (err) {
-    logger.error('Webhook processing error', { error: err });
-    throw error(500, 'Webhook processing failed');
-  }
-};
-```
-
-#### Retry Endpoint
-
-**File**: `apps/web/src/routes/api/transcoding/retry/+server.ts`
-
-```typescript
-import { json, error } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
-import { TranscodingService } from '$lib/server/transcoding/service';
-import { getUserFromSession } from '$lib/server/auth/session';
-import { ObservabilityClient } from '@codex/observability';
-import { z } from 'zod';
-
-const logger = new ObservabilityClient('TranscodingRetry');
-
-const retrySchema = z.object({
-  mediaId: z.string().uuid(),
-});
-
-export const POST: RequestHandler = async ({ request, platform, cookies }) => {
-  try {
-    // Authenticate user
-    const user = await getUserFromSession(cookies);
-    if (!user) {
-      throw error(401, 'Unauthorized');
-    }
-
-    // Validate input
-    const body = await request.json();
-    const { mediaId } = retrySchema.parse(body);
-
-    logger.info('Retry transcoding requested', { mediaId, userId: user.id });
-
-    const service = new TranscodingService(
-      platform?.env.RUNPOD_API_KEY || process.env.RUNPOD_API_KEY!,
-      platform?.env.RUNPOD_ENDPOINT_ID || process.env.RUNPOD_ENDPOINT_ID!,
-      platform?.env.PUBLIC_APP_URL || process.env.PUBLIC_APP_URL!
-    );
-
-    await service.retryTranscoding(mediaId, user.id);
-
-    logger.info('Retry successful', { mediaId });
-
-    return json({ success: true, message: 'Transcoding retry triggered' });
-  } catch (err) {
-    logger.error('Retry failed', { error: err });
-
-    if (err instanceof z.ZodError) {
-      throw error(400, 'Invalid request');
-    }
-
-    if (err instanceof Error && err.message.includes('unauthorized')) {
-      throw error(403, 'Access denied');
-    }
-
-    if (err instanceof Error && err.message.includes('Maximum retry attempts')) {
-      throw error(400, err.message);
-    }
-
-    throw error(500, 'Failed to retry transcoding');
-  }
-};
-```
-
-#### Status Endpoint
-
-**File**: `apps/web/src/routes/api/transcoding/status/[mediaId]/+server.ts`
-
-```typescript
-import { json, error } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
-import { TranscodingService } from '$lib/server/transcoding/service';
-import { getUserFromSession } from '$lib/server/auth/session';
-import { ObservabilityClient } from '@codex/observability';
-
-const logger = new ObservabilityClient('TranscodingStatus');
-
-export const GET: RequestHandler = async ({ params, platform, cookies }) => {
-  try {
-    // Authenticate user
-    const user = await getUserFromSession(cookies);
-    if (!user) {
-      throw error(401, 'Unauthorized');
-    }
-
-    const mediaId = params.mediaId;
-    if (!mediaId) {
-      throw error(400, 'Missing mediaId parameter');
-    }
-
-    const service = new TranscodingService(
-      platform?.env.RUNPOD_API_KEY || process.env.RUNPOD_API_KEY!,
-      platform?.env.RUNPOD_ENDPOINT_ID || process.env.RUNPOD_ENDPOINT_ID!,
-      platform?.env.PUBLIC_APP_URL || process.env.PUBLIC_APP_URL!
-    );
-
-    const status = await service.getStatus(mediaId, user.id);
-
-    return json(status);
-  } catch (err) {
-    logger.error('Status check failed', { error: err });
-
-    if (err instanceof Error && err.message.includes('unauthorized')) {
-      throw error(403, 'Access denied');
-    }
-
-    throw error(500, 'Failed to get transcoding status');
-  }
-};
-```
-
----
-
-### Step 4: Integration with Content Service
-
-**File**: `packages/web/src/lib/server/content/service.ts` (modify existing from P1-CONTENT-001)
-
-After successful upload, trigger transcoding:
-
-```typescript
-import { TranscodingService } from '../transcoding/service';
-
-export class ContentService {
-  // ... existing methods ...
-
-  async completeUpload(
-    mediaId: string,
-    creatorId: string,
-    platform: App.Platform
-  ): Promise<void> {
-    // Mark upload as complete
-    await db
-      .update(mediaItems)
-      .set({ status: 'uploaded' })
-      .where(eq(mediaItems.id, mediaId));
-
-    // Trigger transcoding
-    const transcodingService = new TranscodingService(
-      platform.env.RUNPOD_API_KEY,
-      platform.env.RUNPOD_ENDPOINT_ID,
-      platform.env.PUBLIC_APP_URL
-    );
-
-    try {
-      await transcodingService.triggerJob(mediaId, creatorId);
-    } catch (error) {
-      // Log error but don't fail upload
-      // User can manually retry from UI
-      console.error('Failed to trigger transcoding:', error);
-    }
-  }
-}
-```
-
----
-
-### Step 5: RunPod Docker Image (FFmpeg + Preview Generation)
-
-**File**: `infrastructure/runpod/Dockerfile`
-
-```dockerfile
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
-
-# Install FFmpeg with NVIDIA hardware acceleration
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    python3 \
-    python3-pip \
-    curl \
-    audiowaveform \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies for S3/R2 uploads
-RUN pip3 install boto3 requests
-
-# Copy transcoding script
-COPY transcode.py /app/transcode.py
-WORKDIR /app
-
-CMD ["python3", "transcode.py"]
-```
-
-**File**: `infrastructure/runpod/transcode.py`
-
-```python
-import os
-import sys
-import json
-import subprocess
-import boto3
-import requests
-from pathlib import Path
-
-def transcode_video(media_id, creator_id, input_key, webhook_url):
-    """
-    Transcode video to HLS with multiple quality variants + 30-second preview
-    """
-
-    # Download input from R2
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=os.environ['R2_ENDPOINT'],
-        aws_access_key_id=os.environ['R2_ACCESS_KEY'],
-        aws_secret_access_key=os.environ['R2_SECRET_KEY']
-    )
-
-    bucket_name = os.environ['R2_BUCKET'] # 'codex-media'
-    input_file = f"/tmp/{media_id}_input.mp4"
-    s3_client.download_file(bucket_name, input_key, input_file)
-
-    # Create output directory
-    output_dir = Path(f"/tmp/{media_id}")
-    output_dir.mkdir(exist_ok=True)
-
-    # --- Full HLS Transcoding ---
-
-    # Generate HLS master playlist with 4 quality variants
-    variants = [
-        {'name': '1080p', 'scale': '1920:1080', 'bitrate_v': '5000k', 'bitrate_a': '128k'},
-        {'name': '720p', 'scale': '1280:720', 'bitrate_v': '2500k', 'bitrate_a': '128k'},
-        {'name': '480p', 'scale': '854:480', 'bitrate_v': '1000k', 'bitrate_a': '128k'},
-        {'name': '360p', 'scale': '640:360', 'bitrate_v': '500k', 'bitrate_a': '64k'},
-    ]
-
-    for variant in variants:
-        ffmpeg_cmd = [
-            'ffmpeg', '-i', input_file,
-            '-vf', f'scale={variant["scale"]}',
-            '-c:v', 'h264_nvenc', '-b:v', variant['bitrate_v'],
-            '-c:a', 'aac', '-b:a', variant['bitrate_a'],
-            '-f', 'hls', '-hls_time', '6',
-            '-hls_playlist_type', 'vod',
-            '-hls_segment_filename', f'{output_dir}/{variant["name"]}_%03d.ts',
-            f'{output_dir}/{variant["name"]}.m3u8'
-        ]
-        subprocess.run(ffmpeg_cmd, check=True)
-
-    # Create master playlist
-    master_playlist = """#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080
-1080p.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720
-720p.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480
-480p.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=640x360
-360p.m3u8
-"""
-
-    with open(f'{output_dir}/master.m3u8', 'w') as f:
-        f.write(master_playlist)
-
-    # --- 30-Second Preview HLS ---
-
-    preview_dir = Path(f"/tmp/{media_id}/preview")
-    preview_dir.mkdir(exist_ok=True)
-
-    preview_cmd = [
-        'ffmpeg', '-i', input_file, '-t', '30',  # First 30 seconds
-        '-vf', 'scale=1280:720', '-c:v', 'h264_nvenc', '-b:v', '2500k',
-        '-c:a', 'aac', '-b:a', '128k', '-f', 'hls', '-hls_time', '6',
-        '-hls_playlist_type', 'vod', '-hls_segment_filename',
-        f'{preview_dir}/preview_%03d.ts', f'{preview_dir}/preview.m3u8'
-    ]
-    subprocess.run(preview_cmd, check=True)
-
-    # --- Extract Thumbnail (10% mark) ---
-
-    # Get video duration
-    probe_cmd = [
-        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1', input_file
-    ]
-    duration = float(subprocess.check_output(probe_cmd).decode().strip())
-    thumbnail_time = duration * 0.1  # 10% mark
-
-    thumbnail_path = f'/tmp/{media_id}_thumbnail.jpg'
-    thumbnail_cmd = [
-        'ffmpeg', '-ss', str(thumbnail_time), '-i', input_file,
-        '-vframes', '1', '-vf', 'scale=1280:720', thumbnail_path
-    ]
-    subprocess.run(thumbnail_cmd, check=True)
-
-    # --- Upload to R2 ---
-
-    # Upload HLS files
-    for file in output_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(output_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/{relative_path}'
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload preview files
-    for file in preview_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(preview_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/preview/{relative_path}'
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload thumbnail
-    thumbnail_key = f'{creator_id}/thumbnails/media/{media_id}/auto-generated.jpg'
-    s3_client.upload_file(thumbnail_path, bucket_name, thumbnail_key)
-
-    # --- Get video metadata ---
-
-    probe_cmd = [
-        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-        '-show_entries', 'stream=width,height', '-of', 'json', input_file
-    ]
-    metadata = json.loads(subprocess.check_output(probe_cmd).decode())
-    width = metadata['streams'][0]['width']
-    height = metadata['streams'][0]['height']
-
-    # --- Send webhook callback ---
-
-    result = {
-        'jobId': os.environ.get('RUNPOD_JOB_ID'),
-        'status': 'completed',
-        'output': {
-            'mediaId': media_id,
-            'type': 'video',
-            'hlsMasterKey': f'{creator_id}/hls/{media_id}/master.m3u8',
-            'hlsPreviewKey': f'{creator_id}/hls/{media_id}/preview/preview.m3u8',
-            'thumbnailKey': thumbnail_key,
-            'durationSeconds': int(duration),
-            'width': width,
-            'height': height,
-        }
-    }
-
-    # Send to webhook
-    requests.post(webhook_url, json=result)
-
-    return result
-
-def transcode_audio(media_id, creator_id, input_key, webhook_url):
-    """
-    Transcode audio to HLS + generate waveform
-    """
-
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=os.environ['R2_ENDPOINT'],
-        aws_access_key_id=os.environ['R2_ACCESS_KEY'],
-        aws_secret_access_key=os.environ['R2_SECRET_KEY']
-    )
-
-    bucket_name = os.environ['R2_BUCKET']
-    input_file = f"/tmp/{media_id}_input.mp3"
-    s3_client.download_file(bucket_name, input_key, input_file)
-
-    output_dir = Path(f"/tmp/{media_id}")
-    output_dir.mkdir(exist_ok=True)
-
-    # --- HLS Audio Transcoding (2 quality variants) ---
-
-    variants = [
-        {'name': '128k', 'bitrate': '128k'},
-        {'name': '64k', 'bitrate': '64k'},
-    ]
-
-    for variant in variants:
-        ffmpeg_cmd = [
-            'ffmpeg', '-i', input_file,
-            '-c:a', 'aac', '-b:a', variant['bitrate'],
-            '-f', 'hls', '-hls_time', '6',
-            '-hls_playlist_type', 'vod',
-            '-hls_segment_filename', f'{output_dir}/{variant["name"]}_%03d.ts',
-            f'{output_dir}/{variant["name"]}.m3u8'
-        ]
-        subprocess.run(ffmpeg_cmd, check=True)
-
-    # Create master playlist
-    master_playlist = """#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=128000
-128k.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=64000
-64k.m3u8
-"""
-
-    with open(f'{output_dir}/master.m3u8', 'w') as f:
-        f.write(master_playlist)
-
-    # --- 30-Second Preview ---
-
-    preview_dir = Path(f"/tmp/{media_id}/preview")
-    preview_dir.mkdir(exist_ok=True)
-
-    preview_cmd = [
-        'ffmpeg', '-i', input_file, '-t', '30',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-f', 'hls', '-hls_time', '6',
-        '-hls_playlist_type', 'vod',
-        '-hls_segment_filename', f'{preview_dir}/preview_%03d.ts',
-        f'{preview_dir}/preview.m3u8'
-    ]
-    subprocess.run(preview_cmd, check=True)
-
-    # --- Generate Waveform JSON ---
-
-    waveform_file = f'/tmp/{media_id}_waveform.json'
-    waveform_cmd = [
-        'audiowaveform', '-i', input_file,
-        '-o', waveform_file, '--output-format', 'json',
-        '--pixels-per-second', '20', '--bits', '8'
-    ]
-    subprocess.run(waveform_cmd, check=True)
-
-    # --- Get audio duration ---
-
-    probe_cmd = [
-        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1', input_file
-    ]
-    duration = float(subprocess.check_output(probe_cmd).decode().strip())
-
-    # --- Upload to R2 ---
-
-    # Upload HLS files
-    for file in output_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(output_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/{relative_path}'
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload preview
-    for file in preview_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(preview_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/preview/{relative_path}'
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload waveform
-    waveform_key = f'{creator_id}/waveforms/{media_id}/waveform.json'
-    s3_client.upload_file(waveform_file, bucket_name, waveform_key)
-
-    # --- Send webhook callback ---
-
-    result = {
-        'jobId': os.environ.get('RUNPOD_JOB_ID'),
-        'status': 'completed',
-        'output': {
-            'mediaId': media_id,
-            'type': 'audio',
-            'hlsMasterKey': f'{creator_id}/hls/{media_id}/master.m3u8',
-            'hlsPreviewKey': f'{creator_id}/hls/{media_id}/preview/preview.m3u8',
-            'waveformKey': waveform_key,
-            'durationSeconds': int(duration),
-        }
-    }
-
-    requests.post(webhook_url, json=result)
-
-    return result
-
-if __name__ == '__main__':
-    job_input = json.loads(sys.stdin.read())
-
-    try:
-        if job_input['type'] == 'video':
-            transcode_video(
-                job_input['mediaId'],
-                job_input['creatorId'],
-                job_input['inputKey'],
-                job_input['webhookUrl']
-            )
-        else:
-            transcode_audio(
-                job_input['mediaId'],
-                job_input['creatorId'],
-                job_input['inputKey'],
-                job_input['webhookUrl']
-            )
-    except Exception as e:
-        # Send failure webhook
-        result = {
-            'jobId': os.environ.get('RUNPOD_JOB_ID'),
-            'status': 'failed',
-            'output': {
-                'mediaId': job_input.get('mediaId'),
-                'type': job_input.get('type'),
-            },
-            'error': str(e),
-        }
-        requests.post(job_input['webhookUrl'], json=result)
-        raise
-```
-
-**Deployment**:
-```bash
-# Build and push Docker image
-cd infrastructure/runpod
-docker build -t codex-transcoding:latest .
-docker tag codex-transcoding:latest your-registry/codex-transcoding:latest
-docker push your-registry/codex-transcoding:latest
-
-# Create RunPod serverless endpoint
-# 1. Go to RunPod dashboard
-# 2. Create new serverless endpoint
-# 3. Use Docker image: your-registry/codex-transcoding:latest
-# 4. Set environment variables:
-#    - R2_ENDPOINT
-#    - R2_ACCESS_KEY
-#    - R2_SECRET_KEY
-#    - R2_BUCKET
-# 5. Copy endpoint ID for use in RUNPOD_ENDPOINT_ID secret
-```
-
----
-
-### Step 6: Local Development Setup
-
-For local development, we run the actual transcoding Docker container with FFmpeg, connecting to your local R2 buckets. This ensures you're testing the real transcoding code before deploying to RunPod.
-
-#### Local Transcoding Service
-
-**File**: `infrastructure/local-dev/transcoding-service/server.py`
-
-```python
-"""
-HTTP server wrapper for local development transcoding.
-Mimics RunPod's serverless endpoint behavior but runs as a persistent service.
-Uses the same transcode.py script that will run on RunPod.
-"""
-
-from flask import Flask, request, jsonify
-from threading import Thread
-import json
-import sys
-import os
-import subprocess
-
-app = Flask(__name__)
-
-def process_job_async(job_input):
-    """
-    Process transcoding job asynchronously (same as RunPod).
-    Calls transcode.py with the job input.
-    """
-    try:
-        # Set job ID for logging
-        os.environ['RUNPOD_JOB_ID'] = f'local-job-{os.getpid()}'
-
-        # Call transcode.py (same script used on RunPod)
-        result = subprocess.run(
-            ['python3', '/app/transcode.py'],
-            input=json.dumps(job_input),
-            capture_output=True,
-            text=True,
-            check=True
-        )
-
-        print(f'[Local Transcoding] Job completed successfully')
-        print(f'[Local Transcoding] Output: {result.stdout}')
-
-    except subprocess.CalledProcessError as e:
-        print(f'[Local Transcoding] Job failed: {e.stderr}', file=sys.stderr)
-    except Exception as e:
-        print(f'[Local Transcoding] Unexpected error: {e}', file=sys.stderr)
-
-@app.route('/v2/<endpoint_id>/run', methods=['POST'])
-def run_job(endpoint_id):
-    """
-    Endpoint that mimics RunPod's serverless API.
-    Accepts job, returns job ID immediately, processes asynchronously.
-    """
-    data = request.get_json()
-    job_input = data.get('input', {})
-
-    job_id = f'local-{os.getpid()}-{int(os.times()[4] * 1000)}'
-
-    print(f'[Local Transcoding] Received job: {job_id}')
-    print(f'[Local Transcoding] Input: {json.dumps(job_input, indent=2)}')
-
-    # Process job asynchronously (like RunPod)
-    thread = Thread(target=process_job_async, args=(job_input,))
-    thread.start()
-
-    # Return immediately (like RunPod)
-    return jsonify({
-        'id': job_id,
-        'status': 'IN_QUEUE'
-    })
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({'status': 'ok'})
-
-if __name__ == '__main__':
-    # Run on port 3001 to avoid conflicts
-    app.run(host='0.0.0.0', port=3001, debug=True)
-```
-
-**File**: `infrastructure/local-dev/transcoding-service/Dockerfile`
-
-```dockerfile
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
-
-# Install FFmpeg with software encoding (no GPU in local dev)
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    python3 \
-    python3-pip \
-    curl \
-    audiowaveform \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
-RUN pip3 install boto3 requests flask
-
-WORKDIR /app
-
-# Copy transcoding script (same one used on RunPod)
-COPY ../../runpod/transcode.py /app/transcode.py
-
-# Copy local dev server wrapper
-COPY server.py /app/server.py
-
-EXPOSE 3001
-
-CMD ["python3", "server.py"]
-```
-
-**File**: `infrastructure/local-dev/transcoding-service/transcode-local.py` (Modified version for local dev)
-
-```python
-"""
-Same as infrastructure/runpod/transcode.py but optimized for local development:
-- Uses software encoding instead of GPU (h264 instead of h264_nvenc)
-- Logs more verbosely for debugging
-- Shorter preview (10 seconds instead of 30)
-"""
-
-import os
-import sys
-import json
-import subprocess
-import boto3
-import requests
-from pathlib import Path
-
-def transcode_video(media_id, creator_id, input_key, webhook_url):
-    """
-    Transcode video to HLS - LOCAL DEV VERSION
-    Uses software encoding (no GPU required)
-    """
-
-    print(f'[Transcode] Starting video transcoding for {media_id}')
-
-    # Download input from R2
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=os.environ['R2_ENDPOINT'],
-        aws_access_key_id=os.environ['R2_ACCESS_KEY'],
-        aws_secret_access_key=os.environ['R2_SECRET_KEY']
-    )
-
-    bucket_name = os.environ['R2_BUCKET']
-    input_file = f"/tmp/{media_id}_input.mp4"
-
-    print(f'[Transcode] Downloading from R2: {input_key}')
-    s3_client.download_file(bucket_name, input_key, input_file)
-    print(f'[Transcode] Download complete')
-
-    # Create output directory
-    output_dir = Path(f"/tmp/{media_id}")
-    output_dir.mkdir(exist_ok=True)
-
-    # --- Full HLS Transcoding (2 qualities for local dev: 720p, 480p) ---
-
-    print(f'[Transcode] Generating HLS variants...')
-    variants = [
-        {'name': '720p', 'scale': '1280:720', 'bitrate_v': '2500k', 'bitrate_a': '128k'},
-        {'name': '480p', 'scale': '854:480', 'bitrate_v': '1000k', 'bitrate_a': '128k'},
-    ]
-
-    for variant in variants:
-        print(f'[Transcode] Creating {variant["name"]} variant...')
-        ffmpeg_cmd = [
-            'ffmpeg', '-i', input_file,
-            '-vf', f'scale={variant["scale"]}',
-            '-c:v', 'libx264', '-preset', 'fast',  # Software encoding, faster preset
-            '-b:v', variant['bitrate_v'],
-            '-c:a', 'aac', '-b:a', variant['bitrate_a'],
-            '-f', 'hls', '-hls_time', '6',
-            '-hls_playlist_type', 'vod',
-            '-hls_segment_filename', f'{output_dir}/{variant["name"]}_%03d.ts',
-            f'{output_dir}/{variant["name"]}.m3u8'
-        ]
-        subprocess.run(ffmpeg_cmd, check=True)
-
-    # Create master playlist
-    master_playlist = """#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720
-720p.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480
-480p.m3u8
-"""
-
-    with open(f'{output_dir}/master.m3u8', 'w') as f:
-        f.write(master_playlist)
-
-    # --- 10-Second Preview HLS (shorter for local dev) ---
-
-    print(f'[Transcode] Creating preview...')
-    preview_dir = Path(f"/tmp/{media_id}/preview")
-    preview_dir.mkdir(exist_ok=True)
-
-    preview_cmd = [
-        'ffmpeg', '-i', input_file, '-t', '10',  # 10 seconds for local dev
-        '-vf', 'scale=1280:720', '-c:v', 'libx264', '-preset', 'fast',
-        '-b:v', '2500k',
-        '-c:a', 'aac', '-b:a', '128k', '-f', 'hls', '-hls_time', '6',
-        '-hls_playlist_type', 'vod', '-hls_segment_filename',
-        f'{preview_dir}/preview_%03d.ts', f'{preview_dir}/preview.m3u8'
-    ]
-    subprocess.run(preview_cmd, check=True)
-
-    # --- Extract Thumbnail (10% mark) ---
-
-    print(f'[Transcode] Extracting thumbnail...')
-
-    # Get video duration
-    probe_cmd = [
-        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1', input_file
-    ]
-    duration = float(subprocess.check_output(probe_cmd).decode().strip())
-    thumbnail_time = duration * 0.1  # 10% mark
-
-    thumbnail_path = f'/tmp/{media_id}_thumbnail.jpg'
-    thumbnail_cmd = [
-        'ffmpeg', '-ss', str(thumbnail_time), '-i', input_file,
-        '-vframes', '1', '-vf', 'scale=1280:720', thumbnail_path
-    ]
-    subprocess.run(thumbnail_cmd, check=True)
-
-    # --- Upload to R2 ---
-
-    print(f'[Transcode] Uploading results to R2...')
-
-    # Upload HLS files
-    for file in output_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(output_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/{relative_path}'
-            print(f'[Transcode] Uploading: {s3_key}')
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload preview files
-    for file in preview_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(preview_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/preview/{relative_path}'
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload thumbnail
-    thumbnail_key = f'{creator_id}/thumbnails/media/{media_id}/auto-generated.jpg'
-    s3_client.upload_file(thumbnail_path, bucket_name, thumbnail_key)
-
-    # --- Get video metadata ---
-
-    probe_cmd = [
-        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-        '-show_entries', 'stream=width,height', '-of', 'json', input_file
-    ]
-    metadata = json.loads(subprocess.check_output(probe_cmd).decode())
-    width = metadata['streams'][0]['width']
-    height = metadata['streams'][0]['height']
-
-    # --- Send webhook callback ---
-
-    print(f'[Transcode] Sending webhook to: {webhook_url}')
-
-    result = {
-        'jobId': os.environ.get('RUNPOD_JOB_ID'),
-        'status': 'completed',
-        'output': {
-            'mediaId': media_id,
-            'type': 'video',
-            'hlsMasterKey': f'{creator_id}/hls/{media_id}/master.m3u8',
-            'hlsPreviewKey': f'{creator_id}/hls/{media_id}/preview/preview.m3u8',
-            'thumbnailKey': thumbnail_key,
-            'durationSeconds': int(duration),
-            'width': width,
-            'height': height,
-        }
-    }
-
-    # Send to webhook
-    response = requests.post(webhook_url, json=result)
-    print(f'[Transcode] Webhook response: {response.status_code}')
-
-    return result
-
-def transcode_audio(media_id, creator_id, input_key, webhook_url):
-    """
-    Transcode audio to HLS + generate waveform - LOCAL DEV VERSION
-    """
-
-    print(f'[Transcode] Starting audio transcoding for {media_id}')
-
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=os.environ['R2_ENDPOINT'],
-        aws_access_key_id=os.environ['R2_ACCESS_KEY'],
-        aws_secret_access_key=os.environ['R2_SECRET_KEY']
-    )
-
-    bucket_name = os.environ['R2_BUCKET']
-    input_file = f"/tmp/{media_id}_input.mp3"
-
-    print(f'[Transcode] Downloading from R2: {input_key}')
-    s3_client.download_file(bucket_name, input_key, input_file)
-
-    output_dir = Path(f"/tmp/{media_id}")
-    output_dir.mkdir(exist_ok=True)
-
-    # --- HLS Audio Transcoding (1 quality for local dev) ---
-
-    print(f'[Transcode] Creating HLS audio...')
-
-    ffmpeg_cmd = [
-        'ffmpeg', '-i', input_file,
-        '-c:a', 'aac', '-b:a', '128k',
-        '-f', 'hls', '-hls_time', '6',
-        '-hls_playlist_type', 'vod',
-        '-hls_segment_filename', f'{output_dir}/128k_%03d.ts',
-        f'{output_dir}/128k.m3u8'
-    ]
-    subprocess.run(ffmpeg_cmd, check=True)
-
-    # Create master playlist
-    with open(f'{output_dir}/master.m3u8', 'w') as f:
-        f.write("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n128k.m3u8\n")
-
-    # --- 10-Second Preview ---
-
-    print(f'[Transcode] Creating preview...')
-    preview_dir = Path(f"/tmp/{media_id}/preview")
-    preview_dir.mkdir(exist_ok=True)
-
-    preview_cmd = [
-        'ffmpeg', '-i', input_file, '-t', '10',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-f', 'hls', '-hls_time', '6',
-        '-hls_playlist_type', 'vod',
-        '-hls_segment_filename', f'{preview_dir}/preview_%03d.ts',
-        f'{preview_dir}/preview.m3u8'
-    ]
-    subprocess.run(preview_cmd, check=True)
-
-    # --- Generate Waveform JSON ---
-
-    print(f'[Transcode] Generating waveform...')
-    waveform_file = f'/tmp/{media_id}_waveform.json'
-    waveform_cmd = [
-        'audiowaveform', '-i', input_file,
-        '-o', waveform_file, '--output-format', 'json',
-        '--pixels-per-second', '20', '--bits', '8'
-    ]
-    subprocess.run(waveform_cmd, check=True)
-
-    # --- Get audio duration ---
-
-    probe_cmd = [
-        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1', input_file
-    ]
-    duration = float(subprocess.check_output(probe_cmd).decode().strip())
-
-    # --- Upload to R2 ---
-
-    print(f'[Transcode] Uploading results to R2...')
-
-    # Upload HLS files
-    for file in output_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(output_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/{relative_path}'
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload preview
-    for file in preview_dir.rglob('*'):
-        if file.is_file():
-            relative_path = file.relative_to(preview_dir)
-            s3_key = f'{creator_id}/hls/{media_id}/preview/{relative_path}'
-            s3_client.upload_file(str(file), bucket_name, s3_key)
-
-    # Upload waveform
-    waveform_key = f'{creator_id}/waveforms/{media_id}/waveform.json'
-    s3_client.upload_file(waveform_file, bucket_name, waveform_key)
-
-    # --- Send webhook callback ---
-
-    print(f'[Transcode] Sending webhook to: {webhook_url}')
-
-    result = {
-        'jobId': os.environ.get('RUNPOD_JOB_ID'),
-        'status': 'completed',
-        'output': {
-            'mediaId': media_id,
-            'type': 'audio',
-            'hlsMasterKey': f'{creator_id}/hls/{media_id}/master.m3u8',
-            'hlsPreviewKey': f'{creator_id}/hls/{media_id}/preview/preview.m3u8',
-            'waveformKey': waveform_key,
-            'durationSeconds': int(duration),
-        }
-    }
-
-    response = requests.post(webhook_url, json=result)
-    print(f'[Transcode] Webhook response: {response.status_code}')
-
-    return result
-
-if __name__ == '__main__':
-    job_input = json.loads(sys.stdin.read())
-
-    try:
-        if job_input['type'] == 'video':
-            transcode_video(
-                job_input['mediaId'],
-                job_input['creatorId'],
-                job_input['inputKey'],
-                job_input['webhookUrl']
-            )
-        else:
-            transcode_audio(
-                job_input['mediaId'],
-                job_input['creatorId'],
-                job_input['inputKey'],
-                job_input['webhookUrl']
-            )
-    except Exception as e:
-        # Send failure webhook
-        result = {
-            'jobId': os.environ.get('RUNPOD_JOB_ID'),
-            'status': 'failed',
-            'output': {
-                'mediaId': job_input.get('mediaId'),
-                'type': job_input.get('type'),
-            },
-            'error': str(e),
-        }
-        requests.post(job_input['webhookUrl'], json=result)
-        raise
-```
-
-#### Docker Compose Integration
-
-**File**: `infrastructure/neon/docker-compose.dev.local.yml` (modify existing)
-
-```yaml
-services:
-  postgres:
-    # ... existing postgres config ...
-
-  neon-proxy:
-    # ... existing neon-proxy config ...
-
-  transcoding-service:
-    build: ../local-dev/transcoding-service
-    ports:
-      - '3001:3001'
-    environment:
-      # R2 credentials (same as your workers)
-      - R2_ENDPOINT=${R2_ENDPOINT}
-      - R2_ACCESS_KEY=${R2_ACCESS_KEY}
-      - R2_SECRET_KEY=${R2_SECRET_KEY}
-      - R2_BUCKET=codex-media  # Your R2 bucket name
-    volumes:
-      # Mount transcode script for easy editing during dev
-      - ../../infrastructure/runpod/transcode.py:/app/transcode-prod.py:ro
-      - ../local-dev/transcoding-service/transcode-local.py:/app/transcode.py:ro
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:3001/health']
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-volumes:
-  db_data:
-```
-
-#### Environment Variables for Local Dev
-
-**File**: `.env.dev` (add/update these)
-
-```bash
-# R2 Storage (shared with transcoding service)
-R2_ENDPOINT=https://<your-account-id>.r2.cloudflarestorage.com
-R2_ACCESS_KEY=<your-r2-access-key>
-R2_SECRET_KEY=<your-r2-secret-key>
-
-# Transcoding (Local Development)
-RUNPOD_API_KEY=not-used-locally  # Not used by local service
-RUNPOD_ENDPOINT_ID=local-endpoint  # Not used by local service
-PUBLIC_APP_URL=http://host.docker.internal:5173  # Your local dev server (accessible from Docker)
-RUNPOD_API_BASE_URL=http://transcoding-service:3001  # Points to local service
-```
-
-#### Update TranscodingService for Local Dev
-
-**File**: `packages/web/src/lib/server/transcoding/service.ts` (modify constructor)
-
-```typescript
-export class TranscodingService {
-  private logger: ObservabilityClient;
-  private runpodBaseUrl: string;
-
-  constructor(
-    private runpodApiKey: string,
-    private runpodEndpointId: string,
-    private webhookBaseUrl: string,
-    runpodBaseUrl?: string  // Optional override for local dev
-  ) {
-    this.logger = new ObservabilityClient('TranscodingService');
-    // Allow override for local development
-    this.runpodBaseUrl = runpodBaseUrl || 'https://api.runpod.ai';
-  }
-
-  async triggerJob(mediaId: string, creatorId: string): Promise<void> {
-    // ... existing code ...
-
-    // Call RunPod API (or local service in dev)
-    try {
-      const response = await fetch(
-        `${this.runpodBaseUrl}/v2/${this.runpodEndpointId}/run`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.runpodApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ input: jobInput }),
-        }
-      );
-
-      // ... rest of existing code ...
-    }
-  }
-}
-```
-
-#### Local Development Workflow
-
-```bash
-# 1. Setup R2 credentials in .env.dev
-cp .env.example .env.dev
-# Edit .env.dev with your R2 credentials
-
-# 2. Start local services (database, transcoding)
-cd infrastructure/neon
-docker compose -f docker-compose.dev.local.yml up -d
-
-# 3. Verify services are healthy
-docker compose -f docker-compose.dev.local.yml ps
-# Should show: postgres, neon-proxy, transcoding-service (all healthy)
-
-# 4. Run migrations
-pnpm --filter @codex/database db:migrate
-
-# 5. Start dev server
-pnpm dev
-
-# 6. Test transcoding flow
-# - Upload a video via your app
-# - Watch transcoding service logs:
-docker compose -f docker-compose.dev.local.yml logs -f transcoding-service
-
-# 7. Verify R2 upload
-# - Check your R2 bucket for transcoded files
-# - Files should appear in: {creator_id}/hls/{media_id}/
-
-# 8. Stop services
-docker compose -f docker-compose.dev.local.yml down
-```
-
-#### Differences: Local Dev vs Production
-
-| Aspect | Local Dev | Production (RunPod) |
-|--------|-----------|---------------------|
-| **Encoding** | Software (libx264) | GPU (h264_nvenc) |
-| **Quality Variants** | 2 (720p, 480p) | 4 (1080p, 720p, 480p, 360p) |
-| **Preview Length** | 10 seconds | 30 seconds |
-| **Speed** | Slower (~30-60s for 1min video) | Faster (~10-15s for 1min video) |
-| **R2 Access** | Direct (via env vars) | Direct (via env vars) |
-| **Webhook** | `host.docker.internal:5173` | Production URL |
-| **Persistence** | Long-running service | Serverless (cold start) |
-
-**Note**: The same Python transcoding logic (`transcode.py`) is used in both environments, just with different FFmpeg parameters for performance.
-
----
-
-### Step 7: CI/CD Integration
-
-#### Testing Strategy
-
-**Unit Tests** (mock RunPod API):
-- Already covered in Step 2 (service.test.ts)
-- Tests run in CI without hitting real transcoding service
-
-**Integration Tests** (optional):
-- Can use local transcoding service in CI if desired
-- Would require Docker-in-Docker or services setup in GitHub Actions
-- **Recommendation**: Skip for Phase 1, rely on unit tests + manual testing
-
-#### Secrets Configuration
-
-**GitHub Secrets** (for production deployment):
-
-```bash
-# Navigate to: Settings → Secrets and variables → Actions → Secrets
-
-RUNPOD_API_KEY_PRODUCTION          # Production RunPod API key
-RUNPOD_ENDPOINT_ID_PRODUCTION      # Production RunPod endpoint ID
-
-# These R2 secrets should already exist for workers:
-R2_ENDPOINT
-R2_ACCESS_KEY
-R2_SECRET_KEY
-```
-
-**Cloudflare Secrets** (for production workers):
-
-```bash
-# Set via wrangler CLI:
-wrangler secret put RUNPOD_API_KEY --env production
-wrangler secret put RUNPOD_ENDPOINT_ID --env production
-wrangler secret put PUBLIC_APP_URL --env production  # e.g., https://codex.revelations.studio
-
-# Verify secrets are set
-wrangler secret list --env production
-```
-
-#### GitHub Actions Workflow - No Changes Needed
-
-The transcoding service is part of the web app, so it deploys automatically with existing workflows:
-
-- **Testing** (`.github/workflows/testing.yml`): Unit tests run with mocked RunPod API
-- **Preview** (`.github/workflows/preview-deploy.yml`): Uses test RunPod endpoint (if configured)
-- **Production** (`.github/workflows/deploy-production.yml`): Uses production RunPod endpoint
-
-#### Environment Variable Mapping
-
-| Environment | Transcoding Endpoint | Webhook URL |
-|-------------|---------------------|-------------|
-| **Local** | `http://transcoding-service:3001` | `http://host.docker.internal:5173` |
-| **CI Tests** | Mocked in tests | N/A |
-| **Preview** | Production RunPod (shared) | `https://codex-preview-{PR}.revelations.studio` |
-| **Production** | Production RunPod | `https://codex.revelations.studio` |
-
-**Note**: For local development, the transcoding service runs in Docker and has direct access to R2 buckets. It sends webhook callbacks to your local dev server via `host.docker.internal`.
-
----
-
-## Definition of Done
-
-### Functional Requirements
-- [ ] Schema extended with transcoding fields (`hls_preview_key`, `waveform_key`, `transcoding_error`, etc.)
-- [ ] Media items auto-transcode after upload via direct RunPod API call
-- [ ] Video → HLS with 4 quality variants (1080p, 720p, 480p, 360p)
-- [ ] Video → 30-second preview HLS playlist
-- [ ] Video → Auto-generated thumbnail (10% mark)
-- [ ] Audio → HLS with 2 quality variants (128kbps, 64kbps)
-- [ ] Audio → 30-second preview HLS playlist
-- [ ] Audio → Waveform JSON generation
-- [ ] Status tracking: `uploaded` → `transcoding` → `ready` / `failed`
-- [ ] Webhook handles success and failure callbacks
-- [ ] Manual retry endpoint (max 1 retry)
-- [ ] Status endpoint for frontend polling
-
-### Testing Requirements
-- [ ] Unit tests for `TranscodingService` (all methods)
-  - [ ] triggerJob (success, failure, invalid state)
-  - [ ] handleWebhook (success, failure)
-  - [ ] retryTranscoding (success, max attempts, wrong status)
-  - [ ] getStatus (success, unauthorized)
-- [ ] Integration test: Full video transcoding flow (mock RunPod)
-- [ ] Integration test: Audio transcoding + waveform (mock RunPod)
-- [ ] Integration test: Webhook callback handling
-- [ ] Integration test: Retry logic
-- [ ] All tests pass in CI
-
-### Infrastructure Requirements
-
-**Local Development:**
-- [ ] Local transcoding Docker service created
-- [ ] Docker Compose updated with transcoding service
-- [ ] Local service has R2 access configured
-- [ ] Local transcoding tested end-to-end (upload → transcode → webhook → R2)
-- [ ] Development workflow documented
-
-**Production:**
-- [ ] RunPod serverless endpoint configured
-- [ ] RunPod Docker image built and deployed
-- [ ] Environment variables configured:
-  - [ ] `RUNPOD_API_KEY`
-  - [ ] `RUNPOD_ENDPOINT_ID`
-  - [ ] `PUBLIC_APP_URL`
-  - [ ] `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET_KEY` (already exist)
-- [ ] Webhook URL accessible from RunPod (public endpoint)
-
-### Documentation Requirements
-- [ ] Schema migration documented
-- [ ] RunPod setup process documented
-- [ ] Transcoding troubleshooting guide
-- [ ] API endpoints documented (webhook, retry, status)
-
----
-
-## Related Documentation
-
-- **PRD**: [Media Transcoding PRD](../../features/media-transcoding/pdr-phase-1.md)
-- **TDD**: [Media Transcoding TDD](../../features/media-transcoding/ttd-dphase-1.md)
-- **Schema**: [Database Schema](../../features/shared/database-schema.md) - Lines 130-183
-- **Dependencies**: [Cross-Feature Dependencies](../../cross-feature-dependencies.md#6-media-transcoding)
-- **Standards**: [STANDARDS.md](../STANDARDS.md)
+## Testing Strategy
+
+### Unit Tests
+
+**Service Layer** (`packages/transcoding/src/__tests__/`):
+- Test job triggering (mock RunPod API)
+- Test webhook handling (success/failure)
+- Test retry logic (max attempts)
+- Test status queries
+- Mock database and RunPod API
+
+**Validation Layer**:
+- 100% coverage for transcoding schemas
+- Test webhook payload validation
+- Test retry request validation
+
+### Integration Tests
+
+**API Endpoints** (`workers/transcoding-api/src/__tests__/`):
+- Test webhook endpoint with valid signature
+- Test webhook endpoint with invalid signature → 401
+- Test retry endpoint (creator only)
+- Test status endpoint
+- Mock RunPod responses
+
+### E2E Scenarios
+
+**Successful Video Transcoding**:
+1. Upload video via content service
+2. Trigger transcoding job
+3. Verify media status = 'transcoding'
+4. Simulate RunPod webhook callback (success)
+5. Verify media status = 'ready'
+6. Verify HLS keys populated
+7. Access service generates streaming URL
+
+**Failed Transcoding with Retry**:
+1. Upload video
+2. Trigger transcoding
+3. Simulate RunPod webhook (failure)
+4. Verify media status = 'failed'
+5. Verify error message stored
+6. Trigger manual retry
+7. Verify transcodingAttempts = 1
+8. Simulate success webhook
+9. Verify media status = 'ready'
+
+**Max Retry Limit**:
+1. Failed transcoding with 1 attempt
+2. Try to retry again
+3. Verify ValidationError thrown
+4. Verify transcodingAttempts = 1 (unchanged)
+
+### Local Development Testing
+
+**Tools**:
+- **RunPod Test Mode**: Use RunPod sandbox for development
+- **Ngrok**: Expose local webhook endpoint for RunPod callbacks
+- **Mock Webhooks**: Manually trigger webhook endpoint with test payloads
+
+**Test Data**:
+- Sample videos (various resolutions)
+- Sample audio files
+- Mock RunPod webhook payloads
 
 ---
 
 ## Notes
 
-### Why No Queues?
+### RunPod Docker Image
 
-**Decision**: Use direct HTTP calls instead of Cloudflare Queues because:
+**Required Tools**:
+- FFmpeg with H.264/H.265 encoding
+- HLS segmentation support
+- audiowaveform (for audio waveforms)
+- Python/Node.js for RunPod handler script
 
-1. **Simplicity**: No need for separate queue consumer worker
-2. **Immediate Feedback**: RunPod API returns job ID immediately for tracking
-3. **Webhooks Handle Async**: RunPod calls our webhook when done (no polling needed)
-4. **Cost**: Avoids queue storage costs
-5. **Alignment**: Matches pattern used in other work packets (direct service calls)
+**Handler Script Responsibilities**:
+1. Download input file from R2
+2. Run FFmpeg transcoding (multi-quality HLS)
+3. Extract thumbnail and preview clip
+4. Generate waveform (audio only)
+5. Upload outputs to R2
+6. Send webhook with results
 
-### Why 30-Second Previews?
+**Example Dockerfile**:
+```dockerfile
+FROM runpod/pytorch:3.10-2.0.0-117
 
-- **Marketing**: Let customers sample content before purchasing
-- **Engagement**: Video previews drive higher conversion than text descriptions
-- **No Configuration (Phase 1)**: Always first 30 seconds for simplicity
-- **Future (Phase 2+)**: Let creators configure preview start time and duration
+# Install FFmpeg
+RUN apt-get update && apt-get install -y ffmpeg
 
-### R2 Storage Structure
+# Install audiowaveform
+RUN apt-get install -y audiowaveform
 
-```
-codex-media/
-└── {creator_id}/
-    ├── originals/
-    │   └── {media_id}/
-    │       └── video.mp4
-    ├── hls/
-    │   └── {media_id}/
-    │       ├── master.m3u8          # Full video master playlist
-    │       ├── 1080p.m3u8
-    │       ├── 720p.m3u8
-    │       ├── 480p.m3u8
-    │       ├── 360p.m3u8
-    │       ├── 1080p_000.ts
-    │       ├── ...
-    │       └── preview/
-    │           ├── preview.m3u8     # 30-second preview
-    │           ├── preview_000.ts
-    │           └── ...
-    ├── thumbnails/
-    │   └── media/
-    │       └── {media_id}/
-    │           └── auto-generated.jpg
-    └── waveforms/
-        └── {media_id}/
-            └── waveform.json
+# Copy handler script
+COPY handler.py /handler.py
+
+CMD ["python", "/handler.py"]
 ```
 
-### Cost Estimates (RunPod GPU)
+### Transcoding Performance
 
-- **1GB video (1080p, 10 min)**: ~2 minutes GPU time = $0.02
-- **Preview generation**: +10 seconds = +$0.002
-- **100MB audio + waveform**: ~30 seconds = $0.005
-- **Daily estimate (10 videos, 20 audio)**: ~$0.30/day = $9/month
+**Expected Processing Time** (GPU-accelerated):
+- 1080p video (10 min): ~2-3 minutes
+- 720p video (10 min): ~1-2 minutes
+- Audio (1 hour): ~30 seconds
 
-### Retry Strategy
+**Cost Estimate** (RunPod):
+- ~$0.50/hour GPU time
+- Average video (10 min): ~$0.02-0.03 per transcode
 
-- **Single Retry**: Allow manual retry if transcoding fails (max 1 attempt)
-- **Why Manual?**: Serverless failures are usually deterministic (corrupted file, unsupported codec)
-- **No Auto-Retry**: Avoids wasting money on files that will never succeed
-- **UI Control**: Creator sees failure reason and decides whether to retry or re-upload
+### HLS Quality Levels
+
+**Video**:
+- 1080p: 5000 kbps
+- 720p: 3000 kbps
+- 480p: 1500 kbps
+- 360p: 800 kbps
+
+**Audio**:
+- 128 kbps AAC
+
+### Security Considerations
+
+**Webhook Verification**:
+- HMAC-SHA256 signature from RunPod
+- Prevents webhook spoofing
+- Must be verified before processing
+
+**Input Validation**:
+- Verify media exists and is owned by creator
+- Verify input file exists in R2
+- Validate media type (video/audio only)
+
+**Retry Limits**:
+- Maximum 1 retry to prevent abuse
+- Manual trigger only (no automatic retries)
+
+### Performance Considerations
+
+**Expected Load** (Phase 1):
+- Transcoding jobs: ~10-100/day
+- Webhook calls: ~10-100/day
+- Retry requests: ~5-10/day
+
+**Database Impact**:
+- Minimal (status updates only)
+- No heavy queries during transcoding
+
+**R2 Bandwidth**:
+- Input downloads: RunPod fetches from R2
+- Output uploads: RunPod uploads HLS to R2
+- Ensure R2 bucket has sufficient bandwidth
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2025-11-09
-**Status**: Ready for Implementation
+**Last Updated**: 2025-11-23
+**Version**: 2.0 (Enhanced with implementation patterns and RunPod integration details)
