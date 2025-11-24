@@ -1,128 +1,337 @@
-# Work Packet: P1-NOTIFY-001 - Email Notification Service
+# P1-NOTIFY-001: Email Notification Service
 
-**Status**: 🚧 To Be Implemented
-**Priority**: P1 (Important - needed soon)
+**Priority**: P1
+**Status**: 🚧 Not Started
 **Estimated Effort**: 3-4 days
-**Branch**: `feature/P1-NOTIFY-001-email-service`
 
 ---
 
-## Current State
+## Table of Contents
 
-**✅ Already Implemented:**
-- Observability package with PII redaction (`@codex/observability`)
-- Environment configuration patterns in existing workers
-- Email field validation in auth schema
-
-**🚧 Needs Implementation:**
-- Email template system (verification, password reset, purchase receipt)
-- Resend email provider adapter
-- Notification service (provider-agnostic interface)
-- Template rendering with variables
-- Tests (template rendering, service unit tests)
+- [Overview](#overview)
+- [System Context](#system-context)
+- [Database Schema](#database-schema)
+- [Service Architecture](#service-architecture)
+- [Implementation Patterns](#implementation-patterns)
+- [API Integration](#api-integration)
+- [Available Patterns & Utilities](#available-patterns--utilities)
+- [Dependencies](#dependencies)
+- [Implementation Checklist](#implementation-checklist)
+- [Testing Strategy](#testing-strategy)
+- [Notes](#notes)
 
 ---
 
-## Dependencies
+## Overview
 
-### Required Packages
-- **Resend SDK** - Will install (`npm:resend`)
-- **@codex/observability** - Already available (PII redaction for email addresses)
-- **@codex/validation** - Already available (email validation)
+The Email Notification Service provides transactional email capabilities for the Codex platform. This is not a marketing email system—it sends critical user-initiated emails like email verification, password resets, and purchase receipts.
 
-### Existing Patterns
-```typescript
-// Email validation already available
-import { z } from 'zod';
-const emailSchema = z.string().email('Invalid email address');
+The service is designed provider-agnostic using the Strategy pattern. A unified `NotificationService` interface abstracts away the email provider implementation (Resend in production, MailHog for local development). This allows switching email providers without changing application code.
+
+Email templates are pure functions that take typed data objects and return HTML/text email bodies. This separation of concerns enables easy unit testing (templates are tested independently from email sending), template versioning (change templates without touching service logic), and multi-language support in the future.
+
+The service integrates with the auth system for verification emails, the e-commerce system for purchase receipts, and any future features requiring transactional emails. It's a foundational service that enables user communication without relying on third-party platforms for template hosting or rendering.
+
+---
+
+## System Context
+
+### Upstream Dependencies
+
+- **@codex/observability**: Provides PII redaction for email address logging. Critical for GDPR compliance—email addresses must never appear in plaintext logs.
+
+- **@codex/validation**: Email format validation using Zod schemas (already available).
+
+- **Resend SDK** (External): Third-party email delivery service with simple API and reliability guarantees.
+
+### Downstream Consumers
+
+- **P1-ECOM-002** (Stripe Webhook Handler): Triggers purchase receipt emails after successful payment.
+
+- **Auth Worker** (Future): Sends email verification and password reset emails during registration and password recovery flows.
+
+- **P1-ADMIN-001** (Admin Dashboard - Future): May send weekly revenue report emails to platform owners.
+
+### External Services
+
+- **Resend API**: Production email delivery (requires verified sender domain).
+
+- **MailHog**: Local development SMTP server (captures emails for testing without sending).
+
+### Integration Flow
+
+```
+Stripe Webhook Handler
+    ↓ checkout.session.completed event
+PurchaseService.completePurchase()
+    ↓ Create purchase record in database
+NotificationService.sendPurchaseReceiptEmail()
+    ↓ Generate email template with purchase data
+ResendEmailProvider.sendEmail()
+    ↓ POST to Resend API with HTML/text email
+Customer Inbox
 ```
 
-### Required Documentation
-- [Notifications TDD](../../features/notifications/ttd-dphase-1.md)
-- [STANDARDS.md](../STANDARDS.md)
-- [Resend Documentation](https://resend.com/docs)
+---
+
+## Database Schema
+
+The notification service **does not add new tables**. It's a stateless service that sends emails based on data provided by calling services.
+
+**Future Consideration** (Not in Phase 1):
+- Add `email_logs` table to track sent emails for debugging and audit trail
+- Columns: `id`, `to`, `subject`, `template_type`, `sent_at`, `provider_message_id`
 
 ---
 
-## Implementation Steps
+## Service Architecture
 
-### Step 1: Install Resend SDK
+### Service Responsibilities
 
-**File**: `packages/notifications/package.json`
+**NotificationService** (NOT extending `BaseService` - stateless):
+- **Primary Responsibility**: Send transactional emails with type-safe template rendering
+- **Key Operations**:
+  - `sendVerificationEmail(to, data)`: Email verification with time-limited link
+  - `sendPasswordResetEmail(to, data)`: Password reset with secure token link
+  - `sendPurchaseReceiptEmail(to, data)`: Purchase confirmation with content access link
 
-```json
-{
-  "name": "@codex/notifications",
-  "version": "0.1.0",
-  "type": "module",
-  "main": "./src/index.ts",
-  "dependencies": {
-    "resend": "^3.0.0",
-    "zod": "^3.22.4"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "vitest": "^1.0.0"
+**Template Functions** (Pure functions, no dependencies):
+- **Primary Responsibility**: Generate HTML and text email bodies from typed data
+- **Key Operations**:
+  - `generateVerificationEmail(data)`: Returns `{ subject, html, text }`
+  - `generatePasswordResetEmail(data)`: Returns `{ subject, html, text }`
+  - `generatePurchaseReceiptEmail(data)`: Returns `{ subject, html, text }`
+
+**EmailProvider Interface** (Strategy pattern):
+- **Primary Responsibility**: Abstract email sending implementation
+- **Implementations**:
+  - `ResendEmailProvider`: Production email delivery via Resend API
+  - `MockSMTPEmailProvider`: Local development email capture via MailHog
+
+---
+
+### Key Business Rules
+
+**Transactional Emails Only**:
+- This service is for user-initiated transactional emails (receipts, verification)
+- NOT for marketing emails, newsletters, or bulk campaigns
+- Each email triggered by a specific user action
+- Must include unsubscribe mechanism (Resend handles this)
+
+**PII Protection** (GDPR Compliance):
+- Email addresses are PII and must NEVER appear in logs
+- Use `obs.redactEmail(email)` to redact: `"user@example.com"` → `"u***@example.com"`
+- Log only redacted emails and metadata (subject, template type, provider message ID)
+
+**Email Accessibility**:
+- ALL emails must include both HTML and text versions
+- Text version for accessibility (screen readers) and email clients that block HTML
+- HTML version for visual presentation and branding
+
+**Template Data Type Safety**:
+- All template data strongly typed with TypeScript interfaces
+- Zod validation on email addresses (format validation)
+- Template functions pure (no side effects, easy to test)
+
+---
+
+### Error Handling Approach
+
+**No Custom Error Classes**:
+- Email sending failures are infrastructure errors (not business logic errors)
+- Throw standard JavaScript `Error` with descriptive messages
+- Observability client tracks errors with context (subject, template type)
+
+**Error Recovery**:
+- No automatic retry (calling service decides retry strategy)
+- Failed emails logged with `ObservabilityClient.trackError()`
+- Provider-specific errors wrapped in generic error messages
+
+**Error Logging**:
+```typescript
+try {
+  await emailProvider.sendEmail(message);
+} catch (err) {
+  this.obs.trackError(err as Error, {
+    to: this.obs.redactEmail(message.to), // ✅ PII redacted
+    subject: message.subject,
+    template: 'verification',
+  });
+  throw new Error(`Failed to send verification email: ${err.message}`);
+}
+```
+
+---
+
+### Transaction Boundaries
+
+**No Database Transactions**:
+- Notification service is stateless (no database writes)
+- Email sending is NOT transactional (fire-and-forget)
+- Calling service handles transaction boundaries for database operations
+
+**Future Enhancement** (Email Logs):
+- If `email_logs` table added, use `db.transaction()` to atomically create log entry + send email
+
+---
+
+## Implementation Patterns
+
+### Pattern 1: Strategy Pattern (Provider-Agnostic Email)
+
+Abstract email provider implementation to support multiple backends.
+
+**Interface Definition**:
+```typescript
+export interface EmailMessage {
+  to: string;
+  from: string;
+  subject: string;
+  html: string;
+  text: string;
+  replyTo?: string;
+  tags?: Record<string, string>; // For analytics/tracking
+}
+
+export interface EmailProvider {
+  sendEmail(message: EmailMessage): Promise<{ id: string }>;
+}
+```
+
+**Resend Implementation** (Production):
+```typescript
+import { Resend } from 'resend';
+import type { EmailProvider, EmailMessage } from './types';
+import { ObservabilityClient } from '@codex/observability';
+
+export class ResendEmailProvider implements EmailProvider {
+  private client: Resend;
+  private obs: ObservabilityClient;
+
+  constructor(apiKey: string, environment: string) {
+    this.client = new Resend(apiKey);
+    this.obs = new ObservabilityClient('resend-email-provider', environment);
+  }
+
+  async sendEmail(message: EmailMessage): Promise<{ id: string }> {
+    // ✅ PII redaction: NEVER log raw email addresses
+    this.obs.info('Sending email via Resend', {
+      to: this.obs.redactEmail(message.to), // "user@example.com" → "u***@example.com"
+      subject: message.subject,
+      tags: message.tags,
+    });
+
+    const response = await this.client.emails.send({
+      from: message.from,
+      to: message.to,
+      subject: message.subject,
+      html: message.html,
+      text: message.text,
+      reply_to: message.replyTo,
+      tags: message.tags ? Object.entries(message.tags).map(([name, value]) => ({ name, value })) : undefined,
+    });
+
+    if (response.error) {
+      this.obs.trackError(new Error(response.error.message), {
+        subject: message.subject,
+      });
+      throw new Error(`Email send failed: ${response.error.message}`);
+    }
+
+    this.obs.info('Email sent successfully', {
+      id: response.data!.id,
+      subject: message.subject,
+    });
+
+    return { id: response.data!.id };
   }
 }
 ```
 
-### Step 2: Create Email Templates
-
-**File**: `packages/notifications/src/templates/types.ts`
-
+**Mock Implementation** (Local Development):
 ```typescript
-/**
- * Email template types and data structures
- *
- * Design decisions:
- * - Strongly typed template data for type safety
- * - Separate HTML and text versions for email client compatibility
- * - Template functions return both subject and body
- */
+import * as nodemailer from 'nodemailer';
+import type { EmailProvider, EmailMessage } from './types';
 
-export interface EmailTemplate<T = any> {
-  subject: string;
-  html: string;
-  text: string;
-  data: T;
-}
+export class MockSMTPEmailProvider implements EmailProvider {
+  private transporter: nodemailer.Transporter;
 
-// Template data types
-export interface VerificationEmailData {
-  userName: string;
-  verificationUrl: string;
-  expiryHours: number;
-}
+  constructor(smtpHost: string, smtpPort: number) {
+    this.transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: false, // MailHog doesn't use TLS
+      ignoreTLS: true,
+    });
+  }
 
-export interface PasswordResetEmailData {
-  userName: string;
-  resetUrl: string;
-  expiryHours: number;
-}
+  async sendEmail(message: EmailMessage): Promise<{ id: string }> {
+    const info = await this.transporter.sendMail({
+      from: message.from,
+      to: message.to,
+      subject: `[LOCAL] ${message.subject}`, // Prefix to indicate local
+      html: message.html,
+      text: message.text,
+      replyTo: message.replyTo,
+    });
 
-export interface PurchaseReceiptEmailData {
-  userName: string;
-  contentTitle: string;
-  priceCents: number;
-  purchaseDate: Date;
-  contentUrl: string;
-  receiptUrl?: string;
-}
-
-export interface WelcomeEmailData {
-  userName: string;
-  loginUrl: string;
+    return { id: info.messageId };
+  }
 }
 ```
 
-**File**: `packages/notifications/src/templates/verification.ts`
+**Factory Function** (Dependency Injection):
+```typescript
+export function getNotificationService(env: {
+  USE_MOCK_EMAIL?: string;
+  SMTP_HOST?: string;
+  SMTP_PORT?: string;
+  RESEND_API_KEY?: string;
+  FROM_EMAIL: string;
+  REPLY_TO_EMAIL?: string;
+  ENVIRONMENT: string;
+}): NotificationService {
+  let emailProvider: EmailProvider;
 
+  if (env.USE_MOCK_EMAIL === 'true' && env.SMTP_HOST && env.SMTP_PORT) {
+    // Local development: Use MailHog
+    emailProvider = new MockSMTPEmailProvider(env.SMTP_HOST, parseInt(env.SMTP_PORT, 10));
+  } else {
+    // Production: Use Resend
+    if (!env.RESEND_API_KEY) {
+      throw new Error('RESEND_API_KEY required when USE_MOCK_EMAIL is not true');
+    }
+    emailProvider = new ResendEmailProvider(env.RESEND_API_KEY, env.ENVIRONMENT);
+  }
+
+  return new NotificationService({
+    emailProvider,
+    fromEmail: env.FROM_EMAIL,
+    replyToEmail: env.REPLY_TO_EMAIL,
+    environment: env.ENVIRONMENT,
+  });
+}
+```
+
+**Key Benefits**:
+- **Testability**: Mock provider for unit tests (no external API calls)
+- **Flexibility**: Switch from Resend to SendGrid/Postmark without changing service code
+- **Local Development**: MailHog captures emails locally (no production API needed)
+
+---
+
+### Pattern 2: Pure Template Functions (Testable, Composable)
+
+Email templates are pure functions for easy testing and composition.
+
+**Template Function** (Pure - no side effects):
 ```typescript
 import type { EmailTemplate, VerificationEmailData } from './types';
 
 /**
  * ✅ TESTABLE: Pure function, no dependencies
+ * ✅ TYPE-SAFE: Strongly typed input/output
+ * ✅ COMPOSABLE: Returns data structure, service composes with provider
  */
 export function generateVerificationEmail(
   data: VerificationEmailData
@@ -139,7 +348,7 @@ export function generateVerificationEmail(
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background-color: #f4f4f4; padding: 20px; border-radius: 5px;">
-    <h1 style="color: #2c3e50; margin-bottom: 20px;">Welcome, ${data.userName}!</h1>
+    <h1 style="color: #2c3e50; margin-bottom: 20px;">Welcome, ${escapeHtml(data.userName)}!</h1>
 
     <p>Thank you for signing up. Please verify your email address by clicking the button below:</p>
 
@@ -183,285 +392,69 @@ If you didn't create this account, you can safely ignore this email.
 
   return { subject, html, text };
 }
-```
 
-**File**: `packages/notifications/src/templates/password-reset.ts`
-
-```typescript
-import type { EmailTemplate, PasswordResetEmailData } from './types';
-
-/**
- * ✅ TESTABLE: Pure function, no dependencies
- */
-export function generatePasswordResetEmail(
-  data: PasswordResetEmailData
-): Omit<EmailTemplate, 'data'> {
-  const subject = 'Reset your password';
-
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${subject}</title>
-</head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background-color: #f4f4f4; padding: 20px; border-radius: 5px;">
-    <h1 style="color: #2c3e50; margin-bottom: 20px;">Password Reset Request</h1>
-
-    <p>Hi ${data.userName},</p>
-
-    <p>We received a request to reset your password. Click the button below to create a new password:</p>
-
-    <div style="text-align: center; margin: 30px 0;">
-      <a href="${data.resetUrl}"
-         style="background-color: #e74c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
-        Reset Password
-      </a>
-    </div>
-
-    <p style="color: #666; font-size: 14px;">
-      This link will expire in ${data.expiryHours} hours.
-    </p>
-
-    <p style="color: #e74c3c; font-size: 14px; font-weight: bold;">
-      If you didn't request a password reset, please ignore this email or contact support if you have concerns.
-    </p>
-
-    <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
-
-    <p style="color: #999; font-size: 12px;">
-      If the button doesn't work, copy and paste this link into your browser:<br>
-      <span style="word-break: break-all;">${data.resetUrl}</span>
-    </p>
-  </div>
-</body>
-</html>
-  `.trim();
-
-  const text = `
-Password Reset Request
-
-Hi ${data.userName},
-
-We received a request to reset your password. Visit this link to create a new password:
-
-${data.resetUrl}
-
-This link will expire in ${data.expiryHours} hours.
-
-If you didn't request a password reset, please ignore this email or contact support if you have concerns.
-  `.trim();
-
-  return { subject, html, text };
+// Helper for XSS prevention
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 ```
 
-**File**: `packages/notifications/src/templates/purchase-receipt.ts`
-
+**Type Definitions**:
 ```typescript
-import type { EmailTemplate, PurchaseReceiptEmailData } from './types';
-
-/**
- * ✅ TESTABLE: Pure function, no dependencies
- */
-export function generatePurchaseReceiptEmail(
-  data: PurchaseReceiptEmailData
-): Omit<EmailTemplate, 'data'> {
-  const subject = `Receipt for your purchase: ${data.contentTitle}`;
-  const priceFormatted = `$${(data.priceCents / 100).toFixed(2)}`;
-  const dateFormatted = data.purchaseDate.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${subject}</title>
-</head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background-color: #f4f4f4; padding: 20px; border-radius: 5px;">
-    <h1 style="color: #2c3e50; margin-bottom: 20px;">Thank you for your purchase!</h1>
-
-    <p>Hi ${data.userName},</p>
-
-    <p>Your purchase was successful. Here are the details:</p>
-
-    <div style="background-color: white; padding: 20px; border-radius: 5px; margin: 20px 0;">
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr>
-          <td style="padding: 10px 0; border-bottom: 1px solid #eee;"><strong>Content</strong></td>
-          <td style="padding: 10px 0; border-bottom: 1px solid #eee; text-align: right;">${data.contentTitle}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 0; border-bottom: 1px solid #eee;"><strong>Amount</strong></td>
-          <td style="padding: 10px 0; border-bottom: 1px solid #eee; text-align: right;">${priceFormatted}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 0;"><strong>Date</strong></td>
-          <td style="padding: 10px 0; text-align: right;">${dateFormatted}</td>
-        </tr>
-      </table>
-    </div>
-
-    <div style="text-align: center; margin: 30px 0;">
-      <a href="${data.contentUrl}"
-         style="background-color: #27ae60; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
-        Access Your Content
-      </a>
-    </div>
-
-    ${data.receiptUrl ? `
-    <p style="color: #666; font-size: 14px; text-align: center;">
-      <a href="${data.receiptUrl}" style="color: #3498db;">Download Receipt</a>
-    </p>
-    ` : ''}
-
-    <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
-
-    <p style="color: #666; font-size: 14px;">
-      If you have any questions about this purchase, please contact our support team.
-    </p>
-  </div>
-</body>
-</html>
-  `.trim();
-
-  const text = `
-Thank you for your purchase!
-
-Hi ${data.userName},
-
-Your purchase was successful. Here are the details:
-
-Content: ${data.contentTitle}
-Amount: ${priceFormatted}
-Date: ${dateFormatted}
-
-Access your content here: ${data.contentUrl}
-
-${data.receiptUrl ? `Download receipt: ${data.receiptUrl}` : ''}
-
-If you have any questions about this purchase, please contact our support team.
-  `.trim();
-
-  return { subject, html, text };
-}
-```
-
-### Step 3: Create Email Provider Interface
-
-**File**: `packages/notifications/src/providers/types.ts`
-
-```typescript
-/**
- * Provider-agnostic email interface
- *
- * Design: Abstract interface allows switching email providers without changing service code
- */
-
-export interface EmailMessage {
-  to: string;
-  from: string;
+export interface EmailTemplate<T = any> {
   subject: string;
   html: string;
   text: string;
-  replyTo?: string;
-  tags?: Record<string, string>; // For tracking/analytics
+  data: T;
 }
 
-export interface EmailProvider {
-  sendEmail(message: EmailMessage): Promise<{ id: string }>;
+export interface VerificationEmailData {
+  userName: string;
+  verificationUrl: string;
+  expiryHours: number;
 }
 ```
 
-**File**: `packages/notifications/src/providers/resend.ts`
+**Key Benefits**:
+- **Pure Functions**: No dependencies, no side effects (easy to test)
+- **Type Safety**: TypeScript ensures correct data shape
+- **XSS Prevention**: Escape HTML in user-provided data
+- **Accessibility**: Both HTML and text versions for all email clients
 
+---
+
+### Pattern 3: PII Redaction in Logs (GDPR Compliance)
+
+Email addresses are PII and must be redacted in logs.
+
+**ObservabilityClient Extension** (add to `@codex/observability`):
 ```typescript
-import { Resend } from 'resend';
-import type { EmailProvider, EmailMessage } from './types';
-import { ObservabilityClient } from '@codex/observability';
+/**
+ * Redact email for logging (show first char + domain)
+ * Example: "user@example.com" → "u***@example.com"
+ */
+export class ObservabilityClient {
+  // ... existing methods ...
 
-export class ResendEmailProvider implements EmailProvider {
-  private client: Resend;
-  private obs: ObservabilityClient;
-
-  constructor(apiKey: string, environment: string) {
-    this.client = new Resend(apiKey);
-    this.obs = new ObservabilityClient('resend-email-provider', environment);
-  }
-
-  async sendEmail(message: EmailMessage): Promise<{ id: string }> {
-    // ✅ SECURE: Redact email from logs (PII)
-    this.obs.info('Sending email', {
-      to: this.obs.redactEmail(message.to),
-      subject: message.subject,
-      tags: message.tags,
-    });
-
-    try {
-      const response = await this.client.emails.send({
-        from: message.from,
-        to: message.to,
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
-        reply_to: message.replyTo,
-        tags: message.tags ? Object.entries(message.tags).map(([name, value]) => ({ name, value })) : undefined,
-      });
-
-      if (response.error) {
-        this.obs.trackError(new Error(response.error.message), {
-          subject: message.subject,
-        });
-        throw new Error(`Email send failed: ${response.error.message}`);
-      }
-
-      this.obs.info('Email sent successfully', {
-        id: response.data?.id,
-        subject: message.subject,
-      });
-
-      return { id: response.data!.id };
-    } catch (err) {
-      this.obs.trackError(err as Error, {
-        subject: message.subject,
-      });
-      throw err;
+  redactEmail(email: string): string {
+    if (!email || !email.includes('@')) {
+      return '[invalid-email]';
     }
+
+    const [localPart, domain] = email.split('@');
+    const redactedLocal = localPart.length > 0 ? `${localPart[0]}***` : '***';
+    return `${redactedLocal}@${domain}`;
   }
 }
 ```
 
-### Step 4: Create Notification Service
-
-**File**: `packages/notifications/src/service.ts`
-
+**Usage in Notification Service**:
 ```typescript
-import type { EmailProvider } from './providers/types';
-import { generateVerificationEmail } from './templates/verification';
-import { generatePasswordResetEmail } from './templates/password-reset';
-import { generatePurchaseReceiptEmail } from './templates/purchase-receipt';
-import type {
-  VerificationEmailData,
-  PasswordResetEmailData,
-  PurchaseReceiptEmailData,
-} from './templates/types';
-import { ObservabilityClient } from '@codex/observability';
-
-export interface NotificationServiceConfig {
-  emailProvider: EmailProvider;
-  fromEmail: string;
-  replyToEmail?: string;
-  environment: string;
-}
-
 export class NotificationService {
   private obs: ObservabilityClient;
 
@@ -469,15 +462,11 @@ export class NotificationService {
     this.obs = new ObservabilityClient('notification-service', config.environment);
   }
 
-  /**
-   * Send email verification
-   */
-  async sendVerificationEmail(
-    to: string,
-    data: VerificationEmailData
-  ): Promise<{ id: string }> {
+  async sendVerificationEmail(to: string, data: VerificationEmailData): Promise<{ id: string }> {
+    // ✅ SECURE: Redact PII before logging
     this.obs.info('Sending verification email', {
-      to: this.obs.redactEmail(to),
+      to: this.obs.redactEmail(to), // "user@example.com" → "u***@example.com"
+      userName: data.userName, // OK to log (not unique identifier)
     });
 
     const template = generateVerificationEmail(data);
@@ -495,834 +484,240 @@ export class NotificationService {
       },
     });
   }
-
-  /**
-   * Send password reset email
-   */
-  async sendPasswordResetEmail(
-    to: string,
-    data: PasswordResetEmailData
-  ): Promise<{ id: string }> {
-    this.obs.info('Sending password reset email', {
-      to: this.obs.redactEmail(to),
-    });
-
-    const template = generatePasswordResetEmail(data);
-
-    return this.config.emailProvider.sendEmail({
-      to,
-      from: this.config.fromEmail,
-      subject: template.subject,
-      html: template.html,
-      text: template.text,
-      replyTo: this.config.replyToEmail,
-      tags: {
-        type: 'password-reset',
-        environment: this.config.environment,
-      },
-    });
-  }
-
-  /**
-   * Send purchase receipt email
-   */
-  async sendPurchaseReceiptEmail(
-    to: string,
-    data: PurchaseReceiptEmailData
-  ): Promise<{ id: string }> {
-    this.obs.info('Sending purchase receipt email', {
-      to: this.obs.redactEmail(to),
-      contentTitle: data.contentTitle,
-    });
-
-    const template = generatePurchaseReceiptEmail(data);
-
-    return this.config.emailProvider.sendEmail({
-      to,
-      from: this.config.fromEmail,
-      subject: template.subject,
-      html: template.html,
-      text: template.text,
-      replyTo: this.config.replyToEmail,
-      tags: {
-        type: 'purchase-receipt',
-        environment: this.config.environment,
-      },
-    });
-  }
-}
-
-/**
- * Factory function for dependency injection
- */
-export function getNotificationService(env: {
-  RESEND_API_KEY: string;
-  FROM_EMAIL: string;
-  REPLY_TO_EMAIL?: string;
-  ENVIRONMENT: string;
-}): NotificationService {
-  const { ResendEmailProvider } = require('./providers/resend');
-  const emailProvider = new ResendEmailProvider(env.RESEND_API_KEY, env.ENVIRONMENT);
-
-  return new NotificationService({
-    emailProvider,
-    fromEmail: env.FROM_EMAIL,
-    replyToEmail: env.REPLY_TO_EMAIL,
-    environment: env.ENVIRONMENT,
-  });
 }
 ```
 
-### Step 5: Add Observability PII Redaction
+**Key Benefits**:
+- **GDPR Compliance**: Email addresses never appear in plaintext logs
+- **Debugging**: Still see enough information to trace emails (first char + domain)
+- **Audit Trail**: Logs are safe to store and search
 
-**File**: `packages/observability/src/client.ts` (add method)
+---
 
+### Pattern 4: Service Composition (Not Inheritance)
+
+NotificationService uses composition, not inheritance from BaseService.
+
+**❌ BAD: Inherit from BaseService** (unnecessary dependency):
 ```typescript
-/**
- * Redact email for logging (show first char + domain)
- * Example: "user@example.com" → "u***@example.com"
- */
-redactEmail(email: string): string {
-  if (!email || !email.includes('@')) {
-    return '[invalid-email]';
+import { BaseService } from '@codex/service-errors';
+
+export class NotificationService extends BaseService {
+  constructor(config: ServiceConfig & { emailProvider: EmailProvider }) {
+    super(config); // Requires database, userId - not needed for email!
   }
 
-  const [localPart, domain] = email.split('@');
-  const redactedLocal = localPart.length > 0 ? `${localPart[0]}***` : '***';
-  return `${redactedLocal}@${domain}`;
-}
-```
-
-### Step 6: Add Tests
-
-**File**: `packages/notifications/src/templates/verification.test.ts`
-
-```typescript
-import { describe, it, expect } from 'vitest';
-import { generateVerificationEmail } from './verification';
-
-describe('generateVerificationEmail', () => {
-  it('should generate email with all data', () => {
-    const email = generateVerificationEmail({
-      userName: 'John Doe',
-      verificationUrl: 'https://example.com/verify?token=abc123',
-      expiryHours: 24,
-    });
-
-    expect(email.subject).toBe('Verify your email address');
-    expect(email.html).toContain('John Doe');
-    expect(email.html).toContain('https://example.com/verify?token=abc123');
-    expect(email.html).toContain('24 hours');
-    expect(email.text).toContain('John Doe');
-    expect(email.text).toContain('https://example.com/verify?token=abc123');
-  });
-
-  it('should escape HTML in user data', () => {
-    const email = generateVerificationEmail({
-      userName: '<script>alert("xss")</script>',
-      verificationUrl: 'https://example.com/verify',
-      expiryHours: 24,
-    });
-
-    // HTML should be escaped (basic check - in production use proper sanitization)
-    expect(email.html).not.toContain('<script>');
-  });
-});
-```
-
-**File**: `packages/notifications/src/templates/purchase-receipt.test.ts`
-
-```typescript
-import { describe, it, expect } from 'vitest';
-import { generatePurchaseReceiptEmail } from './purchase-receipt';
-
-describe('generatePurchaseReceiptEmail', () => {
-  it('should format price correctly', () => {
-    const email = generatePurchaseReceiptEmail({
-      userName: 'John Doe',
-      contentTitle: 'Video Course',
-      priceCents: 2999, // $29.99
-      purchaseDate: new Date('2025-01-01'),
-      contentUrl: 'https://example.com/content/123',
-    });
-
-    expect(email.html).toContain('$29.99');
-    expect(email.text).toContain('$29.99');
-  });
-
-  it('should include optional receipt URL', () => {
-    const email = generatePurchaseReceiptEmail({
-      userName: 'John Doe',
-      contentTitle: 'Video Course',
-      priceCents: 2999,
-      purchaseDate: new Date('2025-01-01'),
-      contentUrl: 'https://example.com/content/123',
-      receiptUrl: 'https://example.com/receipt/456',
-    });
-
-    expect(email.html).toContain('https://example.com/receipt/456');
-  });
-
-  it('should handle free content (0 cents)', () => {
-    const email = generatePurchaseReceiptEmail({
-      userName: 'John Doe',
-      contentTitle: 'Free Video',
-      priceCents: 0,
-      purchaseDate: new Date('2025-01-01'),
-      contentUrl: 'https://example.com/content/123',
-    });
-
-    expect(email.html).toContain('$0.00');
-  });
-});
-```
-
-**File**: `packages/notifications/src/service.test.ts`
-
-```typescript
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotificationService } from './service';
-import type { EmailProvider, EmailMessage } from './providers/types';
-
-describe('NotificationService', () => {
-  let mockProvider: EmailProvider;
-  let service: NotificationService;
-
-  beforeEach(() => {
-    mockProvider = {
-      sendEmail: vi.fn().mockResolvedValue({ id: 'email-123' }),
-    };
-
-    service = new NotificationService({
-      emailProvider: mockProvider,
-      fromEmail: 'noreply@example.com',
-      replyToEmail: 'support@example.com',
-      environment: 'test',
-    });
-  });
-
-  describe('sendVerificationEmail', () => {
-    it('should send verification email with correct data', async () => {
-      const result = await service.sendVerificationEmail('user@example.com', {
-        userName: 'John Doe',
-        verificationUrl: 'https://example.com/verify',
-        expiryHours: 24,
-      });
-
-      expect(result.id).toBe('email-123');
-      expect(mockProvider.sendEmail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: 'user@example.com',
-          from: 'noreply@example.com',
-          subject: 'Verify your email address',
-          replyTo: 'support@example.com',
-          tags: expect.objectContaining({
-            type: 'verification',
-          }),
-        })
-      );
-    });
-  });
-
-  describe('sendPasswordResetEmail', () => {
-    it('should send password reset email', async () => {
-      await service.sendPasswordResetEmail('user@example.com', {
-        userName: 'John Doe',
-        resetUrl: 'https://example.com/reset',
-        expiryHours: 2,
-      });
-
-      expect(mockProvider.sendEmail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          subject: 'Reset your password',
-          tags: expect.objectContaining({
-            type: 'password-reset',
-          }),
-        })
-      );
-    });
-  });
-
-  describe('sendPurchaseReceiptEmail', () => {
-    it('should send purchase receipt email', async () => {
-      await service.sendPurchaseReceiptEmail('user@example.com', {
-        userName: 'John Doe',
-        contentTitle: 'Video Course',
-        priceCents: 2999,
-        purchaseDate: new Date('2025-01-01'),
-        contentUrl: 'https://example.com/content/123',
-      });
-
-      expect(mockProvider.sendEmail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          subject: expect.stringContaining('Video Course'),
-          tags: expect.objectContaining({
-            type: 'purchase-receipt',
-          }),
-        })
-      );
-    });
-  });
-});
-```
-
-**File**: `packages/observability/src/client.test.ts` (add test)
-
-```typescript
-describe('redactEmail', () => {
-  it('should redact email addresses', () => {
-    const obs = new ObservabilityClient('test', 'test');
-
-    expect(obs.redactEmail('user@example.com')).toBe('u***@example.com');
-    expect(obs.redactEmail('a@test.com')).toBe('a***@test.com');
-  });
-
-  it('should handle invalid emails', () => {
-    const obs = new ObservabilityClient('test', 'test');
-
-    expect(obs.redactEmail('notanemail')).toBe('[invalid-email]');
-    expect(obs.redactEmail('')).toBe('[invalid-email]');
-  });
-});
-```
-
----
-
-## Test Specifications
-
-### Unit Tests (Templates)
-- `generateVerificationEmail` - Contains all data, escapes HTML
-- `generatePasswordResetEmail` - Contains all data, warning text present
-- `generatePurchaseReceiptEmail` - Price formatting, optional receipt URL, free content
-
-### Unit Tests (Service)
-- `sendVerificationEmail` - Calls provider with correct data
-- `sendPasswordResetEmail` - Calls provider with correct data
-- `sendPurchaseReceiptEmail` - Calls provider with correct data
-- All methods - Include correct tags for tracking
-
-### Unit Tests (Observability)
-- `redactEmail` - Redacts email addresses correctly
-- `redactEmail` - Handles invalid emails
-
-### Integration Tests (Resend Provider)
-- Mock Resend API responses
-- Test error handling
-- Test observability logging
-
----
-
-## Definition of Done
-
-- [ ] Resend SDK installed in notifications package
-- [ ] Email template functions implemented (verification, password reset, purchase receipt)
-- [ ] Resend provider implemented with EmailProvider interface
-- [ ] NotificationService implemented with typed methods
-- [ ] PII redaction added to observability client
-- [ ] Unit tests for all templates (100% coverage)
-- [ ] Unit tests for service (mocked provider)
-- [ ] Unit tests for PII redaction
-- [ ] Error handling comprehensive
-- [ ] Observability logging complete with PII redaction
-- [ ] Environment variables documented (RESEND_API_KEY, FROM_EMAIL)
-- [ ] CI passing (tests + typecheck + lint)
-
----
-
-## Integration Points
-
-### Depends On
-- **@codex/observability**: PII redaction for email logging
-- **@codex/validation**: Email validation (already available)
-
-### Integrates With
-- **P1-ECOM-002** (Webhook Handlers): Will trigger purchase receipt emails
-- Future auth flows: Verification and password reset emails
-
-### Environment Variables
-```bash
-RESEND_API_KEY=re_123abc...           # Resend API key
-FROM_EMAIL=noreply@example.com        # Sender email (must be verified in Resend)
-REPLY_TO_EMAIL=support@example.com    # Optional reply-to address
-```
-
----
-
-## Step 7: Public API and Package Exports
-
-**Why This Matters**: Clear public API enables other packages to import only what they need and work in isolation.
-
-**File**: `packages/notifications/src/index.ts`
-
-```typescript
-/**
- * @codex/notifications - Email notification service
- *
- * PUBLIC API
- * ==========
- * This package exports a provider-agnostic notification service for sending emails.
- *
- * INTERFACE CONTRACT:
- * ------------------
- * Other packages (e.g., @codex/auth, @codex/ecommerce) depend on:
- * 1. NotificationService class with typed send methods
- * 2. Template data types (VerificationEmailData, etc.)
- * 3. Factory function for dependency injection
- *
- * INTERNAL IMPLEMENTATION:
- * -----------------------
- * Template functions, provider implementations, and observability are internal.
- * Other packages MUST NOT import from subdirectories (e.g., ./templates/verification).
- *
- * USAGE EXAMPLE:
- * -------------
- * ```typescript
- * import { getNotificationService, type VerificationEmailData } from '@codex/notifications';
- *
- * const notifService = getNotificationService(env);
- * await notifService.sendVerificationEmail('user@example.com', {
- *   userName: 'John Doe',
- *   verificationUrl: 'https://example.com/verify?token=abc',
- *   expiryHours: 24,
- * });
- * ```
- */
-
-// ============================================================================
-// PUBLIC API - Safe to import from other packages
-// ============================================================================
-
-// Service
-export { NotificationService, getNotificationService } from './service';
-export type { NotificationServiceConfig } from './service';
-
-// Template Data Types (for consumers)
-export type {
-  VerificationEmailData,
-  PasswordResetEmailData,
-  PurchaseReceiptEmailData,
-  WelcomeEmailData,
-} from './templates/types';
-
-// Provider Interface (for testing/mocking)
-export type { EmailProvider, EmailMessage } from './providers/types';
-
-// ============================================================================
-// INTERNAL - DO NOT import from other packages
-// ============================================================================
-
-// Templates are internal - use NotificationService methods instead
-// Providers are internal - use getNotificationService() factory instead
-```
-
-**File**: `packages/notifications/package.json` (exports field)
-
-```json
-{
-  "name": "@codex/notifications",
-  "version": "0.1.0",
-  "type": "module",
-  "main": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "dependencies": {
-    "resend": "^3.0.0",
-    "zod": "^3.22.4",
-    "@codex/observability": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "vitest": "^1.0.0"
+  async sendEmail(...) {
+    // BaseService provides this.db (unused), this.userId (unused)
+    // Creates unnecessary coupling
   }
 }
 ```
 
----
-
-## Step 8: Local Development Setup
-
-**Why This Matters**: Developers need to test emails locally before deploying to production.
-
-### Email Testing with MailHog
-
-**What is MailHog?**
-- Runs a local SMTP server that captures all outgoing emails
-- Provides web UI at http://localhost:8025 to view emails
-- No emails actually sent (safe for testing)
-- Resend SDK will be configured to use MailHog in local dev
-
-### Docker Compose Integration
-
-**File**: `infrastructure/neon/docker-compose.dev.local.yml` (add service)
-
-```yaml
-services:
-  postgres:
-    # ... existing postgres config ...
-
-  neon-proxy:
-    # ... existing neon-proxy config ...
-
-  # ========================================
-  # Email Testing - MailHog
-  # ========================================
-  mailhog:
-    image: mailhog/mailhog:latest
-    ports:
-      - '1025:1025'  # SMTP server
-      - '8025:8025'  # Web UI
-    healthcheck:
-      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:8025']
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-volumes:
-  db_data:
-```
-
-### Local Environment Variables
-
-**File**: `.env.local` (developer creates this)
-
-```bash
-# ============================================================================
-# Email Service Configuration (Local Development)
-# ============================================================================
-
-# For local development, use MailHog mock SMTP server
-# MailHog runs at localhost:1025 (SMTP) and localhost:8025 (Web UI)
-# All emails will be captured and viewable at http://localhost:8025
-
-# Option 1: Mock mode using MailHog (RECOMMENDED for local dev)
-USE_MOCK_EMAIL=true
-SMTP_HOST=localhost
-SMTP_PORT=1025
-FROM_EMAIL=noreply@localhost
-REPLY_TO_EMAIL=support@localhost
-
-# Option 2: Real Resend (for testing actual email delivery)
-# Uncomment these to use real Resend API (requires API key)
-# USE_MOCK_EMAIL=false
-# RESEND_API_KEY=re_123abc...
-# FROM_EMAIL=noreply@yourdomain.com  # Must be verified in Resend
-# REPLY_TO_EMAIL=support@yourdomain.com
-
-ENVIRONMENT=local
-```
-
-### Mock Email Provider for Local Dev
-
-**File**: `packages/notifications/src/providers/mock-smtp.ts`
-
+**✅ GOOD: Composition Pattern** (minimal dependencies):
 ```typescript
-import * as nodemailer from 'nodemailer';
-import type { EmailProvider, EmailMessage } from './types';
-import { ObservabilityClient } from '@codex/observability';
+export interface NotificationServiceConfig {
+  emailProvider: EmailProvider;
+  fromEmail: string;
+  replyToEmail?: string;
+  environment: string;
+}
 
-/**
- * Mock email provider using SMTP (MailHog for local dev)
- *
- * This provider sends emails to a local SMTP server (MailHog) for testing.
- * Emails are captured and viewable at http://localhost:8025
- */
-export class MockSMTPEmailProvider implements EmailProvider {
-  private transporter: nodemailer.Transporter;
+export class NotificationService {
   private obs: ObservabilityClient;
 
-  constructor(smtpHost: string, smtpPort: number, environment: string) {
-    this.transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: false, // MailHog doesn't use TLS
-      ignoreTLS: true,
-    });
-
-    this.obs = new ObservabilityClient('mock-smtp-provider', environment);
+  constructor(private config: NotificationServiceConfig) {
+    this.obs = new ObservabilityClient('notification-service', config.environment);
   }
 
-  async sendEmail(message: EmailMessage): Promise<{ id: string }> {
-    this.obs.info('Sending email via mock SMTP', {
-      to: this.obs.redactEmail(message.to),
+  async sendVerificationEmail(to: string, data: VerificationEmailData): Promise<{ id: string }> {
+    const template = generateVerificationEmail(data);
+
+    return this.config.emailProvider.sendEmail({
+      to,
+      from: this.config.fromEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+      tags: { type: 'verification' },
+    });
+  }
+}
+```
+
+**Key Benefits**:
+- **Minimal Dependencies**: Only depends on what it needs (email provider, config)
+- **No Database**: Stateless service (no DB dependency)
+- **Easier Testing**: Mock only EmailProvider, not entire database
+- **Composition over Inheritance**: More flexible, less coupled
+
+---
+
+## Pseudocode for Key Operations
+
+### Pseudocode: sendVerificationEmail()
+
+```
+FUNCTION sendVerificationEmail(to, data):
+  // Step 1: Log email send attempt (with PII redaction)
+  LOG_INFO('Sending verification email', {
+    to: redactEmail(to),  // "user@example.com" → "u***@example.com"
+    userName: data.userName
+  })
+
+  // Step 2: Generate email template (pure function)
+  template = generateVerificationEmail(data)
+  // Returns: { subject, html, text }
+
+  // Step 3: Send email via provider
+  TRY:
+    result = emailProvider.sendEmail({
+      to: to,
+      from: config.fromEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+      replyTo: config.replyToEmail,
+      tags: {
+        type: 'verification',
+        environment: config.environment
+      }
+    })
+
+    // Step 4: Log success
+    LOG_INFO('Verification email sent', {
+      id: result.id,
+      to: redactEmail(to)
+    })
+
+    RETURN { id: result.id }
+
+  CATCH error:
+    // Step 5: Log failure (with PII redaction)
+    LOG_ERROR('Failed to send verification email', {
+      to: redactEmail(to),
+      error: error.message
+    })
+
+    THROW new Error('Failed to send verification email: ' + error.message)
+END FUNCTION
+```
+
+---
+
+### Pseudocode: generatePurchaseReceiptEmail()
+
+```
+FUNCTION generatePurchaseReceiptEmail(data):
+  // Step 1: Format price from cents to dollars
+  priceFormatted = FORMAT_CURRENCY(data.priceCents / 100)
+  // Example: 2999 cents → "$29.99"
+
+  // Step 2: Format date
+  dateFormatted = FORMAT_DATE(data.purchaseDate, 'en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  })
+  // Example: "November 24, 2025"
+
+  // Step 3: Build email subject
+  subject = 'Receipt for your purchase: ' + data.contentTitle
+
+  // Step 4: Build HTML email body
+  html = TEMPLATE_HTML({
+    title: subject,
+    userName: escapeHtml(data.userName),  // XSS prevention
+    contentTitle: escapeHtml(data.contentTitle),
+    priceFormatted: priceFormatted,
+    dateFormatted: dateFormatted,
+    contentUrl: data.contentUrl,
+    receiptUrl: data.receiptUrl  // Optional
+  })
+
+  // Step 5: Build text email body (for accessibility)
+  text = TEMPLATE_TEXT({
+    userName: data.userName,
+    contentTitle: data.contentTitle,
+    priceFormatted: priceFormatted,
+    dateFormatted: dateFormatted,
+    contentUrl: data.contentUrl,
+    receiptUrl: data.receiptUrl
+  })
+
+  // Step 6: Return email template
+  RETURN {
+    subject: subject,
+    html: html,
+    text: text
+  }
+END FUNCTION
+```
+
+---
+
+### Pseudocode: ResendEmailProvider.sendEmail()
+
+```
+FUNCTION ResendEmailProvider.sendEmail(message):
+  // Step 1: Log send attempt (with PII redaction)
+  LOG_INFO('Sending email via Resend', {
+    to: redactEmail(message.to),
+    subject: message.subject,
+    tags: message.tags
+  })
+
+  // Step 2: Call Resend API
+  TRY:
+    response = RESEND_API.emails.send({
+      from: message.from,
+      to: message.to,
       subject: message.subject,
-      tags: message.tags,
-    });
+      html: message.html,
+      text: message.text,
+      reply_to: message.replyTo,
+      tags: convertTagsToResendFormat(message.tags)
+    })
 
-    try {
-      const info = await this.transporter.sendMail({
-        from: message.from,
-        to: message.to,
-        subject: `[LOCAL] ${message.subject}`, // Prefix to indicate local
-        html: message.html,
-        text: message.text,
-        replyTo: message.replyTo,
-      });
-
-      this.obs.info('Email sent via mock SMTP', {
-        messageId: info.messageId,
+    // Step 3: Check for API error
+    IF response.error:
+      LOG_ERROR('Resend API error', {
         subject: message.subject,
-      });
+        error: response.error.message
+      })
+      THROW new Error('Email send failed: ' + response.error.message)
 
-      return { id: info.messageId };
-    } catch (err) {
-      this.obs.trackError(err as Error, {
-        subject: message.subject,
-      });
-      throw err;
-    }
-  }
-}
+    // Step 4: Log success
+    LOG_INFO('Email sent successfully', {
+      id: response.data.id,
+      subject: message.subject
+    })
+
+    RETURN { id: response.data.id }
+
+  CATCH error:
+    // Step 5: Log and rethrow error
+    LOG_ERROR('Failed to send email', {
+      subject: message.subject,
+      error: error.message
+    })
+    THROW error
+END FUNCTION
 ```
-
-**File**: `packages/notifications/package.json` (add nodemailer for local dev)
-
-```json
-{
-  "dependencies": {
-    "resend": "^3.0.0",
-    "zod": "^3.22.4",
-    "@codex/observability": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "@types/nodemailer": "^6.4.14",
-    "nodemailer": "^6.9.8",
-    "vitest": "^1.0.0"
-  }
-}
-```
-
-### Update Factory Function for Local Dev
-
-**File**: `packages/notifications/src/service.ts` (update factory)
-
-```typescript
-/**
- * Factory function for dependency injection
- * Supports both production (Resend) and local dev (MailHog)
- */
-export function getNotificationService(env: {
-  USE_MOCK_EMAIL?: string;
-  SMTP_HOST?: string;
-  SMTP_PORT?: string;
-  RESEND_API_KEY?: string;
-  FROM_EMAIL: string;
-  REPLY_TO_EMAIL?: string;
-  ENVIRONMENT: string;
-}): NotificationService {
-  let emailProvider: EmailProvider;
-
-  if (env.USE_MOCK_EMAIL === 'true' && env.SMTP_HOST && env.SMTP_PORT) {
-    // Local development: Use MailHog
-    const { MockSMTPEmailProvider } = require('./providers/mock-smtp');
-    emailProvider = new MockSMTPEmailProvider(
-      env.SMTP_HOST,
-      parseInt(env.SMTP_PORT, 10),
-      env.ENVIRONMENT
-    );
-  } else {
-    // Production: Use Resend
-    if (!env.RESEND_API_KEY) {
-      throw new Error('RESEND_API_KEY is required when USE_MOCK_EMAIL is not true');
-    }
-    const { ResendEmailProvider } = require('./providers/resend');
-    emailProvider = new ResendEmailProvider(env.RESEND_API_KEY, env.ENVIRONMENT);
-  }
-
-  return new NotificationService({
-    emailProvider,
-    fromEmail: env.FROM_EMAIL,
-    replyToEmail: env.REPLY_TO_EMAIL,
-    environment: env.ENVIRONMENT,
-  });
-}
-```
-
-### Local Development Workflow
-
-**Start Local Services**:
-```bash
-# Start postgres, neon-proxy, and MailHog
-cd infrastructure/neon
-docker compose -f docker-compose.dev.local.yml up -d
-
-# Verify MailHog is running
-open http://localhost:8025
-```
-
-**Run Package Tests**:
-```bash
-cd packages/notifications
-pnpm test           # Run all tests
-pnpm test:watch     # Watch mode for development
-```
-
-**Manual Email Testing** (in worker code):
-```typescript
-import { getNotificationService } from '@codex/notifications';
-
-// In your Cloudflare Worker or local test script
-const notifService = getNotificationService(env);
-
-await notifService.sendVerificationEmail('test@example.com', {
-  userName: 'Test User',
-  verificationUrl: 'http://localhost:3000/verify?token=abc123',
-  expiryHours: 24,
-});
-
-// Check http://localhost:8025 to see the email
-```
-
-**View Sent Emails**:
-1. Open http://localhost:8025 in browser
-2. See all captured emails with full HTML/text rendering
-3. Inspect headers, attachments, and raw SMTP data
 
 ---
 
-## Step 9: CI/CD Integration
+## API Integration
 
-**Why This Matters**: Ensures tests run in CI and emails work correctly across environments.
+The notification service is a **library package**, not an API worker. It's imported and used by other workers.
 
-### GitHub Actions Workflow
+### Usage in Workers
 
-**No Changes Required**: Existing workflow already handles this package.
-
-**File**: `.github/workflows/test.yml` (already exists)
-
-```yaml
-name: Test
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
-        with:
-          version: 8
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Run tests
-        run: pnpm test
-        # This will test @codex/notifications with mocked EmailProvider
-
-      - name: Type check
-        run: pnpm run typecheck
-
-      - name: Lint
-        run: pnpm run lint
-```
-
-### Environment-Specific Configuration
-
-**Local Development** (.env.local):
-```bash
-USE_MOCK_EMAIL=true
-SMTP_HOST=localhost
-SMTP_PORT=1025
-FROM_EMAIL=noreply@localhost
-ENVIRONMENT=local
-```
-
-**Preview Environments** (Cloudflare Workers):
-```bash
-# Set in wrangler.jsonc [env.preview] or Cloudflare dashboard
-RESEND_API_KEY=re_preview_key123...
-FROM_EMAIL=noreply@preview.yourdomain.com
-REPLY_TO_EMAIL=support@yourdomain.com
-ENVIRONMENT=preview
-```
-
-**Production** (Cloudflare Workers):
-```bash
-# Set in Cloudflare dashboard as secrets
-RESEND_API_KEY=re_prod_key123...
-FROM_EMAIL=noreply@yourdomain.com
-REPLY_TO_EMAIL=support@yourdomain.com
-ENVIRONMENT=production
-```
-
-### Testing Strategy
-
-1. **Unit Tests** (packages/notifications):
-   - Mock EmailProvider interface
-   - Test template rendering
-   - Test service methods
-   - No external dependencies
-
-2. **Local Development**:
-   - Use MailHog to capture emails
-   - Manually verify email rendering
-   - Test with real worker code
-
-3. **Preview Environment**:
-   - Use Resend test mode or separate domain
-   - Test webhook integrations
-   - Verify email delivery
-
-4. **Production**:
-   - Use production Resend API key
-   - Monitor email delivery via Resend dashboard
-   - Track errors via observability
-
----
-
-## Integration Points (Detailed)
-
-### How Other Packages Use This Service
-
-**Example: Auth Worker** (`apps/auth-worker/src/index.ts`)
-
-```typescript
-import { getNotificationService, type VerificationEmailData } from '@codex/notifications';
-
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const notifService = getNotificationService({
-      RESEND_API_KEY: env.RESEND_API_KEY,
-      FROM_EMAIL: env.FROM_EMAIL,
-      REPLY_TO_EMAIL: env.REPLY_TO_EMAIL,
-      ENVIRONMENT: env.ENVIRONMENT,
-    });
-
-    // Register new user
-    const user = await createUser(email, password);
-    const token = generateVerificationToken(user.id);
-
-    // Send verification email
-    await notifService.sendVerificationEmail(user.email, {
-      userName: user.username,
-      verificationUrl: `https://yourdomain.com/verify?token=${token}`,
-      expiryHours: 24,
-    });
-
-    return Response.json({ success: true });
-  },
-};
-```
-
-**Example: Ecommerce Worker** (`apps/ecommerce-worker/src/webhooks/stripe.ts`)
-
+**Stripe Webhook Handler** (P1-ECOM-002):
 ```typescript
 import { getNotificationService, type PurchaseReceiptEmailData } from '@codex/notifications';
 
-export async function handleCheckoutComplete(
-  session: Stripe.Checkout.Session,
-  env: Env
-): Promise<void> {
+export async function handleCheckoutComplete(session: Stripe.Checkout.Session, env: Env) {
   const notifService = getNotificationService({
     RESEND_API_KEY: env.RESEND_API_KEY,
     FROM_EMAIL: env.FROM_EMAIL,
@@ -1330,7 +725,6 @@ export async function handleCheckoutComplete(
     ENVIRONMENT: env.ENVIRONMENT,
   });
 
-  // Send purchase receipt
   await notifService.sendPurchaseReceiptEmail(session.customer_email!, {
     userName: session.metadata.userName,
     contentTitle: session.metadata.contentTitle,
@@ -1341,87 +735,255 @@ export async function handleCheckoutComplete(
 }
 ```
 
-### Interface Contracts
+**Auth Worker** (Future):
+```typescript
+import { getNotificationService, type VerificationEmailData } from '@codex/notifications';
 
-**What Other Packages Can Depend On**:
+app.post('/api/auth/register', async (c) => {
+  const user = await createUser(email, password);
+  const token = generateVerificationToken(user.id);
 
-1. **NotificationService** class with these methods:
-   - `sendVerificationEmail(to: string, data: VerificationEmailData): Promise<{id: string}>`
-   - `sendPasswordResetEmail(to: string, data: PasswordResetEmailData): Promise<{id: string}>`
-   - `sendPurchaseReceiptEmail(to: string, data: PurchaseReceiptEmailData): Promise<{id: string}>`
+  const notifService = getNotificationService(c.env);
+  await notifService.sendVerificationEmail(user.email, {
+    userName: user.username,
+    verificationUrl: `https://yourdomain.com/verify?token=${token}`,
+    expiryHours: 24,
+  });
 
-2. **Template Data Types**:
-   - `VerificationEmailData`
-   - `PasswordResetEmailData`
-   - `PurchaseReceiptEmailData`
-
-3. **Factory Function**:
-   - `getNotificationService(env): NotificationService`
-
-**What Other Packages CANNOT Depend On**:
-- Template rendering functions (internal)
-- Provider implementations (internal)
-- Observability logging details (internal)
-
-### Environment Variables Required by Consumers
-
-Workers that use `@codex/notifications` must set:
-
-```bash
-RESEND_API_KEY=re_...         # Production Resend API key
-FROM_EMAIL=noreply@...        # Sender email (verified in Resend)
-REPLY_TO_EMAIL=support@...    # Optional reply-to address
-ENVIRONMENT=production|preview|local
+  return c.json({ success: true });
+});
 ```
 
-### Package Dependencies
+---
 
-**This package depends on**:
-- `@codex/observability` - PII redaction for logging
-- `resend` - Email provider SDK
-- `nodemailer` (dev only) - Mock SMTP for local testing
+### Public API
 
-**Packages that depend on this**:
-- `@codex/auth` (future) - Verification and password reset emails
-- `@codex/ecommerce` - Purchase receipt emails
-- Any worker that needs to send transactional emails
+**Exported Types and Functions**:
+```typescript
+// Service
+export { NotificationService, getNotificationService } from './service';
+export type { NotificationServiceConfig } from './service';
+
+// Template Data Types
+export type {
+  VerificationEmailData,
+  PasswordResetEmailData,
+  PurchaseReceiptEmailData,
+} from './templates/types';
+
+// Provider Interface (for testing/mocking)
+export type { EmailProvider, EmailMessage } from './providers/types';
+```
+
+**NOT Exported** (Internal Implementation):
+- Template functions (`generateVerificationEmail`, etc.) - use service methods instead
+- Provider implementations (`ResendEmailProvider`, `MockSMTPEmailProvider`) - use factory instead
+- ObservabilityClient usage (internal logging)
 
 ---
 
-## Related Documentation
+## Available Patterns & Utilities
 
-**Must Read**:
-- [STANDARDS.md](../STANDARDS.md) - § 7 Observability (PII redaction)
-- [Resend Documentation](https://resend.com/docs/send-with-nodejs)
-- [Notifications TDD](../../features/notifications/ttd-dphase-1.md)
+### Foundation Packages
 
-**Reference**:
-- [Testing Strategy](../../infrastructure/Testing.md)
-- [Environment Management](../../infrastructure/EnvironmentManagement.md)
+#### `@codex/observability`
+- **PII Redaction**:
+  - `redactEmail(email)`: Redact email addresses for logging (`"user@example.com"` → `"u***@example.com"`)
+  - `info(message, metadata)`: Info logs (use for email send attempts)
+  - `trackError(error, metadata)`: Error logs with stack traces
 
-**Code Examples**:
-- Observability package: `packages/observability/src/client.ts`
+**When to use**: ALL logs that might contain email addresses
 
 ---
 
-## Notes for LLM Developer
+#### `@codex/validation`
+- **Email Validation**:
+  - `z.string().email()`: Zod schema for email format validation
+  - Type-safe validation with automatic error messages
 
-1. **Provider-Agnostic Design**: EmailProvider interface allows switching from Resend to SendGrid/Postmark/etc. without changing NotificationService
-2. **Pure Template Functions**: Template generators are pure functions (no dependencies) for easy unit testing
-3. **PII Redaction**: ALWAYS use `obs.redactEmail()` when logging email addresses
-4. **HTML Escaping**: Ensure user data is escaped in HTML templates to prevent XSS (use template engine or manual escaping)
-5. **Email Verification in Resend**: FROM_EMAIL must be verified in Resend dashboard before sending
-6. **Test Mode**: Resend has test mode for CI - use test API key
-7. **Transactional Emails Only**: This service is for transactional emails (receipts, verification), not marketing
-
-**Common Pitfalls**:
-- Don't log raw email addresses (use PII redaction)
-- Don't forget text version of emails (required for accessibility)
-- Test email rendering in multiple clients (Gmail, Outlook, etc.)
-- Handle Resend API errors gracefully
-
-**If Stuck**: Check [CONTEXT_MAP.md](../CONTEXT_MAP.md) or Resend documentation.
+**When to use**: Validate email addresses before sending
 
 ---
 
-**Last Updated**: 2025-11-05
+### Utility Packages
+
+#### Resend SDK
+- **Email Sending**:
+  - `client.emails.send()`: Send email via Resend API
+  - `tags`: Track email categories for analytics
+  - `reply_to`: Set custom reply-to address
+
+**When to use**: Production email delivery
+
+---
+
+#### Nodemailer (Dev Only)
+- **Local Email Testing**:
+  - `createTransport()`: SMTP client for MailHog
+  - `sendMail()`: Send email to local SMTP server
+
+**When to use**: Local development email capture
+
+---
+
+## Dependencies
+
+### Required (Blocking)
+
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| @codex/observability | ✅ Available | PII redaction for email logging |
+| Resend SDK | ❌ Not Installed | Production email delivery (will install via pnpm) |
+| Nodemailer | ❌ Not Installed | Local dev email testing (will install as devDependency) |
+
+### Optional (Nice to Have)
+
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| Email Template Library | 🚧 Future | Use React Email or MJML for advanced templates |
+
+### Infrastructure Ready
+
+- ✅ Observability package with logging
+- ✅ Validation package with email schemas
+- ✅ MailHog Docker container setup (local dev)
+
+---
+
+## Implementation Checklist
+
+- [ ] **Package Setup**
+  - [ ] Create `packages/notifications/` directory
+  - [ ] Install Resend SDK (`pnpm add resend`)
+  - [ ] Install Nodemailer for dev (`pnpm add -D nodemailer @types/nodemailer`)
+  - [ ] Configure `package.json` with exports
+
+- [ ] **Email Templates**
+  - [ ] Create `src/templates/types.ts` with template data interfaces
+  - [ ] Implement `generateVerificationEmail()` (pure function)
+  - [ ] Implement `generatePasswordResetEmail()` (pure function)
+  - [ ] Implement `generatePurchaseReceiptEmail()` (pure function)
+  - [ ] Add HTML escape helper for XSS prevention
+
+- [ ] **Email Providers**
+  - [ ] Create `src/providers/types.ts` with `EmailProvider` interface
+  - [ ] Implement `ResendEmailProvider` (production)
+  - [ ] Implement `MockSMTPEmailProvider` (local dev)
+  - [ ] Add PII redaction to all log statements
+
+- [ ] **Notification Service**
+  - [ ] Create `src/service.ts` with `NotificationService` class
+  - [ ] Implement `sendVerificationEmail()`
+  - [ ] Implement `sendPasswordResetEmail()`
+  - [ ] Implement `sendPurchaseReceiptEmail()`
+  - [ ] Create factory function `getNotificationService()`
+
+- [ ] **Observability Extension**
+  - [ ] Add `redactEmail()` method to `ObservabilityClient`
+  - [ ] Add tests for PII redaction
+
+- [ ] **Tests**
+  - [ ] Unit tests for all template functions (100% coverage)
+  - [ ] Unit tests for NotificationService (mocked provider)
+  - [ ] Unit tests for PII redaction
+  - [ ] Integration tests for Resend provider (mocked API)
+
+- [ ] **Local Development**
+  - [ ] Add MailHog service to `docker-compose.dev.local.yml`
+  - [ ] Document local dev workflow (README.md)
+  - [ ] Test email capture with MailHog UI
+
+- [ ] **Documentation**
+  - [ ] Update public API exports in `src/index.ts`
+  - [ ] Document environment variables
+  - [ ] Add usage examples for workers
+
+---
+
+## Testing Strategy
+
+### Unit Tests
+- **Template Functions**: Test pure functions in isolation
+  - Verify HTML/text output contains expected data
+  - Test HTML escaping (XSS prevention)
+  - Test price formatting (cents to dollars)
+  - Test date formatting
+
+### Integration Tests
+- **NotificationService**: Test with mocked EmailProvider
+  - Verify correct template data passed to provider
+  - Verify PII redaction in logs
+  - Test error handling (provider failures)
+
+### Local Development Testing
+- **MailHog Capture**:
+  - Start MailHog Docker container
+  - Send test emails via MockSMTPEmailProvider
+  - View emails in MailHog UI (http://localhost:8025)
+  - Verify HTML rendering, text fallback
+
+### E2E Scenarios
+- **Purchase Receipt Flow**: Stripe webhook → purchase record → email sent → customer receives email
+- **Email Verification Flow**: User registers → verification email sent → user clicks link → email verified
+
+---
+
+## Notes
+
+### Architectural Decisions
+
+**Why Not BaseService?**
+- NotificationService is stateless (no database, no userId)
+- Composition over inheritance (minimal dependencies)
+- Easier testing (no need to mock database)
+
+**Why Pure Template Functions?**
+- Easy unit testing (no side effects)
+- Type-safe with TypeScript interfaces
+- Composable (can reuse for other providers)
+
+**Why Strategy Pattern for Providers?**
+- Swap providers without changing service code (Resend → SendGrid)
+- Mock provider for local dev (MailHog) and tests
+- Flexibility for future requirements
+
+### Security Considerations
+
+**PII Protection**:
+- Email addresses MUST be redacted in logs (`redactEmail()`)
+- GDPR compliance: email addresses are personal data
+- Log only metadata (subject, template type, provider message ID)
+
+**XSS Prevention**:
+- Escape HTML in user-provided data (userName, contentTitle)
+- Use `escapeHtml()` helper in templates
+- Never trust user input in HTML templates
+
+**Email Verification**:
+- Resend requires sender domain verification (DNS records)
+- Use environment-specific sender emails (noreply@yourdomain.com)
+
+### Performance Notes
+
+**Expected Latency**:
+- Resend API: ~200-500ms per email
+- MailHog SMTP: ~50-100ms (local)
+
+**Rate Limiting**:
+- Resend free tier: 100 emails/day (sufficient for local dev)
+- Production tier: 50,000+ emails/month
+- No rate limiting in code (Resend handles this)
+
+### Future Enhancements
+
+**Phase 2+**:
+- Email logs table (`email_logs`) for audit trail
+- Template versioning (store templates in database)
+- Multi-language support (i18n for templates)
+- Advanced templates with React Email or MJML
+- Email scheduling (delayed sends)
+
+---
+
+**Last Updated**: 2025-11-24
+**Template Version**: 1.0

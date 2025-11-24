@@ -1,82 +1,341 @@
-# Work Packet: P1-ADMIN-001 - Admin Dashboard Backend
+# P1-ADMIN-001: Admin Dashboard
 
-**Status**: 🚧 To Be Implemented
-**Priority**: P1 (Important - needed soon)
+**Priority**: P1
+**Status**: 🚧 Not Started
 **Estimated Effort**: 4-5 days
-**Branch**: `feature/P1-ADMIN-001-admin-dashboard`
 
 ---
 
-## Current State
+## Table of Contents
 
-**✅ Already Implemented:**
-- Authentication middleware (`workers/auth/src/middleware/auth.ts`)
-- Database client with Drizzle ORM
-- Content schema (from P1-CONTENT-001)
-- Purchase schema (from P1-ECOM-001)
-- Security middleware (rate limiting, headers)
-
-**🚧 Needs Implementation:**
-- Platform owner authentication guard (`requirePlatformOwner`)
-- Admin analytics service (revenue, customers, content stats)
-- Admin content management APIs (list all, publish/unpublish, delete)
-- Customer management APIs (list customers, view purchases, manual access grant)
-- Tests
+- [Overview](#overview)
+- [System Context](#system-context)
+- [Database Schema](#database-schema)
+- [Service Architecture](#service-architecture)
+- [Implementation Patterns](#implementation-patterns)
+- [API Integration](#api-integration)
+- [Available Patterns & Utilities](#available-patterns--utilities)
+- [Dependencies](#dependencies)
+- [Implementation Checklist](#implementation-checklist)
+- [Testing Strategy](#testing-strategy)
+- [Notes](#notes)
 
 ---
 
-## Dependencies
+## Overview
 
-### Required Work Packets
-- **P1-CONTENT-001** (Content Service) - MUST complete first for content queries
-- **P1-ECOM-001** (Stripe Checkout) - MUST complete first for purchase data
+The Admin Dashboard provides platform owners with comprehensive administrative tools to monitor revenue, manage content across all creators, and provide customer support. This is a critical operational interface that enables non-technical business owners to run the platform without developer intervention.
 
-### Existing Code
+Platform owners (users with `role = 'platform_owner'`) can view revenue analytics with time-series breakdowns, see customer statistics and purchase histories, control content publishing status across all creators, and manually grant content access for refunds or promotional purposes. Unlike content creators who only see their own content, platform owners have organization-wide visibility.
+
+This service integrates with the content management system (P1-CONTENT-001) for content operations, the e-commerce system (P1-ECOM-001) for revenue data, and the authentication system for role-based access control. It's designed with multi-tenancy in mind from day one—all queries are scoped by `organizationId` even though Phase 1 has a single organization.
+
+The admin dashboard fills a critical operational gap: enabling business owners to answer questions like "How much revenue did we make this month?", "Which content is performing best?", and "Can you give this customer access as a refund?" without writing SQL queries or deploying code.
+
+---
+
+## System Context
+
+### Upstream Dependencies
+
+- **Auth Worker** (`workers/auth`): Provides `requireAuth()` middleware that validates JWTs and adds user context. Also requires the new `requirePlatformOwner()` middleware to enforce `user.role === 'platform_owner'`.
+
+- **P1-CONTENT-001** (Content Service): Provides the `content` table schema for publishing/unpublishing content and the `media_items` table for media details. Admin uses these for cross-creator content management.
+
+- **P1-ECOM-001** (Stripe Checkout): Provides the `purchases` table for revenue analytics and the `content_access` table for manual access grants. Critical dependency—cannot calculate revenue without purchase data.
+
+### Downstream Consumers
+
+- **Admin Dashboard Frontend** (Future): Web UI that calls admin endpoints to display analytics charts, content management tables, and customer support tools. Expects standardized JSON responses with error codes.
+
+- **P1-NOTIFY-001** (Email Service - Future): May use admin analytics to send weekly revenue reports or performance summaries to platform owners via email.
+
+### External Services
+
+- **Neon PostgreSQL**: All admin queries hit the database for real-time data. No caching in Phase 1 (acceptable for low admin traffic).
+
+- **Cloudflare KV**: Session validation cache used by `requireAuth()` middleware (inherited from auth worker).
+
+### Integration Flow
+
+```
+Platform Owner Web UI
+    ↓ GET /api/admin/analytics/revenue (JWT with role=platform_owner)
+Auth Worker Middleware
+    ↓ requireAuth() → validates JWT → adds user to context
+    ↓ requirePlatformOwner() → checks user.role === 'platform_owner' → 403 if not
+Admin Dashboard Worker
+    ↓ Create AdminAnalyticsService(db, organizationId)
+    ↓ service.getRevenueStats({ startDate, endDate })
+AdminAnalyticsService
+    ↓ SELECT SUM(price_cents) FROM purchases WHERE organization_id = ? AND status = 'completed'
+Neon PostgreSQL
+    ↓ { totalRevenueCents, purchaseCount, revenueByDay: [...] }
+Platform Owner Web UI
+```
+
+---
+
+## Database Schema
+
+The admin dashboard does **not add new tables**. It reads from existing tables established by P1-CONTENT-001 and P1-ECOM-001.
+
+### Tables Used
+
+#### `users` (from database schema v2.0)
+
+**Purpose**: Platform owner role verification
+
 ```typescript
-// Auth middleware pattern already available
-import { requireAuth } from './middleware/auth';
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  name: text('name').notNull(),
+  role: text('role').notNull().default('customer'), // 'platform_owner' | 'creator' | 'customer'
+  organizationId: text('organization_id').notNull().references(() => organizations.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+```
 
-app.get('/api/protected', requireAuth(), async (c) => {
-  const user = c.get('user');
+**Critical Column**:
+- `role`: Enum ('platform_owner', 'creator', 'customer'). Admin middleware checks `user.role === 'platform_owner'` to authorize access.
+
+**Queries**:
+- Customer list: `SELECT * FROM users WHERE organization_id = ? ORDER BY created_at DESC`
+- Customer stats: `SELECT COUNT(*) FROM users WHERE organization_id = ?`
+
+---
+
+#### `content` (from P1-CONTENT-001)
+
+**Purpose**: Cross-creator content management (publish/unpublish/delete)
+
+**Key Columns**:
+- `id`: Primary key
+- `title`, `slug`: Content identification
+- `status`: Enum ('draft', 'published', 'archived')
+- `priceCents`: Integer pricing
+- `publishedAt`: Timestamp (NULL for drafts)
+- `deletedAt`: Soft delete timestamp (NULL = active)
+- `organizationId`: Multi-tenant scoping
+- `creatorId`: Content ownership
+
+**Queries**:
+- List all content: `SELECT * FROM content WHERE organization_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?`
+- Publish: `UPDATE content SET status = 'published', published_at = NOW() WHERE id = ? AND organization_id = ?`
+- Unpublish: `UPDATE content SET status = 'draft' WHERE id = ? AND organization_id = ?`
+- Soft delete: `UPDATE content SET deleted_at = NOW() WHERE id = ? AND organization_id = ?`
+
+---
+
+#### `purchases` (from P1-ECOM-001)
+
+**Purpose**: Revenue analytics, purchase tracking
+
+**Key Columns**:
+- `id`: Primary key
+- `customerId`: References `users.id`
+- `contentId`: References `content.id`
+- `priceCents`: Integer (ACID-compliant)
+- `status`: Enum ('completed', 'pending', 'failed', 'refunded')
+- `stripePaymentIntentId`: Stripe reference (NULL for manual grants)
+- `stripeCheckoutSessionId`: Stripe reference (NULL for manual grants)
+- `organizationId`: Multi-tenant scoping
+- `createdAt`: Purchase timestamp
+
+**Queries**:
+- Total revenue: `SELECT SUM(price_cents), COUNT(*) FROM purchases WHERE organization_id = ? AND status = 'completed'`
+- Daily breakdown: `SELECT DATE(created_at) AS date, SUM(price_cents), COUNT(*) FROM purchases WHERE organization_id = ? AND status = 'completed' GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 30`
+- Top content: `SELECT content_id, SUM(price_cents), COUNT(*) FROM purchases WHERE organization_id = ? AND status = 'completed' GROUP BY content_id ORDER BY SUM(price_cents) DESC LIMIT 10`
+
+**Indexes Required**:
+```sql
+CREATE INDEX idx_purchases_org_created ON purchases(organization_id, created_at);
+CREATE INDEX idx_purchases_status ON purchases(status);
+CREATE INDEX idx_purchases_content ON purchases(content_id);
+```
+
+---
+
+### Relationships
+
+```
+users 1---N purchases
+  └─ Foreign key: purchases.customer_id → users.id
+  └─ Business rule: Revenue analytics aggregate by customer
+
+content 1---N purchases
+  └─ Foreign key: purchases.content_id → content.id
+  └─ Business rule: Top content ranked by revenue
+
+organizations 1---N users
+  └─ Foreign key: users.organization_id → organizations.id
+  └─ Business rule: Platform owner sees only their organization's data
+```
+
+---
+
+## Service Architecture
+
+### Service Responsibilities
+
+**AdminAnalyticsService** (extends `BaseService`):
+- **Primary Responsibility**: Calculate revenue metrics, customer statistics, and content performance rankings for platform owners
+- **Key Operations**:
+  - `getRevenueStats({ startDate?, endDate? })`: Aggregate revenue with optional date filtering. Returns total revenue, purchase count, average order value, and daily breakdown (last 30 days).
+  - `getCustomerStats()`: Count total customers, purchasing customers, and new customers in last 30 days.
+  - `getTopContent(limit)`: Rank content by total revenue with purchase counts.
+
+**AdminContentManagementService** (extends `BaseService`):
+- **Primary Responsibility**: Cross-creator content lifecycle management for platform owners
+- **Key Operations**:
+  - `listAllContent({ page, limit, status? })`: Paginated content list with optional status filtering ('draft', 'published', 'archived', 'all').
+  - `publishContent(contentId)`: Change status to 'published', set `publishedAt` timestamp.
+  - `unpublishContent(contentId)`: Change status to 'draft', clear `publishedAt`.
+  - `deleteContent(contentId)`: Soft delete (set `deletedAt` timestamp).
+
+**AdminCustomerManagementService** (extends `BaseService`):
+- **Primary Responsibility**: Customer support operations (view purchase history, grant manual access)
+- **Key Operations**:
+  - `listCustomers({ page, limit })`: Paginated customer list with aggregated purchase stats (total spent, purchase count).
+  - `getCustomerDetails(customerId)`: Customer profile with complete purchase history.
+  - `grantContentAccess(customerId, contentId)`: Manual access grant for refunds/support (creates $0 purchase, prevents duplicates).
+
+---
+
+### Key Business Rules
+
+**Platform Owner Exclusivity**:
+- ALL admin endpoints require `user.role === 'platform_owner'`
+- Content creators (`role = 'creator'`) and customers (`role = 'customer'`) receive 403 Forbidden
+- No exceptions—even read-only analytics require platform owner role
+- Enforced by `requirePlatformOwner()` middleware on ALL admin routes
+
+**Organization Scoping** (Critical for Multi-Tenancy):
+- ALL queries MUST filter by `organizationId` from authenticated user context
+- NEVER trust client-provided `organizationId` (get from JWT)
+- Even in Phase 1 with single organization, scoping prevents future bugs
+- Example: `WHERE organization_id = user.organizationId` on every query
+
+**Revenue Calculation Rules**:
+- Only `status = 'completed'` purchases count toward revenue
+- Exclude `pending` (incomplete payment), `failed` (payment failed), `refunded` (refunded payment)
+- Daily breakdown limited to last 30 days (prevents massive result sets)
+- Aggregate in database using SQL `SUM()` and `GROUP BY` (not in application code)
+
+**Soft Delete Pattern**:
+- Content deletion sets `deletedAt` timestamp (never hard delete)
+- Preserves referential integrity with `purchases` table (revenue history)
+- Deleted content excluded from listings: `WHERE deleted_at IS NULL`
+- Can be restored by setting `deletedAt = NULL`
+
+**Manual Access Grant Rules** (Support/Refund Workflow):
+- Creates $0 purchase with `status = 'completed'`
+- No Stripe session IDs (manual grant, not payment)
+- Validates customer and content exist in organization
+- Prevents duplicate grants (409 Conflict if already has access)
+
+---
+
+### Error Handling Approach
+
+**Custom Error Classes** (extend `@codex/service-errors`):
+
+None needed—reuse existing error classes:
+- `NotFoundError`: Customer not found, content not found
+- `ConflictError`: Duplicate access grant
+- `ForbiddenError`: Non-platform-owner attempting admin operation
+- `ValidationError`: Invalid input parameters
+
+**Error Mapping** (worker layer):
+```typescript
+import { mapErrorToResponse } from '@codex/service-errors';
+
+try {
+  await service.grantContentAccess(customerId, contentId);
+  return c.json({ success: true });
+} catch (err) {
+  return mapErrorToResponse(err); // Auto-maps to HTTP status codes
+}
+```
+
+**Error Recovery**:
+- No retry logic needed (admin operations are user-initiated)
+- Failed queries logged with `ObservabilityClient.trackError()`
+- Generic error messages to client, detailed errors in logs only
+
+---
+
+### Transaction Boundaries
+
+**No Transactions Required**:
+- All admin operations are single-query operations (no multi-step atomicity needs)
+- `publishContent()`: Single UPDATE statement
+- `grantContentAccess()`: Single INSERT statement (idempotency via unique constraint)
+- Revenue analytics: Read-only aggregation queries
+
+**Future Transaction Use Case** (Not in Phase 1):
+- Bulk content publish/delete operations would require `db.transaction()` for atomicity
+
+---
+
+## Implementation Patterns
+
+### Pattern 1: Role-Based Middleware Composition
+
+Platform owner access requires two-layer authorization: JWT validation + role check.
+
+**BaseService Extension** (all admin services extend this):
+```typescript
+import { BaseService } from '@codex/service-errors';
+import type { ServiceConfig } from '@codex/service-errors';
+
+export class AdminAnalyticsService extends BaseService {
+  constructor(config: ServiceConfig) {
+    super(config); // Provides this.db, this.userId, this.environment
+  }
+
+  async getRevenueStats(organizationId: string, params: { startDate?: Date; endDate?: Date }) {
+    // Business logic here...
+    // this.db available from BaseService
+    // organizationId from authenticated user context (NOT trusted from client)
+  }
+}
+```
+
+**Middleware Chain** (two-step authorization):
+```typescript
+import { Hono } from 'hono';
+import { requireAuth } from '../middleware/auth';
+import { requirePlatformOwner } from '../middleware/require-platform-owner';
+
+const app = new Hono<AuthContext>();
+
+// Step 1: Validate JWT, add user to context
+app.use('*', requireAuth());
+
+// Step 2: Check user.role === 'platform_owner' (403 if not)
+app.use('*', requirePlatformOwner());
+
+// All routes now guaranteed to have platform owner user
+app.get('/api/admin/analytics/revenue', async (c) => {
+  const user = c.get('user'); // Guaranteed: user.role === 'platform_owner'
+  const organizationId = user.organizationId; // From JWT, trusted
   // ...
 });
 ```
 
-### Required Documentation
-- [Access Control Patterns](../../core/ACCESS_CONTROL_PATTERNS.md)
-- [Multi-Tenant Architecture](../../core/MULTI_TENANT_ARCHITECTURE.md)
-- [STANDARDS.md](../STANDARDS.md)
-
----
-
-## Implementation Steps
-
-### Step 1: Create Platform Owner Auth Guard
-
-**Note**: Users table already has `role` enum with 'platform_owner' value (see `design/features/shared/database-schema.md` lines 65-127). No schema changes needed - middleware checks `user.role === 'platform_owner'`.
-
-**File**: `workers/auth/src/middleware/require-platform-owner.ts`
-
+**requirePlatformOwner() Implementation**:
 ```typescript
 import type { Context, Next } from 'hono';
 import type { AuthContext } from './auth';
-import { ObservabilityClient } from '@codex/observability';
 
-/**
- * Middleware to require platform owner role
- *
- * Checks user.role === 'platform_owner' (from database-schema.md v2.0)
- * Must be used AFTER requireAuth() middleware
- */
 export function requirePlatformOwner() {
   return async (c: Context<AuthContext>, next: Next) => {
-    const obs = new ObservabilityClient('auth-middleware', c.env.ENVIRONMENT || 'development');
     const user = c.get('user');
 
     if (!user) {
-      obs.warn('Platform owner check failed - no user context', {
-        url: c.req.url,
-      });
       return c.json({
         error: {
           code: 'UNAUTHORIZED',
@@ -87,11 +346,6 @@ export function requirePlatformOwner() {
 
     // Check role enum (not boolean flag)
     if (user.role !== 'platform_owner') {
-      obs.warn('Platform owner check failed - user not platform owner', {
-        userId: user.id,
-        userRole: user.role,
-        url: c.req.url,
-      });
       return c.json({
         error: {
           code: 'FORBIDDEN',
@@ -100,624 +354,495 @@ export function requirePlatformOwner() {
       }, 403);
     }
 
-    obs.info('Platform owner check passed', {
-      userId: user.id,
-      userRole: user.role,
-    });
-
-    await next();
+    await next(); // User is platform owner, continue
   };
 }
 ```
 
-### Step 2: Create Admin Analytics Service
+**Key Benefits**:
+- Single source of truth for role: `users.role` column (no boolean flags)
+- Middleware composition: `requireAuth()` → `requirePlatformOwner()` → route handler
+- 403 response for non-platform-owners (clear authorization failure)
+- Organization scoping automatic: `user.organizationId` from JWT
 
-**File**: `packages/admin/src/analytics-service.ts`
+---
+
+### Pattern 2: Database Aggregation (Not Application Code)
+
+Revenue analytics use SQL aggregations for performance and correctness.
+
+**❌ BAD: Application-Level Aggregation** (slow, error-prone):
+```typescript
+async getRevenueStats(organizationId: string) {
+  // Fetch ALL purchases into memory (OOM risk for large datasets)
+  const allPurchases = await this.db.query.purchases.findMany({
+    where: and(
+      eq(purchases.organizationId, organizationId),
+      eq(purchases.status, 'completed')
+    ),
+  });
+
+  // Calculate in JavaScript (slow, inefficient)
+  let totalRevenueCents = 0;
+  for (const purchase of allPurchases) {
+    totalRevenueCents += purchase.priceCents; // Integer overflow risk at scale
+  }
+
+  const purchaseCount = allPurchases.length;
+  const averageOrderValue = totalRevenueCents / purchaseCount;
+
+  return { totalRevenueCents, purchaseCount, averageOrderValue };
+}
+```
+
+**✅ GOOD: Database Aggregation** (fast, scalable):
+```typescript
+import { sql, eq, and, gte, lte, desc, count } from 'drizzle-orm';
+import { dbHttp, purchases } from '@codex/database';
+
+async getRevenueStats(organizationId: string, params: { startDate?: Date; endDate?: Date }) {
+  const conditions = [
+    eq(purchases.organizationId, organizationId),
+    eq(purchases.status, 'completed'),
+  ];
+
+  if (params.startDate) {
+    conditions.push(gte(purchases.createdAt, params.startDate));
+  }
+  if (params.endDate) {
+    conditions.push(lte(purchases.createdAt, params.endDate));
+  }
+
+  // Aggregate in database (single query, fast)
+  const totals = await this.db
+    .select({
+      totalRevenueCents: sql<number>`COALESCE(SUM(${purchases.priceCents}), 0)`,
+      totalPurchases: count(purchases.id),
+    })
+    .from(purchases)
+    .where(and(...conditions));
+
+  const { totalRevenueCents, totalPurchases } = totals[0];
+  const averageOrderValueCents = totalPurchases > 0
+    ? Math.round(totalRevenueCents / totalPurchases)
+    : 0;
+
+  // Daily breakdown (GROUP BY in database)
+  const revenueByDay = await this.db
+    .select({
+      date: sql<string>`DATE(${purchases.createdAt})`,
+      revenueCents: sql<number>`SUM(${purchases.priceCents})`,
+      count: count(purchases.id),
+    })
+    .from(purchases)
+    .where(and(...conditions))
+    .groupBy(sql`DATE(${purchases.createdAt})`)
+    .orderBy(sql`DATE(${purchases.createdAt}) DESC`)
+    .limit(30); // Last 30 days
+
+  return {
+    totalRevenueCents: Number(totalRevenueCents),
+    totalPurchases: Number(totalPurchases),
+    averageOrderValueCents,
+    revenueByDay: revenueByDay.map(row => ({
+      date: row.date,
+      revenueCents: Number(row.revenueCents),
+      count: Number(row.count),
+    })),
+  };
+}
+```
+
+**Key Benefits**:
+- Database aggregation: `SUM()`, `COUNT()`, `GROUP BY` in PostgreSQL (optimized, indexed)
+- Single query vs thousands of objects in memory
+- COALESCE handles zero-purchase case (no division by zero)
+- Type-safe: Drizzle ORM `sql` template literals with type annotations
+
+---
+
+### Pattern 3: Idempotent Manual Access Grant
+
+Manual access grants use unique constraints to prevent duplicates.
+
+**Problem**: Platform owner clicks "Grant Access" button twice → duplicate purchases
+
+**Solution**: Idempotency via database unique constraint + pre-check
 
 ```typescript
-import { sql, eq, and, gte, desc, count } from 'drizzle-orm';
-import type { DrizzleClient } from '@codex/database';
-import { content, contentPurchases, users } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
+import { eq, and } from 'drizzle-orm';
+import { NotFoundError, ConflictError } from '@codex/service-errors';
+import { dbHttp, users, content, purchases } from '@codex/database';
 
-export interface AdminAnalyticsServiceConfig {
-  db: DrizzleClient;
-  obs: ObservabilityClient;
-  organizationId: string;
-}
+async grantContentAccess(
+  organizationId: string,
+  customerId: string,
+  contentId: string
+): Promise<void> {
+  // Step 1: Validate customer exists in organization
+  const customer = await this.db.query.users.findFirst({
+    where: and(
+      eq(users.id, customerId),
+      eq(users.organizationId, organizationId)
+    ),
+  });
 
-export class AdminAnalyticsService {
-  constructor(private config: AdminAnalyticsServiceConfig) {}
-
-  /**
-   * Get revenue analytics
-   */
-  async getRevenueStats(params: {
-    startDate?: Date;
-    endDate?: Date;
-  }): Promise<{
-    totalRevenueCents: number;
-    totalPurchases: number;
-    averageOrderValueCents: number;
-    revenueByDay: Array<{ date: string; revenueCents: number; count: number }>;
-  }> {
-    const { db, obs, organizationId } = this.config;
-
-    obs.info('Getting revenue stats', {
-      startDate: params.startDate?.toISOString(),
-      endDate: params.endDate?.toISOString(),
-    });
-
-    const conditions = [
-      eq(contentPurchases.organizationId, organizationId),
-      eq(contentPurchases.status, 'completed'),
-    ];
-
-    if (params.startDate) {
-      conditions.push(gte(contentPurchases.createdAt, params.startDate));
-    }
-    if (params.endDate) {
-      conditions.push(lte(contentPurchases.createdAt, params.endDate));
-    }
-
-    // Get total revenue and count
-    const totals = await db
-      .select({
-        totalRevenueCents: sql<number>`COALESCE(SUM(${contentPurchases.priceCents}), 0)`,
-        totalPurchases: count(contentPurchases.id),
-      })
-      .from(contentPurchases)
-      .where(and(...conditions));
-
-    const { totalRevenueCents, totalPurchases } = totals[0];
-    const averageOrderValueCents = totalPurchases > 0 ? Math.round(totalRevenueCents / totalPurchases) : 0;
-
-    // Get revenue by day
-    const revenueByDay = await db
-      .select({
-        date: sql<string>`DATE(${contentPurchases.createdAt})`,
-        revenueCents: sql<number>`SUM(${contentPurchases.priceCents})`,
-        count: count(contentPurchases.id),
-      })
-      .from(contentPurchases)
-      .where(and(...conditions))
-      .groupBy(sql`DATE(${contentPurchases.createdAt})`)
-      .orderBy(sql`DATE(${contentPurchases.createdAt}) DESC`)
-      .limit(30); // Last 30 days
-
-    return {
-      totalRevenueCents,
-      totalPurchases,
-      averageOrderValueCents,
-      revenueByDay: revenueByDay.map(row => ({
-        date: row.date,
-        revenueCents: Number(row.revenueCents),
-        count: Number(row.count),
-      })),
-    };
+  if (!customer) {
+    throw new NotFoundError('Customer not found');
   }
 
-  /**
-   * Get customer analytics
-   */
-  async getCustomerStats(): Promise<{
-    totalCustomers: number;
-    totalPurchasingCustomers: number;
-    newCustomersLast30Days: number;
-  }> {
-    const { db, obs, organizationId } = this.config;
+  // Step 2: Validate content exists in organization
+  const contentRecord = await this.db.query.content.findFirst({
+    where: and(
+      eq(content.id, contentId),
+      eq(content.organizationId, organizationId)
+    ),
+  });
 
-    obs.info('Getting customer stats');
-
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    // Total customers (users in this organization)
-    const totalCustomersResult = await db
-      .select({ count: count(users.id) })
-      .from(users)
-      .where(eq(users.organizationId, organizationId));
-
-    const totalCustomers = totalCustomersResult[0]?.count || 0;
-
-    // Total purchasing customers (distinct customers with completed purchases)
-    const purchasingCustomersResult = await db
-      .select({ count: sql<number>`COUNT(DISTINCT ${contentPurchases.customerId})` })
-      .from(contentPurchases)
-      .where(and(
-        eq(contentPurchases.organizationId, organizationId),
-        eq(contentPurchases.status, 'completed')
-      ));
-
-    const totalPurchasingCustomers = Number(purchasingCustomersResult[0]?.count || 0);
-
-    // New customers in last 30 days
-    const newCustomersResult = await db
-      .select({ count: count(users.id) })
-      .from(users)
-      .where(and(
-        eq(users.organizationId, organizationId),
-        gte(users.createdAt, thirtyDaysAgo)
-      ));
-
-    const newCustomersLast30Days = newCustomersResult[0]?.count || 0;
-
-    return {
-      totalCustomers,
-      totalPurchasingCustomers,
-      newCustomersLast30Days,
-    };
+  if (!contentRecord) {
+    throw new NotFoundError('Content not found');
   }
 
-  /**
-   * Get top performing content
-   */
-  async getTopContent(limit: number = 10): Promise<Array<{
-    contentId: string;
-    title: string;
-    totalRevenueCents: number;
-    totalPurchases: number;
-  }>> {
-    const { db, obs, organizationId } = this.config;
+  // Step 3: Check for existing purchase (idempotency)
+  const existingPurchase = await this.db.query.purchases.findFirst({
+    where: and(
+      eq(purchases.customerId, customerId),
+      eq(purchases.contentId, contentId)
+    ),
+  });
 
-    obs.info('Getting top content', { limit });
-
-    const topContent = await db
-      .select({
-        contentId: contentPurchases.contentId,
-        title: content.title,
-        totalRevenueCents: sql<number>`SUM(${contentPurchases.priceCents})`,
-        totalPurchases: count(contentPurchases.id),
-      })
-      .from(contentPurchases)
-      .innerJoin(content, eq(contentPurchases.contentId, content.id))
-      .where(and(
-        eq(contentPurchases.organizationId, organizationId),
-        eq(contentPurchases.status, 'completed')
-      ))
-      .groupBy(contentPurchases.contentId, content.title)
-      .orderBy(desc(sql`SUM(${contentPurchases.priceCents})`))
-      .limit(limit);
-
-    return topContent.map(row => ({
-      contentId: row.contentId,
-      title: row.title,
-      totalRevenueCents: Number(row.totalRevenueCents),
-      totalPurchases: Number(row.totalPurchases),
-    }));
+  if (existingPurchase) {
+    throw new ConflictError('Customer already has access to this content');
   }
-}
 
-/**
- * Factory function for dependency injection
- */
-export function getAdminAnalyticsService(env: {
-  DATABASE_URL: string;
-  ENVIRONMENT: string;
-  ORGANIZATION_ID: string;
-}): AdminAnalyticsService {
-  const db = getDbClient(env.DATABASE_URL);
-  const obs = new ObservabilityClient('admin-analytics-service', env.ENVIRONMENT);
+  // Step 4: Create manual grant ($0 purchase, no Stripe references)
+  await this.db.insert(purchases).values({
+    id: crypto.randomUUID(),
+    customerId,
+    contentId,
+    organizationId,
+    priceCents: 0, // Manual grant = free
+    status: 'completed',
+    stripeCheckoutSessionId: null, // Not a Stripe payment
+    stripePaymentIntentId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 
-  return new AdminAnalyticsService({
-    db,
-    obs,
-    organizationId: env.ORGANIZATION_ID,
+  // Step 5: Log for audit trail
+  this.obs.info('Manual content access granted', {
+    customerId,
+    contentId,
+    grantedBy: this.userId, // Platform owner ID
   });
 }
 ```
 
-### Step 3: Create Admin Content Management Service
+**Database Constraint** (prevents race conditions):
+```sql
+-- purchases table unique constraint
+ALTER TABLE purchases
+ADD CONSTRAINT unique_customer_content UNIQUE (customer_id, content_id);
+```
 
-**File**: `packages/admin/src/content-management-service.ts`
+**Key Benefits**:
+- Idempotent: Duplicate clicks return 409 Conflict (safe, no duplicate grants)
+- Validation: Ensures customer and content exist before grant
+- Audit trail: Logs `grantedBy` (platform owner who granted access)
+- No Stripe references: `stripePaymentIntentId = null` distinguishes manual grants
 
+---
+
+### Pattern 4: Organization-Scoped Query Helper
+
+Create reusable helper for organization scoping to prevent bugs.
+
+**Helper Function** (in `@codex/database`):
 ```typescript
-import { eq, and, desc, isNull } from 'drizzle-orm';
-import type { DrizzleClient } from '@codex/database';
-import { content } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
+import { eq, and, isNull } from 'drizzle-orm';
+import type { PgTable } from 'drizzle-orm/pg-core';
 
-export interface AdminContentManagementServiceConfig {
-  db: DrizzleClient;
-  obs: ObservabilityClient;
-  organizationId: string;
-}
-
-export class AdminContentManagementService {
-  constructor(private config: AdminContentManagementServiceConfig) {}
-
-  /**
-   * List all content (including drafts and archived)
-   */
-  async listAllContent(params: {
-    page: number;
-    limit: number;
-    status?: 'draft' | 'published' | 'archived' | 'all';
-  }): Promise<{
-    items: Array<{
-      id: string;
-      title: string;
-      slug: string;
-      status: string;
-      priceCents: number;
-      publishedAt: Date | null;
-      createdAt: Date;
-    }>;
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-    };
-  }> {
-    const { db, obs, organizationId } = this.config;
-
-    obs.info('Listing all content', { page: params.page, status: params.status });
-
-    const conditions = [
-      eq(content.organizationId, organizationId),
-      isNull(content.deletedAt), // Don't show soft-deleted
-    ];
-
-    if (params.status && params.status !== 'all') {
-      conditions.push(eq(content.status, params.status));
-    }
-
-    const offset = (params.page - 1) * params.limit;
-
-    const items = await db.query.content.findMany({
-      where: and(...conditions),
-      orderBy: [desc(content.createdAt)],
-      limit: params.limit,
-      offset,
-      columns: {
-        id: true,
-        title: true,
-        slug: true,
-        status: true,
-        priceCents: true,
-        publishedAt: true,
-        createdAt: true,
-      },
-    });
-
-    // Get total count (simplified - in production use separate count query)
-    const totalResult = await db
-      .select({ count: count(content.id) })
-      .from(content)
-      .where(and(...conditions));
-
-    const total = totalResult[0]?.count || 0;
-
-    return {
-      items,
-      pagination: {
-        page: params.page,
-        limit: params.limit,
-        total,
-      },
-    };
-  }
-
-  /**
-   * Publish content (change status from draft to published)
-   */
-  async publishContent(contentId: string): Promise<void> {
-    const { db, obs, organizationId } = this.config;
-
-    obs.info('Publishing content', { contentId });
-
-    await db
-      .update(content)
-      .set({
-        status: 'published',
-        publishedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(
-        eq(content.id, contentId),
-        eq(content.organizationId, organizationId)
-      ));
-
-    obs.info('Content published', { contentId });
-  }
-
-  /**
-   * Unpublish content (change status to draft)
-   */
-  async unpublishContent(contentId: string): Promise<void> {
-    const { db, obs, organizationId } = this.config;
-
-    obs.info('Unpublishing content', { contentId });
-
-    await db
-      .update(content)
-      .set({
-        status: 'draft',
-        updatedAt: new Date(),
-      })
-      .where(and(
-        eq(content.id, contentId),
-        eq(content.organizationId, organizationId)
-      ));
-
-    obs.info('Content unpublished', { contentId });
-  }
-
-  /**
-   * Soft delete content
-   */
-  async deleteContent(contentId: string): Promise<void> {
-    const { db, obs, organizationId } = this.config;
-
-    obs.info('Deleting content', { contentId });
-
-    await db
-      .update(content)
-      .set({
-        deletedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(
-        eq(content.id, contentId),
-        eq(content.organizationId, organizationId)
-      ));
-
-    obs.info('Content deleted (soft)', { contentId });
-  }
+/**
+ * Scope query by organizationId and exclude soft-deleted records
+ *
+ * @param table - Drizzle table (must have organizationId and deletedAt columns)
+ * @param organizationId - Organization to scope to
+ * @returns WHERE condition for organization + not deleted
+ */
+export function orgScopedNotDeleted<T extends PgTable>(
+  table: T,
+  organizationId: string
+) {
+  return and(
+    eq(table.organizationId, organizationId),
+    isNull(table.deletedAt)
+  );
 }
 ```
 
-### Step 4: Create Admin Customer Management Service
-
-**File**: `packages/admin/src/customer-management-service.ts`
-
+**Usage in Admin Services**:
 ```typescript
-import { eq, and, desc } from 'drizzle-orm';
-import type { DrizzleClient } from '@codex/database';
-import { users, contentPurchases, content } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
+import { orgScopedNotDeleted } from '@codex/database';
 
-export interface AdminCustomerManagementServiceConfig {
-  db: DrizzleClient;
-  obs: ObservabilityClient;
-  organizationId: string;
-}
+async listAllContent(
+  organizationId: string,
+  params: { page: number; limit: number; status?: string }
+) {
+  const conditions = [orgScopedNotDeleted(content, organizationId)];
 
-export class AdminCustomerManagementService {
-  constructor(private config: AdminCustomerManagementServiceConfig) {}
+  if (params.status && params.status !== 'all') {
+    conditions.push(eq(content.status, params.status));
+  }
 
-  /**
-   * List all customers with purchase stats
-   */
-  async listCustomers(params: {
-    page: number;
-    limit: number;
-  }): Promise<{
-    items: Array<{
-      id: string;
-      name: string;
-      email: string;
-      createdAt: Date;
-      totalPurchases: number;
-      totalSpentCents: number;
-    }>;
+  const offset = (params.page - 1) * params.limit;
+
+  const items = await this.db.query.content.findMany({
+    where: and(...conditions),
+    orderBy: [desc(content.createdAt)],
+    limit: params.limit,
+    offset,
+  });
+
+  // Get total count
+  const totalResult = await this.db
+    .select({ count: count(content.id) })
+    .from(content)
+    .where(and(...conditions));
+
+  return {
+    items,
     pagination: {
-      page: number;
-      limit: number;
-      total: number;
-    };
-  }> {
-    const { db, obs, organizationId } = this.config;
+      page: params.page,
+      limit: params.limit,
+      total: totalResult[0]?.count || 0,
+    },
+  };
+}
+```
 
-    obs.info('Listing customers', { page: params.page });
+**Key Benefits**:
+- DRY: Single function for organization scoping + soft delete filtering
+- Type-safe: TypeScript ensures table has `organizationId` and `deletedAt` columns
+- Bug prevention: Impossible to forget organization scoping or soft delete check
 
-    const offset = (params.page - 1) * params.limit;
+---
 
-    // Get users with purchase stats (aggregated)
-    const customers = await db
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-        createdAt: users.createdAt,
-        totalPurchases: sql<number>`COALESCE(COUNT(${contentPurchases.id}), 0)`,
-        totalSpentCents: sql<number>`COALESCE(SUM(${contentPurchases.priceCents}), 0)`,
-      })
-      .from(users)
-      .leftJoin(
-        contentPurchases,
-        and(
-          eq(users.id, contentPurchases.customerId),
-          eq(contentPurchases.status, 'completed')
-        )
-      )
-      .where(eq(users.organizationId, organizationId))
-      .groupBy(users.id, users.name, users.email, users.createdAt)
-      .orderBy(desc(users.createdAt))
-      .limit(params.limit)
-      .offset(offset);
+## Pseudocode for Key Operations
 
-    // Get total count
-    const totalResult = await db
-      .select({ count: count(users.id) })
-      .from(users)
-      .where(eq(users.organizationId, organizationId));
+### Pseudocode: getRevenueStats()
 
-    const total = totalResult[0]?.count || 0;
+```
+FUNCTION getRevenueStats(organizationId, { startDate?, endDate? }):
+  // Step 1: Build query conditions
+  conditions = [
+    purchases.organizationId = organizationId,
+    purchases.status = 'completed'
+  ]
 
-    return {
-      items: customers.map(c => ({
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        createdAt: c.createdAt,
-        totalPurchases: Number(c.totalPurchases),
-        totalSpentCents: Number(c.totalSpentCents),
-      })),
-      pagination: {
-        page: params.page,
-        limit: params.limit,
-        total,
-      },
-    };
+  IF startDate is provided:
+    conditions.push(purchases.createdAt >= startDate)
+
+  IF endDate is provided:
+    conditions.push(purchases.createdAt <= endDate)
+
+  // Step 2: Aggregate total revenue and count
+  totals = DATABASE_QUERY:
+    SELECT
+      COALESCE(SUM(price_cents), 0) AS totalRevenueCents,
+      COUNT(*) AS totalPurchases
+    FROM purchases
+    WHERE conditions
+
+  totalRevenueCents = totals[0].totalRevenueCents
+  totalPurchases = totals[0].totalPurchases
+  averageOrderValueCents = totalPurchases > 0
+    ? ROUND(totalRevenueCents / totalPurchases)
+    : 0
+
+  // Step 3: Get daily breakdown (last 30 days)
+  revenueByDay = DATABASE_QUERY:
+    SELECT
+      DATE(created_at) AS date,
+      SUM(price_cents) AS revenueCents,
+      COUNT(*) AS count
+    FROM purchases
+    WHERE conditions
+    GROUP BY DATE(created_at)
+    ORDER BY DATE(created_at) DESC
+    LIMIT 30
+
+  // Step 4: Return aggregated stats
+  RETURN {
+    totalRevenueCents,
+    totalPurchases,
+    averageOrderValueCents,
+    revenueByDay: revenueByDay.map(row => ({
+      date: row.date,
+      revenueCents: row.revenueCents,
+      count: row.count
+    }))
   }
+END FUNCTION
+```
 
-  /**
-   * Get customer details with purchase history
-   */
-  async getCustomerDetails(customerId: string): Promise<{
-    customer: {
-      id: string;
-      name: string;
-      email: string;
-      createdAt: Date;
-    };
-    purchases: Array<{
-      id: string;
-      contentTitle: string;
-      priceCents: number;
-      purchasedAt: Date;
-      status: string;
-    }>;
-    stats: {
-      totalPurchases: number;
-      totalSpentCents: number;
-    };
-  }> {
-    const { db, obs, organizationId } = this.config;
+---
 
-    obs.info('Getting customer details', { customerId });
+### Pseudocode: grantContentAccess()
 
-    // Get customer
-    const customer = await db.query.users.findFirst({
-      where: and(
-        eq(users.id, customerId),
-        eq(users.organizationId, organizationId)
-      ),
-    });
+```
+FUNCTION grantContentAccess(organizationId, customerId, contentId):
+  // Step 1: Validate customer exists in organization
+  customer = DATABASE_QUERY:
+    SELECT * FROM users
+    WHERE id = customerId
+    AND organization_id = organizationId
 
-    if (!customer) {
-      throw new Error('CUSTOMER_NOT_FOUND');
-    }
+  IF customer is NULL:
+    THROW NotFoundError('Customer not found')
 
-    // Get purchases
-    const purchases = await db.query.contentPurchases.findMany({
-      where: eq(contentPurchases.customerId, customerId),
-      with: {
-        content: {
-          columns: {
-            title: true,
-          },
-        },
-      },
-      orderBy: [desc(contentPurchases.createdAt)],
-    });
+  // Step 2: Validate content exists in organization
+  content = DATABASE_QUERY:
+    SELECT * FROM content
+    WHERE id = contentId
+    AND organization_id = organizationId
 
-    // Calculate stats
-    const completedPurchases = purchases.filter(p => p.status === 'completed');
-    const totalPurchases = completedPurchases.length;
-    const totalSpentCents = completedPurchases.reduce((sum, p) => sum + p.priceCents, 0);
+  IF content is NULL:
+    THROW NotFoundError('Content not found')
 
-    return {
-      customer: {
-        id: customer.id,
-        name: customer.name,
-        email: customer.email,
-        createdAt: customer.createdAt,
-      },
-      purchases: purchases.map(p => ({
-        id: p.id,
-        contentTitle: p.content.title,
-        priceCents: p.priceCents,
-        purchasedAt: p.createdAt,
-        status: p.status,
-      })),
-      stats: {
-        totalPurchases,
-        totalSpentCents,
-      },
-    };
-  }
+  // Step 3: Check for existing purchase (idempotency)
+  existingPurchase = DATABASE_QUERY:
+    SELECT * FROM purchases
+    WHERE customer_id = customerId
+    AND content_id = contentId
 
-  /**
-   * Manually grant access to content (for support/refunds)
-   */
-  async grantContentAccess(customerId: string, contentId: string): Promise<void> {
-    const { db, obs, organizationId } = this.config;
+  IF existingPurchase is NOT NULL:
+    THROW ConflictError('Customer already has access to this content')
 
-    obs.info('Manually granting content access', { customerId, contentId });
-
-    // Verify customer exists
-    const customer = await db.query.users.findFirst({
-      where: and(
-        eq(users.id, customerId),
-        eq(users.organizationId, organizationId)
-      ),
-    });
-
-    if (!customer) {
-      throw new Error('CUSTOMER_NOT_FOUND');
-    }
-
-    // Verify content exists
-    const contentRecord = await db.query.content.findFirst({
-      where: and(
-        eq(content.id, contentId),
-        eq(content.organizationId, organizationId)
-      ),
-    });
-
-    if (!contentRecord) {
-      throw new Error('CONTENT_NOT_FOUND');
-    }
-
-    // Check if purchase already exists
-    const existingPurchase = await db.query.contentPurchases.findFirst({
-      where: and(
-        eq(contentPurchases.customerId, customerId),
-        eq(contentPurchases.contentId, contentId)
-      ),
-    });
-
-    if (existingPurchase) {
-      obs.warn('Purchase already exists', { customerId, contentId });
-      throw new Error('PURCHASE_ALREADY_EXISTS');
-    }
-
-    // Create completed purchase (manual grant = $0)
-    await db.insert(contentPurchases).values({
-      id: crypto.randomUUID(),
+  // Step 4: Create manual grant ($0 purchase)
+  DATABASE_INSERT:
+    INSERT INTO purchases (
+      id,
+      customer_id,
+      content_id,
+      organization_id,
+      price_cents,
+      status,
+      stripe_checkout_session_id,
+      stripe_payment_intent_id,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      generate_uuid(),
       customerId,
       contentId,
       organizationId,
-      priceCents: 0, // Manual grant
-      status: 'completed',
-      stripeCheckoutSessionId: null, // No Stripe session
-      stripePaymentIntentId: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+      0,                    -- Manual grant = free
+      'completed',
+      NULL,                 -- No Stripe session
+      NULL,                 -- No Stripe payment intent
+      NOW(),
+      NOW()
+    )
 
-    obs.info('Content access granted manually', { customerId, contentId });
-  }
-}
+  // Step 5: Log for audit trail
+  LOG_INFO('Manual content access granted', {
+    customerId,
+    contentId,
+    grantedBy: platformOwnerUserId
+  })
+
+  RETURN success
+END FUNCTION
 ```
 
-### Step 5: Create Admin API Endpoints
+---
 
-**File**: `workers/auth/src/routes/admin.ts`
+### Pseudocode: listCustomers()
+
+```
+FUNCTION listCustomers(organizationId, { page, limit }):
+  offset = (page - 1) * limit
+
+  // Step 1: Get customers with aggregated purchase stats
+  customers = DATABASE_QUERY:
+    SELECT
+      users.id,
+      users.name,
+      users.email,
+      users.created_at,
+      COALESCE(COUNT(purchases.id), 0) AS totalPurchases,
+      COALESCE(SUM(purchases.price_cents), 0) AS totalSpentCents
+    FROM users
+    LEFT JOIN purchases ON (
+      users.id = purchases.customer_id
+      AND purchases.status = 'completed'
+    )
+    WHERE users.organization_id = organizationId
+    GROUP BY users.id, users.name, users.email, users.created_at
+    ORDER BY users.created_at DESC
+    LIMIT limit
+    OFFSET offset
+
+  // Step 2: Get total customer count for pagination
+  totalResult = DATABASE_QUERY:
+    SELECT COUNT(*) AS count
+    FROM users
+    WHERE organization_id = organizationId
+
+  total = totalResult[0].count
+
+  // Step 3: Return paginated list
+  RETURN {
+    items: customers.map(c => ({
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      createdAt: c.createdAt,
+      totalPurchases: c.totalPurchases,
+      totalSpentCents: c.totalSpentCents
+    })),
+    pagination: {
+      page,
+      limit,
+      total
+    }
+  }
+END FUNCTION
+```
+
+---
+
+## API Integration
+
+### Endpoints
+
+| Method | Path | Purpose | Security Policy |
+|--------|------|---------|-----------------|
+| GET | `/api/admin/analytics/revenue` | Get revenue statistics | `requirePlatformOwner()` |
+| GET | `/api/admin/analytics/customers` | Get customer statistics | `requirePlatformOwner()` |
+| GET | `/api/admin/analytics/top-content` | Get top performing content | `requirePlatformOwner()` |
+| GET | `/api/admin/content` | List all content (all creators) | `requirePlatformOwner()` |
+| POST | `/api/admin/content/:id/publish` | Publish content | `requirePlatformOwner()` |
+| POST | `/api/admin/content/:id/unpublish` | Unpublish content | `requirePlatformOwner()` |
+| DELETE | `/api/admin/content/:id` | Soft delete content | `requirePlatformOwner()` |
+| GET | `/api/admin/customers` | List all customers | `requirePlatformOwner()` |
+| GET | `/api/admin/customers/:id` | Get customer details | `requirePlatformOwner()` |
+| POST | `/api/admin/customers/:customerId/grant-access/:contentId` | Manually grant access | `requirePlatformOwner()` |
+
+---
+
+### Standard Pattern
+
+All admin endpoints follow this pattern from `@codex/worker-utils`:
 
 ```typescript
 import { Hono } from 'hono';
 import type { AuthContext } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { requirePlatformOwner } from '../middleware/require-platform-owner';
-import {
-  getAdminAnalyticsService,
-  getAdminContentManagementService,
-  getAdminCustomerManagementService,
-} from '@codex/admin';
-import { ObservabilityClient } from '@codex/observability';
+import { mapErrorToResponse } from '@codex/service-errors';
+import { AdminAnalyticsService } from '@codex/admin';
 
 const app = new Hono<AuthContext>();
 
@@ -725,1642 +850,370 @@ const app = new Hono<AuthContext>();
 app.use('*', requireAuth());
 app.use('*', requirePlatformOwner());
 
-/**
- * GET /api/admin/analytics/revenue
- * Get revenue statistics
- */
 app.get('/api/admin/analytics/revenue', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
+  const user = c.get('user'); // Guaranteed platform owner
 
   try {
-    const service = getAdminAnalyticsService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    const startDate = c.req.query('startDate') ? new Date(c.req.query('startDate')!) : undefined;
-    const endDate = c.req.query('endDate') ? new Date(c.req.query('endDate')!) : undefined;
-
-    const stats = await service.getRevenueStats({ startDate, endDate });
-
-    return c.json(stats);
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to get revenue stats' } }, 500);
-  }
-});
-
-/**
- * GET /api/admin/analytics/customers
- * Get customer statistics
- */
-app.get('/api/admin/analytics/customers', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminAnalyticsService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    const stats = await service.getCustomerStats();
-
-    return c.json(stats);
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to get customer stats' } }, 500);
-  }
-});
-
-/**
- * GET /api/admin/analytics/top-content
- * Get top performing content
- */
-app.get('/api/admin/analytics/top-content', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminAnalyticsService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    const limit = Number(c.req.query('limit')) || 10;
-    const topContent = await service.getTopContent(limit);
-
-    return c.json({ items: topContent });
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to get top content' } }, 500);
-  }
-});
-
-/**
- * GET /api/admin/content
- * List all content (including drafts)
- */
-app.get('/api/admin/content', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminContentManagementService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    const page = Number(c.req.query('page')) || 1;
-    const limit = Number(c.req.query('limit')) || 20;
-    const status = c.req.query('status') as 'draft' | 'published' | 'archived' | 'all' | undefined;
-
-    const result = await service.listAllContent({ page, limit, status });
-
-    return c.json(result);
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to list content' } }, 500);
-  }
-});
-
-/**
- * POST /api/admin/content/:id/publish
- * Publish content
- */
-app.post('/api/admin/content/:id/publish', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminContentManagementService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    await service.publishContent(c.req.param('id'));
-
-    return c.json({ success: true });
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id, contentId: c.req.param('id') });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to publish content' } }, 500);
-  }
-});
-
-/**
- * POST /api/admin/content/:id/unpublish
- * Unpublish content
- */
-app.post('/api/admin/content/:id/unpublish', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminContentManagementService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    await service.unpublishContent(c.req.param('id'));
-
-    return c.json({ success: true });
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id, contentId: c.req.param('id') });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to unpublish content' } }, 500);
-  }
-});
-
-/**
- * DELETE /api/admin/content/:id
- * Soft delete content
- */
-app.delete('/api/admin/content/:id', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminContentManagementService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    await service.deleteContent(c.req.param('id'));
-
-    return c.json({ success: true });
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id, contentId: c.req.param('id') });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to delete content' } }, 500);
-  }
-});
-
-/**
- * GET /api/admin/customers
- * List all customers
- */
-app.get('/api/admin/customers', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminCustomerManagementService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    const page = Number(c.req.query('page')) || 1;
-    const limit = Number(c.req.query('limit')) || 20;
-
-    const result = await service.listCustomers({ page, limit });
-
-    return c.json(result);
-  } catch (err) {
-    obs.trackError(err as Error, { userId: user.id });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to list customers' } }, 500);
-  }
-});
-
-/**
- * GET /api/admin/customers/:id
- * Get customer details with purchase history
- */
-app.get('/api/admin/customers/:id', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminCustomerManagementService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    const details = await service.getCustomerDetails(c.req.param('id'));
-
-    return c.json(details);
-  } catch (err) {
-    if ((err as Error).message === 'CUSTOMER_NOT_FOUND') {
-      return c.json({ error: { code: 'CUSTOMER_NOT_FOUND', message: 'Customer not found' } }, 404);
-    }
-    obs.trackError(err as Error, { userId: user.id, customerId: c.req.param('id') });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to get customer details' } }, 500);
-  }
-});
-
-/**
- * POST /api/admin/customers/:customerId/grant-access/:contentId
- * Manually grant content access
- */
-app.post('/api/admin/customers/:customerId/grant-access/:contentId', async (c) => {
-  const obs = new ObservabilityClient('admin-api', c.env.ENVIRONMENT);
-  const user = c.get('user');
-
-  try {
-    const service = getAdminCustomerManagementService({
-      ...c.env,
-      ORGANIZATION_ID: user.organizationId,
-    });
-
-    await service.grantContentAccess(
-      c.req.param('customerId'),
-      c.req.param('contentId')
-    );
-
-    return c.json({ success: true });
-  } catch (err) {
-    const message = (err as Error).message;
-    if (message === 'CUSTOMER_NOT_FOUND') {
-      return c.json({ error: { code: 'CUSTOMER_NOT_FOUND', message: 'Customer not found' } }, 404);
-    }
-    if (message === 'CONTENT_NOT_FOUND') {
-      return c.json({ error: { code: 'CONTENT_NOT_FOUND', message: 'Content not found' } }, 404);
-    }
-    if (message === 'PURCHASE_ALREADY_EXISTS') {
-      return c.json({ error: { code: 'PURCHASE_ALREADY_EXISTS', message: 'Customer already has access' } }, 409);
-    }
-    obs.trackError(err as Error, {
+    const service = new AdminAnalyticsService({
+      db: c.env.DB,
       userId: user.id,
-      customerId: c.req.param('customerId'),
-      contentId: c.req.param('contentId'),
+      environment: c.env.ENVIRONMENT,
     });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to grant access' } }, 500);
+
+    // Get query params
+    const startDate = c.req.query('startDate')
+      ? new Date(c.req.query('startDate')!)
+      : undefined;
+    const endDate = c.req.query('endDate')
+      ? new Date(c.req.query('endDate')!)
+      : undefined;
+
+    const stats = await service.getRevenueStats(user.organizationId, {
+      startDate,
+      endDate,
+    });
+
+    return c.json({ data: stats });
+  } catch (err) {
+    return mapErrorToResponse(err); // Auto HTTP status codes
   }
 });
-
-export default app;
 ```
+
+---
+
+### Security Policies
+
+- **`requireAuth()`**: Validates JWT, adds user to context (inherited from auth worker)
+- **`requirePlatformOwner()`**: Checks `user.role === 'platform_owner'` (NEW in this work packet)
+  - 403 Forbidden for non-platform-owners
+  - Must be chained AFTER `requireAuth()` (requires user context)
+
+**Middleware Chain**:
+```typescript
+app.use('*', requireAuth());           // Step 1: JWT validation
+app.use('*', requirePlatformOwner());  // Step 2: Role check (platform_owner only)
+```
+
+---
+
+### Response Format
+
+All endpoints return standardized responses from `@codex/shared-types`:
+
+```typescript
+// Success (revenue stats)
+{
+  "data": {
+    "totalRevenueCents": 50000,
+    "totalPurchases": 25,
+    "averageOrderValueCents": 2000,
+    "revenueByDay": [
+      { "date": "2025-11-24", "revenueCents": 5000, "count": 3 },
+      { "date": "2025-11-23", "revenueCents": 3000, "count": 2 }
+    ]
+  }
+}
+
+// Success (paginated customers)
+{
+  "data": {
+    "items": [
+      {
+        "id": "uuid",
+        "name": "John Doe",
+        "email": "john@example.com",
+        "createdAt": "2025-11-01T00:00:00Z",
+        "totalPurchases": 5,
+        "totalSpentCents": 10000
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 100
+    }
+  }
+}
+
+// Error (403 Forbidden)
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Platform owner access required"
+  }
+}
+
+// Error (404 Not Found)
+{
+  "error": {
+    "code": "CUSTOMER_NOT_FOUND",
+    "message": "Customer not found"
+  }
+}
+```
+
+---
+
+## Available Patterns & Utilities
+
+### Foundation Packages
+
+#### `@codex/database`
+- **Query Helpers**:
+  - `scopedNotDeleted(table, userId)`: Combines creator scoping + soft delete filtering
+  - `orgScope(table, organizationId)`: Filter by organization
+  - `withPagination(query, page, pageSize)`: Standardized pagination
+
+- **Aggregation Helpers**:
+  - Use Drizzle ORM `sql` templates for `SUM()`, `COUNT()`, `GROUP BY`
+  - Type-safe: `sql<number>\`SUM(${table.column})\`` with type annotations
+
+- **Error Detection**:
+  - `isUniqueViolation(error)`: Check for unique constraint violations (idempotency)
+
+**When to use**: All admin services use these for database access
+
+---
+
+#### `@codex/service-errors`
+- **BaseService**: Extend this for all admin service classes
+  - Provides: `this.db`, `this.userId`, `this.environment`, `this.obs`
+  - Constructor: `constructor(config: ServiceConfig)`
+
+- **Error Classes**:
+  - `NotFoundError(message)`: 404 responses (customer not found, content not found)
+  - `ConflictError(message)`: 409 responses (duplicate access grant)
+  - `ForbiddenError(message)`: 403 responses (non-platform-owner)
+
+- **Error Mapping**:
+  - `mapErrorToResponse(error)`: Converts service errors to HTTP responses
+
+**When to use**: Every admin service extends BaseService, every worker catches with mapErrorToResponse
+
+---
+
+#### `@codex/validation`
+- **Schema Pattern**:
+  - Define Zod schemas for all admin inputs
+  - Type inference: `type T = z.infer<typeof schema>`
+  - Query param validation: `startDate`, `endDate`, `page`, `limit`
+
+**When to use**: Define schemas for all API inputs (query params, path params)
+
+---
+
+#### `@codex/security`
+- **Middleware**:
+  - `requireAuth()`: Session validation (inherited from auth worker)
+  - `requirePlatformOwner()`: NEW middleware for role check
+
+**When to use**: Applied in worker setup, ALL admin routes require both
+
+---
+
+### Utility Packages
+
+#### `@codex/worker-utils`
+- **Worker Setup**:
+  - `createWorker(config)`: Fully configured Hono app with middleware
+  - Returns app with security headers, CORS, logging, error handling
+
+- **Route Handlers**:
+  - Use standard Hono handlers (no `createAuthenticatedHandler` wrapper for admin)
+  - Middleware chain handles auth: `requireAuth()` → `requirePlatformOwner()`
+
+**When to use**: Every worker uses createWorker()
+
+---
+
+#### `@codex/observability`
+- **Logging**:
+  - `ObservabilityClient.info(message, metadata)`: Info logs
+  - `ObservabilityClient.error(message, error)`: Error logs with stack traces
+  - Structured logging with request context
+
+**When to use**: All admin services and workers for monitoring and debugging
+
+---
+
+## Dependencies
+
+### Required (Blocking)
+
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| P1-CONTENT-001 | ✅ Complete | `content` table for publish/unpublish operations |
+| P1-ECOM-001 | ❌ Not Started | `purchases` table for revenue analytics (BLOCKING) |
+| Auth Worker | ✅ Available | `requireAuth()` middleware for JWT validation |
+
+### Optional (Nice to Have)
+
+| Dependency | Status | Description |
+|------------|--------|-------------|
+| P1-NOTIFY-001 | 🚧 Future | Would enable weekly revenue report emails to platform owners |
+
+### Infrastructure Ready
+
+- ✅ Database schema tooling (Drizzle ORM)
+- ✅ Worker deployment pipeline (Cloudflare Workers)
+- ✅ Auth middleware (`requireAuth()`)
+- ✅ Security middleware (rate limiting, headers)
+
+---
+
+## Implementation Checklist
+
+- [ ] **Middleware**
+  - [ ] Create `requirePlatformOwner()` middleware in `workers/auth/src/middleware/`
+  - [ ] Test 403 response for non-platform-owners
+  - [ ] Test platform owner passes through
+
+- [ ] **Admin Analytics Service**
+  - [ ] Create `packages/admin/src/analytics-service.ts`
+  - [ ] Implement `AdminAnalyticsService` extending `BaseService`
+  - [ ] Implement `getRevenueStats()` with SQL aggregations
+  - [ ] Implement `getCustomerStats()` with 30-day new customer count
+  - [ ] Implement `getTopContent()` with revenue ranking
+  - [ ] Add unit tests (mocked DB)
+
+- [ ] **Admin Content Management Service**
+  - [ ] Create `packages/admin/src/content-management-service.ts`
+  - [ ] Implement `AdminContentManagementService` extending `BaseService`
+  - [ ] Implement `listAllContent()` with pagination and status filtering
+  - [ ] Implement `publishContent()` with timestamp update
+  - [ ] Implement `unpublishContent()` with status revert
+  - [ ] Implement `deleteContent()` with soft delete
+  - [ ] Add unit tests
+
+- [ ] **Admin Customer Management Service**
+  - [ ] Create `packages/admin/src/customer-management-service.ts`
+  - [ ] Implement `AdminCustomerManagementService` extending `BaseService`
+  - [ ] Implement `listCustomers()` with purchase aggregation
+  - [ ] Implement `getCustomerDetails()` with purchase history
+  - [ ] Implement `grantContentAccess()` with idempotency
+  - [ ] Add unit tests
+
+- [ ] **API Endpoints**
+  - [ ] Create admin routes in `workers/auth/src/routes/admin.ts`
+  - [ ] Wire analytics endpoints
+  - [ ] Wire content management endpoints
+  - [ ] Wire customer management endpoints
+  - [ ] Apply `requireAuth()` + `requirePlatformOwner()` middleware to all routes
+  - [ ] Add integration tests
+
+- [ ] **Database Indexes**
+  - [ ] Create indexes on `purchases(organization_id, created_at)`
+  - [ ] Create indexes on `purchases(status)`
+  - [ ] Create indexes on `purchases(content_id)`
+  - [ ] Create indexes on `content(organization_id, status)`
+
+- [ ] **Deployment**
+  - [ ] Update wrangler.jsonc with bindings
+  - [ ] Test in preview environment
+  - [ ] Deploy to production
 
 ---
 
 ## Testing Strategy
 
-**Test Specifications**: See `design/roadmap/testing/admin-testing-definition.md` for comprehensive test patterns, including:
-- Platform owner middleware tests
-- Analytics service tests (revenue, customers, top content)
-- Content management service tests (list, publish, unpublish, delete)
-- Customer management service tests (list, details, grant access)
-- API integration tests (authorization, validation, error handling)
-- Common testing patterns and mocking strategies
+### Unit Tests
+- **Admin Services**: Test business logic in isolation
+  - Mock database with test fixtures
+  - Verify SQL aggregations (revenue calculations)
+  - Test error handling (NotFoundError, ConflictError)
+  - Test idempotency (duplicate access grants)
 
-**To Run Tests**:
-```bash
-# Unit tests (services with mocked DB)
-pnpm --filter @codex/admin test
+### Integration Tests
+- **API Endpoints**: Test full request-response cycle
+  - Use `@codex/test-utils` for database setup
+  - Test platform owner authentication (valid JWT with `role = 'platform_owner'`)
+  - Test non-platform-owner authorization (403 responses)
+  - Verify response formats match `@codex/shared-types`
+  - Test error responses (404, 409, 500)
 
-# Integration tests (API with test DB)
-pnpm --filter @codex/workers-auth test:integration
-```
+### Database Tests
+- **Schema Validation**:
+  - Test organization scoping (queries filtered by `organizationId`)
+  - Verify soft delete behavior (`deletedAt` filtering)
+  - Test unique constraint on `purchases(customer_id, content_id)` for idempotency
 
----
+### E2E Scenarios
+- **Revenue Analytics Flow**: Platform owner logs in → views analytics dashboard → sees revenue stats
+- **Manual Access Grant Flow**: Platform owner → customer support page → grants access to refund customer → customer can stream content
 
-## Definition of Done
-
-### Code Implementation
-- [ ] `requirePlatformOwner()` middleware implemented (checks `user.role === 'platform_owner'`)
-- [ ] Admin analytics service implemented with all methods
-  - [ ] `getRevenueStats()` with date filtering
-  - [ ] `getCustomerStats()` with 30-day new customers
-  - [ ] `getTopContent()` with revenue ranking
-- [ ] Admin content management service implemented
-  - [ ] `listAllContent()` with pagination and status filtering
-  - [ ] `publishContent()` with timestamp update
-  - [ ] `unpublishContent()` with status revert
-  - [ ] `deleteContent()` with soft delete
-- [ ] Admin customer management service implemented
-  - [ ] `listCustomers()` with purchase aggregation
-  - [ ] `getCustomerDetails()` with purchase history
-  - [ ] `grantContentAccess()` with validation
-- [ ] Admin API endpoints created and wired
-  - [ ] Analytics endpoints (`/api/admin/analytics/*`)
-  - [ ] Content management endpoints (`/api/admin/content/*`)
-  - [ ] Customer management endpoints (`/api/admin/customers/*`)
-
-### Testing
-- [ ] Unit tests for all services (mocked DB)
-  - [ ] Analytics service tests
-  - [ ] Content management service tests
-  - [ ] Customer management service tests
-- [ ] Integration tests for API
-  - [ ] Platform owner authorization checks (403 for non-platform-owner)
-  - [ ] All endpoints with valid inputs
-  - [ ] Error cases (not found, validation errors)
-- [ ] Manual testing checklist completed
-  - [ ] View analytics dashboard
-  - [ ] Publish/unpublish content
-  - [ ] Manually grant access
-
-### Quality & Security
-- [ ] Error handling comprehensive (all error codes documented)
-- [ ] Observability logging complete (all operations logged)
-- [ ] Organization scoping enforced on ALL queries
-- [ ] Input validation with Zod schemas
-- [ ] TypeScript types exported from services
-- [ ] No sensitive data in logs
-- [ ] Soft delete used (no hard deletes)
-
-### Documentation
-- [ ] API endpoints documented
-- [ ] Error codes documented
-- [ ] Service interfaces documented
-- [ ] Integration points documented
-
-### DevOps
-- [ ] CI passing (tests + typecheck + lint)
-- [ ] No new ESLint warnings
-- [ ] No new TypeScript errors
-- [ ] Branch deployed to staging
-- [ ] Admin routes accessible at `/api/admin/*`
+### Local Development Testing
+- **Tools**:
+  - `pnpm test`: Run all tests
+  - `pnpm --filter @codex/admin test --watch`: Watch mode for service tests
+  - `pnpm dev`: Local worker development
+  - PostgreSQL via Docker Compose
 
 ---
 
-## Interfaces & Integration Points
+## Notes
 
-### Upstream Dependencies (What This Work Packet Needs)
+### Architectural Decisions
 
-#### P1-CONTENT-001 (Content Service)
+**Why No Caching?**
+- Phase 1 has low admin traffic (< 10 requests/minute)
+- Real-time data preferred for admin operations
+- Future: Add Redis caching with 5-minute TTL for analytics
 
-**Tables Used**:
-- `content` - List all content, publish/unpublish, soft delete
-  - Fields: `id`, `title`, `slug`, `status`, `price_cents`, `published_at`, `created_at`, `deleted_at`, `organization_id`
-  - Where clauses:
-    - List all: `organization_id = X AND deleted_at IS NULL`
-    - Status filter: `status IN ('draft', 'published', 'archived')`
-  - Updates: `status`, `published_at`, `deleted_at`, `updated_at`
+**Why BaseService Extension?**
+- Consistent service architecture across all packages
+- Provides `this.db`, `this.userId`, `this.environment`, `this.obs`
+- Error handling patterns inherited
 
-- `media_items` - Display media details in content listings
-  - Fields: `id`, `media_type`, `duration_seconds`, `thumbnail_url`, `creator_id`
+**Why Organization Scoping in Phase 1?**
+- Single organization in Phase 1, but multi-tenant ready
+- Prevents bugs when Phase 2 adds multi-org support
+- Security best practice: scope ALL queries by default
 
-**Example Query**:
-```typescript
-const allContent = await db.query.content.findMany({
-  where: and(
-    eq(content.organizationId, organizationId),
-    isNull(content.deletedAt),
-    params.status !== 'all' ? eq(content.status, params.status) : undefined
-  ),
-  with: { mediaItem: true },
-  orderBy: [desc(content.createdAt)],
-  limit: params.limit,
-  offset: (params.page - 1) * params.limit,
-});
+### Security Considerations
+
+**Platform Owner Role Check**:
+- Use `user.role === 'platform_owner'` (NOT boolean flag)
+- Single source of truth: `users.role` column
+- Middleware enforces on ALL admin routes (no bypass)
+
+**Organization Scoping Critical**:
+- Get `organizationId` from JWT (NEVER trust client input)
+- ALL queries MUST filter by `organizationId`
+- Prevents cross-organization data leaks
+
+**No PII in Logs**:
+- Log user IDs, NOT emails or names
+- Log aggregate stats, NOT individual customer data
+- Example: `{ userId: 'uuid', totalRevenueCents: 5000 }` ✅
+
+### Performance Notes
+
+**Expected Query Times** (with indexes):
+- Revenue stats: ~100ms (SUM + COUNT aggregation)
+- Customer list: ~100ms (JOIN with purchase aggregation)
+- Content list: ~50ms (simple SELECT with pagination)
+- Manual access grant: ~20ms (single INSERT)
+
+**Indexes Required**:
+```sql
+CREATE INDEX idx_purchases_org_created ON purchases(organization_id, created_at);
+CREATE INDEX idx_purchases_status ON purchases(status);
+CREATE INDEX idx_purchases_content ON purchases(content_id);
+CREATE INDEX idx_content_org_status ON content(organization_id, status);
 ```
 
-#### P1-ECOM-001 (Stripe Checkout)
+### Future Enhancements
 
-**Tables Used**:
-- `purchases` - Revenue analytics, customer purchase history
-  - Fields: `id`, `user_id`, `content_id`, `price_cents`, `status`, `created_at`, `organization_id`
-  - Where clauses: `status = 'completed' AND organization_id = X`
-  - Aggregations: `SUM(price_cents)`, `COUNT(*)`, `GROUP BY DATE(created_at)`
-
-- `content_access` - Manual access grants, verify existing access
-  - Fields: `id`, `user_id`, `content_id`, `access_type`, `created_at`
-  - Insert: Manual grants create `access_type = 'purchased'` with `price_cents = 0`
-
-**Example Query**:
-```typescript
-const revenueStats = await db
-  .select({
-    totalRevenueCents: sql<number>`SUM(${purchases.priceCents})`,
-    totalPurchases: count(purchases.id),
-  })
-  .from(purchases)
-  .where(and(
-    eq(purchases.organizationId, organizationId),
-    eq(purchases.status, 'completed')
-  ));
-```
-
-#### Auth Middleware (Existing)
-
-**Exports Used**:
-- `requireAuth()` - Validates JWT, adds user to context
-  - Returns: `c.get('user')` with `{ id, email, role, organizationId }`
-- `requirePlatformOwner()` - NEW middleware from this work packet
-  - Checks: `user.role === 'platform_owner'`
-  - Returns: 403 if not platform owner
-
-**Middleware Chain**:
-```typescript
-app.use('*', requireAuth());           // Step 1: Validate JWT
-app.use('*', requirePlatformOwner());  // Step 2: Check platform_owner role
-```
-
-### Downstream Consumers (What Uses This Work Packet)
-
-#### Admin Dashboard Frontend (Future)
-
-**Endpoints Called**:
-
-**Analytics Tab**:
-- `GET /api/admin/analytics/revenue?startDate=...&endDate=...` - Revenue charts
-- `GET /api/admin/analytics/customers` - Customer metrics
-- `GET /api/admin/analytics/top-content?limit=10` - Top performers
-
-**Content Management Tab**:
-- `GET /api/admin/content?page=1&limit=20&status=all` - Content list with filters
-- `POST /api/admin/content/:id/publish` - Publish button
-- `POST /api/admin/content/:id/unpublish` - Unpublish button
-- `DELETE /api/admin/content/:id` - Delete button (soft delete)
-
-**Customer Support Tab**:
-- `GET /api/admin/customers?page=1&limit=20` - Customer list
-- `GET /api/admin/customers/:id` - Customer detail page
-- `POST /api/admin/customers/:customerId/grant-access/:contentId` - Grant access button
-
-**Response Formats**:
-```typescript
-// GET /api/admin/analytics/revenue
-{
-  totalRevenueCents: 50000,
-  totalPurchases: 25,
-  averageOrderValueCents: 2000,
-  revenueByDay: [
-    { date: '2025-11-09', revenueCents: 5000, count: 3 },
-    // ... last 30 days
-  ]
-}
-
-// GET /api/admin/content
-{
-  items: [
-    {
-      id: 'uuid',
-      title: 'Video Title',
-      slug: 'video-title',
-      status: 'published',
-      priceCents: 1999,
-      publishedAt: '2025-11-01T00:00:00Z',
-      createdAt: '2025-10-30T00:00:00Z'
-    },
-    // ...
-  ],
-  pagination: {
-    page: 1,
-    limit: 20,
-    total: 50
-  }
-}
-
-// GET /api/admin/customers/:id
-{
-  customer: {
-    id: 'uuid',
-    name: 'John Doe',
-    email: 'john@example.com',
-    createdAt: '2025-10-01T00:00:00Z'
-  },
-  purchases: [
-    {
-      id: 'uuid',
-      contentTitle: 'Video Title',
-      priceCents: 1999,
-      purchasedAt: '2025-11-01T00:00:00Z',
-      status: 'completed'
-    },
-    // ...
-  ],
-  stats: {
-    totalPurchases: 5,
-    totalSpentCents: 9995
-  }
-}
-```
-
-#### Error Propagation
-
-All admin endpoints follow consistent error format:
-
-| Error Code | HTTP Status | Meaning | Frontend Action |
-|------------|-------------|---------|-----------------|
-| `UNAUTHORIZED` | 401 | No JWT or invalid JWT | Redirect to login |
-| `FORBIDDEN` | 403 | Not a platform owner | Show "Access denied" message |
-| `CUSTOMER_NOT_FOUND` | 404 | Customer doesn't exist | Show "Customer not found" |
-| `CONTENT_NOT_FOUND` | 404 | Content doesn't exist | Show "Content not found" |
-| `PURCHASE_ALREADY_EXISTS` | 409 | Access already granted | Show "Already has access" |
-| `VALIDATION_ERROR` | 400 | Invalid input parameters | Show validation errors |
-| `INTERNAL_ERROR` | 500 | Unexpected server error | Show generic error, retry |
-
-**Error Response Format**:
-```typescript
-{
-  error: {
-    code: 'FORBIDDEN',
-    message: 'Platform owner access required'
-  }
-}
-```
-
-### Integration With Other Work Packets
-
-#### Integrates With (Existing Code)
-- **Auth Worker**: `workers/auth/src/index.ts` - Hosts admin routes
-- **Auth Middleware**: `workers/auth/src/middleware/auth.ts` - JWT validation
-- **Database Client**: `@codex/database` - Drizzle ORM queries
-- **Observability**: `@codex/observability` - Logging and error tracking
-
-#### Enables (Future Work Packets)
-- **Admin Dashboard Frontend** (Future) - Consumes all admin APIs
-- **P1-SETTINGS-001** (Settings Service) - May use admin analytics patterns
-- **P1-NOTIFY-001** (Email Service) - May email analytics reports to platform owner
-
-### Business Rules
-
-1. **Platform Owner Only**: ALL admin endpoints require `user.role === 'platform_owner'`
-   - No exceptions - even read-only analytics
-   - 403 response for non-platform-owner users
-
-2. **Organization Scoping**: ALL queries MUST filter by `organizationId`
-   - Get `organizationId` from authenticated user context
-   - Never allow cross-organization data access
-   - Critical for multi-tenant security (even in Phase 1 single-org)
-
-3. **Soft Delete**: Content deletion uses `deleted_at` timestamp
-   - Preserves purchase history and analytics
-   - Deleted content excluded from listings
-   - Can be restored by setting `deleted_at = NULL`
-
-4. **Manual Access Grants**: Support/refund workflow
-   - Creates $0 purchase with `status = 'completed'`
-   - No Stripe session IDs (manual grant, not payment)
-   - Prevents duplicate grants (409 if already exists)
-   - Validates customer and content exist
-
-5. **Analytics Date Filtering**: Revenue stats support date ranges
-   - Default: All time
-   - `startDate` and `endDate` query params (ISO 8601)
-   - Daily breakdown limited to last 30 days
-
-### Data Flow Example
-
-**Scenario**: Platform owner manually grants access to refund customer
-
-```
-1. Admin Frontend
-   ↓ POST /api/admin/customers/:customerId/grant-access/:contentId
-
-2. Admin API Endpoint (admin.ts)
-   ↓ requireAuth() middleware validates JWT
-   ↓ requirePlatformOwner() checks user.role === 'platform_owner'
-   ↓ Extract customerId, contentId from URL params
-
-3. AdminCustomerManagementService.grantContentAccess()
-   ↓ Query users table: Verify customer exists in organization
-   ↓ Query content table: Verify content exists in organization
-   ↓ Query content_access table: Check for existing access (409 if exists)
-   ↓ Insert into content_access: Create access grant with price_cents = 0
-   ↓ Log success to ObservabilityClient
-
-4. Admin API Response
-   ↓ { success: true }
-
-5. Admin Frontend
-   ↓ Show success toast "Access granted to John Doe"
-```
+**Phase 2+**:
+- Multi-organization selector in admin UI
+- Fine-grained permissions (read-only admin, support agent roles)
+- Audit trail table for manual access grants (`granted_by` field)
+- Year-over-year revenue comparison
+- Bulk content operations (publish/delete multiple items)
+- Redis caching for analytics (5-minute TTL)
 
 ---
 
-## Business Context
-
-### Why This Matters
-
-The admin dashboard backend provides platform owners with essential tools to:
-1. **Monitor Revenue**: Track sales, average order value, and revenue trends
-2. **Manage Content**: Publish/unpublish/delete content across the platform
-3. **Support Customers**: View purchase history and manually grant access for refunds
-
-Phase 1 has a single organization, but admin features are scoped by `organizationId` to prepare for multi-tenant Phase 2+.
-
-### User Personas
-
-**Platform Owner** (Super Admin):
-- Developer/business operator who runs the Codex platform
-- NOT a content creator (different from organization owner)
-- Has `user.role = 'platform_owner'` in database
-- Full access to admin dashboard (analytics, content, customers)
-- Example: Site administrator monitoring overall platform health
-
-**Organization Owner** (Future Phase 2):
-- Business owner who creates content
-- Has `user.role = 'creator'` and `organization_memberships.role = 'owner'`
-- NO access to admin dashboard in Phase 1
-- Example: Content creator who uploads videos
-
-### Business Rules
-
-1. **Platform Owner Exclusivity**: Only platform owners can access admin features
-   - Enforced by `requirePlatformOwner()` middleware
-   - 403 response for all other users (including org owners)
-
-2. **Organization Scoping**: All data queries filtered by `organizationId`
-   - Prevents cross-organization data leaks
-   - Critical for multi-tenant security (Phase 2+)
-
-3. **Analytics Accuracy**: Revenue calculations use only `completed` purchases
-   - Exclude `pending`, `failed`, `refunded` statuses
-   - Money stored as integer cents (ACID-compliant)
-
-4. **Customer Support Workflow**: Manual access grants for refunds/support
-   - Creates $0 purchase with no Stripe session
-   - Validates customer and content exist
-   - Prevents duplicate grants (409 error)
-
----
-
-## Security Considerations
-
-### Authentication & Authorization
-
-1. **Two-Layer Auth Check**:
-   ```typescript
-   app.use('*', requireAuth());           // Step 1: Valid JWT required
-   app.use('*', requirePlatformOwner());  // Step 2: role = 'platform_owner' required
-   ```
-   - `requireAuth()` validates JWT, adds user to context
-   - `requirePlatformOwner()` checks `user.role === 'platform_owner'`
-   - 401 if no auth, 403 if not platform owner
-
-2. **Role-Based Access Control (RBAC)**:
-   - Users table has `role` enum: `'platform_owner' | 'creator' | 'customer'`
-   - Platform owner role check: `user.role === 'platform_owner'`
-   - NO boolean flags - single source of truth
-
-3. **JWT Token Validation**:
-   - JWT contains: `{ userId, email, role, organizationId }`
-   - Validated by existing `requireAuth()` middleware
-   - Tokens expire (configured in auth service)
-
-### Data Access Controls
-
-1. **Organization Scoping (Critical)**:
-   - ALL queries MUST include `WHERE organization_id = X`
-   - Get `organizationId` from authenticated user context
-   - NEVER trust client-provided `organizationId`
-   - Example:
-     ```typescript
-     const user = c.get('user');
-     const stats = await service.getRevenueStats({
-       ...c.env,
-       ORGANIZATION_ID: user.organizationId, // ← From JWT, not query param
-     });
-     ```
-
-2. **Soft Delete Protection**:
-   - Deleted content has `deleted_at IS NOT NULL`
-   - Listings filter: `WHERE deleted_at IS NULL`
-   - Preserves referential integrity with purchases
-   - Can be restored by setting `deleted_at = NULL`
-
-3. **SQL Injection Prevention**:
-   - Use Drizzle ORM (parameterized queries)
-   - NEVER concatenate user input into SQL
-   - Validate all inputs with Zod schemas
-
-### Sensitive Data Handling
-
-1. **No PII in Logs**:
-   - Log `userId`, NOT email or name
-   - Log aggregate stats, NOT individual customer data
-   - Example:
-     ```typescript
-     obs.info('Revenue stats calculated', {
-       totalRevenueCents: stats.totalRevenueCents, // ✅ OK
-       // email: customer.email, // ❌ NO - PII in logs
-     });
-     ```
-
-2. **Error Messages**:
-   - Generic errors to client: `"Internal server error"`
-   - Detailed errors in logs only
-   - No database schema details in responses
-
-3. **HTTPS Only**:
-   - All admin endpoints require HTTPS
-   - Handled by Cloudflare Workers (automatic)
-
-### Threat Scenarios
-
-| Threat | Mitigation |
-|--------|------------|
-| Non-platform-owner accessing admin | `requirePlatformOwner()` middleware (403) |
-| Cross-org data access | Organization scoping on ALL queries |
-| SQL injection | Drizzle ORM parameterized queries |
-| Privilege escalation | Role stored in database, validated on every request |
-| Data leak via logs | No PII in logs, only user IDs |
-| Brute force | Rate limiting (existing security middleware) |
-
----
-
-## Performance Considerations
-
-### Database Query Optimization
-
-1. **Indexes Required**:
-   ```sql
-   -- Revenue analytics (GROUP BY DATE)
-   CREATE INDEX idx_purchases_org_created ON purchases(organization_id, created_at);
-   CREATE INDEX idx_purchases_status ON purchases(status);
-
-   -- Customer aggregation
-   CREATE INDEX idx_users_org ON users(organization_id);
-
-   -- Content filtering
-   CREATE INDEX idx_content_org_status ON content(organization_id, status);
-   CREATE INDEX idx_content_deleted_at ON content(deleted_at);
-   ```
-
-2. **Aggregation Queries**:
-   - Revenue stats use `SUM()`, `COUNT()`, `GROUP BY` in database
-   - NOT in application code (efficient for large datasets)
-   - Limited to 30-day breakdown (prevents massive result sets)
-
-3. **Pagination**:
-   - All listings paginated (default 20 items)
-   - Use `LIMIT` and `OFFSET` in queries
-   - Include total count for pagination UI
-
-### Expected Load
-
-| Endpoint | Frequency | Query Time | Optimization |
-|----------|-----------|------------|--------------|
-| `GET /api/admin/analytics/revenue` | Once per page load | ~100ms | Indexed on org_id + created_at |
-| `GET /api/admin/content` | Once per page load | ~50ms | Indexed on org_id + status |
-| `GET /api/admin/customers` | Once per page load | ~100ms | JOIN with purchase aggregation |
-| `POST /api/admin/content/:id/publish` | Rare | ~20ms | Single row update |
-
-**Phase 1**: Single org, low traffic (< 10 admin requests/minute)
-**Phase 2+**: Multi-org, moderate traffic (< 100 admin requests/minute)
-
-### Caching Strategy
-
-**Phase 1**: No caching needed (low traffic, real-time data preferred)
-
-**Phase 2+ (Future)**:
-- Cache analytics stats (5-minute TTL)
-- Invalidate on purchase webhooks
-- Cache key: `analytics:revenue:${organizationId}:${date}`
-
----
-
-## Monitoring & Observability
-
-### Logging Strategy
-
-All services use `ObservabilityClient` for structured logging:
-
-```typescript
-const obs = new ObservabilityClient('admin-analytics-service', env.ENVIRONMENT);
-
-// Info level: Successful operations
-obs.info('Revenue stats calculated', {
-  organizationId: config.organizationId,
-  totalRevenueCents: result.totalRevenueCents,
-  totalPurchases: result.totalPurchases,
-});
-
-// Warn level: Unusual but not errors
-obs.warn('Manual access grant - customer already has access', {
-  userId: platformOwnerId,
-  customerId,
-  contentId,
-});
-
-// Error level: Failures
-obs.trackError(err as Error, {
-  userId: user.id,
-  operation: 'getRevenueStats',
-});
-```
-
-### Key Metrics to Track
-
-1. **Admin Activity Metrics**:
-   - Platform owner logins
-   - Content publish/unpublish operations
-   - Manual access grants (support actions)
-   - Failed authorization attempts (403s)
-
-2. **Performance Metrics**:
-   - API endpoint response times (p50, p95, p99)
-   - Database query durations
-   - Error rates by endpoint
-
-3. **Business Metrics**:
-   - Total revenue (tracked by analytics endpoint)
-   - Daily active customers
-   - Content publish rate
-
-### Alerts
-
-**Critical** (Immediate Action):
-- Admin API error rate > 10% for 5 minutes
-- Database connection failures
-- Authentication service down
-
-**Warning** (Monitor):
-- Analytics queries > 1 second (performance degradation)
-- Multiple failed auth attempts (potential brute force)
-
-### Dashboards
-
-**Admin Health Dashboard** (Future):
-- Request volume by endpoint
-- Error rates by endpoint
-- Average response times
-- Platform owner activity log
-
----
-
-## Rollout Plan
-
-### Pre-Deployment Checklist
-
-1. **Database Preparation**:
-   - [ ] Verify `users.role` enum includes 'platform_owner'
-   - [ ] Create indexes on `purchases`, `content`, `users` tables
-   - [ ] Seed initial platform owner user: `UPDATE users SET role = 'platform_owner' WHERE email = 'admin@example.com'`
-
-2. **Environment Variables**:
-   - [ ] `ORGANIZATION_ID` set in worker env (Phase 1 single org)
-   - [ ] `DATABASE_URL` configured
-   - [ ] `ENVIRONMENT` set (development/staging/production)
-
-3. **Integration Testing**:
-   - [ ] Test platform owner login → admin dashboard flow
-   - [ ] Test non-platform-owner → 403 response
-   - [ ] Test revenue analytics with real purchase data
-   - [ ] Test manual access grant end-to-end
-
-### Deployment Steps
-
-1. **Deploy Services** (packages/admin):
-   ```bash
-   pnpm --filter @codex/admin build
-   pnpm --filter @codex/admin test
-   ```
-
-2. **Deploy Middleware** (workers/auth):
-   ```bash
-   pnpm --filter @codex/workers-auth deploy:staging
-   ```
-
-3. **Smoke Tests** (Staging):
-   ```bash
-   curl https://staging.codex.com/api/admin/analytics/revenue \
-     -H "Authorization: Bearer $PLATFORM_OWNER_JWT"
-   # Expected: 200 with revenue stats
-   ```
-
-4. **Production Deployment**:
-   ```bash
-   pnpm --filter @codex/workers-auth deploy:production
-   ```
-
-### Rollback Plan
-
-If issues detected:
-1. Revert worker deployment: `wrangler rollback --worker auth`
-2. Admin frontend shows error, but rest of platform unaffected
-3. Investigate logs, fix issues, redeploy
-
----
-
-## Known Limitations
-
-### Phase 1 Constraints
-
-1. **Single Organization Only**:
-   - Admin dashboard shows data for one organization
-   - Multi-org UI not built (database ready)
-   - Platform owner sees only their organization's data
-
-2. **No Fine-Grained Permissions**:
-   - All-or-nothing platform owner access
-   - No "read-only admin" or "support agent" roles
-   - Future: Add role-based permissions (Phase 2+)
-
-3. **Manual Access Grants**:
-   - Creates $0 purchase (not ideal)
-   - No audit trail of who granted access
-   - Future: Add separate `manual_grants` table with `granted_by` field
-
-4. **Analytics Limited to 30 Days**:
-   - Daily breakdown limited to prevent large result sets
-   - No year-over-year comparison
-   - Future: Add aggregated monthly/yearly stats
-
-### Technical Debt
-
-1. **No Caching**:
-   - All queries hit database
-   - OK for Phase 1 (low traffic)
-   - Future: Add Redis caching for analytics
-
-2. **No Batch Operations**:
-   - Publish/delete one content item at a time
-   - Future: Add bulk operations API
-
-3. **Basic Error Handling**:
-   - Generic "Internal error" responses
-   - Future: Add detailed error codes and recovery suggestions
-
----
-
-## Questions & Clarifications
-
-### Resolved Questions
-
-**Q**: Should organization owners have admin access?
-**A**: No. Platform owners only (super admins). Organization owners are content creators.
-
-**Q**: Use `is_platform_owner` boolean or `role` enum?
-**A**: Use `role` enum (database-schema.md v2.0). Check `user.role === 'platform_owner'`.
-
-**Q**: Hard delete or soft delete content?
-**A**: Soft delete (`deleted_at` timestamp). Preserves purchase history.
-
-### Open Questions
-
-**Q**: Should we track who granted manual access?
-**A**: Not in Phase 1 (adds complexity). Consider for Phase 2 with `granted_by` field.
-
-**Q**: Should analytics show refunded purchases?
-**A**: Phase 1 only tracks `completed` purchases. Refunds added in Phase 2 webhooks.
-
-**Q**: Should platform owners see cross-org data in Phase 2+?
-**A**: TBD. Requires org selector UI in admin dashboard.
-
----
-
-## Success Criteria
-
-### Functional Requirements
-
-- [ ] Platform owners can log in and access admin dashboard
-- [ ] Non-platform-owners receive 403 when accessing admin endpoints
-- [ ] Revenue analytics show accurate totals and daily breakdown
-- [ ] Customer stats show total customers and purchase counts
-- [ ] Top content shows ranked list by revenue
-- [ ] Content list shows all statuses (draft, published, archived)
-- [ ] Publish/unpublish changes content status correctly
-- [ ] Delete soft-deletes content (preserves purchase history)
-- [ ] Customer list shows all customers with purchase aggregation
-- [ ] Customer detail shows purchase history
-- [ ] Manual access grant creates access without payment
-- [ ] Manual access grant prevents duplicates (409 error)
-
-### Non-Functional Requirements
-
-- [ ] All admin endpoints respond in < 500ms (p95)
-- [ ] All endpoints require platform owner role (no unauthorized access)
-- [ ] All queries scoped by `organizationId` (multi-tenant safe)
-- [ ] Error messages consistent (JSON format with `error.code`)
-- [ ] Observability logging complete (all operations logged)
-- [ ] No PII in logs (only user IDs, not emails)
-- [ ] Tests achieve > 80% code coverage
-
-### Business Goals
-
-- [ ] Platform owners can monitor revenue without manual DB queries
-- [ ] Platform owners can manage content without technical knowledge
-- [ ] Support team can grant access for refunds without developer help
-
----
-
-## Related Documentation
-
-### Database Schema References
-
-**Primary Schema** (`design/features/shared/database-schema.md`):
-- Lines 65-127: `users` table with `role` enum ('platform_owner', 'creator', 'customer')
-- Lines 251-339: `content` table (publish/unpublish, soft delete)
-- Lines 611-692: `purchases` table (revenue analytics queries)
-- Lines 694-729: `content_access` table (manual access grants)
-- Lines 1348-1952: Row-Level Security (RLS) strategy (application-level enforcement in Phase 1)
-
-**Schema Revision History** (`design/features/shared/DATABASE_SCHEMA_REVISION.md`):
-- Lines 1-50: v2.0 changes summary (ACID compliance, role enum, organization scoping)
-
-### Architecture References
-
-**Auth Evolution** (`design/features/auth/EVOLUTION.md`):
-- Lines 50-150: User types and roles (platform_owner vs organization_owner distinction)
-- Lines 200-280: Phase 1 authentication patterns (JWT, middleware)
-
-**Architecture Update Summary** (`design/ARCHITECTURE_UPDATE_SUMMARY.md`):
-- Lines 39-49: Phase 1 roles clarification (platform owner ≠ organization owner)
-- Lines 293-302: Q&A on platform owner role
-
-### Feature Specifications
-
-**Admin Dashboard TDD** (`design/features/admin-dashboard/ttd-dphase-1.md`):
-- Feature requirements and user stories for admin dashboard UI
-
-**E-Commerce PRD** (`design/features/e-commerce/pdr-phase-1.md`):
-- Purchase flow and revenue tracking (context for analytics)
-
-### Testing References
-
-**Admin Testing Definition** (`design/roadmap/testing/admin-testing-definition.md`):
-- Lines 1-692: Complete test specifications
-  - Platform owner middleware tests
-  - Analytics service tests (revenue, customers, top content)
-  - Content management service tests
-  - Customer management service tests
-  - API integration tests
-  - Common testing patterns
-
-### Standards & Patterns
-
-**STANDARDS.md** (`design/roadmap/STANDARDS.md`):
-- § 4 Security: Authentication, authorization, data protection
-- § 6 Observability: Logging patterns, error tracking
-- § 7 Testing: Test coverage requirements
-
-**Access Control Patterns** (`design/core/ACCESS_CONTROL_PATTERNS.md`):
-- Role-based access control (RBAC) patterns
-- Organization scoping patterns
-
-**Multi-Tenant Architecture** (`design/core/MULTI_TENANT_ARCHITECTURE.md`):
-- Organization isolation patterns
-- Phase 1 single-org vs Phase 2+ multi-org
-
-### Code Examples
-
-**Existing Middleware** (`workers/auth/src/middleware/auth.ts`):
-- `requireAuth()` implementation (JWT validation pattern)
-- User context injection pattern
-- Error response format
-
----
-
-## Notes for LLM Developer
-
-### Critical Implementation Rules
-
-1. **MUST Complete P1-CONTENT-001 and P1-ECOM-001 First**: Depends on content and purchase schemas
-2. **Use Role Enum, NOT Boolean Flag**: Check `user.role === 'platform_owner'` (from database-schema.md v2.0 lines 75)
-3. **Organization Scoping**: CRITICAL - all admin queries must filter by `organizationId` from user context
-4. **Soft Delete**: Use `deleted_at` timestamp for content deletion (don't hard delete)
-5. **Manual Access Grant**: Creates $0 purchase with `status = 'completed'` - no Stripe session IDs
-6. **Analytics Queries**: Use SQL aggregations for performance (SUM, COUNT, GROUP BY in database, not app code)
-7. **Security**: All endpoints require both `requireAuth()` AND `requirePlatformOwner()` middleware
-
-### Common Pitfalls
-
-❌ **Don't**:
-- Add `is_platform_owner` boolean field (use `role` enum instead)
-- Forget organization scoping on queries (security risk!)
-- Hard delete content (breaks purchase history)
-- Aggregate analytics in application code (performance issue)
-- Trust client-provided `organizationId` (get from JWT)
-- Log PII (emails, names) in observability
-
-✅ **Do**:
-- Check `user.role === 'platform_owner'` in middleware
-- Always filter queries by `user.organizationId` from context
-- Use soft delete: `UPDATE content SET deleted_at = NOW()`
-- Use database aggregations: `SELECT SUM(price_cents) FROM purchases`
-- Get org ID from JWT: `const user = c.get('user'); user.organizationId`
-- Log user IDs only: `obs.info('Revenue calculated', { userId: user.id })`
-
-### Quick Reference: Key Tables
-
-```typescript
-// users table (lines 65-127)
-role: 'platform_owner' | 'creator' | 'customer'
-
-// content table (lines 251-339)
-status: 'draft' | 'published' | 'archived'
-deleted_at: TIMESTAMP (soft delete)
-organization_id: UUID (scoping)
-
-// purchases table (lines 611-692)
-status: 'completed' | 'pending' | 'failed' | 'refunded'
-price_cents: INTEGER (ACID-compliant)
-
-// content_access table (lines 694-729)
-access_type: 'purchased' | 'manual_grant'
-```
-
-### Debugging Tips
-
-**403 Forbidden Error**:
-- Check `user.role === 'platform_owner'` in database
-- Verify JWT contains correct role
-- Check middleware order: `requireAuth()` → `requirePlatformOwner()`
-
-**Empty Analytics Results**:
-- Verify `organizationId` matches in queries
-- Check for `status = 'completed'` filter on purchases
-- Verify date range filters (if provided)
-
-**Manual Grant Fails**:
-- Verify customer exists: `SELECT * FROM users WHERE id = ?`
-- Verify content exists: `SELECT * FROM content WHERE id = ?`
-- Check for duplicate: `SELECT * FROM content_access WHERE user_id = ? AND content_id = ?`
-
-**If Stuck**: Check [CONTEXT_MAP.md](../CONTEXT_MAP.md) for more architecture context.
-
----
-
-## Step 7: Public API & Package Exports
-
-**Package Configuration**:
-
-**File**: `packages/admin-dashboard/package.json`
-
-```json
-{
-  "name": "@codex/admin-dashboard",
-  "version": "1.0.0",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts",
-    "./analytics": "./src/analytics-service.ts",
-    "./customer-management": "./src/customer-management-service.ts"
-  },
-  "dependencies": {
-    "@codex/database": "workspace:*",
-    "@codex/observability": "workspace:*",
-    "@codex/validation": "workspace:*",
-    "drizzle-orm": "^0.29.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "vitest": "^1.0.0"
-  }
-}
-```
-
-**Public Interface**:
-
-**File**: `packages/admin-dashboard/src/index.ts`
-
-```typescript
-/**
- * @codex/admin-dashboard
- *
- * Platform owner administrative services for Codex platform.
- *
- * Core Responsibilities:
- * - Calculate platform revenue analytics (total, by period, by creator)
- * - Track customer metrics (total customers, purchase counts)
- * - Manage customer access (manual content grants)
- * - List and manage customer purchases
- *
- * Integration Points:
- * - Used by: Admin dashboard worker (platform owner endpoints)
- * - Depends on: @codex/database (users, purchases, content_access)
- *
- * Security Model:
- * - ALL operations require platform_owner role
- * - Organization scoping enforced on all queries
- * - No PII in logs (user IDs only)
- */
-
-export {
-  AnalyticsService,
-  createAnalyticsService,
-  type AnalyticsServiceConfig,
-} from './analytics-service';
-
-export {
-  CustomerManagementService,
-  createCustomerManagementService,
-  type CustomerManagementServiceConfig,
-} from './customer-management-service';
-
-// Re-export validation schemas for convenience
-export {
-  getRevenueMetricsSchema,
-  getCustomerStatsSchema,
-  grantAccessSchema,
-  listCustomerPurchasesSchema,
-  type GetRevenueMetricsInput,
-  type GetCustomerStatsInput,
-  type GrantAccessInput,
-  type ListCustomerPurchasesInput,
-} from '@codex/validation/schemas/admin';
-```
-
-**Usage Examples**:
-
-```typescript
-// Example 1: Get revenue metrics for organization
-import { createAnalyticsService } from '@codex/admin-dashboard';
-
-const analyticsService = createAnalyticsService({
-  DATABASE_URL: env.DATABASE_URL,
-  ENVIRONMENT: env.ENVIRONMENT,
-});
-
-const metrics = await analyticsService.getRevenueMetrics(
-  user.organizationId, // From authenticated platform owner
-  {
-    startDate: new Date('2025-01-01'),
-    endDate: new Date('2025-01-31'),
-    groupBy: 'creator',
-  }
-);
-// Returns: { totalRevenueCents, purchaseCount, revenueByCreator: [...] }
-
-// Example 2: Grant manual access to customer
-import { createCustomerManagementService } from '@codex/admin-dashboard';
-
-const customerService = createCustomerManagementService({
-  DATABASE_URL: env.DATABASE_URL,
-  ENVIRONMENT: env.ENVIRONMENT,
-});
-
-await customerService.grantAccess(
-  user.organizationId,
-  {
-    customerId: 'uuid-customer',
-    contentId: 'uuid-content',
-    reason: 'Support request #1234',
-  }
-);
-// Creates content_access record and $0 purchase for audit trail
-
-// Example 3: List customer's purchases
-const purchases = await customerService.listCustomerPurchases(
-  user.organizationId,
-  {
-    customerId: 'uuid-customer',
-    page: 1,
-    limit: 20,
-  }
-);
-// Returns: { items: [...], pagination: { total, hasMore } }
-```
-
----
-
-## Step 8: Local Development Setup
-
-### Docker Compose Integration
-
-The admin dashboard service works seamlessly with the existing local development setup. No additional containers needed.
-
-**Existing Services Used**:
-
-1. **Neon Postgres** (`infrastructure/neon/docker-compose.dev.local.yml`):
-   - Already provides local PostgreSQL with all required tables
-   - No changes needed
-
-**Environment Configuration**:
-
-**File**: `workers/admin-dashboard/.dev.vars`
-
-```bash
-# Database (uses local Neon proxy)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/main
-
-# Environment
-ENVIRONMENT=development
-
-# JWT (for authenticating platform owner)
-JWT_SECRET=your-local-jwt-secret
-```
-
-### Local Testing Flow
-
-**Step 1: Start Database**:
-```bash
-cd infrastructure/neon
-docker-compose -f docker-compose.dev.local.yml up -d
-```
-
-**Step 2: Run Migrations**:
-```bash
-pnpm --filter @codex/database db:migrate
-```
-
-**Step 3: Seed Test Data** (create platform owner user):
-```bash
-# Seed database with test users, content, purchases
-pnpm --filter @codex/database db:seed
-
-# Or manually create platform owner
-psql postgresql://postgres:postgres@localhost:5432/main -c "
-  INSERT INTO users (id, email, role, organization_id)
-  VALUES (
-    'uuid-platform-owner',
-    'admin@test.com',
-    'platform_owner',
-    'uuid-org'
-  );
-"
-```
-
-**Step 4: Start Admin Dashboard Worker**:
-```bash
-pnpm --filter admin-dashboard-worker dev
-# Worker runs on http://localhost:8788
-```
-
-**Step 5: Test API** (requires platform owner JWT):
-```bash
-# Generate test JWT with role='platform_owner'
-# (Use your JWT generation script or tool)
-
-# Get revenue metrics
-curl -H "Authorization: Bearer PLATFORM_OWNER_JWT" \
-  "http://localhost:8788/api/admin/analytics/revenue"
-
-# Get customer stats
-curl -H "Authorization: Bearer PLATFORM_OWNER_JWT" \
-  "http://localhost:8788/api/admin/analytics/customers"
-
-# Grant access to customer
-curl -X POST \
-  -H "Authorization: Bearer PLATFORM_OWNER_JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"customerId": "uuid", "contentId": "uuid", "reason": "Test grant"}' \
-  "http://localhost:8788/api/admin/access/grant"
-```
-
-### Development Workflow
-
-**Typical Developer Day**:
-
-1. Start local database (one-time)
-2. Work on admin-dashboard package in isolation:
-   ```bash
-   # Run tests in watch mode
-   pnpm --filter @codex/admin-dashboard test --watch
-
-   # Type check
-   pnpm --filter @codex/admin-dashboard typecheck
-   ```
-3. Test integration with admin worker:
-   ```bash
-   pnpm --filter admin-dashboard-worker dev
-   # Make changes, worker auto-reloads
-   ```
-4. Run full test suite before committing:
-   ```bash
-   pnpm test
-   ```
-
-**No External Services Required**:
-- Database: Local PostgreSQL via Docker
-- Auth: Local JWT signing with role='platform_owner'
-- No Stripe, no R2, no email service needed
-
----
-
-## Step 9: CI/CD Integration
-
-### CI Pipeline
-
-Admin dashboard tests run automatically when:
-- Any file in `packages/admin-dashboard/**` changes
-- Any file in `packages/validation/src/schemas/admin.ts` changes
-- Any file in `workers/admin-dashboard/src/**` changes
-
-**GitHub Actions Workflow** (already configured in `.github/workflows/test.yml`):
-
-```yaml
-# Path-based test filtering (already in place)
-- name: Run admin dashboard tests
-  if: contains(github.event.head_commit.message, 'admin-dashboard') ||
-      contains(github.event.modified_files, 'packages/admin-dashboard') ||
-      contains(github.event.modified_files, 'workers/admin-dashboard')
-  run: |
-    # Validation tests (fast, no DB)
-    pnpm --filter @codex/validation test -- admin.test.ts
-
-    # Service tests (mocked DB)
-    pnpm --filter @codex/admin-dashboard test
-
-    # Integration tests (test DB with Neon branch)
-    pnpm --filter admin-dashboard-worker test:integration
-```
-
-### Test Environment Setup
-
-**CI Environment Variables** (GitHub Secrets):
-```bash
-# Test Database (Neon branch created per PR)
-TEST_DATABASE_URL=postgresql://...
-
-# JWT Secret (for platform owner auth tests)
-JWT_SECRET=test-secret-key
-
-# Environment
-ENVIRONMENT=test
-```
-
-**Neon Database Branching** (per design/infrastructure/CICD.md):
-```bash
-# Create test branch from main
-neon branches create --name "test-pr-${PR_NUMBER}" --parent main
-
-# Run migrations
-DATABASE_URL=$TEST_DATABASE_URL pnpm db:migrate
-
-# Seed test data (platform owner, content, purchases)
-DATABASE_URL=$TEST_DATABASE_URL pnpm db:seed
-
-# Run tests
-DATABASE_URL=$TEST_DATABASE_URL pnpm test
-
-# Cleanup: Delete branch after tests
-neon branches delete "test-pr-${PR_NUMBER}"
-```
-
-### Deployment Pipeline
-
-**Staging Deployment** (on push to `main`):
-```yaml
-- name: Deploy admin dashboard worker to staging
-  run: |
-    cd workers/admin-dashboard
-    wrangler deploy --env staging
-
-    # Smoke test (requires platform owner JWT)
-    curl -f -H "Authorization: Bearer $STAGING_ADMIN_JWT" \
-      https://staging-admin.codex.app/api/admin/analytics/revenue || exit 1
-```
-
-**Production Deployment** (on tag `v*`):
-```yaml
-- name: Deploy admin dashboard worker to production
-  run: |
-    cd workers/admin-dashboard
-    wrangler deploy --env production
-
-    # Smoke test
-    curl -f -H "Authorization: Bearer $PROD_ADMIN_JWT" \
-      https://admin.codex.app/api/admin/analytics/revenue || exit 1
-```
-
-### Integration Test Strategy
-
-**Test Data Isolation**:
-- Each test creates its own organization, platform owner, content, and purchases
-- Tests use deterministic UUIDs for repeatability
-- Cleanup after each test (or use Neon branches)
-
-**Platform Owner Authentication**:
-- Tests generate JWT with `role: 'platform_owner'` and `organizationId`
-- Middleware validates role before allowing access
-- Tests verify 403 for non-platform-owners
-
-**Example Integration Test**:
-```typescript
-// workers/admin-dashboard/src/routes/analytics.integration.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-
-describe('Admin Analytics API', () => {
-  let platformOwnerJWT: string;
-  let organizationId: string;
-
-  beforeEach(async () => {
-    // Seed test organization and platform owner
-    ({ platformOwnerJWT, organizationId } = await seedPlatformOwner());
-
-    // Seed test purchases for revenue analytics
-    await seedPurchases(organizationId, [
-      { priceCents: 1000, creatorId: 'creator-1' },
-      { priceCents: 2000, creatorId: 'creator-2' },
-    ]);
-  });
-
-  it('should calculate total revenue for organization', async () => {
-    const response = await fetch('http://localhost:8788/api/admin/analytics/revenue', {
-      headers: { 'Authorization': `Bearer ${platformOwnerJWT}` },
-    });
-
-    expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.totalRevenueCents).toBe(3000);
-    expect(data.purchaseCount).toBe(2);
-  });
-
-  it('should deny access to non-platform-owner', async () => {
-    const customerJWT = await generateJWT({ role: 'customer' });
-
-    const response = await fetch('http://localhost:8788/api/admin/analytics/revenue', {
-      headers: { 'Authorization': `Bearer ${customerJWT}` },
-    });
-
-    expect(response.status).toBe(403);
-    const data = await response.json();
-    expect(data.error.code).toBe('FORBIDDEN');
-  });
-
-  it('should only show revenue for own organization', async () => {
-    // Create another organization with purchases
-    const otherOrg = await seedOrganization();
-    await seedPurchases(otherOrg.id, [{ priceCents: 5000 }]);
-
-    const response = await fetch('http://localhost:8788/api/admin/analytics/revenue', {
-      headers: { 'Authorization': `Bearer ${platformOwnerJWT}` },
-    });
-
-    expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.totalRevenueCents).toBe(3000); // Only this org's revenue
-  });
-});
-```
-
-### Monitoring in CI/CD
-
-**Test Coverage Requirements**:
-- Validation tests: 100% coverage (enforced)
-- Service tests: 100% coverage (enforced)
-- Integration tests: No coverage requirement (end-to-end)
-
-**Performance Benchmarks**:
-- Revenue analytics query: < 500ms (P95)
-- Customer stats query: < 300ms (P95)
-- Manual access grant: < 200ms (P95)
-
-**CI Fails If**:
-- Any test fails
-- Coverage below threshold
-- TypeScript errors
-- Linting errors
-- Performance benchmarks exceeded
-- Security: Non-platform-owner can access admin endpoints
-
----
-
-## Integration Points Summary
-
-### Package Dependencies
-
-```
-@codex/admin-dashboard
-├── @codex/database (users, purchases, content, content_access)
-├── @codex/observability (logging, metrics)
-└── @codex/validation (Zod schemas)
-```
-
-### Used By
-
-**1. Admin Dashboard Worker** (`workers/admin-dashboard`):
-- Routes: `/api/admin/analytics/*`, `/api/admin/customers/*`, `/api/admin/access/*`
-- Purpose: Platform owner administrative interface
-
-**2. Admin Web UI** (Frontend):
-- Purpose: Dashboard for platform owners
-- Integration: Calls admin dashboard worker APIs
-
-### Upstream Dependencies
-
-**1. Auth Service**:
-- Middleware: `requireAuth()`, `requirePlatformOwner()`
-- JWT: Must contain `role: 'platform_owner'` and `organizationId`
-
-**2. P1-CONTENT-001** (Content Service):
-- Tables: `content` (for manual access grants)
-- Fields: `id`, `organization_id`, `creator_id`, `status`
-
-**3. P1-ECOM-001** (Stripe Checkout):
-- Tables: `purchases`, `content_access`
-- Fields: Revenue analytics, customer purchase history
-
-**4. Database**:
-- Schema v2.0 (`design/features/shared/database-schema.md`)
-- Role enum: `platform_owner` (lines 75-77)
-- Organization scoping (all tables have `organization_id`)
-
-### Data Flow Diagram
-
-```
-Admin Dashboard UI
-    |
-    | 1. GET /api/admin/analytics/revenue
-    |    (Authorization: Bearer JWT with role=platform_owner)
-    |
-Admin Dashboard Worker
-    |
-    | 2. Middleware: requireAuth() + requirePlatformOwner()
-    |    - Verify JWT
-    |    - Check user.role === 'platform_owner'
-    |    - Extract user.organizationId
-    |
-@codex/admin-dashboard (AnalyticsService)
-    |
-    | 3. Query purchases filtered by organizationId
-    |    SELECT SUM(price_cents), COUNT(*)
-    |    FROM purchases
-    |    WHERE organization_id = ? AND status = 'completed'
-    |
-Database
-    |
-    | 4. Return aggregated metrics
-    |
-Admin Dashboard UI
-```
-
----
-
-**Last Updated**: 2025-11-09
-**Schema Version**: v2.0 (database-schema.md)
-**Version**: 2.1 (Added Steps 7-9 for developer isolation)
+**Last Updated**: 2025-11-24
+**Template Version**: 1.0
