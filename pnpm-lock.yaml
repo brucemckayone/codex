@@ -471,6 +471,12 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250102.0
         version: 4.20251121.0
+      '@codex/content':
+        specifier: workspace:*
+        version: link:../content
+      '@codex/identity':
+        specifier: workspace:*
+        version: link:../identity
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
