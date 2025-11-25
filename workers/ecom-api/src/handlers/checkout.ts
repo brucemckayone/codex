@@ -68,12 +68,14 @@ export async function handleCheckoutCompleted(
       return;
     }
 
-    // Extract metadata (userId, contentId, priceCents from checkout creation)
+    // Extract metadata (customerId, contentId from checkout creation)
     const metadata = session.metadata;
-    if (!metadata?.userId || !metadata?.contentId) {
+    if (!metadata?.customerId || !metadata?.contentId) {
       obs.error('Missing required metadata', {
         sessionId: session.id,
-        metadata,
+        hasCustomerId: !!metadata?.customerId,
+        hasContentId: !!metadata?.contentId,
+        hasOrganizationId: !!metadata?.organizationId,
       });
       return;
     }
@@ -120,7 +122,7 @@ export async function handleCheckoutCompleted(
 
     obs.info('Purchase completed successfully', {
       purchaseId: purchase.id,
-      userId: metadata.userId,
+      customerId: metadata.customerId,
       contentId: metadata.contentId,
       amountCents: amountTotal,
     });

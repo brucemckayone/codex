@@ -7,7 +7,7 @@ import { positiveIntSchema, urlSchema, uuidSchema } from '../primitives';
  * Validates Stripe Checkout integration and purchase query operations.
  *
  * Design principles:
- * - Security-first: Prevent XSS in URLs, validate UUIDs
+ * - Security-first: Prevent XSS in URLs, validate UUIDs, whitelist redirect domains
  * - Database alignment: purchaseStatusEnum matches CHECK constraint
  * - Clear error messages: Actionable feedback for API responses
  * - Type inference: Export TypeScript types via z.infer
@@ -15,7 +15,59 @@ import { positiveIntSchema, urlSchema, uuidSchema } from '../primitives';
  * Database constraint alignment:
  * - status enum: pending, completed, refunded, failed (line 261 in ecommerce.ts)
  * - amountPaidCents: non-negative integer (line 304 in ecommerce.ts)
+ *
+ * Security:
+ * - Checkout redirect URLs are whitelisted to prevent open redirect attacks
  */
+
+/**
+ * Allowed domains for checkout redirect URLs
+ * Prevents open redirect attacks by whitelisting trusted domains
+ */
+const ALLOWED_REDIRECT_DOMAINS = [
+  // Production
+  'revelations.studio',
+  'codex.revelations.studio',
+  'app.revelations.studio',
+  // Staging
+  'codex-staging.revelations.studio',
+  'app-staging.revelations.studio',
+  // Development
+  'localhost',
+  '127.0.0.1',
+];
+
+/**
+ * Checkout redirect URL schema with domain whitelisting
+ * Prevents open redirect attacks by only allowing trusted domains
+ *
+ * Security:
+ * - HTTP/HTTPS protocol only (prevents javascript:, data: URIs)
+ * - Domain whitelist prevents redirects to untrusted sites
+ * - Localhost allowed for development
+ */
+export const checkoutRedirectUrlSchema = urlSchema.refine(
+  (url) => {
+    try {
+      const parsed = new URL(url);
+      const hostname = parsed.hostname.toLowerCase();
+
+      // Check if hostname exactly matches or is subdomain of allowed domains
+      return ALLOWED_REDIRECT_DOMAINS.some((allowedDomain) => {
+        // Exact match
+        if (hostname === allowedDomain) return true;
+        // Subdomain match (e.g., preview-123.revelations.studio)
+        if (hostname.endsWith(`.${allowedDomain}`)) return true;
+        return false;
+      });
+    } catch {
+      return false;
+    }
+  },
+  {
+    message: `Redirect URL must be on a trusted domain (${ALLOWED_REDIRECT_DOMAINS.join(', ')})`,
+  }
+);
 
 /**
  * Purchase status enum
@@ -37,16 +89,17 @@ export const purchaseStatusEnum = z.enum(
  * Security:
  * - contentId: UUID validation prevents injection
  * - URLs: HTTP/HTTPS only, blocks javascript: and data: URIs
+ * - Domain whitelist: Redirect URLs must be on trusted domains (prevents open redirect)
  *
  * Validates:
  * - contentId: UUID of content to purchase
- * - successUrl: Redirect URL after successful payment (HTTP/HTTPS)
- * - cancelUrl: Redirect URL if user cancels (HTTP/HTTPS)
+ * - successUrl: Redirect URL after successful payment (whitelisted domains only)
+ * - cancelUrl: Redirect URL if user cancels (whitelisted domains only)
  */
 export const createCheckoutSchema = z.object({
   contentId: uuidSchema,
-  successUrl: urlSchema,
-  cancelUrl: urlSchema,
+  successUrl: checkoutRedirectUrlSchema,
+  cancelUrl: checkoutRedirectUrlSchema,
 });
 
 /**

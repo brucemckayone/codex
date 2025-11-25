@@ -37,7 +37,9 @@ import type Stripe from 'stripe';
 import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
+  ForbiddenError,
   PaymentProcessingError,
+  PurchaseNotFoundError,
   wrapError,
 } from '../errors';
 
@@ -287,13 +289,45 @@ export class PurchaseService extends BaseService {
           orgFeePercentage
         );
 
+        // Step 3.5: Fetch organizationId from content if not in metadata
+        let organizationId = metadata.organizationId;
+        if (!organizationId) {
+          const contentRecord = await tx.query.content.findFirst({
+            where: eq(content.id, metadata.contentId),
+            columns: { organizationId: true },
+          });
+
+          if (!contentRecord) {
+            throw new PaymentProcessingError(
+              'Content not found during purchase completion',
+              {
+                contentId: metadata.contentId,
+                stripePaymentIntentId,
+              }
+            );
+          }
+
+          organizationId = contentRecord.organizationId;
+        }
+
+        // Phase 1: Personal content (organizationId = null) cannot be purchased
+        if (!organizationId) {
+          throw new PaymentProcessingError(
+            'Personal content purchases not supported - content must belong to an organization',
+            {
+              contentId: metadata.contentId,
+              stripePaymentIntentId,
+            }
+          );
+        }
+
         // Step 4: Create purchase record
         const [purchase] = await tx
           .insert(purchases)
           .values({
             customerId: metadata.customerId,
             contentId: metadata.contentId,
-            organizationId: metadata.organizationId || metadata.contentId, // Fallback if null
+            organizationId: organizationId, // Fetched from content if needed
             amountPaidCents: metadata.amountPaidCents,
             currency: metadata.currency || 'usd',
             stripePaymentIntentId,
@@ -318,7 +352,7 @@ export class PurchaseService extends BaseService {
         await tx.insert(contentAccess).values({
           userId: metadata.customerId,
           contentId: metadata.contentId,
-          organizationId: metadata.organizationId || metadata.contentId,
+          organizationId: organizationId, // Use same fetched value
           accessType: 'purchased',
           expiresAt: null, // Permanent access for purchases
         });
@@ -462,33 +496,51 @@ export class PurchaseService extends BaseService {
    *
    * Security:
    * - Verifies purchase belongs to customer
+   * - Returns 404 if purchase doesn't exist
+   * - Returns 403 if purchase exists but belongs to different customer
    *
    * @param purchaseId - Purchase ID
    * @param customerId - Customer ID for authorization
-   * @returns Purchase record or null if not found/not owned
+   * @returns Purchase record
+   * @throws {PurchaseNotFoundError} If purchase doesn't exist (404)
+   * @throws {ForbiddenError} If purchase exists but user doesn't own it (403)
    *
    * @example
    * const purchase = await purchaseService.getPurchase('purchase-123', 'customer-456');
-   * if (!purchase) {
-   *   throw new PurchaseNotFoundError('purchase-123');
-   * }
+   * // Automatically throws if not found or not authorized
    */
-  async getPurchase(
-    purchaseId: string,
-    customerId: string
-  ): Promise<Purchase | null> {
+  async getPurchase(purchaseId: string, customerId: string): Promise<Purchase> {
     const validated = getPurchaseSchema.parse({ id: purchaseId });
 
     try {
+      // First query by ID only (no customer filter)
       const purchase = await this.db.query.purchases.findFirst({
-        where: and(
-          eq(purchases.id, validated.id),
-          eq(purchases.customerId, customerId)
-        ),
+        where: eq(purchases.id, validated.id),
       });
 
-      return purchase || null;
+      // Not found - throw 404
+      if (!purchase) {
+        throw new PurchaseNotFoundError(validated.id);
+      }
+
+      // Found but doesn't belong to customer - throw 403
+      if (purchase.customerId !== customerId) {
+        throw new ForbiddenError('You do not have access to this purchase', {
+          purchaseId: validated.id,
+        });
+      }
+
+      // Success - return purchase
+      return purchase;
     } catch (error) {
+      // Re-throw known errors
+      if (
+        error instanceof PurchaseNotFoundError ||
+        error instanceof ForbiddenError
+      ) {
+        throw error;
+      }
+      // Wrap unknown errors
       throw wrapError(error, { purchaseId, customerId });
     }
   }

@@ -8,7 +8,7 @@
  *
  * Security:
  * - Requires authentication (user must be logged in)
- * - Rate limited with 'api' preset (100 req/min)
+ * - Strict rate limiting: 10 requests/minute (prevents abuse)
  * - Validates input with createCheckoutSchema
  *
  * Integration:
@@ -25,11 +25,7 @@ import {
 } from '@codex/purchase';
 import type { HonoEnv, SingleItemResponse } from '@codex/shared-types';
 import { createCheckoutSchema } from '@codex/validation';
-import {
-  createAuthenticatedHandler,
-  POLICY_PRESETS,
-  withPolicy,
-} from '@codex/worker-utils';
+import { createAuthenticatedHandler, withPolicy } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 // ============================================================================
@@ -78,7 +74,7 @@ const checkout = new Hono<HonoEnv>();
  *
  * Security:
  * - Requires authentication (withPolicy)
- * - Rate limited (POLICY_PRESETS.authenticated includes rate limiting)
+ * - Strict rate limiting: 10 requests/minute (prevents checkout session abuse)
  * - User can only create checkout for themselves (uses session userId)
  * - Validates content is published, has price, and not already purchased
  *
@@ -92,7 +88,10 @@ const checkout = new Hono<HonoEnv>();
  */
 checkout.post(
   '/create',
-  withPolicy(POLICY_PRESETS.authenticated()),
+  withPolicy({
+    auth: 'required',
+    rateLimit: 'auth', // 10 req/min - stricter than default api (100 req/min)
+  }),
   createAuthenticatedHandler({
     schema: {
       body: createCheckoutSchema,

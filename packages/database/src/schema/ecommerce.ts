@@ -96,6 +96,10 @@ export const platformFeeConfig = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
   },
   (table) => [
     index('idx_platform_fee_config_effective').on(
@@ -238,9 +242,12 @@ export const purchases = pgTable(
 
     // Revenue split snapshot (immutable - calculated at purchase time)
     // Phase 1: platformFeeCents = 10%, organizationFeeCents = 0%, creatorPayoutCents = 90%
-    platformFeeCents: integer('platform_fee_cents').notNull(),
-    organizationFeeCents: integer('organization_fee_cents').notNull(),
-    creatorPayoutCents: integer('creator_payout_cents').notNull(),
+    // DEFAULT 0 ensures safe migration for existing records (will be backfilled)
+    platformFeeCents: integer('platform_fee_cents').notNull().default(0),
+    organizationFeeCents: integer('organization_fee_cents')
+      .notNull()
+      .default(0),
+    creatorPayoutCents: integer('creator_payout_cents').notNull().default(0),
 
     // References to agreements used (audit trail, NULL if defaults used)
     platformAgreementId: uuid('platform_agreement_id').references(
@@ -315,11 +322,9 @@ export const purchases = pgTable(
       sql`${table.amountPaidCents} = ${table.platformFeeCents} + ${table.organizationFeeCents} + ${table.creatorPayoutCents}`
     ),
 
-    // Prevent duplicate purchases: one completed purchase per customer per content
-    unique('purchase_customer_content_unique').on(
-      table.customerId,
-      table.contentId
-    ),
+    // NOTE: No unique constraint on (customerId, contentId)
+    // Idempotency is enforced by stripePaymentIntentId unique constraint only
+    // This allows users to retry failed payments or repurchase after refund
   ]
 );
 

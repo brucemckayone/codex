@@ -102,10 +102,10 @@ export class ContentAccessService {
     });
 
     try {
-      // Wrap in transaction for consistent snapshot of access verification
-      return await db.transaction(
+      // Step 1 & 2: Verify access and fetch content/media data (database transaction)
+      const { r2Key, mediaType } = await db.transaction(
         async (tx) => {
-          // Step 1: Get content with media details (any organization)
+          // Get content with media details (any organization)
           const contentRecord = await tx.query.content.findFirst({
             where: and(
               eq(content.id, input.contentId),
@@ -136,7 +136,7 @@ export class ContentAccessService {
             });
           }
 
-          // Step 2: Check access - free content, purchase, or org membership
+          // Check access - free content, purchase, or org membership
           if (contentRecord.priceCents && contentRecord.priceCents > 0) {
             // Paid content - check purchase via PurchaseService
             const hasPurchased =
@@ -211,7 +211,7 @@ export class ContentAccessService {
             });
           }
 
-          // Step 3: Generate signed R2 URL (outside transaction - external API call)
+          // Extract R2 key and validate
           const r2Key = contentRecord.mediaItem.r2Key;
 
           if (!r2Key) {
@@ -225,54 +225,59 @@ export class ContentAccessService {
             );
           }
 
-          // Generate signed URL
-          try {
-            const streamingUrl = await r2.generateSignedUrl(
-              r2Key,
-              input.expirySeconds
-            );
-            const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
+          // Validate media type (defense-in-depth)
+          const mediaType = contentRecord.mediaItem.mediaType;
 
-            // Step 4: Validate media type (defense-in-depth)
-
-            const mediaType = contentRecord.mediaItem.mediaType;
-
-            if (!['video', 'audio'].includes(mediaType)) {
-              obs.error('Invalid media type', {
-                mediaType,
-                contentId: input.contentId,
-                mediaItemId: contentRecord.mediaItem.id,
-              });
-              throw new Error('INVALID_MEDIA_TYPE');
-            }
-
-            obs.info('Streaming URL generated successfully', {
-              userId,
+          if (!['video', 'audio'].includes(mediaType)) {
+            obs.error('Invalid media type', {
+              mediaType,
               contentId: input.contentId,
-              contentType: mediaType,
-              expiresAt: expiresAt.toISOString(),
+              mediaItemId: contentRecord.mediaItem.id,
             });
-
-            return {
-              streamingUrl,
-              expiresAt,
-              contentType: mediaType as 'video' | 'audio',
-            };
-          } catch (err) {
-            obs.error('Failed to generate signed R2 URL', {
-              error: err,
-              userId,
-              contentId: input.contentId,
-              r2Key,
-            });
-            throw new R2SigningError(r2Key, err);
+            throw new Error('INVALID_MEDIA_TYPE');
           }
+
+          // Return data for R2 signing (outside transaction)
+          return {
+            r2Key,
+            mediaType: mediaType as 'video' | 'audio',
+          };
         },
         {
           isolationLevel: 'read committed', // Consistent snapshot for access verification
           accessMode: 'read only', // All operations are reads
         }
       );
+
+      // Step 3: Generate signed R2 URL (OUTSIDE transaction - external API call)
+      try {
+        const streamingUrl = await r2.generateSignedUrl(
+          r2Key,
+          input.expirySeconds
+        );
+        const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
+
+        obs.info('Streaming URL generated successfully', {
+          userId,
+          contentId: input.contentId,
+          contentType: mediaType,
+          expiresAt: expiresAt.toISOString(),
+        });
+
+        return {
+          streamingUrl,
+          expiresAt,
+          contentType: mediaType,
+        };
+      } catch (err) {
+        obs.error('Failed to generate signed R2 URL', {
+          error: err,
+          userId,
+          contentId: input.contentId,
+          r2Key,
+        });
+        throw new R2SigningError(r2Key, err);
+      }
     } catch (error) {
       // Re-throw domain errors as-is, wrap unexpected errors
       if (
