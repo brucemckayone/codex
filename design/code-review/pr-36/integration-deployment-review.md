@@ -324,7 +324,7 @@ jobs:
 
 **Deployment Order:**
 ```
-1. stripe-webhook-handler (api-preview-{PR})
+1. ecom-api (api-preview-{PR})
 2. content-api (content-api-preview-{PR})
 3. identity-api (identity-api-preview-{PR})
 4. auth-worker (auth-preview-{PR})
@@ -412,7 +412,7 @@ jobs:
 ```
 1. Validate builds (ALL workers) ← Fail before migrations
 2. Run migrations (production DB)
-3. Deploy stripe-webhook-handler → Health check (30s wait)
+3. Deploy ecom-api → Health check (30s wait)
 4. Deploy content-api → Health check (15s wait)
 5. Deploy identity-api → Health check (15s wait)
 6. Deploy auth-worker → Health check (15s wait)
@@ -733,7 +733,7 @@ Merge to main → Testing Workflow (must pass)
            Apply Migrations to Production
                         ↓
          Deploy Workers Sequentially:
-         1. stripe-webhook-handler (+ health check)
+         1. ecom-api (+ health check)
          2. content-api (+ health check)
          3. identity-api (+ health check)
          4. auth-worker (+ health check)
@@ -946,7 +946,7 @@ app.use('*', cors({
 **Recommendations:**
 
 🔴 **CRITICAL** - Add CORS headers for all API workers
-- **Workers affected:** content-api, identity-api, stripe-webhook-handler, auth
+- **Workers affected:** content-api, identity-api, ecom-api, auth
 - **Implementation:** Use @codex/security package or Hono's cors middleware
 
 **Example Configuration:**
@@ -985,7 +985,7 @@ wrangler tail codex-web-production &
 wrangler tail auth-worker-production &
 wrangler tail content-api-production &
 wrangler tail identity-api-production &
-wrangler tail stripe-webhook-handler-production &
+wrangler tail ecom-api-production &
 wait
 ```
 
@@ -1109,7 +1109,7 @@ app.get('/health', async (c) => {
   "dev": "concurrently ...",
   "dev:web": "turbo run dev --filter=web",
   "dev:auth": "turbo run dev --filter=auth",
-  "dev:stripe-webhook-handler": "turbo run dev --filter=stripe-webhook-handler",
+  "dev:ecom-api": "turbo run dev --filter=ecom-api",
   "dev:content-api": "turbo run dev --filter=content-api",
   "dev:identity-api": "turbo run dev --filter=identity-api",
   "docker:up": "docker-compose ...",
@@ -1305,7 +1305,7 @@ verifySetup();
 Run these commands for EACH worker:
 
 ```bash
-# For stripe-webhook-handler
+# For ecom-api
 wrangler secret put DATABASE_URL --env production
 wrangler secret put STRIPE_SECRET_KEY --env production
 wrangler secret put STRIPE_WEBHOOK_SECRET_PAYMENT --env production
@@ -1583,7 +1583,7 @@ app.use('/api/*', rateLimit({
 
 **Current:**
 - Sequential worker deployment: ~5-7 minutes total
-  - stripe-webhook-handler: ~60s (includes 30s SSL wait)
+  - ecom-api: ~60s (includes 30s SSL wait)
   - content-api: ~45s (includes 15s SSL wait)
   - identity-api: ~45s (includes 15s SSL wait)
   - auth-worker: ~45s (includes 15s SSL wait)
@@ -1623,7 +1623,7 @@ app.use('/api/*', rateLimit({
 ```yaml
 - name: Check bundle sizes
   run: |
-    for worker in auth content-api identity-api stripe-webhook-handler; do
+    for worker in auth content-api identity-api ecom-api; do
       SIZE=$(wc -c < workers/$worker/dist/index.js)
       echo "$worker: $(($SIZE / 1024)) KB"
       if [ $SIZE -gt 1000000 ]; then
@@ -1806,7 +1806,7 @@ app.use('/api/*', rateLimit({
    wrangler tail auth-worker-production &
    wrangler tail content-api-production &
    wrangler tail identity-api-production &
-   wrangler tail stripe-webhook-handler-production &
+   wrangler tail ecom-api-production &
    ```
 
 5. **Verify Health**
@@ -2007,7 +2007,7 @@ TURBO_TEAM                    # For remote caching (optional)
 
 **Set via `wrangler secret put`:**
 
-**stripe-webhook-handler:**
+**ecom-api:**
 - DATABASE_URL
 - STRIPE_SECRET_KEY
 - STRIPE_WEBHOOK_SECRET_PAYMENT

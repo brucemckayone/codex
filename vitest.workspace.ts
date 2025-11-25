@@ -20,7 +20,7 @@ export default defineConfig({
 
       // Workers
       'workers/auth',
-      'workers/stripe-webhook-handler',
+      'workers/ecom-api',
       'workers/content-api',
       'workers/identity-api',
     ],

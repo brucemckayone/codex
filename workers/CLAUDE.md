@@ -139,33 +139,36 @@ Workers are organized by business responsibility:
 
 ---
 
-### 4. Stripe Webhook Handler
+### 4. Ecom-API Worker (formerly Stripe Webhook Handler)
 
-**Purpose**: Processes Stripe webhook events with cryptographic signature verification, comprehensive observability, and rate limiting. Acts as entry point for all Stripe payment, subscription, customer, and dispute events. No user authentication required; Stripe HMAC-SHA256 signature verification prevents spoofing.
+**Purpose**: Processes Stripe webhook events with cryptographic signature verification, comprehensive observability, and rate limiting. Acts as entry point for all Stripe payment, subscription, customer, and dispute events. Coordinates with @codex/purchase service for recording purchases. No user authentication required; Stripe HMAC-SHA256 signature verification prevents spoofing.
 
-**Deployment Target**: `webhook.stripe.revelations.studio` (production), local port 42072 (dev)
+**Deployment Target**: `ecom-api.revelations.studio` (production), local port 42072 (development)
 
-**Primary Responsibility**: Payment webhook processing, signature verification, event logging
+**Primary Responsibility**: E-commerce API (checkout creation), payment webhook processing, purchase recording, signature verification, event logging
 
 **Key Endpoints**:
-- `POST /webhooks/stripe/payment` - Payment intent and charge events (rate: 1000/min)
-- `POST /webhooks/stripe/subscription` - Subscription lifecycle events (rate: 1000/min)
-- `POST /webhooks/stripe/customer` - Customer account events (rate: 1000/min)
-- `POST /webhooks/stripe/connect` - Connect account events (rate: 1000/min)
-- `POST /webhooks/stripe/booking` - Checkout session events (rate: 1000/min)
-- `POST /webhooks/stripe/dispute` - Dispute and fraud events (rate: 1000/min)
+- `POST /checkout/create` - Create Stripe Checkout session for paid content (auth required)
+- `POST /webhooks/stripe/booking` - Checkout session completed events (creates purchases, idempotent)
+- `POST /webhooks/stripe/payment` - Payment intent and charge events (for future phases)
+- `POST /webhooks/stripe/subscription` - Subscription lifecycle events (for future phases)
+- `POST /webhooks/stripe/customer` - Customer account events (for future phases)
+- `POST /webhooks/stripe/connect` - Connect account events (for future phases)
+- `POST /webhooks/stripe/dispute` - Dispute and fraud events (for future phases)
 - `GET /health` - Service health check
 
 **Key Packages**:
-- `@codex/security` - Stripe signature verification, rate limiting
+- `@codex/purchase` - PurchaseService for checkout & purchase completion
+- `@codex/security` - Stripe signature verification, rate limiting, authentication
 - `@codex/observability` - Event logging and observability
-- `@codex/worker-utils` - Health checks, error handling, middleware
-- `@codex/database` - PostgreSQL for webhook event storage (optional)
+- `@codex/worker-utils` - Health checks, error handling, middleware, authenticated handler
+- `@codex/database` - PostgreSQL for purchases and webhook logs
+- `@codex/validation` - Input validation for checkout requests
 
 **External Services**:
-- Stripe API (signature verification via STRIPE_SECRET_KEY)
-- Neon PostgreSQL (webhook event logs)
-- Cloudflare KV (RATE_LIMIT_KV for webhook rate limiting)
+- Stripe API (checkout sessions, payment intents, signature verification via STRIPE_SECRET_KEY & STRIPE_WEBHOOK_SECRET_BOOKING)
+- Neon PostgreSQL (purchases table, webhook event logs)
+- Cloudflare KV (RATE_LIMIT_KV for rate limiting)
 
 ---
 
@@ -205,16 +208,24 @@ Workers are organized by business responsibility:
               (Sessions, rate limits)
                             │
 ┌───────────────────────────▼─────────────────────────────┐
-│         Stripe Webhook Handler (42072)                  │
+│            Ecom-API Worker (42072)                      │
 │                                                         │
-│ Signature Verification (HMAC-SHA256)                   │
+│ Checkout Flow:                                         │
+│  - POST /checkout/create                              │
+│  - Validate session (Auth Worker)                     │
+│  - PurchaseService.createCheckoutSession()            │
+│  - Return Stripe checkout URL                         │
+│                                                         │
+│ Webhook Flow:                                          │
+│  - POST /webhooks/stripe/booking                      │
+│  - Signature Verification (HMAC-SHA256)               │
+│  - Extract checkout.session.completed event           │
+│  - PurchaseService.completePurchase()                 │
+│  - Create purchase record (idempotent)                │
+│  - Grant access via contentAccess table               │
+│  - Return 200 OK (prevent Stripe retries)             │
 │  ↓                                                      │
-│ Event Processing:                                      │
-│  - payment_intent.* → Payment Service                 │
-│  - customer.subscription.* → Subscription Service     │
-│  - charge.dispute.* → Dispute Service                 │
-│  ↓                                                      │
-│ Store Event Logs → PostgreSQL                         │
+│ Event Logs → PostgreSQL                               │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -582,9 +593,9 @@ cd workers/identity-api
 pnpm dev  # Starts on http://localhost:42071
 ```
 
-**Terminal 4 - Stripe Webhook Handler**:
+**Terminal 4 - Ecom-API Worker**:
 ```bash
-cd workers/stripe-webhook-handler
+cd workers/ecom-api
 pnpm dev  # Starts on http://localhost:42072
 ```
 
@@ -686,14 +697,14 @@ pnpm run deploy:staging
 cd workers/auth && wrangler deploy --env staging
 cd workers/content-api && wrangler deploy --env staging
 cd workers/identity-api && wrangler deploy --env staging
-cd workers/stripe-webhook-handler && wrangler deploy --env staging
+cd workers/ecom-api && wrangler deploy --env staging
 ```
 
 **Staging URLs**:
 - Auth: https://auth-staging.revelations.studio
 - Content-API: https://content-api-staging.revelations.studio
 - Identity-API: https://identity-api-staging.revelations.studio
-- Stripe Webhook: https://webhook-staging.stripe.revelations.studio
+- Ecom-API: https://ecom-api-staging.revelations.studio
 
 ### Production Deployment
 
@@ -715,7 +726,7 @@ cd workers/auth && wrangler deploy --env production
 - Auth: https://auth.revelations.studio
 - Content-API: https://content-api.revelations.studio
 - Identity-API: https://identity-api.revelations.studio
-- Stripe Webhook: https://webhook.stripe.revelations.studio
+- Ecom-API: https://ecom-api.revelations.studio
 
 ### Environment Variables per Stage
 
@@ -777,7 +788,7 @@ All workers expose `GET /health` endpoint for monitoring:
 ```json
 {
   "status": "healthy | degraded",
-  "service": "auth-worker | content-api | identity-api | stripe-webhook-handler",
+  "service": "auth-worker | content-api | identity-api | ecom-api",
   "version": "1.0.0",
   "timestamp": "2025-11-23T12:34:56Z",
   "checks": {
@@ -1061,7 +1072,7 @@ workers/
 │   ├── package.json               # Port: 42071
 │   └── wrangler.jsonc
 │
-└── stripe-webhook-handler/        # Stripe Webhook Handler
+└── ecom-api/        # Stripe Webhook Handler
     ├── src/
     │   ├── handlers/
     │   │   ├── payment.ts         # Payment events

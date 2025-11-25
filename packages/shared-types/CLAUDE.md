@@ -143,6 +143,7 @@ Environment variables and Cloudflare resources available to all workers. Include
 - CORS configuration (web app and API URLs)
 - Cloudflare KV for rate limiting
 - R2 bucket and credentials for media storage
+- Stripe API keys and webhook secrets for payment processing
 - Environment name (development, staging, production)
 
 ```typescript
@@ -158,20 +159,69 @@ export type Bindings = {
   R2_ACCESS_KEY_ID?: string;      // R2 API access key
   R2_SECRET_ACCESS_KEY?: string;  // R2 API secret key
   R2_BUCKET_MEDIA?: string;       // R2 bucket name
+  STRIPE_SECRET_KEY?: string;     // Stripe API secret key
+  STRIPE_WEBHOOK_SECRET_PAYMENT?: string;      // Webhook signing secret for payment events
+  STRIPE_WEBHOOK_SECRET_SUBSCRIPTION?: string; // Webhook signing secret for subscription events
+  STRIPE_WEBHOOK_SECRET_CONNECT?: string;      // Webhook signing secret for Connect events
+  STRIPE_WEBHOOK_SECRET_CUSTOMER?: string;     // Webhook signing secret for customer events
+  STRIPE_WEBHOOK_SECRET_BOOKING?: string;      // Webhook signing secret for booking/checkout events
+  STRIPE_WEBHOOK_SECRET_DISPUTE?: string;      // Webhook signing secret for dispute events
 };
 ```
 
 **Accessing bindings in route handlers:**
 
 ```typescript
-// Through Hono context
+// Accessing R2 bindings
 app.post('/upload', (c) => {
   const bucket = c.env.MEDIA_BUCKET;
   const accountId = c.env.R2_ACCOUNT_ID;
 
   return c.json({ bucket });
 });
+
+// Accessing Stripe bindings in ecom-api worker
+app.post('/checkout/create', async (c) => {
+  const stripeKey = c.env.STRIPE_SECRET_KEY;
+  const stripe = new Stripe(stripeKey, { apiVersion: '2025-10-29.clover' });
+
+  // Create checkout session...
+  return c.json({ sessionUrl: '...' });
+});
 ```
+
+**Architectural Pattern: Shared Bindings**
+
+All external service credentials (R2, Stripe, etc.) are defined in the shared `Bindings` type rather than per-worker custom types. This ensures:
+
+1. **Consistency** - All workers use the same base `HonoEnv` type
+2. **Type Safety** - No need for custom environment type extensions
+3. **Simplicity** - Workers access `ctx.env.STRIPE_SECRET_KEY` directly
+4. **Maintainability** - Single source of truth for all environment variables
+
+Example: The ecom-api worker uses Stripe credentials from shared Bindings:
+
+```typescript
+import type { HonoEnv } from '@codex/shared-types';
+import { Hono } from 'hono';
+
+const app = new Hono<HonoEnv>(); // Uses base HonoEnv, not custom type
+
+app.post('/checkout/create', async (c) => {
+  // Stripe keys available from shared Bindings
+  const stripeKey = c.env.STRIPE_SECRET_KEY;
+  const webhookSecret = c.env.STRIPE_WEBHOOK_SECRET_PAYMENT;
+
+  if (!stripeKey) {
+    throw new PaymentProcessingError('STRIPE_SECRET_KEY not configured');
+  }
+
+  const stripe = new Stripe(stripeKey, { apiVersion: '2025-10-29.clover' });
+  // ...
+});
+```
+
+This pattern follows the same approach used for R2 credentials, where `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` are in shared Bindings rather than being defined separately in each worker that needs R2 access.
 
 ### Variables
 
@@ -988,7 +1038,7 @@ app.onError((err, c) => {
 | `content-api` | `src/index.ts` | Uses `HonoEnv`, all content response types, `AuthenticatedContext` |
 | `identity-api` | `src/index.ts` | Uses `HonoEnv`, organization response types, `AuthenticatedContext` |
 | `auth` | `src/index.ts` | Uses `SessionData`, `UserData`, `Bindings` for session management |
-| `stripe-webhook-handler` | `src/index.ts` | Uses `Bindings` for environment access |
+| `ecom-api` | `src/index.ts` | Uses `Bindings` for environment access |
 
 ### How Shared Types Enable Type Safety
 

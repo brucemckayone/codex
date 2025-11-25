@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "stripe-webhook-handler",
+  "name": "ecom-api",
   "main": "dist/index.js",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -22,7 +22,7 @@
   "env": {
     // Production environment
     "production": {
-      "name": "stripe-webhook-handler-production",
+      "name": "ecom-api-production",
       "vars": {
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
@@ -39,7 +39,7 @@
 
     // Staging environment
     "staging": {
-      "name": "stripe-webhook-handler-staging",
+      "name": "ecom-api-staging",
       "vars": {
         "ENVIRONMENT": "staging",
         "WEB_APP_URL": "https://codex-staging.revelations.studio",

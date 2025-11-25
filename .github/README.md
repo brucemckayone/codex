@@ -83,7 +83,7 @@ gh run view <run-id> --log
 ### Rollback Production
 ```bash
 wrangler rollback --name codex-web-production
-wrangler rollback --name stripe-webhook-handler-production
+wrangler rollback --name ecom-api-production
 wrangler rollback --name auth-worker-production
 ```
 

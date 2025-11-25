@@ -181,7 +181,7 @@ export interface WorkerConfig extends MiddlewareConfig {
  * @example With internal routes
  * ```typescript
  * const app = createWorker({
- *   serviceName: 'stripe-webhook-handler',
+ *   serviceName: 'ecom-api',
  *   version: '1.0.0',
  *   internalRoutePrefix: '/internal',
  *   workerSharedSecret: c.env.WORKER_SHARED_SECRET,

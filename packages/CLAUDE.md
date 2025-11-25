@@ -66,6 +66,7 @@ Codex organizes all business logic into **12 packages** across three architectur
 | **Content management** | @codex/content | ContentService, MediaItemService |
 | **Identity/orgs** | @codex/identity | OrganizationService |
 | **Access control** | @codex/access | ContentAccessService |
+| **Purchase management** | @codex/purchase | PurchaseService, Stripe client factory |
 | **Worker setup** | @codex/worker-utils | createWorker, middleware factories |
 | **R2 storage** | @codex/cloudflare-clients | R2Service, R2SigningClient |
 | **Observability** | @codex/observability | Logging and monitoring |
@@ -239,7 +240,7 @@ create(uploading) → uploaded → transcoding → ready/failed
 
 **Access control logic**:
 - Free content: Any authenticated user
-- Paid content: User must have purchase OR be org member
+- Paid content: User must have purchase (via @codex/purchase) OR be org member
 - Org-scoped: Content belongs to organization
 
 **Streaming**: Generates R2 presigned URLs (time-limited, cryptographically signed)
@@ -247,6 +248,35 @@ create(uploading) → uploaded → transcoding → ready/failed
 **Playback**: Tracks position/duration; auto-completes at 95%; prevents backwards overwrites
 
 **Read full docs**: [packages/access/README.clog](packages/access/README.clog)
+
+---
+
+### @codex/purchase
+
+**Purpose**: Stripe Checkout integration and purchase management with revenue split calculation.
+
+**When to use**: Creating checkout sessions, recording purchases from webhooks, verifying ownership for access control
+
+**Key exports**:
+- `PurchaseService` - Purchase lifecycle, Stripe integration
+- `createStripeClient()` - Stripe SDK factory with pinned API version
+- `verifyWebhookSignature()` - HMAC-SHA256 signature verification
+- `calculateRevenueSplit()` - Fee distribution calculator
+- Error classes: `AlreadyPurchasedError` (409), `ContentNotPurchasableError` (400), `PaymentProcessingError` (502)
+
+**Key methods**:
+- `createCheckoutSession()` - Create Stripe checkout for paid content
+- `completePurchase()` - Record purchase from webhook (idempotent)
+- `verifyPurchase()` - Check customer owns content
+- `getPurchaseHistory()` - Query purchases with pagination
+
+**Business logic**:
+- Supports one-time purchases (not subscriptions yet)
+- Revenue split: Default 10% platform / 90% creator (configurable)
+- Idempotency via stripePaymentIntentId unique constraint
+- Integrates with @codex/access for access verification
+
+**Read full docs**: [packages/purchase/README.clog](packages/purchase/README.clog)
 
 ---
 
@@ -258,7 +288,7 @@ Utility packages provide cross-cutting concerns, helpers, and infrastructure. Us
 
 **Purpose**: Factory functions and middleware for standardized Cloudflare Workers setup.
 
-**When to use**: Building any API worker (content-api, identity-api, auth, stripe-webhook-handler)
+**When to use**: Building any API worker (content-api, identity-api, auth, ecom-api)
 
 **Key exports**:
 - `createWorker()` - Create fully configured Hono app with standard middleware
@@ -333,15 +363,16 @@ Utility packages provide cross-cutting concerns, helpers, and infrastructure. Us
 ```
 WORKERS (API Endpoints)
 ├── workers/auth - Authentication/sessions
-├── workers/content-api - Content CRUD
+├── workers/content-api - Content CRUD, streaming, access control
 ├── workers/identity-api - Organization management
-└── workers/stripe-webhook-handler - Payment webhooks
+└── workers/ecom-api - Stripe checkout, purchase webhooks
     |
     v
 SERVICE LAYER (Business Logic)
 ├── @codex/content - Content/media lifecycle
 ├── @codex/identity - Organization management
-└── @codex/access - Access control & streaming
+├── @codex/access - Access control & streaming (uses @codex/purchase)
+└── @codex/purchase - Stripe integration, purchases, revenue splits
     |
     v
 UTILITY PACKAGES (Cross-cutting Concerns)
@@ -582,8 +613,12 @@ describe('User Library', () => {
   └─ used by: [workers/identity-api]
 
 @codex/access
-  ├─ depends: @codex/database, @codex/validation, @codex/service-errors, @codex/cloudflare-clients
+  ├─ depends: @codex/database, @codex/validation, @codex/service-errors, @codex/cloudflare-clients, @codex/purchase
   └─ used by: [workers/content-api]
+
+@codex/purchase
+  ├─ depends: @codex/database, @codex/validation, @codex/service-errors, stripe
+  └─ used by: [workers/ecom-api], [@codex/access]
 ```
 
 ### Utility Packages
@@ -620,6 +655,7 @@ describe('User Library', () => {
 | Create content/media | @codex/content | ContentService, MediaItemService |
 | Manage organizations | @codex/identity | OrganizationService |
 | Control access to content | @codex/access | ContentAccessService |
+| Handle purchases & Stripe | @codex/purchase | PurchaseService, createStripeClient, verifyWebhookSignature |
 | Build an API worker | @codex/worker-utils | createWorker, createAuthenticatedHandler |
 | Upload media to R2 | @codex/cloudflare-clients | R2Service, R2SigningClient |
 | Generate streaming URLs | @codex/cloudflare-clients | R2Service.generateSignedUrl() |
@@ -745,6 +781,15 @@ packages/
 │   ├── src/
 │   │   ├── services/           # ContentAccessService
 │   │   ├── errors.ts           # Domain-specific error classes
+│   │   └── index.ts            # Main exports
+│   └── README.clog
+│
+├── purchase/                    # Purchases & Stripe integration
+│   ├── src/
+│   │   ├── services/           # PurchaseService, revenue calculator
+│   │   ├── stripe-client.ts    # Centralized Stripe client factory
+│   │   ├── errors.ts           # Domain-specific error classes
+│   │   ├── types.ts            # Purchase record types
 │   │   └── index.ts            # Main exports
 │   └── README.clog
 │

@@ -140,10 +140,10 @@ Codex/
 │   │   ├── wrangler.jsonc        # Cloudflare config
 │   │   └── vite.auth-worker.config.ts
 │   │
-│   └── stripe-webhook-handler/ # Stripe webhook handler
+│   └── ecom-api/ # Stripe webhook handler
 │       ├── src/
 │       ├── wrangler.jsonc
-│       └── vite.stripe-webhook-handler.config.ts
+│       └── vite.ecom-api.config.ts
 │
 ├── packages/
 │   ├── database/               # Database client & schema
@@ -617,7 +617,7 @@ pnpm --filter auth build
 # - workers/auth/dist/index.d.ts (TypeScript definitions)
 
 # Build stripe worker
-pnpm --filter stripe-webhook-handler build
+pnpm --filter ecom-api build
 ```
 
 **Build Configuration:**

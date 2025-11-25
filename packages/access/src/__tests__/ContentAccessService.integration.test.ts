@@ -23,11 +23,12 @@ import {
 } from '@codex/cloudflare-clients';
 import { ContentService, MediaItemService } from '@codex/content';
 import {
-  contentAccess,
+  organizationMemberships,
   organizations,
   purchases,
 } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
+import type { PurchaseService } from '@codex/purchase';
 import {
   createUniqueSlug,
   type Database,
@@ -36,7 +37,16 @@ import {
   teardownTestDatabase,
   withNeonTestBranch,
 } from '@codex/test-utils';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from 'vitest';
+import { AccessDeniedError } from '../errors';
 import { ContentAccessService } from '../services/ContentAccessService';
 
 // Enable ephemeral Neon branch for this test file
@@ -48,6 +58,11 @@ describe('ContentAccessService Integration', () => {
   let contentService: ContentService;
   let mediaService: MediaItemService;
   let r2Client: R2SigningClient;
+  let mockPurchaseService: {
+    verifyPurchase: Mock<
+      (contentId: string, customerId: string) => Promise<boolean>
+    >;
+  };
   let userId: string;
   let otherUserId: string;
   let organizationId: string;
@@ -62,11 +77,17 @@ describe('ContentAccessService Integration', () => {
     // Use real R2 signing client with test bucket credentials
     r2Client = createR2SigningClientFromEnv();
 
+    // Mock PurchaseService
+    mockPurchaseService = {
+      verifyPurchase: vi.fn(),
+    };
+
     const obs = new ObservabilityClient('content-access-test', 'test');
     accessService = new ContentAccessService({
       db,
       r2: r2Client,
       obs,
+      purchaseService: mockPurchaseService as unknown as PurchaseService,
     });
 
     const userIds = await seedTestUsers(db, 2);
@@ -94,6 +115,9 @@ describe('ContentAccessService Integration', () => {
 
   describe('getStreamingUrl', () => {
     it('should return streaming URL for free content without purchase', async () => {
+      // Reset mock before test
+      mockPurchaseService.verifyPurchase.mockClear();
+
       // Create media and content
       const media = await mediaService.create(
         {
@@ -143,9 +167,15 @@ describe('ContentAccessService Integration', () => {
       expect(result.streamingUrl).toContain('X-Amz-Signature');
       expect(result.contentType).toBe('video');
       expect(result.expiresAt).toBeInstanceOf(Date);
+
+      // Verify PurchaseService was NOT called for free content
+      expect(mockPurchaseService.verifyPurchase).not.toHaveBeenCalled();
     });
 
     it('should return streaming URL for paid content with purchase', async () => {
+      // Reset mock before test
+      mockPurchaseService.verifyPurchase.mockClear();
+
       // Create media and paid content
       const media = await mediaService.create(
         {
@@ -184,15 +214,10 @@ describe('ContentAccessService Integration', () => {
 
       await contentService.publish(paidContent.id, userId);
 
-      // Grant access to otherUser via content_access
-      await db.insert(contentAccess).values({
-        userId: otherUserId,
-        contentId: paidContent.id,
-        organizationId,
-        accessType: 'purchased',
-      });
+      // Mock: User HAS purchased this content
+      mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
-      // User with access should be able to stream
+      // User with purchase should be able to stream
       const result = await accessService.getStreamingUrl(otherUserId, {
         contentId: paidContent.id,
         expirySeconds: 3600,
@@ -200,9 +225,19 @@ describe('ContentAccessService Integration', () => {
 
       expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
       expect(result.contentType).toBe('video');
+
+      // Verify PurchaseService was called
+      expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledWith(
+        paidContent.id,
+        otherUserId
+      );
+      expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledTimes(1);
     });
 
     it('should throw ACCESS_DENIED for paid content without purchase', async () => {
+      // Reset mock before test
+      mockPurchaseService.verifyPurchase.mockClear();
+
       // Create media and paid content
       const media = await mediaService.create(
         {
@@ -241,13 +276,93 @@ describe('ContentAccessService Integration', () => {
 
       await contentService.publish(exclusiveContent.id, userId);
 
+      // Mock: User has NOT purchased this content
+      mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
       // User without access should be denied
       await expect(
         accessService.getStreamingUrl(otherUserId, {
           contentId: exclusiveContent.id,
           expirySeconds: 3600,
         })
-      ).rejects.toThrow('User does not have access to this content');
+      ).rejects.toThrow(AccessDeniedError);
+
+      // Verify PurchaseService was called
+      expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledWith(
+        exclusiveContent.id,
+        otherUserId
+      );
+      expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledTimes(1);
+    });
+
+    it('should grant access to org paid content for active members (fallback)', async () => {
+      // Reset mock before test
+      mockPurchaseService.verifyPurchase.mockClear();
+
+      // Create media and paid org content
+      const media = await mediaService.create(
+        {
+          title: 'Org Premium Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/org-premium.mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/org-premium/master.m3u8',
+          thumbnailKey: 'thumbnails/org-premium.jpg',
+          durationSeconds: 300,
+        },
+        userId
+      );
+
+      const orgPaidContent = await contentService.create(
+        {
+          organizationId, // Belongs to organization
+          title: 'Org Exclusive Content',
+          slug: createUniqueSlug('org-exclusive'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          priceCents: 2999, // $29.99
+          tags: [],
+        },
+        userId
+      );
+
+      await contentService.publish(orgPaidContent.id, userId);
+
+      // Mock: User has NOT purchased this content
+      mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+      // Create org membership for otherUserId (active member)
+      await db.insert(organizationMemberships).values({
+        userId: otherUserId,
+        organizationId,
+        role: 'member',
+        status: 'active',
+      });
+
+      // User should be able to stream via org membership (fallback)
+      const result = await accessService.getStreamingUrl(otherUserId, {
+        contentId: orgPaidContent.id,
+        expirySeconds: 3600,
+      });
+
+      expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      expect(result.contentType).toBe('video');
+
+      // Verify PurchaseService was called first (then fallback to org membership)
+      expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledWith(
+        orgPaidContent.id,
+        otherUserId
+      );
+      expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledTimes(1);
     });
 
     it('should throw CONTENT_NOT_FOUND for unpublished content', async () => {
@@ -580,6 +695,9 @@ describe('ContentAccessService Integration', () => {
         contentId: libraryContent.id,
         status: 'completed',
         amountPaidCents: 999,
+        platformFeeCents: 100, // 10% platform fee
+        organizationFeeCents: 0, // 0% org fee
+        creatorPayoutCents: 899, // 90% creator payout
         stripePaymentIntentId: `pi_test_${Date.now()}_${otherUserId}`,
       });
 
@@ -658,6 +776,9 @@ describe('ContentAccessService Integration', () => {
         contentId: content1.id,
         status: 'completed',
         amountPaidCents: 500,
+        platformFeeCents: 50, // 10% platform fee
+        organizationFeeCents: 0, // 0% org fee
+        creatorPayoutCents: 450, // 90% creator payout
         stripePaymentIntentId: `pi_test_${Date.now()}_${testUserId}`,
       });
 
@@ -1163,6 +1284,9 @@ describe('ContentAccessService Integration', () => {
       });
 
       it('should handle content with priceCents = 0 (free)', async () => {
+        // Reset mock before test
+        mockPurchaseService.verifyPurchase.mockClear();
+
         const media = await mediaService.create(
           {
             title: 'Free Content Test',
@@ -1207,9 +1331,18 @@ describe('ContentAccessService Integration', () => {
         });
 
         expect(result.streamingUrl).toBeDefined();
+
+        // Verify PurchaseService was NOT called for free content
+        expect(mockPurchaseService.verifyPurchase).not.toHaveBeenCalled();
       });
 
       it('should handle content with very high price', async () => {
+        // Reset mock before test
+        mockPurchaseService.verifyPurchase.mockClear();
+
+        // Create fresh user without org membership to ensure access is denied
+        const [freshUserId] = await seedTestUsers(db, 1);
+
         const media = await mediaService.create(
           {
             title: 'Expensive Content',
@@ -1247,13 +1380,22 @@ describe('ContentAccessService Integration', () => {
 
         await contentService.publish(testContent.id, userId);
 
-        // Without purchase, should be denied
+        // Mock: User has NOT purchased this content
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        // Without purchase and not org member, should be denied
         await expect(
-          accessService.getStreamingUrl(otherUserId, {
+          accessService.getStreamingUrl(freshUserId, {
             contentId: testContent.id,
             expirySeconds: 3600,
           })
-        ).rejects.toThrow('User does not have access to this content');
+        ).rejects.toThrow(AccessDeniedError);
+
+        // Verify PurchaseService was called
+        expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledWith(
+          testContent.id,
+          freshUserId
+        );
       });
     });
 

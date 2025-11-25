@@ -120,14 +120,14 @@ jobs:
           echo "✅ Migrations completed successfully"
           echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
-      # Deploy stripe-webhook-handler to production
-      - name: Deploy stripe-webhook-handler
-        id: deploy-stripe
+      # Deploy ecom-api to production
+      - name: Deploy ecom-api
+        id: deploy-ecom
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: workers/stripe-webhook-handler
+          workingDirectory: workers/ecom-api
           command: deploy --env production
           secrets: |
             DATABASE_URL
@@ -537,7 +537,7 @@ jobs:
 
             \`\`\`bash
             # Option A: Rollback worker to previous version
-            wrangler rollback --name stripe-webhook-handler-production
+            wrangler rollback --name ecom-api-production
             wrangler rollback --name auth-worker-production
             wrangler rollback --name codex-web-production
 

@@ -271,7 +271,7 @@ export async function handleCheckoutCompleted(
 
 ### Handler Responsibilities
 
-**Webhook Handlers** (thin wrappers in `workers/stripe-webhook-handler/src/handlers/`):
+**Webhook Handlers** (thin wrappers in `workers/ecom-api/src/handlers/`):
 - **Extract event data**: Payment intent ID, session ID, metadata
 - **Validate event**: Check payment status, required fields
 - **Call service layer**: Delegate to PurchaseService
@@ -384,7 +384,7 @@ END FUNCTION
 ### Existing Infrastructure
 
 **Already Implemented** (50% complete):
-- Webhook worker skeleton (`workers/stripe-webhook-handler/src/index.ts`)
+- Webhook worker skeleton (`workers/ecom-api/src/index.ts`)
 - Signature verification middleware (`src/middleware/verify-signature.ts`)
 - Security headers, rate limiting, CORS
 - Observability logging
@@ -399,7 +399,7 @@ END FUNCTION
 **Already implemented** - validates HMAC signature from Stripe:
 
 ```typescript
-// workers/stripe-webhook-handler/src/middleware/verify-signature.ts
+// workers/ecom-api/src/middleware/verify-signature.ts
 export function verifyStripeSignature() {
   return async (c: Context, next: Next) => {
     const signature = c.req.header('stripe-signature');
@@ -430,7 +430,7 @@ export function verifyStripeSignature() {
 ### Handler Implementation Example
 
 ```typescript
-// workers/stripe-webhook-handler/src/handlers/checkout.ts
+// workers/ecom-api/src/handlers/checkout.ts
 import type Stripe from 'stripe';
 import { createPurchaseService } from '@codex/purchase';
 import { ObservabilityClient } from '@codex/observability';
@@ -475,13 +475,13 @@ export async function handleCheckoutCompleted(
 ### Worker Route Example
 
 ```typescript
-// workers/stripe-webhook-handler/src/index.ts
+// workers/ecom-api/src/index.ts
 import { createWorker } from '@codex/worker-utils';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import { handleCheckoutCompleted } from './handlers/checkout';
 
 const app = createWorker({
-  serviceName: 'stripe-webhook-handler',
+  serviceName: 'ecom-api',
   enableCors: false, // Webhooks don't need CORS
   enableSecurityHeaders: true,
 });
@@ -564,7 +564,7 @@ obs.error('Purchase failed', error, {
 import { createWorker } from '@codex/worker-utils';
 
 const app = createWorker({
-  serviceName: 'stripe-webhook-handler',
+  serviceName: 'ecom-api',
   enableCors: false,
   enableSecurityHeaders: true,
 });
@@ -608,7 +608,7 @@ const event = stripe.webhooks.constructEvent(
 
 ### Infrastructure Ready
 
-- ✅ Worker skeleton (`workers/stripe-webhook-handler/`)
+- ✅ Worker skeleton (`workers/ecom-api/`)
 - ✅ Signature verification middleware
 - ✅ Security headers and rate limiting
 - ✅ Observability logging
@@ -625,7 +625,7 @@ const event = stripe.webhooks.constructEvent(
 ## Implementation Checklist
 
 - [ ] **Handler Implementation**
-  - [ ] Create `workers/stripe-webhook-handler/src/handlers/checkout.ts`
+  - [ ] Create `workers/ecom-api/src/handlers/checkout.ts`
   - [ ] Implement `handleCheckoutCompleted()` function
   - [ ] Extract payment intent ID from event
   - [ ] Validate payment status and metadata
@@ -660,7 +660,7 @@ const event = stripe.webhooks.constructEvent(
 
 ### Unit Tests
 
-**Handler Tests** (`workers/stripe-webhook-handler/src/handlers/__tests__/`):
+**Handler Tests** (`workers/ecom-api/src/handlers/__tests__/`):
 - Test checkout completed handler
 - Mock PurchaseService
 - Test payment status validation (paid vs unpaid)

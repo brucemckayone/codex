@@ -78,7 +78,7 @@ async function verifyWorkerSignature(
  *
  * @example
  * ```ts
- * // In receiving worker (e.g., stripe-webhook-handler)
+ * // In receiving worker (e.g., ecom-api)
  * import { workerAuth } from '@codex/security';
  *
  * app.use('/internal/*', workerAuth({

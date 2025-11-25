@@ -158,7 +158,7 @@ R2_BUCKET_PLATFORM: codex-platform-test
 ```
 
 **Strengths:**
-- ✅ Sequential deployment after stripe-webhook-handler
+- ✅ Sequential deployment after ecom-api
 - ✅ Health check with exponential backoff (30s + 10 retries)
 - ✅ Proper environment isolation (test vs production buckets)
 - ✅ SSL provisioning handling

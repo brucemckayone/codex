@@ -40,7 +40,7 @@ jobs:
 
             You are reviewing a pull request in a Cloudflare Workers monorepo with:
             - SvelteKit web app
-            - Cloudflare Workers (auth, stripe-webhook-handler, content-api, identity-api)
+            - Cloudflare Workers (auth, ecom-api, content-api, identity-api)
             - Shared packages (database with Drizzle ORM, validation with Zod, test-utils)
             - Neon Postgres database
             - Better Auth for authentication

@@ -269,7 +269,7 @@ describe('PurchaseService', () => {
 
 ### 3. Webhook Handler Tests
 
-**Location**: `workers/stripe-webhook-handler/src/handlers/checkout.test.ts`
+**Location**: `workers/ecom-api/src/handlers/checkout.test.ts`
 
 **What to Test**:
 - Event routing
@@ -374,7 +374,7 @@ describe('Checkout Webhook Handlers', () => {
 
 ### 4. Webhook Integration Tests
 
-**Location**: `workers/stripe-webhook-handler/src/index.integration.test.ts`
+**Location**: `workers/ecom-api/src/index.integration.test.ts`
 
 **What to Test**:
 - Signature verification
@@ -619,7 +619,7 @@ pnpm --filter @codex/validation test
 pnpm --filter @codex/purchases test
 
 # Run webhook handler tests
-pnpm --filter stripe-webhook-handler test
+pnpm --filter ecom-api test
 
 # Run integration tests with test Stripe keys
 STRIPE_SECRET_KEY=sk_test_... pnpm test:integration

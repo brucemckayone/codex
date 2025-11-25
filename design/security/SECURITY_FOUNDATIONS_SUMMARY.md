@@ -179,7 +179,7 @@ const safeData = redactSensitiveData({
 
 ## 4. Applied to Stripe Webhook Handler ✅
 
-**Updated:** `workers/stripe-webhook-handler/src/index.ts`
+**Updated:** `workers/ecom-api/src/index.ts`
 
 Demonstrated how to use the new security middleware in a real worker.
 
@@ -207,7 +207,7 @@ return c.json({
 // ✅ SECURE: No secret leakage
 return c.json({
   status: 'healthy',
-  worker: 'stripe-webhook-handler',
+  worker: 'ecom-api',
   environment: c.env.ENVIRONMENT || 'development',
   timestamp: new Date().toISOString(),
 });
@@ -252,7 +252,7 @@ packages/observability/src/index.ts
   - Integrated PII redaction into ObservabilityClient
   - Re-exported redaction utilities
 
-workers/stripe-webhook-handler/
+workers/ecom-api/
   ├── package.json (added @codex/security dependency)
   └── src/index.ts (applied security middleware, removed secret leakage)
 ```

@@ -949,7 +949,7 @@ The security package is integrated into all Codex workers:
 | **auth-worker** | Session authentication, rate limiting, security headers |
 | **content-api** | Session authentication, rate limiting, security headers |
 | **identity-api** | Session authentication, rate limiting, security headers |
-| **stripe-webhook-handler** | Worker-to-worker authentication, rate limiting |
+| **ecom-api** | Worker-to-worker authentication, rate limiting |
 
 ### Integration with worker-utils
 

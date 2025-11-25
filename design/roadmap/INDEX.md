@@ -148,7 +148,7 @@ Integration & Testing (Week 5-6)
 - Observability logging
 
 **Dependencies**:
-- ✅ Webhook worker skeleton (`workers/stripe-webhook-handler`)
+- ✅ Webhook worker skeleton (`workers/ecom-api`)
 - ✅ Signature verification middleware
 - ⏸️ **P1-ECOM-001** (purchase service) - MUST complete first
 

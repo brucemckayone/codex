@@ -100,19 +100,26 @@ Organization and user identity management.
 
 ---
 
-### 4. Stripe Webhook Handler (Port 42072)
-**File**: [workers/stripe-webhook-handler/CLAUDE.md](workers/stripe-webhook-handler/CLAUDE.md)
+### 4. Ecom-API Worker (Port 42072)
+**File**: [workers/ecom-api/CLAUDE.md](workers/ecom-api/CLAUDE.md)
 
-Webhook endpoint for Stripe payment events.
-- Payment intent processing
-- Signature verification (HMAC-SHA256)
-- Event logging
-- Purchase record creation
+E-commerce API for Stripe Checkout integration and payment webhook processing. Handles checkout session creation, webhook event processing with signature verification, and idempotent purchase recording. Acts as bridge between Stripe payment system and Codex purchase records.
 
 **Key Endpoints**:
-- POST /webhooks/stripe/payment
-- POST /webhooks/stripe/subscription
-- POST /webhooks/stripe/customer
+- POST /checkout/create - Create Stripe Checkout session for paid content
+- POST /webhooks/stripe/booking - Checkout session completed events (creates purchases)
+- POST /webhooks/stripe/payment - Payment intent events (for future phases)
+- POST /webhooks/stripe/subscription - Subscription events (for future phases)
+- POST /webhooks/stripe/customer - Customer account events (for future phases)
+
+**Key Features**:
+- Stripe Checkout session creation with content pricing
+- Webhook signature verification (HMAC-SHA256)
+- Idempotent purchase recording (prevents duplicates)
+- Revenue split calculation (10% platform/90% creator)
+- ContentAccess grant for verified purchases
+
+**Note**: Uses shared Bindings for Stripe credentials (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET_BOOKING) following the same pattern as R2 credentials.
 
 ---
 
@@ -140,7 +147,8 @@ All packages live in `packages/`. They're organized into three architectural lay
 |---------|---------|------|
 | **@codex/content** | Content & media lifecycle management | [content/CLAUDE.md](packages/content/CLAUDE.md) |
 | **@codex/identity** | Organization management | [identity/CLAUDE.md](packages/identity/CLAUDE.md) |
-| **@codex/access** | Content access control & streaming URLs | [access/CLAUDE.md](packages/access/CLAUDE.md) |
+| **@codex/access** | Content access control, streaming URLs, playback tracking | [access/CLAUDE.md](packages/access/CLAUDE.md) |
+| **@codex/purchase** | Stripe Checkout integration, purchase management, revenue splits | [purchase/CLAUDE.md](packages/purchase/CLAUDE.md) |
 
 **Key Concept**: Service layer implements domain business logic. Each service extends BaseService and throws domain-specific errors.
 
@@ -220,7 +228,17 @@ All packages live in `packages/`. They're organized into three architectural lay
 - Access control logic: free content vs purchased vs members_only
 - Presigned R2 URLs with time-limited expiration
 - Playback progress tracking with resume functionality
+- Integrates with @codex/purchase for purchase verification
 - Error classes: AccessDeniedError, R2SigningError
+
+**@codex/purchase** [Read Full Docs](packages/purchase/CLAUDE.md)
+- PurchaseService: Stripe Checkout integration, purchase management
+- createCheckoutSession() - Create Stripe checkout for paid content
+- completePurchase() - Record completed purchases from webhooks (idempotent)
+- verifyPurchase() - Check customer ownership for access control
+- Revenue split calculation (configurable platform/org/creator fees)
+- Centralized Stripe client factory with pinned API version
+- Error classes: AlreadyPurchasedError, ContentNotPurchasableError, PaymentProcessingError
 
 ---
 
@@ -361,7 +379,7 @@ pnpm format
 cd workers/auth && pnpm dev
 cd workers/content-api && pnpm dev
 cd workers/identity-api && pnpm dev
-cd workers/stripe-webhook-handler && pnpm dev
+cd workers/ecom-api && pnpm dev
 
 # Database migrations
 pnpm db:gen:drizzle
@@ -435,12 +453,14 @@ Foundation Packages
 |------|----------|
 | Content service methods | packages/content/CLAUDE.md |
 | Organization management | packages/identity/CLAUDE.md |
-| Access control logic | packages/access/CLAUDE.md |
+| Access control & streaming | packages/access/CLAUDE.md |
+| Purchases & Stripe integration | packages/purchase/CLAUDE.md |
 | Database schema | packages/database/CLAUDE.md |
 | Error classes | packages/service-errors/CLAUDE.md |
 | Security middleware | packages/security/CLAUDE.md |
 | Input validation | packages/validation/CLAUDE.md |
 | Type definitions | packages/shared-types/CLAUDE.md |
+| Environment bindings (R2, Stripe) | packages/shared-types/CLAUDE.md |
 | Worker middleware | packages/worker-utils/CLAUDE.md |
 | R2 operations | packages/cloudflare-clients/CLAUDE.md |
 | Worker endpoints | workers/{name}/CLAUDE.md |
@@ -494,6 +514,7 @@ packages/{name}/
 - **Type Safety**: Let Zod infer types; don't define types manually
 - **Error Handling**: Services throw specific errors; workers map to HTTP
 - **Security First**: Validate all input, scope all queries, sign all URLs
+- **Shared Bindings**: All external service credentials (R2, Stripe) in @codex/shared-types Bindings, not per-worker custom types
 
 ---
 

@@ -1,5 +1,5 @@
 {
-  "name": "stripe-webhook-handler",
+  "name": "ecom-api",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -17,7 +17,9 @@
   "dependencies": {
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
+    "@codex/purchase": "workspace:*",
     "@codex/security": "workspace:*",
+    "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",

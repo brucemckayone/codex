@@ -7,8 +7,9 @@
  * @see https://stripe.com/docs/webhooks/signatures
  */
 
+import { createStripeClient, verifyWebhookSignature } from '@codex/purchase';
 import type { Context, Next } from 'hono';
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
 
 /**
@@ -75,14 +76,12 @@ export function verifyStripeSignature() {
       return c.json({ error: 'Stripe not configured' }, 500);
     }
 
-    const stripe = new Stripe(c.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2025-10-29.clover',
-    });
+    const stripe = createStripeClient(c.env.STRIPE_SECRET_KEY);
 
     // Verify signature
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+      event = verifyWebhookSignature(rawBody, signature, webhookSecret, stripe);
 
       obs.info('Webhook signature verified', {
         type: event.type,
