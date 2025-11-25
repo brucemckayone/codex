@@ -4,12 +4,12 @@ import type { Database } from '@codex/database';
 import { dbHttp } from '@codex/database';
 import {
   content,
-  contentAccess,
   organizationMemberships,
   purchases,
   videoPlayback,
 } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
+import { createStripeClient, PurchaseService } from '@codex/purchase';
 import { wrapError } from '@codex/service-errors';
 import type {
   GetPlaybackProgressInput,
@@ -37,6 +37,7 @@ export interface ContentAccessServiceConfig {
   db: Database;
   r2: R2Signer;
   obs: ObservabilityClient;
+  purchaseService: PurchaseService;
 }
 
 /**
@@ -137,16 +138,14 @@ export class ContentAccessService {
 
           // Step 2: Check access - free content, purchase, or org membership
           if (contentRecord.priceCents && contentRecord.priceCents > 0) {
-            // Paid content - check purchase first
-            const hasAccess = await tx.query.contentAccess.findFirst({
-              where: and(
-                eq(contentAccess.userId, userId),
-                eq(contentAccess.contentId, input.contentId),
-                eq(contentAccess.accessType, 'purchased')
-              ),
-            });
+            // Paid content - check purchase via PurchaseService
+            const hasPurchased =
+              await this.config.purchaseService.verifyPurchase(
+                input.contentId,
+                userId
+              );
 
-            if (hasAccess) {
+            if (hasPurchased) {
               obs.info('Access granted via purchase', {
                 userId,
                 contentId: input.contentId,
@@ -541,6 +540,8 @@ export interface ContentAccessEnv {
   R2_SECRET_ACCESS_KEY?: string;
   /** R2 bucket name for media (e.g., codex-media-production) */
   R2_BUCKET_MEDIA?: string;
+  /** Stripe secret key for purchase verification */
+  STRIPE_SECRET_KEY?: string;
 }
 
 /**
@@ -586,5 +587,12 @@ export function createContentAccessService(
   const r2 = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);
   const db = dbHttp;
 
-  return new ContentAccessService({ db, r2, obs });
+  // Create Stripe client and PurchaseService
+  const stripe = createStripeClient(env.STRIPE_SECRET_KEY || '');
+  const purchaseService = new PurchaseService(
+    { db, environment: env.ENVIRONMENT ?? 'development' },
+    stripe
+  );
+
+  return new ContentAccessService({ db, r2, obs, purchaseService });
 }

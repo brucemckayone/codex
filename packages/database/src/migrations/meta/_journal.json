@@ -43,6 +43,13 @@
       "when": 1763898839399,
       "tag": "0005_fast_old_lace",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1763989118942,
+      "tag": "0006_breezy_slipstream",
+      "breakpoints": true
     }
   ]
 }

@@ -8,7 +8,7 @@ import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Integration tests for security middleware in stripe-webhook-handler.
+ * Integration tests for security middleware in ecom-api.
  * These tests verify that security middleware is correctly applied to the worker.
  *
  * The actual middleware functionality is tested in @codex/security package.
@@ -116,7 +116,7 @@ describe('Stripe Webhook Handler - Security Integration', () => {
 
         return c.json({
           status: 'healthy',
-          worker: 'stripe-webhook-handler',
+          worker: 'ecom-api',
           environment: c.env.ENVIRONMENT || 'development',
           timestamp: new Date().toISOString(),
           // ❌ BAD: These should NOT be included

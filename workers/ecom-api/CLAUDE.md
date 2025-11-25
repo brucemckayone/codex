@@ -1,103 +1,258 @@
-# Stripe Webhook Handler Worker
+# Ecom-API Worker
 
 ## Overview
 
-The stripe-webhook-handler worker is a Cloudflare Workers-based service that processes Stripe webhook events with cryptographic signature verification, comprehensive observability, and rate limiting. This worker acts as the entry point for all Stripe events in the Codex platform, handling payment, subscription, customer, Connect account, booking, and dispute events. No user authentication is required; Stripe signature verification serves as the only authentication mechanism. The worker validates webhook signatures using HMAC-SHA256 to prevent spoofing, logs all webhook activity for debugging and compliance, and provides a foundation for event-specific business logic handlers.
+The ecom-api worker is a Cloudflare Workers-based service that handles e-commerce operations: creating Stripe Checkout sessions for paid content purchases and processing Stripe webhook events with cryptographic signature verification. This worker acts as the API entry point for Codex platform commerce, coordinating with PurchaseService for recording purchases, calculating revenue splits, and granting content access. Authenticated endpoints handle checkout session creation (session required). Webhook endpoints require only Stripe HMAC-SHA256 signature verification (no user auth). The worker integrates payment processing with purchase tracking, enabling creators to monetize content via one-time purchases with immutable revenue splits.
 
 ## Architecture
 
 ### Deployment Target
 
-- **Service**: stripe-webhook-handler
+- **Service**: ecom-api
 - **Runtime**: Cloudflare Workers (wrangler)
 - **Development Port**: 42072
 - **Compatibility Date**: 2025-01-01
 - **Compatibility Flags**: nodejs_compat
+- **Environment URL**: https://ecom-api.revelations.studio
 
 ### Route Structure
 
-The worker defines six separate webhook endpoints, each handling a distinct category of Stripe events:
+The worker defines checkout and webhook endpoints:
 
-| Endpoint | Purpose | Event Categories |
-|----------|---------|------------------|
-| `POST /webhooks/stripe/payment` | Payment processing events | payment_intent.*, charge.* |
-| `POST /webhooks/stripe/subscription` | Subscription lifecycle events | customer.subscription.*, invoice.* |
-| `POST /webhooks/stripe/customer` | Customer account events | customer.created, customer.updated, customer.deleted |
-| `POST /webhooks/stripe/connect` | Connect account events | account.*, capability.*, person.* |
-| `POST /webhooks/stripe/booking` | Checkout session events | checkout.session.* |
-| `POST /webhooks/stripe/dispute` | Dispute and fraud warning events | charge.dispute.*, radar.early_fraud_warning.* |
+**Checkout API**:
+| Endpoint | Purpose | Auth | Rate Limit |
+|----------|---------|------|-----------|
+| `POST /checkout/create` | Create Stripe Checkout session for purchase | Session required | 100/min |
 
-Health check endpoints provide status monitoring:
+**Webhook Endpoints**:
+| Endpoint | Purpose | Event Categories | Rate Limit |
+|----------|---------|------------------|-----------|
+| `POST /webhooks/stripe/booking` | Checkout completion (creates purchases, idempotent) | checkout.session.completed | 1000/min |
+| `POST /webhooks/stripe/payment` | Payment intent/charge events (future phase) | payment_intent.*, charge.* | 1000/min |
+| `POST /webhooks/stripe/subscription` | Subscription lifecycle (future phase) | customer.subscription.*, invoice.* | 1000/min |
+| `POST /webhooks/stripe/customer` | Customer account events (future phase) | customer.created/updated/deleted | 1000/min |
+| `POST /webhooks/stripe/connect` | Connect account events (future phase) | account.*, capability.*, person.* | 1000/min |
+| `POST /webhooks/stripe/dispute` | Dispute & fraud warnings (future phase) | charge.dispute.*, radar.early_fraud_warning.* | 1000/min |
 
+**Health Checks**:
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | Simple status check |
-| `GET /health` | Detailed health check with database and KV status |
+| `GET /health` | Detailed health check (database, KV, R2 status) |
 
 ### Middleware Chain
 
-All requests flow through a standardized middleware chain applied globally:
-
+**Global Middleware** (all routes):
 ```
 Request
   ↓
-Request Tracking Middleware (generates UUID request ID, captures IP, user agent)
+Request Tracking (generates UUID, captures IP, user agent)
   ↓
-Observability Middleware (logs request, tags with request ID)
+Observability (logs request with context)
   ↓
-Security Headers Middleware (applies CSP and other security headers)
+Security Headers (CSP, X-Frame-Options, HSTS)
   ↓
-Not Found Handler (catches unmapped routes)
+Health Check Route (GET /health, /)
   ↓
-Error Handler (catches exceptions, logs errors, returns appropriate responses)
+Route Handlers
+  ↓
+Error Handler (catches exceptions, maps to HTTP responses)
 ```
 
-For webhook endpoints specifically, an additional middleware is applied:
-
+**Checkout Route Middleware** (POST /checkout/create):
 ```
-Webhook Request
+Request
   ↓
-Rate Limiting Middleware (1000 req/min via KV store)
+Rate Limiting (100 req/min via KV store)
   ↓
-Stripe Signature Verification Middleware (verifies HMAC-SHA256 signature)
+Session Validation (auth required via Auth Worker)
   ↓
-Webhook Handler (logs event, executes optional event-specific handler, returns response)
+Schema Validation (Zod validation of request body)
+  ↓
+Authenticated Handler
+  ├─ Instantiate PurchaseService
+  ├─ Call createCheckoutSession()
+  └─ Return {sessionUrl, sessionId}
+  ↓
+Error Mapping (map service errors to HTTP responses)
+```
+
+**Webhook Route Middleware** (POST /webhooks/stripe/*):
+```
+Request
+  ↓
+Rate Limiting (1000 req/min via KV store)
+  ↓
+Stripe Signature Verification (HMAC-SHA256, verifyWebhookSignature)
+  ↓
+Webhook Handler
+  ├─ Extract event type
+  ├─ Route to handler (e.g., handleCheckoutCompleted)
+  ├─ Execute handler logic
+  └─ Return 200 OK (always, prevent Stripe retries)
+  ↓
+Error Logging (errors logged but don't affect response)
 ```
 
 ### Middleware Details
 
-**Global Middleware Chain** (`createStandardMiddlewareChain`)
-- Service name: stripe-webhook-handler
+### Middleware Implementation Details
+
+**Global Middleware Chain** (via @codex/worker-utils):
+- Service name: ecom-api
 - Enables observability: true
-- Applied to: all routes (*)
-- Behavior: Adds request tracking (UUID), logging, security headers
+- Applied to: all routes
+- Modules:
+  - Request Tracking: Generates UUID request ID, captures client IP
+  - Security Headers: CSP, X-Frame-Options, HSTS
+  - Health Check Handler: GET / and GET /health routes
+  - Error Handler: Maps service errors to HTTP responses
 
-**Rate Limiting** (`RATE_LIMIT_PRESETS.webhook`)
-- Applied to: /webhooks/* routes only
-- Limit: 1000 requests per minute
-- Storage: RATE_LIMIT_KV (Cloudflare KV namespace)
-- Response headers: x-ratelimit-limit, x-ratelimit-remaining
-- Enforcement: Returns 429 if exceeded
+**Checkout Route Middleware** (POST /checkout/create):
+- Policy: POLICY_PRESETS.authenticated() (session required)
+- Rate Limit: RATE_LIMIT_PRESETS.api (100 requests/min per user)
+- Validation: createCheckoutSchema via createAuthenticatedHandler
+- Handler: Authenticated context + PurchaseService
+- Error Mapping: Service errors → HTTP responses (400, 404, 409, 502, etc.)
 
-**Stripe Signature Verification** (`verifyStripeSignature`)
-- Applied to: Each webhook endpoint
-- Algorithm: HMAC-SHA256
-- Header: stripe-signature
-- Behavior: Constructs and verifies event, sets stripeEvent and stripe in context
-- Errors: Returns 400 if signature header missing, 401 if verification fails, 500 if webhook secret not configured
-
-**Observability Error Handler** (`createObservabilityErrorHandler`)
-- Applied to: Application error handler
-- Behavior: Logs errors with full context, includes error stack traces (in development)
-- Response: JSON error response with safe error message
-
-**Not Found Handler** (`createNotFoundHandler`)
-- Applied to: Unmapped routes
-- Response: 404 JSON response
+**Webhook Routes** (POST /webhooks/stripe/*):
+- Rate Limiting: RATE_LIMIT_PRESETS.webhook (1000 requests/min)
+- Signature Verification: verifyWebhookSignature() from @codex/purchase
+  - Algorithm: HMAC-SHA256
+  - Header: stripe-signature
+  - Secret: STRIPE_WEBHOOK_SECRET_* per endpoint
+  - Errors: Returns 400 (missing header), 401 (invalid signature)
+- Handler: Event-specific processor (e.g., handleCheckoutCompleted)
+- Response: Always 200 OK (prevents Stripe retry logic)
+- Error Handling: Errors logged but never returned to Stripe
 
 ## Public Endpoints
 
-### POST /webhooks/stripe/payment
+### POST /checkout/create
+
+Create Stripe Checkout session for purchasing content.
+
+**Authentication**: Session required (via Auth Worker)
+
+**Rate Limiting**: 100 requests/minute per authenticated user
+
+**Request Body**:
+```typescript
+{
+  contentId: string;      // UUID of content to purchase
+  successUrl: string;     // URL redirect after payment success
+  cancelUrl: string;      // URL redirect if payment canceled
+}
+```
+
+**Response (200 Created)**:
+```typescript
+{
+  sessionUrl: string;     // Stripe-hosted checkout page URL
+  sessionId: string;      // Stripe session ID for tracking
+}
+```
+
+**Example**:
+```bash
+curl -X POST http://localhost:42072/checkout/create \
+  -H "Cookie: codex-session=<token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contentId": "content-abc-123",
+    "successUrl": "https://example.com/purchase-success",
+    "cancelUrl": "https://example.com/purchase-cancel"
+  }'
+```
+
+**Error Responses**:
+- `400` - Invalid input (missing/invalid contentId, bad URLs)
+- `401` - Unauthorized (missing session)
+- `404` - Content not found or not published
+- `409` - Already purchased
+- `502` - Stripe API failure
+
+**What it does**:
+1. Validates session (authenticated user ID)
+2. Validates input (content ID format, valid URLs)
+3. Checks content exists, published, not deleted
+4. Validates content has price > 0
+5. Checks user hasn't already purchased
+6. Creates Stripe Checkout session with content price
+7. Returns checkout URL for frontend redirect
+
+---
+
+### POST /webhooks/stripe/booking
+
+Process Stripe checkout.session.completed events. Records purchase and grants access.
+
+**Authentication**: Stripe HMAC-SHA256 signature verification (no session required)
+
+**Rate Limiting**: 1000 requests/minute
+
+**Event Type**: `checkout.session.completed`
+
+**Request Headers**:
+```
+stripe-signature: t=<timestamp>,v1=<signature>
+```
+
+**Request Body** (raw JSON from Stripe):
+```typescript
+{
+  type: "checkout.session.completed",
+  data: {
+    object: {
+      id: string;                    // Stripe session ID
+      payment_intent: string;        // Stripe Payment Intent ID
+      customer_email: string;        // Customer email
+      amount_total: number;          // Amount in cents
+      currency: string;              // Currency code
+      metadata: {
+        contentId: string;           // Content ID stored in checkout
+        customerId: string;          // Customer ID stored in checkout
+        organizationId?: string;     // Org ID (optional)
+      };
+      status: "complete";
+    };
+  };
+}
+```
+
+**Response (200 OK)** (always, even on error):
+```typescript
+{ received: true }
+```
+
+**What it does**:
+1. Verifies Stripe signature (HMAC-SHA256)
+2. Extracts checkout.session.completed event
+3. Calls PurchaseService.completePurchase() with metadata
+4. Creates purchase record (idempotent via paymentIntentId)
+5. Calculates revenue split (10% platform / 90% creator default)
+6. Grants access via contentAccess table
+7. Logs purchase completion
+8. Returns 200 OK
+
+**Idempotency**: Duplicate webhooks return existing purchase (no duplicates created)
+
+**Error Handling**: All errors logged internally. Always returns 200 OK to prevent Stripe retries.
+
+**Testing Locally**:
+```bash
+# Start local listener
+stripe listen --forward-to http://localhost:42072/webhooks/stripe/booking
+
+# Trigger test event
+stripe trigger checkout.session.completed
+
+# Check logs for success
+```
+
+---
+
+### POST /webhooks/stripe/payment (Future Phase)
 
 **Purpose**: Handle payment-related webhook events from Stripe (payment intent and charge events)
 
@@ -110,7 +265,7 @@ Stripe webhook request with raw body (not parsed) and stripe-signature header
 
 ```
 POST /webhooks/stripe/payment HTTP/1.1
-Host: stripe-webhook-handler.example.com
+Host: ecom-api.example.com
 stripe-signature: t=1614556800,v1=abc123...
 Content-Type: application/json
 
@@ -306,7 +461,7 @@ curl -X POST http://localhost:42072/webhooks/stripe/payment \
 ```json
 {
   "status": "healthy",
-  "worker": "stripe-webhook-handler",
+  "worker": "ecom-api",
   "version": "1.0.0",
   "checks": {
     "database": {
@@ -326,7 +481,7 @@ curl -X POST http://localhost:42072/webhooks/stripe/payment \
 ```json
 {
   "status": "unhealthy",
-  "worker": "stripe-webhook-handler",
+  "worker": "ecom-api",
   "version": "1.0.0",
   "checks": {
     "database": {
@@ -758,7 +913,7 @@ app.post('/webhooks/stripe/subscription', verifyStripeSignature(),
 
 **Setup**:
 ```bash
-cd workers/stripe-webhook-handler
+cd workers/ecom-api
 
 # Install dependencies
 pnpm install
@@ -1080,7 +1235,7 @@ These are monitored via observability client and available in Cloudflare dashboa
 ## File Structure
 
 ```
-workers/stripe-webhook-handler/
+workers/ecom-api/
 ├── src/
 │   ├── index.ts                    # Main worker entry point
 │   ├── types.ts                    # TypeScript type definitions

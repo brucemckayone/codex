@@ -40,7 +40,7 @@ jobs:
       shared-types: ${{ steps.filter.outputs.shared-types }}
       web: ${{ steps.filter.outputs.web }}
       auth-worker: ${{ steps.filter.outputs.auth-worker }}
-      stripe-webhook-handler: ${{ steps.filter.outputs.stripe-webhook-handler }}
+      ecom-api: ${{ steps.filter.outputs.ecom-api }}
       content-api: ${{ steps.filter.outputs.content-api }}
       identity-api: ${{ steps.filter.outputs.identity-api }}
     steps:
@@ -77,8 +77,8 @@ jobs:
               - 'apps/web/**'
             auth-worker:
               - 'workers/auth/**'
-            stripe-webhook-handler:
-              - 'workers/stripe-webhook-handler/**'
+            ecom-api:
+              - 'workers/ecom-api/**'
             content-api:
               - 'workers/content-api/**'
             identity-api:

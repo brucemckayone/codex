@@ -1,7 +1,7 @@
 {
-  "name": "@codex/access",
+  "name": "@codex/purchase",
   "version": "1.0.0",
-  "description": "Access control and permissions service for Codex platform",
+  "description": "Purchase and payment service for Codex platform - Stripe integration and revenue splits",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,27 +24,23 @@
     }
   },
   "scripts": {
-    "build": "vite build --config vite.config.access.ts",
-    "dev": "vite build --config vite.config.access.ts --watch",
+    "build": "vite build --config vite.config.purchase.ts",
+    "dev": "vite build --config vite.config.purchase.ts --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config vitest.config.access.ts",
+    "test": "vitest run --config vitest.config.purchase.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint --write .",
     "format": "biome format --write ."
   },
   "dependencies": {
-    "@codex/cloudflare-clients": "workspace:*",
-    "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
-    "@codex/observability": "workspace:*",
-    "@codex/purchase": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/validation": "workspace:*",
-    "drizzle-orm": "0.44.7"
+    "drizzle-orm": "0.44.7",
+    "stripe": "^17.5.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241127.0",
     "@codex/test-utils": "workspace:*",
     "@types/node": "^22.0.0",
     "dotenv": "^17.2.3",
