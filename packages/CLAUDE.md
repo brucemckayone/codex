@@ -288,7 +288,7 @@ Utility packages provide cross-cutting concerns, helpers, and infrastructure. Us
 
 **Purpose**: Factory functions and middleware for standardized Cloudflare Workers setup.
 
-**When to use**: Building any API worker (content-api, identity-api, auth, stripe-webhook-handler)
+**When to use**: Building any API worker (content-api, identity-api, auth, ecom-api)
 
 **Key exports**:
 - `createWorker()` - Create fully configured Hono app with standard middleware

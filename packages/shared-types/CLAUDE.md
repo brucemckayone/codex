@@ -1038,7 +1038,7 @@ app.onError((err, c) => {
 | `content-api` | `src/index.ts` | Uses `HonoEnv`, all content response types, `AuthenticatedContext` |
 | `identity-api` | `src/index.ts` | Uses `HonoEnv`, organization response types, `AuthenticatedContext` |
 | `auth` | `src/index.ts` | Uses `SessionData`, `UserData`, `Bindings` for session management |
-| `stripe-webhook-handler` | `src/index.ts` | Uses `Bindings` for environment access |
+| `ecom-api` | `src/index.ts` | Uses `Bindings` for environment access |
 
 ### How Shared Types Enable Type Safety
 

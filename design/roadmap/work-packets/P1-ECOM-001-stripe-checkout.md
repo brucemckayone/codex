@@ -940,7 +940,7 @@ const paymentIntent = await stripe.paymentIntents.retrieve(id);
 ## Implementation Checklist
 
 - [x] **Phase 1: Worker Rename** ✅ Complete
-  - [x] Rename `stripe-webhook-handler` → `ecom-api` worker
+  - [x] Rename `ecom-api` → `ecom-api` worker
   - [x] Update all imports and references across workspace
   - [x] Update CI/CD workflows
 

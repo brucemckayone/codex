@@ -76,7 +76,7 @@ pnpm dev
 # Or specific apps
 pnpm --filter web dev          # SvelteKit
 pnpm --filter auth dev          # Auth worker
-pnpm --filter stripe-webhook-handler dev  # API worker
+pnpm --filter ecom-api dev  # API worker
 ```
 
 ---
@@ -100,7 +100,7 @@ For PR #8:
 ### Preview Environment Details
 
 - **Database:** Neon branch `pr-{number}` (inherits from production)
-- **Workers:** `codex-web-preview-{PR}`, `auth-worker-preview-{PR}`, `stripe-webhook-handler-preview-{PR}`
+- **Workers:** `codex-web-preview-{PR}`, `auth-worker-preview-{PR}`, `ecom-api-preview-{PR}`
 - **DNS:** Automatically created via Cloudflare API
 - **Secrets:** Test mode credentials (Stripe test keys, etc.)
 - **Lifetime:** Deleted when PR closes
@@ -142,7 +142,7 @@ Production deploys automatically when PR is merged to `main`:
 ### Production Environment Details
 
 - **Database:** Neon `production` branch
-- **Workers:** `codex-web-production`, `auth-worker-production`, `stripe-webhook-handler-production`
+- **Workers:** `codex-web-production`, `auth-worker-production`, `ecom-api-production`
 - **DNS:** Custom domains managed automatically
 - **Secrets:** Production credentials (set via Wrangler CLI)
 - **Monitoring:** Cloudflare observability enabled
@@ -153,7 +153,7 @@ Production deploys automatically when PR is merged to `main`:
 # View worker logs
 wrangler tail codex-web-production
 wrangler tail auth-worker-production
-wrangler tail stripe-webhook-handler-production
+wrangler tail ecom-api-production
 
 # Check health
 curl https://codex.revelations.studio
@@ -245,7 +245,7 @@ wrangler secret list --env production
 pnpm dev                              # Start all
 pnpm --filter web dev                 # Web app only
 pnpm --filter auth dev                # Auth worker only
-pnpm --filter stripe-webhook-handler dev  # API worker only
+pnpm --filter ecom-api dev  # API worker only
 ```
 
 ### Testing

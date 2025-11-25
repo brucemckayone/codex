@@ -753,7 +753,7 @@ The service layer is exceptionally well-tested, but **user-facing API endpoints 
    - Still basic smoke tests only
    - ❌ No tests for new `/api/access` routes
 
-3. **workers/stripe-webhook-handler/src/index.test.ts**
+3. **workers/ecom-api/src/index.test.ts**
    - Minor updates
    - Not relevant to this feature
 

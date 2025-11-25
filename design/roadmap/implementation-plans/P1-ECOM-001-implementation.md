@@ -9,7 +9,7 @@
 **Ready for Production Deployment**: All phases complete. Implementation fully tested and verified. Ready to deploy to production environment.
 
 ## Overview
-Transform `stripe-webhook-handler` → `ecom-api` worker and implement full Stripe Checkout integration with purchase tracking, access control, and revenue split calculation.
+Transform `ecom-api` → `ecom-api` worker and implement full Stripe Checkout integration with purchase tracking, access control, and revenue split calculation.
 
 **Key Architectural Decisions**:
 - Revenue split: 10% platform / 0% org / 90% creator (default, configurable)
@@ -109,7 +109,7 @@ export type StripeWebhookEnv = {
 **Estimated Time**: 1-2h | **Actual**: ~1h
 
 ### Tasks ✅
-1. ✅ Rename directory: `workers/stripe-webhook-handler` → `workers/ecom-api`
+1. ✅ Rename directory: `workers/ecom-api` → `workers/ecom-api`
 2. ✅ Update `workers/ecom-api/package.json` name field
 3. ✅ Update `workers/ecom-api/wrangler.jsonc` name field
 4. ✅ Update root `package.json` workspace references

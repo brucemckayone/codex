@@ -2,7 +2,7 @@
 
 ## Overview
 
-Shared utilities and factory functions for Cloudflare Workers that eliminate boilerplate and ensure consistency across all API workers. Provides standardized middleware chains, route handlers, security policies, and health checks used by auth, content-api, identity-api, and stripe-webhook-handler workers.
+Shared utilities and factory functions for Cloudflare Workers that eliminate boilerplate and ensure consistency across all API workers. Provides standardized middleware chains, route handlers, security policies, and health checks used by auth, content-api, identity-api, and ecom-api workers.
 
 **Primary purpose**: Reduce repetitive setup code across workers by providing composable, well-tested utilities for common patterns like request tracking, authentication, CORS, security headers, error handling, and health checks.
 
@@ -149,7 +149,7 @@ const app = createWorker({
 
 ```typescript
 const app = createWorker({
-  serviceName: 'stripe-webhook-handler',
+  serviceName: 'ecom-api',
   internalRoutePrefix: '/internal',
   workerSharedSecret: c.env.WORKER_SHARED_SECRET,
   allowedWorkerOrigins: ['https://auth.revelations.studio'],
@@ -1107,14 +1107,14 @@ app.patch('/api/org/settings',
 import { createWorker, POLICY_PRESETS } from '@codex/worker-utils';
 
 const app = createWorker({
-  serviceName: 'stripe-webhook-handler',
+  serviceName: 'ecom-api',
   internalRoutePrefix: '/internal',
   workerSharedSecret: env.WORKER_SHARED_SECRET,
   allowedWorkerOrigins: ['https://stripe.com'],
 });
 
 // Public health check
-app.get('/health', createHealthCheckHandler('stripe-webhook-handler', '1.0.0'));
+app.get('/health', createHealthCheckHandler('ecom-api', '1.0.0'));
 
 // Internal webhook (worker-to-worker auth only)
 app.post('/internal/webhook',
@@ -1155,7 +1155,7 @@ This package is imported by:
 - **@codex/workers/auth** - Authentication service
 - **@codex/workers/content-api** - Content management
 - **@codex/workers/identity-api** - User identity management
-- **@codex/workers/stripe-webhook-handler** - Webhook processing
+- **@codex/workers/ecom-api** - Webhook processing
 
 ### Data Flow
 

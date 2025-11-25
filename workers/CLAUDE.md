@@ -788,7 +788,7 @@ All workers expose `GET /health` endpoint for monitoring:
 ```json
 {
   "status": "healthy | degraded",
-  "service": "auth-worker | content-api | identity-api | stripe-webhook-handler",
+  "service": "auth-worker | content-api | identity-api | ecom-api",
   "version": "1.0.0",
   "timestamp": "2025-11-23T12:34:56Z",
   "checks": {
@@ -1072,7 +1072,7 @@ workers/
 │   ├── package.json               # Port: 42071
 │   └── wrangler.jsonc
 │
-└── stripe-webhook-handler/        # Stripe Webhook Handler
+└── ecom-api/        # Stripe Webhook Handler
     ├── src/
     │   ├── handlers/
     │   │   ├── payment.ts         # Payment events

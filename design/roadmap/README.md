@@ -13,7 +13,7 @@ This roadmap provides execution-ready implementation guides for Phase 1 backend 
 ### Current Implementation Status
 
 **✅ Already Implemented:**
-- Cloudflare Workers infrastructure (auth, stripe-webhook-handler)
+- Cloudflare Workers infrastructure (auth, ecom-api)
 - Database client with Drizzle ORM + Neon
 - BetterAuth integration with KV session caching
 - Basic auth schema (users, accounts, sessions, verification_tokens)

@@ -104,10 +104,10 @@ pattern = "auth.revelations.studio/*"
 custom_domain = true
 ```
 
-### Stripe Webhook Handler (`workers/stripe-webhook-handler/wrangler.jsonc`)
+### Stripe Webhook Handler (`workers/ecom-api/wrangler.jsonc`)
 
 ```toml
-name = "stripe-webhook-handler"
+name = "ecom-api"
 main = "dist/index.js"
 compatibility_date = "2025-01-01"
 
@@ -115,7 +115,7 @@ compatibility_date = "2025-01-01"
 enabled = true
 
 [env.production]
-name = "stripe-webhook-handler-production"
+name = "ecom-api-production"
 
 [env.production.vars]
 ENVIRONMENT = "production"
@@ -223,7 +223,7 @@ wrangler deploy --env production
 cd ../../workers/auth
 wrangler deploy --env production
 
-cd ../stripe-webhook-handler
+cd ../ecom-api
 wrangler deploy --env production
 ```
 
@@ -237,12 +237,12 @@ wrangler deploy --env production
 # List recent deployments
 wrangler deployments list --name codex-web-production
 wrangler deployments list --name auth-worker-production
-wrangler deployments list --name stripe-webhook-handler-production
+wrangler deployments list --name ecom-api-production
 
 # View worker logs
 wrangler tail codex-web-production
 wrangler tail auth-worker-production
-wrangler tail stripe-webhook-handler-production
+wrangler tail ecom-api-production
 ```
 
 ### Health Checks

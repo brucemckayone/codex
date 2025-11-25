@@ -15,7 +15,7 @@
 
 ### Assets
 
-1. **Cloudflare Workers** (codex-web, auth-worker, stripe-webhook-handler)
+1. **Cloudflare Workers** (codex-web, auth-worker, ecom-api)
 2. **Neon Postgres Database** (production + ephemeral branches)
 3. **Secrets** (Stripe keys, session secrets, DB credentials, API tokens)
 4. **GitHub Actions** (workflow execution, artifact storage, secrets management)
@@ -25,7 +25,7 @@
 
 ### Threat Analysis by Component
 
-#### 1. Stripe Webhook Handler (`workers/stripe-webhook-handler`)
+#### 1. Stripe Webhook Handler (`workers/ecom-api`)
 
 | Threat Type | Threat | Impact | Likelihood | Mitigation Priority |
 |-------------|--------|--------|------------|---------------------|
@@ -37,8 +37,8 @@
 | **Privilege Escalation** | Compromised webhook triggers admin actions | 5/5 | Low | High |
 
 **Current Gaps:**
-- ❌ No Stripe signature verification ([src/index.ts:70-78](../../../workers/stripe-webhook-handler/src/index.ts#L70-L78))
-- ❌ Health endpoint exposes secret presence ([src/index.ts:54-65](../../../workers/stripe-webhook-handler/src/index.ts#L54-L65))
+- ❌ No Stripe signature verification ([src/index.ts:70-78](../../../workers/ecom-api/src/index.ts#L70-L78))
+- ❌ Health endpoint exposes secret presence ([src/index.ts:54-65](../../../workers/ecom-api/src/index.ts#L54-L65))
 - ❌ No rate limiting on webhook endpoint
 - ❌ No request replay protection (idempotency keys)
 
@@ -125,8 +125,8 @@
 
 | # | Item | Risk | Effort | Files/Areas |
 |---|------|------|--------|-------------|
-| 1 | **Implement Stripe webhook signature verification** | 5/5 | M | `workers/stripe-webhook-handler/src/index.ts` (lines 70-78) |
-| 2 | **Remove secret leakage from health endpoints** | 5/5 | S | `workers/stripe-webhook-handler/src/index.ts` (lines 54-65), `workers/auth/src/index.ts` |
+| 1 | **Implement Stripe webhook signature verification** | 5/5 | M | `workers/ecom-api/src/index.ts` (lines 70-78) |
+| 2 | **Remove secret leakage from health endpoints** | 5/5 | S | `workers/ecom-api/src/index.ts` (lines 54-65), `workers/auth/src/index.ts` |
 | 3 | **Mask DATABASE_URL in all workflow logs** | 5/5 | S | `.github/workflows/testing.yml` (line 151), `.github/workflows/preview-deploy.yml` (line 283) |
 | 4 | **Reduce artifact retention to 1 day for ephemeral secrets** | 4/5 | S | `.github/workflows/testing.yml` (line 138) |
 
@@ -134,8 +134,8 @@
 
 | # | Item | Risk | Effort | Files/Areas |
 |---|------|------|--------|-------------|
-| 5 | **Add security headers (CSP, HSTS, X-Frame-Options) to all workers** | 4/5 | M | `apps/web/src/`, `workers/auth/src/`, `workers/stripe-webhook-handler/src/` |
-| 6 | **Implement rate limiting on auth and webhook endpoints** | 4/5 | M | `workers/auth/src/index.ts`, `workers/stripe-webhook-handler/src/index.ts` |
+| 5 | **Add security headers (CSP, HSTS, X-Frame-Options) to all workers** | 4/5 | M | `apps/web/src/`, `workers/auth/src/`, `workers/ecom-api/src/` |
+| 6 | **Implement rate limiting on auth and webhook endpoints** | 4/5 | M | `workers/auth/src/index.ts`, `workers/ecom-api/src/index.ts` |
 | 7 | **Add dependency vulnerability scanning (npm audit + Dependabot)** | 4/5 | S | `.github/workflows/security-scan.yml` (new file), `.github/dependabot.yml` |
 | 8 | **Implement preview environment authentication (basic auth or allowlist)** | 4/5 | M | `.github/workflows/preview-deploy.yml`, middleware in workers |
 | 9 | **Add SAST scanning (CodeQL or Semgrep)** | 4/5 | M | `.github/workflows/security-scan.yml` |
@@ -146,7 +146,7 @@
 | # | Item | Risk | Effort | Files/Areas |
 |---|------|------|--------|-------------|
 | 11 | **Add structured logging with PII redaction** | 3/5 | M | `packages/observability/src/`, all workers |
-| 12 | **Implement webhook idempotency (replay protection)** | 3/5 | M | `workers/stripe-webhook-handler/src/index.ts` |
+| 12 | **Implement webhook idempotency (replay protection)** | 3/5 | M | `workers/ecom-api/src/index.ts` |
 | 13 | **Add database query timeout enforcement** | 3/5 | S | `packages/database/src/client.ts` |
 | 14 | **Implement CSRF protection in auth worker** | 3/5 | M | `workers/auth/src/index.ts` |
 | 15 | **Add alerting for failed secret rotations** | 3/5 | M | `.github/workflows/production-deploy.yml`, monitoring integration |
@@ -165,14 +165,14 @@
 
 ### 1. Stripe Webhook Signature Verification
 
-**File:** `workers/stripe-webhook-handler/src/index.ts`
+**File:** `workers/ecom-api/src/index.ts`
 
 ```typescript
 import Stripe from 'stripe';
 
 app.post('/webhook', async (c) => {
   const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
+    'ecom-api',
     c.env.ENVIRONMENT || 'development'
   );
 
@@ -207,18 +207,18 @@ app.post('/webhook', async (c) => {
 });
 ```
 
-**Dependencies:** `pnpm add stripe` in `workers/stripe-webhook-handler/package.json`
+**Dependencies:** `pnpm add stripe` in `workers/ecom-api/package.json`
 
 ---
 
 ### 2. Remove Secret Leakage from Health Endpoint
 
-**File:** `workers/stripe-webhook-handler/src/index.ts`
+**File:** `workers/ecom-api/src/index.ts`
 
 ```typescript
 app.get('/health', (c) => {
   const obs = new ObservabilityClient(
-    'stripe-webhook-handler',
+    'ecom-api',
     c.env.ENVIRONMENT || 'development'
   );
   obs.info('Health check endpoint hit');
@@ -226,7 +226,7 @@ app.get('/health', (c) => {
   // ✅ SECURE: Only return boolean status, never actual secret values
   return c.json({
     status: 'healthy',
-    worker: 'stripe-webhook-handler',
+    worker: 'ecom-api',
     environment: c.env.ENVIRONMENT || 'development',
     timestamp: new Date().toISOString(),
     // ❌ REMOVED: hasDatabase, hasStripeKey, webhookSecretsConfigured
@@ -720,7 +720,7 @@ test.describe('Authentication Security', () => {
 
 ### 5. Stripe Webhook Testing
 
-**File:** `workers/stripe-webhook-handler/src/index.test.ts` (enhance)
+**File:** `workers/ecom-api/src/index.test.ts` (enhance)
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -803,7 +803,7 @@ ffuf -u https://api-preview-123.revelations.studio/webhook \
   env:
     STRIPE_API_KEY: ${{ secrets.STRIPE_TEST_KEY }}
 
-- name: Deploy stripe-webhook-handler (preview)
+- name: Deploy ecom-api (preview)
   uses: cloudflare/wrangler-action@v3
   with:
     secrets: |
@@ -924,7 +924,7 @@ export class ObservabilityClient {
 {
   "timestamp": "2025-11-02T12:34:56.789Z",
   "level": "info",
-  "service": "stripe-webhook-handler",
+  "service": "ecom-api",
   "event_type": "payment_succeeded",
   "stripe_event_id": "evt_abc123",
   "stripe_event_type": "payment_intent.succeeded",
@@ -1104,7 +1104,7 @@ gh pr close $PR_NUMBER --comment "Closed due to security incident"
 # Rollback to previous deployment (fast, non-destructive)
 wrangler rollback --name codex-web-production
 wrangler rollback --name auth-worker-production
-wrangler rollback --name stripe-webhook-handler-production
+wrangler rollback --name ecom-api-production
 
 # Verify rollback
 curl https://codex.revelations.studio
@@ -1257,7 +1257,7 @@ RESTORE_URL=$(neonctl connection-string emergency-restore-* --pooled)
 echo $RESTORE_URL | wrangler secret put DATABASE_URL --env production
 
 # Redeploy
-cd workers/stripe-webhook-handler && wrangler deploy --env production
+cd workers/ecom-api && wrangler deploy --env production
 cd ../auth && wrangler deploy --env production
 cd ../../apps/web && wrangler deploy --env production
 
@@ -1404,7 +1404,7 @@ curl -X POST https://api.revelations.studio/webhook \
 
 **Logs to inspect:**
 ```bash
-wrangler tail stripe-webhook-handler-production --format json | grep "signature"
+wrangler tail ecom-api-production --format json | grep "signature"
 # Should see: "Webhook signature verification failed" for invalid signatures
 ```
 
@@ -1418,7 +1418,7 @@ curl https://api.revelations.studio/health | jq
 # Expected output (NO hasDatabase, hasStripeKey, etc.):
 {
   "status": "healthy",
-  "worker": "stripe-webhook-handler",
+  "worker": "ecom-api",
   "environment": "production",
   "timestamp": "2025-11-02T12:34:56.789Z"
 }

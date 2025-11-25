@@ -12,18 +12,18 @@
 
 - [ ] **Install Stripe SDK**
   ```bash
-  cd workers/stripe-webhook-handler
+  cd workers/ecom-api
   pnpm add stripe
   ```
 
 - [ ] **Implement signature verification** ([SECURITY.md#1-stripe-webhook-signature-verification](../design/infrastructure/SECURITY.md#1-stripe-webhook-signature-verification))
-  - File: `workers/stripe-webhook-handler/src/index.ts`
+  - File: `workers/ecom-api/src/index.ts`
   - Lines to modify: 70-78
   - Add signature extraction and verification before processing
   - Test with invalid/missing signatures
 
 - [ ] **Add unit tests**
-  - File: `workers/stripe-webhook-handler/src/index.test.ts`
+  - File: `workers/ecom-api/src/index.test.ts`
   - Test: Reject missing signature (expect HTTP 400)
   - Test: Reject invalid signature (expect HTTP 401)
   - Test: Accept valid signature (mock Stripe event)
@@ -43,7 +43,7 @@
 ### Day 2-3: Remove Secret Leakage
 
 - [ ] **Update health endpoints** ([SECURITY.md#2-remove-secret-leakage-from-health-endpoint](../design/infrastructure/SECURITY.md#2-remove-secret-leakage-from-health-endpoint))
-  - File: `workers/stripe-webhook-handler/src/index.ts` (lines 54-65)
+  - File: `workers/ecom-api/src/index.ts` (lines 54-65)
   - File: `workers/auth/src/index.ts`
   - File: `apps/web/src/routes/api/health/+server.ts`
   - Remove: `hasDatabase`, `hasStripeKey`, `webhookSecretsConfigured`
@@ -56,7 +56,7 @@
   # Should NOT show secret configuration
 
   # Check worker logs
-  wrangler tail stripe-webhook-handler-production --format json | grep -i "secret\|key\|password"
+  wrangler tail ecom-api-production --format json | grep -i "secret\|key\|password"
   # Should be empty or redacted
   ```
 
@@ -119,7 +119,7 @@
   - Test: `curl -I https://auth-preview-{PR}.revelations.studio/health`
 
 - [ ] **Add webhook handler headers**
-  - File: `workers/stripe-webhook-handler/src/index.ts`
+  - File: `workers/ecom-api/src/index.ts`
   - Same pattern as auth worker
 
 ---
@@ -136,7 +136,7 @@
   - Config: 5 requests per 15 minutes per IP
 
 - [ ] **Apply to webhook endpoint**
-  - File: `workers/stripe-webhook-handler/src/index.ts`
+  - File: `workers/ecom-api/src/index.ts`
   - Protect `/webhook`
   - Config: 100 requests per minute per IP (Stripe can send bursts)
 

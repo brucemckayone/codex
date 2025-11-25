@@ -31,9 +31,9 @@ This document helps you find the right documentation quickly. Use this as your f
 → Auth schema: `packages/database/src/schema/auth.ts`
 
 **...how to handle Stripe webhooks**
-→ `workers/stripe-webhook-handler/src/index.ts` (existing implementation)
-→ Webhook schemas: `workers/stripe-webhook-handler/src/schemas/*.ts`
-→ Signature verification: `workers/stripe-webhook-handler/src/middleware/verify-signature.ts`
+→ `workers/ecom-api/src/index.ts` (existing implementation)
+→ Webhook schemas: `workers/ecom-api/src/schemas/*.ts`
+→ Signature verification: `workers/ecom-api/src/middleware/verify-signature.ts`
 
 **...how to write secure code**
 → `packages/security/src/` (security middleware)
@@ -134,7 +134,7 @@ This document helps you find the right documentation quickly. Use this as your f
 workers/
 ├── auth/                              # BetterAuth worker (✅ Implemented)
 │   └── src/index.ts                   # Main entry, middleware, session caching
-└── stripe-webhook-handler/            # Stripe webhook worker (✅ Implemented)
+└── ecom-api/            # Stripe webhook worker (✅ Implemented)
     ├── src/index.ts                   # Main entry, endpoints, security
     ├── src/middleware/verify-signature.ts
     └── src/schemas/*.ts               # Event schemas for each webhook type
@@ -234,9 +234,9 @@ If tests are failing:
 3. [Testing Strategy](../infrastructure/Testing.md) - How to test endpoints
 
 **Code Examples**:
-- Existing endpoint: `workers/stripe-webhook-handler/src/index.ts`
+- Existing endpoint: `workers/ecom-api/src/index.ts`
 - Security middleware: `packages/security/src/`
-- Tests: `workers/stripe-webhook-handler/src/index.test.ts`
+- Tests: `workers/ecom-api/src/index.test.ts`
 
 ### Scenario: Working with Database
 
@@ -267,9 +267,9 @@ If tests are failing:
 2. [Security Guide](../infrastructure/SECURITY.md) - Webhook signature verification
 
 **Code Examples**:
-- Webhook handler: `workers/stripe-webhook-handler/src/index.ts`
-- Signature verification: `workers/stripe-webhook-handler/src/middleware/verify-signature.ts`
-- Event schemas: `workers/stripe-webhook-handler/src/schemas/`
+- Webhook handler: `workers/ecom-api/src/index.ts`
+- Signature verification: `workers/ecom-api/src/middleware/verify-signature.ts`
+- Event schemas: `workers/ecom-api/src/schemas/`
 
 ### Scenario: Writing Tests
 
@@ -304,7 +304,7 @@ If you find documentation that doesn't match the code, note it in your PR or cre
 
 | Need | First Check | Then Check | Code Example |
 |------|-------------|------------|--------------|
-| API endpoint | STANDARDS.md § 5 | Security Guide | `workers/stripe-webhook-handler/src/index.ts` |
+| API endpoint | STANDARDS.md § 5 | Security Guide | `workers/ecom-api/src/index.ts` |
 | Database query | STANDARDS.md § 4 | DB Schema Design | `packages/database/src/client.ts` |
 | Validation | STANDARDS.md § 2.2 | Validation package | `packages/validation/src/user-schema.ts` |
 | Testing | Testing Strategy | STANDARDS.md § 1 | `*.test.ts` files |

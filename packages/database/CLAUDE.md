@@ -1009,7 +1009,7 @@ async function createUser(email: string, name: string) {
 | workers/auth | dbWs/dbHttp | Authentication, session management |
 | workers/identity-api | dbHttp | User/organization API endpoints |
 | workers/content-api | dbHttp | Content, media, access endpoints |
-| workers/stripe-webhook-handler | dbHttp | Payment processing |
+| workers/ecom-api | dbHttp | Payment processing |
 
 ### Dependency Direction
 
