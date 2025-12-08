@@ -1,0 +1,133 @@
+
+> @codex/e2e@0.1.0 test /Users/brucemckay/development/Codex/e2e
+> playwright test 03-free-content-access.spec.ts
+
+
+🚀 Starting E2E test setup...
+
+[dotenv@17.2.3] injecting env (33) from ../.env.test -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+✅ Loaded environment from /Users/brucemckay/development/Codex/.env.test
+
+📦 Setting up test media files in R2...
+   Bucket: codex-media-test
+
+⏭️  Skipped (exists): e2e-test-creator/originals/e2e-test-video-001/original.mp4
+⏭️  Skipped (exists): e2e-test-creator/hls/e2e-test-video-001/master.m3u8
+⏭️  Skipped (exists): e2e-test-creator/thumbnails/e2e-test-video-001/thumb.jpg
+
+✅ Test media files ready
+   Test creator ID: e2e-test-creator
+   Test media ID: e2e-test-video-001
+   Use in tests: r2Key = "e2e-test-creator/originals/e2e-test-video-001/original.mp4"
+                 hlsMasterPlaylistKey = "e2e-test-creator/hls/e2e-test-video-001/master.m3u8"
+
+
+🚀 Starting all workers with test environment...
+
+[dotenv@17.2.3] injecting env (33) from ../.env.test -- tip: ⚙️  enable debug logging with { debug: true }
+📁 Loaded test environment from /Users/brucemckay/development/Codex/.env.test
+  ✓ Created auth/.test.vars
+  ✓ Created content-api/.test.vars
+  ✓ Created identity-api/.test.vars
+  ✓ Created ecom-api/.test.vars
+🚀 Starting auth on port 42069...
+🚀 Starting content-api on port 4001...
+🚀 Starting identity-api on port 42071...
+🚀 Starting ecom-api on port 42072...
+✅ identity-api started successfully
+✅ ecom-api started successfully
+✅ auth started successfully
+✅ content-api started successfully
+🔍 Waiting for auth health check...
+🔍 Waiting for content-api health check...
+🔍 Waiting for identity-api health check...
+🔍 Waiting for ecom-api health check...
+✅ auth health check passed
+✅ identity-api health check passed
+✅ content-api health check passed
+✅ ecom-api started successfully
+✅ ecom-api health check passed
+
+✅ All workers started and healthy
+
+
+✅ All workers started and healthy. Starting tests...
+
+
+Running 3 tests using 1 worker
+
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=Hsu37lMwq7KCrfZOENAyls5g8eVx2kEX.w17TogQfaAnzWt%2F%2FEvRyILe2apqKxylTuhSoRVDQySA%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0MzoyOS43MzFaIiwidG9rZW4iOiJIc3UzN2xNd3E3S0NyZlpPRU5BeWxzNWc4ZVZ4MmtFWCIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6MjkuNzMxWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6MjkuNzMxWiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6Im5kdDhiRnNLUVFzdGVqRzMwZlhtMnoybjE1UWN3MktnIiwiaWQiOiJRaG9VMmZPVmE1WDFnVXllRGZNcmZyVXp2clZJY29NQSJ9LCJ1c2VyIjp7Im5hbWUiOiJGcmVlIENvbnRlbnQgQ3JlYXRvciIsImVtYWlsIjoiY3JlYXRvci1mcmVlLTE3NjQ5NzQ2MDUwNjQtNHdyd2lzOXVnZTVAZXhhbXBsZS5jb20iLCJlbWFpbFZlcmlmaWVkIjp0cnVlLCJpbWFnZSI6bnVsbCwiY3JlYXRlZEF0IjoiMjAyNS0xMi0wNVQyMjo0MzoyNS43NDBaIiwidXBkYXRlZEF0IjoiMjAyNS0xMi0wNVQyMjo0MzoyNy4zMzZaIiwicm9sZSI6ImNyZWF0b3IiLCJpZCI6Im5kdDhiRnNLUVFzdGVqRzMwZlhtMnoybjE1UWN3MktnIn0sInVwZGF0ZWRBdCI6MTc2NDk3NDYxMDI2NiwidmVyc2lvbiI6IjEifSwiZXhwaXJlc0F0IjoxNzY0OTc0OTEwMjY2LCJzaWduYXR1cmUiOiI2UkNadlFZcGFzdFZiMzNDb3hjR2s0ZDcwYnFVSXRiWkNnUnFFLUlyTURzIn0
+[DEBUG] Session response status: [33m200[39m
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=aCU7zLcYySkOp890IyDTKVqfo9VVKQU5.C6YgddpBrf0YZCU6ul%2Bd0ipK2DfCE6CfPL96%2B7Cc%2FUw%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0MzozOS4wNDlaIiwidG9rZW4iOiJhQ1U3ekxjWXlTa09wODkwSXlEVEtWcWZvOVZWS1FVNSIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6MzkuMDQ5WiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6MzkuMDQ5WiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6IldVYkxXb01mSDA2V2VUWlBJMXFuTUEwZEhLYlNFVU94IiwiaWQiOiJuYVBnbjI3Q25lcGwzSGlwQjRqV25tODYwVDhsV21wUyJ9LCJ1c2VyIjp7Im5hbWUiOiJGcmVlIENvbnRlbnQgVmlld2VyIiwiZW1haWwiOiJ2aWV3ZXItZnJlZS0xNzY0OTc0NjE0NzE5LXU2czc5ZjF6cXlzQGV4YW1wbGUuY29tIiwiZW1haWxWZXJpZmllZCI6dHJ1ZSwiaW1hZ2UiOm51bGwsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6MzUuMzMyWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6MzYuODg3WiIsInJvbGUiOiJ1c2VyIiwiaWQiOiJXVWJMV29NZkgwNldlVFpQSTFxbk1BMGRIS2JTRVVPeCJ9LCJ1cGRhdGVkQXQiOjE3NjQ5NzQ2MTk1MzYsInZlcnNpb24iOiIxIn0sImV4cGlyZXNBdCI6MTc2NDk3NDkxOTUzNiwic2lnbmF0dXJlIjoiYldOQVBKd1pBdXZKTWwxdUt1c3BHUzZXLXp4M0dxbC1kS2RLOFJJQXZWMCJ9
+[DEBUG] Session response status: [33m200[39m
+  ✘  1 [api-e2e] › tests/03-free-content-access.spec.ts:27:3 › Free Content Access Flow › should allow any authenticated user to access free content (15.6s)
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=ZiOLtF6E2gd7jQM9ru0vOg0KIIX9dlOE.bazl3ih4mV18onHcVhnf82K49Pgt40K5vAog0NAHJDM%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0Mzo0Ni4zOTBaIiwidG9rZW4iOiJaaU9MdEY2RTJnZDdqUU05cnUwdk9nMEtJSVg5ZGxPRSIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NDYuMzkwWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NDYuMzkwWiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6InJvbHJNVTI4Wk94T2tWbkpjOGllbXlXYVY2bzA4U2VIIiwiaWQiOiJWOFVsSXZGc3lxSmhnRkY1VGJ0c1pvRndJRjQ0M2hEbyJ9LCJ1c2VyIjp7Im5hbWUiOiJEcmFmdCBDcmVhdG9yIiwiZW1haWwiOiJjcmVhdG9yLWRyYWZ0LTE3NjQ5NzQ2MjE5ODEtZGs2cnVmMHgyeWJAZXhhbXBsZS5jb20iLCJlbWFpbFZlcmlmaWVkIjp0cnVlLCJpbWFnZSI6bnVsbCwiY3JlYXRlZEF0IjoiMjAyNS0xMi0wNVQyMjo0Mzo0Mi42NjdaIiwidXBkYXRlZEF0IjoiMjAyNS0xMi0wNVQyMjo0Mzo0NC4xOTVaIiwicm9sZSI6ImNyZWF0b3IiLCJpZCI6InJvbHJNVTI4Wk94T2tWbkpjOGllbXlXYVY2bzA4U2VIIn0sInVwZGF0ZWRBdCI6MTc2NDk3NDYyNjkxOCwidmVyc2lvbiI6IjEifSwiZXhwaXJlc0F0IjoxNzY0OTc0OTI2OTE4LCJzaWduYXR1cmUiOiJCZFc4djFoNFFoNWxtOTdILXNiSlI4VUk1eFExTms0QUhGWFhTTUM0dXljIn0
+[DEBUG] Session response status: [33m200[39m
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=XkSqvyv86PZ2O89xkNzvqkVMxyvnqCff.tVemy2MCwKN7rs1n1eOIe2XOUxt0rUR9YbdxCprX5fc%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0Mzo1Mi4yOTdaIiwidG9rZW4iOiJYa1Nxdnl2ODZQWjJPODl4a056dnFrVk14eXZucUNmZiIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NTIuMjk3WiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NTIuMjk3WiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6InFETFNUSHhUeGRpRGxGTHlicVFpSm9qeVNScWkzYUlQIiwiaWQiOiJkajJRVkRDZWZBUjdnemRMVklhRUltRkZtbVgydU5kaiJ9LCJ1c2VyIjp7Im5hbWUiOiJWaWV3ZXIiLCJlbWFpbCI6InZpZXdlci1kcmFmdC0xNzY0OTc0NjI3OTkyLXVlODZsMzYzcjBwQGV4YW1wbGUuY29tIiwiZW1haWxWZXJpZmllZCI6dHJ1ZSwiaW1hZ2UiOm51bGwsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NDguNTkzWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NTAuMTE2WiIsInJvbGUiOiJ1c2VyIiwiaWQiOiJxRExTVEh4VHhkaURsRkx5YnFRaUpvanlTUnFpM2FJUCJ9LCJ1cGRhdGVkQXQiOjE3NjQ5NzQ2MzI4MjMsInZlcnNpb24iOiIxIn0sImV4cGlyZXNBdCI6MTc2NDk3NDkzMjgyMywic2lnbmF0dXJlIjoiMFFNWG80dUN5a3hnazVobjNGTlhMdUIwMVhCdU5kNDI2eHJxZlM4R0NRWSJ9
+[DEBUG] Session response status: [33m200[39m
+  ✓  2 [api-e2e] › tests/03-free-content-access.spec.ts:211:3 › Free Content Access Flow › should deny access to unpublished free content (12.0s)
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=eiJ28EDg57BafDn4PcG8LZENUa5jCka6.EMpnX6MeuGk3QYVE6H9rVZa5%2BVzpUa8%2F2pX%2FNuPLvNs%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0Mzo1OC42MzJaIiwidG9rZW4iOiJlaUoyOEVEZzU3QmFmRG40UGNHOExaRU5VYTVqQ2thNiIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NTguNjMyWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NTguNjMyWiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6IlRvQ3Bkcmh0M3lpbjBxa2RxaEp2RExnTXNLTHVPNkd4IiwiaWQiOiJBMjdtM21TalJrZFdlbEZtUEU2NlhMU2xyOWdGcEFsNCJ9LCJ1c2VyIjp7Im5hbWUiOiJQb3B1bGFyIENyZWF0b3IiLCJlbWFpbCI6ImNyZWF0b3ItcG9wdWxhci0xNzY0OTc0NjMzOTI1LTl2aXN6ampncHVvQGV4YW1wbGUuY29tIiwiZW1haWxWZXJpZmllZCI6dHJ1ZSwiaW1hZ2UiOm51bGwsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NTQuNTY3WiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDM6NTYuMjc5WiIsInJvbGUiOiJjcmVhdG9yIiwiaWQiOiJUb0NwZHJodDN5aW4wcWtkcWhKdkRMZ01zS0x1TzZHeCJ9LCJ1cGRhdGVkQXQiOjE3NjQ5NzQ2MzkxMTMsInZlcnNpb24iOiIxIn0sImV4cGlyZXNBdCI6MTc2NDk3NDkzOTExMywic2lnbmF0dXJlIjoiZzNiUXNDN01rUldHMUk2Q2NqWGhXZXd5b3ZSYWNIbUwtc0RGcF9FVzZUVSJ9
+[DEBUG] Session response status: [33m200[39m
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=S5ow8vXWpO9N7Xjt7yBi1zw646hd0XlV.3r2BABGMaH0UEcPlkEgx5xWZsTCnUmqua%2Bl1823WOYc%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0NDowNS42OTNaIiwidG9rZW4iOiJTNW93OHZYV3BPOU43WGp0N3lCaTF6dzY0NmhkMFhsViIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MDUuNjkzWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MDUuNjkzWiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6IlA4N01UejRVVVQyanBKSVVTd3ZUa2tVOVlZcWlmRGFxIiwiaWQiOiJWU3RQMm1HR25GYlFNSFZpVDB1RXAzTG5LdXUzOGNTRCJ9LCJ1c2VyIjp7Im5hbWUiOiJWaWV3ZXIgMSIsImVtYWlsIjoidmlld2VyMS0xNzY0OTc0NjQxMzk1LWt3dXIycmZydHdlQGV4YW1wbGUuY29tIiwiZW1haWxWZXJpZmllZCI6dHJ1ZSwiaW1hZ2UiOm51bGwsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MDIuMDEyWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MDMuNTQ1WiIsInJvbGUiOiJ1c2VyIiwiaWQiOiJQODdNVHo0VVVUMmpwSklVU3d2VGtrVTlZWXFpZkRhcSJ9LCJ1cGRhdGVkQXQiOjE3NjQ5NzQ2NDYyNDYsInZlcnNpb24iOiIxIn0sImV4cGlyZXNBdCI6MTc2NDk3NDk0NjI0Niwic2lnbmF0dXJlIjoid0ZnRmNZYVRabUpRLWJhZEpDQmlHVUxPaF9YV2FNemZQOWlLQVhfSHpvZyJ9
+[DEBUG] Session response status: [33m200[39m
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=0URsWqchVkXWJmtR67pujcfzvjZugTxH.j6DysxD1vLIOH4tdlhZAtnn3PsfHnsXZdiwCNIXlyDM%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0NDoxMC40OTFaIiwidG9rZW4iOiIwVVJzV3FjaFZrWFdKbXRSNjdwdWpjZnp2alp1Z1R4SCIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MTAuNDkxWiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MTAuNDkxWiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6IkhiR3lFUEpjbkY1M3o4MU42bzBZbnRGQmltRzZUWXA5IiwiaWQiOiI3V0F5eHRuZGp4R0lnaVBEOUxOajZiRDlrWHZhMlR0MiJ9LCJ1c2VyIjp7Im5hbWUiOiJWaWV3ZXIgMiIsImVtYWlsIjoidmlld2VyMi0xNzY0OTc0NjQxMzk1LXhjMHQ1bXh0N3pnQGV4YW1wbGUuY29tIiwiZW1haWxWZXJpZmllZCI6dHJ1ZSwiaW1hZ2UiOm51bGwsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MDYuODY4WiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MDguMzIyWiIsInJvbGUiOiJ1c2VyIiwiaWQiOiJIYkd5RVBKY25GNTN6ODFONm8wWW50RkJpbUc2VFlwOSJ9LCJ1cGRhdGVkQXQiOjE3NjQ5NzQ2NTA5NjYsInZlcnNpb24iOiIxIn0sImV4cGlyZXNBdCI6MTc2NDk3NDk1MDk2Niwic2lnbmF0dXJlIjoiVzBNMm5lbTd6RHh3Q0xZMndLb1B6cUJ6dHBUc0tLUTNncDRldF9HTTRiMCJ9
+[DEBUG] Session response status: [33m200[39m
+[DEBUG] Cookies being sent to /api/auth/get-session: better-auth.session_token=2jsmLVImYJVJ18avpW9tymmmZPCtxFna.Dyvy7vpNzIdHsSFX5J7HSvBQCGCBRfeX%2BHnYMH8hYiY%3D; better-auth.session_data=eyJzZXNzaW9uIjp7InNlc3Npb24iOnsiZXhwaXJlc0F0IjoiMjAyNS0xMi0wNlQyMjo0NDoxNS4zNzZaIiwidG9rZW4iOiIyanNtTFZJbVlKVkoxOGF2cFc5dHltbW1aUEN0eEZuYSIsImNyZWF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MTUuMzc2WiIsInVwZGF0ZWRBdCI6IjIwMjUtMTItMDVUMjI6NDQ6MTUuMzc2WiIsImlwQWRkcmVzcyI6IjEyNy4wLjAuMSIsInVzZXJBZ2VudCI6IlBsYXl3cmlnaHQvMS41Ni4xIChhcm02NDsgbWFjT1MgMTUuNykgbm9kZS8yMi4yMSIsInVzZXJJZCI6IlNqS1F5aEt1SUhtdHNRUk1WQU1YdlJjWU5GRndRdXA5IiwiaWQiOiIyRVI0R0pTNVJjVVVZa0txUUtLdDhRZ1hvUEJBNEVpbSJ9LCJ1c2VyIjp7Im5hbWUiOiJWaWV3ZXIgMyIsImVtYWlsIjoidmlld2VyMy0xNzY0OTc0NjQxMzk1LW5ueDE4aTVhOWNAZXhhbXBsZS5jb20iLCJlbWFpbFZlcmlmaWVkIjp0cnVlLCJpbWFnZSI6bnVsbCwiY3JlYXRlZEF0IjoiMjAyNS0xMi0wNVQyMjo0NDoxMS41OTJaIiwidXBkYXRlZEF0IjoiMjAyNS0xMi0wNVQyMjo0NDoxMy4yMDJaIiwicm9sZSI6InVzZXIiLCJpZCI6IlNqS1F5aEt1SUhtdHNRUk1WQU1YdlJjWU5GRndRdXA5In0sInVwZGF0ZWRBdCI6MTc2NDk3NDY1NTg2OSwidmVyc2lvbiI6IjEifSwiZXhwaXJlc0F0IjoxNzY0OTc0OTU1ODY5LCJzaWduYXR1cmUiOiJjeGEybEVpTXJEQTdqSnRiT1ZDb0pCajZla29rd2xXeS01cl9SQmpFQ0djIn0
+[DEBUG] Session response status: [33m200[39m
+  ✘  3 [api-e2e] › tests/03-free-content-access.spec.ts:274:3 › Free Content Access Flow › should handle multiple viewers accessing same free content (25.2s)
+
+🧹 Cleaning up E2E test environment...
+
+
+🛑 Stopping all workers...
+
+  ✓ Cleaned up auth/.test.vars
+  ✓ Cleaned up content-api/.test.vars
+  ✓ Cleaned up identity-api/.test.vars
+  ✓ Cleaned up ecom-api/.test.vars
+✅ All workers stopped
+
+
+✅ E2E tests completed and workers stopped
+
+
+
+  1) [api-e2e] › tests/03-free-content-access.spec.ts:27:3 › Free Content Access Flow › should allow any authenticated user to access free content 
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeDefined[2m()[22m
+
+    Received: [31mundefined[39m
+
+      147 |
+      148 |     // Verify streaming URL was provided
+    > 149 |     expect(accessData.streamingUrl).toBeDefined();
+          |                                     ^
+      150 |     expect(accessData.streamingUrl).toContain('master.m3u8');
+      151 |     expect(accessData.expiresAt).toBeDefined();
+      152 |     expect(accessData.contentType).toBe('video');
+        at /Users/brucemckay/development/Codex/e2e/tests/03-free-content-access.spec.ts:149:37
+
+  2) [api-e2e] › tests/03-free-content-access.spec.ts:274:3 › Free Content Access Flow › should handle multiple viewers accessing same free content 
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m200[39m
+    Received: [31m404[39m
+
+       at ../helpers/assertions.ts:15
+
+      13 |   expectedStatus = 200
+      14 | ): Promise<void> {
+    > 15 |   expect(response.status()).toBe(expectedStatus);
+         |                             ^
+      16 |   expect(response.headers()['content-type']).toContain('application/json');
+      17 | }
+      18 |
+        at expectSuccessResponse (/Users/brucemckay/development/Codex/e2e/helpers/assertions.ts:15:29)
+        at /Users/brucemckay/development/Codex/e2e/tests/03-free-content-access.spec.ts:369:11
+
+  2 failed
+    [api-e2e] › tests/03-free-content-access.spec.ts:27:3 › Free Content Access Flow › should allow any authenticated user to access free content 
+    [api-e2e] › tests/03-free-content-access.spec.ts:274:3 › Free Content Access Flow › should handle multiple viewers accessing same free content 
+  1 passed (1.0m)
+ ELIFECYCLE  Test failed. See above for more details.

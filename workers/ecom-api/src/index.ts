@@ -28,7 +28,9 @@ import { Hono } from 'hono';
 import { handleCheckoutCompleted } from './handlers/checkout';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import checkout from './routes/checkout';
+import purchases from './routes/purchases';
 import type { StripeWebhookEnv } from './types';
+import { createEnvValidationMiddleware } from './utils/validate-env';
 import { createWebhookHandler } from './utils/webhook-handler';
 
 // ============================================================================
@@ -40,6 +42,13 @@ const app = new Hono<StripeWebhookEnv>();
 // ============================================================================
 // Global Middleware
 // ============================================================================
+
+/**
+ * Environment validation
+ * Validates required environment variables on first request
+ * Runs once per worker instance (not per request)
+ */
+app.use('*', createEnvValidationMiddleware());
 
 /**
  * Global middleware chain
@@ -94,6 +103,12 @@ app.get(
  * Handles Stripe Checkout session creation for purchases
  */
 app.route('/checkout', checkout);
+
+/**
+ * Purchase routes
+ * Handles purchase listing and retrieval for customers
+ */
+app.route('/purchases', purchases);
 
 // ============================================================================
 // Webhook Endpoints

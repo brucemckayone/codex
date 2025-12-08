@@ -18,8 +18,33 @@
     }
   ],
 
+  // Default environment variables (local development)
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DB_METHOD": "LOCAL_PROXY",
+    "WEB_APP_URL": "http://localhost:3000",
+    "API_URL": "http://localhost:8787"
+  },
+
   // Environment configurations
   "env": {
+    // Test environment (E2E tests)
+    "test": {
+      "name": "identity-api-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "DB_METHOD": "LOCAL_PROXY",
+        "WEB_APP_URL": "http://localhost:3000",
+        "API_URL": "http://localhost:8787"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        }
+      ]
+    },
+
     // Production environment
     "production": {
       "name": "identity-api-production",
@@ -55,10 +80,20 @@
     }
   }
 
-  // Note: Secrets to be set via wrangler CLI or CI/CD:
-  // - DATABASE_URL
+  // ==========================================================================
+  // Environment Variables & Secrets
+  // ==========================================================================
   //
-  // Set secrets with:
+  // Local Development:
+  //   Create .dev.vars file with required secrets (see .dev.vars.example)
+  //
+  // Test Environment:
+  //   Uses .dev.vars.test (already configured with test values)
+  //
+  // Production Secrets (set via wrangler CLI):
   //   wrangler secret put DATABASE_URL --env production
-  //   wrangler secret put DATABASE_URL --env staging
+  //
+  // Required Variables:
+  //   - DATABASE_URL: PostgreSQL connection string
+  //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
 }

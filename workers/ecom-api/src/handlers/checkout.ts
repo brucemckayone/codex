@@ -16,7 +16,7 @@
  * - Transaction safety ensures purchase + access grant atomicity
  */
 
-import { dbHttp } from '@codex/database';
+import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -90,42 +90,47 @@ export async function handleCheckoutCompleted(
       return;
     }
 
-    // Extract customer ID
-    const customerId =
-      typeof session.customer === 'string'
-        ? session.customer
-        : session.customer?.id;
+    // Create per-request db client for transaction support
+    // Pass both DATABASE_URL variants to support LOCAL_PROXY mode in tests
+    const { db, cleanup } = createPerRequestDbClient({
+      DATABASE_URL: c.env.DATABASE_URL,
+      DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string>)
+        .DATABASE_URL_LOCAL_PROXY,
+      DB_METHOD: c.env.DB_METHOD,
+    });
 
-    if (!customerId) {
-      obs.error('Missing customer ID', { sessionId: session.id });
-      return;
+    try {
+      // Initialize purchase service with transaction-capable db
+      const purchaseService = new PurchaseService(
+        {
+          db,
+          environment: c.env.ENVIRONMENT || 'development',
+        },
+        stripe
+      );
+
+      // Complete purchase (atomic transaction: purchase + content access)
+      // Pass organizationId from metadata (required for Phase 1 purchases)
+      const purchase = await purchaseService.completePurchase(paymentIntentId, {
+        customerId: metadata.customerId, // Codex user ID from metadata
+        contentId: metadata.contentId,
+        organizationId:
+          metadata.organizationId && metadata.organizationId !== ''
+            ? metadata.organizationId
+            : null,
+        amountPaidCents: amountTotal,
+        currency: 'usd',
+      });
+
+      obs.info('Purchase completed successfully', {
+        purchaseId: purchase.id,
+        customerId: metadata.customerId,
+        contentId: metadata.contentId,
+        amountCents: amountTotal,
+      });
+    } finally {
+      await cleanup();
     }
-
-    // Initialize purchase service
-    const purchaseService = new PurchaseService(
-      {
-        db: dbHttp,
-        environment: c.env.ENVIRONMENT || 'development',
-      },
-      stripe
-    );
-
-    // Complete purchase (atomic transaction: purchase + content access)
-    // Note: organizationId will be fetched from content record inside completePurchase
-    const purchase = await purchaseService.completePurchase(paymentIntentId, {
-      customerId,
-      contentId: metadata.contentId,
-      organizationId: null, // Fetched from content in service layer
-      amountPaidCents: amountTotal,
-      currency: 'usd',
-    });
-
-    obs.info('Purchase completed successfully', {
-      purchaseId: purchase.id,
-      customerId: metadata.customerId,
-      contentId: metadata.contentId,
-      amountCents: amountTotal,
-    });
   } catch (error) {
     const err = error as Error;
     obs.error('Failed to complete purchase', {

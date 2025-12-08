@@ -2,23 +2,31 @@ import type { NeonConfig } from '@neondatabase/serverless';
 
 type DbMethod = 'LOCAL_PROXY' | 'NEON_BRANCH' | 'PRODUCTION';
 
+// Type for environment variables that can come from process.env or c.env
+export interface DbEnvVars {
+  DB_METHOD?: string;
+  DATABASE_URL?: string;
+  DATABASE_URL_LOCAL_PROXY?: string;
+  NODE_ENV?: string;
+}
+
 interface DbMethodConfig {
-  getUrl: () => string;
-  applyNeonConfig: (neonConfigInstance: NeonConfig) => void;
+  getUrl: (env: DbEnvVars) => string;
+  applyNeonConfig: (neonConfigInstance: NeonConfig, env: DbEnvVars) => void;
 }
 
 // Consolidated database configuration by method
 const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
   LOCAL_PROXY: {
-    getUrl: () => {
+    getUrl: (env) => {
       // Local PostgreSQL instance (Docker Compose)
-      if (process.env.NODE_ENV === 'production') {
+      if (env.NODE_ENV === 'production') {
         throw new Error(
-          `Attempting to use Local Database in production environment: ${process.env.NODE_ENV ?? 'unknown'}`
+          `Attempting to use Local Database in production environment: ${env.NODE_ENV ?? 'unknown'}`
         );
       }
 
-      const dbUrl = process.env.DATABASE_URL_LOCAL_PROXY;
+      const dbUrl = env.DATABASE_URL_LOCAL_PROXY;
       if (!dbUrl) {
         throw new Error(
           'DATABASE_URL_LOCAL_PROXY environment variable is required for LOCAL_PROXY method'
@@ -26,8 +34,8 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
       }
       return dbUrl;
     },
-    applyNeonConfig: (neonConfigInstance: NeonConfig) => {
-      if (process.env.NODE_ENV === 'production') return;
+    applyNeonConfig: (neonConfigInstance: NeonConfig, env) => {
+      if (env.NODE_ENV === 'production') return;
 
       // Configure Neon HTTP proxy for local development
       // The local Neon proxy runs on HTTP (not HTTPS) at port 4444
@@ -47,16 +55,16 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
 
       // WebSocket proxy configuration for local development
       // The local proxy expects WebSocket connections on the same port (4444)
-      const dbUrl = DB_METHOD_CONFIGS.LOCAL_PROXY.getUrl();
-      if (new URL(dbUrl).hostname === 'db.localtest.me') {
+      const dbUrl = env.DATABASE_URL_LOCAL_PROXY;
+      if (dbUrl && new URL(dbUrl).hostname === 'db.localtest.me') {
         neonConfigInstance.wsProxy = (host: string) => `${host}:4444/v1`;
       }
     },
   },
   NEON_BRANCH: {
-    getUrl: () => {
+    getUrl: (env) => {
       // Neon ephemeral branch for testing (CI or local)
-      const dbUrl = process.env.DATABASE_URL;
+      const dbUrl = env.DATABASE_URL;
       if (!dbUrl) {
         throw new Error(
           'DATABASE_URL environment variable is required for NEON_BRANCH method'
@@ -79,9 +87,9 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
     },
   },
   PRODUCTION: {
-    getUrl: () => {
+    getUrl: (env) => {
       // Production database connection
-      const dbUrl = process.env.DATABASE_URL;
+      const dbUrl = env.DATABASE_URL;
       if (!dbUrl) {
         throw new Error(
           'DATABASE_URL environment variable is required for PRODUCTION method'
@@ -98,8 +106,8 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
 };
 
 // Get current database method from environment
-function getCurrentDbMethod(): DbMethod {
-  const method = process.env.DB_METHOD;
+function getCurrentDbMethod(dbMethod?: string): DbMethod {
+  const method = dbMethod || process.env.DB_METHOD;
   if (!method || !(method in DB_METHOD_CONFIGS)) {
     throw new Error(
       `Invalid DB_METHOD: ${method}. Must be one of: LOCAL_PROXY, NEON_BRANCH, PRODUCTION`
@@ -108,19 +116,27 @@ function getCurrentDbMethod(): DbMethod {
   return method as DbMethod;
 }
 
-// Public API functions
-function getDbUrl(): string {
-  const method = getCurrentDbMethod();
-  return DB_METHOD_CONFIGS[method].getUrl();
+// Public API functions with parameter support
+function getDbUrl(env?: DbEnvVars): string {
+  const envVars = env || (process.env as unknown as DbEnvVars);
+  const method = getCurrentDbMethod(envVars.DB_METHOD);
+  return DB_METHOD_CONFIGS[method].getUrl(envVars);
 }
 
-function applyNeonConfig(neonConfigInstance: NeonConfig): void {
-  const method = process.env.DB_METHOD;
+function applyNeonConfig(
+  neonConfigInstance: NeonConfig,
+  env?: DbEnvVars
+): void {
+  const envVars = env || (process.env as unknown as DbEnvVars);
+  const method = envVars.DB_METHOD;
   // Skip configuration if DB_METHOD is not set (e.g., in web app)
   if (!method || !(method in DB_METHOD_CONFIGS)) {
     return;
   }
-  DB_METHOD_CONFIGS[method as DbMethod].applyNeonConfig(neonConfigInstance);
+  DB_METHOD_CONFIGS[method as DbMethod].applyNeonConfig(
+    neonConfigInstance,
+    envVars
+  );
 }
 
 // Main exported value for config/env logic

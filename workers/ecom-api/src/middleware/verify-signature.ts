@@ -81,7 +81,12 @@ export function verifyStripeSignature() {
     // Verify signature
     let event: Stripe.Event;
     try {
-      event = verifyWebhookSignature(rawBody, signature, webhookSecret, stripe);
+      event = await verifyWebhookSignature(
+        rawBody,
+        signature,
+        webhookSecret,
+        stripe
+      );
 
       obs.info('Webhook signature verified', {
         type: event.type,

@@ -152,6 +152,18 @@ export class PurchaseService extends BaseService {
         });
       }
 
+      // Phase 1: Paid content must belong to an organization
+      if (!contentRecord.organizationId) {
+        throw new ContentNotPurchasableError(
+          validated.contentId,
+          'not_published',
+          {
+            reason:
+              'Content must belong to an organization to be purchasable (Phase 1)',
+          }
+        );
+      }
+
       // Step 2: Check for existing purchase
       const existingPurchase = await this.db.query.purchases.findFirst({
         where: and(
@@ -190,7 +202,7 @@ export class PurchaseService extends BaseService {
         metadata: {
           contentId: validated.contentId,
           customerId,
-          organizationId: contentRecord.organizationId || '',
+          organizationId: contentRecord.organizationId!, // Must exist (validated above)
           creatorId: contentRecord.creatorId,
         },
         client_reference_id: customerId,
@@ -360,6 +372,7 @@ export class PurchaseService extends BaseService {
         return purchase;
       });
     } catch (error) {
+      console.error('completePurchase error:', error);
       throw wrapError(error, {
         stripePaymentIntentId,
         metadata,

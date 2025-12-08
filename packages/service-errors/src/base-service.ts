@@ -13,8 +13,16 @@
  * - Type-safe database operations
  */
 
-import type { Database } from '@codex/database';
+import type { dbHttp, dbWs } from '@codex/database';
 import { isServiceError, wrapError } from './base-errors';
+
+/**
+ * Database client type for services
+ *
+ * Supports both HTTP (production workers) and WebSocket (tests/transactions)
+ * database clients from @codex/database.
+ */
+export type ServiceDatabase = typeof dbHttp | typeof dbWs;
 
 /**
  * Configuration required by all services
@@ -22,7 +30,7 @@ import { isServiceError, wrapError } from './base-errors';
  */
 export interface ServiceConfig {
   /** Database connection instance */
-  db: Database;
+  db: ServiceDatabase;
   /** Runtime environment (development, staging, production, test) */
   environment: string;
 }
@@ -52,7 +60,7 @@ export interface ServiceConfig {
  */
 export abstract class BaseService {
   /** Protected database connection - accessible to subclasses */
-  protected readonly db: Database;
+  protected readonly db: ServiceDatabase;
 
   /** Protected environment string - accessible to subclasses */
   protected readonly environment: string;

@@ -38,9 +38,10 @@
     "@codex/service-errors": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7",
-    "stripe": "^17.5.0"
+    "stripe": "^19.2.0"
   },
   "devDependencies": {
+    "@codex/content": "workspace:*",
     "@codex/test-utils": "workspace:*",
     "@types/node": "^22.0.0",
     "dotenv": "^17.2.3",

@@ -3,6 +3,10 @@
 .env.*
 **/.env
 **/.env.*
+.dev.vars
+.dev.vars.*
+**/.dev.vars
+**/.dev.vars.*
 env.dev
 env.prod
 

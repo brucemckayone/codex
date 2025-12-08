@@ -70,8 +70,8 @@ describe('Create Checkout Schema', () => {
     it('should validate correct checkout data', () => {
       const validCheckout: CreateCheckoutInput = {
         contentId: validUuid,
-        successUrl: 'https://example.com/success',
-        cancelUrl: 'https://example.com/cancel',
+        successUrl: 'http://localhost:3000/success',
+        cancelUrl: 'http://localhost:3000/cancel',
       };
 
       const result = createCheckoutSchema.parse(validCheckout);
@@ -93,8 +93,8 @@ describe('Create Checkout Schema', () => {
     it('should validate with HTTPS URLs', () => {
       const checkout = {
         contentId: validUuid,
-        successUrl: 'https://example.com/payment/success',
-        cancelUrl: 'https://example.com/payment/cancel',
+        successUrl: 'http://localhost:3000/payment/success',
+        cancelUrl: 'http://localhost:3000/payment/cancel',
       };
 
       const result = createCheckoutSchema.parse(checkout);
@@ -104,8 +104,8 @@ describe('Create Checkout Schema', () => {
     it('should validate URLs with query parameters', () => {
       const checkout = {
         contentId: validUuid,
-        successUrl: 'https://example.com/success?session=123&user=456',
-        cancelUrl: 'https://example.com/cancel?reason=user',
+        successUrl: 'http://localhost:3000/success?session=123&user=456',
+        cancelUrl: 'http://localhost:3000/cancel?reason=user',
       };
 
       const result = createCheckoutSchema.parse(checkout);
@@ -116,13 +116,15 @@ describe('Create Checkout Schema', () => {
     it('should validate URLs with fragments', () => {
       const checkout = {
         contentId: validUuid,
-        successUrl: 'https://example.com/dashboard#purchases',
-        cancelUrl: 'https://example.com/content#back',
+        successUrl: 'http://localhost:3000/dashboard#purchases',
+        cancelUrl: 'http://localhost:3000/content#back',
       };
 
       const result = createCheckoutSchema.parse(checkout);
-      expect(result.successUrl).toBe('https://example.com/dashboard#purchases');
-      expect(result.cancelUrl).toBe('https://example.com/content#back');
+      expect(result.successUrl).toBe(
+        'http://localhost:3000/dashboard#purchases'
+      );
+      expect(result.cancelUrl).toBe('http://localhost:3000/content#back');
     });
 
     describe('contentId validation', () => {
@@ -130,8 +132,8 @@ describe('Create Checkout Schema', () => {
         expect(() =>
           createCheckoutSchema.parse({
             contentId: 'not-a-uuid',
-            successUrl: 'https://example.com/success',
-            cancelUrl: 'https://example.com/cancel',
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow('Invalid ID format');
       });
@@ -140,8 +142,8 @@ describe('Create Checkout Schema', () => {
         expect(() =>
           createCheckoutSchema.parse({
             contentId: '',
-            successUrl: 'https://example.com/success',
-            cancelUrl: 'https://example.com/cancel',
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow('Invalid ID format');
       });
@@ -150,8 +152,8 @@ describe('Create Checkout Schema', () => {
         expect(() =>
           createCheckoutSchema.parse({
             contentId: 12345,
-            successUrl: 'https://example.com/success',
-            cancelUrl: 'https://example.com/cancel',
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow();
       });
@@ -162,7 +164,7 @@ describe('Create Checkout Schema', () => {
         expect(() =>
           createCheckoutSchema.parse({
             contentId: validUuid,
-            cancelUrl: 'https://example.com/cancel',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow();
       });
@@ -171,7 +173,7 @@ describe('Create Checkout Schema', () => {
         expect(() =>
           createCheckoutSchema.parse({
             contentId: validUuid,
-            successUrl: 'https://example.com/success',
+            successUrl: 'http://localhost:3000/success',
           })
         ).toThrow();
       });
@@ -181,14 +183,14 @@ describe('Create Checkout Schema', () => {
           createCheckoutSchema.parse({
             contentId: validUuid,
             successUrl: '',
-            cancelUrl: 'https://example.com/cancel',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow('Invalid URL format');
 
         expect(() =>
           createCheckoutSchema.parse({
             contentId: validUuid,
-            successUrl: 'https://example.com/success',
+            successUrl: 'http://localhost:3000/success',
             cancelUrl: '',
           })
         ).toThrow('Invalid URL format');
@@ -208,7 +210,7 @@ describe('Create Checkout Schema', () => {
             createCheckoutSchema.parse({
               contentId: validUuid,
               successUrl: url,
-              cancelUrl: 'https://example.com/cancel',
+              cancelUrl: 'http://localhost:3000/cancel',
             })
           ).toThrow();
         });
@@ -219,14 +221,14 @@ describe('Create Checkout Schema', () => {
           createCheckoutSchema.parse({
             contentId: validUuid,
             successUrl: '/success',
-            cancelUrl: 'https://example.com/cancel',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow();
 
         expect(() =>
           createCheckoutSchema.parse({
             contentId: validUuid,
-            successUrl: 'https://example.com/success',
+            successUrl: 'http://localhost:3000/success',
             cancelUrl: '../cancel',
           })
         ).toThrow();
@@ -239,7 +241,7 @@ describe('Create Checkout Schema', () => {
           createCheckoutSchema.parse({
             contentId: validUuid,
             successUrl: 'javascript:alert(1)',
-            cancelUrl: 'https://example.com/cancel',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow('URL must use HTTP or HTTPS protocol');
       });
@@ -248,7 +250,7 @@ describe('Create Checkout Schema', () => {
         expect(() =>
           createCheckoutSchema.parse({
             contentId: validUuid,
-            successUrl: 'https://example.com/success',
+            successUrl: 'http://localhost:3000/success',
             cancelUrl: 'javascript:alert(1)',
           })
         ).toThrow('URL must use HTTP or HTTPS protocol');
@@ -259,7 +261,7 @@ describe('Create Checkout Schema', () => {
           createCheckoutSchema.parse({
             contentId: validUuid,
             successUrl: 'data:text/html,<script>alert(1)</script>',
-            cancelUrl: 'https://example.com/cancel',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow('URL must use HTTP or HTTPS protocol');
       });
@@ -268,7 +270,7 @@ describe('Create Checkout Schema', () => {
         expect(() =>
           createCheckoutSchema.parse({
             contentId: validUuid,
-            successUrl: 'https://example.com/success',
+            successUrl: 'http://localhost:3000/success',
             cancelUrl: 'data:text/html,<script>alert(1)</script>',
           })
         ).toThrow('URL must use HTTP or HTTPS protocol');
@@ -279,7 +281,7 @@ describe('Create Checkout Schema', () => {
           createCheckoutSchema.parse({
             contentId: validUuid,
             successUrl: 'file:///etc/passwd',
-            cancelUrl: 'https://example.com/cancel',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow('URL must use HTTP or HTTPS protocol');
       });
@@ -289,7 +291,7 @@ describe('Create Checkout Schema', () => {
           createCheckoutSchema.parse({
             contentId: validUuid,
             successUrl: 'ftp://example.com/success',
-            cancelUrl: 'https://example.com/cancel',
+            cancelUrl: 'http://localhost:3000/cancel',
           })
         ).toThrow('URL must use HTTP or HTTPS protocol');
       });
@@ -299,8 +301,8 @@ describe('Create Checkout Schema', () => {
       it('should infer correct TypeScript type', () => {
         const checkout: CreateCheckoutInput = {
           contentId: validUuid,
-          successUrl: 'https://example.com/success',
-          cancelUrl: 'https://example.com/cancel',
+          successUrl: 'http://localhost:3000/success',
+          cancelUrl: 'http://localhost:3000/cancel',
         };
 
         // Type assertion to verify TypeScript inference
@@ -593,8 +595,8 @@ describe('Database Constraint Alignment', () => {
 
       const checkout = createCheckoutSchema.parse({
         contentId: validUuid,
-        successUrl: 'https://example.com/success',
-        cancelUrl: 'https://example.com/cancel',
+        successUrl: 'http://localhost:3000/success',
+        cancelUrl: 'http://localhost:3000/cancel',
       });
 
       expect(checkout.contentId).toBe(validUuid);
@@ -648,18 +650,20 @@ describe('Edge Cases', () => {
     it('should accept URLs with authentication', () => {
       const checkout = createCheckoutSchema.parse({
         contentId: '123e4567-e89b-12d3-a456-426614174000',
-        successUrl: 'https://user:pass@example.com/success',
-        cancelUrl: 'https://example.com/cancel',
+        successUrl: 'https://user:pass@localhost:3000/success',
+        cancelUrl: 'http://localhost:3000/cancel',
       });
 
-      expect(checkout.successUrl).toBe('https://user:pass@example.com/success');
+      expect(checkout.successUrl).toBe(
+        'https://user:pass@localhost:3000/success'
+      );
     });
 
     it('should accept URLs with encoded characters', () => {
       const checkout = createCheckoutSchema.parse({
         contentId: '123e4567-e89b-12d3-a456-426614174000',
-        successUrl: 'https://example.com/success?name=John%20Doe',
-        cancelUrl: 'https://example.com/cancel?reason=not%20interested',
+        successUrl: 'http://localhost:3000/success?name=John%20Doe',
+        cancelUrl: 'http://localhost:3000/cancel?reason=not%20interested',
       });
 
       expect(checkout.successUrl).toContain('%20');

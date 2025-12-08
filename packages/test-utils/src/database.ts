@@ -77,6 +77,21 @@ if (typeof globalThis.WebSocket === 'undefined') {
   globalThis.WebSocket = ws as unknown as typeof WebSocket;
 }
 
+// Apply LOCAL_PROXY configuration for local development testing
+// This must be done early, before any database connections are created
+if (process.env.DB_METHOD === 'LOCAL_PROXY') {
+  neonConfig.useSecureWebSocket = false;
+  neonConfig.fetchEndpoint = (host: string): string => {
+    const [protocol, port] =
+      host === 'db.localtest.me' ? ['http', 4444] : ['https', 443];
+    return `${protocol}://${host}:${port}/sql`;
+  };
+  const dbUrl = process.env.DATABASE_URL_LOCAL_PROXY;
+  if (dbUrl && new URL(dbUrl).hostname === 'db.localtest.me') {
+    neonConfig.wsProxy = (host: string) => `${host}:4444/v1`;
+  }
+}
+
 /**
  * Database type - import from @codex/database for type safety
  * This ensures we use the same type as the content service

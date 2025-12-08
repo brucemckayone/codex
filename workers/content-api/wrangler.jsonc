@@ -27,8 +27,44 @@
     }
   ],
 
+  // Default environment variables (local development)
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DB_METHOD": "LOCAL_PROXY",
+    "WEB_APP_URL": "http://localhost:3000",
+    "API_URL": "http://localhost:8787"
+  },
+
   // Environment configurations
   "env": {
+    // Test environment (E2E tests)
+    "test": {
+      "name": "content-api-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "DB_METHOD": "LOCAL_PROXY",
+        "WEB_APP_URL": "http://localhost:3000",
+        "API_URL": "http://localhost:8787",
+        "R2_ACCOUNT_ID": "158c04717be8e66d8e7800808e416d1a",
+        "R2_ACCESS_KEY_ID": "edf68e327b0bbb734577d68f233f8f2f",
+        "R2_SECRET_ACCESS_KEY": "af651e8873286273ff1cf6013629a6a66b1b9c9325f7baf64b62999b140fd85f",
+        "R2_BUCKET_MEDIA": "codex-media-test"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production",
+          "preview_bucket_name": "codex-media-test"
+        }
+      ]
+    },
+
     // Production environment
     "production": {
       "name": "content-api-production",
@@ -64,23 +100,28 @@
     }
   }
 
-  // Note: Secrets to be set via wrangler CLI or CI/CD:
-  // - DATABASE_URL
-  // - R2_ACCOUNT_ID
-  // - R2_ACCESS_KEY_ID
-  // - R2_SECRET_ACCESS_KEY
-  // - R2_BUCKET_MEDIA
+  // ==========================================================================
+  // Environment Variables & Secrets
+  // ==========================================================================
   //
-  // Set secrets with:
+  // Local Development:
+  //   Create .dev.vars file with required secrets (see .dev.vars.example)
+  //
+  // Test Environment:
+  //   Uses .dev.vars.test (already configured with test values)
+  //
+  // Production Secrets (set via wrangler CLI):
   //   wrangler secret put DATABASE_URL --env production
   //   wrangler secret put R2_ACCOUNT_ID --env production
   //   wrangler secret put R2_ACCESS_KEY_ID --env production
   //   wrangler secret put R2_SECRET_ACCESS_KEY --env production
   //   wrangler secret put R2_BUCKET_MEDIA --env production
   //
-  //   wrangler secret put DATABASE_URL --env staging
-  //   wrangler secret put R2_ACCOUNT_ID --env staging
-  //   wrangler secret put R2_ACCESS_KEY_ID --env staging
-  //   wrangler secret put R2_SECRET_ACCESS_KEY --env staging
-  //   wrangler secret put R2_BUCKET_MEDIA --env staging
+  // Required Variables:
+  //   - DATABASE_URL: PostgreSQL connection string
+  //   - R2_ACCOUNT_ID: Cloudflare R2 account ID
+  //   - R2_ACCESS_KEY_ID: R2 access key ID
+  //   - R2_SECRET_ACCESS_KEY: R2 secret access key
+  //   - R2_BUCKET_MEDIA: R2 bucket name for media storage
+  //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
 }

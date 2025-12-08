@@ -109,7 +109,7 @@ class KVStore {
     // Increment existing window
     const newValue = { count: existing.count + 1, resetAt: existing.resetAt };
     await this.kv.put(kvKey, JSON.stringify(newValue), {
-      expirationTtl: Math.ceil((existing.resetAt - now) / 1000),
+      expirationTtl: Math.max(60, Math.ceil((existing.resetAt - now) / 1000)),
     });
 
     return newValue.count;

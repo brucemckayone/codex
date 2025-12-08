@@ -21,7 +21,7 @@ import {
   createContentSchema,
   updateContentSchema,
 } from '@codex/content';
-import { dbHttp } from '@codex/database';
+import { createPerRequestDbClient, dbHttp } from '@codex/database';
 import type {
   ContentListResponse,
   ContentResponse,
@@ -59,14 +59,27 @@ app.post(
     schema: {
       body: createContentSchema,
     },
-    handler: async (_c, ctx): Promise<CreateContentResponse> => {
-      const service = new ContentService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
+    handler: async (c, ctx): Promise<CreateContentResponse> => {
+      // Create per-request database client with transaction support
+      const { db, cleanup } = createPerRequestDbClient(ctx.env);
 
-      const content = await service.create(ctx.validated.body, ctx.user.id);
-      return { data: content };
+      try {
+        const service = new ContentService({
+          db,
+          environment: ctx.env.ENVIRONMENT || 'development',
+        });
+
+        const content = await service.create(ctx.validated.body, ctx.user.id);
+
+        // Schedule cleanup after response is sent
+        c.executionCtx.waitUntil(cleanup());
+
+        return { data: content };
+      } catch (error) {
+        // Ensure cleanup happens even on error
+        await cleanup();
+        throw error;
+      }
     },
     successStatus: 201,
   })
@@ -117,18 +130,27 @@ app.patch(
       params: createIdParamsSchema(),
       body: updateContentSchema,
     },
-    handler: async (_c, ctx): Promise<UpdateContentResponse> => {
-      const service = new ContentService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
+    handler: async (c, ctx): Promise<UpdateContentResponse> => {
+      const { db, cleanup } = createPerRequestDbClient(ctx.env);
 
-      const content = await service.update(
-        ctx.validated.params.id,
-        ctx.validated.body,
-        ctx.user.id
-      );
-      return { data: content };
+      try {
+        const service = new ContentService({
+          db,
+          environment: ctx.env.ENVIRONMENT || 'development',
+        });
+
+        const content = await service.update(
+          ctx.validated.params.id,
+          ctx.validated.body,
+          ctx.user.id
+        );
+
+        c.executionCtx.waitUntil(cleanup());
+        return { data: content };
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
     },
   })
 );
@@ -175,17 +197,26 @@ app.post(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx): Promise<PublishContentResponse> => {
-      const service = new ContentService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
+    handler: async (c, ctx): Promise<PublishContentResponse> => {
+      const { db, cleanup } = createPerRequestDbClient(ctx.env);
 
-      const content = await service.publish(
-        ctx.validated.params.id,
-        ctx.user.id
-      );
-      return { data: content };
+      try {
+        const service = new ContentService({
+          db,
+          environment: ctx.env.ENVIRONMENT || 'development',
+        });
+
+        const content = await service.publish(
+          ctx.validated.params.id,
+          ctx.user.id
+        );
+
+        c.executionCtx.waitUntil(cleanup());
+        return { data: content };
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
     },
   })
 );
@@ -204,17 +235,26 @@ app.post(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx): Promise<UnpublishContentResponse> => {
-      const service = new ContentService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
+    handler: async (c, ctx): Promise<UnpublishContentResponse> => {
+      const { db, cleanup } = createPerRequestDbClient(ctx.env);
 
-      const content = await service.unpublish(
-        ctx.validated.params.id,
-        ctx.user.id
-      );
-      return { data: content };
+      try {
+        const service = new ContentService({
+          db,
+          environment: ctx.env.ENVIRONMENT || 'development',
+        });
+
+        const content = await service.unpublish(
+          ctx.validated.params.id,
+          ctx.user.id
+        );
+
+        c.executionCtx.waitUntil(cleanup());
+        return { data: content };
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
     },
   })
 );
@@ -237,14 +277,23 @@ app.delete(
     schema: {
       params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx): Promise<DeleteContentResponse> => {
-      const service = new ContentService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
+    handler: async (c, ctx): Promise<DeleteContentResponse> => {
+      const { db, cleanup } = createPerRequestDbClient(ctx.env);
 
-      await service.delete(ctx.validated.params.id, ctx.user.id);
-      return null;
+      try {
+        const service = new ContentService({
+          db,
+          environment: ctx.env.ENVIRONMENT || 'development',
+        });
+
+        await service.delete(ctx.validated.params.id, ctx.user.id);
+
+        c.executionCtx.waitUntil(cleanup());
+        return null;
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
     },
     successStatus: 204,
   })

@@ -6,10 +6,14 @@
  */
 
 import { dbHttp } from '@codex/database';
-import { organizationMemberships, organizations } from '@codex/database/schema';
+import {
+  organizationMemberships,
+  organizations,
+  sessions,
+} from '@codex/database/schema';
 import type { RATE_LIMIT_PRESETS } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import type { Context, MiddlewareHandler } from 'hono';
 
 /**
@@ -312,15 +316,87 @@ export function withPolicy(
     // Authentication Check
     // ========================================================================
 
-    const user = c.get('user');
-
     // None: Skip auth checks
     if (mergedPolicy.auth === 'none') {
       await next();
       return;
     }
 
-    // Optional: Auth attempted by middleware, but not required
+    // Check if auth middleware already ran (enableGlobalAuth: true case)
+    let user = c.get('user');
+
+    // If no user yet, perform session validation here
+    // This allows withPolicy() to work with enableGlobalAuth: false
+    if (
+      !user &&
+      (mergedPolicy.auth === 'optional' || mergedPolicy.auth === 'required')
+    ) {
+      const sessionCookie = c.req.header('cookie');
+      console.log(
+        '[withPolicy] Cookie header:',
+        sessionCookie ? 'present' : 'missing'
+      );
+
+      if (sessionCookie) {
+        // Extract session token from cookie
+        // Try codex-session first (configured name), then better-auth.session_token
+        let match = sessionCookie.match(/codex-session=([^;]+)/);
+        if (!match) {
+          match = sessionCookie.match(/better-auth\.session_token=([^;]+)/);
+        }
+        const rawToken = match?.[1];
+        console.log(
+          '[withPolicy] Session token:',
+          rawToken ? 'found' : 'not found'
+        );
+
+        if (rawToken) {
+          // URL-decode the token (cookies are URL-encoded)
+          const fullToken = decodeURIComponent(rawToken);
+          // Better Auth tokens are in format: token.signature
+          // Database only stores the token part (before the dot)
+          const sessionToken = fullToken.split('.')[0] || fullToken;
+          console.log(
+            '[withPolicy] Decoded token:',
+            sessionToken.substring(0, 20) + '...'
+          );
+
+          try {
+            // Query session from database
+            const sessionData = await dbHttp.query.sessions.findFirst({
+              where: and(
+                eq(sessions.token, sessionToken),
+                gt(sessions.expiresAt, new Date())
+              ),
+              with: {
+                user: true,
+              },
+            });
+
+            console.log(
+              '[withPolicy] Session query result:',
+              sessionData ? 'found' : 'not found'
+            );
+            if (sessionData) {
+              // Valid session found - set context
+              c.set('session', sessionData);
+              c.set('user', sessionData.user);
+              user = sessionData.user;
+              console.log(
+                '[withPolicy] User set:',
+                sessionData.user.id,
+                sessionData.user.role
+              );
+            }
+          } catch (error) {
+            console.error('[withPolicy] Session validation error:', error);
+            // Continue without auth - will be caught below if required
+          }
+        }
+      }
+    }
+
+    // Optional: Auth attempted but not required
     if (mergedPolicy.auth === 'optional') {
       // User may or may not exist, proceed either way
       await next();

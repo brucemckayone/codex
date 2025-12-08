@@ -5,7 +5,7 @@
   "description": "Cloudflare Worker for Content and Media API endpoints",
   "type": "module",
   "scripts": {
-    "dev": "pnpm build && wrangler dev --port 4001 --inspector-port 9233",
+    "dev": "pnpm build && dotenv -e ../../.env.dev -- wrangler dev --port 4001 --inspector-port 9233",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:production": "wrangler deploy --env production",

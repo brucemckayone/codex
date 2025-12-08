@@ -1,7 +1,7 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import type { Database } from '@codex/database';
-import { dbHttp } from '@codex/database';
+import type { Database, DatabaseWs } from '@codex/database';
+import { createPerRequestDbClient } from '@codex/database';
 import {
   content,
   organizationMemberships,
@@ -34,7 +34,7 @@ export interface R2Signer {
 }
 
 export interface ContentAccessServiceConfig {
-  db: Database;
+  db: DatabaseWs; // WebSocket client for transaction support
   r2: R2Signer;
   obs: ObservabilityClient;
   purchaseService: PurchaseService;
@@ -102,7 +102,8 @@ export class ContentAccessService {
     });
 
     try {
-      // Step 1 & 2: Verify access and fetch content/media data (database transaction)
+      // Step 1 & 2: Verify access and fetch content/media data within transaction
+      // Transaction ensures consistent snapshot for access verification
       const { r2Key, mediaType } = await db.transaction(
         async (tx) => {
           // Get content with media details (any organization)
@@ -211,17 +212,19 @@ export class ContentAccessService {
             });
           }
 
-          // Extract R2 key and validate
-          const r2Key = contentRecord.mediaItem.r2Key;
+          // Extract R2 key for streaming (prefer HLS master playlist for adaptive streaming)
+          const r2Key =
+            contentRecord.mediaItem.hlsMasterPlaylistKey ||
+            contentRecord.mediaItem.r2Key;
 
           if (!r2Key) {
-            obs.error('Media item missing R2 key', {
+            obs.error('Media item missing R2 key and HLS key', {
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
             });
             throw new R2SigningError(
               'missing_r2_key',
-              new Error('R2 key is null')
+              new Error('Neither R2 key nor HLS master playlist key is set')
             );
           }
 
@@ -271,7 +274,9 @@ export class ContentAccessService {
         };
       } catch (err) {
         obs.error('Failed to generate signed R2 URL', {
-          error: err,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          errorStack: err instanceof Error ? err.stack : undefined,
+          errorName: err instanceof Error ? err.name : undefined,
           userId,
           contentId: input.contentId,
           r2Key,
@@ -288,7 +293,9 @@ export class ContentAccessService {
         throw error;
       }
       obs.error('Unexpected error in getStreamingUrl', {
-        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorName: error instanceof Error ? error.name : undefined,
         userId,
         contentId: input.contentId,
       });
@@ -547,6 +554,12 @@ export interface ContentAccessEnv {
   R2_BUCKET_MEDIA?: string;
   /** Stripe secret key for purchase verification */
   STRIPE_SECRET_KEY?: string;
+  /** Database connection method (LOCAL_PROXY, NEON_BRANCH, PRODUCTION) */
+  DB_METHOD?: string;
+  /** Database URL for connections */
+  DATABASE_URL?: string;
+  /** Local proxy database URL (for LOCAL_PROXY mode) */
+  DATABASE_URL_LOCAL_PROXY?: string;
 }
 
 /**
@@ -557,9 +570,10 @@ export interface ContentAccessEnv {
  *
  * @throws Error if required environment variables are missing
  */
-export function createContentAccessService(
-  env: ContentAccessEnv
-): ContentAccessService {
+export function createContentAccessService(env: ContentAccessEnv): {
+  service: ContentAccessService;
+  cleanup: () => Promise<void>;
+} {
   // Validate required environment variables
   if (!env.MEDIA_BUCKET) {
     throw new Error('MEDIA_BUCKET binding is required');
@@ -590,7 +604,9 @@ export function createContentAccessService(
   };
 
   const r2 = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);
-  const db = dbHttp;
+
+  // Create per-request database client with WebSocket support for transactions
+  const { db, cleanup } = createPerRequestDbClient(env);
 
   // Create Stripe client and PurchaseService
   const stripe = createStripeClient(env.STRIPE_SECRET_KEY || '');
@@ -599,5 +615,8 @@ export function createContentAccessService(
     stripe
   );
 
-  return new ContentAccessService({ db, r2, obs, purchaseService });
+  const service = new ContentAccessService({ db, r2, obs, purchaseService });
+
+  // Return service with cleanup function
+  return { service, cleanup };
 }

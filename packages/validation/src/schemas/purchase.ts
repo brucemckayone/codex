@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { positiveIntSchema, urlSchema, uuidSchema } from '../primitives';
+import { urlSchema, uuidSchema } from '../primitives';
 
 /**
  * Purchase Validation Schemas
@@ -116,13 +116,21 @@ export const createCheckoutSchema = z.object({
  * Pagination bounds:
  * - Max page 1000 prevents excessive database offsets
  * - Max limit 100 prevents large query results
+ *
+ * Note: Uses z.coerce for page/limit because query params arrive as strings
  */
 export const purchaseQuerySchema = z.object({
-  page: positiveIntSchema
+  page: z.coerce
+    .number()
+    .int('Must be a whole number')
+    .positive('Must be greater than 0')
     .max(1000, 'Must be 1000 or less')
     .optional()
     .default(1),
-  limit: positiveIntSchema
+  limit: z.coerce
+    .number()
+    .int('Must be a whole number')
+    .positive('Must be greater than 0')
     .max(100, 'Must be 100 or less')
     .optional()
     .default(20),

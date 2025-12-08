@@ -25,8 +25,37 @@
   // Note: R2 buckets are not used by auth worker
   // R2 storage is only used by content-api worker for media management
 
+  // Default environment variables (local development)
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DB_METHOD": "LOCAL_PROXY",
+    "WEB_APP_URL": "http://localhost:3000",
+    "API_URL": "http://localhost:8787"
+  },
+
   // Environment configurations
   "env": {
+    // Test environment (E2E tests)
+    "test": {
+      "name": "auth-worker-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "DB_METHOD": "LOCAL_PROXY",
+        "WEB_APP_URL": "http://localhost:3000",
+        "API_URL": "http://localhost:8787"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        }
+      ]
+    },
+
     // Production environment
     "production": {
       "name": "auth-worker-production",
@@ -61,13 +90,23 @@
     }
   }
 
-  // Note: Secrets to be set via wrangler CLI or CI/CD:
-  // - DATABASE_URL
-  // - SESSION_SECRET
-  // - BETTER_AUTH_SECRET
+  // ==========================================================================
+  // Environment Variables & Secrets
+  // ==========================================================================
   //
-  // Set secrets with:
+  // Local Development:
+  //   Create .dev.vars file with required secrets (see .dev.vars.example)
+  //
+  // Test Environment:
+  //   Uses .dev.vars.test (already configured with test values)
+  //
+  // Production Secrets (set via wrangler CLI):
   //   wrangler secret put DATABASE_URL --env production
-  //   wrangler secret put SESSION_SECRET --env production
   //   wrangler secret put BETTER_AUTH_SECRET --env production
+  //
+  // Required Variables:
+  //   - DATABASE_URL: PostgreSQL connection string
+  //   - BETTER_AUTH_SECRET: BetterAuth secret key (min 32 characters)
+  //   - AUTH_SESSION_KV: KV namespace binding for session caching
+  //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
 }

@@ -1,0 +1,15 @@
+# Development Environment Variables
+# Copy to .dev.vars and fill in actual values
+
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/codex_dev
+
+# BetterAuth Secret (min 32 characters)
+BETTER_AUTH_SECRET=your-secret-key-min-32-characters-here
+
+# CORS URLs
+WEB_APP_URL=http://localhost:3000
+API_URL=http://localhost:8787
+
+# Environment
+ENVIRONMENT=development

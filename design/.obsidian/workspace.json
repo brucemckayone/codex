@@ -1,14 +1,14 @@
 {
   "main": {
-    "id": "552267220b62624f",
+    "id": "1ead5193c1bc5105",
     "type": "split",
     "children": [
       {
-        "id": "437ae031c87c9754",
+        "id": "0b8bc06a5edc5919",
         "type": "tabs",
         "children": [
           {
-            "id": "f9e416ad637af1a8",
+            "id": "0c59f307fdf1749b",
             "type": "leaf",
             "state": {
               "type": "empty",
@@ -23,15 +23,15 @@
     "direction": "vertical"
   },
   "left": {
-    "id": "4e021659e382f0c6",
+    "id": "19471d4be221cb2f",
     "type": "split",
     "children": [
       {
-        "id": "608ad784fe7169bd",
+        "id": "bef90eca0ec770ec",
         "type": "tabs",
         "children": [
           {
-            "id": "0ba8de14df472946",
+            "id": "bf601c28b63f0a12",
             "type": "leaf",
             "state": {
               "type": "file-explorer",
@@ -44,12 +44,12 @@
             }
           },
           {
-            "id": "052917dabc598244",
+            "id": "590242aa32c1a438",
             "type": "leaf",
             "state": {
               "type": "search",
               "state": {
-                "query": "r2bucketstruc",
+                "query": "",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
@@ -61,7 +61,7 @@
             }
           },
           {
-            "id": "cdc11ab250cce3c6",
+            "id": "82a1e1ca64b00968",
             "type": "leaf",
             "state": {
               "type": "bookmarks",
@@ -77,20 +77,19 @@
     "width": 300
   },
   "right": {
-    "id": "e4291c2507b07b01",
+    "id": "6939eb10377d16ae",
     "type": "split",
     "children": [
       {
-        "id": "c6d790c3c440852e",
+        "id": "4f68db6c6e206061",
         "type": "tabs",
         "children": [
           {
-            "id": "179d57546fd384a8",
+            "id": "346e7461299d5c2e",
             "type": "leaf",
             "state": {
               "type": "backlink",
               "state": {
-                "file": "infrastructure/SECURITY.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -100,25 +99,24 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for SECURITY"
+              "title": "Backlinks"
             }
           },
           {
-            "id": "503c67ba34ca46ab",
+            "id": "52a1e2740c8a225b",
             "type": "leaf",
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "infrastructure/SECURITY.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from SECURITY"
+              "title": "Outgoing links"
             }
           },
           {
-            "id": "2d691eb50406e206",
+            "id": "58bf8af7cdc32483",
             "type": "leaf",
             "state": {
               "type": "tag",
@@ -133,18 +131,17 @@
             }
           },
           {
-            "id": "fe17cafa4485a811",
+            "id": "d6a3f8410490a252",
             "type": "leaf",
             "state": {
               "type": "outline",
               "state": {
-                "file": "infrastructure/SECURITY.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of SECURITY"
+              "title": "Outline"
             }
           }
         ]
@@ -156,47 +153,16 @@
   },
   "left-ribbon": {
     "hiddenItems": {
-      "bases:Create new base": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
+      "bases:Create new base": false,
       "obsidian-excalidraw-plugin:New drawing": false
     }
   },
-  "active": "f9e416ad637af1a8",
-  "lastOpenFiles": [
-    "code-review/pr-44-test-coverage-review.md",
-    "code-review/pr-44-integration-review.md",
-    "code-review/pr-44-security-review.md",
-    "code-review/pr-44-service-layer-review.md",
-    "code-review/pr-44-api-endpoints-review.md",
-    "code-review/pr-44-validation-review.md",
-    "code-review/pr-44-database-review.md",
-    "Excalidraw/Drawing 2025-11-19 21.29.19.excalidraw.md",
-    "Excalidraw",
-    "infrastructure/R2BucketStructure.md",
-    "code-review/pr-36/validation-review.md",
-    "code-review/pr-36/test-coverage-review.md",
-    "code-review/pr-36/service-layer-review.md",
-    "code-review/pr-36/security-review.md",
-    "code-review/pr-36/integration-deployment-review.md",
-    "code-review/pr-36/database-schema-review.md",
-    "code-review/pr-36/api-endpoint-review.md",
-    "code-review/pr-36",
-    "code-review",
-    "roadmap/work-packets/README.md",
-    "roadmap/work-packets/ARCHITECTURE-CHANGELOG.md",
-    "SECURITY_POLICY_USAGE.md",
-    "roadmap/work-packets/P1-CONTENT-001-content-service.md",
-    "features/auth/pdr-phase-1.md",
-    "roadmap/work-packets/P1-CONTENT-001-content-service.md.tmp.13416.1763231850245",
-    "features/auth/PHASE_1_AUTH_DESIGN.md",
-    "PHASE_1_AUTH_DESIGN.md",
-    "DOCUMENTATION_INDEX.md",
-    "DEVELOPER_GUIDE.md",
-f    "CODEBASE_ANALYSIS.md"
-  ]
+  "active": "0c59f307fdf1749b",
+  "lastOpenFiles": []
 }

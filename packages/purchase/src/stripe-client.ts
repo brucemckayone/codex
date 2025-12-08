@@ -26,9 +26,9 @@ import Stripe from 'stripe';
 /**
  * Stripe API version
  * Internal constant - updated when upgrading Stripe API version
- * Current: 2025-02-24.acacia (pinned by Stripe Node v19.2.0)
+ * Current: 2025-10-29.clover (pinned by Stripe Node v19.3.1)
  */
-const STRIPE_API_VERSION = '2025-02-24.acacia';
+const STRIPE_API_VERSION = '2025-10-29.clover';
 
 /**
  * Create configured Stripe client instance
@@ -62,6 +62,9 @@ export function createStripeClient(apiKey: string): Stripe {
  * Validates webhook authenticity using HMAC-SHA256 signature verification.
  * Prevents webhook spoofing and ensures events originate from Stripe.
  *
+ * NOTE: Uses async signature verification for Cloudflare Workers compatibility.
+ * In edge runtimes, SubtleCrypto requires async operations.
+ *
  * @param rawBody - Raw request body (must be exact bytes from Stripe)
  * @param signature - Stripe signature header (stripe-signature)
  * @param webhookSecret - Webhook signing secret (env.STRIPE_WEBHOOK_SECRET_*)
@@ -72,7 +75,7 @@ export function createStripeClient(apiKey: string): Stripe {
  * @example
  * ```typescript
  * const stripe = createStripeClient(env.STRIPE_SECRET_KEY);
- * const event = verifyWebhookSignature(
+ * const event = await verifyWebhookSignature(
  *   rawBody,
  *   req.header('stripe-signature'),
  *   env.STRIPE_WEBHOOK_SECRET_BOOKING,
@@ -85,12 +88,12 @@ export function createStripeClient(apiKey: string): Stripe {
  * - Timing-safe signature comparison
  * - Prevents replay attacks (signature includes timestamp)
  */
-export function verifyWebhookSignature(
+export async function verifyWebhookSignature(
   rawBody: string,
   signature: string,
   webhookSecret: string,
   stripeClient: Stripe
-): Stripe.Event {
+): Promise<Stripe.Event> {
   if (!signature) {
     throw new Error('Missing stripe-signature header');
   }
@@ -99,7 +102,7 @@ export function verifyWebhookSignature(
     throw new Error('Webhook secret not configured');
   }
 
-  return stripeClient.webhooks.constructEvent(
+  return await stripeClient.webhooks.constructEventAsync(
     rawBody,
     signature,
     webhookSecret
