@@ -24,6 +24,7 @@ import {
   type PurchaseWithContent,
 } from '@codex/purchase';
 import type {
+  Bindings,
   HonoEnv,
   PaginatedListResponse,
   SingleItemResponse,
@@ -31,6 +32,22 @@ import type {
 import { createIdParamsSchema, purchaseQuerySchema } from '@codex/validation';
 import { createAuthenticatedHandler, withPolicy } from '@codex/worker-utils';
 import { Hono } from 'hono';
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Get Stripe API key from environment with type safety.
+ * STRIPE_SECRET_KEY is validated at worker startup via createEnvValidationMiddleware.
+ * This helper provides type-safe access after validation.
+ */
+function getStripeKey(env: Bindings): string {
+  if (!env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY not configured');
+  }
+  return env.STRIPE_SECRET_KEY;
+}
 
 // ============================================================================
 // Routes
@@ -73,8 +90,7 @@ purchases.get(
       query: purchaseQuerySchema,
     },
     handler: async (_c, ctx) => {
-      // STRIPE_SECRET_KEY validated at worker startup via createEnvValidationMiddleware
-      const stripe = createStripeClient(ctx.env.STRIPE_SECRET_KEY!);
+      const stripe = createStripeClient(getStripeKey(ctx.env));
 
       const purchaseService = new PurchaseService(
         {
@@ -142,8 +158,7 @@ purchases.get(
       params: createIdParamsSchema(),
     },
     handler: async (_c, ctx) => {
-      // STRIPE_SECRET_KEY validated at worker startup via createEnvValidationMiddleware
-      const stripe = createStripeClient(ctx.env.STRIPE_SECRET_KEY!);
+      const stripe = createStripeClient(getStripeKey(ctx.env));
 
       const purchaseService = new PurchaseService(
         {

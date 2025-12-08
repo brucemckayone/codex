@@ -1,6 +1,6 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import type { Database, DatabaseWs } from '@codex/database';
+import type { DatabaseWs } from '@codex/database';
 import { createPerRequestDbClient } from '@codex/database';
 import {
   content,

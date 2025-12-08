@@ -51,7 +51,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
     },
     logger: {
       level: 'debug',
-      logger: (level: string, message: string, ...args: any[]) => {
+      logger: (level: string, message: string, ...args: unknown[]) => {
         console.log(`[${level.toUpperCase()}]`, message, ...args);
       },
       disabled: false,
@@ -67,7 +67,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
           url: string;
           token: string;
         },
-        request
+        _request
       ) => {
         console.log(
           `Sending verification email to ${user.email} with url: ${url} and token: ${token}`
@@ -89,24 +89,24 @@ export function createAuthInstance(options: AuthConfigOptions) {
             console.log(
               `[TEST] Stored verification token for ${user.email} in KV`
             );
-          } catch (error) {
+          } catch (_error) {
             console.error(
               '[TEST] Failed to store verification token in KV:',
-              error
+              _error
             );
           }
         }
       },
       autoSignInAfterVerification: true,
       sendOnSignUp: true,
-      async onEmailVerification(user, request) {
+      async onEmailVerification(user, _request) {
         console.log(`Email verified for user ${user.email}`);
       },
     },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
-      async sendResetPassword(data, request) {
+      async sendResetPassword(data, _request) {
         // TODO: Implement email sending via notification service
         console.log(`Sending reset password email to ${data.user.email}`);
       },

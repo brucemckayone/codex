@@ -12,6 +12,48 @@ import type { APIRequestContext, APIResponse } from '@playwright/test';
 import Stripe from 'stripe';
 
 /**
+ * Checkout session object as embedded in webhook events
+ */
+export interface StripeCheckoutSession {
+  id: string;
+  object: 'checkout.session';
+  payment_intent: string;
+  customer: string;
+  customer_email: string;
+  amount_total: number;
+  currency: string;
+  metadata: {
+    customerId: string;
+    contentId: string;
+    organizationId: string | null;
+  };
+  status: string;
+  client_reference_id: string;
+  payment_status: string;
+  mode: string;
+}
+
+/**
+ * Stripe webhook event structure for checkout.session.completed
+ */
+export interface StripeCheckoutWebhookEvent {
+  id: string;
+  object: 'event';
+  api_version: string;
+  created: number;
+  livemode: boolean;
+  type: 'checkout.session.completed';
+  data: {
+    object: StripeCheckoutSession;
+  };
+  pending_webhooks: number;
+  request: {
+    id: null;
+    idempotency_key: null;
+  };
+}
+
+/**
  * Generate valid Stripe webhook signature for testing
  *
  * Uses Stripe's official generateTestHeaderString() method to create a properly
@@ -90,7 +132,7 @@ export interface CheckoutCompletedEventParams {
  */
 export function createCheckoutCompletedEvent(
   params: CheckoutCompletedEventParams
-): any {
+): StripeCheckoutWebhookEvent {
   const timestamp = Math.floor(Date.now() / 1000);
 
   return {
@@ -159,7 +201,7 @@ export function createCheckoutCompletedEvent(
 export async function sendSignedWebhook(
   request: APIRequestContext,
   webhookUrl: string,
-  event: any,
+  event: StripeCheckoutWebhookEvent,
   webhookSecret: string
 ): Promise<APIResponse> {
   // Serialize event to exact JSON string (critical for signature verification)

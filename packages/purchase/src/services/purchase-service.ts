@@ -138,11 +138,14 @@ export class PurchaseService extends BaseService {
         });
       }
 
-      if (contentRecord.status !== 'published') {
+      if (contentRecord.organizationId == null) {
         throw new ContentNotPurchasableError(
           validated.contentId,
           'not_published',
-          { status: contentRecord.status }
+          {
+            reason:
+              'Content must belong to an organization to be purchasable (Phase 1)',
+          }
         );
       }
 
@@ -202,7 +205,7 @@ export class PurchaseService extends BaseService {
         metadata: {
           contentId: validated.contentId,
           customerId,
-          organizationId: contentRecord.organizationId!, // Must exist (validated above)
+          organizationId: contentRecord.organizationId, // Must exist (validated above)
           creatorId: contentRecord.creatorId,
         },
         client_reference_id: customerId,

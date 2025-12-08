@@ -358,7 +358,7 @@ export function withPolicy(
           const sessionToken = fullToken.split('.')[0] || fullToken;
           console.log(
             '[withPolicy] Decoded token:',
-            sessionToken.substring(0, 20) + '...'
+            `${sessionToken.substring(0, 20)}...`
           );
 
           try {

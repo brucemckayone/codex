@@ -12,13 +12,11 @@
 
 import { expect, test } from '@playwright/test';
 import { authFixture } from '../fixtures';
-import {
-  expectErrorResponse,
-  expectSuccessResponse,
-} from '../helpers/assertions';
+import { expectSuccessResponse } from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 // Helper to unwrap API responses (handles double-wrapping: { data: { data: {...} } })
+// biome-ignore lint/suspicious/noExplicitAny: we need to support any response shape
 function unwrap(response: any): any {
   return response.data?.data || response.data || response;
 }
@@ -31,13 +29,12 @@ test.describe('Free Content Access Flow', () => {
     const testEmail = `creator-free-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const testPassword = 'SecurePassword123!';
 
-    const { user: creator, cookie: creatorCookie } =
-      await authFixture.registerUser(request, {
-        email: testEmail,
-        password: testPassword,
-        name: 'Free Content Creator',
-        role: 'creator',
-      });
+    const { cookie: creatorCookie } = await authFixture.registerUser(request, {
+      email: testEmail,
+      password: testPassword,
+      name: 'Free Content Creator',
+      role: 'creator',
+    });
 
     // Create media item (using test files uploaded to R2 in global setup)
     // R2 structure: {creatorId}/originals/{mediaId}/original.mp4
@@ -129,13 +126,12 @@ test.describe('Free Content Access Flow', () => {
     const viewerEmail = `viewer-free-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const viewerPassword = 'SecurePassword123!';
 
-    const { user: viewer, cookie: viewerCookie } =
-      await authFixture.registerUser(request, {
-        email: viewerEmail,
-        password: viewerPassword,
-        name: 'Free Content Viewer',
-        role: 'user',
-      });
+    const { cookie: viewerCookie } = await authFixture.registerUser(request, {
+      email: viewerEmail,
+      password: viewerPassword,
+      name: 'Free Content Viewer',
+      role: 'user',
+    });
 
     // Step 3: Viewer can access free content without purchase
     const accessResponse = await request.get(
@@ -205,13 +201,12 @@ test.describe('Free Content Access Flow', () => {
     const creatorEmail = `creator-draft-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const creatorPassword = 'SecurePassword123!';
 
-    const { user: creator, cookie: creatorCookie } =
-      await authFixture.registerUser(request, {
-        email: creatorEmail,
-        password: creatorPassword,
-        name: 'Draft Creator',
-        role: 'creator',
-      });
+    const { cookie: creatorCookie } = await authFixture.registerUser(request, {
+      email: creatorEmail,
+      password: creatorPassword,
+      name: 'Draft Creator',
+      role: 'creator',
+    });
 
     // Create draft content (not published)
     const contentResponse = await request.post(
@@ -240,13 +235,12 @@ test.describe('Free Content Access Flow', () => {
     const viewerEmail = `viewer-draft-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const viewerPassword = 'SecurePassword123!';
 
-    const { user: viewer, cookie: viewerCookie } =
-      await authFixture.registerUser(request, {
-        email: viewerEmail,
-        password: viewerPassword,
-        name: 'Viewer',
-        role: 'user',
-      });
+    const { cookie: viewerCookie } = await authFixture.registerUser(request, {
+      email: viewerEmail,
+      password: viewerPassword,
+      name: 'Viewer',
+      role: 'user',
+    });
 
     // Attempt to access draft content - should fail
     const accessResponse = await request.get(
@@ -272,13 +266,12 @@ test.describe('Free Content Access Flow', () => {
     const creatorEmail = `creator-popular-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const creatorPassword = 'SecurePassword123!';
 
-    const { user: creator, cookie: creatorCookie } =
-      await authFixture.registerUser(request, {
-        email: creatorEmail,
-        password: creatorPassword,
-        name: 'Popular Creator',
-        role: 'creator',
-      });
+    const { cookie: creatorCookie } = await authFixture.registerUser(request, {
+      email: creatorEmail,
+      password: creatorPassword,
+      name: 'Popular Creator',
+      role: 'creator',
+    });
 
     // Create media item (using test files uploaded to R2 in global setup)
     const testCreatorId = 'e2e-test-creator';

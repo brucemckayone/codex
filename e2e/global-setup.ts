@@ -1,7 +1,7 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { FullConfig } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
 import { setupTestMediaFiles } from './helpers/r2-test-setup.js';
 import { startAllWorkers } from './helpers/worker-manager.js';
 
@@ -15,7 +15,7 @@ const __dirname = dirname(__filename);
  * 2. Uploads test media files to R2
  * 3. Starts all 4 workers with .env.test environment variables
  */
-async function globalSetup(config: FullConfig) {
+async function globalSetup(_config: FullConfig) {
   console.log('\n🚀 Starting E2E test setup...\n');
 
   // Load environment variables from .env.test

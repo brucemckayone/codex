@@ -5,21 +5,28 @@
  * Fails fast if critical vars are missing to prevent runtime errors.
  */
 
-import type { Bindings, HonoEnv } from '@codex/shared-types';
 import type { Context } from 'hono';
+import type { AuthBindings, AuthEnv } from '../types';
+
+/**
+ * Extended bindings type for local proxy support
+ */
+type ExtendedAuthBindings = AuthBindings & {
+  DATABASE_URL_LOCAL_PROXY?: string;
+};
 
 /**
  * Validates required environment variables
  * @throws {Error} If any required variables are missing
  */
-export function validateEnvironment(env: Bindings): void {
+export function validateEnvironment(env: ExtendedAuthBindings): void {
   // Determine which database URL is required based on DB_METHOD
   const dbMethod = env.DB_METHOD || 'PRODUCTION';
   const missing: string[] = [];
 
   // Check database URL based on method
   if (dbMethod === 'LOCAL_PROXY') {
-    if (!(env as any).DATABASE_URL_LOCAL_PROXY) {
+    if (!env.DATABASE_URL_LOCAL_PROXY) {
       missing.push('DATABASE_URL_LOCAL_PROXY');
     }
   } else {
@@ -63,7 +70,7 @@ export function validateEnvironment(env: Bindings): void {
   }
 
   // Optional variables - warn if missing but don't fail
-  const optional: Array<keyof Bindings> = [
+  const optional: Array<keyof AuthBindings> = [
     'ENVIRONMENT',
     'WEB_APP_URL',
     'API_URL',
@@ -85,7 +92,7 @@ export function validateEnvironment(env: Bindings): void {
 export function createEnvValidationMiddleware() {
   let validated = false;
 
-  return async (c: Context<HonoEnv>, next: () => Promise<void>) => {
+  return async (c: Context<AuthEnv>, next: () => Promise<void>) => {
     if (!validated) {
       try {
         validateEnvironment(c.env);

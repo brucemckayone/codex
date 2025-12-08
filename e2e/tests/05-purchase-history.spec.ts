@@ -26,7 +26,8 @@ import {
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 // Helper to unwrap API responses (handles double-wrapping: { data: { data: {...} } })
-function unwrap(response: any): any {
+// biome-ignore lint/suspicious/noExplicitAny: E2E test helper for dynamic API responses
+function unwrap(response: Record<string, any>): Record<string, any> {
   return response.data?.data || response.data || response;
 }
 

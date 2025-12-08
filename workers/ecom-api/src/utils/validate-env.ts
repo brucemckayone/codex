@@ -10,17 +10,24 @@ import type { Context } from 'hono';
 import type { StripeWebhookEnv } from '../types';
 
 /**
+ * Extended bindings type for local proxy support
+ */
+type ExtendedBindings = Bindings & {
+  DATABASE_URL_LOCAL_PROXY?: string;
+};
+
+/**
  * Validates required environment variables
  * @throws {Error} If any required variables are missing
  */
-export function validateEnvironment(env: Bindings): void {
+export function validateEnvironment(env: ExtendedBindings): void {
   // Determine which database URL is required based on DB_METHOD
   const dbMethod = env.DB_METHOD || 'PRODUCTION';
   const missing: string[] = [];
 
   // Check database URL based on method
   if (dbMethod === 'LOCAL_PROXY') {
-    if (!(env as any).DATABASE_URL_LOCAL_PROXY) {
+    if (!env.DATABASE_URL_LOCAL_PROXY) {
       missing.push('DATABASE_URL_LOCAL_PROXY');
     }
   } else {

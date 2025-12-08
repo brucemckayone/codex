@@ -103,13 +103,13 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
 
     runningProcesses.push(proc);
 
-    let startupOutput = '';
+    let _startupOutput = '';
     let hasStarted = false;
 
     // Listen to stdout for "Ready on" message
     proc.stdout?.on('data', (data) => {
       const output = data.toString();
-      startupOutput += output;
+      _startupOutput += output;
 
       // Wrangler logs "Ready on http://..." when server starts
       if (
@@ -163,7 +163,7 @@ async function waitForHealth(
         console.log(`✅ ${worker.name} health check passed`);
         return;
       }
-    } catch (error) {
+    } catch (_error) {
       // Connection refused is expected while starting up
     }
 

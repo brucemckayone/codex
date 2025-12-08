@@ -19,7 +19,7 @@ export function validateEnvironment(env: Bindings): void {
 
   // Check database URL based on method
   if (dbMethod === 'LOCAL_PROXY') {
-    if (!(env as any).DATABASE_URL_LOCAL_PROXY) {
+    if (!(env as Record<string, unknown>).DATABASE_URL_LOCAL_PROXY) {
       missing.push('DATABASE_URL_LOCAL_PROXY');
     }
   } else {
