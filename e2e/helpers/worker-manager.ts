@@ -52,18 +52,31 @@ let nextInspectorPort = 9230;
 const runningProcesses: ChildProcess[] = [];
 
 /**
- * Load .env.test variables into process.env
+ * Load test environment variables into process.env
+ * - In CI: Variables are already set by GitHub Actions (via `test` environment)
+ * - Locally: Load from .env.test file
  * Note: Wrangler will load .dev.vars.test automatically when using --env test
  */
 export function loadTestEnvironment(): void {
+  const isCI = process.env.CI === 'true';
+
+  if (isCI) {
+    console.log(' CI mode: Environment variables from GitHub Actions');
+    return; // Variables already in process.env from GitHub Actions
+  }
+
+  // Local development: load from .env.test file
   const envTestPath = resolve(__dirname, '../../.env.test');
 
   if (!existsSync(envTestPath)) {
-    throw new Error(`.env.test not found at ${envTestPath}`);
+    throw new Error(
+      `.env.test not found at ${envTestPath}\n` +
+        'For local development, create .env.test with required variables.'
+    );
   }
 
   dotenvConfig({ path: envTestPath, override: true });
-  console.log(`📁 Loaded test environment from ${envTestPath}`);
+  console.log(` Loaded test environment from ${envTestPath}`);
 }
 
 /**

@@ -10,6 +10,9 @@
 env.dev
 env.prod
 
+# GitHub environment config files (contain secrets!)
+.github/env/.env.github.*
+
 # Dependencies
 node_modules
 
@@ -49,3 +52,5 @@ packages/**/*.js.map
 # OS-specific
 .DS_Store
 
+# Log files
+*.log

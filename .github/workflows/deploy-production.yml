@@ -2,7 +2,7 @@ name: Production Deployment
 
 on:
   workflow_run:
-    workflows: ['PR and Push CI (Neon ephemeral DB)']
+    workflows: ["PR and Push CI (Neon ephemeral DB)"]
     types:
       - completed
     branches:
@@ -37,7 +37,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - uses: pnpm/action-setup@v4
 
@@ -106,12 +106,13 @@ jobs:
           echo "✅ Proceeding with migration (validated in test workflow)"
 
       # Apply migrations to production database
+      # Uses DATABASE_URL from production environment secrets
       - name: Run production migrations
         id: run-migrations
         run: pnpm --filter @codex/database db:migrate
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
-          DB_METHOD: PRODUCTION
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_METHOD: ${{ vars.DB_METHOD }}
 
       # Verify migration success
       - name: Verify migrations applied successfully
@@ -121,6 +122,7 @@ jobs:
           echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
       # Deploy ecom-api to production
+      # Uses environment-specific secrets from production environment
       - name: Deploy ecom-api
         id: deploy-ecom
         uses: cloudflare/wrangler-action@v3
@@ -139,14 +141,14 @@ jobs:
             STRIPE_WEBHOOK_SECRET_BOOKING
             STRIPE_WEBHOOK_SECRET_DISPUTE
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_PRODUCTION_KEY }}
-          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_PRODUCTION_PAYMENT_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_PRODUCTION_SUBSCRIPTION_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_PRODUCTION_CONNECT_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_PRODUCTION_CUSTOMER_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_PRODUCTION_BOOKING_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_PRODUCTION_DISPUTE_WEBHOOK_SECRET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
 
       # Verify API worker is healthy after deployment
       - name: Health check - API worker
@@ -185,6 +187,7 @@ jobs:
           exit 1
 
       # Deploy content-api to production
+      # Uses environment-specific R2_BUCKET_MEDIA from production environment variables
       - name: Deploy content-api
         id: deploy-content-api
         uses: cloudflare/wrangler-action@v3
@@ -200,11 +203,11 @@ jobs:
             R2_SECRET_ACCESS_KEY
             R2_BUCKET_MEDIA
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_MEDIA: codex-media-production
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
 
       # Verify content-api worker is healthy after deployment
       - name: Health check - Content API worker
@@ -253,7 +256,7 @@ jobs:
           secrets: |
             DATABASE_URL
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       # Verify identity-api worker is healthy after deployment
       - name: Health check - Identity API worker
@@ -291,6 +294,7 @@ jobs:
           exit 1
 
       # Deploy auth-worker to production
+      # Uses environment-specific secrets from production environment
       - name: Deploy auth-worker
         id: deploy-auth
         uses: cloudflare/wrangler-action@v3
@@ -302,13 +306,11 @@ jobs:
           secrets: |
             DATABASE_URL
             SESSION_SECRET
-            SESSION_SECRET_PRODUCTION
             BETTER_AUTH_SECRET
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET_PRODUCTION }}
-          SESSION_SECRET_PRODUCTION: ${{ secrets.SESSION_SECRET_PRODUCTION }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET_PRODUCTION }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
 
       # Verify auth worker is healthy after deployment
       - name: Health check - Auth worker
@@ -350,7 +352,7 @@ jobs:
       - name: Build SvelteKit app for production with Turborepo
         run: pnpm build:web
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PUBLIC_APP_URL: https://codex.revelations.studio
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
@@ -368,7 +370,7 @@ jobs:
           secrets: |
             DATABASE_URL
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       # Verify web app is healthy after deployment
       - name: Health check - Web app
