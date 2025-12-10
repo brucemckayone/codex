@@ -19,13 +19,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Clean up ALL non-production Neon branches before creating new ones
+  # This prevents hitting the 9-branch limit on Neon free tier
+  cleanup-stale-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install neonctl
+        run: npm i -g neonctl@2
+
+      - name: Delete all CI branches (keep only production)
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          echo "::add-mask::$NEON_API_KEY"
+          echo "Listing all branches..."
+          BRANCHES=$(neonctl branches list --project-id ${{ vars.NEON_PROJECT_ID }} --output json 2>/dev/null || echo "[]")
+
+          # Count branches before cleanup
+          BRANCH_COUNT=$(echo "$BRANCHES" | jq 'length')
+          echo "Found $BRANCH_COUNT branches total"
+
+          # Get the default/main branch name to protect it
+          DEFAULT_BRANCH=$(echo "$BRANCHES" | jq -r '.[] | select(.default == true) | .name' | head -1)
+          echo "Default branch: $DEFAULT_BRANCH"
+
+          # Delete ALL branches except the default production branch
+          # This includes: ci-test-branch, ci-e2e-branch, pr-*, push-*, and neon-testing ephemeral branches
+          echo "$BRANCHES" | jq -r ".[] | select(.default != true) | .id" | while read branch_id; do
+            if [ -n "$branch_id" ] && [ "$branch_id" != "null" ]; then
+              BRANCH_NAME=$(echo "$BRANCHES" | jq -r ".[] | select(.id == \"$branch_id\") | .name")
+              echo "Deleting branch: $BRANCH_NAME ($branch_id)"
+              neonctl branches delete "$branch_id" --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+            fi
+          done
+
+          echo "Cleanup complete"
+
   # Wait for static analysis to pass before running expensive tests
   static-analysis:
+    needs: [cleanup-stale-branches]
     uses: ./.github/workflows/static_analysis.yml
 
   changes:
     runs-on: ubuntu-latest
-    needs: [static-analysis]
+    needs: [static-analysis, cleanup-stale-branches]
     outputs:
       database: ${{ steps.filter.outputs.database }}
       validation: ${{ steps.filter.outputs.validation }}
@@ -101,31 +138,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Generate Neon branch name
+      # Use a single reusable branch name for CI tests
+      # The cleanup job deletes this at the start of each run
       - name: Generate Neon Branch Name
         id: branch-name
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Include run_id for uniqueness across retries and re-runs
-            PR_NUM=${{ github.event.number }}
-            RUN_ID=${{ github.run_id }}
-            # Truncate to fit Neon's 63 char limit
-            BRANCH_NAME="pr-${PR_NUM}-${RUN_ID}"
-            echo "name=${BRANCH_NAME:0:63}" >> $GITHUB_OUTPUT
-          else
-            SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-            RUN_ID=${{ github.run_id }}
-            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-${RUN_ID}"
-            # truncate to 63 chars (Neon limit)
-            BRANCH_NAME_TRUNC=${BRANCH_NAME:0:63}
-            echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
-          fi
+          # Single reusable branch name - cleanup job removes it before each run
+          echo "name=ci-test-branch" >> $GITHUB_OUTPUT
 
-      # Create Neon branch for preview deployments
-      # NOTE: Tests use neon-testing which creates ephemeral branches automatically
-      # This branch is for storing deployment connection details, not for running tests
-      - name: Create Neon branch for preview deployment
+      # Create Neon branch for tests
+      # NOTE: neon-testing creates additional ephemeral branches per test file
+      # This parent branch provides the migrated schema for those ephemeral branches
+      - name: Create Neon branch for tests
         id: create-branch
         uses: neondatabase/create-branch-action@v5
         with:
@@ -274,27 +298,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Generate Neon branch name
+      # Use a single reusable branch name for E2E tests
+      # The cleanup job deletes this at the start of each run
       - name: Generate Neon Branch Name
         id: branch-name
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Include run_id for uniqueness across retries and re-runs
-            PR_NUM=${{ github.event.number }}
-            RUN_ID=${{ github.run_id }}
-            BRANCH_NAME="pr-${PR_NUM}-${RUN_ID}-e2e"
-            echo "name=${BRANCH_NAME:0:63}" >> $GITHUB_OUTPUT
-          else
-            SANITIZED_REF_NAME=$(echo "${{ github.ref_name }}" | tr / -)
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-            RUN_ID=${{ github.run_id }}
-            BRANCH_NAME="push-${SANITIZED_REF_NAME}-${SHORT_SHA}-${RUN_ID}-e2e"
-            # truncate to 63 chars (Neon limit)
-            BRANCH_NAME_TRUNC=${BRANCH_NAME:0:63}
-            echo "name=${BRANCH_NAME_TRUNC}" >> $GITHUB_OUTPUT
-          fi
+          # Single reusable branch name for E2E - cleanup job removes it before each run
+          echo "name=ci-e2e-branch" >> $GITHUB_OUTPUT
 
-      # Create separate Neon branch for E2E tests
+      # Create Neon branch for E2E tests
       - name: Create Neon branch for E2E
         id: create-branch
         uses: neondatabase/create-branch-action@v5
