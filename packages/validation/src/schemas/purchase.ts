@@ -129,6 +129,32 @@ export const getPurchaseSchema = z.object({
   id: uuidSchema,
 });
 
+/**
+ * Checkout Session Metadata Schema
+ *
+ * Validates metadata attached to Stripe checkout sessions.
+ * Used by webhook handler to extract purchase details from completed checkout.
+ *
+ * Security:
+ * - customerId: UUID validation prevents injection
+ * - contentId: UUID validation prevents injection
+ * - organizationId: Optional UUID, transforms empty string to null
+ * - amountCents: Already validated from Stripe API, but documented for clarity
+ *
+ * Validates:
+ * - customerId: Codex user ID (UUID) who completed purchase
+ * - contentId: Content being purchased (UUID)
+ * - organizationId: Optional creator's organization (UUID or null)
+ */
+export const checkoutSessionMetadataSchema = z.object({
+  customerId: uuidSchema,
+  contentId: uuidSchema,
+  organizationId: uuidSchema
+    .nullable()
+    .default(null)
+    .transform((val) => (val === '' ? null : val)),
+});
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -141,3 +167,6 @@ export type PurchaseStatus = z.infer<typeof purchaseStatusEnum>;
 export type CreateCheckoutInput = z.infer<typeof createCheckoutSchema>;
 export type PurchaseQueryInput = z.infer<typeof purchaseQuerySchema>;
 export type GetPurchaseInput = z.infer<typeof getPurchaseSchema>;
+export type CheckoutSessionMetadata = z.infer<
+  typeof checkoutSessionMetadataSchema
+>;

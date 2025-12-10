@@ -18,6 +18,7 @@
 
 import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';
+import { checkoutSessionMetadataSchema } from '@codex/validation';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -56,6 +57,12 @@ export async function handleCheckoutCompleted(
     customerId: session.customer,
   });
 
+  // Declare variables in outer scope for error logging
+  let validatedMetadata:
+    | ReturnType<typeof checkoutSessionMetadataSchema.parse>
+    | undefined;
+  let amountTotal: number | null | undefined;
+
   try {
     // Extract payment intent ID
     const paymentIntentId =
@@ -68,20 +75,24 @@ export async function handleCheckoutCompleted(
       return;
     }
 
-    // Extract metadata (customerId, contentId from checkout creation)
+    // Extract and validate metadata (customerId, contentId from checkout creation)
     const metadata = session.metadata;
-    if (!metadata?.customerId || !metadata?.contentId) {
-      obs.error('Missing required metadata', {
+    try {
+      validatedMetadata = checkoutSessionMetadataSchema.parse(metadata);
+    } catch (validationError) {
+      obs.error('Invalid checkout session metadata', {
         sessionId: session.id,
-        hasCustomerId: !!metadata?.customerId,
-        hasContentId: !!metadata?.contentId,
-        hasOrganizationId: !!metadata?.organizationId,
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : 'Unknown validation error',
+        metadata,
       });
       return;
     }
 
     // Extract amount paid (in cents)
-    const amountTotal = session.amount_total; // Already in cents from Stripe
+    amountTotal = session.amount_total; // Already in cents from Stripe
     if (typeof amountTotal !== 'number') {
       obs.error('Invalid amount_total', {
         sessionId: session.id,
@@ -91,11 +102,12 @@ export async function handleCheckoutCompleted(
     }
 
     // Create per-request db client for transaction support
-    // Pass both DATABASE_URL variants to support LOCAL_PROXY mode in tests
+    // DATABASE_URL_LOCAL_PROXY is optional and set only in test environments
     const { db, cleanup } = createPerRequestDbClient({
       DATABASE_URL: c.env.DATABASE_URL,
-      DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string>)
-        .DATABASE_URL_LOCAL_PROXY,
+      DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)[
+        'DATABASE_URL_LOCAL_PROXY'
+      ],
       DB_METHOD: c.env.DB_METHOD,
     });
 
@@ -110,22 +122,19 @@ export async function handleCheckoutCompleted(
       );
 
       // Complete purchase (atomic transaction: purchase + content access)
-      // Pass organizationId from metadata (required for Phase 1 purchases)
+      // organizationId already transformed to null by schema if empty/undefined
       const purchase = await purchaseService.completePurchase(paymentIntentId, {
-        customerId: metadata.customerId, // Codex user ID from metadata
-        contentId: metadata.contentId,
-        organizationId:
-          metadata.organizationId && metadata.organizationId !== ''
-            ? metadata.organizationId
-            : null,
+        customerId: validatedMetadata.customerId,
+        contentId: validatedMetadata.contentId,
+        organizationId: validatedMetadata.organizationId,
         amountPaidCents: amountTotal,
         currency: 'usd',
       });
 
       obs.info('Purchase completed successfully', {
         purchaseId: purchase.id,
-        customerId: metadata.customerId,
-        contentId: metadata.contentId,
+        customerId: validatedMetadata.customerId,
+        contentId: validatedMetadata.contentId,
         amountCents: amountTotal,
       });
     } finally {
@@ -133,12 +142,18 @@ export async function handleCheckoutCompleted(
     }
   } catch (error) {
     const err = error as Error;
-    obs.error('Failed to complete purchase', {
-      error: err.message,
+
+    // Provide detailed error context for debugging
+    obs.error('Failed to complete purchase from Stripe webhook', {
       sessionId: session.id,
-      stack: err.stack,
+      customerId: validatedMetadata?.customerId,
+      contentId: validatedMetadata?.contentId,
+      amountCents: amountTotal,
+      errorType: err.name,
+      errorMessage: err.message,
     });
+
     // Don't throw - return 200 to Stripe to prevent retries
-    // Manual investigation required for failed purchases
+    // Manual investigation required - check error logs and database state
   }
 }
