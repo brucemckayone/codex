@@ -14,8 +14,18 @@ import { z } from 'zod';
  * ```
  */
 export const paginationSchema = z.object({
-  page: z.coerce.number().int().positive().max(1000).default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  page: z.coerce
+    .number()
+    .int({ message: 'Must be a whole number' })
+    .positive({ message: 'Must be greater than 0' })
+    .max(1000, { message: 'Must be 1000 or less' })
+    .default(1),
+  limit: z.coerce
+    .number()
+    .int({ message: 'Must be a whole number' })
+    .positive({ message: 'Must be greater than 0' })
+    .max(100, { message: 'Must be 100 or less' })
+    .default(20),
 });
 
 export type PaginationInput = z.infer<typeof paginationSchema>;

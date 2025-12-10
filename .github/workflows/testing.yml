@@ -130,6 +130,8 @@ jobs:
   test:
     needs: [changes]
     runs-on: ubuntu-latest
+    # Use test environment for environment-specific secrets and variables
+    environment: test
     strategy:
       matrix:
         node: [20]
@@ -231,11 +233,11 @@ jobs:
       - name: Generate worker dev vars for unit tests
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
+          DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_MEDIA: codex-media-test
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
@@ -260,15 +262,15 @@ jobs:
           # CRITICAL: Parent branch ID for neon-testing to clone from (has migrations applied)
           NEON_PARENT_BRANCH_ID: ${{ steps.create-branch.outputs.branch_id }}
           # Database method for test environment
-          DB_METHOD: NEON_BRANCH
-          # R2 credentials for tests (using test buckets)
+          DB_METHOD: ${{ vars.DB_METHOD }}
+          # R2 credentials for tests (using test buckets from environment)
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_MEDIA: codex-media-test
-          R2_BUCKET_ASSETS: codex-assets-test
-          R2_BUCKET_RESOURCES: codex-resources-test
-          R2_BUCKET_PLATFORM: codex-platform-test
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           # Turborepo configuration
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}

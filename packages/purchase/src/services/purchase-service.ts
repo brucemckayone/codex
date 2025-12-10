@@ -149,6 +149,18 @@ export class PurchaseService extends BaseService {
         );
       }
 
+      // Check content is published
+      if (contentRecord.status !== 'published') {
+        throw new ContentNotPurchasableError(
+          validated.contentId,
+          'not_published',
+          {
+            reason: 'Content must be published to be purchasable',
+            status: contentRecord.status,
+          }
+        );
+      }
+
       if (contentRecord.priceCents === null || contentRecord.priceCents <= 0) {
         throw new ContentNotPurchasableError(validated.contentId, 'free', {
           priceCents: contentRecord.priceCents,
