@@ -20,18 +20,15 @@ import { dbHttp, schema } from '@codex/database';
 import { expect, test } from '@playwright/test';
 import { and, eq } from 'drizzle-orm';
 import { authFixture } from '../fixtures';
-import { expectSuccessResponse } from '../helpers/assertions';
+import {
+  expectSuccessResponse,
+  unwrapApiResponse,
+} from '../helpers/assertions';
 import {
   createCheckoutCompletedEvent,
   sendSignedWebhook,
 } from '../helpers/stripe-webhook';
 import { WORKER_URLS } from '../helpers/worker-urls';
-
-// Helper to unwrap API responses (handles double-wrapping: { data: { data: {...} } })
-// biome-ignore lint/suspicious/noExplicitAny: E2E test helper for dynamic API responses
-function unwrap(response: Record<string, any>): Record<string, any> {
-  return response.data?.data || response.data || response;
-}
 
 test.describe('Paid Content Purchase Flow', () => {
   test('should complete full paid content purchase flow', async ({
@@ -67,7 +64,7 @@ test.describe('Paid Content Purchase Flow', () => {
       }
     );
     await expectSuccessResponse(orgResponse, 201);
-    const organization = unwrap(await orgResponse.json());
+    const organization = unwrapApiResponse(await orgResponse.json());
 
     // Create media item
     const testCreatorId = 'e2e-test-creator';
@@ -91,7 +88,7 @@ test.describe('Paid Content Purchase Flow', () => {
       }
     );
     await expectSuccessResponse(mediaResponse, 201);
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
 
     // Mark media as ready
     const readyMediaResponse = await request.patch(
@@ -138,7 +135,7 @@ test.describe('Paid Content Purchase Flow', () => {
       }
     );
     await expectSuccessResponse(contentResponse, 201);
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
 
     // Publish the content
     const publishResponse = await request.post(
@@ -152,7 +149,7 @@ test.describe('Paid Content Purchase Flow', () => {
       }
     );
     await expectSuccessResponse(publishResponse);
-    const publishedContent = unwrap(await publishResponse.json());
+    const publishedContent = unwrapApiResponse(await publishResponse.json());
     expect(publishedContent.status).toBe('published');
     expect(publishedContent.priceCents).toBe(2999);
 
@@ -210,7 +207,7 @@ test.describe('Paid Content Purchase Flow', () => {
 
     await expectSuccessResponse(checkoutResponse);
     const checkoutData = await checkoutResponse.json();
-    const checkout = unwrap(checkoutData);
+    const checkout = unwrapApiResponse(checkoutData);
 
     expect(checkout.sessionUrl).toBeDefined();
     expect(checkout.sessionUrl).toContain('checkout.stripe.com');
@@ -312,7 +309,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const organization = unwrap(await orgResponse.json());
+    const organization = unwrapApiResponse(await orgResponse.json());
 
     // Create and publish paid content (abbreviated)
     const testMediaId = `e2e-idem-${Date.now()}`;
@@ -333,7 +330,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
 
     await request.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
       headers: {
@@ -368,7 +365,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
 
     await request.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,
@@ -407,7 +404,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const checkout = unwrap(await checkoutResponse.json());
+    const checkout = unwrapApiResponse(await checkoutResponse.json());
 
     // Create webhook event with SAME payment intent ID
     const paymentIntentId = `pi_test_idempotency_${Date.now()}`;
@@ -506,7 +503,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const organization = unwrap(await orgResponse.json());
+    const organization = unwrapApiResponse(await orgResponse.json());
 
     const testMediaId = `e2e-409-${Date.now()}`;
     const mediaResponse = await request.post(
@@ -526,7 +523,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
 
     await request.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
       headers: {
@@ -561,7 +558,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
 
     await request.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,
@@ -597,7 +594,7 @@ test.describe('Paid Content Purchase Flow', () => {
       }
     );
     await expectSuccessResponse(firstCheckout);
-    const checkout = unwrap(await firstCheckout.json());
+    const checkout = unwrapApiResponse(await firstCheckout.json());
 
     // Complete purchase via webhook
     const webhookEvent = createCheckoutCompletedEvent({
@@ -662,7 +659,7 @@ test.describe('Paid Content Purchase Flow', () => {
         },
       }
     );
-    const freeContent = unwrap(await contentResponse.json());
+    const freeContent = unwrapApiResponse(await contentResponse.json());
 
     await request.post(
       `${WORKER_URLS.content}/api/content/${freeContent.id}/publish`,

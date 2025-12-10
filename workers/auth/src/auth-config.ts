@@ -11,7 +11,7 @@ import { betterAuth, type User } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { AuthBindings } from './types';
 
-export interface AuthConfigOptions {
+interface AuthConfigOptions {
   env: AuthBindings;
 }
 

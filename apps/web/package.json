@@ -19,22 +19,15 @@
     "typecheck": "svelte-kit sync && tsc --noEmit"
   },
   "dependencies": {
-    "@codex/cloudflare-clients": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/test-utils": "workspace:*",
-    "@codex/validation": "workspace:*",
     "happy-dom": "^20.0.8"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251014.0",
     "@playwright/test": "^1.56.1",
-    "@sveltejs/adapter-auto": "^3.0.0",
     "@sveltejs/adapter-cloudflare": "^7.2.4",
     "@sveltejs/kit": "^2.0.0",
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/svelte": "^5.2.8",
-    "neon-testing": "^2.2.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.6.3",

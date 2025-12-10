@@ -20,7 +20,7 @@ type ExtendedBindings = Bindings & {
  * Validates required environment variables
  * @throws {Error} If any required variables are missing
  */
-export function validateEnvironment(env: ExtendedBindings): void {
+function validateEnvironment(env: ExtendedBindings): void {
   // Determine which database URL is required based on DB_METHOD
   const dbMethod = env.DB_METHOD || 'PRODUCTION';
   const missing: string[] = [];

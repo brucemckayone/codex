@@ -23,14 +23,51 @@ import {
   ContentNotFoundError,
   R2SigningError,
 } from '../errors';
-import type { UserLibraryResponse } from '../types';
 
 /**
  * Interface for R2 signing functionality.
  * Can be implemented by R2Service (workers) or R2SigningClient (tests/scripts).
  */
-export interface R2Signer {
+interface R2Signer {
   generateSignedUrl(r2Key: string, expirySeconds: number): Promise<string>;
+}
+
+/**
+ * User library item with content, purchase, and progress information
+ */
+interface UserLibraryItem {
+  content: {
+    id: string;
+    title: string;
+    description: string;
+    thumbnailUrl: string | null;
+    contentType: string;
+    durationSeconds: number;
+  };
+  purchase: {
+    purchasedAt: string;
+    priceCents: number;
+  };
+  progress: {
+    positionSeconds: number;
+    durationSeconds: number;
+    completed: boolean;
+    percentComplete: number;
+    updatedAt: string;
+  } | null;
+}
+
+/**
+ * User library response with pagination
+ */
+interface UserLibraryResponse {
+  items: UserLibraryItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export interface ContentAccessServiceConfig {

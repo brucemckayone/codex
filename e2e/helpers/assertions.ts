@@ -55,3 +55,12 @@ export async function expectForbidden(response: APIResponse): Promise<void> {
 export async function expectNotFound(response: APIResponse): Promise<void> {
   await expectErrorResponse(response, 'NOT_FOUND', 404);
 }
+
+/**
+ * Unwrap double-wrapped API responses
+ * Handles: { data: { data: {...} } } OR { data: {...} } OR {...}
+ * biome-ignore lint/suspicious/noExplicitAny: E2E test helper for dynamic API responses
+ */
+export function unwrapApiResponse<T = any>(response: Record<string, any>): T {
+  return response.data?.data || response.data || response;
+}

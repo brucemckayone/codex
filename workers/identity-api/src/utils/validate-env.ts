@@ -12,7 +12,7 @@ import type { Context } from 'hono';
  * Validates required environment variables
  * @throws {Error} If any required variables are missing
  */
-export function validateEnvironment(env: Bindings): void {
+function validateEnvironment(env: Bindings): void {
   // Required environment variables - worker fails without these
   const required = ['DATABASE_URL', 'RATE_LIMIT_KV'] as const;
 

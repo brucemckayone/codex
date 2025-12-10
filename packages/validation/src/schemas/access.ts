@@ -4,6 +4,7 @@ import {
   positiveIntSchema,
   uuidSchema,
 } from '../primitives';
+import { paginationSchema } from '../shared/pagination-schema';
 
 /**
  * Validation schemas for content access endpoints
@@ -38,15 +39,7 @@ export const getPlaybackProgressSchema = z.object({
   contentId: uuidSchema,
 });
 
-export const listUserLibrarySchema = z.object({
-  page: positiveIntSchema
-    .max(1000, 'Must be 1000 or less')
-    .optional()
-    .default(1),
-  limit: positiveIntSchema
-    .max(100, 'Must be 100 or less')
-    .optional()
-    .default(20),
+export const listUserLibrarySchema = paginationSchema.extend({
   filter: z.enum(['all', 'in-progress', 'completed']).optional().default('all'),
   sortBy: z.enum(['recent', 'title', 'duration']).optional().default('recent'),
 });

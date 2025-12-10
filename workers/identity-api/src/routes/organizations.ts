@@ -24,6 +24,7 @@ import type {
   CheckSlugResponse,
   CreateOrganizationResponse,
   DeleteOrganizationResponse,
+  HonoEnv,
   OrganizationBySlugResponse,
   OrganizationListResponse,
   OrganizationResponse,
@@ -41,7 +42,6 @@ import {
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { HonoEnv } from '../types';
 
 const app = new Hono<HonoEnv>();
 

@@ -16,7 +16,7 @@ import type Stripe from 'stripe';
  * Stripe-specific context variables
  * Set by webhook middleware after signature verification
  */
-export type StripeWebhookVariables = {
+type StripeWebhookVariables = {
   /**
    * Verified Stripe event from webhook
    * Set by verifyStripeSignature middleware

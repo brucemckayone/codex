@@ -23,6 +23,7 @@ import { createPerRequestDbClient, dbHttp } from '@codex/database';
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,
+  HonoEnv,
   MediaListResponse,
   MediaResponse,
   UpdateMediaResponse,
@@ -34,7 +35,6 @@ import {
   withPolicy,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
-import type { HonoEnv } from '../types';
 
 const app = new Hono<HonoEnv>();
 

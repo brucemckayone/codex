@@ -22,7 +22,7 @@ import { isServiceError, wrapError } from './base-errors';
  * Supports both HTTP (production workers) and WebSocket (tests/transactions)
  * database clients from @codex/database.
  */
-export type ServiceDatabase = typeof dbHttp | typeof dbWs;
+type ServiceDatabase = typeof dbHttp | typeof dbWs;
 
 /**
  * Configuration required by all services

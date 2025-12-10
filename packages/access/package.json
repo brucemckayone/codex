@@ -47,11 +47,8 @@
     "@cloudflare/workers-types": "^4.20241127.0",
     "@codex/test-utils": "workspace:*",
     "@types/node": "^22.0.0",
-    "dotenv": "^17.2.3",
-    "neon-testing": "^2.2.0",
     "typescript": "^5.6.3",
     "vite": "^7.2.2",
-    "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.0.2"
   }
 }

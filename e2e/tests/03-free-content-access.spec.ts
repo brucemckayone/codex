@@ -12,14 +12,11 @@
 
 import { expect, test } from '@playwright/test';
 import { authFixture } from '../fixtures';
-import { expectSuccessResponse } from '../helpers/assertions';
+import {
+  expectSuccessResponse,
+  unwrapApiResponse,
+} from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
-
-// Helper to unwrap API responses (handles double-wrapping: { data: { data: {...} } })
-// biome-ignore lint/suspicious/noExplicitAny: we need to support any response shape
-function unwrap(response: any): any {
-  return response.data?.data || response.data || response;
-}
 
 test.describe('Free Content Access Flow', () => {
   test('should allow any authenticated user to access free content', async ({
@@ -59,7 +56,7 @@ test.describe('Free Content Access Flow', () => {
       }
     );
     await expectSuccessResponse(mediaResponse, 201);
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
 
     // Mark media as ready (using test HLS and thumbnail uploaded to R2)
     const readyMediaResponse = await request.patch(
@@ -105,7 +102,7 @@ test.describe('Free Content Access Flow', () => {
       }
     );
     await expectSuccessResponse(contentResponse, 201);
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
 
     // Publish the content
     const publishResponse = await request.post(
@@ -119,7 +116,7 @@ test.describe('Free Content Access Flow', () => {
       }
     );
     await expectSuccessResponse(publishResponse);
-    const publishedContent = unwrap(await publishResponse.json());
+    const publishedContent = unwrapApiResponse(await publishResponse.json());
     expect(publishedContent.status).toBe('published');
 
     // Step 2: Create a regular viewer (not creator)
@@ -228,7 +225,7 @@ test.describe('Free Content Access Flow', () => {
       }
     );
     await expectSuccessResponse(contentResponse, 201);
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
     expect(content.status).toBe('draft');
 
     // Create viewer
@@ -295,7 +292,7 @@ test.describe('Free Content Access Flow', () => {
       }
     );
     await expectSuccessResponse(mediaResponse, 201);
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
 
     // Update media to ready status
     const updateMediaResponse = await request.patch(
@@ -339,7 +336,7 @@ test.describe('Free Content Access Flow', () => {
       }
     );
     await expectSuccessResponse(contentResponse, 201);
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
 
     // Publish
     const publishResponse = await request.post(

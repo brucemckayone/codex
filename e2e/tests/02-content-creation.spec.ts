@@ -6,14 +6,11 @@
 import { expect, test } from '@playwright/test';
 
 import { authFixture } from '../fixtures';
-import { expectSuccessResponse } from '../helpers/assertions';
+import {
+  expectSuccessResponse,
+  unwrapApiResponse,
+} from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
-
-// Helper to unwrap API responses (handles double-wrapping: { data: { data: {...} } })
-// biome-ignore lint/suspicious/noExplicitAny: E2E test helper for dynamic API responses
-function unwrap(response: Record<string, any>): Record<string, any> {
-  return response.data?.data || response.data || response;
-}
 
 test.describe('Content Creation Flow', () => {
   test('should create draft content, add media, and publish', async ({
@@ -50,7 +47,7 @@ test.describe('Content Creation Flow', () => {
     );
 
     await expectSuccessResponse(mediaResponse, 201);
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
     expect(media.id).toBeDefined();
     expect(media.status).toBe('uploading');
 
@@ -78,7 +75,7 @@ test.describe('Content Creation Flow', () => {
       );
     }
     await expectSuccessResponse(updateMediaResponse);
-    const updatedMedia = unwrap(await updateMediaResponse.json());
+    const updatedMedia = unwrapApiResponse(await updateMediaResponse.json());
     expect(updatedMedia.status).toBe('ready');
 
     // Step 4: Create draft content with media
@@ -102,7 +99,7 @@ test.describe('Content Creation Flow', () => {
     );
 
     await expectSuccessResponse(contentResponse, 201);
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
     expect(content.id).toBeDefined();
     expect(content.status).toBe('draft');
     expect(content.title).toBe('My First Video');
@@ -121,7 +118,7 @@ test.describe('Content Creation Flow', () => {
     );
 
     await expectSuccessResponse(publishResponse);
-    const publishedContent = unwrap(await publishResponse.json());
+    const publishedContent = unwrapApiResponse(await publishResponse.json());
     expect(publishedContent.status).toBe('published');
     expect(publishedContent.publishedAt).toBeDefined();
 
@@ -136,7 +133,7 @@ test.describe('Content Creation Flow', () => {
     );
 
     await expectSuccessResponse(getContentResponse);
-    const retrievedContent = unwrap(await getContentResponse.json());
+    const retrievedContent = unwrapApiResponse(await getContentResponse.json());
     expect(retrievedContent.id).toBe(content.id);
     expect(retrievedContent.status).toBe('published');
   });
@@ -172,7 +169,7 @@ test.describe('Content Creation Flow', () => {
       }
     );
 
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
 
     // Step 3: Create draft content with non-ready media
     const contentResponse = await request.post(
@@ -193,7 +190,7 @@ test.describe('Content Creation Flow', () => {
       }
     );
 
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
 
     // Step 4: Attempt to publish (should fail)
     const publishResponse = await request.post(
@@ -242,7 +239,7 @@ test.describe('Content Creation Flow', () => {
         },
       }
     );
-    const media = unwrap(await mediaResponse.json());
+    const media = unwrapApiResponse(await mediaResponse.json());
 
     await request.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
       headers: {
@@ -270,7 +267,7 @@ test.describe('Content Creation Flow', () => {
         },
       }
     );
-    const content = unwrap(await contentResponse.json());
+    const content = unwrapApiResponse(await contentResponse.json());
 
     // Step 2: Create second user
     const creator2Email = `creator2-${Date.now()}@example.com`;

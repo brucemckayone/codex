@@ -57,9 +57,3 @@ export interface CompletePurchaseMetadata {
   /** Currency code (default: 'usd') */
   currency?: string;
 }
-
-/**
- * Revenue split calculation result
- * Re-exported from revenue-calculator for convenience
- */
-export type { RevenueSplit } from './services/revenue-calculator';

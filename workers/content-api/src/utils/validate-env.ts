@@ -12,7 +12,7 @@ import type { Context } from 'hono';
  * Validates required environment variables
  * @throws {Error} If any required variables are missing
  */
-export function validateEnvironment(env: Bindings): void {
+function validateEnvironment(env: Bindings): void {
   // Determine which database URL is required based on DB_METHOD
   const dbMethod = env.DB_METHOD || 'PRODUCTION';
   const missing: string[] = [];

@@ -8,8 +8,8 @@
  * HMAC-SHA256 signatures, ensuring compatibility with Stripe's verification logic.
  */
 
+import { createStripeClient } from '@codex/purchase';
 import type { APIRequestContext, APIResponse } from '@playwright/test';
-import Stripe from 'stripe';
 
 /**
  * Checkout session object as embedded in webhook events
@@ -81,9 +81,7 @@ export function generateStripeSignature(
 ): string {
   // Use Stripe's official test signature generator
   // This ensures 100% compatibility with Stripe's verification logic
-  const stripe = new Stripe('sk_test_dummy', {
-    apiVersion: '2025-10-29.clover',
-  });
+  const stripe = createStripeClient('sk_test_dummy');
 
   return stripe.webhooks.generateTestHeaderString({
     payload: rawBody,

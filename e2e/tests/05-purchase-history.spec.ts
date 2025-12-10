@@ -18,18 +18,15 @@ import { dbHttp, schema } from '@codex/database';
 import { expect, test } from '@playwright/test';
 import { and, eq } from 'drizzle-orm';
 import { authFixture } from '../fixtures';
-import { expectSuccessResponse } from '../helpers/assertions';
+import {
+  expectSuccessResponse,
+  unwrapApiResponse,
+} from '../helpers/assertions';
 import {
   createCheckoutCompletedEvent,
   sendSignedWebhook,
 } from '../helpers/stripe-webhook';
 import { WORKER_URLS } from '../helpers/worker-urls';
-
-// Helper to unwrap API responses (handles double-wrapping: { data: { data: {...} } })
-// biome-ignore lint/suspicious/noExplicitAny: E2E test helper for dynamic API responses
-function unwrap(response: Record<string, any>): Record<string, any> {
-  return response.data?.data || response.data || response;
-}
 
 test.describe('Purchase History API', () => {
   // Run tests serially in same worker to share beforeAll setup
@@ -86,7 +83,7 @@ test.describe('Purchase History API', () => {
       }
     );
     await expectSuccessResponse(orgResponse, 201);
-    const organization = unwrap(await orgResponse.json());
+    const organization = unwrapApiResponse(await orgResponse.json());
     organizationId = organization.id;
     console.log('[Setup] 2/12 Organization created:', organizationId);
 
@@ -111,7 +108,7 @@ test.describe('Purchase History API', () => {
       }
     );
     await expectSuccessResponse(mediaResponse1, 201);
-    const media1 = unwrap(await mediaResponse1.json());
+    const media1 = unwrapApiResponse(await mediaResponse1.json());
     console.log('[Setup] 3/12 Media item 1 created');
 
     // Mark media 1 as ready
@@ -154,7 +151,7 @@ test.describe('Purchase History API', () => {
       }
     );
     await expectSuccessResponse(contentResponse1, 201);
-    const content1 = unwrap(await contentResponse1.json());
+    const content1 = unwrapApiResponse(await contentResponse1.json());
     contentId = content1.id;
     console.log('[Setup] 5/12 Content 1 created:', contentId);
 
@@ -193,7 +190,7 @@ test.describe('Purchase History API', () => {
       }
     );
     await expectSuccessResponse(mediaResponse2, 201);
-    const media2 = unwrap(await mediaResponse2.json());
+    const media2 = unwrapApiResponse(await mediaResponse2.json());
     console.log('[Setup] 7/12 Media item 2 created');
 
     // Mark media 2 as ready
@@ -236,7 +233,7 @@ test.describe('Purchase History API', () => {
       }
     );
     await expectSuccessResponse(contentResponse2, 201);
-    const content2 = unwrap(await contentResponse2.json());
+    const content2 = unwrapApiResponse(await contentResponse2.json());
     content2Id = content2.id;
     console.log('[Setup] 9/12 Content 2 created:', content2Id);
 
@@ -287,7 +284,7 @@ test.describe('Purchase History API', () => {
       }
     );
     await expectSuccessResponse(checkoutResponse1);
-    const checkout1 = unwrap(await checkoutResponse1.json());
+    const checkout1 = unwrapApiResponse(await checkoutResponse1.json());
 
     const paymentIntentId1 = `pi_history_1_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const webhookEvent1 = createCheckoutCompletedEvent({
@@ -340,7 +337,7 @@ test.describe('Purchase History API', () => {
       }
     );
     await expectSuccessResponse(checkoutResponse2);
-    const checkout2 = unwrap(await checkoutResponse2.json());
+    const checkout2 = unwrapApiResponse(await checkoutResponse2.json());
 
     const paymentIntentId2 = `pi_history_2_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const webhookEvent2 = createCheckoutCompletedEvent({

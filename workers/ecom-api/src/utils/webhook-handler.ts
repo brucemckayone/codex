@@ -12,7 +12,7 @@ import type { StripeWebhookEnv } from '../types';
 /**
  * Webhook handler function type
  */
-export type WebhookHandler = (
+type WebhookHandler = (
   event: Stripe.Event,
   stripe: Stripe,
   c: Context<StripeWebhookEnv>

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { urlSchema, uuidSchema } from '../primitives';
+import { paginationSchema } from '../shared/pagination-schema';
 
 /**
  * Purchase Validation Schemas
@@ -107,33 +108,11 @@ export const createCheckoutSchema = z.object({
  *
  * Used for GET /api/purchases with filters
  *
- * Validates:
- * - page: Pagination page number (default: 1, max: 1000)
- * - limit: Items per page (default: 20, max: 100)
+ * Extends pagination schema with purchase-specific filters:
  * - status: Optional filter by purchase status
  * - contentId: Optional filter by content UUID
- *
- * Pagination bounds:
- * - Max page 1000 prevents excessive database offsets
- * - Max limit 100 prevents large query results
- *
- * Note: Uses z.coerce for page/limit because query params arrive as strings
  */
-export const purchaseQuerySchema = z.object({
-  page: z.coerce
-    .number()
-    .int('Must be a whole number')
-    .positive('Must be greater than 0')
-    .max(1000, 'Must be 1000 or less')
-    .optional()
-    .default(1),
-  limit: z.coerce
-    .number()
-    .int('Must be a whole number')
-    .positive('Must be greater than 0')
-    .max(100, 'Must be 100 or less')
-    .optional()
-    .default(20),
+export const purchaseQuerySchema = paginationSchema.extend({
   status: purchaseStatusEnum.optional(),
   contentId: uuidSchema.optional(),
 });

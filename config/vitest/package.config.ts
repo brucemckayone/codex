@@ -192,9 +192,3 @@ export function packageVitestConfig(
     },
   });
 }
-
-/**
- * Alias for packageVitestConfig for consistency with naming patterns
- * @deprecated Use packageVitestConfig instead
- */
-export const createPackageTestConfig = packageVitestConfig;

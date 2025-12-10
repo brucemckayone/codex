@@ -1,0 +1,79 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.svelte-kit/**",
+    "**/.wrangler/**",
+    "coverage/**",
+    "test-results/**",
+    "packages/database/src/config/drizzle.config.ts",
+    "packages/database/src/triggers/index.ts",
+    "workers/ecom-api/src/utils/metadata.ts"
+  ],
+  "workspaces": {
+    ".": {
+      "entry": ["vitest.setup.ts", "config/vite/*.ts", "config/vitest/*.ts"],
+      "project": ["config/**/*.{ts,js}", "vitest.setup.ts"]
+    },
+    "packages/*": {
+      "entry": ["src/index.ts", "vitest.config.*", "vite.config.*"],
+      "project": [
+        "src/**/*.{ts,tsx,js,jsx}",
+        "vite.config.*",
+        "vitest.*.ts",
+        "tsconfig.*"
+      ]
+    },
+    "workers/*": {
+      "entry": ["src/index.ts", "vitest.config.*", "vite.config.*"],
+      "project": [
+        "src/**/*.{ts,tsx,js,jsx}",
+        "vite.config.*",
+        "vitest.*.ts",
+        "tsconfig.*"
+      ]
+    },
+    "apps/web": {
+      "entry": [
+        "src/routes/**/*.{ts,js,svelte}",
+        "src/app.html",
+        "vite.config.*",
+        "svelte.config.*",
+        "src/tests/setup.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx,js,jsx,svelte}",
+        "vite.config.*",
+        "svelte.config.*"
+      ]
+    },
+    "e2e": {
+      "entry": [
+        "tests/**/*.ts",
+        "helpers/**/*.ts",
+        "fixtures/**/*.ts",
+        "global-setup.ts",
+        "global-teardown.ts",
+        "playwright.config.ts"
+      ],
+      "project": ["**/*.ts"]
+    }
+  },
+  "ignoreIssues": {
+    "packages/*/src/index.ts": ["exports"],
+    "workers/*/src/index.ts": ["exports"],
+    "config/vite/package.config.ts": ["types"],
+    "config/vite/worker.config.ts": ["types"],
+    "config/vitest/package.config.ts": ["types"]
+  },
+  "ignoreDependencies": [
+    "vite-plugin-dts",
+    "@codex/observability",
+    "@codex/validation",
+    "@codex/security",
+    "@codex/service-errors",
+    "zod"
+  ],
+  "ignoreBinaries": ["docker-compose", "act"]
+}

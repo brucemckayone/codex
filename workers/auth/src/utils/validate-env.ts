@@ -19,7 +19,7 @@ type ExtendedAuthBindings = AuthBindings & {
  * Validates required environment variables
  * @throws {Error} If any required variables are missing
  */
-export function validateEnvironment(env: ExtendedAuthBindings): void {
+function validateEnvironment(env: ExtendedAuthBindings): void {
   // Determine which database URL is required based on DB_METHOD
   const dbMethod = env.DB_METHOD || 'PRODUCTION';
   const missing: string[] = [];
