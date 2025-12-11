@@ -29,11 +29,11 @@
   // Environment configurations
   "env": {
     // Test environment (E2E tests)
+    // Note: DB_METHOD is set via .dev.vars.test (NEON_BRANCH in CI, LOCAL_PROXY locally)
     "test": {
       "name": "ecom-api-test",
       "vars": {
         "ENVIRONMENT": "test",
-        "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
         "API_URL": "http://localhost:8787"
       },

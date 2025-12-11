@@ -38,17 +38,13 @@
   // Environment configurations
   "env": {
     // Test environment (E2E tests)
+    // Note: DB_METHOD is set via .dev.vars.test (NEON_BRANCH in CI, LOCAL_PROXY locally)
     "test": {
       "name": "content-api-test",
       "vars": {
         "ENVIRONMENT": "test",
-        "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
-        "API_URL": "http://localhost:8787",
-        "R2_ACCOUNT_ID": "158c04717be8e66d8e7800808e416d1a",
-        "R2_ACCESS_KEY_ID": "edf68e327b0bbb734577d68f233f8f2f",
-        "R2_SECRET_ACCESS_KEY": "af651e8873286273ff1cf6013629a6a66b1b9c9325f7baf64b62999b140fd85f",
-        "R2_BUCKET_MEDIA": "codex-media-test"
+        "API_URL": "http://localhost:8787"
       },
       "kv_namespaces": [
         {
