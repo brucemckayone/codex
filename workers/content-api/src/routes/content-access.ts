@@ -6,7 +6,7 @@ import type {
   UserLibraryResponse,
 } from '@codex/shared-types';
 import {
-  getPlaybackProgressSchema,
+  createIdParamsSchema,
   getStreamingUrlSchema,
   listUserLibrarySchema,
   savePlaybackProgressSchema,
@@ -37,25 +37,30 @@ app.get(
   }),
   createAuthenticatedHandler({
     schema: {
-      params: getStreamingUrlSchema.pick({ contentId: true }),
+      params: createIdParamsSchema(),
       query: getStreamingUrlSchema.pick({ expirySeconds: true }),
     },
-    handler: async (_c, ctx): Promise<StreamingUrlResponse> => {
+    handler: async (c, ctx): Promise<StreamingUrlResponse> => {
       const { params, query } = ctx.validated;
       const user = ctx.user;
 
-      const service = createContentAccessService(ctx.env);
-      // Service fetches content's organizationId and verifies access
-      const result = await service.getStreamingUrl(user.id, {
-        contentId: params.contentId,
-        expirySeconds: query?.expirySeconds,
-      });
+      const { service, cleanup } = createContentAccessService(ctx.env);
+      try {
+        // Service fetches content's organizationId and verifies access
+        const result = await service.getStreamingUrl(user.id, {
+          contentId: params.id,
+          expirySeconds: query?.expirySeconds,
+        });
 
-      return {
-        streamingUrl: result.streamingUrl,
-        expiresAt: result.expiresAt.toISOString(),
-        contentType: result.contentType,
-      };
+        return {
+          streamingUrl: result.streamingUrl,
+          expiresAt: result.expiresAt.toISOString(),
+          contentType: result.contentType,
+        };
+      } finally {
+        // Cleanup database connection after request
+        c.executionCtx.waitUntil(cleanup());
+      }
     },
   })
 );
@@ -76,21 +81,25 @@ app.post(
   }),
   createAuthenticatedHandler({
     schema: {
-      params: savePlaybackProgressSchema.pick({ contentId: true }),
+      params: createIdParamsSchema(),
       body: savePlaybackProgressSchema.omit({ contentId: true }),
     },
     successStatus: 204, // No Content - update successful, no response body
-    handler: async (_c, ctx): Promise<UpdatePlaybackProgressResponse> => {
+    handler: async (c, ctx): Promise<UpdatePlaybackProgressResponse> => {
       const { params, body } = ctx.validated;
       const user = ctx.user;
 
-      const service = createContentAccessService(ctx.env);
-      await service.savePlaybackProgress(user.id, {
-        contentId: params.contentId,
-        ...body,
-      });
+      const { service, cleanup } = createContentAccessService(ctx.env);
+      try {
+        await service.savePlaybackProgress(user.id, {
+          contentId: params.id,
+          ...body,
+        });
 
-      return null; // 204 returns no body
+        return null; // 204 returns no body
+      } finally {
+        c.executionCtx.waitUntil(cleanup());
+      }
     },
   })
 );
@@ -110,27 +119,31 @@ app.get(
   }),
   createAuthenticatedHandler({
     schema: {
-      params: getPlaybackProgressSchema,
+      params: createIdParamsSchema(),
     },
-    handler: async (_c, ctx): Promise<PlaybackProgressResponse> => {
+    handler: async (c, ctx): Promise<PlaybackProgressResponse> => {
       const { params } = ctx.validated;
       const user = ctx.user;
 
-      const service = createContentAccessService(ctx.env);
-      const progress = await service.getPlaybackProgress(user.id, {
-        contentId: params.contentId,
-      });
+      const { service, cleanup } = createContentAccessService(ctx.env);
+      try {
+        const progress = await service.getPlaybackProgress(user.id, {
+          contentId: params.id,
+        });
 
-      if (!progress) {
-        return { progress: null };
+        if (!progress) {
+          return { progress: null };
+        }
+
+        return {
+          progress: {
+            ...progress,
+            updatedAt: progress.updatedAt.toISOString(),
+          },
+        };
+      } finally {
+        c.executionCtx.waitUntil(cleanup());
       }
-
-      return {
-        progress: {
-          ...progress,
-          updatedAt: progress.updatedAt.toISOString(),
-        },
-      };
     },
   })
 );
@@ -153,14 +166,18 @@ app.get(
     schema: {
       query: listUserLibrarySchema,
     },
-    handler: async (_c, ctx): Promise<UserLibraryResponse> => {
+    handler: async (c, ctx): Promise<UserLibraryResponse> => {
       const { query } = ctx.validated;
       const user = ctx.user;
 
-      const service = createContentAccessService(ctx.env);
-      const result = await service.listUserLibrary(user.id, query);
+      const { service, cleanup } = createContentAccessService(ctx.env);
+      try {
+        const result = await service.listUserLibrary(user.id, query);
 
-      return result;
+        return result;
+      } finally {
+        c.executionCtx.waitUntil(cleanup());
+      }
     },
   })
 );

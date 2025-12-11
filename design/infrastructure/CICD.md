@@ -212,7 +212,7 @@ git push origin feature/my-changes
    - Verifies DNS propagation (polling, not fixed sleep)
 
 3. **Deploy Workers**
-   - `stripe-webhook-handler-preview-{PR}` → `api-preview-{PR}.revelations.studio`
+   - `ecom-api-preview-{PR}` → `api-preview-{PR}.revelations.studio`
    - `auth-worker-preview-{PR}` → `auth-preview-{PR}.revelations.studio`
    - `codex-web-preview-{PR}` → `codex-preview-{PR}.revelations.studio`
    - Uses test credentials (Stripe test keys)
@@ -260,7 +260,7 @@ if: |
 
 2. **Build Validation (Fail Fast)**
    ```bash
-   pnpm --filter stripe-webhook-handler build
+   pnpm --filter ecom-api build
    pnpm --filter auth build
    pnpm --filter web build
    ```
@@ -277,7 +277,7 @@ if: |
 
 4. **Deploy Workers (Sequential)**
 
-   **a) stripe-webhook-handler**
+   **a) ecom-api**
    ```bash
    wrangler deploy --env production
    ```
@@ -369,7 +369,7 @@ STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_test_***
 # Real-time logs
 wrangler tail codex-web-production
 wrangler tail auth-worker-production
-wrangler tail stripe-webhook-handler-production
+wrangler tail ecom-api-production
 
 # Health checks
 curl https://codex.revelations.studio
@@ -614,12 +614,12 @@ describe('Users', () => {
 **Production:**
 - `codex.revelations.studio` → codex-web-production
 - `auth.revelations.studio` → auth-worker-production
-- `api.revelations.studio` → stripe-webhook-handler-production
+- `api.revelations.studio` → ecom-api-production
 
 **Preview:**
 - `codex-preview-{PR}.revelations.studio` → codex-web-preview-{PR}
 - `auth-preview-{PR}.revelations.studio` → auth-worker-preview-{PR}
-- `api-preview-{PR}.revelations.studio` → stripe-webhook-handler-preview-{PR}
+- `api-preview-{PR}.revelations.studio` → ecom-api-preview-{PR}
 
 **DNS Management:**
 - Production: `.github/scripts/manage-production-dns.sh`
@@ -807,7 +807,7 @@ wrangler deployments list --name codex-web-production
 # Rollback to previous
 wrangler rollback --name codex-web-production
 wrangler rollback --name auth-worker-production
-wrangler rollback --name stripe-webhook-handler-production
+wrangler rollback --name ecom-api-production
 
 # Verify
 curl https://codex.revelations.studio
@@ -828,7 +828,7 @@ RESTORE_URL=$(neonctl connection-string emergency-restore-* --pooled)
 echo $RESTORE_URL | wrangler secret put DATABASE_URL --env production
 
 # Redeploy workers
-cd workers/stripe-webhook-handler && wrangler deploy --env production
+cd workers/ecom-api && wrangler deploy --env production
 cd ../auth && wrangler deploy --env production
 cd ../../apps/web && wrangler deploy --env production
 ```

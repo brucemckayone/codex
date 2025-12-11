@@ -1,0 +1,51 @@
+{
+  "name": "@codex/purchase",
+  "version": "1.0.0",
+  "description": "Purchase and payment service for Codex platform - Stripe integration and revenue splits",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./services": {
+      "types": "./dist/services/index.d.ts",
+      "default": "./dist/services/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.purchase.ts",
+    "dev": "vite build --config vite.config.purchase.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.purchase.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@codex/database": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "drizzle-orm": "0.44.7",
+    "stripe": "^19.2.0"
+  },
+  "devDependencies": {
+    "@codex/content": "workspace:*",
+    "@codex/test-utils": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.2.2",
+    "vitest": "^4.0.2"
+  }
+}

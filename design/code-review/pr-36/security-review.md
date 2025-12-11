@@ -1198,7 +1198,7 @@ updates:
 
 ### 8.1 Signature Verification ✅ EXCELLENT
 
-**Implementation:** `workers/stripe-webhook-handler/src/middleware/verify-signature.ts`
+**Implementation:** `workers/ecom-api/src/middleware/verify-signature.ts`
 
 ```typescript
 export function verifyStripeSignature() {

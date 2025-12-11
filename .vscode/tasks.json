@@ -181,6 +181,104 @@
         "panel": "shared"
       },
       "detail": "Run TypeScript type checking"
+    },
+    {
+      "label": "Start Auth Worker (debug)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--filter", "auth", "dev"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Ready on|Debugger listening"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "workers"
+      }
+    },
+    {
+      "label": "Start Ecom-API Worker (debug)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--filter", "ecom-api", "dev"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Ready on|Debugger listening"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "workers"
+      }
+    },
+    {
+      "label": "Start Content-API Worker (debug)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--filter", "content-api", "dev"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Ready on|Debugger listening"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "workers"
+      }
+    },
+    {
+      "label": "Start Identity-API Worker (debug)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--filter", "identity-api", "dev"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Ready on|Debugger listening"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "workers"
+      }
+    },
+    {
+      "label": "Start All Workers (debug)",
+      "dependsOn": [
+        "Start Auth Worker (debug)",
+        "Start Ecom-API Worker (debug)",
+        "Start Content-API Worker (debug)",
+        "Start Identity-API Worker (debug)"
+      ],
+      "problemMatcher": []
     }
   ]
 }

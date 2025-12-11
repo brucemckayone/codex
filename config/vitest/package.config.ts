@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { neonTesting } from 'neon-testing/vite';
 import type { UserProjectConfigExport } from 'vitest/config';
 import { defineProject } from 'vitest/config';
 
@@ -43,9 +42,8 @@ export interface PackageVitestConfigOptions {
   sequentialTests?: boolean;
 
   /**
-   * Enable Neon Testing plugin for database integration tests
-   * Creates ephemeral Neon branches for each test file
-   * @default false
+   * @deprecated Neon branches are now created at workflow level
+   * This option is ignored - kept for backwards compatibility
    */
   enableNeonTesting?: boolean;
 
@@ -122,7 +120,7 @@ export function packageVitestConfig(
     testTimeout = 10000,
     hookTimeout = 10000,
     sequentialTests = false,
-    enableNeonTesting = false,
+    // enableNeonTesting is deprecated and ignored
     include = ['src/**/*.{test,spec}.{js,ts}'],
     enableCoverage = true,
     coverageInclude = ['src/**/*.ts'],
@@ -164,11 +162,10 @@ export function packageVitestConfig(
       }
     : {};
 
-  // COST OPTIMIZATION: Only use neon-testing in CI to avoid local branch creation costs
-  // Local development uses DATABASE_URL from .env.dev (LOCAL_PROXY method - FREE)
-  // CI uses neon-testing to create ephemeral branches per test file (Isolated)
-  const shouldUseNeonTesting = enableNeonTesting && process.env.CI === 'true';
-  const plugins = shouldUseNeonTesting ? [neonTesting()] : [];
+  // Neon branches are now created at GitHub Actions workflow level (7 per CI run)
+  // instead of per-test-file ephemeral branches (200+ per CI run)
+  // No plugins needed - tests use DATABASE_URL from environment
+  const plugins: never[] = [];
 
   return defineProject({
     plugins,
@@ -192,9 +189,3 @@ export function packageVitestConfig(
     },
   });
 }
-
-/**
- * Alias for packageVitestConfig for consistency with naming patterns
- * @deprecated Use packageVitestConfig instead
- */
-export const createPackageTestConfig = packageVitestConfig;

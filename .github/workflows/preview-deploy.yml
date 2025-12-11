@@ -56,7 +56,7 @@ jobs:
       - name: Delete worker deployments
         continue-on-error: true
         run: |
-          wrangler delete --name stripe-webhook-handler-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name ecom-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name content-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name identity-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name auth-worker-preview-${{ env.PR_NUMBER }} || true
@@ -291,16 +291,16 @@ jobs:
             sleep 2
           done
 
-      # Deploy stripe-webhook-handler worker
-      - name: Deploy stripe-webhook-handler (preview)
+      # Deploy ecom-api worker
+      - name: Deploy ecom-api (preview)
         id: deploy-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: workers/stripe-webhook-handler
+          workingDirectory: workers/ecom-api
           command: >
-            deploy --name stripe-webhook-handler-preview-${{ env.PR_NUMBER }}
+            deploy --name ecom-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
             --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |

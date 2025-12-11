@@ -39,7 +39,7 @@ export function formatValidationError(zodError: ZodError) {
 /**
  * Extended context with validated data
  */
-type ValidatedContext<TValidated> = AuthenticatedContext<HonoEnv> & {
+type ValidatedContext<TValidated> = AuthenticatedContext & {
   validated: TValidated;
 };
 
@@ -47,7 +47,7 @@ type ValidatedContext<TValidated> = AuthenticatedContext<HonoEnv> & {
  * Enriched validated context with request metadata
  * Used when useEnrichedContext option is enabled
  */
-type EnrichedValidatedContext<TValidated> = EnrichedAuthContext<HonoEnv> & {
+type EnrichedValidatedContext<TValidated> = EnrichedAuthContext & {
   validated: TValidated;
 };
 
@@ -161,7 +161,7 @@ function getUserPermissions(
  * ```
  */
 export function createAuthenticatedHandler<
-  TSchema extends RequestSchema,
+  TSchema extends RequestSchema = RequestSchema,
   TValidated = InferSchemaType<TSchema>,
   TOutput = unknown,
   TUseEnriched extends boolean = false,

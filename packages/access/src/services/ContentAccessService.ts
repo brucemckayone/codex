@@ -1,15 +1,15 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import type { Database } from '@codex/database';
-import { dbHttp } from '@codex/database';
+import type { DatabaseWs } from '@codex/database';
+import { createPerRequestDbClient } from '@codex/database';
 import {
   content,
-  contentAccess,
   organizationMemberships,
   purchases,
   videoPlayback,
 } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
+import { createStripeClient, PurchaseService } from '@codex/purchase';
 import { wrapError } from '@codex/service-errors';
 import type {
   GetPlaybackProgressInput,
@@ -23,20 +23,58 @@ import {
   ContentNotFoundError,
   R2SigningError,
 } from '../errors';
-import type { UserLibraryResponse } from '../types';
 
 /**
  * Interface for R2 signing functionality.
  * Can be implemented by R2Service (workers) or R2SigningClient (tests/scripts).
  */
-export interface R2Signer {
+interface R2Signer {
   generateSignedUrl(r2Key: string, expirySeconds: number): Promise<string>;
 }
 
+/**
+ * User library item with content, purchase, and progress information
+ */
+interface UserLibraryItem {
+  content: {
+    id: string;
+    title: string;
+    description: string;
+    thumbnailUrl: string | null;
+    contentType: string;
+    durationSeconds: number;
+  };
+  purchase: {
+    purchasedAt: string;
+    priceCents: number;
+  };
+  progress: {
+    positionSeconds: number;
+    durationSeconds: number;
+    completed: boolean;
+    percentComplete: number;
+    updatedAt: string;
+  } | null;
+}
+
+/**
+ * User library response with pagination
+ */
+interface UserLibraryResponse {
+  items: UserLibraryItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 export interface ContentAccessServiceConfig {
-  db: Database;
+  db: DatabaseWs; // WebSocket client for transaction support
   r2: R2Signer;
   obs: ObservabilityClient;
+  purchaseService: PurchaseService;
 }
 
 /**
@@ -101,10 +139,11 @@ export class ContentAccessService {
     });
 
     try {
-      // Wrap in transaction for consistent snapshot of access verification
-      return await db.transaction(
+      // Step 1 & 2: Verify access and fetch content/media data within transaction
+      // Transaction ensures consistent snapshot for access verification
+      const { r2Key, mediaType } = await db.transaction(
         async (tx) => {
-          // Step 1: Get content with media details (any organization)
+          // Get content with media details (any organization)
           const contentRecord = await tx.query.content.findFirst({
             where: and(
               eq(content.id, input.contentId),
@@ -135,18 +174,16 @@ export class ContentAccessService {
             });
           }
 
-          // Step 2: Check access - free content, purchase, or org membership
+          // Check access - free content, purchase, or org membership
           if (contentRecord.priceCents && contentRecord.priceCents > 0) {
-            // Paid content - check purchase first
-            const hasAccess = await tx.query.contentAccess.findFirst({
-              where: and(
-                eq(contentAccess.userId, userId),
-                eq(contentAccess.contentId, input.contentId),
-                eq(contentAccess.accessType, 'purchased')
-              ),
-            });
+            // Paid content - check purchase via PurchaseService
+            const hasPurchased =
+              await this.config.purchaseService.verifyPurchase(
+                input.contentId,
+                userId
+              );
 
-            if (hasAccess) {
+            if (hasPurchased) {
               obs.info('Access granted via purchase', {
                 userId,
                 contentId: input.contentId,
@@ -212,68 +249,77 @@ export class ContentAccessService {
             });
           }
 
-          // Step 3: Generate signed R2 URL (outside transaction - external API call)
-          const r2Key = contentRecord.mediaItem.r2Key;
+          // Extract R2 key for streaming (prefer HLS master playlist for adaptive streaming)
+          const r2Key =
+            contentRecord.mediaItem.hlsMasterPlaylistKey ||
+            contentRecord.mediaItem.r2Key;
 
           if (!r2Key) {
-            obs.error('Media item missing R2 key', {
+            obs.error('Media item missing R2 key and HLS key', {
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
             });
             throw new R2SigningError(
               'missing_r2_key',
-              new Error('R2 key is null')
+              new Error('Neither R2 key nor HLS master playlist key is set')
             );
           }
 
-          // Generate signed URL
-          try {
-            const streamingUrl = await r2.generateSignedUrl(
-              r2Key,
-              input.expirySeconds
-            );
-            const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
+          // Validate media type (defense-in-depth)
+          const mediaType = contentRecord.mediaItem.mediaType;
 
-            // Step 4: Validate media type (defense-in-depth)
-
-            const mediaType = contentRecord.mediaItem.mediaType;
-
-            if (!['video', 'audio'].includes(mediaType)) {
-              obs.error('Invalid media type', {
-                mediaType,
-                contentId: input.contentId,
-                mediaItemId: contentRecord.mediaItem.id,
-              });
-              throw new Error('INVALID_MEDIA_TYPE');
-            }
-
-            obs.info('Streaming URL generated successfully', {
-              userId,
+          if (!['video', 'audio'].includes(mediaType)) {
+            obs.error('Invalid media type', {
+              mediaType,
               contentId: input.contentId,
-              contentType: mediaType,
-              expiresAt: expiresAt.toISOString(),
+              mediaItemId: contentRecord.mediaItem.id,
             });
-
-            return {
-              streamingUrl,
-              expiresAt,
-              contentType: mediaType as 'video' | 'audio',
-            };
-          } catch (err) {
-            obs.error('Failed to generate signed R2 URL', {
-              error: err,
-              userId,
-              contentId: input.contentId,
-              r2Key,
-            });
-            throw new R2SigningError(r2Key, err);
+            throw new Error('INVALID_MEDIA_TYPE');
           }
+
+          // Return data for R2 signing (outside transaction)
+          return {
+            r2Key,
+            mediaType: mediaType as 'video' | 'audio',
+          };
         },
         {
           isolationLevel: 'read committed', // Consistent snapshot for access verification
           accessMode: 'read only', // All operations are reads
         }
       );
+
+      // Step 3: Generate signed R2 URL (OUTSIDE transaction - external API call)
+      try {
+        const streamingUrl = await r2.generateSignedUrl(
+          r2Key,
+          input.expirySeconds
+        );
+        const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
+
+        obs.info('Streaming URL generated successfully', {
+          userId,
+          contentId: input.contentId,
+          contentType: mediaType,
+          expiresAt: expiresAt.toISOString(),
+        });
+
+        return {
+          streamingUrl,
+          expiresAt,
+          contentType: mediaType,
+        };
+      } catch (err) {
+        obs.error('Failed to generate signed R2 URL', {
+          errorMessage: err instanceof Error ? err.message : String(err),
+          errorStack: err instanceof Error ? err.stack : undefined,
+          errorName: err instanceof Error ? err.name : undefined,
+          userId,
+          contentId: input.contentId,
+          r2Key,
+        });
+        throw new R2SigningError(r2Key, err);
+      }
     } catch (error) {
       // Re-throw domain errors as-is, wrap unexpected errors
       if (
@@ -284,7 +330,9 @@ export class ContentAccessService {
         throw error;
       }
       obs.error('Unexpected error in getStreamingUrl', {
-        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorName: error instanceof Error ? error.name : undefined,
         userId,
         contentId: input.contentId,
       });
@@ -541,6 +589,14 @@ export interface ContentAccessEnv {
   R2_SECRET_ACCESS_KEY?: string;
   /** R2 bucket name for media (e.g., codex-media-production) */
   R2_BUCKET_MEDIA?: string;
+  /** Stripe secret key for purchase verification */
+  STRIPE_SECRET_KEY?: string;
+  /** Database connection method (LOCAL_PROXY, NEON_BRANCH, PRODUCTION) */
+  DB_METHOD?: string;
+  /** Database URL for connections */
+  DATABASE_URL?: string;
+  /** Local proxy database URL (for LOCAL_PROXY mode) */
+  DATABASE_URL_LOCAL_PROXY?: string;
 }
 
 /**
@@ -551,9 +607,10 @@ export interface ContentAccessEnv {
  *
  * @throws Error if required environment variables are missing
  */
-export function createContentAccessService(
-  env: ContentAccessEnv
-): ContentAccessService {
+export function createContentAccessService(env: ContentAccessEnv): {
+  service: ContentAccessService;
+  cleanup: () => Promise<void>;
+} {
   // Validate required environment variables
   if (!env.MEDIA_BUCKET) {
     throw new Error('MEDIA_BUCKET binding is required');
@@ -584,7 +641,19 @@ export function createContentAccessService(
   };
 
   const r2 = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);
-  const db = dbHttp;
 
-  return new ContentAccessService({ db, r2, obs });
+  // Create per-request database client with WebSocket support for transactions
+  const { db, cleanup } = createPerRequestDbClient(env);
+
+  // Create Stripe client and PurchaseService
+  const stripe = createStripeClient(env.STRIPE_SECRET_KEY || '');
+  const purchaseService = new PurchaseService(
+    { db, environment: env.ENVIRONMENT ?? 'development' },
+    stripe
+  );
+
+  const service = new ContentAccessService({ db, r2, obs, purchaseService });
+
+  // Return service with cleanup function
+  return { service, cleanup };
 }

@@ -43,6 +43,48 @@
       "when": 1763898839399,
       "tag": "0005_fast_old_lace",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1763989118942,
+      "tag": "0006_breezy_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1764058002506,
+      "tag": "0007_lyrical_famine",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1764609429336,
+      "tag": "0008_stale_masked_marvel",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1764853073307,
+      "tag": "0009_petite_karnak",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1764857331200,
+      "tag": "0010_oval_mindworm",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1764858988945,
+      "tag": "0011_stale_sugar_man",
+      "breakpoints": true
     }
   ]
 }

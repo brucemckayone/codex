@@ -2,41 +2,39 @@
  * Database Test Utilities
  *
  * Helpers for setting up and managing test databases for integration tests.
- * Works with neon-testing library for ephemeral branch isolation.
  *
  * Key Points:
  * - Uses the production database client from @codex/database
- * - Each test file gets its own ephemeral Neon branch (via neon-testing)
- * - Complete isolation between test files - no cleanup needed between files
- * - Optional cleanup helpers for tests within the same file
+ * - GitHub Actions creates one Neon branch per test domain (7 branches total)
+ * - Complete isolation between test domains
+ * - Optional cleanup helpers for tests within the same domain
  * - Supports test user creation for auth scenarios
  * - Transaction helpers for isolated test scenarios
  *
- * HYBRID TESTING STRATEGY - COST OPTIMIZATION:
- * =============================================
+ * WORKFLOW-LEVEL NEON BRANCHING:
+ * ==============================
  * **Local Development** (FREE, unlimited test runs):
- * - Uses DATABASE_URL from .env.dev (LOCAL_PROXY method)
+ * - Uses DATABASE_URL from .env.test (LOCAL_PROXY method)
  * - No ephemeral branch creation costs
  * - Fast execution with no provisioning delay
  * - Tests share database (cleanup helpers still work if needed)
  *
- * **CI/CD** (Isolated, reliable):
- * - Uses neon-testing to create ephemeral Neon branches
- * - Each test file gets its own isolated branch
- * - Complete isolation between test files
- * - Full production schema and constraints
+ * **CI/CD** (Isolated by test domain):
+ * - GitHub Actions creates dedicated Neon branch per domain:
+ *   - ci-unit-tests (shared by all package tests)
+ *   - ci-auth-tests, ci-content-api-tests, etc. (per worker)
+ *   - ci-e2e-api-tests, ci-e2e-web-tests (E2E tests)
+ * - DATABASE_URL set at workflow level
+ * - Tests share branch within their domain
+ * - Branches cleaned up after workflow completes
  *
- * This hybrid approach saves 200+ branch creations per day during local development!
+ * This approach saves ~97% of Neon branches vs per-test-file ephemeral branches!
  *
- * Usage with neon-testing (works in both local and CI):
+ * Usage:
  * ```typescript
  * import { test } from 'vitest';
- * import { withNeonTestBranch } from '../../config/vitest/test-setup';
  * import { setupTestDatabase, seedTestUsers } from '@codex/test-utils';
  * import type { Database } from '@codex/database';
- *
- * // Enable neon-testing (only activates in CI, uses .env.dev locally)
- * withNeonTestBranch();
  *
  * let db: Database;
  * let testUserId: string;
@@ -47,11 +45,8 @@
  *   testUserId = userId;
  * });
  *
- * // No cleanup needed - CI gets fresh database per file!
- * // Local uses shared database but tests are idempotent
- *
  * test('my test', async () => {
- *   // Test with clean database state (CI) or shared state (local)
+ *   // Uses DATABASE_URL from environment (workflow-created branch in CI)
  * });
  * ```
  */
@@ -64,17 +59,25 @@ import {
 import * as schema from '@codex/database/schema';
 import { neonConfig } from '@neondatabase/serverless';
 import { sql as sqlOperator } from 'drizzle-orm';
-import { makeNeonTesting } from 'neon-testing';
 import ws from 'ws';
 
 // Configure Neon serverless WebSocket for Node.js environment
 // This is required for @neondatabase/serverless in Node.js v21 and earlier
-// and for neon-testing to work properly in test environments
 neonConfig.webSocketConstructor = ws;
 
-// Also polyfill global WebSocket for other code that might need it
-if (typeof globalThis.WebSocket === 'undefined') {
-  globalThis.WebSocket = ws as unknown as typeof WebSocket;
+// Apply LOCAL_PROXY configuration for local development testing
+// This must be done early, before any database connections are created
+if (process.env.DB_METHOD === 'LOCAL_PROXY') {
+  neonConfig.useSecureWebSocket = false;
+  neonConfig.fetchEndpoint = (host: string): string => {
+    const [protocol, port] =
+      host === 'db.localtest.me' ? ['http', 4444] : ['https', 443];
+    return `${protocol}://${host}:${port}/sql`;
+  };
+  const dbUrl = process.env.DATABASE_URL_LOCAL_PROXY;
+  if (dbUrl && new URL(dbUrl).hostname === 'db.localtest.me') {
+    neonConfig.wsProxy = (host: string) => `${host}:4444/v1`;
+  }
 }
 
 /**
@@ -84,67 +87,24 @@ if (typeof globalThis.WebSocket === 'undefined') {
 export type Database = DatabaseWs;
 
 /**
- * Setup neon-testing for database integration tests
+ * DEPRECATED: withNeonTestBranch() is now a no-op.
  *
- * Creates ephemeral Neon branches for test isolation in CI.
- * In local development, uses existing DATABASE_URL (no branch creation).
+ * Neon branch creation has moved to GitHub Actions workflow level.
+ * Each test domain gets a dedicated shared branch instead of
+ * ephemeral per-file branches:
+ * - ci-unit-tests (shared by all package tests)
+ * - ci-auth-tests, ci-content-api-tests, etc. (per worker)
+ * - ci-e2e-api-tests, ci-e2e-web-tests (E2E tests)
  *
- * **MUST be called at module level**, not inside beforeAll/beforeEach.
+ * Tests automatically use DATABASE_URL from:
+ * - Local: .env.test (LOCAL_PROXY method)
+ * - CI: GitHub Actions (NEON_BRANCH method, workflow-created branch)
  *
- * **IMPORTANT**: In CI, ephemeral branches are cloned from NEON_PARENT_BRANCH_ID
- * if provided, otherwise from the project's default branch. The parent branch
- * MUST have all migrations applied for tests to work correctly.
- *
- * Usage:
- * ```typescript
- * import { withNeonTestBranch } from '@codex/test-utils';
- *
- * // Call at module level
- * withNeonTestBranch();
- *
- * describe('My tests', () => {
- *   // Tests run with isolated database in CI
- * });
- * ```
+ * @deprecated Remove calls to this function from test files
  */
-export function withNeonTestBranch() {
-  // Only create ephemeral branches in CI environment
-  // In local development (DB_METHOD=LOCAL_PROXY), this is a no-op
-  if (process.env.CI === 'true') {
-    // Verify required environment variables for CI
-    if (!process.env.NEON_API_KEY || !process.env.NEON_PROJECT_ID) {
-      console.error('invalid enviroment variables or enviroment');
-      return;
-    }
-
-    const config: {
-      apiKey: string;
-      projectId: string;
-      autoCloseWebSockets: boolean;
-      parentBranchId?: string;
-    } = {
-      apiKey: process.env.NEON_API_KEY,
-      projectId: process.env.NEON_PROJECT_ID,
-      autoCloseWebSockets: true,
-    };
-
-    // If NEON_PARENT_BRANCH_ID is provided, use it as the parent branch
-    // This ensures ephemeral branches have the correct schema
-    if (process.env.NEON_PARENT_BRANCH_ID) {
-      config.parentBranchId = process.env.NEON_PARENT_BRANCH_ID;
-      console.log('[test-utils] Using parent branch:', config.parentBranchId);
-    } else {
-      console.warn(
-        '[test-utils] No NEON_PARENT_BRANCH_ID provided, using project default branch'
-      );
-    }
-
-    const fixture = makeNeonTesting(config);
-    fixture();
-  } else {
-    console.error('invalid enviroment variables or enviroment');
-  }
-  // In local development - use existing DATABASE_URL (no-op)
+export function withNeonTestBranch(): void {
+  // No-op - branch created at workflow level
+  // Keeping function for backwards compatibility during migration
 }
 
 /**

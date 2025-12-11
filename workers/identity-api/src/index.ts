@@ -31,6 +31,7 @@ import {
 
 // Import route modules
 import organizationRoutes from './routes/organizations';
+import { createEnvValidationMiddleware } from './utils/validate-env';
 
 // ============================================================================
 // Application Setup
@@ -49,6 +50,13 @@ const app = createWorker({
     checkKV: createKvCheck(['RATE_LIMIT_KV']),
   },
 });
+
+/**
+ * Environment validation
+ * Validates required environment variables on first request
+ * Runs once per worker instance (not per request)
+ */
+app.use('*', createEnvValidationMiddleware());
 
 // ============================================================================
 // Rate Limiting

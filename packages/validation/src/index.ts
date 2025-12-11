@@ -9,3 +9,7 @@ export * from './identity/user-schema';
 export * from './primitives';
 // Access schemas
 export * from './schemas/access';
+// Purchase schemas
+export * from './schemas/purchase';
+// Shared schemas (pagination, etc)
+export * from './shared/pagination-schema';

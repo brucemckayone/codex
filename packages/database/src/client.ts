@@ -2,7 +2,7 @@ import { neon, neonConfig, Pool } from '@neondatabase/serverless';
 import { drizzle as drizzleHttp } from 'drizzle-orm/neon-http';
 import { drizzle as drizzleWs } from 'drizzle-orm/neon-serverless';
 import ws from 'ws';
-import { DbEnvConfig } from './config/env.config';
+import { DbEnvConfig, type DbEnvVars } from './config/env.config';
 import * as schema from './schema';
 
 /**
@@ -63,8 +63,8 @@ if (isNodeRuntime) {
   neonConfig.webSocketConstructor = ws as unknown as typeof WebSocket;
 }
 
-// Apply Neon configuration
-DbEnvConfig.applyNeonConfig(neonConfig);
+// Note: Neon HTTP configuration is applied per-request in getDbHttp()
+// to support Cloudflare Workers where process.env is not available
 
 // ============================================================================
 // HTTP Client - Stateless, for one-off queries
@@ -87,9 +87,15 @@ DbEnvConfig.applyNeonConfig(neonConfig);
  */
 let _dbHttp: ReturnType<typeof drizzleHttp<typeof schema>> | null = null;
 
-function getDbHttp(): ReturnType<typeof drizzleHttp<typeof schema>> {
+function getDbHttp(
+  env?: DbEnvVars
+): ReturnType<typeof drizzleHttp<typeof schema>> {
   if (!_dbHttp) {
-    const dbUrl = DbEnvConfig.getDbUrl();
+    // Apply Neon configuration with environment variables
+    // This must happen before creating the neon client
+    DbEnvConfig.applyNeonConfig(neonConfig, env);
+
+    const dbUrl = DbEnvConfig.getDbUrl(env);
     const sqlHttp = neon(dbUrl);
     _dbHttp = drizzleHttp({ client: sqlHttp, schema });
   }
@@ -106,6 +112,29 @@ export const dbHttp = new Proxy(
   }
 );
 
+/**
+ * Create a new HTTP database client with explicit environment
+ *
+ * Use this factory when you need to create a database client with
+ * explicit environment variables (e.g., in Better-auth configuration).
+ *
+ * @param env - Database environment variables
+ * @returns Fresh database client instance with schema
+ *
+ * @example
+ * const db = createDbClient(c.env);
+ */
+export function createDbClient(
+  env: DbEnvVars
+): ReturnType<typeof drizzleHttp<typeof schema>> {
+  // Apply Neon configuration with environment variables
+  DbEnvConfig.applyNeonConfig(neonConfig, env);
+
+  const dbUrl = DbEnvConfig.getDbUrl(env);
+  const sqlHttp = neon(dbUrl);
+  return drizzleHttp({ client: sqlHttp, schema });
+}
+
 // ============================================================================
 // WebSocket Client - Stateful, for transactions
 // ============================================================================
@@ -118,6 +147,10 @@ let _dbWs: ReturnType<typeof drizzleWs<typeof schema>> | null = null;
  */
 function initializeDbWs(): ReturnType<typeof drizzleWs<typeof schema>> {
   if (!_dbWs) {
+    // Apply Neon configuration (WebSocket proxy settings for local dev)
+    // This must happen before creating the Pool
+    DbEnvConfig.applyNeonConfig(neonConfig);
+
     const dbUrl = DbEnvConfig.getDbUrl();
     if (!dbUrl) {
       throw new Error(
@@ -172,16 +205,77 @@ function createDbWsProxy() {
 
 export const dbWs = createDbWsProxy();
 
+/**
+ * Create a per-request WebSocket database client for Cloudflare Workers
+ *
+ * IMPORTANT: In Cloudflare Workers, WebSocket connections cannot outlive a single request.
+ * This factory creates a fresh Pool instance that MUST be closed before the request completes.
+ *
+ * @param env - Environment variables containing DATABASE_URL
+ * @returns Object with db client and cleanup function
+ *
+ * @example
+ * // In Cloudflare Worker route handler:
+ * const { db, cleanup } = createPerRequestDbClient(c.env);
+ * try {
+ *   await db.transaction(async (tx) => {
+ *     // Your database operations
+ *   });
+ * } finally {
+ *   await cleanup(); // MUST close pool before request ends
+ * }
+ *
+ * // Or with ctx.waitUntil for async cleanup:
+ * const { db, cleanup } = createPerRequestDbClient(c.env);
+ * const result = await db.transaction(async (tx) => {
+ *   // Your operations
+ * });
+ * ctx.waitUntil(cleanup()); // Cleanup happens after response sent
+ * return result;
+ */
+export function createPerRequestDbClient(env: DbEnvVars): {
+  db: ReturnType<typeof drizzleWs<typeof schema>>;
+  cleanup: () => Promise<void>;
+} {
+  // Apply Neon configuration (WebSocket proxy settings for local dev)
+  // This must happen before creating the Pool
+  DbEnvConfig.applyNeonConfig(neonConfig, env);
+
+  const dbUrl = DbEnvConfig.getDbUrl(env);
+  if (!dbUrl) {
+    throw new Error(
+      'DATABASE_URL not configured. Check DB_METHOD and environment variables.'
+    );
+  }
+
+  // Create a fresh Pool for this request
+  const pool = new Pool({ connectionString: dbUrl });
+  pool.on('error', (err) => console.error('Per-request pool error:', err));
+
+  // Create Drizzle instance with the pool
+  const db = drizzleWs(pool, { schema });
+
+  // Cleanup function that MUST be called before request ends
+  const cleanup = async () => {
+    await pool.end();
+  };
+
+  return { db, cleanup };
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
 
 /**
  * Test database connection
+ *
+ * @param env - Optional environment variables (for Cloudflare Workers use c.env)
  */
-export async function testDbConnection(): Promise<boolean> {
+export async function testDbConnection(env?: DbEnvVars): Promise<boolean> {
   try {
-    const result = await dbHttp.execute('SELECT 1 as value');
+    const db = getDbHttp(env);
+    const result = await db.execute('SELECT 1 as value');
     if (
       result &&
       Array.isArray(result.rows) &&

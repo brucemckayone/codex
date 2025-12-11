@@ -415,7 +415,7 @@ This package has **zero dependencies** (other than Node.js/Cloudflare Workers ru
 |----------------|--------------|---------|
 | `@codex/access` | Content access service instantiates ObservabilityClient | Logging access operations, tracking errors |
 | `@codex/worker-utils` | Middleware chain creates client | Request timing, error tracking in all workers |
-| `stripe-webhook-handler` | Worker imports ObservabilityClient type | Typing webhook handlers for observability |
+| `ecom-api` | Worker imports ObservabilityClient type | Typing webhook handlers for observability |
 | All workers/services | Direct instantiation | Logging, metrics, error tracking |
 
 ### Data Flow

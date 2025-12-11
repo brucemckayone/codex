@@ -1,12 +1,12 @@
-# Database connection (local development)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/main
+# Development Environment Variables
+# Copy to .dev.vars and fill in actual values
 
-# Environment
-ENVIRONMENT=development
-
-# Database method (use LOCAL for development)
-DB_METHOD=LOCAL
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/codex_dev
 
 # CORS URLs
 WEB_APP_URL=http://localhost:3000
 API_URL=http://localhost:8787
+
+# Environment
+ENVIRONMENT=development

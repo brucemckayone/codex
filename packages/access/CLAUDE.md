@@ -564,11 +564,12 @@ Library shows all completed purchases (purchases.status='completed') with:
 
 | Package | Why |
 |---------|-----|
-| `@codex/database` | Queries content, purchases, contentAccess, videoPlayback, organizationMemberships tables |
+| `@codex/database` | Queries content, purchases, videoPlayback, organizationMemberships tables |
 | `@codex/cloudflare-clients` | R2Service for presigned URL generation |
 | `@codex/observability` | Logging and monitoring |
 | `@codex/service-errors` | ServiceError base classes for error handling |
 | `@codex/validation` | Zod schemas for input validation |
+| `@codex/purchase` | PurchaseService for verifying purchase records (optional, deferred to Phase 2) |
 
 ### Used By
 

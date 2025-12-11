@@ -7,6 +7,7 @@ import {
   urlSchema,
   uuidSchema,
 } from '../primitives';
+import { paginationSchema } from '../shared/pagination-schema';
 
 /**
  * Content Management Validation Schemas
@@ -355,16 +356,9 @@ export type PublishContentInput = z.infer<typeof publishContentSchema>;
 // ============================================================================
 
 /**
- * Pagination schema
- * Reusable for list queries
- * Uses z.coerce to handle query string parameters
+ * Pagination Input Type
+ * Import from '@codex/validation' to use PaginationInput
  */
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-});
-
-export type PaginationInput = z.infer<typeof paginationSchema>;
 
 /**
  * Sort order enum

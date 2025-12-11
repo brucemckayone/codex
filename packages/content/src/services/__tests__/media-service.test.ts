@@ -23,15 +23,13 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
-  withNeonTestBranch,
 } from '@codex/test-utils';
 import type { CreateMediaItemInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MediaNotFoundError } from '../../errors';
 import { MediaItemService } from '../media-service';
 
-// Enable ephemeral Neon branch for this test file
-withNeonTestBranch();
+// Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
 
 describe('MediaItemService', () => {
   let db: Database;

@@ -20,7 +20,7 @@ BASE_DOMAIN="revelations.studio"
 declare -A PRODUCTION_DOMAINS=(
   ["codex"]="codex-web-production"
   ["auth"]="auth-worker-production"
-  ["api"]="stripe-webhook-handler-production"
+  ["api"]="ecom-api-production"
   ["content-api"]="content-api-production"
   ["identity-api"]="identity-api-production"
 )

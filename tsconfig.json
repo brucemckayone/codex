@@ -14,10 +14,11 @@
     { "path": "./packages/worker-utils" },
     { "path": "./packages/service-errors" },
     { "path": "./packages/shared-types" },
+    { "path": "./packages/purchase" },
     { "path": "./workers/auth" },
     { "path": "./workers/content-api" },
     { "path": "./workers/identity-api" },
-    { "path": "./workers/stripe-webhook-handler" }
+    { "path": "./workers/ecom-api" }
   ],
   "compilerOptions": {
     "target": "ES2022",

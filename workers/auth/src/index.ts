@@ -27,8 +27,16 @@ import {
   createSessionCacheMiddleware,
 } from './middleware';
 import type { AuthEnv } from './types';
+import { createEnvValidationMiddleware } from './utils/validate-env';
 
 const app = new Hono<AuthEnv>();
+
+/**
+ * Environment validation
+ * Validates required environment variables on first request
+ * Runs once per worker instance (not per request)
+ */
+app.use('*', createEnvValidationMiddleware());
 
 /**
  * Global middleware chain
@@ -50,26 +58,6 @@ for (const middleware of globalMiddleware) {
  * Wrapped with error handling to gracefully handle malformed requests
  */
 const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
-  //  Validate JSON body if present
-  if (
-    c.req.method !== 'GET' &&
-    c.req.header('content-type')?.includes('application/json')
-  ) {
-    const rawBody = await c.req.raw.clone().text();
-    if (rawBody?.trim()) {
-      try {
-        JSON.parse(rawBody);
-      } catch {
-        return createErrorResponse(
-          c,
-          ERROR_CODES.INVALID_JSON,
-          'Request body contains invalid JSON',
-          400
-        );
-      }
-    }
-  }
-
   try {
     const auth = createAuthInstance({ env: c.env });
     const response = await auth.handler(c.req.raw);
@@ -103,6 +91,34 @@ app.get(
     checkDatabase: standardDatabaseCheck,
   })
 );
+
+/**
+ * Test-only endpoint to retrieve verification tokens
+ * ONLY available in development/test environments
+ * Returns 404 in staging/production
+ */
+app.get('/api/test/verification-token/:email', async (c) => {
+  const environment = c.env.ENVIRONMENT || 'development';
+
+  // Strict guard: only allow in development/test
+  if (environment !== 'development' && environment !== 'test') {
+    return c.notFound();
+  }
+  const email = c.req.param('email');
+
+  try {
+    const token = await c.env.AUTH_SESSION_KV.get(`verification:${email}`);
+
+    if (!token) {
+      return c.json({ error: 'Verification token not found or expired' }, 404);
+    }
+
+    return c.json({ token, email });
+  } catch (error) {
+    console.error('[TEST] Failed to retrieve verification token:', error);
+    return c.json({ error: 'Failed to retrieve token' }, 500);
+  }
+});
 
 /**
  * Security headers middleware wrapper

@@ -19,10 +19,11 @@ import {
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
-import { dbHttp } from '@codex/database';
+import { createPerRequestDbClient, dbHttp } from '@codex/database';
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,
+  HonoEnv,
   MediaListResponse,
   MediaResponse,
   UpdateMediaResponse,
@@ -34,7 +35,6 @@ import {
   withPolicy,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
-import type { HonoEnv } from '../types';
 
 const app = new Hono<HonoEnv>();
 
@@ -116,17 +116,30 @@ app.patch(
       params: createIdParamsSchema(),
       body: updateMediaItemSchema,
     },
-    handler: async (_c, ctx): Promise<UpdateMediaResponse> => {
-      const service = new MediaItemService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-      const media = await service.update(
-        ctx.validated.params.id,
-        ctx.validated.body,
-        ctx.user.id
-      );
-      return { data: media };
+    handler: async (c, ctx): Promise<UpdateMediaResponse> => {
+      // Create per-request database client with transaction support
+      const { db, cleanup } = createPerRequestDbClient(ctx.env);
+
+      try {
+        const service = new MediaItemService({
+          db,
+          environment: ctx.env.ENVIRONMENT || 'development',
+        });
+        const media = await service.update(
+          ctx.validated.params.id,
+          ctx.validated.body,
+          ctx.user.id
+        );
+
+        // Schedule cleanup after response is sent
+        c.executionCtx.waitUntil(cleanup());
+
+        return { data: media };
+      } catch (error) {
+        // Ensure cleanup happens even on error
+        await cleanup();
+        throw error;
+      }
     },
   })
 );

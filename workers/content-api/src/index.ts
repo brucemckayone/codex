@@ -35,6 +35,7 @@ import {
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
 import mediaRoutes from './routes/media';
+import { createEnvValidationMiddleware } from './utils/validate-env';
 
 // ============================================================================
 // Application Setup
@@ -54,6 +55,13 @@ const app = createWorker({
     checkR2: createR2Check(['MEDIA_BUCKET']),
   },
 });
+
+/**
+ * Environment validation
+ * Validates required environment variables on first request
+ * Runs once per worker instance (not per request)
+ */
+app.use('*', createEnvValidationMiddleware());
 
 // ============================================================================
 // Rate Limiting

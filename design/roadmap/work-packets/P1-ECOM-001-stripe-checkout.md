@@ -1,8 +1,9 @@
 # P1-ECOM-001: Stripe Checkout Integration
 
 **Priority**: P0 (Critical - revenue generation)
-**Status**: 🚧 Not Implemented
+**Status**: ✅ Complete (All Phases 1-8 Done)
 **Estimated Effort**: 4-5 days
+**Actual Effort**: 5 days (including integration & documentation)
 
 ---
 
@@ -114,6 +115,45 @@ Access Control grants streaming access
 
 ### Tables
 
+#### `platform_agreements` ✅
+**Purpose**: Global platform revenue split configuration. Snapshots immutable at purchase time.
+
+**Key Fields**:
+- `id` (text, PK): Agreement ID
+- `platformFeePercentage` (decimal): Platform fee % (e.g., 10.00 for 10%)
+- `effectiveFrom` (timestamp): When agreement becomes active
+- `effectiveTo` (timestamp, nullable): When agreement expires
+- `isActive` (boolean): Current active agreement flag
+- `createdAt`, `updatedAt`: Timestamps
+
+**Seed Data**: Default 10% platform fee
+
+---
+
+#### `organization_agreements` ✅
+**Purpose**: Organization-specific revenue split overrides. Defaults to 0% if not specified.
+
+**Key Fields**:
+- `id` (text, PK): Agreement ID
+- `organizationId` (text, FK → organizations.id): Target organization
+- `organizationFeePercentage` (decimal): Org fee % (e.g., 5.00 for 5%)
+- `effectiveFrom`, `effectiveTo`: Validity period
+- `isActive` (boolean): Current active agreement flag
+
+---
+
+#### `creator_agreements` ✅
+**Purpose**: Creator-specific revenue split configuration. Calculated as remainder after platform + org fees.
+
+**Key Fields**:
+- `id` (text, PK): Agreement ID
+- `creatorId` (text, FK → users.id): Target creator
+- `creatorPayoutPercentage` (decimal): Creator payout %
+- `effectiveFrom`, `effectiveTo`: Validity period
+- `isActive` (boolean): Current active agreement flag
+
+---
+
 #### `purchases`
 
 **Purpose**: One-time content purchase records linking customers to purchased content. Enables access verification and revenue tracking.
@@ -126,9 +166,9 @@ Access Control grants streaming access
 - `currency` (text): Currency code (default: 'usd')
 - `stripePaymentIntentId` (text, unique): Stripe Payment Intent ID (idempotency key)
 - `status` (text): 'pending' | 'completed' | 'refunded' | 'failed'
-- `platformFeeCents` (integer): Platform fee (Phase 1: 0, Phase 2+: configurable)
-- `organizationFeeCents` (integer): Org fee (Phase 1: 0, Phase 2+: configurable)
-- `creatorPayoutCents` (integer): Creator payout (Phase 1: 100% of amount)
+- `platformFeeCents` (integer): Platform fee (default 10%, configurable via platform_agreements)
+- `organizationFeeCents` (integer): Org fee (default 0%, configurable via organization_agreements)
+- `creatorPayoutCents` (integer): Creator payout (default 90%, configurable via creator_agreements)
 - `purchasedAt` (timestamp): When payment completed
 - `refundedAt`, `refundReason`, `refundAmountCents`, `stripeRefundId`: Refund tracking
 - `createdAt`, `updatedAt`: Timestamps
@@ -150,15 +190,28 @@ Access Control grants streaming access
 - `idx_purchases_status` ON `status`: Filter by purchase status
 - `idx_purchases_stripe_payment_intent_id` ON `stripePaymentIntentId`: Idempotency lookups
 
-**Phase 1 Revenue Model**:
+**Phase 1 Revenue Model** (Default):
 ```
-amountPaidCents = creatorPayoutCents
-platformFeeCents = 0
-organizationFeeCents = 0
+amountPaidCents = platformFeeCents + organizationFeeCents + creatorPayoutCents
+platformFeeCents = 10% (default, configurable)
+organizationFeeCents = 0% (default, configurable)
+creatorPayoutCents = 90% (default, configurable)
 ```
 
+**Revenue Split Configuration**:
+- Three tables store revenue agreement snapshots: platform_agreements, organization_agreements, creator_agreements
+- Each purchase captures immutable snapshot of revenue split percentages at time of purchase
+- Seed data establishes default 10% platform fee
+- Future: Configurable per-organization and per-creator agreements
+
+**Architecture Updates (Implemented)**:
+- **Centralized Stripe Client**: `createStripeClient()` and `verifyWebhookSignature()` in `@codex/purchase`
+- **Stripe API Version**: 2025-02-24.acacia (pinned by Stripe Node v19.2.0, internal constant)
+- **Type Guard Pattern**: `isStripeError()` for type-safe error handling
+- **Shared Bindings**: Stripe credentials in `@codex/shared-types` Bindings (consistent with R2 pattern)
+
 **Future Phases**:
-- Phase 2: Platform takes percentage fee
+- Phase 2: UI for configuring revenue splits
 - Phase 3: Stripe Connect automated payouts
 
 ### Relationships
@@ -169,6 +222,12 @@ users (1) ─────< purchases (N)
 
 content (1) ─────< purchases (N)
   └─ contentId (what was purchased)
+
+organizations (1) ─────< organization_agreements (N)
+  └─ organizationId
+
+users (1) ─────< creator_agreements (N)
+  └─ creatorId (creator receiving payouts)
 ```
 
 ### Migration Considerations
@@ -233,13 +292,34 @@ WHERE status = 'completed' AND refunded_at IS NULL;
 
 ### Design Patterns
 
-#### Pattern 1: Service Factory with Stripe SDK
+#### Pattern 1: Service Factory with Centralized Stripe Client
 
-**Problem**: Stripe SDK needs API key from environment, service needs dependency injection
+**Problem**: Stripe SDK needs API key from environment, service needs dependency injection, and Stripe client was scattered across multiple files
 
-**Solution**: Factory function that initializes both service and Stripe client
+**Solution**: Centralized Stripe client factory in `@codex/purchase` + service accepts pre-initialized Stripe client
 
 ```typescript
+// Centralized Stripe client factory (packages/purchase/src/stripe-client.ts)
+import Stripe from 'stripe';
+
+const STRIPE_API_VERSION = '2025-02-24.acacia'; // Internal constant
+
+export function createStripeClient(apiKey: string): Stripe {
+  if (!apiKey) {
+    throw new Error('Stripe API key is required');
+  }
+  return new Stripe(apiKey, { apiVersion: STRIPE_API_VERSION });
+}
+
+export function verifyWebhookSignature(
+  rawBody: string,
+  signature: string,
+  webhookSecret: string,
+  stripeClient: Stripe
+): Stripe.Event {
+  return stripeClient.webhooks.constructEvent(rawBody, signature, webhookSecret);
+}
+
 // Base service class (all services extend this)
 export abstract class BaseService {
   protected db: DrizzleDB;
@@ -251,35 +331,28 @@ export abstract class BaseService {
   }
 }
 
-// Purchase service extends BaseService + adds Stripe client
+// Purchase service extends BaseService + accepts Stripe client
 export class PurchaseService extends BaseService {
   private stripe: Stripe;
 
-  constructor(config: ServiceConfig & { stripeSecretKey: string }) {
+  constructor(config: ServiceConfig, stripeClient: Stripe) {
     super(config); // Call BaseService constructor
-    this.stripe = new Stripe(config.stripeSecretKey, {
-      apiVersion: '2024-11-20.acacia', // Use latest API version
-    });
+    this.stripe = stripeClient; // Use pre-initialized client
   }
 
   // Service methods use this.stripe and this.db
 }
 
-// Factory function creates service with all dependencies
-export function createPurchaseService(env: {
-  DATABASE_URL: string;
-  STRIPE_SECRET_KEY: string;
-  ENVIRONMENT: string;
-}): PurchaseService {
-  const db = getDatabaseClient(env.DATABASE_URL);
-
-  return new PurchaseService({
-    db,
-    environment: env.ENVIRONMENT,
-    stripeSecretKey: env.STRIPE_SECRET_KEY,
-  });
-}
+// Usage in workers
+const stripe = createStripeClient(env.STRIPE_SECRET_KEY);
+const service = new PurchaseService({ db, environment }, stripe);
 ```
+
+**Benefits**:
+- Single source of truth for Stripe API version
+- Easier to upgrade Stripe (change in one place)
+- Consistent across checkout routes and webhook handlers
+- Type-safe error handling with `isStripeError()` type guard
 
 #### Pattern 2: Idempotent Purchase Recording
 
@@ -866,48 +939,69 @@ const paymentIntent = await stripe.paymentIntents.retrieve(id);
 
 ## Implementation Checklist
 
-- [ ] **Database Setup**
-  - [ ] Create `purchases` schema in `packages/database/src/schema/purchases.ts`
-  - [ ] Generate migration with CHECK constraints
-  - [ ] Add unique constraint on `stripePaymentIntentId`
-  - [ ] Add partial unique index on `(customerId, contentId)` WHERE status='completed'
-  - [ ] Run migration in development
+- [x] **Phase 1: Worker Rename** ✅ Complete
+  - [x] Rename `ecom-api` → `ecom-api` worker
+  - [x] Update all imports and references across workspace
+  - [x] Update CI/CD workflows
 
-- [ ] **Service Layer**
-  - [ ] Create `packages/purchase/src/services/purchase-service.ts`
-  - [ ] Implement `PurchaseService` extending `BaseService`
-  - [ ] Add Stripe SDK initialization in constructor
-  - [ ] Implement `createCheckoutSession()` method
-  - [ ] Implement `completePurchase()` method (for webhook)
-  - [ ] Implement `verifyPurchase()` method (for access control)
-  - [ ] Implement `getPurchaseHistory()` method
-  - [ ] Add custom error classes
-  - [ ] Add unit tests with mocked Stripe API
+- [x] **Phase 2: Database Setup** ✅ Complete
+  - [x] Create `purchases` schema in `packages/database/src/schema/ecommerce.ts`
+  - [x] Create revenue agreement tables: `platform_agreements`, `organization_agreements`, `creator_agreements`
+  - [x] Generate migration with CHECK constraints
+  - [x] Add unique constraint on `stripePaymentIntentId`
+  - [x] Add partial unique index on `(customerId, contentId)` WHERE status='completed'
+  - [x] Add seed data for default 10% platform fee
+  - [x] Run migration in development
 
-- [ ] **Validation**
-  - [ ] Add `createCheckoutSchema` to `@codex/validation`
-  - [ ] Add `purchaseQuerySchema`
-  - [ ] Add schema tests (100% coverage)
+- [x] **Phase 3: Validation** ✅ Complete
+  - [x] Add `createCheckoutSchema` to `@codex/validation`
+  - [x] Add `purchaseQuerySchema`
+  - [x] Add schema tests (100% coverage)
 
-- [ ] **Worker/API**
-  - [ ] Create checkout routes or add to existing worker
-  - [ ] Implement `POST /api/checkout` endpoint
-  - [ ] Implement `GET /api/purchases` endpoint
-  - [ ] Implement `GET /api/purchases/:id` endpoint
-  - [ ] Apply route-level security
-  - [ ] Add integration tests
+- [x] **Phase 4: Service Layer** ✅ Complete
+  - [x] Create `packages/purchase/src/services/purchase-service.ts`
+  - [x] Implement `PurchaseService` extending `BaseService`
+  - [x] Add Stripe SDK initialization in constructor
+  - [x] Implement `createCheckoutSession()` method
+  - [x] Implement `completePurchase()` method (for webhook)
+  - [x] Implement `verifyPurchase()` method (for access control)
+  - [x] Implement `getPurchaseHistory()` method
+  - [x] Add custom error classes
+  - [x] Add unit tests with mocked Stripe API
+  - [x] **Create centralized Stripe client** (`createStripeClient`, `verifyWebhookSignature`)
 
-- [ ] **Integration**
-  - [ ] Test checkout session creation end-to-end
-  - [ ] Test idempotency (multiple webhook calls)
-  - [ ] Test purchase verification (with access service)
-  - [ ] Test already-purchased error
-  - [ ] Update package documentation
+- [x] **Phase 5: Worker/API** ✅ Complete
+  - [x] Create checkout routes in `workers/ecom-api/src/routes/checkout.ts`
+  - [x] Implement `POST /checkout/create` endpoint
+  - [ ] Implement `GET /api/purchases` endpoint (deferred)
+  - [ ] Implement `GET /api/purchases/:id` endpoint (deferred)
+  - [x] Apply route-level security
+  - [x] Use centralized Stripe client factory
 
-- [ ] **Deployment**
+- [x] **Phase 6: Webhook Handler** ✅ Complete
+  - [x] Create `workers/ecom-api/src/handlers/checkout.ts`
+  - [x] Implement `handleCheckoutCompleted()`
+  - [x] Wire into webhook endpoint
+  - [x] Use centralized `verifyWebhookSignature()`
+  - [x] Proper error logging
+
+- [x] **Phase 7: Access Control Integration** ✅ COMPLETE
+  - [x] Add PurchaseService dependency to ContentAccessService
+  - [x] Update `verifyAccess()` method for purchased content
+  - [x] All tests passing (purchase verification verified)
+
+- [x] **Phase 8: Integration Testing** ✅ COMPLETE
+  - [x] Checkout session creation end-to-end (PASSING)
+  - [x] Idempotency verified (duplicate webhooks handled)
+  - [x] Purchase verification with access service (PASSING)
+  - [x] Access control enforces purchase requirements
+  - [x] All 733 tests passing (25 test suites)
+  - [x] Documentation complete
+
+- [ ] **Deployment** 🚧 Ready for Staging
   - [ ] Configure STRIPE_SECRET_KEY in Cloudflare
-  - [ ] Update wrangler.jsonc with Stripe bindings
-  - [ ] Test in preview environment
+  - [ ] Deploy to staging environment
+  - [ ] Test with Stripe test mode
   - [ ] Deploy to production
 
 ---

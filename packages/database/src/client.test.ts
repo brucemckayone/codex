@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { withNeonTestBranch } from '../../../config/vitest/test-setup';
 
 // This test requires a database connection.
 // It will only run if DB_METHOD is set to a value that provides a database.
-
-// Use hybrid testing strategy: neon-testing in CI, LOCAL_PROXY locally
-// Must be called at module level, not inside beforeAll
-withNeonTestBranch();
+// Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
 
 describe('Database Client', () => {
   if (['LOCAL_PROXY', 'NEON_BRANCH'].includes(process.env.DB_METHOD || '')) {

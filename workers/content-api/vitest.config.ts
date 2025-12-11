@@ -6,7 +6,7 @@ export default defineWorkersConfig({
     // Use Workers pool to run tests in workerd runtime (not Node.js)
     poolOptions: {
       workers: {
-        wrangler: { configPath: './wrangler.jsonc' },
+        wrangler: { configPath: './wrangler.jsonc', environment: 'test' },
       },
     },
     include: ['src/**/*.{test,spec}.ts'],

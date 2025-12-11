@@ -141,7 +141,7 @@ Worker layer will map these to appropriate HTTP status codes.
 2. Implement PurchaseService extending BaseService
 3. Add validation schemas to @codex/validation
 4. Create worker routes in workers/content-api using createAuthenticatedHandler
-5. Implement webhook handler in workers/stripe-webhook-handler
+5. Implement webhook handler in workers/ecom-api
 6. Write unit tests for service methods
 7. Write integration tests for complete checkout flow
 

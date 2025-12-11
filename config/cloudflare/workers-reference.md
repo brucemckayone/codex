@@ -75,7 +75,7 @@ API_URL = "https://api-staging.revelations.studio"
 
 Some workers require additional environment variables:
 
-**stripe-webhook-handler:**
+**ecom-api:**
 ```toml
 [env.production.vars]
 AUTH_WORKER_URL = "https://auth.revelations.studio"
@@ -95,8 +95,8 @@ Secrets are **never** stored in wrangler.jsonc. They must be set via CLI or CI/C
 | `DATABASE_URL` | All workers | PostgreSQL connection string (Neon) |
 | `SESSION_SECRET` | auth | Session encryption key |
 | `BETTER_AUTH_SECRET` | auth | Better Auth encryption key |
-| `STRIPE_SECRET_KEY` | stripe-webhook-handler | Stripe API key |
-| `STRIPE_WEBHOOK_SECRET` | stripe-webhook-handler | Stripe webhook signing secret |
+| `STRIPE_SECRET_KEY` | ecom-api | Stripe API key |
+| `STRIPE_WEBHOOK_SECRET` | ecom-api | Stripe webhook signing secret |
 
 ### Setting Secrets
 
@@ -163,7 +163,7 @@ Each worker has its own custom domain patterns:
 | auth | `auth.revelations.studio` | `auth-staging.revelations.studio/*` |
 | content-api | `content-api.revelations.studio/*` | `content-api-staging.revelations.studio/*` |
 | identity-api | `identity-api.revelations.studio/*` | `identity-api-staging.revelations.studio/*` |
-| stripe-webhook-handler | `api.revelations.studio` | `api-staging.revelations.studio/*` |
+| ecom-api | `api.revelations.studio` | `api-staging.revelations.studio/*` |
 
 ### Route Configuration Pattern
 

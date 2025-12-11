@@ -64,6 +64,41 @@ export type Bindings = {
    * R2 bucket name for media storage
    */
   R2_BUCKET_MEDIA?: string;
+
+  /**
+   * Stripe API secret key
+   */
+  STRIPE_SECRET_KEY?: string;
+
+  /**
+   * Stripe webhook signing secret for payment events
+   */
+  STRIPE_WEBHOOK_SECRET_PAYMENT?: string;
+
+  /**
+   * Stripe webhook signing secret for subscription events
+   */
+  STRIPE_WEBHOOK_SECRET_SUBSCRIPTION?: string;
+
+  /**
+   * Stripe webhook signing secret for Connect account events
+   */
+  STRIPE_WEBHOOK_SECRET_CONNECT?: string;
+
+  /**
+   * Stripe webhook signing secret for customer events
+   */
+  STRIPE_WEBHOOK_SECRET_CUSTOMER?: string;
+
+  /**
+   * Stripe webhook signing secret for booking/checkout events
+   */
+  STRIPE_WEBHOOK_SECRET_BOOKING?: string;
+
+  /**
+   * Stripe webhook signing secret for dispute events
+   */
+  STRIPE_WEBHOOK_SECRET_DISPUTE?: string;
 };
 
 /**
