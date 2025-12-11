@@ -24,15 +24,13 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
   validateDatabaseConnection,
-  withNeonTestBranch,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConflictError, OrganizationNotFoundError } from '../../errors';
 import { OrganizationService } from '../organization-service';
 
-// Enable ephemeral Neon branch for this test file
-withNeonTestBranch();
+// Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
 
 describe('OrganizationService', () => {
   let db: Database;

@@ -35,7 +35,6 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
-  withNeonTestBranch,
 } from '@codex/test-utils';
 import {
   afterAll,
@@ -49,8 +48,7 @@ import {
 import { AccessDeniedError } from '../errors';
 import { ContentAccessService } from '../services/ContentAccessService';
 
-// Enable ephemeral Neon branch for this test file
-withNeonTestBranch();
+// Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
 
 describe('ContentAccessService Integration', () => {
   let db: Database;

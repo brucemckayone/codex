@@ -28,7 +28,6 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
-  withNeonTestBranch,
 } from '@codex/test-utils';
 import type { CreateContentInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
@@ -42,8 +41,7 @@ import {
 } from '../../errors';
 import { ContentService } from '../content-service';
 
-// Enable ephemeral Neon branch for this test file
-withNeonTestBranch();
+// Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
 
 describe('ContentService', () => {
   let db: Database;
