@@ -149,10 +149,7 @@ export const getPurchaseSchema = z.object({
 export const checkoutSessionMetadataSchema = z.object({
   customerId: userIdSchema,
   contentId: uuidSchema,
-  organizationId: uuidSchema
-    .nullable()
-    .default(null)
-    .transform((val) => (val === '' ? null : val)),
+  organizationId: uuidSchema.nullable().default(null),
 });
 
 // ============================================================================
