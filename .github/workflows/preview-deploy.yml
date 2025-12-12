@@ -1,6 +1,11 @@
 name: Preview Deployment
 
 on:
+  # TEMPORARY: Run on push for debugging
+  push:
+    branches:
+      - '**'
+      - '!main'
   # Run after tests complete successfully
   workflow_run:
     workflows: ['PR and Push CI (Neon ephemeral DB)']
@@ -23,12 +28,13 @@ permissions:
   deployments: write
 
 concurrency:
-  group: preview-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || inputs.pr_number }}
+  group: preview-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || inputs.pr_number || github.run_number }}
   cancel-in-progress: true # Cancel old deployments for same PR
 
 env:
-  # Handle workflow_run, pull_request, and workflow_dispatch triggers
-  PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || inputs.pr_number }}
+  # Handle workflow_run, pull_request, workflow_dispatch, and push triggers
+  # For push events without a PR, use a hash of the branch name
+  PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || inputs.pr_number || github.run_number }}
 
 jobs:
   # Cleanup preview when PR is closed
@@ -87,10 +93,11 @@ jobs:
     runs-on: ubuntu-latest
     # Use preview environment for environment-specific secrets and variables
     environment: preview
-    # TEMPORARY: Skip test requirement for debugging
+    # TEMPORARY: Run on push for debugging, also workflow_dispatch and workflow_run
     if: |
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
-      github.event.action != 'closed'
+      (github.event_name == 'workflow_run' && github.event.action != 'closed')
     outputs:
       web_url: ${{ steps.deploy-web.outputs.deployment-url }}
 
