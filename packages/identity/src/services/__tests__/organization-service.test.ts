@@ -377,15 +377,21 @@ describe('OrganizationService', () => {
     });
 
     it('should not return soft-deleted organizations', async () => {
-      const beforeDelete = await service.list();
-      const countBeforeDelete = beforeDelete.pagination.total;
+      // Get the organization before deletion
+      const orgBefore = await service.get(createdOrgIds[0]);
+      expect(orgBefore).toBeDefined();
+      expect(orgBefore?.deletedAt).toBeNull();
 
+      // Delete the organization
       await service.delete(createdOrgIds[0]);
 
-      const afterDelete = await service.list();
+      // Verify it's gone
+      const orgAfter = await service.get(createdOrgIds[0]);
+      expect(orgAfter).toBeNull();
 
-      // Should have one less organization after delete
-      expect(afterDelete.pagination.total).toBe(countBeforeDelete - 1);
+      // Verify it doesn't appear in list
+      const list = await service.list();
+      expect(list.items.some((org) => org.id === createdOrgIds[0])).toBe(false);
     });
   });
 
