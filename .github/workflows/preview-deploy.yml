@@ -303,6 +303,8 @@ jobs:
             deploy --name ecom-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |
             DATABASE_URL
@@ -342,6 +344,8 @@ jobs:
             deploy --name content-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --route "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |
             DATABASE_URL
@@ -375,6 +379,8 @@ jobs:
             deploy --name identity-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --route "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |
             DATABASE_URL
