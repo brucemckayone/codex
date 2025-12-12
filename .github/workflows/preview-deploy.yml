@@ -302,6 +302,7 @@ jobs:
           command: >
             deploy --name ecom-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
             --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |
             DATABASE_URL
@@ -340,6 +341,7 @@ jobs:
           command: >
             deploy --name content-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
             --route "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |
             DATABASE_URL
@@ -372,6 +374,7 @@ jobs:
           command: >
             deploy --name identity-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
             --route "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |
             DATABASE_URL
@@ -402,15 +405,16 @@ jobs:
           command: >
             deploy --name auth-worker-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
             --var API_URL:${{ env.API_URL }}
             --var WEB_APP_URL:${{ env.WEB_URL }}
             --route "auth-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
           secrets: |
             DATABASE_URL
-            SESSION_SECRET
+            BETTER_AUTH_SECRET
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          BETTER_AUTH_SECRET: ${{ secrets.SESSION_SECRET }}
 
       - name: Set Auth URL
         id: auth-url
@@ -424,6 +428,7 @@ jobs:
         run: pnpm build:web
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
+          DB_METHOD: NEON_BRANCH
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
@@ -438,6 +443,7 @@ jobs:
           command: >
             deploy --name codex-web-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
             --var AUTH_WORKER_URL:${{ env.AUTH_URL }}
             --var API_URL:${{ env.API_URL }}
             --route "codex-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
