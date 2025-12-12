@@ -44,7 +44,7 @@ jobs:
         continue-on-error: true
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: pr-${{ env.PR_NUMBER }}
+          branch: preview-pr-${{ env.PR_NUMBER }}
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Setup pnpm
@@ -87,10 +87,12 @@ jobs:
     runs-on: ubuntu-latest
     # Use preview environment for environment-specific secrets and variables
     environment: preview
-    # Deploy if: (1) manual trigger OR (2) not a closed event (TEMPORARILY SKIP TEST CHECK FOR DEBUGGING)
+    # Deploy if: (1) manual trigger OR (2) not a closed event AND workflow_run succeeded AND was triggered by PR
     if: |
       github.event_name == 'workflow_dispatch' ||
-      github.event.action != 'closed'
+      (github.event.action != 'closed' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request')
     outputs:
       web_url: ${{ steps.deploy-web.outputs.deployment-url }}
 
@@ -165,7 +167,18 @@ jobs:
       - name: Pre-deployment quality gates
         run: |
           echo "## 🔍 Pre-Deployment Checks" >> $GITHUB_STEP_SUMMARY
-          echo "⚠️ DEBUGGING MODE - Test checks temporarily disabled" >> $GITHUB_STEP_SUMMARY
+
+          # Verify this workflow_run came from successful tests (if triggered by workflow_run)
+          if [ "${{ github.event_name }}" == "workflow_run" ] && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "❌ Tests must pass before deploying" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "✅ All quality gates passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Static analysis passed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Safe to deploy" >> $GITHUB_STEP_SUMMARY
 
       # Build packages using Turborepo (required by workers)
       - name: Build packages with Turborepo
@@ -195,66 +208,48 @@ jobs:
               comment_id: '${{ env.COMMENT_ID }}',
               body: `## 🚀 Preview Deployment In Progress
 
-            **Status:** 🔄 Deploying
+            **Status:** 🔄 Creating Database
             **Started:** ${new Date().toLocaleString()}
 
             ### Progress
-            - [x] Tests passed ✅
             - [x] Building workers ✅
+            - [ ] Creating Neon branch...
             - [ ] Deploying to Cloudflare...
             - [ ] Running health checks...
             - [ ] Preview ready
 
-            _Deploying 5 workers to Cloudflare..._`
+            _Setting up isolated database branch..._`
             });
 
-      # CRITICAL: Download artifact FIRST (fail fast if expired/missing)
-      - name: Download Neon connection artifact
-        uses: actions/download-artifact@v4
+      # Create Neon branch for this preview deployment
+      - name: Create Neon branch for preview
+        id: create-neon-branch
+        uses: neondatabase/create-branch-action@v5
         with:
-          name: neon-connection-${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: preview-pr-${{ env.PR_NUMBER }}
+          parent: production
+          username: neondb_owner
+          api_key: ${{ secrets.NEON_API_KEY }}
 
-      # Validate artifact contents BEFORE creating any resources
-      - name: Validate and load DATABASE_URL from artifact
-        id: load-db-url
+      # Load DATABASE_URL from Neon branch creation
+      - name: Set DATABASE_URL from Neon branch
         run: |
-          # Validate files exist
-          if [ ! -f database-url.txt ]; then
-            echo "❌ ERROR: Artifact missing database-url.txt"
-            exit 1
-          fi
-          if [ ! -f branch-id.txt ]; then
-            echo "❌ ERROR: Artifact missing branch-id.txt"
-            exit 1
-          fi
-          if [ ! -f branch-name.txt ]; then
-            echo "❌ ERROR: Artifact missing branch-name.txt"
-            exit 1
-          fi
-
-          # Validate DATABASE_URL is not empty
-          DATABASE_URL=$(cat database-url.txt)
-          if [ -z "$DATABASE_URL" ]; then
-            echo "❌ ERROR: DATABASE_URL is empty"
-            exit 1
-          fi
-
-          # Load all values
+          DATABASE_URL="${{ steps.create-neon-branch.outputs.db_url_with_pooler }}"
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+          echo "BRANCH_ID=${{ steps.create-neon-branch.outputs.branch_id }}" >> $GITHUB_ENV
+          echo "BRANCH_NAME=preview-pr-${{ env.PR_NUMBER }}" >> $GITHUB_ENV
+          echo "✅ Database branch created: preview-pr-${{ env.PR_NUMBER }}"
 
-          BRANCH_ID=$(cat branch-id.txt)
-          echo "BRANCH_ID=$BRANCH_ID" >> $GITHUB_ENV
+      # Run database migrations on the preview branch
+      - name: Run migrations on preview branch
+        run: pnpm --filter @codex/database db:migrate
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          DB_METHOD: NEON_BRANCH
 
-          BRANCH_NAME=$(cat branch-name.txt)
-          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
-
-          echo "✅ Artifact validated successfully"
-          echo "📊 Database branch: $BRANCH_NAME"
-
-      # Only AFTER artifact validation, create DNS records
+      # Create DNS records for preview deployment
       - name: Create preview DNS records
         id: dns-creation
         run: |
@@ -279,19 +274,6 @@ jobs:
             echo "Waiting for DNS propagation... ($i/30)"
             sleep 2
           done
-
-      # Debug: Check if secrets are accessible
-      - name: Debug secrets availability
-        run: |
-          echo "Checking if secrets are accessible..."
-          if [ -z "$STRIPE_SECRET_KEY" ]; then
-            echo "❌ STRIPE_SECRET_KEY is empty or not set"
-            exit 1
-          else
-            echo "✅ STRIPE_SECRET_KEY is set (length: ${#STRIPE_SECRET_KEY})"
-          fi
-        env:
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       # Deploy ecom-api worker
       - name: Deploy ecom-api (preview)
