@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { urlSchema, uuidSchema } from '../primitives';
+import { urlSchema, userIdSchema, uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
 
 /**
@@ -136,23 +136,20 @@ export const getPurchaseSchema = z.object({
  * Used by webhook handler to extract purchase details from completed checkout.
  *
  * Security:
- * - customerId: UUID validation prevents injection
+ * - customerId: Better Auth user ID validation (alphanumeric string)
  * - contentId: UUID validation prevents injection
  * - organizationId: Optional UUID, transforms empty string to null
  * - amountCents: Already validated from Stripe API, but documented for clarity
  *
  * Validates:
- * - customerId: Codex user ID (UUID) who completed purchase
+ * - customerId: Codex user ID (Better Auth format) who completed purchase
  * - contentId: Content being purchased (UUID)
  * - organizationId: Optional creator's organization (UUID or null)
  */
 export const checkoutSessionMetadataSchema = z.object({
-  customerId: uuidSchema,
+  customerId: userIdSchema,
   contentId: uuidSchema,
-  organizationId: uuidSchema
-    .nullable()
-    .default(null)
-    .transform((val) => (val === '' ? null : val)),
+  organizationId: uuidSchema.nullable().default(null),
 });
 
 // ============================================================================

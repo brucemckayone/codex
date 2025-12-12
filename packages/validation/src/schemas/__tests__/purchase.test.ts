@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type CheckoutSessionMetadata,
   type CreateCheckoutInput,
+  checkoutSessionMetadataSchema,
   createCheckoutSchema,
   type GetPurchaseInput,
   getPurchaseSchema,
@@ -685,6 +687,315 @@ describe('Edge Cases', () => {
       // Zod .optional() allows undefined, not null
       // This test documents current behavior
       expect(() => purchaseQuerySchema.parse({ status: null })).toThrow();
+    });
+  });
+});
+
+describe('Checkout Session Metadata Schema', () => {
+  /**
+   * checkoutSessionMetadataSchema validates metadata attached to Stripe checkout sessions.
+   * Used by webhook handler to extract purchase details from completed checkout.
+   *
+   * Key validation:
+   * - customerId: Better Auth user ID (alphanumeric, NOT UUID)
+   * - contentId: UUID
+   * - organizationId: Optional UUID (transforms empty string to null)
+   */
+
+  describe('valid metadata', () => {
+    const validUuid = '123e4567-e89b-12d3-a456-426614174000';
+    const validBetterAuthId = 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b';
+
+    it('should validate complete metadata with all fields', () => {
+      const metadata: CheckoutSessionMetadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+        organizationId: validUuid,
+      };
+
+      const result = checkoutSessionMetadataSchema.parse(metadata);
+      expect(result.customerId).toBe(validBetterAuthId);
+      expect(result.contentId).toBe(validUuid);
+      expect(result.organizationId).toBe(validUuid);
+    });
+
+    it('should accept metadata without organizationId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+      };
+
+      const result = checkoutSessionMetadataSchema.parse(metadata);
+      expect(result.customerId).toBe(validBetterAuthId);
+      expect(result.contentId).toBe(validUuid);
+      expect(result.organizationId).toBeNull();
+    });
+
+    it('should accept null organizationId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+        organizationId: null,
+      };
+
+      const result = checkoutSessionMetadataSchema.parse(metadata);
+      expect(result.organizationId).toBeNull();
+    });
+
+    it('should reject empty string organizationId (use null or omit)', () => {
+      // Empty string is not a valid UUID - use null or omit the field
+      // Stripe metadata with missing organizationId should be null, not ''
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+        organizationId: '',
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid ID format'
+      );
+    });
+
+    it('should accept various Better Auth ID formats', () => {
+      const betterAuthIds = [
+        'abc123', // short
+        'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b', // typical 32-char
+        'a'.repeat(64), // max length
+        'MixedCaseId123456789012345678901', // mixed case
+      ];
+
+      betterAuthIds.forEach((id) => {
+        const metadata = {
+          customerId: id,
+          contentId: validUuid,
+        };
+
+        const result = checkoutSessionMetadataSchema.parse(metadata);
+        expect(result.customerId).toBe(id);
+      });
+    });
+  });
+
+  describe('customerId validation (Better Auth format)', () => {
+    const validUuid = '123e4567-e89b-12d3-a456-426614174000';
+
+    it('should reject UUID format for customerId', () => {
+      // Better Auth uses alphanumeric IDs, NOT UUIDs
+      // This is the critical fix in this PR
+      const metadata = {
+        customerId: validUuid, // UUID format - should be rejected
+        contentId: validUuid,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid user ID format'
+      );
+    });
+
+    it('should reject customerId with hyphens', () => {
+      const metadata = {
+        customerId: 'user-with-hyphens',
+        contentId: validUuid,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid user ID format'
+      );
+    });
+
+    it('should reject customerId with underscores', () => {
+      const metadata = {
+        customerId: 'user_with_underscores',
+        contentId: validUuid,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid user ID format'
+      );
+    });
+
+    it('should reject empty customerId', () => {
+      const metadata = {
+        customerId: '',
+        contentId: validUuid,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'User ID is required'
+      );
+    });
+
+    it('should reject customerId exceeding max length', () => {
+      const metadata = {
+        customerId: 'a'.repeat(65),
+        contentId: validUuid,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'User ID is too long'
+      );
+    });
+
+    it('should reject missing customerId', () => {
+      const metadata = {
+        contentId: validUuid,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow();
+    });
+  });
+
+  describe('contentId validation (UUID format)', () => {
+    const validBetterAuthId = 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b';
+
+    it('should accept valid UUID for contentId', () => {
+      const validUuids = [
+        '123e4567-e89b-12d3-a456-426614174000',
+        'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        '00000000-0000-0000-0000-000000000000',
+      ];
+
+      validUuids.forEach((uuid) => {
+        const metadata = {
+          customerId: validBetterAuthId,
+          contentId: uuid,
+        };
+
+        const result = checkoutSessionMetadataSchema.parse(metadata);
+        expect(result.contentId).toBe(uuid);
+      });
+    });
+
+    it('should reject non-UUID contentId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: 'not-a-uuid',
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid ID format'
+      );
+    });
+
+    it('should reject Better Auth ID format for contentId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: validBetterAuthId, // Using Better Auth ID instead of UUID
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid ID format'
+      );
+    });
+
+    it('should reject empty contentId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: '',
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid ID format'
+      );
+    });
+
+    it('should reject missing contentId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow();
+    });
+  });
+
+  describe('organizationId validation (optional UUID)', () => {
+    const validBetterAuthId = 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b';
+    const validUuid = '123e4567-e89b-12d3-a456-426614174000';
+
+    it('should accept valid UUID for organizationId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+        organizationId: validUuid,
+      };
+
+      const result = checkoutSessionMetadataSchema.parse(metadata);
+      expect(result.organizationId).toBe(validUuid);
+    });
+
+    it('should reject invalid UUID for organizationId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+        organizationId: 'not-a-uuid',
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid ID format'
+      );
+    });
+
+    it('should reject Better Auth ID format for organizationId', () => {
+      const metadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+        organizationId: validBetterAuthId,
+      };
+
+      expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow(
+        'Invalid ID format'
+      );
+    });
+  });
+
+  describe('security validation', () => {
+    const validUuid = '123e4567-e89b-12d3-a456-426614174000';
+
+    it('should reject SQL injection in customerId', () => {
+      const sqlInjectionAttempts = [
+        "'; DROP TABLE users; --",
+        '1 OR 1=1',
+        "' UNION SELECT * FROM purchases--",
+      ];
+
+      sqlInjectionAttempts.forEach((attempt) => {
+        const metadata = {
+          customerId: attempt,
+          contentId: validUuid,
+        };
+
+        expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow();
+      });
+    });
+
+    it('should reject XSS attempts in customerId', () => {
+      const xssAttempts = ['<script>alert(1)</script>', 'javascript:alert(1)'];
+
+      xssAttempts.forEach((attempt) => {
+        const metadata = {
+          customerId: attempt,
+          contentId: validUuid,
+        };
+
+        expect(() => checkoutSessionMetadataSchema.parse(metadata)).toThrow();
+      });
+    });
+  });
+
+  describe('type inference', () => {
+    it('should infer correct TypeScript type', () => {
+      const validBetterAuthId = 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b';
+      const validUuid = '123e4567-e89b-12d3-a456-426614174000';
+
+      const metadata: CheckoutSessionMetadata = {
+        customerId: validBetterAuthId,
+        contentId: validUuid,
+        organizationId: validUuid,
+      };
+
+      const parsed = checkoutSessionMetadataSchema.parse(metadata);
+      const _typeCheck: CheckoutSessionMetadata = parsed;
+      expect(parsed.customerId).toBe(validBetterAuthId);
     });
   });
 });

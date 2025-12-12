@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { sveltekit } from '@sveltejs/kit/vite';
-import { neonTesting } from 'neon-testing/vite';
 import { defineProject } from 'vitest/config';
 
 // Web app testing strategy:
@@ -8,15 +7,10 @@ import { defineProject } from 'vitest/config';
 // - Database integration tests: Use node environment (via @vitest-environment comment)
 // - E2E tests: Use Playwright with real environment
 //
-// COST OPTIMIZATION: Only use neon-testing in CI to avoid local branch creation costs
-// Note: neon-testing creates ephemeral branches that clone schema from parent branch
-const shouldUseNeonTesting = process.env.CI === 'true';
-const plugins = shouldUseNeonTesting
-  ? [sveltekit(), neonTesting()]
-  : [sveltekit()];
+// Database branches are created at workflow level in CI (not per-test-file)
 
 export default defineProject({
-  plugins,
+  plugins: [sveltekit()],
   test: {
     name: 'web',
     globals: true,

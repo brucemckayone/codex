@@ -91,6 +91,7 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
 
     // Spawn wrangler dev with --env test
     // Wrangler automatically loads .dev.vars file from worker directory
+    // --live-reload=false prevents file watching and hot reloads during tests
     const proc = spawn(
       'npx',
       [
@@ -102,6 +103,7 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
         worker.port.toString(),
         '--inspector-port',
         inspectorPort.toString(),
+        '--live-reload=false',
       ],
       {
         cwd: worker.cwd,
