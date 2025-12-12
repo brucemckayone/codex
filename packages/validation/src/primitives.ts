@@ -28,6 +28,28 @@ export const uuidSchema = z.string().uuid({
 });
 
 /**
+ * Better Auth User ID validation
+ * Better Auth generates user IDs as alphanumeric strings (base62-like format)
+ * e.g., 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b'
+ *
+ * Used for user IDs (users.id column is text, not uuid)
+ *
+ * @example
+ * ```typescript
+ * import { userIdSchema } from '@codex/validation/primitives';
+ *
+ * const userId = userIdSchema.parse('GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b');
+ * ```
+ */
+export const userIdSchema = z
+  .string()
+  .min(1, 'User ID is required')
+  .max(64, 'User ID is too long')
+  .regex(/^[a-zA-Z0-9]+$/, {
+    message: 'Invalid user ID format',
+  });
+
+/**
  * Slug validation
  * - Lowercase alphanumeric + hyphens only
  * - No leading/trailing hyphens

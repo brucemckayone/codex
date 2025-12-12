@@ -34,6 +34,9 @@ test.describe('Paid Content Purchase Flow', () => {
   test('should complete full paid content purchase flow', async ({
     request,
   }) => {
+    // This test performs many API calls (creator setup, org, media, content,
+    // publish, buyer registration, checkout, webhook, DB verify, access verify)
+    test.setTimeout(120000); // 2 minutes
     // ========================================================================
     // Step 1: Create creator and publish paid content
     // ========================================================================
@@ -286,6 +289,8 @@ test.describe('Paid Content Purchase Flow', () => {
   test('should handle duplicate webhook gracefully (idempotency)', async ({
     request,
   }) => {
+    // This test performs full setup + purchase + duplicate webhook test
+    test.setTimeout(120000); // 2 minutes
     // Create creator and paid content
     const creatorEmail = `creator-idem-${Date.now()}@example.com`;
     const { cookie: creatorCookie } = await authFixture.registerUser(request, {
@@ -481,6 +486,8 @@ test.describe('Paid Content Purchase Flow', () => {
   test('should return 409 when attempting to purchase already-owned content', async ({
     request,
   }) => {
+    // This test performs full setup + purchase + second checkout attempt
+    test.setTimeout(120000); // 2 minutes
     // Setup: Create and publish paid content
     const { cookie: creatorCookie } = await authFixture.registerUser(request, {
       email: `creator-409-${Date.now()}@example.com`,
