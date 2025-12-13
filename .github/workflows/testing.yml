@@ -145,8 +145,8 @@ jobs:
       - name: Generate Neon Branch Name
         id: branch-name
         run: |
-          # Single reusable branch name - cleanup job removes it before each run
-          echo "name=ci-unit-tests" >> $GITHUB_OUTPUT
+          # Unique branch per run to avoid race conditions with concurrent workflows
+          echo "name=ci-unit-tests-${{ github.run_id }}" >> $GITHUB_OUTPUT
 
       # Create Neon branch for unit tests
       - name: Create Neon branch for tests

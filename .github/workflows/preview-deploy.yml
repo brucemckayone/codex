@@ -44,7 +44,7 @@ jobs:
         continue-on-error: true
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: pr-${{ env.PR_NUMBER }}
+          branch: preview-pr-${{ env.PR_NUMBER }}
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Setup pnpm
@@ -85,10 +85,12 @@ jobs:
   deploy-preview:
     name: Deploy Preview Environment
     runs-on: ubuntu-latest
-    # Deploy if: (1) manual trigger OR (2) not a closed event AND workflow_run succeeded AND was triggered by PR
+    # Use preview environment for environment-specific secrets and variables
+    environment: preview
+    # Deploy if: (1) manual trigger OR (2) workflow_run succeeded and was triggered by PR
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event.action != 'closed' &&
+      (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request')
     outputs:
@@ -166,8 +168,11 @@ jobs:
         run: |
           echo "## 🔍 Pre-Deployment Checks" >> $GITHUB_STEP_SUMMARY
 
-          # Verify this workflow_run came from successful tests
-          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+          # Verify this workflow_run came from successful tests (if triggered by workflow_run)
+          EVENT_NAME="${{ github.event_name }}"
+          WORKFLOW_CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+
+          if [ "$EVENT_NAME" == "workflow_run" ] && [ "$WORKFLOW_CONCLUSION" != "success" ]; then
             echo "❌ Tests must pass before deploying" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
@@ -206,66 +211,48 @@ jobs:
               comment_id: '${{ env.COMMENT_ID }}',
               body: `## 🚀 Preview Deployment In Progress
 
-            **Status:** 🔄 Deploying
+            **Status:** 🔄 Creating Database
             **Started:** ${new Date().toLocaleString()}
 
             ### Progress
-            - [x] Tests passed ✅
             - [x] Building workers ✅
+            - [ ] Creating Neon branch...
             - [ ] Deploying to Cloudflare...
             - [ ] Running health checks...
             - [ ] Preview ready
 
-            _Deploying 5 workers to Cloudflare..._`
+            _Setting up isolated database branch..._`
             });
 
-      # CRITICAL: Download artifact FIRST (fail fast if expired/missing)
-      - name: Download Neon connection artifact
-        uses: actions/download-artifact@v4
+      # Create Neon branch for this preview deployment
+      - name: Create Neon branch for preview
+        id: create-neon-branch
+        uses: neondatabase/create-branch-action@v5
         with:
-          name: neon-connection-${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: preview-pr-${{ env.PR_NUMBER }}
+          parent: production
+          username: neondb_owner
+          api_key: ${{ secrets.NEON_API_KEY }}
 
-      # Validate artifact contents BEFORE creating any resources
-      - name: Validate and load DATABASE_URL from artifact
-        id: load-db-url
+      # Load DATABASE_URL from Neon branch creation
+      - name: Set DATABASE_URL from Neon branch
         run: |
-          # Validate files exist
-          if [ ! -f database-url.txt ]; then
-            echo "❌ ERROR: Artifact missing database-url.txt"
-            exit 1
-          fi
-          if [ ! -f branch-id.txt ]; then
-            echo "❌ ERROR: Artifact missing branch-id.txt"
-            exit 1
-          fi
-          if [ ! -f branch-name.txt ]; then
-            echo "❌ ERROR: Artifact missing branch-name.txt"
-            exit 1
-          fi
-
-          # Validate DATABASE_URL is not empty
-          DATABASE_URL=$(cat database-url.txt)
-          if [ -z "$DATABASE_URL" ]; then
-            echo "❌ ERROR: DATABASE_URL is empty"
-            exit 1
-          fi
-
-          # Load all values
+          DATABASE_URL="${{ steps.create-neon-branch.outputs.db_url_with_pooler }}"
           echo "::add-mask::$DATABASE_URL"
           echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
+          echo "BRANCH_ID=${{ steps.create-neon-branch.outputs.branch_id }}" >> $GITHUB_ENV
+          echo "BRANCH_NAME=preview-pr-${{ env.PR_NUMBER }}" >> $GITHUB_ENV
+          echo "✅ Database branch created: preview-pr-${{ env.PR_NUMBER }}"
 
-          BRANCH_ID=$(cat branch-id.txt)
-          echo "BRANCH_ID=$BRANCH_ID" >> $GITHUB_ENV
+      # Run database migrations on the preview branch
+      - name: Run migrations on preview branch
+        run: pnpm --filter @codex/database db:migrate
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          DB_METHOD: NEON_BRANCH
 
-          BRANCH_NAME=$(cat branch-name.txt)
-          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
-
-          echo "✅ Artifact validated successfully"
-          echo "📊 Database branch: $BRANCH_NAME"
-
-      # Only AFTER artifact validation, create DNS records
+      # Create DNS records for preview deployment
       - name: Create preview DNS records
         id: dns-creation
         run: |
@@ -303,25 +290,17 @@ jobs:
             deploy --name ecom-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
-          secrets: |
-            DATABASE_URL
-            STRIPE_SECRET_KEY
-            STRIPE_WEBHOOK_SECRET_PAYMENT
-            STRIPE_WEBHOOK_SECRET_SUBSCRIPTION
-            STRIPE_WEBHOOK_SECRET_CONNECT
-            STRIPE_WEBHOOK_SECRET_CUSTOMER
-            STRIPE_WEBHOOK_SECRET_BOOKING
-            STRIPE_WEBHOOK_SECRET_DISPUTE
+
+      # Upload secrets to the preview worker (wrangler-action uploads to wrong worker name)
+      - name: Upload ecom-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}","STRIPE_SECRET_KEY":"${{ secrets.STRIPE_SECRET_KEY }}","STRIPE_WEBHOOK_SECRET_PAYMENT":"${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}","STRIPE_WEBHOOK_SECRET_SUBSCRIPTION":"${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}","STRIPE_WEBHOOK_SECRET_CONNECT":"${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}","STRIPE_WEBHOOK_SECRET_CUSTOMER":"${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}","STRIPE_WEBHOOK_SECRET_BOOKING":"${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}","STRIPE_WEBHOOK_SECRET_DISPUTE":"${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}"}' | npx wrangler secret bulk --name ecom-api-preview-${{ env.PR_NUMBER }}
         env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
-          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_TEST_PAYMENT_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_TEST_SUBSCRIPTION_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_TEST_CONNECT_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_TEST_CUSTOMER_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_TEST_BOOKING_WEBHOOK_SECRET }}
-          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_TEST_DISPUTE_WEBHOOK_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set API URL
         id: api-url
@@ -342,19 +321,17 @@ jobs:
             deploy --name content-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
             --route "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
-          secrets: |
-            DATABASE_URL
-            R2_ACCOUNT_ID
-            R2_ACCESS_KEY_ID
-            R2_SECRET_ACCESS_KEY
-            R2_BUCKET_MEDIA
+
+      - name: Upload content-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}","R2_ACCOUNT_ID":"${{ secrets.R2_ACCOUNT_ID }}","R2_ACCESS_KEY_ID":"${{ secrets.R2_ACCESS_KEY_ID }}","R2_SECRET_ACCESS_KEY":"${{ secrets.R2_SECRET_ACCESS_KEY }}"}' | npx wrangler secret bulk --name content-api-preview-${{ env.PR_NUMBER }}
         env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_MEDIA: codex-media-test
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set Content API URL
         id: content-api-url
@@ -375,11 +352,16 @@ jobs:
             deploy --name identity-api-preview-${{ env.PR_NUMBER }}
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --route "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
-          secrets: |
-            DATABASE_URL
+
+      - name: Upload identity-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name identity-api-preview-${{ env.PR_NUMBER }}
         env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set Identity API URL
         id: identity-api-url
@@ -409,12 +391,13 @@ jobs:
             --var API_URL:${{ env.API_URL }}
             --var WEB_APP_URL:${{ env.WEB_URL }}
             --route "auth-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
-          secrets: |
-            DATABASE_URL
-            BETTER_AUTH_SECRET
+
+      - name: Upload auth-worker secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}","BETTER_AUTH_SECRET":"${{ secrets.BETTER_AUTH_SECRET }}","SESSION_SECRET":"${{ secrets.SESSION_SECRET }}"}' | npx wrangler secret bulk --name auth-worker-preview-${{ env.PR_NUMBER }}
         env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-          BETTER_AUTH_SECRET: ${{ secrets.SESSION_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set Auth URL
         id: auth-url
@@ -447,14 +430,17 @@ jobs:
             --var AUTH_WORKER_URL:${{ env.AUTH_URL }}
             --var API_URL:${{ env.API_URL }}
             --route "codex-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
-          secrets: |
-            DATABASE_URL
-        env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
 
-      # Comment final status on PR
+      - name: Upload web secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name codex-web-preview-${{ env.PR_NUMBER }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Comment final status on PR (only when triggered by workflow_run with a real PR)
       - name: Comment final status
-        if: always()
+        if: always() && github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0].number
         uses: actions/github-script@v7
         with:
           script: |
