@@ -169,7 +169,10 @@ jobs:
           echo "## 🔍 Pre-Deployment Checks" >> $GITHUB_STEP_SUMMARY
 
           # Verify this workflow_run came from successful tests (if triggered by workflow_run)
-          if [ "${{ github.event_name }}" == "workflow_run" ] && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+          EVENT_NAME="${{ github.event_name }}"
+          WORKFLOW_CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+
+          if [ "$EVENT_NAME" == "workflow_run" ] && [ "$WORKFLOW_CONCLUSION" != "success" ]; then
             echo "❌ Tests must pass before deploying" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
