@@ -101,12 +101,25 @@ function createMockCheckoutEvent(
   } as Stripe.Event;
 }
 
+/** Mock observability interface for tests */
+interface MockObs {
+  info: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+}
+
+/** Extended context type with test utilities */
+type MockContext = Context<StripeWebhookEnv> & {
+  _logs: { level: string; message: string; data?: unknown }[];
+  _obs: MockObs;
+};
+
 /**
  * Create a mock Hono context for webhook handler tests
  */
 function createMockContext(
   env: Partial<StripeWebhookEnv['Bindings']> = {}
-): Context<StripeWebhookEnv> {
+): MockContext {
   const logs: { level: string; message: string; data?: unknown }[] = [];
 
   const obs = {
@@ -135,10 +148,7 @@ function createMockContext(
     // Access logs for assertions
     _logs: logs,
     _obs: obs,
-  } as unknown as Context<StripeWebhookEnv> & {
-    _logs: typeof logs;
-    _obs: typeof obs;
-  };
+  } as unknown as MockContext;
 }
 
 describe('handleCheckoutCompleted', () => {

@@ -105,9 +105,8 @@ export async function handleCheckoutCompleted(
     // DATABASE_URL_LOCAL_PROXY is optional and set only in test environments
     const { db, cleanup } = createPerRequestDbClient({
       DATABASE_URL: c.env.DATABASE_URL,
-      DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)[
-        'DATABASE_URL_LOCAL_PROXY'
-      ],
+      DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)
+        .DATABASE_URL_LOCAL_PROXY,
       DB_METHOD: c.env.DB_METHOD,
     });
 
