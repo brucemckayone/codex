@@ -16,13 +16,24 @@ fi
 
 BASE_DOMAIN="revelations.studio"
 
-# Define the production subdomains (custom domains for Cloudflare Workers)
+# Define production subdomains that need CNAME DNS records created manually
+#
+# IMPORTANT: Workers with custom_domain: true in wrangler.jsonc should NOT be listed here!
+# Wrangler automatically creates "Worker" type DNS records for custom domains.
+# Adding them here creates CNAME records that conflict with Wrangler's deployment.
+#
+# Workers managed by Wrangler (DO NOT ADD HERE):
+# - auth.revelations.studio -> auth-worker-production (custom_domain: true)
+# - api.revelations.studio -> ecom-api-production (custom_domain: true)
+# - content-api.revelations.studio -> content-api-production (custom_domain: true)
+# - identity-api.revelations.studio -> identity-api-production (custom_domain: true)
+#
+# Add entries here for:
+# - Cloudflare Pages deployments (web app)
+# - Organization tenant subdomains (e.g., yogastudio.revelations.studio)
+# - External service subdomains
 declare -A PRODUCTION_DOMAINS=(
   ["codex"]="codex-web-production"
-  ["auth"]="auth-worker-production"
-  ["api"]="ecom-api-production"
-  ["content-api"]="content-api-production"
-  ["identity-api"]="identity-api-production"
 )
 
 # Cloudflare API endpoint
