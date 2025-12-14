@@ -122,7 +122,6 @@ jobs:
           echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
       # Deploy ecom-api to production
-      # Uses environment-specific secrets from production environment
       - name: Deploy ecom-api
         id: deploy-ecom
         uses: cloudflare/wrangler-action@v3
@@ -131,24 +130,14 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/ecom-api
           command: deploy --env production
-          secrets: |
-            DATABASE_URL
-            STRIPE_SECRET_KEY
-            STRIPE_WEBHOOK_SECRET_PAYMENT
-            STRIPE_WEBHOOK_SECRET_SUBSCRIPTION
-            STRIPE_WEBHOOK_SECRET_CONNECT
-            STRIPE_WEBHOOK_SECRET_CUSTOMER
-            STRIPE_WEBHOOK_SECRET_BOOKING
-            STRIPE_WEBHOOK_SECRET_DISPUTE
+
+      # Upload secrets to the production worker (wrangler-action secrets: uploads to wrong worker name)
+      - name: Upload ecom-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ secrets.DATABASE_URL }}","STRIPE_SECRET_KEY":"${{ secrets.STRIPE_SECRET_KEY }}","STRIPE_WEBHOOK_SECRET_PAYMENT":"${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}","STRIPE_WEBHOOK_SECRET_SUBSCRIPTION":"${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}","STRIPE_WEBHOOK_SECRET_CONNECT":"${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}","STRIPE_WEBHOOK_SECRET_CUSTOMER":"${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}","STRIPE_WEBHOOK_SECRET_BOOKING":"${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}","STRIPE_WEBHOOK_SECRET_DISPUTE":"${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}"}' | npx wrangler secret bulk --name ecom-api-production
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
-          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
-          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
-          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
-          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
-          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Verify API worker is healthy after deployment
       - name: Health check - API worker
@@ -187,7 +176,6 @@ jobs:
           exit 1
 
       # Deploy content-api to production
-      # Uses environment-specific R2_BUCKET_MEDIA from production environment variables
       - name: Deploy content-api
         id: deploy-content-api
         uses: cloudflare/wrangler-action@v3
@@ -196,18 +184,13 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/content-api
           command: deploy --env production
-          secrets: |
-            DATABASE_URL
-            R2_ACCOUNT_ID
-            R2_ACCESS_KEY_ID
-            R2_SECRET_ACCESS_KEY
-            R2_BUCKET_MEDIA
+
+      - name: Upload content-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ secrets.DATABASE_URL }}","R2_ACCOUNT_ID":"${{ secrets.R2_ACCOUNT_ID }}","R2_ACCESS_KEY_ID":"${{ secrets.R2_ACCESS_KEY_ID }}","R2_SECRET_ACCESS_KEY":"${{ secrets.R2_SECRET_ACCESS_KEY }}"}' | npx wrangler secret bulk --name content-api-production
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Verify content-api worker is healthy after deployment
       - name: Health check - Content API worker
@@ -253,10 +236,13 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/identity-api
           command: deploy --env production
-          secrets: |
-            DATABASE_URL
+
+      - name: Upload identity-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ secrets.DATABASE_URL }}"}' | npx wrangler secret bulk --name identity-api-production
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Verify identity-api worker is healthy after deployment
       - name: Health check - Identity API worker
@@ -294,7 +280,6 @@ jobs:
           exit 1
 
       # Deploy auth-worker to production
-      # Uses environment-specific secrets from production environment
       - name: Deploy auth-worker
         id: deploy-auth
         uses: cloudflare/wrangler-action@v3
@@ -303,14 +288,13 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/auth
           command: deploy --env production
-          secrets: |
-            DATABASE_URL
-            SESSION_SECRET
-            BETTER_AUTH_SECRET
+
+      - name: Upload auth-worker secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ secrets.DATABASE_URL }}","SESSION_SECRET":"${{ secrets.SESSION_SECRET }}","BETTER_AUTH_SECRET":"${{ secrets.BETTER_AUTH_SECRET }}"}' | npx wrangler secret bulk --name auth-worker-production
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Verify auth worker is healthy after deployment
       - name: Health check - Auth worker
@@ -367,10 +351,13 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/web
           command: deploy --env production
-          secrets: |
-            DATABASE_URL
+
+      - name: Upload web secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ secrets.DATABASE_URL }}"}' | npx wrangler secret bulk --name codex-web-production
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Verify web app is healthy after deployment
       - name: Health check - Web app
