@@ -70,6 +70,18 @@
         "WEB_APP_URL": "https://codex.revelations.studio",
         "API_URL": "https://api.revelations.studio"
       },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production"
+        }
+      ],
       "routes": [
         {
           "pattern": "content-api.revelations.studio/*",
