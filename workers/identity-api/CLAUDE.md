@@ -1,123 +1,352 @@
-# Identity API Worker
+# Identity API Worker - Complete Documentation
 
 ## Overview
 
-Organization and identity management API served via Cloudflare Workers. Provides RESTful endpoints for creating, reading, updating, and deleting organizations with slug-based lookup, availability checking, and advanced filtering/pagination. Supports multi-tenant scoping and secure slug uniqueness validation.
+The Identity API Worker provides RESTful endpoints for organization management in the Codex platform. It handles organization CRUD operations, slug-based lookups, availability checking, and advanced filtering with pagination. All endpoints require authentication via session tokens and enforce consistent rate limiting and input validation.
 
-Deployed to: Production (identity-api.revelations.studio), Staging (identity-api-staging.revelations.studio)
+**Deployment Target**: `identity-api.revelations.studio` (production), local port 42071 (development)
 
-Dev Port: 42071 (local development)
+**Primary Business Responsibility**: Multi-tenant organization identity management and scoping
+
+**Key Features**:
+- Full organization CRUD lifecycle (create, read, update, delete via soft deletes)
+- Slug-based lookups with uniqueness guarantee
+- Real-time slug availability checking (useful for frontend validation)
+- Advanced listing with full-text search, sorting, and pagination
+- Transaction safety for atomic multi-step operations
+- Consistent error handling with domain-specific error codes
+
+**Authentication Model**: All endpoints protected by session-based authentication (except `/health`). Session validation via `@codex/security` middleware verifies user identity before route execution.
+
+**Rate Limiting**: Stricter limits on destructive operations (DELETE), standard API limits on read/write operations to prevent abuse.
+
+---
 
 ## Architecture
 
-### Request Flow
+### Request Flow Diagram
 
 ```
-Request → Security Headers → CORS → Request Tracking → Route Handler
+Request → Security Middleware Chain
    ↓
-Rate Limiting (via KV) → withPolicy() → createAuthenticatedHandler()
+1. Request Tracking (UUID request ID, IP address, user agent)
+2. Security Headers (CSP, X-Frame-Options, HSTS, etc.)
+3. CORS Handling (same-origin + configured origins)
+4. Global Error Handler (catches unhandled exceptions)
+5. Route-level Authentication (withPolicy)
    ↓
-Validation (Zod) → OrganizationService → Database (Drizzle ORM)
+Route Handler (createAuthenticatedHandler)
+   ├─ Zod Input Validation (body, params, query)
+   ├─ OrganizationService Instantiation
+   └─ Service Method Call with validated input
    ↓
-Response Formatting → Error Handling → JSON Response
+Business Logic Layer
+   ├─ OrganizationService (extends BaseService)
+   ├─ Database Query via Drizzle ORM
+   └─ Error handling with custom error classes
+   ↓
+Response Formatting
+   ├─ Success: Standardized response envelope
+   ├─ Error: Sanitized error response
+   └─ Status Code mapping
+   ↓
+HTTP Response → Client
 ```
 
-### Route Files
+### Worker Setup (index.ts)
 
-**File**: `/src/routes/organizations.ts`
-- Organization management endpoints
-- 7 endpoints for CRUD, slug operations, listing, availability checks
-- Route-level security policies via `withPolicy()`
-- Request validation with Zod schemas
-- Response types from `@codex/shared-types`
+The worker uses `createWorker()` from `@codex/worker-utils` for standardized configuration:
 
-### Middleware Chain (from createWorker)
+**Enabled Features**:
+- `enableRequestTracking`: UUID request IDs for distributed tracing
+- `enableLogging`: Structured logging with request context
+- `enableCors`: CORS headers for authenticated requests
+- `enableSecurityHeaders`: CSP, X-Frame-Options, HSTS, etc.
+- `enableGlobalAuth: false`: Uses route-level `withPolicy()` instead of global middleware
 
-1. **Security Headers**: CSP, XFO, X-Content-Type-Options added automatically
-2. **CORS**: Enabled (requests from same-origin and configured origins)
-3. **Request Tracking**: UUID request IDs, IP tracking, user agent logging
-4. **Global Error Handler**: Catches unhandled errors, returns sanitized responses
-5. **Route-level Auth**: Each route declares auth requirements via `withPolicy()`
-6. **Rate Limiting**: Applied per route via KV namespace, rate limits configurable per endpoint
+**Health Checks**:
+- `standardDatabaseCheck`: Validates Neon PostgreSQL connectivity
+- `createKvCheck(['RATE_LIMIT_KV'])`: Validates Cloudflare KV namespace
 
-### Dependency Injection
+**Middleware Chain** (applied in order):
+1. **Request Tracking**: Assigns UUID `requestId`, captures IP address, user agent
+2. **Error Handler**: Global catch-all for unhandled errors
+3. **CORS**: Allows authenticated requests from configured origins
+4. **Security Headers**: Content-Security-Policy, X-Frame-Options, Strict-Transport-Security
+5. **Health Check Route**: `GET /health` returns service status
+6. **Rate Limiting**: Per-endpoint KV-backed rate limiting with user ID scoping
+7. **Route Handler**: Service instantiation and business logic
 
-OrganizationService instantiated per request with:
-- `db: dbHttp` (Drizzle ORM client for Neon PostgreSQL)
-- `environment: 'production' | 'staging' | 'development'` (from ENVIRONMENT var)
+### Route Organization (routes/organizations.ts)
 
-Service instance used for all database operations within handler scope.
+Single route file handles all organization endpoints:
 
-## Public Endpoints
+**Route Structure**:
+- `POST   /api/organizations`           - Create (authenticated, API rate limit)
+- `GET    /api/organizations/:id`       - Get by ID (authenticated, API rate limit)
+- `GET    /api/organizations/slug/:slug` - Get by slug (authenticated, API rate limit)
+- `PATCH  /api/organizations/:id`       - Update (authenticated, API rate limit)
+- `GET    /api/organizations`           - List with filters (authenticated, API rate limit)
+- `DELETE /api/organizations/:id`       - Soft delete (authenticated, stricter rate limit)
+- `GET    /api/organizations/check-slug/:slug` - Check availability (authenticated, API rate limit)
+
+**Security Policies**:
+- Most endpoints: `withPolicy(POLICY_PRESETS.authenticated())` - Standard API rate limit (100 req/min per user)
+- DELETE endpoint: `withPolicy({ auth: 'required', rateLimit: 'auth' })` - Stricter rate limit (5 req/15min per user)
+
+### Middleware Chain Details
+
+**createWorker() Configuration**:
+```typescript
+const app = createWorker({
+  serviceName: 'identity-api',          // Service identifier for logs
+  version: '1.0.0',                      // API version
+  enableRequestTracking: true,           // UUID request IDs
+  enableLogging: true,                   // Structured logging
+  enableCors: true,                      // CORS for authenticated requests
+  enableSecurityHeaders: true,           // CSP, XFO, HSTS headers
+  enableGlobalAuth: false,               // Route-level auth via withPolicy()
+  healthCheck: {
+    checkDatabase: standardDatabaseCheck,
+    checkKV: createKvCheck(['RATE_LIMIT_KV']),
+  },
+});
+```
+
+**Environment Validation Middleware**:
+```typescript
+app.use('*', createEnvValidationMiddleware());
+```
+Validates required environment variables once per worker instance. Fails fast (500 error) if critical variables missing (DATABASE_URL, RATE_LIMIT_KV).
+
+### Dependency Injection Pattern
+
+OrganizationService instantiated per-request with dependencies:
+
+```typescript
+const service = new OrganizationService({
+  db: dbHttp,                                    // Drizzle ORM HTTP client
+  environment: ctx.env.ENVIRONMENT || 'development', // Deployment environment
+});
+```
+
+Service instance scoped to request lifetime. New instance created per request ensures clean state and thread-safe database access.
+
+---
+
+## Public API Reference
+
+### Endpoint Listing
+
+| Method | Path | Purpose | Auth | Rate Limit | Status |
+|--------|------|---------|------|-----------|--------|
+| POST | `/api/organizations` | Create organization | Required | 100/min | 201 |
+| GET | `/api/organizations/:id` | Get by ID | Required | 100/min | 200 |
+| GET | `/api/organizations/slug/:slug` | Get by slug | Required | 100/min | 200 |
+| PATCH | `/api/organizations/:id` | Update org | Required | 100/min | 200 |
+| GET | `/api/organizations` | List with filters | Required | 100/min | 200 |
+| DELETE | `/api/organizations/:id` | Soft delete | Required | 5/15min | 200 |
+| GET | `/api/organizations/check-slug/:slug` | Check availability | Required | 100/min | 200 |
+| GET | `/health` | Health check | None | None | 200/503 |
+
+---
+
+## Detailed Endpoint Specifications
 
 ### POST /api/organizations
 
-Create new organization.
+**Create a new organization with unique slug validation.**
 
-**Authentication**: Required (session token)
+**Authentication**: Required (HTTP-only session cookie)
 
-**Rate Limit**: API preset (100 req/min per user)
+**Rate Limit**: API preset (100 requests/min per authenticated user)
+
+**Request Headers**:
+```
+Content-Type: application/json
+Cookie: codex-session=<session-token>
+```
 
 **Request Body**:
 ```json
 {
   "name": "string (1-255 chars, required)",
-  "slug": "string (1-255 chars, lowercase alphanumeric + hyphen, unique, required)",
+  "slug": "string (1-255 chars, lowercase alphanumeric+hyphen, unique, required)",
   "description": "string (0-5000 chars, optional)",
-  "logoUrl": "string (valid URL, optional)",
-  "websiteUrl": "string (valid URL, optional)"
+  "logoUrl": "string (valid URL format, optional)",
+  "websiteUrl": "string (valid URL format, optional)"
 }
 ```
+
+**Validation Rules**:
+- `name`: Required, trimmed, 1-255 characters (validates non-empty after trim)
+- `slug`: Required, lowercase, alphanumeric + hyphen only, globally unique, 1-255 chars
+- `description`: Optional, max 5000 characters, trimmed
+- `logoUrl`: Optional, validated as absolute HTTP/HTTPS URL
+- `websiteUrl`: Optional, validated as absolute HTTP/HTTPS URL
 
 **Response (201 Created)**:
 ```json
 {
   "data": {
-    "id": "uuid",
-    "name": "My Organization",
-    "slug": "my-organization",
-    "description": "Organization description",
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Acme Corporation",
+    "slug": "acme-corp",
+    "description": "Leading widget manufacturer",
     "logoUrl": "https://example.com/logo.png",
-    "websiteUrl": "https://example.com",
-    "createdAt": "2025-01-23T10:30:00Z",
-    "updatedAt": "2025-01-23T10:30:00Z",
+    "websiteUrl": "https://acme.example.com",
+    "createdAt": "2025-01-23T10:30:00.000Z",
+    "updatedAt": "2025-01-23T10:30:00.000Z",
     "deletedAt": null
   }
 }
 ```
 
 **Error Responses**:
-- `400 Bad Request`: Invalid request body (name too long, invalid URL format, etc.)
-- `401 Unauthorized`: No valid session token
-- `409 Conflict`: Slug already exists (ConflictError)
-- `422 Unprocessable Entity`: Validation failed (Zod error)
-- `503 Service Unavailable`: Database error
 
-**Example**:
+| Status | Code | Message | Cause |
+|--------|------|---------|-------|
+| 400 | INVALID_REQUEST | Invalid JSON or missing required fields | Malformed request body |
+| 400 | VALIDATION_ERROR | Field validation failed | Name/slug too long, invalid URL format |
+| 401 | UNAUTHORIZED | No valid session token | Missing/expired session |
+| 409 | CONFLICT | Organization slug already exists | Duplicate slug (unique constraint) |
+| 422 | VALIDATION_ERROR | Business rule violation | Zod schema validation failure |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | Connection pooling exhausted |
+
+**Example Request**:
 ```bash
 curl -X POST http://localhost:42071/api/organizations \
   -H "Content-Type: application/json" \
-  -H "Cookie: session=..." \
+  -H "Cookie: codex-session=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
   -d '{
     "name": "Acme Corp",
     "slug": "acme-corp",
-    "description": "Leading widget manufacturer",
+    "description": "Widget manufacturer",
     "websiteUrl": "https://acme.example.com"
   }'
 ```
+
+**Example Response**:
+```json
+{
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Acme Corp",
+    "slug": "acme-corp",
+    "description": "Widget manufacturer",
+    "logoUrl": null,
+    "websiteUrl": "https://acme.example.com",
+    "createdAt": "2025-01-23T10:30:00.000Z",
+    "updatedAt": "2025-01-23T10:30:00.000Z",
+    "deletedAt": null
+  }
+}
+```
+
+---
+
+### GET /api/organizations/:id
+
+**Retrieve organization by UUID identifier.**
+
+**Authentication**: Required (HTTP-only session cookie)
+
+**Rate Limit**: API preset (100 requests/min per user)
+
+**Path Parameters**:
+- `id` (UUID string): Organization ID to retrieve. Must be valid UUID v4 format.
+
+**Response (200 OK)**:
+```json
+{
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Acme Corporation",
+    "slug": "acme-corp",
+    "description": "Leading widget manufacturer",
+    "logoUrl": "https://example.com/logo.png",
+    "websiteUrl": "https://acme.example.com",
+    "createdAt": "2025-01-23T10:30:00.000Z",
+    "updatedAt": "2025-01-23T10:30:00.000Z",
+    "deletedAt": null
+  }
+}
+```
+
+**Error Responses**:
+
+| Status | Code | Message | Cause |
+|--------|------|---------|-------|
+| 400 | VALIDATION_ERROR | Invalid UUID format | Malformed path parameter |
+| 401 | UNAUTHORIZED | No valid session | Missing/expired session |
+| 404 | NOT_FOUND | Organization not found | ID doesn't exist or soft-deleted |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | Connection issue |
+
+**Example Request**:
+```bash
+curl http://localhost:42071/api/organizations/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Cookie: codex-session=..."
+```
+
+---
+
+### GET /api/organizations/slug/:slug
+
+**Retrieve organization by slug (case-insensitive).**
+
+**Authentication**: Required (HTTP-only session cookie)
+
+**Rate Limit**: API preset (100 requests/min per user)
+
+**Path Parameters**:
+- `slug` (string, 1-255 chars): Organization slug. Case-insensitive for lookup.
+
+**Response (200 OK)**:
+```json
+{
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Acme Corporation",
+    "slug": "acme-corp",
+    "description": "Leading widget manufacturer",
+    "logoUrl": "https://example.com/logo.png",
+    "websiteUrl": "https://acme.example.com",
+    "createdAt": "2025-01-23T10:30:00.000Z",
+    "updatedAt": "2025-01-23T10:30:00.000Z",
+    "deletedAt": null
+  }
+}
+```
+
+**Error Responses**:
+
+| Status | Code | Message | Cause |
+|--------|------|---------|-------|
+| 400 | VALIDATION_ERROR | Invalid slug format | Malformed path parameter |
+| 401 | UNAUTHORIZED | No valid session | Missing/expired session |
+| 404 | NOT_FOUND | Organization not found | Slug doesn't exist or soft-deleted |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | Connection issue |
+
+**Example Request**:
+```bash
+curl http://localhost:42071/api/organizations/slug/acme-corp \
+  -H "Cookie: codex-session=..."
+```
+
+**Use Case**: Frontend widgets for organization profile pages (load by slug from URL).
 
 ---
 
 ### GET /api/organizations/check-slug/:slug
 
-Check if slug is available for new organization creation.
+**Check if slug is available for new organization creation. Real-time validation endpoint.**
 
-**Authentication**: Required (session token)
+**Authentication**: Required (HTTP-only session cookie)
 
-**Rate Limit**: API preset (100 req/min per user)
+**Rate Limit**: API preset (100 requests/min per user)
 
 **Path Parameters**:
-- `slug`: Organization slug to check (1-255 chars)
+- `slug` (string, 1-255 chars): Slug to check availability
 
 **Response (200 OK)**:
 ```json
@@ -126,110 +355,48 @@ Check if slug is available for new organization creation.
 }
 ```
 
-**Error Responses**:
-- `400 Bad Request`: Invalid slug format
-- `401 Unauthorized`: No valid session token
-
-**Example**:
-```bash
-curl http://localhost:42071/api/organizations/check-slug/my-org \
-  -H "Cookie: session=..."
-```
-
----
-
-### GET /api/organizations/slug/:slug
-
-Get organization by slug.
-
-**Authentication**: Required (session token)
-
-**Rate Limit**: API preset (100 req/min per user)
-
-**Path Parameters**:
-- `slug`: Organization slug (1-255 chars)
-
-**Response (200 OK)**:
+**Response (200 OK - Taken)**:
 ```json
 {
-  "data": {
-    "id": "uuid",
-    "name": "My Organization",
-    "slug": "my-organization",
-    "description": "Organization description",
-    "logoUrl": "https://example.com/logo.png",
-    "websiteUrl": "https://example.com",
-    "createdAt": "2025-01-23T10:30:00Z",
-    "updatedAt": "2025-01-23T10:30:00Z",
-    "deletedAt": null
-  }
+  "available": false
 }
 ```
 
 **Error Responses**:
-- `400 Bad Request`: Invalid slug format
-- `401 Unauthorized`: No valid session token
-- `404 Not Found`: Organization not found or deleted
 
-**Example**:
+| Status | Code | Message | Cause |
+|--------|------|---------|-------|
+| 400 | VALIDATION_ERROR | Invalid slug format | Doesn't match slug pattern |
+| 401 | UNAUTHORIZED | No valid session | Missing/expired session |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | Connection issue |
+
+**Example Request**:
 ```bash
-curl http://localhost:42071/api/organizations/slug/my-organization \
-  -H "Cookie: session=..."
+curl http://localhost:42071/api/organizations/check-slug/my-new-org \
+  -H "Cookie: codex-session=..."
 ```
 
----
-
-### GET /api/organizations/:id
-
-Get organization by ID.
-
-**Authentication**: Required (session token)
-
-**Rate Limit**: API preset (100 req/min per user)
-
-**Path Parameters**:
-- `id`: Organization UUID
-
-**Response (200 OK)**:
+**Response**:
 ```json
 {
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "My Organization",
-    "slug": "my-organization",
-    "description": "Organization description",
-    "logoUrl": "https://example.com/logo.png",
-    "websiteUrl": "https://example.com",
-    "createdAt": "2025-01-23T10:30:00Z",
-    "updatedAt": "2025-01-23T10:30:00Z",
-    "deletedAt": null
-  }
+  "available": true
 }
 ```
 
-**Error Responses**:
-- `400 Bad Request`: Invalid UUID format
-- `401 Unauthorized`: No valid session token
-- `404 Not Found`: Organization not found or deleted
-
-**Example**:
-```bash
-curl http://localhost:42071/api/organizations/550e8400-e29b-41d4-a716-446655440000 \
-  -H "Cookie: session=..."
-```
+**Use Case**: Frontend slug input field validation (show "available" / "taken" in real-time).
 
 ---
 
 ### PATCH /api/organizations/:id
 
-Update organization (partial update, all fields optional).
+**Update organization with partial data. All fields optional.**
 
-**Authentication**: Required (session token)
+**Authentication**: Required (HTTP-only session cookie)
 
-**Rate Limit**: API preset (100 req/min per user)
+**Rate Limit**: API preset (100 requests/min per user)
 
 **Path Parameters**:
-- `id`: Organization UUID
+- `id` (UUID string): Organization ID to update
 
 **Request Body** (all fields optional):
 ```json
@@ -247,33 +414,37 @@ Update organization (partial update, all fields optional).
 {
   "data": {
     "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "Updated Organization",
-    "slug": "updated-org",
+    "name": "Updated Acme",
+    "slug": "updated-acme",
     "description": "Updated description",
     "logoUrl": "https://example.com/new-logo.png",
-    "websiteUrl": "https://updated.example.com",
-    "createdAt": "2025-01-23T10:30:00Z",
-    "updatedAt": "2025-01-23T11:45:00Z",
+    "websiteUrl": "https://updated.acme.example.com",
+    "createdAt": "2025-01-23T10:30:00.000Z",
+    "updatedAt": "2025-01-23T11:45:00.000Z",
     "deletedAt": null
   }
 }
 ```
 
 **Error Responses**:
-- `400 Bad Request`: Invalid request body
-- `401 Unauthorized`: No valid session token
-- `404 Not Found`: Organization not found or deleted
-- `409 Conflict`: New slug already exists
-- `422 Unprocessable Entity`: Validation failed
 
-**Example**:
+| Status | Code | Message | Cause |
+|--------|------|---------|-------|
+| 400 | VALIDATION_ERROR | Field validation failed | Name too long, invalid URL, etc. |
+| 401 | UNAUTHORIZED | No valid session | Missing/expired session |
+| 404 | NOT_FOUND | Organization not found | ID doesn't exist |
+| 409 | CONFLICT | Slug already in use | New slug conflicts with existing org |
+| 422 | VALIDATION_ERROR | Business rule violation | Zod schema failure |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | Connection issue |
+
+**Example Request**:
 ```bash
 curl -X PATCH http://localhost:42071/api/organizations/550e8400-e29b-41d4-a716-446655440000 \
   -H "Content-Type: application/json" \
-  -H "Cookie: session=..." \
+  -H "Cookie: codex-session=..." \
   -d '{
-    "name": "New Name",
-    "description": "Updated description"
+    "description": "New description",
+    "logoUrl": "https://example.com/new-logo.png"
   }'
 ```
 
@@ -281,18 +452,18 @@ curl -X PATCH http://localhost:42071/api/organizations/550e8400-e29b-41d4-a716-4
 
 ### GET /api/organizations
 
-List organizations with filtering and pagination.
+**List organizations with full-text search, filtering, sorting, and pagination.**
 
-**Authentication**: Required (session token)
+**Authentication**: Required (HTTP-only session cookie)
 
-**Rate Limit**: API preset (100 req/min per user)
+**Rate Limit**: API preset (100 requests/min per user)
 
 **Query Parameters**:
-- `search`: Text search in name and description (optional, max 255 chars)
-- `sortBy`: Sort field - `createdAt` or `name` (default: `createdAt`)
-- `sortOrder`: Sort direction - `asc` or `desc` (default: `desc`)
-- `page`: Page number, 1-indexed (default: 1)
-- `limit`: Results per page, 1-100 (default: 20)
+- `search` (string, max 255, optional): Text search in organization name and description (case-insensitive LIKE). If provided, filters results.
+- `sortBy` (enum: 'createdAt' | 'name', default: 'createdAt'): Column to sort results by
+- `sortOrder` (enum: 'asc' | 'desc', default: 'desc'): Sort direction
+- `page` (integer, min 1, default 1): Page number (1-indexed)
+- `limit` (integer, min 1, max 100, default 20): Results per page
 
 **Response (200 OK)**:
 ```json
@@ -300,24 +471,24 @@ List organizations with filtering and pagination.
   "items": [
     {
       "id": "550e8400-e29b-41d4-a716-446655440000",
-      "name": "First Organization",
-      "slug": "first-org",
-      "description": "Description",
+      "name": "Acme Corporation",
+      "slug": "acme-corp",
+      "description": "Leading widget manufacturer",
       "logoUrl": "https://example.com/logo.png",
-      "websiteUrl": "https://example.com",
-      "createdAt": "2025-01-23T10:30:00Z",
-      "updatedAt": "2025-01-23T10:30:00Z",
+      "websiteUrl": "https://acme.example.com",
+      "createdAt": "2025-01-23T10:30:00.000Z",
+      "updatedAt": "2025-01-23T10:30:00.000Z",
       "deletedAt": null
     },
     {
       "id": "660e8400-e29b-41d4-a716-446655440001",
-      "name": "Second Organization",
-      "slug": "second-org",
-      "description": null,
+      "name": "TechStart Inc",
+      "slug": "techstart-inc",
+      "description": "Early-stage tech startup",
       "logoUrl": null,
-      "websiteUrl": null,
-      "createdAt": "2025-01-22T15:20:00Z",
-      "updatedAt": "2025-01-22T15:20:00Z",
+      "websiteUrl": "https://techstart.example.com",
+      "createdAt": "2025-01-22T15:20:00.000Z",
+      "updatedAt": "2025-01-22T15:20:00.000Z",
       "deletedAt": null
     }
   ],
@@ -331,28 +502,46 @@ List organizations with filtering and pagination.
 ```
 
 **Error Responses**:
-- `400 Bad Request`: Invalid query parameters
-- `401 Unauthorized`: No valid session token
-- `422 Unprocessable Entity`: Validation failed
 
-**Example**:
+| Status | Code | Message | Cause |
+|--------|------|---------|-------|
+| 400 | VALIDATION_ERROR | Invalid query parameters | Page < 1, limit > 100, etc. |
+| 401 | UNAUTHORIZED | No valid session | Missing/expired session |
+| 422 | VALIDATION_ERROR | Schema validation failure | Invalid sortBy value |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | Connection issue |
+
+**Pagination Behavior**:
+- `total`: Total number of organizations matching filters
+- `totalPages`: Calculated as `ceil(total / limit)`
+- Returns empty items array if page > totalPages
+- Default 20 results per page
+
+**Example Requests**:
+
+Basic list (first 20, newest first):
 ```bash
-curl "http://localhost:42071/api/organizations?search=example&sortBy=name&sortOrder=asc&page=1&limit=10" \
-  -H "Cookie: session=..."
+curl "http://localhost:42071/api/organizations" \
+  -H "Cookie: codex-session=..."
+```
+
+Search with pagination:
+```bash
+curl "http://localhost:42071/api/organizations?search=acme&page=1&limit=10&sortBy=name&sortOrder=asc" \
+  -H "Cookie: codex-session=..."
 ```
 
 ---
 
 ### DELETE /api/organizations/:id
 
-Soft delete organization (sets deletedAt timestamp, preserves data).
+**Soft-delete organization by setting deletedAt timestamp. Data preserved in database.**
 
-**Authentication**: Required (session token)
+**Authentication**: Required (HTTP-only session cookie)
 
-**Rate Limit**: Auth preset - stricter (5 req/15min per user) due to destructive operation
+**Rate Limit**: Auth preset - stricter (5 requests/15 minutes per user) due to destructive operation
 
 **Path Parameters**:
-- `id`: Organization UUID
+- `id` (UUID string): Organization ID to delete
 
 **Response (200 OK)**:
 ```json
@@ -363,24 +552,34 @@ Soft delete organization (sets deletedAt timestamp, preserves data).
 ```
 
 **Error Responses**:
-- `400 Bad Request`: Invalid UUID format
-- `401 Unauthorized`: No valid session token
-- `404 Not Found`: Organization not found or already deleted
-- `429 Too Many Requests`: Rate limit exceeded (stricter limit for deletions)
 
-**Example**:
+| Status | Code | Message | Cause |
+|--------|------|---------|-------|
+| 400 | VALIDATION_ERROR | Invalid UUID format | Malformed path parameter |
+| 401 | UNAUTHORIZED | No valid session | Missing/expired session |
+| 404 | NOT_FOUND | Organization not found | ID doesn't exist |
+| 429 | TOO_MANY_REQUESTS | Rate limit exceeded | Stricter rate limit (5/15min) |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | Connection issue |
+
+**Important Notes**:
+- Soft delete: Organization record remains in database with `deletedAt` set
+- Related content: Media items and content owned by org remain in database with org reference
+- No cascade delete: Related data is not deleted
+- Reversible: Soft-deleted orgs can theoretically be restored (future feature)
+
+**Example Request**:
 ```bash
 curl -X DELETE http://localhost:42071/api/organizations/550e8400-e29b-41d4-a716-446655440000 \
-  -H "Cookie: session=..."
+  -H "Cookie: codex-session=..."
 ```
 
 ---
 
 ### GET /health
 
-Health check endpoint (public, no auth required).
+**Health check endpoint for monitoring and load balancing. Public endpoint, no authentication required.**
 
-**Response (200 OK when healthy, 503 when unhealthy)**:
+**Response (200 OK - Healthy)**:
 ```json
 {
   "service": "identity-api",
@@ -390,84 +589,223 @@ Health check endpoint (public, no auth required).
     "database": "healthy",
     "kv": "healthy"
   },
-  "timestamp": "2025-01-23T10:30:00Z",
-  "requestId": "uuid"
+  "timestamp": "2025-01-23T10:30:00.000Z",
+  "requestId": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
-**Example**:
+**Response (503 Service Unavailable - Unhealthy)**:
+```json
+{
+  "service": "identity-api",
+  "version": "1.0.0",
+  "status": "unhealthy",
+  "checks": {
+    "database": "unhealthy",
+    "kv": "healthy"
+  },
+  "timestamp": "2025-01-23T10:30:00.000Z",
+  "requestId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Check Details**:
+- `database`: Neon PostgreSQL connectivity via `standardDatabaseCheck`
+- `kv`: Cloudflare KV namespace (RATE_LIMIT_KV) availability
+
+**Example Request**:
 ```bash
 curl http://localhost:42071/health
 ```
 
 ---
 
-## Security Model
+## Core Services Integration
 
-### Authentication
+### OrganizationService
 
-All `/api/*` endpoints require valid session token via HTTP-only cookie or Authorization header.
+All business logic delegated to `@codex/identity` package's `OrganizationService` class.
 
-Session validation performed by `@codex/security` middleware integrated in `createWorker()`.
+**Service Instantiation** (per-request):
+```typescript
+const service = new OrganizationService({
+  db: dbHttp,
+  environment: ctx.env.ENVIRONMENT || 'development',
+});
+```
 
-Missing/invalid session returns `401 Unauthorized`.
+**Methods Used in Routes**:
 
-### Authorization
+| Route | Service Method | Input | Output | Errors |
+|-------|---|---|---|---|
+| POST / | `create()` | `CreateOrganizationInput` | `Organization` | ConflictError, ValidationError |
+| GET /:id | `get()` | organization ID | `Organization \| null` | InternalServiceError |
+| GET /slug/:slug | `getBySlug()` | slug | `Organization \| null` | InternalServiceError |
+| PATCH /:id | `update()` | ID + `UpdateOrganizationInput` | `Organization` | OrganizationNotFoundError, ConflictError |
+| DELETE /:id | `delete()` | organization ID | void | OrganizationNotFoundError |
+| GET / | `list()` | filters + pagination | `PaginatedResponse<Organization>` | InternalServiceError |
+| GET /check-slug/:slug | `isSlugAvailable()` | slug | boolean | InternalServiceError |
 
-No role-based or user-based authorization at worker level. All authenticated users can:
-- Create organizations
-- Read any organization
-- Update any organization
-- Delete any organization
+**Service Error Handling** (auto-mapped by worker):
+- Service throws specific error classes from `@codex/service-errors`
+- Worker catches via `mapErrorToResponse()` middleware
+- Errors converted to standardized HTTP responses with appropriate status codes
 
-Authorization enforcement is application responsibility at higher layer.
+---
 
-### Rate Limiting
+## Usage Examples
 
-Applied via KV namespace (`RATE_LIMIT_KV`).
+### Complete Create Organization Workflow
 
-**Preset Rates**:
-- `authenticated()`: 100 req/min per user (standard endpoints)
-- `auth`: 5 req/15min per user (destructive operations like DELETE)
+```bash
+# 1. Check if slug is available
+curl "http://localhost:42071/api/organizations/check-slug/my-startup" \
+  -H "Cookie: codex-session=$SESSION_TOKEN"
+# Response: { "available": true }
 
-Rate exceeded returns `429 Too Many Requests`.
+# 2. Create organization
+curl -X POST http://localhost:42071/api/organizations \
+  -H "Content-Type: application/json" \
+  -H "Cookie: codex-session=$SESSION_TOKEN" \
+  -d '{
+    "name": "My Startup",
+    "slug": "my-startup",
+    "description": "A revolutionary company",
+    "websiteUrl": "https://mystartup.example.com"
+  }'
+# Response: { "data": { "id": "uuid", ... } }
 
-### Input Validation
+# 3. Retrieve organization by slug
+curl "http://localhost:42071/api/organizations/slug/my-startup" \
+  -H "Cookie: codex-session=$SESSION_TOKEN"
+```
 
-All request bodies and query parameters validated with Zod schemas:
+### List Organizations with Search
 
-- `createOrganizationSchema`: POST body validation
-- `updateOrganizationSchema`: PATCH body validation (partial)
-- `organizationQuerySchema`: GET query parameter validation
-- `uuidSchema`: UUID path parameter validation
-- `createSlugSchema(255)`: Slug path parameter validation
+```bash
+# Search for tech-related organizations, sorted by name
+curl "http://localhost:42071/api/organizations?search=tech&sortBy=name&sortOrder=asc&limit=10" \
+  -H "Cookie: codex-session=$SESSION_TOKEN"
+```
 
-Validation errors return `400 Bad Request` with error details.
+### Update Organization Metadata
 
-XSS prevention via sanitized string schemas:
-- Strings trimmed and validated against allowlist patterns
-- URLs validated as valid HTTP/HTTPS URLs
-- Slug enforces lowercase alphanumeric + hyphen pattern
+```bash
+curl -X PATCH "http://localhost:42071/api/organizations/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Content-Type: application/json" \
+  -H "Cookie: codex-session=$SESSION_TOKEN" \
+  -d '{
+    "description": "Updated company description",
+    "logoUrl": "https://example.com/new-logo.png"
+  }'
+```
 
-### Request Tracking
+### Error Handling Examples
 
-All requests assigned UUID `requestId` and include IP address tracking, user agent logging for observability.
+**Handle Duplicate Slug**:
+```typescript
+try {
+  const org = await fetch('POST /api/organizations', {
+    body: { slug: 'taken-slug' }
+  });
+  if (org.status === 409) {
+    console.error('Slug already in use. Try another.');
+  }
+} catch (error) {
+  console.error('Network error:', error);
+}
+```
 
-### Error Sanitization
+**Check Availability Before Submission**:
+```typescript
+const slug = 'my-org';
+const available = await fetch(`/api/organizations/check-slug/${slug}`);
+const { available: isAvailable } = await available.json();
 
-Worker catches all unhandled errors and returns sanitized `500 Internal Server Error` responses. No internal stack traces or database errors exposed to client.
+if (!isAvailable) {
+  // Suggest alternative
+  suggestAlternativeSlug(slug);
+}
+```
 
-## Multi-Tenant Support
+---
 
-Organizations table includes `deletedAt` soft-delete column. All queries exclude deleted organizations via `whereNotDeleted()` helper.
+## Integration Points
 
-Slug uniqueness enforced at database level (UNIQUE constraint on `slug` column, including soft-deleted rows check).
+### Upstream Dependencies (What This Worker Uses)
 
-When organization deleted, all content belonging to that organization remains in database with `organizationId` reference, but displays as "deleted organization" in UIs.
+| Package | Purpose | Usage |
+|---------|---------|-------|
+| **@codex/identity** | Organization service layer | `OrganizationService` class for CRUD operations |
+| **@codex/database** | PostgreSQL data access | `dbHttp` client, `organizations` table schema |
+| **@codex/validation** | Input validation schemas | `createOrganizationSchema`, `updateOrganizationSchema`, `organizationQuerySchema`, `uuidSchema`, `createSlugSchema` |
+| **@codex/shared-types** | Response type definitions | Organization response envelopes, pagination types |
+| **@codex/worker-utils** | Worker setup & middleware | `createWorker`, `createAuthenticatedHandler`, `withPolicy`, `POLICY_PRESETS` |
+| **@codex/security** | Authentication & rate limiting | Session validation, rate limit KV checks (via createWorker) |
+| **hono** | HTTP framework | Request routing, context management |
+| **zod** | Schema validation | Runtime validation of request inputs |
 
-## Error Responses
+### Downstream Dependents (Packages/Systems Using This Worker)
 
-### Standard Error Response Format
+| Component | Usage | Integration Points |
+|-----------|-------|---|
+| **Frontend** (Codex Web App) | Organization management UI | Calls all CRUD endpoints, uses check-slug for real-time validation |
+| **@codex/content** | Content scoping | Content references organizationId for multi-tenant isolation |
+| **@codex/access** | Access control | Org membership verification (future) |
+| **Future: @codex/users** | User-org membership | Will use org IDs for scoping user memberships |
+
+### External Service Dependencies
+
+| Service | Purpose | Binding |
+|---------|---------|---------|
+| **Neon PostgreSQL** | Organization data persistence | `DATABASE_URL` (via @codex/database HTTP client) |
+| **Cloudflare KV** | Rate limit tracking | `RATE_LIMIT_KV` namespace |
+| **Auth Worker** | Session validation | Implicitly used by middleware for session cookie verification |
+
+---
+
+## Data Models
+
+### Organizations Table
+
+Database: `organizations` table in Neon PostgreSQL
+
+**Schema** (from @codex/database):
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| `id` | UUID | PRIMARY KEY, auto-generated | Unique organization identifier (v4) |
+| `name` | VARCHAR(255) | NOT NULL | Display name (1-255 chars) |
+| `slug` | VARCHAR(255) | NOT NULL, UNIQUE | URL-friendly identifier (1-255 chars, lowercase alphanumeric+hyphen) |
+| `description` | TEXT | nullable | Optional organization description (0-5000 chars) |
+| `logoUrl` | TEXT | nullable | Optional logo image URL (validated URL format) |
+| `websiteUrl` | TEXT | nullable | Optional organization website (validated URL format) |
+| `createdAt` | TIMESTAMP | NOT NULL, default CURRENT_TIMESTAMP | Record creation timestamp (UTC) |
+| `updatedAt` | TIMESTAMP | NOT NULL, default CURRENT_TIMESTAMP | Last modification timestamp (UTC) |
+| `deletedAt` | TIMESTAMP | nullable | Soft delete marker (NULL = active) |
+
+**Indexes**:
+- `idx_organizations_slug`: On `(slug)` for O(1) slug lookups
+- `idx_organizations_deleted_at`: Implicit for `whereNotDeleted()` filtering
+
+**Key Characteristics**:
+- **Soft Deletes**: `deletedAt IS NULL` implies active; `deleteAt IS NOT NULL` implies deleted
+- **Slug Uniqueness**: Enforced at database constraint level (includes soft-deleted records to prevent reuse)
+- **Multi-Tenant Scoping**: Organizations are fundamental scoping unit (content belongs to organizations)
+- **No User Scoping**: Organizations are not directly scoped by creator/user (future enhancement with memberships)
+
+**Related Tables**:
+- `content` table: Has optional `organizationId` foreign key
+- `mediaItems` table: Has optional `organizationId` foreign key
+- `organizationMemberships` table (future): Will link users to organizations with roles
+
+---
+
+## Error Handling Reference
+
+### Error Response Format
+
+All errors follow standardized response envelope:
 
 ```json
 {
@@ -476,314 +814,456 @@ When organization deleted, all content belonging to that organization remains in
     "code": "ERROR_CODE",
     "message": "Human-readable error message",
     "status": 400,
-    "requestId": "uuid",
-    "timestamp": "2025-01-23T10:30:00Z"
+    "requestId": "550e8400-e29b-41d4-a716-446655440000",
+    "timestamp": "2025-01-23T10:30:00.000Z"
   }
 }
 ```
 
-### Error Codes and Meanings
+### Error Codes and HTTP Status Mapping
 
-| Code | HTTP Status | Cause | Recovery |
-|------|-------------|-------|----------|
-| `INVALID_REQUEST` | 400 | Malformed JSON or missing required fields | Fix request body, check syntax |
-| `VALIDATION_ERROR` | 400 | Zod schema validation failed (name too long, invalid email, etc.) | Correct field values to match schema |
-| `NOT_FOUND` | 404 | Organization ID/slug doesn't exist or is deleted | Verify ID exists and not deleted |
-| `CONFLICT` | 409 | Slug already in use by another organization | Choose different slug, check availability first |
-| `UNAUTHORIZED` | 401 | Missing or invalid session token | Authenticate and provide valid session |
-| `FORBIDDEN` | 403 | User lacks permission (not used currently) | Check authorization |
-| `TOO_MANY_REQUESTS` | 429 | Rate limit exceeded | Wait before retrying |
-| `INTERNAL_SERVER_ERROR` | 500 | Unexpected server error | Retry later, contact support if persistent |
-| `SERVICE_UNAVAILABLE` | 503 | Database or KV unavailable | Retry later |
+| HTTP | Code | Meaning | Recovery |
+|------|------|---------|----------|
+| 400 | INVALID_REQUEST | Malformed JSON or missing required fields | Check request syntax |
+| 400 | VALIDATION_ERROR | Zod schema validation failed (field validation) | Fix field values, retry |
+| 401 | UNAUTHORIZED | Missing/expired session token | Re-authenticate, provide valid session |
+| 404 | NOT_FOUND | Organization doesn't exist or is soft-deleted | Verify ID exists |
+| 409 | CONFLICT | Slug already exists (unique constraint) | Check availability, use different slug |
+| 422 | VALIDATION_ERROR | Business logic violation (Zod parse failure) | Correct input values |
+| 429 | TOO_MANY_REQUESTS | Rate limit exceeded | Wait before retrying |
+| 500 | INTERNAL_SERVER_ERROR | Unhandled server error | Retry later, contact support |
+| 503 | SERVICE_UNAVAILABLE | Database/KV unavailable | Wait for service recovery |
 
-### Common Error Examples
+### Common Error Scenarios and Recovery
 
-**Slug Conflict**:
-```json
-{
-  "success": false,
-  "error": {
-    "code": "CONFLICT",
-    "message": "Organization slug already exists",
-    "status": 409,
-    "requestId": "uuid"
+**Duplicate Slug (409 Conflict)**:
+```typescript
+try {
+  const org = await service.create({ slug: 'taken-slug' });
+} catch (error) {
+  if (error.status === 409) {
+    const available = await service.isSlugAvailable('new-slug');
+    if (available) {
+      const org = await service.create({ slug: 'new-slug' });
+    }
   }
 }
 ```
 
-**Validation Error (name too long)**:
-```json
-{
-  "success": false,
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Organization name must be 255 characters or less",
-    "status": 400,
-    "requestId": "uuid"
+**Organization Not Found (404 Not Found)**:
+```typescript
+const org = await service.get(unknownId);
+if (!org) {
+  // Organization doesn't exist or is soft-deleted
+  // Show 404 to user or redirect to list
+}
+```
+
+**Validation Error (400 Bad Request)**:
+```typescript
+try {
+  const org = await service.create({ name: '' }); // Too short
+} catch (error) {
+  if (error.status === 400) {
+    // Show validation error to user with field-specific messages
+    displayValidationErrors(error.details);
   }
 }
 ```
 
-**Not Found**:
-```json
-{
-  "success": false,
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Organization not found",
-    "status": 404,
-    "requestId": "uuid"
-  }
+**Rate Limited (429 Too Many Requests)**:
+```typescript
+const response = await fetch('/api/organizations', { method: 'DELETE' });
+if (response.status === 429) {
+  // Stricter rate limit (5/15min) on DELETE endpoints
+  showMessage('Too many deletions. Try again in 15 minutes.');
 }
 ```
+
+### Service-Level Error Classes
+
+Errors thrown by OrganizationService and mapped by worker:
+
+| Error Class | HTTP Status | When Thrown | Handling |
+|-------------|-------------|-------------|----------|
+| `ConflictError` | 409 | Slug already exists on create/update | Check availability before creation |
+| `OrganizationNotFoundError` | 404 | Org doesn't exist on get/update/delete | Verify ID and refresh data |
+| `ValidationError` | 422 | Input fails Zod schema | Fix field values and retry |
+| `InternalServiceError` | 500 | Database errors, transaction failures | Retry with exponential backoff |
 
 ---
 
-## Integration Points
+## Security Model
 
-### OrganizationService Usage
+### Authentication
 
-Service instantiated per request in route handlers:
+**Mechanism**: Session-based authentication via HTTP-only cookies
+
+**Session Validation Flow**:
+1. Client includes `codex-session` cookie in request headers
+2. Worker middleware calls `@codex/security` session validator
+3. Session token validated against PostgreSQL (cached in KV for 5min TTL)
+4. Valid session: Request proceeds with user context in `ctx.user`
+5. Invalid/missing session: Returns `401 Unauthorized`
+
+**Session Storage**:
+- Primary: PostgreSQL `sessions` table (persistent storage)
+- Cache: Cloudflare KV (AUTH_SESSION_KV, 5-minute TTL for performance)
+
+**Session Expiry**:
+- Default 24 hours
+- Checked on every protected request
+- KV cache refreshed every 5 minutes
+
+### Authorization
+
+**Current Model**: All authenticated users can perform all CRUD operations
+
+**No User-Based Scoping** (currently):
+- Any authenticated user can create organizations
+- Any authenticated user can read/update/delete any organization
+- No role-based access control (planned)
+
+**Future Model** (planned):
+- Organization membership with roles (owner, admin, creator, member)
+- Content scoped to organization members
+- Permissions tied to roles (e.g., only admins can delete org)
+
+### Input Validation
+
+All request inputs validated with Zod schemas before service execution:
+
+**Validation Points**:
+1. **Request Body**: `createOrganizationSchema`, `updateOrganizationSchema`
+2. **Path Parameters**: `uuidSchema` for org IDs, `createSlugSchema()` for slugs
+3. **Query Parameters**: `organizationQuerySchema` for list filters
+
+**Security Features**:
+- URL validation prevents XSS (validates HTTP/HTTPS URLs only)
+- Slug validation prevents path traversal (alphanumeric + hyphen only)
+- String trimming prevents leading/trailing whitespace exploits
+- Length limits prevent buffer overflow/DoS
+
+**Failed Validation Response** (400 Bad Request):
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Validation failed",
+    "status": 400
+  }
+}
+```
+
+### Rate Limiting
+
+**KV-Backed Rate Limiting** (Cloudflare KV `RATE_LIMIT_KV`):
+
+| Endpoint Group | Limit | Window | Scope |
+|---|---|---|---|
+| Standard API (GET list, POST create, PATCH update) | 100 requests | 1 minute | Per authenticated user ID |
+| Destructive (DELETE) | 5 requests | 15 minutes | Per authenticated user ID |
+| Check Slug (GET availability) | 100 requests | 1 minute | Per authenticated user ID |
+
+**Rate Limit Exceeded Response** (429 Too Many Requests):
+```json
+{
+  "error": {
+    "code": "TOO_MANY_REQUESTS",
+    "message": "Rate limit exceeded",
+    "status": 429,
+    "retryAfter": 60
+  }
+}
+```
+
+**Retry Strategy**:
+- Client should wait before retrying
+- Check `Retry-After` header for guidance
+- Stricter limits on DELETE (5/15min) encourage careful deletions
+
+### Security Headers
+
+Applied by `createWorker()` middleware:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `X-Content-Type-Options` | `nosniff` | Prevent MIME type sniffing attacks |
+| `X-Frame-Options` | `SAMEORIGIN` | Clickjacking protection |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Referrer leakage prevention |
+| `Strict-Transport-Security` | `max-age=31536000` | Force HTTPS (production only) |
+| `Content-Security-Policy` | Varies per env | Script execution control |
+
+### PII Handling
+
+**What's Collected**:
+- Organization metadata (name, slug, description, URLs)
+- Request metadata (IP address, user agent, request ID)
+
+**What's Not Collected**:
+- User identities (authentication handled by Auth Worker)
+- Email addresses (not stored in organization records)
+- Credit card data (payment handled by Stripe)
+
+**PII Protection**:
+- All request/response bodies stripped from logs
+- IP addresses logged but never exposed in API responses
+- User IDs never included in organization responses
+- Error messages sanitized (no internal details exposed)
+
+---
+
+## Performance Notes
+
+### Database Query Optimization
+
+**Slug Lookups** (O(1) via index):
+```typescript
+// Fast: Uses idx_organizations_slug index
+const org = await service.getBySlug('acme-corp');
+```
+
+**List with Search** (O(n log n)):
+```typescript
+// Uses database-level LIKE search on name/description
+// Results sorted and paginated in database (not in memory)
+const result = await service.list({ search: 'tech' });
+```
+
+**Soft Delete Filtering**:
+```typescript
+// whereNotDeleted() adds simple IS NULL condition (index-friendly)
+// SELECT * FROM organizations WHERE deletedAt IS NULL
+```
+
+### Pagination Optimization
+
+**Pagination Strategy**:
+- LIMIT/OFFSET approach (standard)
+- Default 20 results per page (configurable 1-100)
+- Total count calculated separately for page metadata
+
+**Avoid**:
+```typescript
+// Bad: Loading all organizations into memory
+const allOrgs = await db.query.organizations.findMany();
+```
+
+**Do**:
+```typescript
+// Good: Database-level pagination
+const page1 = await service.list({}, { page: 1, limit: 20 });
+```
+
+### Caching Strategy
+
+Worker does not implement caching. Optimization recommendations:
+
+**Client-Side Caching**:
+- Cache organization metadata for user's session (5-10 min)
+- Refresh on user navigation or explicit refresh
+
+**Application-Level Caching**:
+```typescript
+// Simple request-scoped cache
+const cache = new Map<string, Organization>();
+
+async function getCachedOrg(id: string) {
+  if (cache.has(id)) return cache.get(id);
+  const org = await service.get(id);
+  if (org) cache.set(id, org);
+  return org;
+}
+```
+
+**Redis/KV Caching** (future):
+- Cache frequently accessed organizations in Cloudflare KV
+- 5-minute TTL for organization metadata
+- Invalidate on update
+
+### Rate Limit Performance
+
+Rate limiting is KV-backed (distributed, low-latency):
+- Increments counter on each request
+- O(1) KV lookup/write operation
+- No database round-trip
+
+**Performance Impact**:
+- ~5ms per request for rate limit check
+- Negligible compared to database query latency
+
+---
+
+## Testing
+
+### Test Structure
+
+Tests use Vitest with Cloudflare Workers test runtime (`cloudflare:test` module):
+
+**File**: `/src/index.test.ts`
+
+**Test Categories**:
+1. **Health Check**: Service availability and status
+2. **Security**: Headers, authentication requirements
+3. **Error Handling**: 404s, malformed requests, edge cases
+4. **Environment**: Required bindings present
+
+### Running Tests
+
+**Local Test Execution**:
+```bash
+cd /Users/brucemckay/development/Codex/workers/identity-api
+
+# Run once
+pnpm test
+
+# Watch mode (re-run on file change)
+pnpm test:watch
+
+# Coverage report
+pnpm test:coverage
+
+# UI dashboard
+pnpm test:ui
+```
+
+### Test Database
+
+**Note**: Tests use real Cloudflare Workers runtime but database is unavailable by design. This prevents:
+- Accidental data modifications
+- Test flakiness from database state
+
+**Expected Behavior**:
+- Health check returns 503 (database unavailable in test environment)
+- Authentication tests check headers (don't require database session validation)
+- Route tests verify middleware chain (don't test service layer)
+
+### Writing Integration Tests
+
+Full integration tests would require real database. Pattern:
 
 ```typescript
-const service = new OrganizationService({
-  db: dbHttp,
-  environment: ctx.env.ENVIRONMENT || 'development',
+import { setupTestDatabase, seedTestUsers, withNeonTestBranch } from '@codex/test-utils';
+import { OrganizationService } from '@codex/identity';
+
+withNeonTestBranch();
+
+describe('Organization Management', () => {
+  let db: Database;
+  let service: OrganizationService;
+
+  beforeAll(async () => {
+    db = setupTestDatabase();
+    service = new OrganizationService({ db, environment: 'test' });
+  });
+
+  afterAll(async () => {
+    await teardownTestDatabase();
+  });
+
+  it('should create and retrieve organization', async () => {
+    const created = await service.create({
+      name: 'Test Org',
+      slug: 'test-org-unique',
+    });
+
+    const retrieved = await service.get(created.id);
+    expect(retrieved?.name).toBe('Test Org');
+  });
+
+  it('should reject duplicate slug', async () => {
+    const slug = 'unique-slug';
+    await service.create({ name: 'First', slug });
+
+    await expect(
+      service.create({ name: 'Second', slug })
+    ).rejects.toThrow(ConflictError);
+  });
 });
 ```
 
-Service methods called with validated input:
-
-```typescript
-// Create
-const organization = await service.create(ctx.validated.body);
-
-// Get by ID
-const organization = await service.get(ctx.validated.params.id);
-
-// Get by slug
-const organization = await service.getBySlug(ctx.validated.params.slug);
-
-// Update
-const organization = await service.update(
-  ctx.validated.params.id,
-  ctx.validated.body
-);
-
-// Delete (soft)
-await service.delete(ctx.validated.params.id);
-
-// List with filters
-const result = await service.list(filters, pagination);
-
-// Check slug availability
-const available = await service.isSlugAvailable(slug);
-```
-
-Service errors mapped to HTTP responses:
-
-- `ConflictError` → 409 Conflict
-- `OrganizationNotFoundError` → 404 Not Found
-- `ValidationError` → 400 Bad Request
-- Other ServiceErrors → 400/500 depending on type
-- Unhandled errors → 500 Internal Server Error
-
-### Database Integration
-
-Uses `dbHttp` client from `@codex/database` (HTTP client for Neon PostgreSQL):
-
-```typescript
-import { dbHttp } from '@codex/database';
-```
-
-Drizzle ORM with schema from `@codex/database/schema`:
-
-```typescript
-import { organizations } from '@codex/database/schema';
-```
-
-Query helpers for common operations:
-
-```typescript
-import {
-  isUniqueViolation,
-  whereNotDeleted,
-  withPagination,
-} from '@codex/database';
-```
-
-### Type Integration
-
-Response types from `@codex/shared-types`:
-
-```typescript
-import type {
-  CheckSlugResponse,
-  CreateOrganizationResponse,
-  DeleteOrganizationResponse,
-  OrganizationBySlugResponse,
-  OrganizationListResponse,
-  OrganizationResponse,
-  UpdateOrganizationResponse,
-} from '@codex/shared-types';
-```
-
-Request validation schemas from `@codex/validation`:
-
-```typescript
-import {
-  createOrganizationSchema,
-  organizationQuerySchema,
-  updateOrganizationSchema,
-} from '@codex/validation';
-import { createSlugSchema, uuidSchema } from '@codex/validation';
-```
-
 ---
 
-## Dependencies
+## Development & Deployment
 
-### Direct Package Dependencies
+### Local Development Setup
 
-| Package | Purpose | Usage |
-|---------|---------|-------|
-| `@codex/database` | Data persistence via Drizzle ORM + Neon PostgreSQL | dbHttp client, schema, query helpers |
-| `@codex/identity` | Organization service and error classes | OrganizationService, error handling |
-| `@codex/validation` | Zod schemas for request validation | Input validation via schemas |
-| `@codex/shared-types` | TypeScript response types | Response type definitions |
-| `@codex/worker-utils` | Worker setup, middleware, utilities | createWorker, createAuthenticatedHandler, withPolicy |
-| `@codex/security` | Session authentication middleware | Via createWorker |
-| `hono` | Web framework for routing and middleware | HTTP routing, request/response handling |
-| `zod` | Schema validation | Request validation |
-
-### External Dependencies
-
-| Resource | Purpose | Binding |
-|----------|---------|---------|
-| Neon PostgreSQL Database | Organization data storage | DATABASE_URL (via @codex/database) |
-| Cloudflare KV | Rate limiting state (request counters per user) | RATE_LIMIT_KV |
-| Cloudflare Analytics Engine | Request observability (optional) | Via createWorker enableLogging |
-
-### Cloudflare Bindings (wrangler.jsonc)
-
-```
-KV_NAMESPACES:
-  RATE_LIMIT_KV: cea7153364974737b16870df08f31083
-
-ENVIRONMENT VARIABLES (vars):
-  ENVIRONMENT: "production" | "staging" | "development"
-  DB_METHOD: "PRODUCTION" (enables HTTP client for Neon)
-  WEB_APP_URL: Frontend URL for CORS, redirects
-  API_URL: API base URL for frontend requests
-
-SECRETS (via wrangler secret put):
-  DATABASE_URL: Neon PostgreSQL connection string
-```
-
----
-
-## Development
-
-### Local Setup
-
-1. Install dependencies:
+**Prerequisites**:
 ```bash
 cd /Users/brucemckay/development/Codex/workers/identity-api
 pnpm install
 ```
 
-2. Start development server on port 42071:
+**Environment Configuration** (create `.dev.vars`):
+```
+ENVIRONMENT=development
+DB_METHOD=LOCAL_PROXY
+WEB_APP_URL=http://localhost:3000
+API_URL=http://localhost:8787
+DATABASE_URL=postgresql://user:password@localhost:5432/codex_dev
+```
+
+**Start Development Server**:
 ```bash
 pnpm dev
 ```
 
-Server runs with:
-- Hot reloading on file changes
+Server runs on http://localhost:42071 with:
+- Hot module reloading
 - Source maps for debugging
-- Real KV bindings via Wrangler
-- Request logging enabled
-- Inspector available on port 9234 for Node.js debugging
+- Real KV and R2 bindings via Wrangler
+- Inspector available on port 9234
 
-### Testing
+### Building for Production
 
-Run unit tests in Cloudflare Workers runtime:
-```bash
-pnpm test
-```
-
-Tests use `cloudflare:test` module for real runtime environment. Test database unavailable by design (no fixtures), so database tests return 503 Service Unavailable or require mocking.
-
-UI for test exploration:
-```bash
-pnpm test:ui
-```
-
-### Type Checking
-
-Generate Cloudflare types:
-```bash
-pnpm cf-typegen
-```
-
-Typecheck without building:
-```bash
-pnpm typecheck
-```
-
-### Code Quality
-
-Format code:
-```bash
-pnpm format
-```
-
-Lint code:
-```bash
-pnpm lint
-```
-
----
-
-## Deployment
-
-### Build
-
-Build for production:
+**Build**:
 ```bash
 pnpm build
 ```
 
-Outputs compiled JavaScript to `dist/index.js`.
+Outputs compiled JavaScript to `dist/index.js` (consumed by Wrangler).
 
-### Deploy
+**Type Checking**:
+```bash
+pnpm typecheck
+```
 
-**Staging**:
+Validates TypeScript without emitting code.
+
+**Code Quality**:
+```bash
+pnpm lint      # Lint with Biome
+pnpm format    # Format with Biome
+pnpm test      # Run tests
+```
+
+### Deployment Process
+
+**Staging Deployment**:
 ```bash
 pnpm deploy:staging
 ```
 
-Deploys to `identity-api-staging.revelations.studio`.
+Deploys to `identity-api-staging.revelations.studio`
 
-**Production**:
+**Production Deployment**:
 ```bash
-pnorm deploy
+pnpm deploy
 ```
 
-Deploys to `identity-api.revelations.studio`.
+Deploys to `identity-api.revelations.studio`
 
 ### Environment Configuration
 
-Environment variables set via `wrangler.jsonc`:
-
-**Development (local)**:
+**Development** (local .dev.vars):
 ```
 ENVIRONMENT=development
-DB_METHOD=PRODUCTION (for HTTP client)
+DB_METHOD=LOCAL_PROXY
 WEB_APP_URL=http://localhost:3000
-API_URL=http://localhost:42071
+API_URL=http://localhost:8787
 ```
 
-**Staging**:
+**Staging** (wrangler.jsonc + secrets):
 ```
 ENVIRONMENT=staging
 DB_METHOD=PRODUCTION
@@ -791,7 +1271,7 @@ WEB_APP_URL=https://codex-staging.revelations.studio
 API_URL=https://api-staging.revelations.studio
 ```
 
-**Production**:
+**Production** (wrangler.jsonc + secrets):
 ```
 ENVIRONMENT=production
 DB_METHOD=PRODUCTION
@@ -799,57 +1279,47 @@ WEB_APP_URL=https://codex.revelations.studio
 API_URL=https://api.revelations.studio
 ```
 
-### Secrets
+### Secrets Management
 
 Database URL stored as secret (not in wrangler.jsonc):
 
 ```bash
-# Set for staging
+# Set DATABASE_URL for staging
 wrangler secret put DATABASE_URL --env staging
-# Enter: postgresql://user:password@host/database
+# Paste: postgresql://user:password@host:port/database
 
-# Set for production
+# Set DATABASE_URL for production
 wrangler secret put DATABASE_URL --env production
-# Enter: postgresql://user:password@host/database
+# Paste: postgresql://user:password@host:port/database
 ```
 
-Database secret accessed via `env.DATABASE_URL` in code (passed to dbHttp client).
+### Health Monitoring
 
-### Health Checks
-
-Deployment health checked at `/health` endpoint:
-
+**Health Endpoint**:
 ```bash
+# Local
+curl http://localhost:42071/health
+
+# Production
 curl https://identity-api.revelations.studio/health
 ```
 
-Returns 200 OK with service status only if database and KV are reachable.
+**Monitoring Setup** (recommended):
+- Poll `/health` every 30 seconds
+- Alert if status != "healthy" or response time > 5 seconds
+- Check both `database` and `kv` sub-checks
+- Use request ID for tracing failures
 
-### Rollback
+### Rollback Strategy
 
-To rollback to previous deployment:
-
-1. Check deployment history:
+**To Rollback**:
 ```bash
+# Check deployment history
 wrangler deployments list
-```
 
-2. Rollback via Cloudflare dashboard or:
-```bash
+# Rollback via dashboard or CLI
 wrangler rollback --message "Rollback reason"
 ```
-
-### Monitoring
-
-Logs available in Cloudflare dashboard → Workers → identity-api → Real-time logs.
-
-Request tracking includes:
-- Request ID (UUID)
-- IP address
-- User agent
-- Method, URL, status code
-- Response time
-- Error details (if any)
 
 ---
 
@@ -858,19 +1328,27 @@ Request tracking includes:
 ```
 /Users/brucemckay/development/Codex/workers/identity-api/
 ├── src/
-│   ├── index.ts                 # Worker entry point, routes setup
-│   ├── types/
-│   │   └── index.ts             # Type re-exports from @codex/shared-types
-│   └── routes/
-│       └── organizations.ts     # Organization endpoints (CRUD, slug, list)
+│   ├── index.ts                  # Worker setup, route mounting
+│   ├── index.test.ts             # Unit tests
+│   ├── routes/
+│   │   └── organizations.ts      # All organization endpoints
+│   ├── utils/
+│   │   └── validate-env.ts       # Environment variable validation
+│   └── types/
+│       └── (implicit via shared-types)
+│
 ├── dist/
-│   └── index.js                 # Compiled output (generated by build)
-├── package.json                 # Dependencies and scripts
-├── wrangler.jsonc              # Cloudflare configuration and bindings
-├── tsconfig.json               # TypeScript configuration
-├── vite.config.ts              # Vite build configuration
-├── vitest.config.ts            # Vitest test configuration
-└── README.clog                 # This file
+│   └── index.js                  # Compiled output (generated by build)
+│
+├── package.json                  # Dependencies, scripts
+├── wrangler.jsonc               # Cloudflare Worker config
+├── wrangler-defaults.json       # Default env vars
+├── tsconfig.json                # TypeScript configuration
+├── vitest.config.ts             # Test configuration
+├── vite.config.ts               # Build configuration
+│
+├── CLAUDE.md                    # This documentation
+└── .env.example                 # Example environment variables
 ```
 
 ---
@@ -879,70 +1357,140 @@ Request tracking includes:
 
 ### Add New Organization Endpoint
 
-1. Add handler in `/src/routes/organizations.ts`:
+**Step-by-Step**:
+
+1. **Add Validation Schema** (if needed):
+   ```typescript
+   // In @codex/validation/src/...
+   export const newActionSchema = z.object({
+     // Define validation rules
+   });
+   ```
+
+2. **Add Response Type** (if needed):
+   ```typescript
+   // In @codex/shared-types/src/...
+   export interface NewActionResponse {
+     data: SomeType;
+   }
+   ```
+
+3. **Create Route Handler** (in `routes/organizations.ts`):
+   ```typescript
+   app.post(
+     '/new-action',
+     withPolicy(POLICY_PRESETS.authenticated()),
+     createAuthenticatedHandler({
+       schema: { body: newActionSchema },
+       handler: async (_c, ctx): Promise<NewActionResponse> => {
+         const service = new OrganizationService({
+           db: dbHttp,
+           environment: ctx.env.ENVIRONMENT || 'development',
+         });
+         const result = await service.someMethod(ctx.validated.body);
+         return { data: result };
+       },
+     })
+   );
+   ```
+
+4. **Test** (create test in `index.test.ts`):
+   ```typescript
+   it('should handle new action', async () => {
+     const response = await SELF.fetch(
+       'http://localhost/new-action',
+       { method: 'POST', body: JSON.stringify({...}) }
+     );
+     expect(response.status).toBe(200);
+   });
+   ```
+
+5. **Document** (add to Public API Reference above)
+
+### Modify Rate Limiting
+
+**Increase Limit for Endpoint**:
 ```typescript
-app.post('/new-action',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: { /* validation */ },
-    handler: async (_c, ctx) => { /* logic */ }
-  })
-);
-```
-
-2. Add validation schema in `@codex/validation` if needed
-
-3. Add response type in `@codex/shared-types` if needed
-
-4. Add test in `src/index.test.ts` or new test file
-
-5. Run tests: `pnpm test`
-
-### Increase Rate Limit
-
-1. Edit endpoint's `withPolicy()` call:
-```typescript
+// Change from authenticated() preset to custom
 withPolicy({
   auth: 'required',
-  rateLimit: 'custom', // Create custom preset
+  rateLimit: 'api',  // Use api preset (100/min)
 })
 ```
 
-2. Or use existing POLICY_PRESETS:
-- `authenticated()` - 100 req/min
-- `auth` - 5 req/15min (strict)
-- Custom object with `rateLimit` key
+**Available Presets** (from @codex/worker-utils):
+- `public` - No rate limit
+- `api` - 100 req/min per user
+- `auth` - 5 req/15min per user (stricter)
+- `strict` - 1 req/min per user
+- `webhook` - 1000 req/min (for webhook handlers)
 
-3. Rate limit stored in KV, checked per request
+### Adjust Pagination Defaults
 
-### Add Organization Field
+**Current defaults** (in routes/organizations.ts):
+- Default limit: 20 items per page
+- Max limit: 100 items per page
+- Minimum limit: 1 item per page
 
-1. Add column to database schema in `@codex/database/schema/content.ts`
-2. Create migration
-3. Update `createOrganizationSchema` and `updateOrganizationSchema` in `@codex/validation`
-4. Update `Organization` type in database schema exports
-5. Update response examples in this README
-6. Run tests to ensure compatibility
+**To change**:
+```typescript
+// In organizationQuerySchema (from @codex/validation)
+limit: z.number().int().min(1).max(100).default(20),
+```
 
-### Debug Failed Request
+### Debug a Failed Request
 
-1. Check worker logs: `wrangler tail`
-2. Inspect request ID in error response
-3. Search logs by request ID
-4. Check database connection: `curl /health`
-5. Check rate limit: Watch RATE_LIMIT_KV in dashboard
-6. Enable debug logging: Set `DEBUG_IDENTITY=true` environment variable
+1. **Check Worker Logs**:
+   ```bash
+   wrangler tail
+   ```
+
+2. **Identify Request ID** (in error response):
+   ```json
+   { "error": { "requestId": "550e8400-..." } }
+   ```
+
+3. **Search Logs by Request ID**:
+   ```bash
+   wrangler tail | grep "550e8400-e29b-41d4-a716-446655440000"
+   ```
+
+4. **Check Health Status**:
+   ```bash
+   curl http://localhost:42071/health
+   ```
+
+5. **Verify Database Connectivity**:
+   ```bash
+   # Test DATABASE_URL
+   psql $DATABASE_URL -c "SELECT 1"
+   ```
+
+6. **Check Rate Limit State** (if 429):
+   - View RATE_LIMIT_KV in Cloudflare dashboard
+   - Verify user ID and request count
 
 ---
 
-## Notes
+## Summary
 
-- All timestamps in ISO 8601 format (UTC)
-- All UUIDs valid UUID v4 format
-- Slug lowercase, alphanumeric + hyphen, 1-255 chars, unique
-- Soft deletes preserve data integrity; use `whereNotDeleted()` in queries
-- OrganizationService handles transaction safety for multi-step operations
-- CORS enabled for authenticated requests from configured origins
-- No user-level authorization; all authenticated users can CRUD all organizations
-- Database errors wrapped in ServiceError types for consistent error handling
+The Identity API Worker provides production-ready organization management endpoints following Codex platform standards. All requests follow consistent middleware chain patterns, input validation, error handling, and security practices. The worker delegates all business logic to the `@codex/identity` service layer, maintaining separation of concerns between HTTP handling and domain logic.
 
+**Key Architectural Principles**:
+1. **Stateless Workers**: All state stored in PostgreSQL and KV
+2. **Type Safety**: Zod schemas for validation, TypeScript for compile-time checks
+3. **Consistent Error Handling**: Domain errors mapped to HTTP responses
+4. **Security First**: Authentication required, rate limiting enforced, input validated
+5. **Observability**: Request tracking, health checks, structured logging
+
+**For Developers**:
+- Start with usage examples above
+- Refer to endpoint specs when building clients
+- Follow error handling patterns for robust integrations
+- Use local development setup for faster iteration
+
+**For AI Agents**:
+- All method signatures fully documented with parameter types
+- All error conditions explicitly listed with recovery strategies
+- Database schema and constraints precisely specified
+- Integration points clearly mapped to upstream/downstream components

@@ -20,6 +20,10 @@ Provides S3-compatible clients for Cloudflare R2 object storage and KV key-value
 S3-compatible client for R2 bucket operations with exponential backoff retry logic. Wraps Cloudflare Workers R2Bucket binding for automatic retry, JSON serialization, and presigned URL generation.
 
 ### Constructor
+
+```typescript
+constructor(
+  bucket: R2Bucket,
   opts?: R2Opts,
   signingConfig?: R2SigningConfig
 )
@@ -1470,5 +1474,5 @@ dotenv.config({ path: '.env.test' });
 ---
 
 **Documentation Version**: 1.0
-**Last Updated**: 2024-11-23
+**Last Updated**: 2025-12-14
 **Status**: Complete - All R2 APIs documented, KV placeholder noted

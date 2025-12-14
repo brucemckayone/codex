@@ -1,337 +1,445 @@
 # @codex/validation
 
-Comprehensive Zod schema library for request validation and type inference across the Codex platform. Provides centralized, reusable validation schemas for all API endpoints, services, and data operations.
+Centralized Zod schema library for input validation and type inference across Codex. Single source of truth for all validation rules, providing type-safe contracts between workers, services, and the database.
 
 ## Overview
 
-The `@codex/validation` package is a foundational library that implements the input validation strategy for Codex. It serves as the single source of truth for data validation rules, ensuring consistent validation behavior across workers, services, and packages.
+The `@codex/validation` package defines all input validation schemas used by workers, services, and the database layer. It ensures consistent validation behavior and provides automatic type inference via `z.infer`.
 
-**Primary responsibility**: Define and enforce validation rules for all user-generated input, database constraints, and API contracts.
+**Primary responsibility**: Validate all user input, route parameters, and query strings while providing type-safe TypeScript interfaces.
 
-**Why it exists**: Validation logic is complex and must be consistent everywhere input is accepted. By centralizing schemas, we ensure:
-- Single source of truth for validation rules
-- Type-safe inference from Zod schemas (TypeScript `z.infer`)
-- Reusability across workers and services
-- Easy maintenance when validation rules change
-- Security enforcement (XSS prevention, path traversal prevention, constraint validation)
+**Why it exists**:
+- Single source of truth for validation (if validation rules change, update once)
+- Type inference via `z.infer<typeof schema>` eliminates duplicate type definitions
+- Security enforcement at API boundaries (XSS, path traversal, injection prevention)
+- Database constraint alignment (validation enums match CHECK constraints exactly)
+- Reusable schemas across all workers and services
 
 **Key features**:
-- Zod-based schema definitions for all content, identity, and access operations
-- Custom validators for URLs, slugs, file paths, and pricing
-- Type inference for compile-time type safety
-- Security-focused validation (regex patterns, custom refinements)
-- Comprehensive error messages for API responses
-- Database constraint alignment (enums match CHECK constraints)
+- Zod-based primitives and domain schemas with full type inference
+- Security-first validation: URL protocol whitelisting, slug safety, R2 path traversal prevention, domain whitelisting for redirects
+- Database-aligned enums: mediaStatusEnum, contentStatusEnum, visibilityEnum, etc. match database CHECK constraints exactly
+- Custom refinements for cross-field validation: video/audio requires mediaItemId, free content cannot be purchased_only, etc.
+- Pagination schema with coercion for query string parameters
+- Clear, actionable error messages designed for API responses
 
 ## Architecture
 
-The package is organized into domain-specific modules:
+The package is organized into layered modules by domain and reusability:
 
-- **primitives.ts**: Reusable primitive validators (UUIDs, URLs, slugs, numbers, strings)
-- **content/content-schemas.ts**: Content, media, and organization schemas
-- **identity/user-schema.ts**: User authentication schemas
-- **schemas/access.ts**: Content access and streaming schemas
-- **shared/**: Pagination and common query schemas
+```
+primitives.ts
+  └─ Reusable validators (UUIDs, URLs, slugs, numbers, strings, email, params)
 
-Each module exports both Zod schemas (for validation) and TypeScript types (inferred from schemas using `z.infer<typeof schema>`).
+shared/
+  └─ pagination-schema.ts (PaginationInput with coercion)
+
+content/
+  ├─ Organization schemas (create, update, query)
+  ├─ Media item schemas (create, update, query)
+  ├─ Content schemas (create, update, query, publish)
+  └─ Upload request schema
+
+identity/
+  └─ User schemas (user profile, login credentials)
+
+schemas/
+  ├─ access.ts (streaming URLs, playback progress, user library)
+  └─ purchase.ts (checkout session, purchase queries, webhook metadata)
+
+index.ts
+  └─ Re-exports all schemas and types
+```
+
+**Design principle**: Primitives are composed into domain schemas. Domain schemas are composed using `.extend()` or `.refine()` for cross-field validation. All exports include both schemas (for `parse()` calls) and types (for TypeScript annotations).
 
 ## Public API
 
 ### Primitive Validators
 
-Core building blocks for composing larger schemas. Designed for reuse across domain-specific schemas.
+Reusable building blocks for composing domain schemas. Zero business logic—pure validation only.
 
-| Export | Type | Purpose | Usage |
-|--------|------|---------|-------|
-| `uuidSchema` | ZodSchema | Validates UUID v4 format | Primary/foreign key validation |
-| `createSlugSchema(maxLength)` | Function | Validates URL-safe slugs | Organization/content slugs |
-| `urlSchema` | ZodSchema | Validates HTTP/HTTPS URLs | Website URLs, image URLs |
-| `priceCentsSchema` | ZodSchema | Validates pricing (integer cents) | Content pricing |
-| `positiveIntSchema` | ZodSchema | Validates positive integers | Page numbers, limits |
-| `nonNegativeIntSchema` | ZodSchema | Validates non-negative integers | Duration, position, count |
-| `createSanitizedStringSchema(min, max, fieldName)` | Function | Validates trimmed strings with bounds | Titles, names, descriptions |
-| `createOptionalTextSchema(maxLength, fieldName)` | Function | Validates optional text with max length | Descriptions, optional fields |
-| `emailSchema` | ZodSchema | Validates email format | Email addresses |
-| `createIdParamsSchema()` | Function | Validates route param `{ id: string }` | GET/PATCH/DELETE /:id routes |
-| `createSlugParamsSchema(maxLength)` | Function | Validates route param `{ slug: string }` | GET /:slug routes |
+#### Identifiers
 
-### Content Schemas
+```typescript
+// UUID v4 validation (for all primary/foreign keys)
+export const uuidSchema: ZodSchema;
+// Example: '550e8400-e29b-41d4-a716-446655440000'
 
-Validation for organizations, media items, and content creation/updates.
+// Better Auth user ID (alphanumeric, 1-64 chars)
+export const userIdSchema: ZodSchema;
+// Example: 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b' (Better Auth default format)
+
+// URL-safe slug validation (lowercase a-z0-9-, no leading/trailing hyphens)
+export const createSlugSchema(maxLength?: number = 500): ZodSchema;
+// Example: 'my-content-slug' (not 'My-Content-Slug' or '-my-slug')
+```
+
+#### URLs & Protocols
+
+```typescript
+// HTTP/HTTPS only (prevents javascript: and data: URIs for XSS prevention)
+export const urlSchema: ZodSchema;
+// Accepts: 'https://example.com', 'http://example.com:8080'
+// Rejects: 'javascript:alert(1)', 'data:text/html,<img>', 'ftp://example.com'
+```
+
+#### Numbers
+
+```typescript
+// Price in cents: non-negative integer, max $100,000 (10M cents), nullable
+export const priceCentsSchema: ZodSchema;
+// Example: 9999 (represents $99.99), null (free content)
+
+// Positive integer (> 0)
+export const positiveIntSchema: ZodSchema;
+// Example: 1, 100, 1000 (not 0)
+
+// Non-negative integer (>= 0)
+export const nonNegativeIntSchema: ZodSchema;
+// Example: 0, 100, 1000
+```
+
+#### Strings
+
+```typescript
+// Sanitized string: trimmed, min/max length, custom field name for errors
+export const createSanitizedStringSchema(min: number, max: number, fieldName: string): ZodSchema;
+// Example: createSanitizedStringSchema(1, 255, 'Title')
+// Trims whitespace, rejects empty strings
+
+// Optional text: trimmed, max length, can be null/undefined
+export const createOptionalTextSchema(maxLength: number, fieldName: string): ZodSchema;
+// Example: createOptionalTextSchema(5000, 'Description')
+// Allows null or undefined
+
+// Email validation
+export const emailSchema: ZodSchema;
+// Example: 'user@example.com'
+```
+
+#### Route Parameters
+
+```typescript
+// Route params for GET/:id endpoints
+export const createIdParamsSchema(): ZodSchema;
+// Validates: { id: string (UUID) }
+
+// Route params for GET/:slug endpoints
+export const createSlugParamsSchema(maxLength?: number = 255): ZodSchema;
+// Validates: { slug: string (lowercase a-z0-9-) }
+```
+
+### Content Domain Schemas
+
+Validation for organizations, media items, and content with database constraint alignment and security refinements.
 
 #### Organization Schemas
 
 ```typescript
-// Create organization input validation
-createOrganizationSchema: ZodSchema<CreateOrganizationInput>
-type CreateOrganizationInput = {
-  name: string;              // 1-255 characters
-  slug: string;              // lowercase a-z0-9-, no leading/trailing hyphens
-  description?: string;      // optional, max 5000 chars
-  logoUrl?: string | null;   // optional HTTP/HTTPS URL
-  websiteUrl?: string | null;// optional HTTP/HTTPS URL
-}
+export const createOrganizationSchema: ZodSchema;
+export type CreateOrganizationInput = {
+  name: string;              // 1-255 chars, trimmed (sanitized)
+  slug: string;              // lowercase a-z0-9-, max 255 chars (unique per database)
+  description?: string;      // max 5000 chars, optional, nullable
+  logoUrl?: string | null;   // HTTP/HTTPS URL only, optional, nullable
+  websiteUrl?: string | null;// HTTP/HTTPS URL only, optional, nullable
+};
 
-// Update organization (all fields optional)
-updateOrganizationSchema: ZodSchema<UpdateOrganizationInput>
-type UpdateOrganizationInput = Partial<CreateOrganizationInput>
+export const updateOrganizationSchema: ZodSchema; // All fields optional
+export type UpdateOrganizationInput = Partial<CreateOrganizationInput>;
 
-// Organization status enum
-organizationStatusEnum: ZodEnum<['active', 'suspended', 'deleted']>
+export const organizationStatusEnum: ZodEnum<['active', 'suspended', 'deleted']>;
 
-// Query/list organizations
-organizationQuerySchema: ZodSchema<OrganizationQueryInput>
-type OrganizationQueryInput = {
-  page: number;                      // default: 1
-  limit: number;                     // default: 20, max: 100
-  search?: string;                   // max 255 chars
-  sortBy: 'createdAt' | 'name';     // default: 'createdAt'
-  sortOrder: 'asc' | 'desc';        // default: 'desc'
-}
+export const organizationQuerySchema: ZodSchema;
+export type OrganizationQueryInput = {
+  page: number;              // default: 1, coerced from query string
+  limit: number;             // default: 20, max 100, coerced from query string
+  search?: string;           // max 255 chars, optional filter
+  sortBy: 'createdAt' | 'name'; // default: 'createdAt'
+  sortOrder: 'asc' | 'desc'; // default: 'desc'
+};
 ```
 
 #### Media Item Schemas
 
 ```typescript
-// Create media item
-createMediaItemSchema: ZodSchema<CreateMediaItemInput>
-type CreateMediaItemInput = {
-  title: string;                     // 1-255 characters
-  description?: string;              // optional, max 5000 chars
-  mediaType: 'video' | 'audio';     // enum
-  mimeType: string;                  // whitelist of supported formats
-  fileSizeBytes: number;             // 1 byte to 5GB
-  r2Key: string;                     // S3-style path, max 500 chars
-}
+export const mediaTypeEnum: ZodEnum<['video', 'audio']>;
+// Aligns with database CHECK constraint
 
-// Update media item (for transcoding service)
-updateMediaItemSchema: ZodSchema<UpdateMediaItemInput>
-type UpdateMediaItemInput = {
+export const mediaStatusEnum: ZodEnum<['uploading', 'uploaded', 'transcoding', 'ready', 'failed']>;
+// Aligns with database CHECK constraint
+
+export const createMediaItemSchema: ZodSchema;
+export type CreateMediaItemInput = {
+  title: string;             // 1-255 chars
+  description?: string;      // max 5000 chars, optional, nullable
+  mediaType: 'video' | 'audio';
+  mimeType: string;          // whitelist: video/mp4, video/quicktime, video/x-msvideo, video/webm,
+                             // audio/mpeg, audio/mp4, audio/wav, audio/webm, audio/ogg
+  fileSizeBytes: number;     // 1 byte to 5GB
+  r2Key: string;             // S3-style path (alphanumeric/_-, no traversal, max 500 chars)
+};
+
+export const updateMediaItemSchema: ZodSchema;
+export type UpdateMediaItemInput = {
   status?: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed';
-  durationSeconds?: number;          // 0-86400 (24 hours max)
-  width?: number;                    // 1-7680 (8K max)
-  height?: number;                   // 1-4320 (8K max)
-  hlsMasterPlaylistKey?: string;     // HLS manifest path
-  thumbnailKey?: string;             // thumbnail image path
-  uploadedAt?: Date;                 // upload timestamp
-}
+  durationSeconds?: number;  // 0-86400 (24 hours max)
+  width?: number;            // 1-7680 (8K max width)
+  height?: number;           // 1-4320 (8K max height)
+  hlsMasterPlaylistKey?: string | null; // max 500 chars
+  thumbnailKey?: string | null;         // max 500 chars
+  uploadedAt?: Date;
+};
 
-// Query/list media
-mediaQuerySchema: ZodSchema<MediaQueryInput>
-type MediaQueryInput = {
-  page: number;                      // default: 1
-  limit: number;                     // default: 20, max: 100
-  status?: mediaStatusEnum;          // optional filter
-  mediaType?: 'video' | 'audio';    // optional filter
+export const mediaQuerySchema: ZodSchema;
+export type MediaQueryInput = {
+  page: number;              // default: 1, coerced from query string
+  limit: number;             // default: 20, max 100, coerced from query string
+  status?: MediaStatusEnum;  // optional filter
+  mediaType?: 'video' | 'audio'; // optional filter
   sortBy: 'createdAt' | 'uploadedAt' | 'title'; // default: 'createdAt'
-  sortOrder: 'asc' | 'desc';        // default: 'desc'
-}
-
-// Media type and status enums
-mediaTypeEnum: ZodEnum<['video', 'audio']>
-mediaStatusEnum: ZodEnum<['uploading', 'uploaded', 'transcoding', 'ready', 'failed']>
+  sortOrder: 'asc' | 'desc'; // default: 'desc'
+};
 ```
 
 #### Content Schemas
 
 ```typescript
-// Create content
-createContentSchema: ZodSchema<CreateContentInput>
-type CreateContentInput = {
-  title: string;                           // 1-500 characters
-  slug: string;                            // URL-safe, max 500 chars
-  description?: string;                    // optional, max 10000 chars
-  contentType: 'video' | 'audio' | 'written'; // enum
-  mediaItemId?: string | null;             // UUID, required for video/audio
-  contentBody?: string;                    // optional, max 100000 chars
-  organizationId?: string | null;          // UUID, org context
-  category?: string;                       // optional, max 100 chars
-  tags?: string[];                         // array, max 20, each max 50 chars
-  thumbnailUrl?: string | null;            // optional HTTP/HTTPS URL
-  visibility: 'public' | 'private' | 'members_only' | 'purchased_only';
-  priceCents?: number | null;              // cents (0 to $100,000)
-}
+export const contentTypeEnum: ZodEnum<['video', 'audio', 'written']>;
+export const contentStatusEnum: ZodEnum<['draft', 'published', 'archived']>;
+export const visibilityEnum: ZodEnum<['public', 'private', 'members_only', 'purchased_only']>;
+export const sortOrderEnum: ZodEnum<['asc', 'desc']>;
 
-// Update content (partial, cannot change mediaItemId)
-updateContentSchema: ZodSchema<UpdateContentInput>
-type UpdateContentInput = Partial<Omit<CreateContentInput, 'mediaItemId'>>
+export const createContentSchema: ZodSchema;
+export type CreateContentInput = {
+  title: string;             // 1-500 chars, sanitized
+  slug: string;              // lowercase a-z0-9-, max 500 chars
+  description?: string;      // max 10000 chars, optional, nullable
+  contentType: 'video' | 'audio' | 'written';
+  mediaItemId?: string | null; // UUID, REQUIRED if video/audio
+  contentBody?: string;      // max 100000 chars, REQUIRED if written
+  organizationId?: string | null; // UUID, optional (personal content if null)
+  category?: string | null;  // max 100 chars, optional, nullable
+  tags?: string[];           // max 20 tags, each max 50 chars (defaults to [])
+  thumbnailUrl?: string | null; // HTTP/HTTPS URL, optional, nullable
+  visibility: 'public' | 'private' | 'members_only' | 'purchased_only'; // default: 'purchased_only'
+  priceCents?: number | null; // 0 to 10M cents ($100K), nullable
+};
 
-// Content type, status, and visibility enums
-contentTypeEnum: ZodEnum<['video', 'audio', 'written']>
-contentStatusEnum: ZodEnum<['draft', 'published', 'archived']>
-visibilityEnum: ZodEnum<['public', 'private', 'members_only', 'purchased_only']>
+// Refinements:
+// 1. Video/audio MUST have mediaItemId
+// 2. Written MUST have contentBody
+// 3. Free content (price 0 or null) CANNOT be purchased_only visibility
 
-// Query/list content
-contentQuerySchema: ZodSchema<ContentQueryInput>
-type ContentQueryInput = {
-  page: number;                           // default: 1
-  limit: number;                          // default: 20, max: 100
-  status?: contentStatusEnum;              // optional filter
-  contentType?: contentTypeEnum;           // optional filter
-  visibility?: visibilityEnum;             // optional filter
-  category?: string;                       // optional, max 100 chars
-  organizationId?: string;                 // UUID, optional filter
-  search?: string;                         // text search, max 255 chars
-  sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount';
-  sortOrder: 'asc' | 'desc';              // default: 'desc'
-}
+export const updateContentSchema: ZodSchema; // All fields optional except mediaItemId removed
+export type UpdateContentInput = Partial<Omit<CreateContentInput, 'mediaItemId'>>;
 
-// Publish content status change
-publishContentSchema: ZodSchema<PublishContentInput>
-type PublishContentInput = {
-  contentId: string;                       // UUID of content to publish
-}
+export const publishContentSchema: ZodSchema;
+export type PublishContentInput = {
+  contentId: string; // UUID of content to publish
+};
+
+export const contentQuerySchema: ZodSchema;
+export type ContentQueryInput = {
+  page: number;              // default: 1, coerced from query string
+  limit: number;             // default: 20, max 100, coerced from query string
+  status?: ContentStatusEnum; // optional filter
+  contentType?: ContentTypeEnum; // optional filter
+  visibility?: VisibilityEnum; // optional filter
+  category?: string;         // max 100 chars, optional filter
+  organizationId?: string;   // UUID, optional filter
+  search?: string;           // max 255 chars, optional text search
+  sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount'; // default: 'createdAt'
+  sortOrder: 'asc' | 'desc'; // default: 'desc'
+};
 ```
 
 #### Upload Request Schema
 
 ```typescript
-// Initiate direct upload to R2
-uploadRequestSchema: ZodSchema<UploadRequestInput>
-type UploadRequestInput = {
-  filename: string;                        // 1-255 chars, [a-zA-Z0-9._-]
-  contentType: string;                     // MIME type from whitelist
-  fileSizeBytes: number;                   // 1 byte to 5GB
-  title: string;                           // 1-255 characters
-  description?: string;                    // optional, max 1000 chars
-  mediaType: 'video' | 'audio';           // enum
-}
+export const uploadRequestSchema: ZodSchema;
+export type UploadRequestInput = {
+  filename: string;          // 1-255 chars, alphanumeric + ._- only (no spaces, no path separators)
+  contentType: string;       // MIME type from whitelist (video/*, audio/*)
+  fileSizeBytes: number;     // 1 byte to 5GB
+  title: string;             // 1-255 chars, sanitized
+  description?: string;      // max 1000 chars, optional, nullable
+  mediaType: 'video' | 'audio';
+};
 ```
 
 ### Identity Schemas
 
 ```typescript
-// User profile
-userSchema: ZodSchema<User>
-type User = {
-  email: string;              // valid email format
-  name: string;               // 1+ characters
-  age?: number;               // optional, must be >= 0
-  role: 'user' | 'admin';    // default: 'user'
-}
+export const userSchema: ZodSchema;
+export type User = {
+  email: string;      // valid email format
+  name: string;       // 1+ characters
+  age?: number;       // optional, must be >= 0
+  role: 'user' | 'admin'; // default: 'user'
+};
 
-// Login credentials
-loginSchema: ZodSchema<LoginCredentials>
-type LoginCredentials = {
-  email: string;              // valid email format
-  password: string;           // min 8 characters
-}
+export const loginSchema: ZodSchema;
+export type LoginCredentials = {
+  email: string;      // valid email format
+  password: string;   // min 8 characters
+};
 ```
 
 ### Access Schemas
 
-Validation for user library, playback tracking, and streaming URLs.
+Validation for content streaming, playback tracking, and user library access.
 
 ```typescript
-// Get streaming URL
-getStreamingUrlSchema: ZodSchema<GetStreamingUrlInput>
-type GetStreamingUrlInput = {
+export const getStreamingUrlSchema: ZodSchema;
+export type GetStreamingUrlInput = {
   contentId: string;          // UUID of content
-  expirySeconds?: number;     // optional, default 3600, range 300-7200 (5m-2h)
-}
+  expirySeconds?: number;     // 300-7200 seconds (5 min to 2 hours), default: 3600 (1 hour)
+};
 
-// Save playback progress
-savePlaybackProgressSchema: ZodSchema<SavePlaybackProgressInput>
-type SavePlaybackProgressInput = {
+export const savePlaybackProgressSchema: ZodSchema;
+export type SavePlaybackProgressInput = {
   contentId: string;          // UUID of content
-  positionSeconds: number;    // non-negative integer
-  durationSeconds: number;    // positive integer
+  positionSeconds: number;    // non-negative integer (>=0)
+  durationSeconds: number;    // positive integer (>0)
   completed?: boolean;        // default: false
-}
+};
 
-// Get playback progress
-getPlaybackProgressSchema: ZodSchema<GetPlaybackProgressInput>
-type GetPlaybackProgressInput = {
+export const getPlaybackProgressSchema: ZodSchema;
+export type GetPlaybackProgressInput = {
   contentId: string;          // UUID of content
-}
+};
 
-// List user library
-listUserLibrarySchema: ZodSchema<ListUserLibraryInput>
-type ListUserLibraryInput = {
+export const listUserLibrarySchema: ZodSchema;
+export type ListUserLibraryInput = {
   page: number;               // default: 1, max: 1000
   limit: number;              // default: 20, max: 100
   filter: 'all' | 'in-progress' | 'completed'; // default: 'all'
   sortBy: 'recent' | 'title' | 'duration'; // default: 'recent'
-}
+};
 ```
 
-## Schema Categories by Domain
+### Purchase Schemas
 
-### Primitives
-Building blocks for all validation:
-- **Identifiers**: UUID validation
-- **URLs**: HTTP/HTTPS validation with protocol enforcement
-- **Numbers**: Price (cents), positive/non-negative integers
-- **Strings**: Sanitized text with length constraints, slugs, email
-- **Params**: ID and slug route parameter validation
+Validation for Stripe Checkout integration and purchase queries. All URLs are HTTP/HTTPS only.
 
-### Content Management
-Organizations, media, and content operations:
-- **Organizations**: Create/update/query with slug uniqueness, name/description bounds
-- **Media Items**: File uploads with MIME type whitelist, R2 path validation
-- **Content**: Multi-type content (video/audio/written) with visibility and pricing
-- **Upload**: Direct R2 upload initiation with file size and format validation
+```typescript
+export const checkoutRedirectUrlSchema: ZodSchema;
+// Whitelisted domains: revelations.studio, codex.revelations.studio, app.revelations.studio,
+// codex-staging.revelations.studio, app-staging.revelations.studio, localhost, 127.0.0.1
+// Prevents open redirect attacks via domain whitelist
 
-### Identity & Access
-User management and content access control:
-- **Users**: Email, name, role, age
-- **Login**: Email and password for authentication
-- **Library**: User playback history and saved content
-- **Streaming**: Temporary signed URL generation with expiry bounds
-- **Progress**: Playback position tracking
+export const purchaseStatusEnum: ZodEnum<['pending', 'completed', 'refunded', 'failed']>;
+// Aligns with database CHECK constraint
 
-## Validation Patterns
+export const createCheckoutSchema: ZodSchema;
+export type CreateCheckoutInput = {
+  contentId: string;          // UUID of content to purchase
+  successUrl: string;         // HTTP/HTTPS URL on whitelisted domain
+  cancelUrl: string;          // HTTP/HTTPS URL on whitelisted domain
+};
 
-### 1. Basic Schema Usage
+export const purchaseQuerySchema: ZodSchema;
+export type PurchaseQueryInput = {
+  page: number;               // default: 1, max: 1000, coerced from query string
+  limit: number;              // default: 20, max: 100, coerced from query string
+  status?: PurchaseStatus;    // optional filter
+  contentId?: string;         // UUID, optional filter
+};
 
-Parse and validate user input:
+export const getPurchaseSchema: ZodSchema;
+export type GetPurchaseInput = {
+  id: string;                 // UUID of purchase record
+};
+
+export const checkoutSessionMetadataSchema: ZodSchema;
+export type CheckoutSessionMetadata = {
+  customerId: string;         // Better Auth user ID (alphanumeric)
+  contentId: string;          // UUID of content being purchased
+  organizationId?: string | null; // UUID of creator's organization, nullable
+};
+```
+
+## Core Validation Patterns
+
+### 1. Basic Usage: Parse & Type Inference
 
 ```typescript
 import { createContentSchema, type CreateContentInput } from '@codex/validation';
 
-// Throws ZodError if validation fails
+// Parse (throws ZodError on failure)
 const validated = createContentSchema.parse(userInput);
 
-// Or use safe parsing (returns { success: true/false })
+// Safe parse (no throw)
 const result = createContentSchema.safeParse(userInput);
 if (result.success) {
   const validated: CreateContentInput = result.data;
 }
+
+// Type inference via z.infer (single source of truth)
+type MyInput = z.infer<typeof createContentSchema>;
 ```
 
-### 2. Type Inference for Type Safety
-
-Use `z.infer` to get TypeScript types automatically:
+### 2. Route Parameter Validation
 
 ```typescript
-import { createContentSchema } from '@codex/validation';
+import { createIdParamsSchema, createSlugParamsSchema } from '@codex/validation';
 
-// Type is inferred automatically from schema
-type ContentInput = z.infer<typeof createContentSchema>;
+// GET /content/:id
+app.get('/:id', createAuthenticatedHandler({
+  schema: { params: createIdParamsSchema() },
+  handler: async (c, ctx) => {
+    const { id } = ctx.validated.params; // UUID
+  },
+}));
 
-// Or use pre-exported types
-import type { CreateContentInput } from '@codex/validation';
+// GET /org/:slug
+app.get('/:slug', createAuthenticatedHandler({
+  schema: { params: createSlugParamsSchema(255) },
+  handler: async (c, ctx) => {
+    const { slug } = ctx.validated.params; // lowercase a-z0-9-
+  },
+}));
 ```
 
-### 3. Extending Schemas
+### 3. Query Parameters with Type Coercion
 
-Compose schemas for reuse:
+Query string parameters are always strings in URLs. Use `z.coerce` to convert:
 
 ```typescript
-import { createSanitizedStringSchema } from '@codex/validation';
+import { contentQuerySchema } from '@codex/validation';
 
-const myCustomSchema = z.object({
-  title: createSanitizedStringSchema(5, 100, 'Title'),
-  status: z.enum(['active', 'inactive']),
+// URL: ?page=2&limit=50&status=published
+app.get('/content', createAuthenticatedHandler({
+  schema: { query: contentQuerySchema },
+  handler: async (c, ctx) => {
+    // ctx.validated.query has page/limit coerced to numbers
+    const { page, limit, status } = ctx.validated.query;
+  },
+}));
+```
+
+### 4. Schema Composition
+
+Extend schemas to add filters and sorting:
+
+```typescript
+import { paginationSchema } from '@codex/validation';
+
+// Extend pagination with domain-specific filters
+const myQuerySchema = paginationSchema.extend({
+  status: z.enum(['active', 'inactive']).optional(),
+  createdAfter: z.coerce.date().optional(),
 });
 ```
 
-### 4. Custom Refinements
+### 5. Cross-Field Validation (Refinements)
 
-Add business logic validation:
+Validate relationships between fields:
 
 ```typescript
-const createContentSchema = baseContentSchema
+export const createContentSchema = baseContentSchema
   .refine(
     (data) => {
       // Video/audio MUST have mediaItemId
@@ -347,889 +455,303 @@ const createContentSchema = baseContentSchema
   );
 ```
 
-### 5. Route Parameter Validation
+## Security Features
 
-Validate dynamic route segments:
+All validation schemas enforce security at the API boundary:
+
+### XSS Prevention
+
+URL fields reject `javascript:` and `data:` URIs:
 
 ```typescript
-import { createIdParamsSchema, createSlugParamsSchema } from '@codex/validation';
+// Valid
+urlSchema.parse('https://example.com');
+urlSchema.parse('http://subdomain.example.com:8080');
 
-// Route: GET /content/:id
-const schema = { params: createIdParamsSchema() };
-// Validates: { id: string (UUID) }
-
-// Route: GET /org/:slug
-const schema = { params: createSlugParamsSchema(255) };
-// Validates: { slug: string (lowercase a-z0-9-) }
+// Throws
+urlSchema.parse('javascript:alert(1)');
+urlSchema.parse('data:text/html,<img src=x onerror=alert(1)>');
 ```
 
-### 6. Query Parameter Validation with Type Coercion
+### Path Traversal Prevention
 
-Handle query string parameters (always strings in URL):
-
-```typescript
-const querySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-});
-
-// URL: ?page=2&limit=50
-// Coerces strings to numbers automatically
-const validated = querySchema.parse(req.query);
-```
-
-### 7. Enum Validation
-
-Whitelist allowed values:
+R2 keys and filenames reject traversal sequences:
 
 ```typescript
-import { visibilityEnum } from '@codex/validation';
-
-// Throws error if not one of: public, private, members_only, purchased_only
-const visibility = visibilityEnum.parse(userInput);
-```
-
-### 8. Optional and Nullable Fields
-
-Handle missing/null values:
-
-```typescript
-const schema = z.object({
-  description: z.string().optional(),           // undefined is valid
-  logoUrl: z.string().nullable(),               // null is valid
-  websiteUrl: z.string().optional().nullable(), // both undefined and null valid
-});
-```
-
-## Custom Validators
-
-### Slug Validation
-
-Prevents XSS and path traversal by restricting to `a-z0-9-` with no leading/trailing hyphens:
-
-```typescript
-const slugSchema = createSlugSchema(500);
-// Accepts: 'my-content', 'tutorial-2024', 'a'
-// Rejects: 'MY-CONTENT' (uppercase), '-start' (leading), 'double--hyphen'
-// Transform: Converts to lowercase
-```
-
-**Security properties**:
-- Lowercase-only prevents case sensitivity attacks
-- Hyphen-only separator prevents XSS encoding evasion
-- No path traversal characters (`../`, `..\\`)
-- Safe for URLs and file paths
-
-### URL Validation
-
-Restricts to HTTP/HTTPS, preventing javascript: and data: URIs:
-
-```typescript
-const urlSchema = z.string().url().refine((url) => {
-  const parsed = new URL(url);
-  return ['http:', 'https:'].includes(parsed.protocol);
-});
-// Accepts: 'https://example.com', 'http://example.com:8080'
-// Rejects: 'javascript:alert(1)', 'data:text/html,<script>', 'ftp://example.com'
-```
-
-**Security properties**:
-- Protocol whitelist blocks javascript: and data: URIs
-- Native URL constructor prevents malformed URLs
-- Used for all external URLs (logos, websites, thumbnails)
-
-### R2 Path Validation
-
-Prevents directory traversal and injection in cloud storage paths:
-
-```typescript
-const r2Key = z.string()
-  .regex(/^[a-zA-Z0-9/_-]+(\.[a-zA-Z0-9]+)?$/)
-  .refine((key) => !key.includes('..'));
-// Accepts: 'originals/abc123/video.mp4', 'hls/master.m3u8'
-// Rejects: '../../../etc/passwd', 'file@name.mp4', 'file name.mp4'
-```
-
-**Security properties**:
-- Character whitelist prevents injection
-- Path traversal detection blocks `..` sequences
-- Used for S3/R2 object keys to prevent unauthorized access
-
-### Filename Validation
-
-Prevents directory traversal in uploaded filenames:
-
-```typescript
-const filename = z.string()
-  .regex(/^[a-zA-Z0-9._-]+$/);
-// Accepts: 'video.mp4', 'video-final_v2.mp4'
-// Rejects: 'my video.mp4' (spaces), '../etc/passwd' (path traversal)
-```
-
-## Error Messages
-
-All schemas provide clear, user-friendly error messages designed for API responses. Errors follow the pattern:
-
-**Format**: "[Field name] must [condition]" or "[Field name] [error]"
-
-**Examples**:
-- `"Organization name must be at least 1 characters"`
-- `"Slug must contain only lowercase letters, numbers, and hyphens"`
-- `"URL must use HTTP or HTTPS protocol"`
-- `"Price cannot exceed $100,000"`
-- `"File size cannot exceed 5GB"`
-- `"Media item is required for video and audio content"`
-- `"Status must be active, suspended, or deleted"`
-
-**Error response structure**:
-
-When validation fails, Zod errors are converted to JSON by the worker layer:
-
-```typescript
-// Validation fails
-const result = createContentSchema.safeParse(invalidInput);
-if (!result.success) {
-  // result.error is ZodError
-  // Contains: error.issues[].{path[], message, code}
-}
-
-// HTTP response (400 Bad Request)
-{
-  "error": "Validation failed",
-  "issues": [
-    {
-      "path": ["mediaItemId"],
-      "message": "Media item is required for video and audio content"
-    }
-  ]
-}
-```
-
-## Type Inference and TypeScript Integration
-
-### Automatic Type Extraction
-
-Zod schemas automatically generate TypeScript types using `z.infer`:
-
-```typescript
-import { createContentSchema } from '@codex/validation';
-
-// Automatic type derivation
-type CreateContentInput = z.infer<typeof createContentSchema>;
-
-// Service layer receives strongly-typed data
-class ContentService {
-  async create(input: CreateContentInput, creatorId: string) {
-    // TypeScript knows all fields and their types
-    console.log(input.title); // string
-    console.log(input.priceCents); // number | null
-  }
-}
-```
-
-### Pre-Exported Types
-
-Common types are pre-exported for convenience:
-
-```typescript
-import {
-  type CreateContentInput,
-  type UpdateContentInput,
-  type ContentQueryInput,
-  createContentSchema,
-} from '@codex/validation';
-
-// Use pre-exported types
-function handleCreate(input: CreateContentInput) {
+// Valid
+createMediaItemSchema.parse({
   // ...
-}
+  r2Key: 'originals/abc123/video.mp4',
+});
 
-// Or derive your own
-type MyType = z.infer<typeof createContentSchema>;
+// Throws
+createMediaItemSchema.parse({
+  // ...
+  r2Key: '../../../etc/passwd',
+});
+
+uploadRequestSchema.parse({
+  filename: 'video.mp4', // Valid
+});
+uploadRequestSchema.parse({
+  filename: '../etc/passwd', // Throws
+});
 ```
 
-### Type Safety in Workers
+### Open Redirect Prevention
 
-Workers validate and extract types in one step:
+Checkout redirect URLs are domain-whitelisted:
 
 ```typescript
-import { createContentSchema, type CreateContentInput } from '@codex/validation';
+// Whitelisted domains
+- revelations.studio
+- codex.revelations.studio
+- app.revelations.studio
+- codex-staging.revelations.studio
+- app-staging.revelations.studio
+- localhost (dev only)
+- 127.0.0.1 (dev only)
 
-app.post('/content', createAuthenticatedHandler({
+// Valid
+checkoutRedirectUrlSchema.parse('https://app.revelations.studio/success');
+
+// Throws
+checkoutRedirectUrlSchema.parse('https://evil.com/phish');
+```
+
+### String Sanitization
+
+All user-generated strings are trimmed and length-bounded:
+
+```typescript
+// Input: "  My Title  "
+// Output: "My Title" (trimmed)
+// Max length enforced: 255 chars
+createSanitizedStringSchema(1, 255, 'Title').parse('  My Title  ');
+```
+
+### Enum Whitelisting
+
+Only database-defined values accepted:
+
+```typescript
+mediaTypeEnum.parse('video');    // Valid
+mediaTypeEnum.parse('audio');    // Valid
+mediaTypeEnum.parse('document');  // Throws (not whitelisted)
+```
+
+## Database Alignment
+
+All validation schemas align exactly with database constraints. Enum values in schemas match CHECK constraints in the database schema:
+
+| Schema | Database Column | Constraint | Alignment |
+|--------|-----------------|-----------|-----------|
+| `mediaTypeEnum` | media_items.media_type | `('video', 'audio')` | Exact match |
+| `mediaStatusEnum` | media_items.status | `('uploading', 'uploaded', 'transcoding', 'ready', 'failed')` | Exact match |
+| `contentTypeEnum` | content.content_type | `('video', 'audio', 'written')` | Exact match |
+| `contentStatusEnum` | content.status | `('draft', 'published', 'archived')` | Exact match |
+| `visibilityEnum` | content.visibility | `('public', 'private', 'members_only', 'purchased_only')` | Exact match |
+| `purchaseStatusEnum` | purchases.status | `('pending', 'completed', 'refunded', 'failed')` | Exact match |
+| `priceCentsSchema` | content.price_cents, purchases.amount_paid_cents | Non-negative integer, max 10M | Non-negative int, 0-10M |
+| `createSlugSchema(500)` | content.slug | VARCHAR(500) | Max 500 chars |
+| `organizationSlugSchema` | organizations.slug | VARCHAR(255), UNIQUE | Max 255 chars, unique |
+
+This ensures that:
+1. API validation matches database constraints (no surprises on insert/update)
+2. Changes to database constraints must be reflected in validation schemas
+3. Enum values are whitelisted at the API boundary (principle of least privilege)
+
+## Usage Examples
+
+### Example 1: Create Endpoint with Full Validation
+
+```typescript
+import { createContentSchema, createIdParamsSchema } from '@codex/validation';
+import { ContentService } from '@codex/content';
+
+// POST /api/content
+app.post('/api/content', createAuthenticatedHandler({
   schema: { body: createContentSchema },
   handler: async (c, ctx) => {
-    // ctx.validated.body is strongly-typed as CreateContentInput
-    const content = await contentService.create(
-      ctx.validated.body,
-      ctx.user.id
-    );
+    const service = new ContentService({ db: dbHttp });
+    const content = await service.create(ctx.validated.body, ctx.user.id);
+    return { data: content };
+  },
+}));
+
+// GET /api/content/:id
+app.get('/api/content/:id', createAuthenticatedHandler({
+  schema: { params: createIdParamsSchema() },
+  handler: async (c, ctx) => {
+    const service = new ContentService({ db: dbHttp });
+    const content = await service.get(ctx.validated.params.id, ctx.user.id);
     return { data: content };
   },
 }));
 ```
 
-### Database Constraint Alignment
-
-Schema enums match database CHECK constraints exactly:
-
-```typescript
-// packages/validation/src/content/content-schemas.ts
-export const contentStatusEnum = z.enum(['draft', 'published', 'archived']);
-export const visibilityEnum = z.enum(['public', 'private', 'members_only', 'purchased_only']);
-export const mediaStatusEnum = z.enum(['uploading', 'uploaded', 'transcoding', 'ready', 'failed']);
-
-// Aligns with database schema:
-// CHECK (content_status IN ('draft', 'published', 'archived'))
-// CHECK (visibility IN ('public', 'private', 'members_only', 'purchased_only'))
-// CHECK (media_status IN ('uploading', 'uploaded', 'transcoding', 'ready', 'failed'))
-```
-
-This ensures validation at the API boundary matches database constraints.
-
-## Usage Examples
-
-### Example 1: Creating Content in a Worker
-
-```typescript
-import { createContentSchema, type CreateContentInput } from '@codex/validation';
-import { ContentService } from '@codex/content';
-
-app.post('/content', createAuthenticatedHandler({
-  schema: { body: createContentSchema },
-  handler: async (c, ctx) => {
-    // Validated input is strongly typed
-    const input: CreateContentInput = ctx.validated.body;
-
-    const service = new ContentService({ db: dbHttp });
-    const content = await service.create(input, ctx.user.id);
-
-    return {
-      data: content,
-    };
-  },
-}));
-```
-
-### Example 2: Listing Content with Filters
+### Example 2: List Endpoint with Pagination & Filters
 
 ```typescript
 import { contentQuerySchema } from '@codex/validation';
 
-app.get('/content', createAuthenticatedHandler({
+// GET /api/content?page=1&limit=20&status=published
+app.get('/api/content', createAuthenticatedHandler({
   schema: { query: contentQuerySchema },
   handler: async (c, ctx) => {
-    // Query parameters are validated and coerced
-    const filters = ctx.validated.query;
-
     const service = new ContentService({ db: dbHttp });
-    const { items, total } = await service.list(filters, ctx.user.id);
-
+    const { items, total } = await service.list(
+      ctx.validated.query,
+      ctx.user.id
+    );
     return { data: items, total };
   },
 }));
 ```
 
-### Example 3: Validating Route Parameters
+### Example 3: Service Layer with Type Safety
 
 ```typescript
-import { createIdParamsSchema } from '@codex/validation';
+import { type CreateContentInput } from '@codex/validation';
 
-app.get('/:id', createAuthenticatedHandler({
-  schema: { params: createIdParamsSchema() },
+export class ContentService {
+  async create(input: CreateContentInput, creatorId: string) {
+    // input is fully typed and validated
+    const { title, slug, visibility, priceCents } = input;
+
+    // Guaranteed to satisfy database constraints
+    const [content] = await this.db
+      .insert(schema.content)
+      .values({ ...input, creatorId })
+      .returning();
+
+    return content;
+  }
+}
+```
+
+### Example 4: Error Handling
+
+```typescript
+import { createContentSchema } from '@codex/validation';
+
+const result = createContentSchema.safeParse(userInput);
+
+if (!result.success) {
+  // result.error contains all validation issues
+  const errors = result.error.errors.map((e) => ({
+    path: e.path.join('.'),
+    message: e.message,
+  }));
+  return c.json({ error: 'Validation failed', errors }, 400);
+}
+
+// result.data is guaranteed valid
+const validated = result.data;
+```
+
+## Integration with Codex Architecture
+
+### Dependent Packages
+
+| Package | Usage | Schemas |
+|---------|-------|---------|
+| @codex/content | Content & media lifecycle | createContentSchema, createMediaItemSchema, createOrganizationSchema |
+| @codex/identity | Organization management | createOrganizationSchema, updateOrganizationSchema |
+| @codex/access | Content access & streaming | getStreamingUrlSchema, savePlaybackProgressSchema, listUserLibrarySchema |
+| @codex/purchase | Stripe checkout & purchases | createCheckoutSchema, purchaseQuerySchema, checkoutSessionMetadataSchema |
+
+### Dependent Workers
+
+All workers use validation schemas in route handlers via `createAuthenticatedHandler()`:
+
+```typescript
+import { createAuthenticatedHandler } from '@codex/worker-utils';
+import { createContentSchema } from '@codex/validation';
+
+app.post('/api/content', createAuthenticatedHandler({
+  schema: { body: createContentSchema },
   handler: async (c, ctx) => {
-    // Route param is validated as UUID
-    const { id } = ctx.validated.params;
-
-    const service = new ContentService({ db: dbHttp });
-    const content = await service.get(id, ctx.user.id);
-
-    return { data: content };
+    // ctx.validated is fully validated and typed
   },
 }));
 ```
 
-### Example 4: Custom Type-Safe Data Processing
+## Performance & Best Practices
 
-```typescript
-import { createOrganizationSchema, type CreateOrganizationInput } from '@codex/validation';
+**Validation cost**: Minimal (microseconds per request). Zod caches regex compilation and runs custom refinements only after basic validation passes.
 
-function processOrganization(input: CreateOrganizationInput) {
-  // All fields are properly typed
-  const slug = input.slug.toLowerCase(); // slug is string
-  const hasLogo = !!input.logoUrl; // logoUrl is string | undefined | null
-
-  return {
-    slug,
-    name: input.name,
-    hasLogo,
-  };
-}
-```
-
-### Example 5: Error Handling
-
-```typescript
-import { createContentSchema } from '@codex/validation';
-
-function validateAndHandle(input: unknown) {
-  const result = createContentSchema.safeParse(input);
-
-  if (!result.success) {
-    // result.error is ZodError
-    const issues = result.error.issues.map((issue) => ({
-      field: issue.path.join('.'),
-      message: issue.message,
-    }));
-
-    return {
-      status: 400,
-      body: {
-        error: 'Validation failed',
-        issues,
-      },
-    };
-  }
-
-  // result.data is fully validated and typed
-  const validated = result.data;
-  // Process validated data
-}
-```
-
-## Integration Points
-
-### Packages Using @codex/validation
-
-| Package | Schemas Used | Purpose |
-|---------|--------------|---------|
-| @codex/content | createContentSchema, createMediaItemSchema, createOrganizationSchema | Content service validation |
-| @codex/access | getStreamingUrlSchema, savePlaybackProgressSchema, listUserLibrarySchema | Access control and streaming |
-| @codex/identity | userSchema, loginSchema | User authentication |
-
-### Workers Using @codex/validation
-
-| Worker | Endpoints | Key Schemas |
-|--------|-----------|-------------|
-| content-api | POST/GET/PATCH /content, POST /content/:id/publish | createContentSchema, contentQuerySchema, createIdParamsSchema |
-| media-api | POST/GET /media, PATCH /media/:id | createMediaItemSchema, updateMediaItemSchema, createIdParamsSchema |
-| identity-api | POST/PATCH /organizations, GET /organizations | createOrganizationSchema, organizationQuerySchema, createIdParamsSchema |
-| content-access-api | GET /stream, POST /progress, GET /library | getStreamingUrlSchema, savePlaybackProgressSchema, listUserLibrarySchema |
-
-### Service Layer Integration
-
-Services import validated types for type safety:
-
-```typescript
-// @codex/content
-import { type CreateContentInput, type UpdateContentInput } from '@codex/validation';
-
-export class ContentService {
-  async create(input: CreateContentInput, creatorId: string) {
-    // input is guaranteed to match database schema
-  }
-
-  async update(contentId: string, input: UpdateContentInput, creatorId: string) {
-    // input is partial but validated
-  }
-}
-```
-
-## Performance Notes
-
-### Validation Cost
-
-- **Zod parsing**: Minimal overhead (microseconds per validation)
-- **Regex compilation**: Cached by Zod, no recompilation per request
-- **Custom refinements**: Only run after basic validation passes
-- **Type inference**: Zero runtime cost (compile-time only)
-
-### Recommendations
-
-1. **Parse at boundaries**: Validate request input immediately at route handler
-2. **Reuse schemas**: Import from this package rather than duplicating
-3. **Safe parsing**: Use `.safeParse()` for error handling without try/catch
-4. **Type inference**: Let TypeScript infer types from schemas rather than manual definitions
-
-## Security Features
-
-### XSS Prevention
-
-All URL fields reject `javascript:` and `data:` URIs:
-
-```typescript
-// ✓ Valid
-urlSchema.parse('https://example.com');
-urlSchema.parse('http://example.com');
-
-// ❌ Throws
-urlSchema.parse('javascript:alert(1)');
-urlSchema.parse('data:text/html,<script>alert(1)</script>');
-```
-
-### Path Traversal Prevention
-
-R2 keys and filenames reject path traversal sequences:
-
-```typescript
-// ✓ Valid
-createMediaItemSchema.parse({
-  ...,
-  r2Key: 'originals/abc123/video.mp4',
-});
-
-// ❌ Throws
-createMediaItemSchema.parse({
-  ...,
-  r2Key: '../../../etc/passwd',
-});
-```
-
-### String Sanitization
-
-All user-generated strings are trimmed and length-limited:
-
-```typescript
-// Input: "  My Title  "
-// Output: "My Title" (trimmed)
-const title = createSanitizedStringSchema(1, 255, 'Title').parse('  My Title  ');
-```
-
-### Enum Whitelisting
-
-All enum fields only accept database-defined values:
-
-```typescript
-// ✓ Valid
-mediaTypeEnum.parse('video');
-mediaTypeEnum.parse('audio');
-
-// ❌ Throws
-mediaTypeEnum.parse('document'); // Not in whitelist
-```
-
-## Database Alignment
-
-All schemas align exactly with database constraints:
-
-| Schema | Database Constraint | Alignment |
-|--------|---------------------|-----------|
-| `organizationSlugSchema` | `VARCHAR(255)` | Max 255 chars |
-| `mediaTypeEnum` | `CHECK (media_type IN ('video', 'audio'))` | Exact match |
-| `mediaStatusEnum` | `CHECK (status IN (...))` | Exact match |
-| `priceCentsSchema` | `CHECK (price_cents >= 0)`, `INTEGER` | Non-negative int |
-| `contentTypeEnum` | `CHECK (content_type IN (...))` | Exact match |
-| `slugSchema` | `VARCHAR(500)` | Max 500 chars |
-
-See `packages/database/src/schema/content.ts` for full database schema.
-
-## Error Handling
-
-Zod throws `ZodError` on validation failures:
-
-```typescript
-import { ZodError } from 'zod';
-
-try {
-  const user = userSchema.parse(invalidInput);
-} catch (error) {
-  if (error instanceof ZodError) {
-    console.error(error.errors);
-    // [
-    //   {
-    //     code: 'invalid_type',
-    //     expected: 'string',
-    //     received: 'number',
-    //     path: ['email'],
-    //     message: 'Expected string, received number'
-    //   }
-    // ]
-  }
-}
-```
-
-Use `safeParse()` for non-throwing validation:
-
-```typescript
-const result = userSchema.safeParse(input);
-if (!result.success) {
-  console.error(result.error.errors);
-} else {
-  console.log(result.data); // Validated data
-}
-```
+**Best practices**:
+1. Validate at API boundaries (route handlers), not in services
+2. Reuse schemas from this package rather than duplicating
+3. Use `.safeParse()` for error handling without try/catch
+4. Let TypeScript infer types from schemas (don't manually define types)
+5. Extend base schemas for domain-specific filters/sorting
 
 ## Testing
 
-The package includes comprehensive test suites covering:
-- Valid inputs (happy paths)
-- Invalid inputs (error cases)
-- Edge cases (boundary conditions)
-- Security validations (XSS, injection, path traversal)
-- Database constraint alignment
-
-Run tests:
+Comprehensive test suites cover valid inputs, error cases, edge cases, security validations (XSS, path traversal, injection), and database constraint alignment. Run tests:
 
 ```bash
-# Run all tests
 pnpm test
-
-# Watch mode
 pnpm test:watch
-
-# Coverage report
 pnpm test:coverage
 ```
 
-## Integration Examples
+## Quick Reference
 
-### With Cloudflare Workers + Hono
-
-```typescript
-import { Hono } from 'hono';
-import { createAuthenticatedHandler } from '@codex/worker-utils';
-import { createContentSchema, createIdParamsSchema } from '@codex/validation';
-
-const app = new Hono();
-
-app.post(
-  '/api/content',
-  createAuthenticatedHandler({
-    schema: {
-      body: createContentSchema,
-    },
-    handler: async (c, ctx) => {
-      // ctx.validated.body is fully validated and typed
-      const content = await contentService.create(
-        ctx.validated.body,
-        ctx.user.id
-      );
-      return content;
-    },
-    successStatus: 201,
-  })
-);
-
-app.get(
-  '/api/content/:id',
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
-    },
-    handler: async (c, ctx) => {
-      // ctx.validated.params.id is validated UUID
-      return contentService.get(ctx.validated.params.id, ctx.user.id);
-    },
-  })
-);
+**Common schemas**:
+```
+createContentSchema, updateContentSchema, contentQuerySchema
+createOrganizationSchema, updateOrganizationSchema
+createMediaItemSchema, updateMediaItemSchema
+getStreamingUrlSchema, savePlaybackProgressSchema
+createCheckoutSchema, purchaseQuerySchema
+createIdParamsSchema, createSlugParamsSchema
 ```
 
-### With Service Layer
-
-```typescript
-import {
-  createOrganizationSchema,
-  type CreateOrganizationInput
-} from '@codex/validation';
-import { organizations } from '@codex/database/schema';
-import { db } from '@codex/database';
-
-class OrganizationService {
-  async create(input: CreateOrganizationInput) {
-    // Validate input (throws ZodError if invalid)
-    const validated = createOrganizationSchema.parse(input);
-
-    try {
-      const [org] = await db
-        .insert(organizations)
-        .values(validated)
-        .returning();
-
-      return org;
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        throw new ConflictError('Organization slug already exists');
-      }
-      throw error;
-    }
-  }
-}
+**Common primitives**:
+```
+uuidSchema, userIdSchema
+createSlugSchema(maxLength), urlSchema
+priceCentsSchema, positiveIntSchema, nonNegativeIntSchema
+emailSchema
 ```
 
-### Query String Validation
-
-Zod's `z.coerce` handles query string type coercion:
-
-```typescript
-import { contentQuerySchema } from '@codex/validation';
-
-// Query string: ?page=2&limit=50&status=published
-const query = {
-  page: '2',      // String from URL
-  limit: '50',    // String from URL
-  status: 'published',
-};
-
-const validated = contentQuerySchema.parse(query);
-// Result: { page: 2, limit: 50, status: 'published', ... } (numbers coerced)
+**Common patterns**:
+```
+schema.parse(input)                          // Throws ZodError
+schema.safeParse(input)                      // Returns {success, data|error}
+z.infer<typeof schema>                       // Type inference
+type MyType = z.infer<typeof mySchema>;      // Type extraction
 ```
 
-## Best Practices
-
-### 1. Always Validate at Boundaries
-
-```typescript
-// ✓ Good: Validate at API entry point
-app.post('/api/users', async (c) => {
-  const validated = userSchema.parse(await c.req.json());
-  return userService.create(validated);
-});
-
-// ❌ Bad: Pass raw input to service layer
-app.post('/api/users', async (c) => {
-  return userService.create(await c.req.json()); // No validation!
-});
+**Enum exports**:
 ```
-
-### 2. Use Type Inference
-
-```typescript
-// ✓ Good: Infer types from schemas
-export type User = z.infer<typeof userSchema>;
-
-// ❌ Bad: Duplicate type definitions
-export type User = { email: string; name: string; ... };
-```
-
-### 3. Compose Schemas from Primitives
-
-```typescript
-// ✓ Good: Reuse primitive schemas
-import { uuidSchema, createSanitizedStringSchema } from '@codex/validation/primitives';
-
-const mySchema = z.object({
-  id: uuidSchema,
-  title: createSanitizedStringSchema(1, 255, 'Title'),
-});
-
-// ❌ Bad: Duplicate validation logic
-const mySchema = z.object({
-  id: z.string().uuid(),
-  title: z.string().trim().min(1).max(255),
-});
-```
-
-### 4. Handle Errors Gracefully
-
-```typescript
-// ✓ Good: Catch and format errors
-try {
-  const validated = userSchema.parse(input);
-} catch (error) {
-  if (error instanceof ZodError) {
-    return c.json({ errors: error.errors }, 400);
-  }
-  throw error;
-}
-
-// Or use safeParse
-const result = userSchema.safeParse(input);
-if (!result.success) {
-  return c.json({ errors: result.error.errors }, 400);
-}
-```
-
-## Related Packages
-
-- **@codex/database** - Database schema and migrations
-- **@codex/content** - Content service layer (uses validation schemas)
-- **@codex/identity** - Identity service layer (uses validation schemas)
-- **@codex/worker-utils** - Worker utilities with built-in validation support
-
-## Testing
-
-### Test Setup Pattern
-
-The package includes comprehensive tests using Vitest:
-
-```typescript
-import { describe, expect, it } from 'vitest';
-import { createContentSchema } from '@codex/validation';
-
-describe('createContentSchema', () => {
-  it('should validate valid content', () => {
-    const result = createContentSchema.safeParse({
-      title: 'My Video',
-      slug: 'my-video',
-      contentType: 'video',
-      mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-    });
-
-    expect(result.success).toBe(true);
-  });
-
-  it('should reject invalid content', () => {
-    const result = createContentSchema.safeParse({
-      title: 'My Video',
-      // Missing required fields
-    });
-
-    expect(result.success).toBe(false);
-  });
-});
-```
-
-### Testing Validation Errors
-
-```typescript
-import { createContentSchema } from '@codex/validation';
-
-it('should provide specific error for missing mediaItemId', () => {
-  const result = createContentSchema.safeParse({
-    title: 'Video',
-    slug: 'video',
-    contentType: 'video', // mediaItemId required for video
-    // Missing mediaItemId
-  });
-
-  expect(result.success).toBe(false);
-  if (!result.success) {
-    const error = result.error.issues.find((i) => i.path.includes('mediaItemId'));
-    expect(error?.message).toContain('Media item is required');
-  }
-});
-```
-
-### Testing Security Validations
-
-```typescript
-it('should reject XSS attempts in URLs', () => {
-  const result = createOrganizationSchema.safeParse({
-    name: 'Test',
-    slug: 'test',
-    logoUrl: 'javascript:alert(1)',
-  });
-
-  expect(result.success).toBe(false);
-});
-
-it('should reject path traversal in R2 keys', () => {
-  const result = createMediaItemSchema.safeParse({
-    title: 'Test',
-    mediaType: 'video',
-    mimeType: 'video/mp4',
-    fileSizeBytes: 1000,
-    r2Key: '../../../etc/passwd',
-  });
-
-  expect(result.success).toBe(false);
-});
+contentTypeEnum, contentStatusEnum, visibilityEnum
+mediaTypeEnum, mediaStatusEnum
+purchaseStatusEnum
+sortOrderEnum
+organizationStatusEnum
 ```
 
 ## Build & Deployment
 
-### Development
-
 ```bash
-cd packages/validation
+# Development
+npm run build      # Build package
+npm run dev        # Watch mode
+npm run typecheck  # Type check
 
-# Build package
-npm run build
-
-# Watch mode
-npm run dev
-
-# Run tests
-npm run test
-
-# Test coverage
-npm run test:coverage
-
-# Type check
-npm run typecheck
+# Testing
+npm run test              # Run all tests
+npm run test:coverage     # Coverage report
 ```
 
-### Package Publishing
-
-The package exports:
-- **Main entry**: `./dist/index.js` (compiled JavaScript)
-- **Types**: `./dist/index.d.ts` (TypeScript declarations)
-
-All exports are re-exported from `/src/index.ts`:
-
-```typescript
-export * from './content/content-schemas';
-export * from './identity/user-schema';
-export * from './primitives';
-export * from './schemas/access';
-```
-
-## Zod Version
-
-- **Zod version**: 3.24.1
-- **Validation style**: Schema-based validation
-- **Error handling**: Native ZodError with detailed issue information
-
-## Quick Reference
-
-### Most Common Schemas
-
-```typescript
-// Organization
-createOrganizationSchema, updateOrganizationSchema
-
-// Content
-createContentSchema, updateContentSchema, contentQuerySchema
-
-// Media
-createMediaItemSchema, updateMediaItemSchema
-
-// Access
-getStreamingUrlSchema, listUserLibrarySchema
-
-// Route params
-createIdParamsSchema, createSlugParamsSchema
-
-// Primitives
-uuidSchema, emailSchema, urlSchema, priceCentsSchema
-```
-
-### Most Common Type Inference
-
-```typescript
-type CreateContentInput = z.infer<typeof createContentSchema>;
-type UpdateContentInput = z.infer<typeof updateContentSchema>;
-type ContentQueryInput = z.infer<typeof contentQuerySchema>;
-```
-
-### Most Common Parsing Patterns
-
-```typescript
-// Parse and throw on error
-const data = schema.parse(input);
-
-// Safe parse (no throw)
-const result = schema.safeParse(input);
-if (result.success) {
-  // Use result.data
-}
-
-// Type inference in one step
-const validated: z.infer<typeof schema> = schema.parse(input);
-```
-
-## Contributing
-
-When adding new schemas:
-
-1. Add primitive components to `primitives.ts` if reusable
-2. Add domain-specific schemas to appropriate files (e.g., `content-schemas.ts`)
-3. Export from `index.ts`
-4. Add comprehensive tests covering:
-   - Valid inputs (happy paths)
-   - Invalid inputs (error cases)
-   - Security validations (XSS, path traversal, etc.)
-   - Database constraint alignment
-5. Document usage in this README
+Exports:
+- Main: `./dist/index.js`
+- Types: `./dist/index.d.ts`
+- Zod version: 3.24.1
 
 ## License
 

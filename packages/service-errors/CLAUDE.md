@@ -1,95 +1,105 @@
 # @codex/service-errors
 
-Shared error classes and utilities for service layers. Provides consistent error handling and HTTP status mapping across all Codex services.
+Standardized error handling framework for all Codex services. Provides consistent error classes, HTTP status code mapping, and utilities for service error management across the entire platform.
 
-This package is a **foundation package** that all service packages depend on. It defines the error handling strategy for the entire platform, ensuring consistent behavior across services, workers, and client responses.
+This is a **foundation package** that all service packages depend on. It defines the error handling strategy that ensures consistent behavior across services, workers, and client responses.
+
+---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Public API](#public-api)
-- [Error Class Hierarchy](#error-class-hierarchy)
-- [BaseService Class](#baseservice-class)
-- [Custom Error Classes](#custom-error-classes)
-- [HTTP Status Mapping](#http-status-mapping)
-- [Usage Examples](#usage-examples)
-- [Integration Points](#integration-points)
-- [Error Response Format](#error-response-format)
-- [Error Handling Patterns](#error-handling-patterns)
-- [Development & Testing](#development--testing)
+1. [Overview](#overview)
+2. [Public API](#public-api)
+3. [Error Class Hierarchy](#error-class-hierarchy)
+4. [BaseService Class](#baseservice-class)
+5. [Error Classes & Status Codes](#error-classes--status-codes)
+6. [Usage Examples](#usage-examples)
+7. [Integration Points](#integration-points)
+8. [Error Response Format](#error-response-format)
+9. [Error Handling Patterns](#error-handling-patterns)
+10. [Error Mapper Utilities](#error-mapper-utilities)
+11. [Type System](#type-system)
+12. [Performance Notes](#performance-notes)
+13. [Testing](#testing)
+
+---
 
 ## Overview
 
 ### What This Package Does
 
-@codex/service-errors provides a standardized error handling framework that enables:
+@codex/service-errors provides the error handling foundation for the entire Codex platform. It enables:
+
 - **Consistent error structure** across all services with code, message, status code, and context
 - **Type-safe error handling** through custom error classes for each error scenario
-- **HTTP status code mapping** that automatically converts service errors to appropriate HTTP responses
+- **Automatic HTTP status mapping** converting service errors to appropriate HTTP responses
 - **Base service class** that all domain services extend for unified error handling
-- **Error wrapping utilities** that prevent internal implementation details from leaking to clients
+- **Error wrapping utilities** preventing internal implementation details from leaking to clients
 
 ### Business Responsibility
 
-This package implements the error handling layer that sits between application logic and HTTP responses. Services throw domain-specific or base errors, workers catch them and map to standardized HTTP responses, and clients receive well-formed error objects with actionable information.
-
-### Why It Exists
-
-- **Consistency**: Every service, worker, and API client follows the same error handling patterns
-- **Security**: Prevents accidental exposure of database errors, stack traces, and internal details
-- **Debuggability**: Error context includes relevant business metadata for troubleshooting
-- **Developer experience**: Removes boilerplate error handling code from every service
+This package implements the error handling layer between application logic and HTTP responses. Services throw domain-specific errors, workers catch and map them to standardized HTTP responses, and clients receive well-formed error objects with actionable information.
 
 ### Key Concepts
 
-**ServiceError**: All custom errors extend this abstract base class. Each error has:
-- `message`: Human-readable description of what went wrong
-- `code`: Machine-readable error identifier (e.g., `NOT_FOUND`, `VALIDATION_ERROR`)
-- `statusCode`: The HTTP status code this error maps to (400, 401, 403, 404, 409, 422, 500)
-- `context`: Optional metadata for debugging (field names, resource IDs, constraint details)
+**ServiceError**: Base abstract class for all custom errors. Each error has:
+- `message` - Human-readable description of what went wrong
+- `code` - Machine-readable error identifier (NOT_FOUND, VALIDATION_ERROR, etc.)
+- `statusCode` - HTTP status code (400, 401, 403, 404, 409, 422, 500)
+- `context` - Optional metadata for debugging (field names, resource IDs, constraint details)
 
-**BaseService**: Abstract base class that all domain services extend. Provides:
-- Unified constructor requiring database connection and environment
-- Error handling method that wraps unknown errors
-- Direct access to protected database instance
+**BaseService**: Abstract base class all domain services extend:
+- Provides unified constructor requiring database connection and environment
+- Includes error handling method that wraps unknown errors
+- Protected database instance accessible to subclasses
 
-**ErrorMapper**: Converts all error types to standardized HTTP response format. Handles:
-- ServiceError instances (custom errors with status codes)
-- ZodError instances (validation schema failures)
-- Unknown errors (wrapped as 500 internal errors)
+**ErrorMapper**: Converts all error types to standardized HTTP response format:
+- Handles ServiceError instances with built-in status codes
+- Handles ZodError instances from validation schemas
+- Wraps unknown errors safely as 500 internal errors
+
+---
 
 ## Public API
 
 ### Error Classes
 
-| Export | Type | Purpose | When to Use |
-|--------|------|---------|------------|
-| `ServiceError` | Abstract class | Base class for all service errors | Extend to create custom errors |
-| `NotFoundError` | Class | 404 - Resource not found | Query returns no results |
-| `ValidationError` | Class | 400 - Input validation failed | Schema validation fails |
-| `ForbiddenError` | Class | 403 - Access denied | User lacks permission |
-| `ConflictError` | Class | 409 - Resource conflict | Duplicate key, slug exists |
-| `BusinessLogicError` | Class | 422 - Business rule violated | Domain constraint failure |
-| `InternalServiceError` | Class | 500 - Unexpected error | Wrap unknown database errors |
+| Export | Type | HTTP Status | Purpose |
+|--------|------|-------------|---------|
+| `NotFoundError` | Class | 404 | Resource doesn't exist |
+| `ValidationError` | Class | 400 | Input validation failed |
+| `ForbiddenError` | Class | 403 | User lacks permission |
+| `ConflictError` | Class | 409 | State conflict (duplicate) |
+| `BusinessLogicError` | Class | 422 | Business rule violated |
+| `InternalServiceError` | Class | 500 | Unexpected error |
+| `ServiceError` | Abstract class | N/A | Base class for all errors |
 
-### Utilities & Type Guards
+### Utility Functions
 
 | Export | Type | Purpose |
 |--------|------|---------|
-| `isServiceError(error)` | Function | Type guard to check if error is a ServiceError |
-| `wrapError(error, context)` | Function | Convert unknown errors to ServiceError instances |
-| `mapErrorToResponse(error, options)` | Function | Convert any error to standardized HTTP response |
+| `mapErrorToResponse(error, options?)` | Function | Convert any error to HTTP response |
+| `isServiceError(error)` | Function | Type guard for ServiceError instances |
+| `wrapError(error, context?)` | Function | Convert unknown errors to ServiceError |
 | `isKnownError(error)` | Function | Check if error is ServiceError or ZodError |
 
-### Types
+### Base Service
 
-| Export | Purpose |
-|--------|---------|
-| `ErrorStatusCode` | Type union of valid error HTTP status codes: 400, 401, 403, 404, 409, 422, 500 |
-| `ServiceConfig` | Configuration object for BaseService (db, environment) |
-| `ErrorResponse` | Standard HTTP error response structure |
-| `MappedError` | Result of error mapping (statusCode + ErrorResponse) |
-| `ErrorMapperOptions` | Configuration for mapErrorToResponse (includeStack, logError) |
+| Export | Type | Purpose |
+|--------|------|---------|
+| `BaseService` | Abstract class | Foundation for all domain services |
+| `ServiceConfig` | Interface | Configuration for BaseService (db, environment) |
+
+### Response Types
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| `ErrorResponse` | Interface | Standard HTTP error response structure |
+| `MappedError` | Interface | Result of error mapping (statusCode + ErrorResponse) |
+| `ErrorMapperOptions` | Interface | Configuration for mapErrorToResponse |
+| `ErrorStatusCode` | Type | Union of valid error HTTP status codes |
+
+---
 
 ## Error Class Hierarchy
 
@@ -104,87 +114,69 @@ Error (JavaScript built-in)
     └── InternalServiceError (500)
 ```
 
-All errors in this hierarchy:
-- Extend `ServiceError` (except ServiceError itself)
-- Have `instanceof` checks working correctly through the chain
-- Provide a `name` property matching the class name
-- Capture stack traces when thrown
-- Support optional context metadata
+All errors extend `ServiceError` and:
+- Properly chain instanceof checks through the inheritance hierarchy
+- Provide `name` property matching the class name
+- Capture stack traces for debugging (V8 runtime - Node.js, Cloudflare Workers)
+- Support optional context metadata for additional information
+- Serialize correctly for logging and transport
 
-### Extending ServiceError
-
-Domain-specific services create their own error classes by extending base errors:
-
-```typescript
-// Content service errors extend base errors
-export class ContentNotFoundError extends NotFoundError {
-  constructor(contentId: string) {
-    super('Content not found', { contentId });
-  }
-}
-
-// Organization service errors extend base errors
-export class OrganizationAlreadyExistsError extends ConflictError {
-  constructor(slug: string) {
-    super('Organization already exists', { slug });
-  }
-}
-```
+---
 
 ## BaseService Class
 
-The `BaseService` abstract class is the foundation for all domain services. Every service in the Codex platform extends this class.
+The `BaseService` abstract class is the foundation for all domain services in Codex. Every service extends this class to ensure consistent initialization, database access, and error handling.
 
 ### Constructor Signature
 
 ```typescript
-export abstract class BaseService {
-  constructor(config: ServiceConfig): void
+abstract class BaseService {
+  constructor(config: ServiceConfig)
 }
 ```
 
 ### Constructor Parameters
 
 **config: ServiceConfig**
-- `db` (Database): Database connection instance for running queries
-- `environment` (string): Runtime environment name (development, staging, production, test)
+- `db` (typeof dbHttp | typeof dbWs) - Database connection instance for queries
+- `environment` (string) - Runtime environment (development, staging, production, test)
 
 ### Protected Properties
 
 ```typescript
-protected readonly db: Database
+protected readonly db: typeof dbHttp | typeof dbWs
 protected readonly environment: string
 ```
 
-Both properties are accessible to subclasses for database operations and environment-aware behavior.
+Both accessible to subclasses for database operations and environment-aware behavior.
 
 ### Protected Methods
 
 #### handleError(error: unknown, context?: string): never
 
-Handles unknown errors by wrapping them with service context. This method:
+Wraps unknown errors with service context. This method:
 - Re-throws ServiceError instances unchanged
 - Wraps unknown errors as InternalServiceError with service metadata
 - Never returns (always throws)
 
 **Parameters:**
-- `error` (unknown): The error to handle
-- `context` (string): Optional context description
+- `error` (unknown) - The error to handle
+- `context` (string, optional) - Context description (e.g., "publish operation")
 
-**Always throws**: A ServiceError instance (either the original or a wrapper)
+**Always throws** a ServiceError instance
 
 **Example:**
+
 ```typescript
 export class ContentService extends BaseService {
   async publishContent(contentId: string) {
     try {
-      const result = await this.db.update(content)
+      const result = await this.db.update(schema.content)
         .set({ status: 'published' })
-        .where(eq(content.id, contentId))
+        .where(eq(schema.content.id, contentId))
         .returning();
       return result[0];
     } catch (error) {
-      // Wraps unknown database errors with service context
       this.handleError(error, 'publish operation');
     }
   }
@@ -195,35 +187,36 @@ export class ContentService extends BaseService {
 
 ```typescript
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { content } from '@codex/database/schema';
+import { schema } from '@codex/database';
+import { eq } from 'drizzle-orm';
 
-export class ContentService extends BaseService {
+export class UserService extends BaseService {
   constructor(config: ServiceConfig) {
     super(config);
   }
 
-  async getContentById(contentId: string) {
+  async getUserById(userId: string) {
     try {
-      const result = await this.db.query.content.findFirst({
-        where: eq(content.id, contentId),
+      const user = await this.db.query.users.findFirst({
+        where: eq(schema.users.id, userId),
       });
 
-      if (!result) {
-        throw new NotFoundError('Content not found', { contentId });
+      if (!user) {
+        throw new NotFoundError('User not found', { userId });
       }
 
-      return result;
+      return user;
     } catch (error) {
       this.handleError(error);
     }
   }
 
-  async createContent(input: CreateContentInput) {
+  async createUser(input: CreateUserInput) {
     try {
-      return await this.db.transaction(async (tx) => {
-        const [result] = await tx.insert(content).values(input).returning();
-        return result;
+      const [user] = await this.db.transaction(async (tx) => {
+        return await tx.insert(schema.users).values(input).returning();
       });
+      return user;
     } catch (error) {
       this.handleError(error);
     }
@@ -231,22 +224,23 @@ export class ContentService extends BaseService {
 }
 ```
 
-## Custom Error Classes
+---
 
-This section documents each error class with its HTTP status code, when it's thrown, what context to include, and usage patterns.
+## Error Classes & Status Codes
 
 ### NotFoundError (404)
 
 **HTTP Status**: 404 Not Found
 
-**Thrown When**: A database query finds no matching resource
+**When to throw**: Database query finds no matching resource
 
-**Context**: Should include resource identifiers and query parameters
+**Context includes**: Resource identifiers and query parameters
 
 **Example:**
+
 ```typescript
-const user = await db.query.users.findFirst({
-  where: eq(users.id, userId),
+const user = await this.db.query.users.findFirst({
+  where: eq(schema.users.id, userId),
 });
 
 if (!user) {
@@ -254,13 +248,14 @@ if (!user) {
 }
 ```
 
-**HTTP Response**:
+**HTTP Response:**
+
 ```json
 {
   "error": {
     "code": "NOT_FOUND",
     "message": "User not found",
-    "details": { "userId": "123" }
+    "details": { "userId": "user-123" }
   }
 }
 ```
@@ -269,33 +264,22 @@ if (!user) {
 
 **HTTP Status**: 400 Bad Request
 
-**Thrown When**: Input validation fails (usually from Zod schema validation)
+**When to throw**: Input validation fails (usually from Zod schema)
 
-**Context**: Should describe which field failed and why
+**Context includes**: Field name and validation reason
 
 **Example:**
+
 ```typescript
-const schema = z.object({
-  email: z.string().email(),
-  age: z.number().min(18),
-});
-
-try {
-  const data = schema.parse(input);
-} catch (error) {
-  if (error instanceof ZodError) {
-    // mapErrorToResponse automatically handles ZodError
-    throw error;
-  }
-}
-
-// Or manually for custom validation:
 if (!isValidEmail(email)) {
-  throw new ValidationError('Invalid email format', { field: 'email' });
+  throw new ValidationError('Invalid email format', { email });
 }
 ```
 
-**HTTP Response**:
+**Note**: Most validation errors come from Zod schemas, automatically handled by `mapErrorToResponse()`
+
+**HTTP Response:**
+
 ```json
 {
   "error": {
@@ -313,17 +297,16 @@ if (!isValidEmail(email)) {
 
 **HTTP Status**: 403 Forbidden
 
-**Thrown When**: User is authenticated but lacks permission for the action
+**When to throw**: User is authenticated but lacks permission for the action
 
-**Context**: Include resource and permission details for security logs
+**Context includes**: Resource and permission details for security logs
 
 **Example:**
+
 ```typescript
 export class ContentService extends BaseService {
   async deleteContent(contentId: string, userId: string) {
-    const content = await this.db.query.content.findFirst({
-      where: eq(content.id, contentId),
-    });
+    const content = await this.getContentById(contentId);
 
     if (content.creatorId !== userId) {
       throw new ForbiddenError(
@@ -332,19 +315,21 @@ export class ContentService extends BaseService {
       );
     }
 
-    return await this.db.delete(content).where(eq(content.id, contentId));
+    return await this.db.delete(schema.content)
+      .where(eq(schema.content.id, contentId));
   }
 }
 ```
 
-**HTTP Response**:
+**HTTP Response:**
+
 ```json
 {
   "error": {
     "code": "FORBIDDEN",
     "message": "You do not own this content",
     "details": {
-      "contentId": "abc-123",
+      "contentId": "content-123",
       "userId": "user-456",
       "ownerId": "user-789"
     }
@@ -356,18 +341,20 @@ export class ContentService extends BaseService {
 
 **HTTP Status**: 409 Conflict
 
-**Thrown When**: Operation conflicts with existing state (e.g., duplicate unique constraint)
+**When to throw**: Operation conflicts with existing state (e.g., duplicate unique constraint)
 
-**Context**: Include the conflicting field and existing resource ID
+**Context includes**: The conflicting field and existing resource ID
 
 **Example:**
+
 ```typescript
 export class OrganizationService extends BaseService {
   async createOrganization(input: CreateOrgInput) {
     try {
-      return await this.db.insert(organizations).values(input).returning();
+      return await this.db.insert(schema.organizations)
+        .values(input)
+        .returning();
     } catch (error) {
-      // Database unique constraint violation on slug column
       if (error instanceof Error && error.message.includes('unique constraint')) {
         throw new ConflictError(
           'Organization slug already exists',
@@ -380,7 +367,8 @@ export class OrganizationService extends BaseService {
 }
 ```
 
-**HTTP Response**:
+**HTTP Response:**
+
 ```json
 {
   "error": {
@@ -395,17 +383,17 @@ export class OrganizationService extends BaseService {
 
 **HTTP Status**: 422 Unprocessable Entity
 
-**Thrown When**: Request is valid but violates business rules or domain constraints
+**When to throw**: Request is valid but violates domain constraints or business rules
 
-**Context**: Include state information explaining why the operation cannot proceed
+**Context includes**: State information explaining why operation cannot proceed
 
 **Example:**
+
 ```typescript
 export class ContentService extends BaseService {
   async publishContent(contentId: string) {
-    const content = await this.getContent(contentId);
+    const content = await this.getContentById(contentId);
 
-    // Content must have at least one media item
     if (content.mediaItems.length === 0) {
       throw new BusinessLogicError(
         'Cannot publish content without media',
@@ -417,7 +405,6 @@ export class ContentService extends BaseService {
       );
     }
 
-    // All media must be ready (processed)
     const unreadyMedia = content.mediaItems.filter(m => !m.isReady);
     if (unreadyMedia.length > 0) {
       throw new BusinessLogicError(
@@ -430,15 +417,16 @@ export class ContentService extends BaseService {
       );
     }
 
-    return await this.db.update(content)
+    return await this.db.update(schema.content)
       .set({ status: 'published' })
-      .where(eq(content.id, contentId))
+      .where(eq(schema.content.id, contentId))
       .returning();
   }
 }
 ```
 
-**HTTP Response**:
+**HTTP Response:**
+
 ```json
 {
   "error": {
@@ -457,13 +445,14 @@ export class ContentService extends BaseService {
 
 **HTTP Status**: 500 Internal Server Error
 
-**Thrown When**: Unexpected errors occur (database connection failure, missing config, etc.)
+**When to throw**: Unexpected errors occur (database connection failure, missing config, etc.)
 
-**Context**: Should include operation name and service context for debugging
+**Context includes**: Operation name and service context for backend logging only
 
-**Important**: Never expose internal error details to clients. Error context is for backend logging only.
+**Important**: Never expose internal error details to clients. Context is for backend logging only.
 
 **Example:**
+
 ```typescript
 export class DatabaseService extends BaseService {
   async query(sql: string) {
@@ -484,7 +473,8 @@ export class DatabaseService extends BaseService {
 }
 ```
 
-**HTTP Response**:
+**HTTP Response:**
+
 ```json
 {
   "error": {
@@ -494,43 +484,20 @@ export class DatabaseService extends BaseService {
 }
 ```
 
-## HTTP Status Mapping
-
-This table shows which errors map to which HTTP status codes:
-
-| Error Class | HTTP Status | Use Case | Client Action |
-|------------|-------------|----------|----------------|
-| NotFoundError | 404 | Resource doesn't exist | Verify resource ID, redirect to list |
-| ValidationError | 400 | Invalid input data | Show validation messages, fix form |
-| ForbiddenError | 403 | User lacks permission | Show access denied message |
-| ConflictError | 409 | State conflict (duplicate) | Suggest alternative, show existing |
-| BusinessLogicError | 422 | Violates business rules | Show constraint message, suggest fix |
-| InternalServiceError | 500 | Unexpected error | Retry or contact support |
-
-**Note on 401 Unauthorized**: This status is not directly used by service errors. It's handled at the worker/middleware level for missing or invalid authentication tokens.
+---
 
 ## Usage Examples
 
-### Basic Error Throwing Pattern
+### Basic Pattern: Query Returns Empty Result
 
 ```typescript
-import {
-  NotFoundError,
-  ValidationError,
-  ForbiddenError,
-  BusinessLogicError,
-  BaseService,
-  type ServiceConfig,
-} from '@codex/service-errors';
+import { NotFoundError, BaseService, type ServiceConfig } from '@codex/service-errors';
+import { eq } from 'drizzle-orm';
 
 export class UserService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
-  async getUser(userId: string) {
+  async getUserById(userId: string) {
     const user = await this.db.query.users.findFirst({
-      where: eq(users.id, userId),
+      where: eq(schema.users.id, userId),
     });
 
     if (!user) {
@@ -539,195 +506,198 @@ export class UserService extends BaseService {
 
     return user;
   }
+}
+```
 
-  async validateEmail(email: string) {
-    if (!email.includes('@')) {
-      throw new ValidationError('Invalid email format', { email });
-    }
-  }
+### Pattern: Ownership Check
 
-  async updateProfile(userId: string, updatedBy: string, data: any) {
-    // Check ownership
-    if (userId !== updatedBy) {
+```typescript
+import { ForbiddenError, BaseService, type ServiceConfig } from '@codex/service-errors';
+
+export class ContentService extends BaseService {
+  async updateContent(contentId: string, userId: string, updates: any) {
+    const content = await this.getContentById(contentId);
+
+    if (content.creatorId !== userId) {
       throw new ForbiddenError(
-        'Cannot update another user profile',
-        { userId, updatedBy }
+        'You do not own this content',
+        { contentId, userId }
       );
     }
 
-    // Check business rules
-    if (data.age < 18) {
-      throw new BusinessLogicError(
-        'User must be 18 or older',
-        { age: data.age }
-      );
-    }
-
-    return await this.db.update(users)
-      .set(data)
-      .where(eq(users.id, userId))
+    return await this.db.update(schema.content)
+      .set(updates)
+      .where(eq(schema.content.id, contentId))
       .returning();
   }
 }
 ```
 
-### Error Handling in Worker Routes
+### Pattern: Unique Constraint Violation
 
 ```typescript
-import { mapErrorToResponse } from '@codex/service-errors';
-import { createAuthenticatedHandler } from '@codex/worker-utils';
-import { Hono } from 'hono';
+import { ConflictError, wrapError, BaseService } from '@codex/service-errors';
 
-const app = new Hono();
-
-app.post('/users', createAuthenticatedHandler({
-  schema: { body: createUserSchema },
-  async handler(c, { validated }) {
+export class OrganizationService extends BaseService {
+  async createOrganization(input: CreateOrgInput) {
     try {
-      const userService = new UserService({
-        db: c.env.DB,
-        environment: c.env.ENVIRONMENT,
-      });
-
-      const newUser = await userService.createUser(validated);
-      return c.json(newUser, 201);
+      return await this.db.insert(schema.organizations)
+        .values(input)
+        .returning();
     } catch (error) {
-      const { statusCode, response } = mapErrorToResponse(error);
-      return c.json(response, statusCode);
+      // wrapError detects unique constraint violations
+      throw wrapError(error, { table: 'organizations' });
     }
-  },
-}));
-```
-
-### Type-Safe Error Checking
-
-```typescript
-import { isServiceError, isKnownError } from '@codex/service-errors';
-
-async function handleOperation() {
-  try {
-    await service.performOperation();
-  } catch (error) {
-    // Check if it's a known application error
-    if (isKnownError(error)) {
-      // Safe to return to client
-      return mapErrorToResponse(error);
-    }
-
-    // Unknown error - log it
-    console.error('Unexpected error:', error);
-    return { statusCode: 500, response: { error: { code: 'INTERNAL_ERROR' } } };
   }
 }
 ```
 
-### Error Context for Debugging
+### Pattern: Business Rule Validation
 
 ```typescript
-// Service throws error with rich context
-throw new BusinessLogicError(
-  'Cannot process payment',
-  {
-    orderId: 'order-123',
-    amount: 99.99,
-    currency: 'USD',
-    reason: 'account_balance_insufficient',
-    accountBalance: 50.00,
-    required: 99.99,
+import { BusinessLogicError, BaseService } from '@codex/service-errors';
+
+export class PaymentService extends BaseService {
+  async processPayment(orderId: string, amount: number) {
+    const account = await this.getAccount(orderId);
+
+    if (account.balance < amount) {
+      throw new BusinessLogicError(
+        'Insufficient account balance',
+        {
+          orderId,
+          required: amount,
+          available: account.balance,
+          shortfall: amount - account.balance,
+        }
+      );
+    }
+
+    return await this.debitAccount(orderId, amount);
   }
-);
-
-// Error is caught and mapped
-const { statusCode, response } = mapErrorToResponse(error);
-
-// Response includes all context for debugging:
-// {
-//   statusCode: 422,
-//   response: {
-//     error: {
-//       code: 'BUSINESS_LOGIC_ERROR',
-//       message: 'Cannot process payment',
-//       details: {
-//         orderId: 'order-123',
-//         amount: 99.99,
-//         reason: 'account_balance_insufficient',
-//         accountBalance: 50.00,
-//         required: 99.99,
-//       }
-//     }
-//   }
-// }
+}
 ```
 
-### Wrapping Unknown Errors
+### Pattern: Transaction Safety
 
 ```typescript
-import { wrapError } from '@codex/service-errors';
+import { BaseService } from '@codex/service-errors';
 
-async function riskyOperation() {
-  try {
-    // Call external API or database
-    const result = await externalDatabase.query('SELECT * FROM users');
-    return result;
-  } catch (error) {
-    // Converts any error to ServiceError
-    // - If already ServiceError: returns unchanged
-    // - If matches known patterns (unique constraint): specific error
-    // - Otherwise: wraps as InternalServiceError (safe for client)
-    throw wrapError(error, {
-      operation: 'fetch users',
-      endpoint: 'external-database',
+export class TransferService extends BaseService {
+  async transferItem(itemId: string, fromUserId: string, toUserId: string) {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const item = await tx.query.items.findFirst({
+          where: eq(schema.items.id, itemId),
+        });
+
+        if (item.ownerId !== fromUserId) {
+          throw new ForbiddenError('Cannot transfer item you do not own');
+        }
+
+        await tx.update(schema.items)
+          .set({ ownerId: toUserId })
+          .where(eq(schema.items.id, itemId));
+
+        await tx.insert(schema.auditLog).values({
+          itemId,
+          action: 'transfer',
+          fromUserId,
+          toUserId,
+        });
+
+        return item;
+      });
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+}
+```
+
+### Pattern: Scoped Access Control
+
+```typescript
+import { NotFoundError, ForbiddenError, BaseService } from '@codex/service-errors';
+import { and, eq } from 'drizzle-orm';
+
+export class ItemService extends BaseService {
+  async deleteItem(itemId: string, userId: string, orgId: string) {
+    // Query with org scope (prevents leaking org structure)
+    const item = await this.db.query.items.findFirst({
+      where: and(
+        eq(schema.items.id, itemId),
+        eq(schema.items.organizationId, orgId)
+      ),
     });
+
+    if (!item) {
+      throw new NotFoundError('Item not found', { itemId });
+    }
+
+    if (item.creatorId !== userId && !await this.isOrgAdmin(userId, orgId)) {
+      throw new ForbiddenError('Cannot delete this item');
+    }
+
+    await this.db.delete(schema.items)
+      .where(eq(schema.items.id, itemId));
   }
 }
 ```
+
+---
 
 ## Integration Points
 
 ### Packages That Depend on @codex/service-errors
 
-| Package | Purpose | Usage |
-|---------|---------|-------|
-| @codex/content | Content management service | Extends BaseService, defines ContentNotFoundError, etc. |
-| @codex/identity | Organization/user service | Extends BaseService, defines OrganizationAlreadyExistsError, etc. |
-| @codex/access | Content access control | Extends BaseService, defines AccessDeniedError, etc. |
-| @codex/worker-utils | Worker route helpers | Uses mapErrorToResponse in route handlers |
-| @codex/validation | Input validation | Uses ValidationError for schema failures |
+| Package | Usage |
+|---------|-------|
+| @codex/content | Extends BaseService, defines domain-specific errors |
+| @codex/identity | Extends BaseService, defines organization-specific errors |
+| @codex/access | Extends BaseService, defines access control errors |
+| @codex/purchase | Extends BaseService, defines payment-specific errors |
+| @codex/worker-utils | Uses mapErrorToResponse in route handlers |
+| All worker packages | Use mapErrorToResponse to convert service errors |
 
-### Dependency Tree
+### Dependency Graph
 
 ```
 @codex/service-errors
-├── @codex/database (dependency)
-│   └── drizzle-orm (ORM library)
-└── zod (dependency, for ZodError handling)
+├─ @codex/database (dependency)
+└─ zod (dependency, for ZodError handling)
 
-Packages that depend on @codex/service-errors:
-├── @codex/content
-├── @codex/identity
-├── @codex/access
-├── @codex/worker-utils
-├── All service packages
-└── All worker packages
+Packages depending on @codex/service-errors:
+├─ @codex/content
+├─ @codex/identity
+├─ @codex/access
+├─ @codex/purchase
+├─ @codex/worker-utils
+├─ All service packages
+└─ All worker packages
 ```
 
 ### How Services Use This Package
 
-1. **Service Definition**: Service class extends `BaseService` from @codex/service-errors
-2. **Error Throwing**: Service methods throw specific error classes
-3. **Error Context**: Rich context included for debugging
-4. **Error Handling**: `handleError()` method wraps unknown database errors
+1. **Service Definition** - Service class extends BaseService
+2. **Error Throwing** - Service methods throw specific error classes
+3. **Error Context** - Rich context included for debugging
+4. **Error Handling** - handleError() method wraps unknown database errors
 
 ```typescript
 // packages/content/src/services/content-service.ts
-import { BaseService } from '@codex/service-errors';
+import { BaseService, NotFoundError } from '@codex/service-errors';
 
 export class ContentService extends BaseService {
   async getContent(id: string) {
-    const content = await this.db.query.content.findFirst(...);
+    const content = await this.db.query.content.findFirst({
+      where: eq(schema.content.id, id),
+    });
+
     if (!content) {
       throw new NotFoundError('Content not found', { id });
     }
+
     return content;
   }
 }
@@ -735,9 +705,9 @@ export class ContentService extends BaseService {
 
 ### How Workers Use This Package
 
-1. **Error Mapping**: Worker routes import `mapErrorToResponse`
-2. **Error Conversion**: Exceptions are converted to HTTP responses
-3. **Consistent Format**: All API errors follow the same structure
+1. **Error Mapping** - Worker routes import mapErrorToResponse
+2. **Error Conversion** - Exceptions converted to HTTP responses
+3. **Consistent Format** - All API errors follow standard structure
 
 ```typescript
 // workers/content-api/src/routes/content.ts
@@ -754,6 +724,8 @@ app.get('/:id', handler(async (c) => {
 }));
 ```
 
+---
+
 ## Error Response Format
 
 All errors are transformed to a standardized JSON format for API responses.
@@ -763,92 +735,85 @@ All errors are transformed to a standardized JSON format for API responses.
 ```typescript
 interface ErrorResponse {
   error: {
-    code: string;          // Machine-readable error code (e.g., "NOT_FOUND")
+    code: string;          // Machine-readable error code
     message: string;       // Human-readable description
     details?: unknown;     // Optional context/metadata
   };
 }
 ```
 
-### Example Responses
+### HTTP Status Code Mapping
 
-**Not Found (404)**:
+| Error Class | HTTP Status | Meaning | Client Action |
+|------------|-------------|---------|----------------|
+| NotFoundError | 404 | Resource doesn't exist | Verify ID or redirect |
+| ValidationError | 400 | Invalid input | Show validation messages |
+| ForbiddenError | 403 | Lacks permission | Show access denied |
+| ConflictError | 409 | State conflict | Suggest alternative |
+| BusinessLogicError | 422 | Rule violated | Show constraint message |
+| InternalServiceError | 500 | Unexpected error | Retry or contact support |
+
+### Example Response Bodies
+
+**404 Not Found:**
 ```json
 {
   "error": {
     "code": "NOT_FOUND",
     "message": "Content not found",
-    "details": {
-      "contentId": "abc-123"
-    }
+    "details": { "contentId": "abc-123" }
   }
 }
 ```
 
-**Validation Error (400)**:
+**400 Validation Error:**
 ```json
 {
   "error": {
     "code": "VALIDATION_ERROR",
     "message": "Invalid request data",
     "details": [
-      {
-        "path": "email",
-        "message": "Invalid email"
-      },
-      {
-        "path": "age",
-        "message": "Must be at least 18"
-      }
+      { "path": "email", "message": "Invalid email" },
+      { "path": "age", "message": "Must be at least 18" }
     ]
   }
 }
 ```
 
-**Forbidden (403)**:
+**403 Forbidden:**
 ```json
 {
   "error": {
     "code": "FORBIDDEN",
     "message": "You do not have permission to access this resource",
-    "details": {
-      "resource": "content-456",
-      "requiredRole": "creator"
-    }
+    "details": { "resource": "content-456" }
   }
 }
 ```
 
-**Conflict (409)**:
+**409 Conflict:**
 ```json
 {
   "error": {
     "code": "CONFLICT",
     "message": "A resource with this identifier already exists",
-    "details": {
-      "slug": "my-organization",
-      "existingId": "org-789"
-    }
+    "details": { "slug": "my-organization" }
   }
 }
 ```
 
-**Business Logic Error (422)**:
+**422 Business Logic Error:**
 ```json
 {
   "error": {
     "code": "BUSINESS_LOGIC_ERROR",
     "message": "Cannot publish content without media",
-    "details": {
-      "contentId": "content-123",
-      "mediaCount": 0,
-      "reason": "At least one media item required"
-    }
+    "details": { "mediaCount": 0, "requiredCount": 1 }
   }
 }
 ```
 
-**Internal Error (500)**:
+**500 Internal Error:**
 ```json
 {
   "error": {
@@ -858,45 +823,156 @@ interface ErrorResponse {
 }
 ```
 
-### Mapping Errors to Responses
+---
 
-The `mapErrorToResponse()` function converts any error type to this format:
+## Error Handling Patterns
+
+### Pattern 1: Service Method with Proper Error Handling
 
 ```typescript
-import { mapErrorToResponse } from '@codex/service-errors';
+async getItem(itemId: string) {
+  try {
+    const item = await this.db.query.items.findFirst({
+      where: eq(schema.items.id, itemId),
+    });
 
-// ServiceError instance
-const error1 = new NotFoundError('Item not found', { itemId: '123' });
-const mapped1 = mapErrorToResponse(error1);
-// => { statusCode: 404, response: { error: { ... } } }
+    if (!item) {
+      throw new NotFoundError('Item not found', { itemId });
+    }
 
-// ZodError instance (from validation)
-import { z } from 'zod';
-const schema = z.object({ email: z.string().email() });
-try {
-  schema.parse({ email: 'invalid' });
-} catch (error) {
-  const mapped = mapErrorToResponse(error);
-  // => { statusCode: 422, response: { error: { ... } } }
-}
-
-// Unknown error (wrapped safely)
-try {
-  throw new Error('Database connection failed');
-} catch (error) {
-  const mapped = mapErrorToResponse(error);
-  // => { statusCode: 500, response: { error: { code: 'INTERNAL_ERROR', ... } } }
+    return item;
+  } catch (error) {
+    this.handleError(error);
+  }
 }
 ```
 
-### MapErrorToResponse Options
+**Flow**: Try query → Check result → Throw specific error OR handle unknown error
 
-The `mapErrorToResponse()` function accepts optional configuration:
+### Pattern 2: Catch Database Constraint Violations
+
+```typescript
+async createItem(input: CreateItemInput) {
+  try {
+    const [item] = await this.db.insert(schema.items)
+      .values(input)
+      .returning();
+    return item;
+  } catch (error) {
+    // wrapError automatically detects unique constraint violations
+    throw wrapError(error, { table: 'items', input });
+  }
+}
+```
+
+**Flow**: Try insert → Catch error → Let wrapError detect constraint type → Throw appropriate error
+
+### Pattern 3: Multiple Permission Checks
+
+```typescript
+async updateItem(itemId: string, userId: string, orgId: string, data: any) {
+  const item = await this.getItem(itemId); // May throw NotFoundError
+
+  // Check ownership
+  if (item.ownerId !== userId) {
+    throw new ForbiddenError('Cannot update item you do not own');
+  }
+
+  // Check org membership
+  const isMember = await this.isOrgMember(userId, orgId);
+  if (!isMember) {
+    throw new ForbiddenError('You are not a member of this organization');
+  }
+
+  return await this.db.update(schema.items)
+    .set(data)
+    .where(eq(schema.items.id, itemId))
+    .returning();
+}
+```
+
+**Flow**: Validate prerequisites → Multiple permission checks → Perform operation OR throw ForbiddenError
+
+### Pattern 4: State Machine Validation
+
+```typescript
+async publishItem(itemId: string) {
+  const item = await this.getItem(itemId);
+
+  // Check current state
+  if (item.status !== 'draft') {
+    throw new BusinessLogicError(
+      'Only draft items can be published',
+      { itemId, currentStatus: item.status }
+    );
+  }
+
+  // Check required fields
+  const missing = this.getMissingRequiredFields(item);
+  if (missing.length > 0) {
+    throw new BusinessLogicError(
+      'Cannot publish item missing required fields',
+      { itemId, missingFields: missing }
+    );
+  }
+
+  // Perform state transition
+  return await this.db.update(schema.items)
+    .set({ status: 'published' })
+    .where(eq(schema.items.id, itemId))
+    .returning();
+}
+```
+
+**Flow**: Get item → Validate state → Validate prerequisites → Transition state OR throw BusinessLogicError
+
+### Pattern 5: Scoped Multi-Tenant Query
+
+```typescript
+async getOrganizationItems(userId: string, orgId: string) {
+  // First: Verify user is org member
+  const isMember = await this.isOrgMember(userId, orgId);
+  if (!isMember) {
+    throw new ForbiddenError('You are not a member of this organization');
+  }
+
+  // Then: Query with org scope
+  return await this.db.query.items.findMany({
+    where: eq(schema.items.organizationId, orgId),
+  });
+}
+```
+
+**Flow**: Verify access → Query with scope → Return results
+
+---
+
+## Error Mapper Utilities
+
+### mapErrorToResponse(error, options?)
+
+Converts any error type to standardized HTTP response with status code.
+
+**Signature:**
+
+```typescript
+function mapErrorToResponse(
+  error: unknown,
+  options?: ErrorMapperOptions
+): MappedError
+```
+
+**Handles:**
+- ServiceError instances (custom errors with built-in status codes)
+- ZodError instances (validation errors from schemas)
+- Unknown errors (wrapped safely as 500 internal errors)
+
+**Options:**
 
 ```typescript
 interface ErrorMapperOptions {
   /**
-   * Whether to include stack trace in error response (development only)
+   * Whether to include stack trace in response (development only)
    * @default false
    */
   includeStack?: boolean;
@@ -907,286 +983,297 @@ interface ErrorMapperOptions {
    */
   logError?: boolean;
 }
+```
 
-// Example: Include stack trace in development
-const { statusCode, response } = mapErrorToResponse(error, {
-  includeStack: process.env.NODE_ENV === 'development',
-  logError: true,
+**Returns:**
+
+```typescript
+interface MappedError {
+  statusCode: ErrorStatusCode;  // HTTP status code
+  response: ErrorResponse;      // Response body
+}
+```
+
+**Example:**
+
+```typescript
+try {
+  await service.create(input);
+} catch (error) {
+  const { statusCode, response } = mapErrorToResponse(error, {
+    includeStack: process.env.NODE_ENV === 'development',
+    logError: true,
+  });
+  return c.json(response, statusCode);
+}
+```
+
+### isServiceError(error)
+
+Type guard to check if error is a ServiceError instance.
+
+**Signature:**
+
+```typescript
+function isServiceError(error: unknown): error is ServiceError
+```
+
+**Returns**: true if error is ServiceError or subclass, false otherwise
+
+**Example:**
+
+```typescript
+try {
+  await service.operation();
+} catch (error) {
+  if (isServiceError(error)) {
+    // Type-safe: error is ServiceError
+    console.log(`Service error: ${error.code}`);
+  } else {
+    // Unknown error
+    console.error('Unexpected error:', error);
+  }
+}
+```
+
+### wrapError(error, context?)
+
+Converts unknown errors to ServiceError instances safely.
+
+**Signature:**
+
+```typescript
+function wrapError(
+  error: unknown,
+  context?: Record<string, unknown>
+): ServiceError
+```
+
+**Behavior:**
+- If error is already ServiceError: returns unchanged
+- If error matches database unique constraint: returns ConflictError
+- Otherwise: returns InternalServiceError (safe for client)
+
+**Returns**: ServiceError instance (never throws)
+
+**Example:**
+
+```typescript
+try {
+  await db.insert(schema.users).values(input);
+} catch (error) {
+  // Detects unique constraint and returns ConflictError
+  // Otherwise returns InternalServiceError with safe message
+  throw wrapError(error, { operation: 'create user' });
+}
+```
+
+### isKnownError(error)
+
+Type guard to check if error is ServiceError or ZodError.
+
+**Signature:**
+
+```typescript
+function isKnownError(error: unknown): boolean
+```
+
+**Returns**: true if error is a known application error type
+
+**Example:**
+
+```typescript
+try {
+  await operation();
+} catch (error) {
+  if (isKnownError(error)) {
+    // Safe to send to client
+    const { statusCode, response } = mapErrorToResponse(error);
+    return c.json(response, statusCode);
+  } else {
+    // Unknown error - log and return generic message
+    console.error('Unexpected error:', error);
+    return c.json(
+      { error: { code: 'INTERNAL_ERROR', message: 'An error occurred' } },
+      500
+    );
+  }
+}
+```
+
+---
+
+## Type System
+
+### ErrorStatusCode
+
+Union type of valid HTTP error status codes for this package.
+
+```typescript
+type ErrorStatusCode = 400 | 401 | 403 | 404 | 409 | 422 | 500
+```
+
+**Values:**
+- 400 - ValidationError
+- 401 - (Reserved for auth middleware)
+- 403 - ForbiddenError
+- 404 - NotFoundError
+- 409 - ConflictError
+- 422 - BusinessLogicError
+- 500 - InternalServiceError
+
+### ServiceConfig
+
+Configuration object required by all services.
+
+```typescript
+interface ServiceConfig {
+  db: typeof dbHttp | typeof dbWs;  // Database connection
+  environment: string;               // Runtime environment
+}
+```
+
+**Usage in services:**
+
+```typescript
+const service = new ContentService({
+  db: dbHttp,
+  environment: 'production',
 });
 ```
 
-## Error Handling Patterns
+### ErrorResponse
 
-This section documents common error handling patterns used throughout Codex services.
+Standard error response structure for all errors.
 
-### Pattern 1: Query Returns Empty Result
-
-**Situation**: Database query returns no results
-
-**Pattern**:
 ```typescript
-async getItemById(id: string) {
-  const item = await this.db.query.items.findFirst({
-    where: eq(items.id, id),
-  });
-
-  if (!item) {
-    throw new NotFoundError('Item not found', { itemId: id });
-  }
-
-  return item;
+interface ErrorResponse {
+  error: {
+    code: string;        // Machine-readable code
+    message: string;     // Human-readable message
+    details?: unknown;   // Optional context
+  };
 }
 ```
 
-### Pattern 2: Input Validation
+### MappedError
 
-**Situation**: Input fails schema validation
+Result of error mapping operation.
 
-**Pattern**:
 ```typescript
-async createItem(input: unknown) {
-  // Zod automatically throws ZodError on validation failure
-  const validated = createItemSchema.parse(input);
-
-  // Continue with validated data
-  return await this.db.insert(items).values(validated).returning();
+interface MappedError {
+  statusCode: ErrorStatusCode;
+  response: ErrorResponse;
 }
 ```
 
-**Note**: ZodError is automatically handled by `mapErrorToResponse()` and converted to 422 status with validation details.
+---
 
-### Pattern 3: Ownership/Authorization Check
+## Performance Notes
 
-**Situation**: User is authenticated but lacks permission
+### Error Creation Overhead
 
-**Pattern**:
-```typescript
-async updateItem(itemId: string, userId: string, updates: any) {
-  const item = await this.db.query.items.findFirst({
-    where: eq(items.id, itemId),
-  });
+- Error creation is lightweight (only properties assigned, no computation)
+- Stack trace capture is conditional on V8 runtime (Node.js, Cloudflare Workers)
+- Context object is reference-stored (not deep-cloned)
 
-  if (item.ownerId !== userId) {
-    throw new ForbiddenError(
-      'You do not own this item',
-      { itemId, userId, ownerId: item.ownerId }
-    );
-  }
+### Error Mapping Performance
 
-  return await this.db.update(items)
-    .set(updates)
-    .where(eq(items.id, itemId))
-    .returning();
-}
-```
+- Error mapping is O(1) for ServiceError instances (just property access)
+- ZodError mapping is O(n) where n = number of validation failures
+- Unknown error handling includes console.error() which can be disabled via options
 
-### Pattern 4: Unique Constraint Violation
+### Recommendation
 
-**Situation**: Database operation violates unique constraint
+Don't throw errors in tight loops. Create errors only when exceptional conditions occur.
 
-**Pattern**:
-```typescript
-async createItem(input: CreateItemInput) {
-  try {
-    return await this.db.insert(items).values(input).returning();
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes('unique constraint')
-    ) {
-      throw new ConflictError(
-        'Item with this slug already exists',
-        { slug: input.slug }
-      );
-    }
-    this.handleError(error, 'create item');
-  }
-}
-```
+### Best Practices
 
-### Pattern 5: Business Rule Validation
+1. **Throw early** - Validate and throw errors as soon as conditions are detected
+2. **Context is cheap** - Include rich context for debugging without performance penalty
+3. **Catch specific errors** - Use error.code to check error types in catch blocks
+4. **Wrap once** - Use wrapError() or handleError() once per error, not multiple times
 
-**Situation**: Request is valid but violates domain logic
+---
 
-**Pattern**:
-```typescript
-async publishItem(itemId: string) {
-  const item = await this.getItemById(itemId);
-
-  // Check preconditions
-  if (item.status !== 'draft') {
-    throw new BusinessLogicError(
-      'Only draft items can be published',
-      { itemId, currentStatus: item.status }
-    );
-  }
-
-  if (!item.hasRequiredFields()) {
-    throw new BusinessLogicError(
-      'Item is missing required fields',
-      { itemId, missingFields: item.getMissingFields() }
-    );
-  }
-
-  // Perform operation
-  return await this.db.update(items)
-    .set({ status: 'published' })
-    .where(eq(items.id, itemId))
-    .returning();
-}
-```
-
-### Pattern 6: Database Error Wrapping
-
-**Situation**: Unknown database error occurs
-
-**Pattern**:
-```typescript
-async dangerousOperation() {
-  try {
-    return await this.db.execute(complexQuery());
-  } catch (error) {
-    // handleError wraps unknown errors as InternalServiceError
-    // with service name and environment context
-    this.handleError(error, 'dangerous operation');
-  }
-}
-```
-
-### Pattern 7: Transaction Safety
-
-**Situation**: Multi-step operation needs atomic transaction
-
-**Pattern**:
-```typescript
-async transferItem(itemId: string, fromUserId: string, toUserId: string) {
-  try {
-    return await this.db.transaction(async (tx) => {
-      // All operations in transaction or none
-      const item = await tx.query.items.findFirst({
-        where: eq(items.id, itemId),
-      });
-
-      if (item.ownerId !== fromUserId) {
-        throw new ForbiddenError('Cannot transfer item you do not own');
-      }
-
-      await tx.update(items)
-        .set({ ownerId: toUserId })
-        .where(eq(items.id, itemId));
-
-      await tx.insert(auditLog).values({
-        itemId,
-        action: 'transfer',
-        fromUserId,
-        toUserId,
-      });
-
-      return item;
-    });
-  } catch (error) {
-    this.handleError(error);
-  }
-}
-```
-
-### Pattern 8: Scoped Access Control
-
-**Situation**: Query must be scoped to organization/creator
-
-**Pattern**:
-```typescript
-async getItemsByOrganization(orgId: string) {
-  try {
-    return await this.db.query.items.findMany({
-      where: eq(items.organizationId, orgId),
-    });
-  } catch (error) {
-    this.handleError(error);
-  }
-}
-
-async deleteItem(itemId: string, userId: string, orgId: string) {
-  const item = await this.db.query.items.findFirst({
-    where: and(
-      eq(items.id, itemId),
-      eq(items.organizationId, orgId) // Scoped query
-    ),
-  });
-
-  if (!item) {
-    // Could be 404 or forbidden depending on context
-    // If item exists in different org, return 404 to hide org structure
-    throw new NotFoundError('Item not found', { itemId });
-  }
-
-  if (item.creatorId !== userId && !userIsOrgAdmin(userId, orgId)) {
-    throw new ForbiddenError('Cannot delete this item');
-  }
-
-  await this.db.delete(items)
-    .where(eq(items.id, itemId));
-}
-```
-
-## Development & Testing
+## Testing
 
 ### Running Tests
 
 ```bash
-# Run all tests
-npm run test
+# Run tests
+pnpm test
 
-# Watch mode for development
-npm run test:watch
+# Watch mode
+pnpm test:watch
 
 # Coverage report
-npm run test:coverage
+pnpm test:coverage
 ```
 
-### Test Patterns
+### Test File Location
 
-**Testing Error Throwing**:
+`packages/service-errors/src/__tests__/base-errors.test.ts`
+
+### Testing Error Throwing
+
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { NotFoundError, ValidationError } from '@codex/service-errors';
+import { NotFoundError } from '@codex/service-errors';
 
-describe('UserService', () => {
-  it('should throw NotFoundError when user not found', () => {
-    const service = new UserService(config);
+describe('Service', () => {
+  it('should throw NotFoundError when item not found', async () => {
+    const service = new ItemService(config);
 
-    expect(() => service.getUser('nonexistent')).rejects.toThrow(NotFoundError);
+    await expect(
+      service.getItem('nonexistent')
+    ).rejects.toThrow(NotFoundError);
   });
 
-  it('should include context in error', () => {
-    const service = new UserService(config);
+  it('should include context in thrown error', async () => {
+    const service = new ItemService(config);
 
     try {
-      service.getUser('nonexistent');
+      await service.getItem('nonexistent');
     } catch (error) {
       expect(error).toBeInstanceOf(NotFoundError);
-      expect(error.context).toEqual({ userId: 'nonexistent' });
+      expect((error as NotFoundError).context).toEqual({
+        itemId: 'nonexistent',
+      });
     }
   });
 
   it('should have correct HTTP status code', () => {
-    const error = new NotFoundError('Test');
+    const error = new NotFoundError('Not found');
     expect(error.statusCode).toBe(404);
   });
 });
 ```
 
-**Testing Error Mapping**:
+### Testing Error Mapping
+
 ```typescript
 import { mapErrorToResponse } from '@codex/service-errors';
 
 describe('Error Mapping', () => {
-  it('should map NotFoundError to 404 response', () => {
+  it('should map NotFoundError to 404', () => {
     const error = new NotFoundError('Not found');
     const { statusCode, response } = mapErrorToResponse(error);
 
     expect(statusCode).toBe(404);
     expect(response.error.code).toBe('NOT_FOUND');
+  });
+
+  it('should map ZodError to 422', () => {
+    const schema = z.object({ email: z.string().email() });
+    try {
+      schema.parse({ email: 'invalid' });
+    } catch (error) {
+      const { statusCode, response } = mapErrorToResponse(error);
+
+      expect(statusCode).toBe(422);
+      expect(response.error.code).toBe('VALIDATION_ERROR');
+    }
   });
 
   it('should wrap unknown errors safely', () => {
@@ -1195,110 +1282,174 @@ describe('Error Mapping', () => {
 
     expect(statusCode).toBe(500);
     expect(response.error.code).toBe('INTERNAL_ERROR');
+    // Message should NOT expose database details
     expect(response.error.message).not.toContain('Database');
   });
 });
 ```
 
-### Building the Package
+### Testing Service Implementation
 
-```bash
-# Build for production
-npm run build
+```typescript
+import { BaseService, NotFoundError } from '@codex/service-errors';
 
-# Type check
-npm run typecheck
+describe('UserService', () => {
+  let service: UserService;
 
-# Lint and format
-npm run lint
-npm run format
+  beforeEach(() => {
+    service = new UserService({
+      db: dbWs,
+      environment: 'test',
+    });
+  });
+
+  it('should create user with valid input', async () => {
+    const input = { email: 'user@example.com', name: 'Test' };
+    const user = await service.createUser(input);
+
+    expect(user.id).toBeDefined();
+    expect(user.email).toBe('user@example.com');
+  });
+
+  it('should throw NotFoundError for missing user', async () => {
+    await expect(
+      service.getUserById('nonexistent')
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it('should throw ConflictError for duplicate email', async () => {
+    const input = { email: 'user@example.com' };
+    await service.createUser(input);
+
+    await expect(
+      service.createUser(input)
+    ).rejects.toThrow(ConflictError);
+  });
+});
 ```
 
-### Package Structure
+### Test Utilities
 
-```
-packages/service-errors/
-├── src/
-│   ├── index.ts              # Public API exports
-│   ├── base-errors.ts        # Error classes and type guards
-│   ├── base-service.ts       # BaseService abstract class
-│   ├── error-mapper.ts       # Error to HTTP response mapping
-│   └── __tests__/
-│       └── base-errors.test.ts
-├── dist/                      # Compiled output
-├── package.json
-├── tsconfig.json
-└── README.md (this file)
-```
+The package includes comprehensive test utilities in `__tests__/base-errors.test.ts` covering:
+- Error instantiation and properties
+- Error inheritance chains
+- Type guards (isServiceError, isKnownError)
+- Error wrapping (wrapError)
+- Error serialization
+- Error mapping (mapErrorToResponse)
+- Stack trace capture
 
-### Adding New Error Types
+### Key Test Patterns
 
-To add a domain-specific error:
+1. **Test error throwing** - Verify errors are thrown in correct conditions
+2. **Test error properties** - Verify code, message, statusCode, context
+3. **Test inheritance** - Verify instanceof checks work correctly
+4. **Test mapping** - Verify errors map to correct HTTP status/response
+5. **Test wrapping** - Verify unknown errors are safely wrapped
+6. **Test type guards** - Verify type guard functions work correctly
 
-1. **Create error class in domain package** (not in service-errors):
+---
+
+## Creating Domain-Specific Errors
+
+Domain packages create their own error classes by extending base errors:
+
+### In Domain Package (e.g., @codex/content)
 
 ```typescript
 // packages/content/src/errors.ts
-import { NotFoundError } from '@codex/service-errors';
+import { NotFoundError, ConflictError } from '@codex/service-errors';
+
+export class ContentNotFoundError extends NotFoundError {
+  constructor(contentId: string) {
+    super('Content not found', { contentId });
+  }
+}
 
 export class MediaNotFoundError extends NotFoundError {
   constructor(mediaId: string) {
     super('Media file not found', { mediaId });
   }
 }
-```
 
-2. **Use in service**:
-
-```typescript
-// packages/content/src/services/media-service.ts
-async getMedia(mediaId: string) {
-  const media = await this.db.query.media.findFirst({
-    where: eq(media.id, mediaId),
-  });
-
-  if (!media) {
-    throw new MediaNotFoundError(mediaId);
+export class SlugConflictError extends ConflictError {
+  constructor(slug: string) {
+    super('Content slug already exists', { slug });
   }
-
-  return media;
 }
 ```
 
-3. **Error is automatically handled by error mapper**:
+### In Service
 
 ```typescript
-// workers/content-api/src/routes/media.ts
+import { ContentNotFoundError } from './errors';
+
+export class ContentService extends BaseService {
+  async getContent(id: string) {
+    const content = await this.db.query.content.findFirst({
+      where: eq(schema.content.id, id),
+    });
+
+    if (!content) {
+      throw new ContentNotFoundError(id);
+    }
+
+    return content;
+  }
+}
+```
+
+### In Worker Route
+
+```typescript
 try {
-  const media = await service.getMedia(id);
-  return c.json(media);
+  const content = await service.getContent(id);
+  return c.json(content);
 } catch (error) {
+  // ContentNotFoundError is automatically handled
   const { statusCode, response } = mapErrorToResponse(error);
   return c.json(response, statusCode);
 }
 ```
 
-### Key Principles
-
-1. **Never expose internal errors**: Always wrap unknown errors with safe messages
-2. **Include actionable context**: Error details help developers debug issues
-3. **Use specific errors**: NotFoundError, ValidationError, etc. not generic Error
-4. **Extend base errors**: Create domain-specific errors by extending NotFoundError, etc.
-5. **Scope sensitive data**: Don't include passwords, tokens, or PII in context
-6. **Consistent patterns**: All services follow the same error handling approach
+---
 
 ## Dependencies
 
 | Package | Purpose | Version |
 |---------|---------|---------|
-| @codex/database | Database access layer | workspace |
-| zod | Schema validation library | ^3.24.1 |
+| @codex/database | Database client types | workspace |
+| zod | Schema validation (ZodError handling) | ^3.24.1 |
 | typescript | Type system | ^5.7.3 |
+
+### No Production Dependencies
+
+The package has zero production dependencies other than zod (for type guards). All other dependencies are dev dependencies for building and testing.
+
+---
 
 ## Related Documentation
 
-- [Database Package](../database/README.md) - Database queries and transactions
-- [Worker Utils](../worker-utils/README.md) - Route handler helpers using mapErrorToResponse
-- [Validation Package](../validation/README.md) - Schema validation (ZodError handling)
-- [Content Package](../content/README.md) - Example service implementation
-- [Identity Package](../identity/README.md) - Example service implementation
+- [Database Package](../database/CLAUDE.md) - Database operations and transactions
+- [Worker Utils](../worker-utils/CLAUDE.md) - Route handlers using mapErrorToResponse
+- [Validation Package](../validation/CLAUDE.md) - Schema validation and ZodError handling
+- [Content Package](../content/CLAUDE.md) - Example service implementation
+- [Identity Package](../identity/CLAUDE.md) - Example service implementation
+
+---
+
+## Key Design Principles
+
+1. **Consistency** - Every service and worker follows the same error patterns
+2. **Type Safety** - Error types prevent passing wrong status codes
+3. **Security** - Internal errors never expose implementation details to clients
+4. **Debuggability** - Error context includes business metadata for troubleshooting
+5. **Simplicity** - Minimal boilerplate, maximum clarity
+6. **Inheritance** - Custom errors extend base errors, not creating new classes
+7. **V8 Runtime** - Stack trace capture works in Node.js and Cloudflare Workers
+
+---
+
+**Last Updated**: 2025-12-14
+**Version**: 1.0.0
+**Status**: Complete
