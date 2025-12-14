@@ -1531,10 +1531,14 @@ workers/ecom-api/
 │   │   └── purchases.ts              # Purchase history/details (GET /purchases/:id)
 │   │
 │   ├── handlers/
-│   │   └── checkout.ts               # handleCheckoutCompleted() webhook handler
+│   │   ├── checkout.ts               # handleCheckoutCompleted() webhook handler
+│   │   └── __tests__/
+│   │       └── checkout.test.ts      # Checkout handler unit tests
 │   │
 │   ├── middleware/
-│   │   └── verify-signature.ts       # Stripe signature verification
+│   │   ├── verify-signature.ts       # Stripe signature verification
+│   │   └── __tests__/
+│   │       └── verify-signature.test.ts  # Signature verification tests
 │   │
 │   └── utils/
 │       ├── webhook-handler.ts        # createWebhookHandler() factory
