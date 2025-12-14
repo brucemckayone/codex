@@ -84,7 +84,7 @@
       ],
       "routes": [
         {
-          "pattern": "content-api.revelations.studio/*",
+          "pattern": "content-api.revelations.studio",
           "custom_domain": true
         }
       ]

@@ -62,7 +62,7 @@
       ],
       "routes": [
         {
-          "pattern": "identity-api.revelations.studio/*",
+          "pattern": "identity-api.revelations.studio",
           "custom_domain": true
         }
       ]
