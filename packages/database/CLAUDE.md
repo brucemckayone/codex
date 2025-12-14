@@ -1,10 +1,10 @@
 # @codex/database
 
-Foundation package providing database ORM layer, connection management, and schema definitions for the Codex platform.
+Foundation package providing type-safe PostgreSQL data access layer with dual connection modes, complete schema definitions, query utilities, and error handling.
 
-**Purpose**: Type-safe PostgreSQL/Neon data access layer with two connection modes (HTTP for production, WebSocket for transactions), complete schema definitions, query utilities, and error handling.
+**Purpose**: Type-safe Drizzle ORM integration for Neon serverless PostgreSQL with two connection strategies (HTTP for production, WebSocket for transactions), comprehensive schema definitions, reusable query utilities, and PostgreSQL error detection.
 
-**Status**: Foundation package - depended on by all service layers and workers
+**Status**: Foundation package - depended on by all service and utility layers
 
 **Latest Version**: 0.1.0
 
@@ -14,29 +14,34 @@ Foundation package providing database ORM layer, connection management, and sche
 - [Quick Start](#quick-start)
 - [Public API](#public-api)
 - [Database Clients](#database-clients)
+- [Connection Strategies](#connection-strategies)
 - [Query Utilities](#query-utilities)
 - [Error Handling](#error-handling)
 - [Data Models](#data-models)
 - [Usage Examples](#usage-examples)
 - [Integration Points](#integration-points)
 - [Configuration](#configuration)
-- [Migrations](#migrations)
 - [Performance Notes](#performance-notes)
 - [Testing](#testing)
+
+---
 
 ## Overview
 
 @codex/database is the foundational data access layer for Codex. It provides:
 
-- **Database Clients**: Two connection modes
-  - `dbHttp`: Stateless HTTP client for production (Cloudflare Workers)
-  - `dbWs`: Stateful WebSocket client with transaction support (tests, local dev)
-- **Schema Definitions**: Complete Drizzle ORM schema for all business domains
-- **Query Utilities**: Reusable helpers for soft-delete filtering, scoping, and pagination
-- **Error Detection**: Type-safe PostgreSQL error detection and handling
-- **Type Safety**: Full TypeScript inference for all database operations
+- **Dual Database Clients**: Two connection modes optimized for different use cases
+  - `dbHttp`: Stateless HTTP client for production (Cloudflare Workers, edge deployments)
+  - `dbWs`: Stateful WebSocket client with full transaction support (tests, local dev)
+- **Drizzle ORM Integration**: Type-safe SQL query builder with full schema inference
+- **Complete Schema**: All business domain tables (users, content, organizations, purchases, playback, etc.)
+- **Query Utilities**: Reusable helpers for common patterns (soft-delete filtering, scoping, pagination)
+- **Error Detection**: Type-safe PostgreSQL error detection (unique violations, foreign keys, etc.)
+- **Connection Management**: Automatic pooling, lazy initialization, proper cleanup
 
-All database interaction in Codex flows through this package. It integrates with Neon's serverless PostgreSQL, supporting local development, ephemeral test branches, and production deployments.
+All database interaction in Codex flows through this package. It integrates with Neon's serverless PostgreSQL, supporting local development with Docker, ephemeral test branches in CI/CD, and production deployments.
+
+---
 
 ## Quick Start
 
@@ -44,16 +49,16 @@ All database interaction in Codex flows through this package. It integrates with
 import { dbHttp, dbWs, schema } from '@codex/database';
 import { eq } from 'drizzle-orm';
 
-// HTTP client - simple queries, production workers
+// HTTP client - simple queries in production workers
 const users = await dbHttp.select().from(schema.users);
 
-// WebSocket client - transactions, tests
+// WebSocket client - transactions in tests
 await dbWs.transaction(async (tx) => {
-  await tx.insert(schema.users).values({ name: 'John', email: 'john@example.com' });
+  await tx.insert(schema.users).values({ name: 'Jane', email: 'jane@example.com' });
   await tx.insert(schema.organizations).values({ name: 'Acme', slug: 'acme' });
 });
 
-// Query utilities for common patterns
+// Query utilities - common patterns
 import { scopedNotDeleted, withPagination } from '@codex/database';
 
 const pagination = withPagination({ page: 1, limit: 20 });
@@ -64,89 +69,98 @@ const content = await dbHttp.query.content.findMany({
 });
 ```
 
+---
+
 ## Public API
 
 All exports are available at `@codex/database`:
 
 ### Database Clients
 
-| Export | Type | Purpose |
-|--------|------|---------|
-| `dbHttp` | Database Client | Stateless queries, production workers, HTTP API |
-| `dbWs` | Database Client | Transactions, tests, local development, WebSocket |
-| `Database` | Type | HTTP client type for imports |
-| `DatabaseWs` | Type | WebSocket client type for imports |
+| Export | Type | Purpose | Use Case |
+|--------|------|---------|----------|
+| `dbHttp` | Proxy to HTTP Database | Stateless HTTP queries | Production workers, simple CRUD, one-off operations |
+| `dbWs` | Proxy to WebSocket Database | Stateful queries with transactions | Tests, local dev, multi-step atomic operations |
+| `createDbClient(env)` | Factory Function | Create HTTP client with explicit env | Better-auth config, custom initialization |
+| `createPerRequestDbClient(env)` | Factory Function | Create per-request WebSocket client | Cloudflare Worker transactions (must cleanup) |
+| `Database` | Type | HTTP client type for imports | Type annotations for HTTP clients |
+| `DatabaseWs` | Type | WebSocket client type for imports | Type annotations for transaction clients |
 
 ### Query Utility Functions
 
 | Export | Signature | Purpose |
 |--------|-----------|---------|
-| `whereNotDeleted()` | `(table) => SQL` | Filter soft-deleted records (deletedAt IS NULL) |
-| `withCreatorScope()` | `(table, creatorId) => SQL` | Scope to creator-owned resources |
-| `withOrgScope()` | `(table, orgId) => SQL` | Scope to organization-owned resources |
-| `scopedNotDeleted()` | `(table, creatorId) => SQL` | Combined: non-deleted + creator scope |
-| `orgScopedNotDeleted()` | `(table, orgId) => SQL` | Combined: non-deleted + org scope |
-| `withPagination()` | `(options) => {limit, offset}` | Convert page/limit to SQL offset |
+| `whereNotDeleted(table)` | `(table) => SQL` | Filter soft-deleted records (deletedAt IS NULL) |
+| `withCreatorScope(table, creatorId)` | `(table, id) => SQL` | Scope query to creator-owned resources |
+| `withOrgScope(table, orgId)` | `(table, id) => SQL` | Scope query to organization-owned resources |
+| `scopedNotDeleted(table, creatorId)` | `(table, id) => SQL` | Combined: non-deleted + creator scope |
+| `orgScopedNotDeleted(table, orgId)` | `(table, id) => SQL` | Combined: non-deleted + org scope |
+| `withPagination(options)` | `({page, limit}) => {limit, offset}` | Convert page-based to offset-based pagination |
 
 ### Error Detection Functions
 
 | Export | Purpose |
 |--------|---------|
-| `isUniqueViolation()` | Detect unique constraint violations (23505) |
-| `isForeignKeyViolation()` | Detect foreign key violations (23503) |
-| `isNotNullViolation()` | Detect not-null constraint violations (23502) |
-| `getConstraintName()` | Extract constraint name from error |
-| `getErrorDetail()` | Extract detail message from error |
+| `isUniqueViolation(error)` | Detect unique constraint violations (PostgreSQL 23505) |
+| `isForeignKeyViolation(error)` | Detect foreign key violations (PostgreSQL 23503) |
+| `isNotNullViolation(error)` | Detect not-null constraint violations (PostgreSQL 23502) |
+| `getConstraintName(error)` | Extract constraint name from error |
+| `getErrorDetail(error)` | Extract detail message from error |
 
 ### Utility Functions
 
 | Export | Purpose |
 |--------|---------|
-| `testDbConnection()` | Verify database connectivity |
-| `closeDbPool()` | Close WebSocket pool (test cleanup) |
+| `testDbConnection(env?)` | Verify database connectivity (SELECT 1 test) |
+| `closeDbPool()` | Close WebSocket pool (MUST call in test cleanup) |
 
 ### Schema Exports
 
-Access via `import { schema }` or individual imports:
+Access complete schema via `import { schema }` or individual table imports. All tables are Drizzle ORM table definitions with full TypeScript inference.
 
-| Table | Purpose | Primary Key |
-|-------|---------|-------------|
-| `users` | User identity and profile | `id: text` |
-| `accounts` | OAuth provider accounts | `id: text` |
-| `sessions` | User session management | `id: text` |
-| `verificationTokens` | Email verification tokens | `id: text` |
-| `organizations` | Teams/organizations | `id: uuid` |
-| `organizationMemberships` | Organization membership | `id: uuid` |
-| `mediaItems` | Video/audio uploads | `id: uuid` |
-| `content` | Published content | `id: uuid` |
-| `contentAccess` | User access grants | `id: uuid` |
-| `purchases` | Purchase transactions | `id: uuid` |
-| `videoPlayback` | Video playback progress | `id: uuid` |
+**Identity Tables**:
+- `users` - User identity and profile information
+- `accounts` - OAuth provider accounts (Better Auth)
+- `sessions` - User session management
+- `verificationTokens` - Email verification tokens
+
+**Organization Tables**:
+- `organizations` - Teams and organizations
+- `organizationMemberships` - User roles in organizations
+
+**Content Tables**:
+- `mediaItems` - Uploaded video/audio files
+- `content` - Published content (references media items)
+- `contentAccess` - User access to content (purchases, subscriptions, etc.)
+
+**E-Commerce Tables**:
+- `purchases` - Purchase transaction records
+- `platformFeeConfig` - Default platform fee configuration
+- `organizationPlatformAgreements` - Custom org fees
+- `creatorOrganizationAgreements` - Revenue split agreements
+
+**Playback Tables**:
+- `videoPlayback` - Video playback progress tracking
 
 ### Type Exports
 
+Full Drizzle type inference available for all tables:
+
 ```typescript
-// Identity
+// Read types (database record)
 type User = typeof schema.users.$inferSelect;
-type NewUser = typeof schema.users.$inferInsert;
-
-// Organizations
-type Organization = typeof schema.organizations.$inferSelect;
-type NewOrganization = typeof schema.organizations.$inferInsert;
-type OrganizationMembership = typeof schema.organizationMemberships.$inferSelect;
-
-// Content
 type Content = typeof schema.content.$inferSelect;
+type Organization = typeof schema.organizations.$inferSelect;
+
+// Insert types (values to insert)
+type NewUser = typeof schema.users.$inferInsert;
 type NewContent = typeof schema.content.$inferInsert;
-type MediaItem = typeof schema.mediaItems.$inferSelect;
+type NewOrganization = typeof schema.organizations.$inferInsert;
 
-// E-commerce
-type Purchase = typeof schema.purchases.$inferSelect;
-type NewPurchase = typeof schema.purchases.$inferInsert;
-
-// Video
-type VideoPlayback = typeof schema.videoPlayback.$inferSelect;
+// All other tables follow same pattern
 ```
+
+---
 
 ## Database Clients
 
@@ -154,24 +168,30 @@ type VideoPlayback = typeof schema.videoPlayback.$inferSelect;
 
 Stateless HTTP-based client optimized for Cloudflare Workers and one-off queries.
 
-**Use cases:**
-- Production Cloudflare Workers (workers/content-api, workers/identity-api)
+**When to use**:
+- Production Cloudflare Workers (workers/content-api, workers/identity-api, workers/auth, workers/ecom-api)
 - One-off queries and simple CRUD operations
 - Read-only operations
 - Minimal latency for edge deployments
 
-**Features:**
+**Features**:
 - Stateless connection (no persistent pool)
 - Lazy initialization (first use only)
 - Optimized for serverless/edge environments
 - Uses Neon HTTP API
 
-**Limitations:**
-- `dbHttp.transaction()` is NOT supported (throws error)
-- Cannot use `db.transaction()` for multi-step atomic operations
+**Limitations**:
+- `db.transaction()` is NOT supported (throws error)
+- Cannot use transactions for multi-step atomic operations
 - Use `dbWs` for transactions
 
-**Example:**
+**Connection Behavior**:
+- First call to any dbHttp method initializes the client
+- Initialization applies Neon configuration from environment
+- Subsequent calls reuse the same client instance
+- No cleanup needed (stateless HTTP)
+
+**Example**:
 
 ```typescript
 import { dbHttp, schema } from '@codex/database';
@@ -199,31 +219,33 @@ await dbHttp.update(schema.users)
 
 // Raw SQL
 import { sql } from 'drizzle-orm';
-const result = await dbHttp.execute(sql`SELECT COUNT(*) FROM users`);
+const result = await dbHttp.execute(sql`SELECT COUNT(*) as count FROM users`);
 ```
 
 ### dbWs: WebSocket Client with Transactions
 
 Stateful WebSocket-based client with full transaction support. Maintains a connection pool for atomic multi-step operations.
 
-**Use cases:**
+**When to use**:
 - Test suites (full transaction support)
 - Local development
 - Operations requiring atomicity (multiple tables)
 - Operations requiring BEGIN/COMMIT/ROLLBACK
+- Cloudflare Workers that need per-request transactions (with cleanup)
 
-**Features:**
+**Features**:
 - Full transaction support with BEGIN/COMMIT/ROLLBACK
 - Connection pooling for connection reuse
 - Interactive sessions
 - Works in Node.js and Cloudflare Workers
 
-**Pool Lifecycle:**
+**Pool Lifecycle**:
 - Lazily initialized on first dbWs call
-- Must call `closeDbPool()` in test teardown (prevents hanging processes)
+- MUST call `closeDbPool()` in test cleanup (prevents hanging processes)
 - Maintains connection state across requests
+- Automatic error handling on pool errors
 
-**Example:**
+**Example**:
 
 ```typescript
 import { dbWs, schema } from '@codex/database';
@@ -255,11 +277,162 @@ const user = await dbWs.query.users.findFirst({
 });
 ```
 
+### createDbClient(env): Factory for Explicit Environment
+
+Creates HTTP database client with explicit environment variables. Useful for Better-auth configuration and custom initialization.
+
+**Signature**:
+```typescript
+function createDbClient(env: DbEnvVars): Database;
+```
+
+**Parameters**:
+- `env` - Database environment variables containing DB_METHOD and DATABASE_URL
+
+**Returns**: Fresh HTTP database client instance with schema
+
+**Example**:
+
+```typescript
+import { createDbClient } from '@codex/database';
+
+// In Better-auth configuration
+const db = createDbClient(c.env);
+
+// Use like dbHttp
+const users = await db.select().from(schema.users);
+```
+
+### createPerRequestDbClient(env): Per-Request Transactions in Workers
+
+Creates a per-request WebSocket database client for Cloudflare Workers. CRITICAL: Must call cleanup before request ends.
+
+**Signature**:
+```typescript
+function createPerRequestDbClient(env: DbEnvVars): {
+  db: DatabaseWs;
+  cleanup: () => Promise<void>;
+};
+```
+
+**Parameters**:
+- `env` - Database environment variables containing DB_METHOD and DATABASE_URL
+
+**Returns**: Object with database client and cleanup function
+
+**CRITICAL REQUIREMENT**: Call `cleanup()` before request ends. In Cloudflare Workers, WebSocket connections cannot outlive a single request.
+
+**Example**:
+
+```typescript
+import { createPerRequestDbClient } from '@codex/database';
+
+// In Cloudflare Worker route handler
+app.post('/api/create-content', async (c) => {
+  const { db, cleanup } = createPerRequestDbClient(c.env);
+  try {
+    const result = await db.transaction(async (tx) => {
+      // Create media item
+      const media = await tx.insert(schema.mediaItems).values({
+        // ...
+      }).returning();
+
+      // Create content
+      return await tx.insert(schema.content).values({
+        mediaItemId: media[0].id,
+        // ...
+      }).returning();
+    });
+    return c.json(result);
+  } finally {
+    await cleanup(); // MUST cleanup before request ends
+  }
+});
+
+// Or with ctx.waitUntil for async cleanup
+app.post('/api/async', async (c, ctx) => {
+  const { db, cleanup } = createPerRequestDbClient(c.env);
+  const result = await db.transaction(async (tx) => {
+    // Operations
+  });
+  ctx.waitUntil(cleanup()); // Cleanup after response sent
+  return c.json(result);
+});
+```
+
+---
+
+## Connection Strategies
+
+The database client supports three connection strategies configured via `DB_METHOD` environment variable:
+
+### LOCAL_PROXY: Local Development
+
+For local development with Docker Compose PostgreSQL.
+
+**Configuration**:
+```bash
+DB_METHOD=LOCAL_PROXY
+DATABASE_URL_LOCAL_PROXY=postgresql://postgres:password@db.localtest.me:5432/codex
+```
+
+**Characteristics**:
+- Uses local PostgreSQL instance via Docker
+- HTTP proxy for Neon compatibility
+- Non-secure WebSocket (ws:// not wss://)
+- Disabled in production
+
+### NEON_BRANCH: CI/CD & Ephemeral Branches
+
+For CI/CD pipelines and ephemeral branch databases.
+
+**Configuration**:
+```bash
+DB_METHOD=NEON_BRANCH
+DATABASE_URL=postgresql://user:pass@ep-xyz.us-east-2.aws.neon.tech/dbname
+```
+
+**Characteristics**:
+- Neon ephemeral database branches
+- Connection caching for read-your-writes consistency
+- Full WebSocket support (wss://)
+- Parallel test support (each test gets separate branch)
+- Automatic branch cleanup
+
+### PRODUCTION: Production Neon Database
+
+For production deployments.
+
+**Configuration**:
+```bash
+DB_METHOD=PRODUCTION
+DATABASE_URL=postgresql://user:pass@ep-abc.us-east-2.aws.neon.tech/dbname
+```
+
+**Characteristics**:
+- Production Neon database
+- HTTP pooling optimized for edge
+- Full WebSocket support (wss://)
+- High availability and performance
+
+---
+
 ## Query Utilities
 
 ### whereNotDeleted()
 
 Filter soft-deleted records by checking `deletedAt IS NULL`.
+
+**Signature**:
+```typescript
+function whereNotDeleted<T extends {deletedAt: PgColumn}>(table: T): SQL<unknown>;
+```
+
+**Use Cases**:
+- Exclude soft-deleted records from queries
+- Most common helper for ensuring data visibility
+
+**Example**:
 
 ```typescript
 import { whereNotDeleted } from '@codex/database';
@@ -285,6 +458,21 @@ const item = await dbWs.query.content.findFirst({
 
 Scope queries to creator-owned resources using `creatorId = value`.
 
+**Signature**:
+```typescript
+function withCreatorScope<T extends {creatorId: PgColumn}>(
+  table: T,
+  creatorId: string
+): SQL<unknown>;
+```
+
+**Use Cases**:
+- Ensure users only access their own content
+- Implement creator-level access control
+- Query creator-owned media, content, etc.
+
+**Example**:
+
 ```typescript
 import { withCreatorScope } from '@codex/database';
 import { dbWs, schema } from '@codex/database';
@@ -299,6 +487,21 @@ const creatorContent = await dbWs.query.content.findMany({
 
 Scope queries to organization-owned resources using `organizationId = value`.
 
+**Signature**:
+```typescript
+function withOrgScope<T extends {organizationId: PgColumn}>(
+  table: T,
+  organizationId: string
+): SQL<unknown>;
+```
+
+**Use Cases**:
+- Enforce organization-level isolation
+- Query organization-owned content
+- Implement multi-tenancy
+
+**Example**:
+
 ```typescript
 import { withOrgScope } from '@codex/database';
 import { dbWs, schema } from '@codex/database';
@@ -311,7 +514,22 @@ const orgContent = await dbWs.query.content.findMany({
 
 ### scopedNotDeleted()
 
-Combined helper for creator-owned resources (non-deleted + creator scope).
+Combined helper for creator-owned resources: non-deleted + creator scope.
+
+**Signature**:
+```typescript
+function scopedNotDeleted<T extends {deletedAt: PgColumn, creatorId: PgColumn}>(
+  table: T,
+  creatorId: string
+): SQL<unknown>;
+```
+
+**Use Cases**:
+- Most common pattern for creator-owned resources
+- Equivalent to `and(whereNotDeleted(table), withCreatorScope(table, creatorId))`
+- Single-operation convenience function
+
+**Example**:
 
 ```typescript
 import { scopedNotDeleted } from '@codex/database';
@@ -334,7 +552,22 @@ const item = await dbWs.query.content.findFirst({
 
 ### orgScopedNotDeleted()
 
-Combined helper for organization-owned resources (non-deleted + org scope).
+Combined helper for organization-owned resources: non-deleted + org scope.
+
+**Signature**:
+```typescript
+function orgScopedNotDeleted<T extends {deletedAt: PgColumn, organizationId: PgColumn}>(
+  table: T,
+  organizationId: string
+): SQL<unknown>;
+```
+
+**Use Cases**:
+- Most common pattern for organization-owned resources
+- Equivalent to `and(whereNotDeleted(table), withOrgScope(table, orgId))`
+- Single-operation convenience function
+
+**Example**:
 
 ```typescript
 import { orgScopedNotDeleted } from '@codex/database';
@@ -346,7 +579,7 @@ const items = await dbWs.query.content.findMany({
   where: orgScopedNotDeleted(schema.content, orgId),
 });
 
-// Get specific organization content
+// Get specific organization content by slug
 const item = await dbWs.query.content.findFirst({
   where: and(
     orgScopedNotDeleted(schema.content, orgId),
@@ -357,7 +590,31 @@ const item = await dbWs.query.content.findFirst({
 
 ### withPagination()
 
-Convert page-based pagination (1-indexed pages, limit per page) to SQL offset-based pagination.
+Convert page-based pagination (1-indexed pages) to offset-based pagination for SQL queries.
+
+**Signature**:
+```typescript
+interface PaginationOptions {
+  page: number;      // 1-indexed page number
+  limit: number;     // Items per page
+}
+
+interface PaginationResult {
+  limit: number;     // Items per page (same as input)
+  offset: number;    // Items to skip
+}
+
+function withPagination(options: PaginationOptions): PaginationResult;
+```
+
+**Formula**: `offset = (page - 1) * limit`
+
+**Use Cases**:
+- Convert API pagination parameters to SQL
+- Consistent pagination across all queries
+- Support cursor-less pagination
+
+**Example**:
 
 ```typescript
 import { withPagination } from '@codex/database';
@@ -376,15 +633,25 @@ const items = await dbWs.query.content.findMany({
 });
 ```
 
+---
+
 ## Error Handling
 
 ### PostgreSQL Error Categories
 
-All database errors are PostgreSQL errors. The @codex/database package provides type-safe detection functions.
+All database errors are PostgreSQL errors with standard error codes. The @codex/database package provides type-safe detection functions.
 
-#### Unique Constraint Violations (23505)
+### Unique Constraint Violations (23505)
 
 Occurs when inserting/updating a value that must be unique.
+
+**Common occurrences**:
+- Duplicate email in users table
+- Duplicate slug in organization
+- Duplicate session token
+- Duplicate organization membership
+
+**Example**:
 
 ```typescript
 import { isUniqueViolation } from '@codex/database';
@@ -402,15 +669,17 @@ try {
 }
 ```
 
-**Common occurrences:**
-- Duplicate email
-- Duplicate slug in organization
-- Duplicate session token
-- Duplicate organization membership
-
-#### Foreign Key Violations (23503)
+### Foreign Key Violations (23503)
 
 Occurs when referencing a non-existent parent record.
+
+**Common occurrences**:
+- Creator doesn't exist when creating content
+- Organization doesn't exist
+- Referenced media item doesn't exist
+- Referenced user doesn't exist
+
+**Example**:
 
 ```typescript
 import { isForeignKeyViolation } from '@codex/database';
@@ -421,21 +690,21 @@ try {
   });
 } catch (error) {
   if (isForeignKeyViolation(error)) {
-    // Handle: referenced record doesn't exist
     return { error: 'User not found', code: 'INVALID_CREATOR' };
   }
   throw error;
 }
 ```
 
-**Common occurrences:**
-- Creator doesn't exist
-- Organization doesn't exist
-- Referenced media item doesn't exist
-
-#### Not-Null Violations (23502)
+### Not-Null Violations (23502)
 
 Occurs when inserting NULL into a NOT NULL column.
+
+**Common occurrences**:
+- Missing required field in insert
+- NULL in non-nullable column
+
+**Example**:
 
 ```typescript
 import { isNotNullViolation } from '@codex/database';
@@ -447,20 +716,23 @@ try {
   });
 } catch (error) {
   if (isNotNullViolation(error)) {
-    // Handle: required field missing
     return { error: 'Name is required', code: 'MISSING_FIELD' };
   }
   throw error;
 }
 ```
 
-**Common occurrences:**
-- Missing required field in insert
-- NULL in non-nullable column
-
-#### Check Constraint Violations (23514)
+### Check Constraint Violations (23514)
 
 Occurs when data violates a CHECK constraint (invalid enum value, negative price, etc).
+
+**Common occurrences**:
+- Invalid status value (not one of allowed enum values)
+- Negative price or amount
+- Invalid access type
+- Invalid membership role
+
+**Example**:
 
 ```typescript
 try {
@@ -468,7 +740,6 @@ try {
     status: 'invalid-status', // Must be: draft|published|archived
   });
 } catch (error) {
-  // Check constraint violation
   if ('code' in error && error.code === '23514') {
     return { error: 'Invalid status value' };
   }
@@ -478,7 +749,7 @@ try {
 
 ### Error Detection Pattern
 
-Best practice for database operations:
+Best practice for handling database operations:
 
 ```typescript
 import {
@@ -519,6 +790,8 @@ async function safeInsertContent(content: NewContent) {
 }
 ```
 
+---
+
 ## Data Models
 
 ### Identity Tables
@@ -527,20 +800,23 @@ async function safeInsertContent(content: NewContent) {
 
 User identity and profile information.
 
-**Columns:**
+**Columns**:
 - `id: text` - User ID (primary key)
 - `name: text` - User's display name (required)
 - `email: text` - Email address (unique, required)
 - `emailVerified: boolean` - Email verification status (default: false)
 - `image: text` - Profile image URL (optional)
+- `role: text` - User role (default: 'customer')
 - `createdAt: timestamp` - Creation timestamp (auto)
 - `updatedAt: timestamp` - Last update timestamp (auto)
 
-**Constraints:**
+**Constraints**:
 - Unique email per user
 - Email and name required
 
-**Type Exports:**
+**Relationships**: Referenced by content, mediaItems, sessions, organizationMemberships, purchases, videoPlayback
+
+**Type Exports**:
 ```typescript
 type User = typeof schema.users.$inferSelect;
 type NewUser = typeof schema.users.$inferInsert;
@@ -550,7 +826,7 @@ type NewUser = typeof schema.users.$inferInsert;
 
 OAuth provider accounts and credentials (Better Auth integration).
 
-**Columns:**
+**Columns**:
 - `id: text` - Primary key
 - `accountId: text` - Provider account ID (required)
 - `providerId: text` - Provider name: google, github, etc (required)
@@ -567,9 +843,9 @@ OAuth provider accounts and credentials (Better Auth integration).
 
 #### sessions
 
-User session management.
+User session management for authentication.
 
-**Columns:**
+**Columns**:
 - `id: text` - Primary key
 - `expiresAt: timestamp` - Session expiration (required)
 - `token: text` - Session token (unique, required)
@@ -581,9 +857,9 @@ User session management.
 
 #### verificationTokens
 
-Email verification tokens.
+Email verification tokens for sign-up and password reset.
 
-**Columns:**
+**Columns**:
 - `id: text` - Primary key
 - `identifier: text` - Email or identifier (required)
 - `value: text` - Token value (required)
@@ -591,14 +867,16 @@ Email verification tokens.
 - `createdAt: timestamp` - Creation timestamp (auto)
 - `updatedAt: timestamp` - Last update timestamp (auto)
 
+---
+
 ### Organization Tables
 
 #### organizations
 
-Teams/organizations for collaborative content.
+Teams and organizations for collaborative content creation.
 
-**Columns:**
-- `id: uuid` - Primary key (default: random)
+**Columns**:
+- `id: uuid` - Primary key (default: random UUID)
 - `name: varchar[255]` - Organization name (required)
 - `slug: varchar[255]` - URL-safe slug (unique, required)
 - `description: text` - Organization description (optional)
@@ -608,10 +886,12 @@ Teams/organizations for collaborative content.
 - `updatedAt: timestamp` - Last update (auto)
 - `deletedAt: timestamp` - Soft-delete marker (optional)
 
-**Indexes:**
-- Index on slug for efficient lookup by URL
+**Indexes**:
+- Index on slug for efficient lookup
 
-**Type Exports:**
+**Scoping**: Organization ID used for multi-tenant isolation
+
+**Type Exports**:
 ```typescript
 type Organization = typeof schema.organizations.$inferSelect;
 type NewOrganization = typeof schema.organizations.$inferInsert;
@@ -621,7 +901,7 @@ type NewOrganization = typeof schema.organizations.$inferInsert;
 
 User membership in organizations with roles and status.
 
-**Columns:**
+**Columns**:
 - `id: uuid` - Primary key
 - `organizationId: uuid` - Organization (FK -> organizations, cascade delete)
 - `userId: text` - User (FK -> users, cascade delete)
@@ -631,23 +911,25 @@ User membership in organizations with roles and status.
 - `createdAt: timestamp` - Creation timestamp (auto)
 - `updatedAt: timestamp` - Last update timestamp (auto)
 
-**Constraints:**
+**Constraints**:
 - Unique (organizationId, userId) - one membership per user per org
 - CHECK role: owner, admin, creator, subscriber, member
 - CHECK status: active, inactive, invited
 
-**Indexes:**
+**Indexes**:
 - Unique on (organizationId, userId)
 - Index on organizationId
 - Index on userId
-- Composite index on (organizationId, role) for role queries
-- Composite index on (organizationId, status) for status queries
+- Composite on (organizationId, role) for role queries
+- Composite on (organizationId, status) for status queries
 
-**Type Exports:**
+**Type Exports**:
 ```typescript
 type OrganizationMembership = typeof schema.organizationMemberships.$inferSelect;
 type NewOrganizationMembership = typeof schema.organizationMemberships.$inferInsert;
 ```
+
+---
 
 ### Content Tables
 
@@ -655,7 +937,7 @@ type NewOrganizationMembership = typeof schema.organizationMemberships.$inferIns
 
 Video/audio upload metadata (separated from content for reusability).
 
-**Columns:**
+**Columns**:
 - `id: uuid` - Primary key
 - `creatorId: text` - Uploader (FK -> users, restrict delete)
 - `title: varchar[255]` - Media title (required)
@@ -669,22 +951,29 @@ Video/audio upload metadata (separated from content for reusability).
 - `width: integer` - Video width (optional)
 - `height: integer` - Video height (optional)
 - `hlsMasterPlaylistKey: varchar[500]` - HLS master playlist key (optional)
-- `thumbnailKey: varchar[500]` - Thumbnail S3 key (optional)
+- `thumbnailKey: varchar[500]` - Thumbnail R2 key (optional)
 - `uploadedAt: timestamp` - Upload completion time (optional)
 - `createdAt: timestamp` - Creation timestamp (auto)
 - `updatedAt: timestamp` - Last update timestamp (auto)
 - `deletedAt: timestamp` - Soft-delete marker (optional)
 
-**Constraints:**
+**Constraints**:
 - CHECK status: uploading, uploaded, transcoding, ready, failed
 - CHECK mediaType: video, audio
 
-**Indexes:**
+**Indexes**:
 - Index on creatorId
-- Composite index on (creatorId, status)
-- Composite index on (creatorId, mediaType)
+- Composite on (creatorId, status)
+- Composite on (creatorId, mediaType)
 
-**Type Exports:**
+**Lifecycle**:
+1. `uploading` - Initial state when upload starts
+2. `uploaded` - File successfully uploaded to R2
+3. `transcoding` - Processing for streaming (HLS generation)
+4. `ready` - Available for streaming
+5. `failed` - Upload or transcoding failed
+
+**Type Exports**:
 ```typescript
 type MediaItem = typeof schema.mediaItems.$inferSelect;
 type NewMediaItem = typeof schema.mediaItems.$inferInsert;
@@ -692,9 +981,9 @@ type NewMediaItem = typeof schema.mediaItems.$inferInsert;
 
 #### content
 
-Published content (references mediaItems).
+Published content that references media items. Can belong to organization or creator.
 
-**Columns:**
+**Columns**:
 - `id: uuid` - Primary key
 - `creatorId: text` - Content creator (FK -> users, restrict delete)
 - `organizationId: uuid` - Organization (FK -> organizations, set null) (optional)
@@ -704,7 +993,7 @@ Published content (references mediaItems).
 - `description: text` - Content description (optional)
 - `contentType: varchar[50]` - video, audio, or written (required)
 - `thumbnailUrl: text` - Custom thumbnail URL (optional)
-- `contentBody: text` - Written content body (optional)
+- `contentBody: text` - Written content body (optional, Phase 2+)
 - `category: varchar[100]` - Content category (optional)
 - `tags: jsonb[]` - Array of tag strings (default: [])
 - `visibility: varchar[50]` - public, private, members_only, purchased_only (default: purchased_only)
@@ -717,7 +1006,7 @@ Published content (references mediaItems).
 - `updatedAt: timestamp` - Last update timestamp (auto)
 - `deletedAt: timestamp` - Soft-delete marker (optional)
 
-**Constraints:**
+**Constraints**:
 - CHECK status: draft, published, archived
 - CHECK visibility: public, private, members_only, purchased_only
 - CHECK contentType: video, audio, written
@@ -725,30 +1014,37 @@ Published content (references mediaItems).
 - Unique slug per organization (for org content)
 - Unique slug per creator (for personal content)
 
-**Indexes:**
+**Indexes**:
 - Index on creatorId
 - Index on organizationId
 - Index on mediaItemId
-- Composite index on (slug, organizationId)
+- Composite on (slug, organizationId)
 - Index on status
 - Index on publishedAt
 - Index on category
 - Partial unique on slug+organizationId (where organizationId IS NOT NULL)
 - Partial unique on slug+creatorId (where organizationId IS NULL)
 
-**Type Exports:**
+**Lifecycle**:
+1. `draft` - Initial state, not visible
+2. `published` - Live, visible based on visibility setting
+3. `archived` - Hidden, but not soft-deleted
+
+**Type Exports**:
 ```typescript
 type Content = typeof schema.content.$inferSelect;
 type NewContent = typeof schema.content.$inferInsert;
 ```
 
+---
+
 ### E-Commerce Tables
 
 #### contentAccess
 
-User access grants to content (purchases, subscriptions, complimentary).
+User access grants to content (purchases, subscriptions, complimentary access).
 
-**Columns:**
+**Columns**:
 - `id: uuid` - Primary key
 - `userId: text` - Access holder (FK -> users, cascade delete)
 - `contentId: uuid` - Content being accessed (FK -> content, cascade delete)
@@ -758,16 +1054,22 @@ User access grants to content (purchases, subscriptions, complimentary).
 - `createdAt: timestamp` - Creation timestamp (auto)
 - `updatedAt: timestamp` - Last update timestamp (auto)
 
-**Constraints:**
+**Constraints**:
 - Unique (userId, contentId) - one access record per user per content
 - CHECK accessType: purchased, subscription, complimentary, preview
 
-**Indexes:**
+**Indexes**:
 - Index on userId
 - Index on contentId
 - Index on organizationId
 
-**Type Exports:**
+**Access Types**:
+- `purchased` - One-time purchase
+- `subscription` - Ongoing subscription access
+- `complimentary` - Free/promotional access
+- `preview` - Limited preview access
+
+**Type Exports**:
 ```typescript
 type ContentAccess = typeof schema.contentAccess.$inferSelect;
 type NewContentAccess = typeof schema.contentAccess.$inferInsert;
@@ -775,36 +1077,132 @@ type NewContentAccess = typeof schema.contentAccess.$inferInsert;
 
 #### purchases
 
-Purchase transaction records.
+Purchase transaction records with immutable revenue split snapshots.
 
-**Columns:**
+**Columns**:
 - `id: uuid` - Primary key
 - `customerId: text` - Buyer (FK -> users, cascade delete)
 - `contentId: uuid` - Content purchased (FK -> content, restrict delete)
 - `organizationId: uuid` - Creator's organization (FK -> organizations, restrict delete)
 - `amountPaidCents: integer` - Amount in cents (required)
 - `currency: varchar[3]` - Currency code (default: usd)
+- `platformFeeCents: integer` - Platform fee snapshot (required, default: 0)
+- `organizationFeeCents: integer` - Organization fee snapshot (required, default: 0)
+- `creatorPayoutCents: integer` - Creator payout snapshot (required, default: 0)
+- `platformAgreementId: uuid` - Platform fee agreement reference (optional)
+- `creatorOrgAgreementId: uuid` - Creator-org revenue split agreement (optional)
 - `stripePaymentIntentId: varchar[255]` - Stripe reference (unique, required)
 - `status: varchar[50]` - pending, completed, refunded, or failed (required)
+- `purchasedAt: timestamp` - Completion time (optional)
+- `refundedAt: timestamp` - Refund time (optional)
+- `refundReason: text` - Refund reason (optional)
+- `refundAmountCents: integer` - Refund amount (optional)
+- `stripeRefundId: varchar[255]` - Stripe refund reference (optional)
 - `createdAt: timestamp` - Creation timestamp (auto)
 - `updatedAt: timestamp` - Last update timestamp (auto)
 
-**Constraints:**
+**Constraints**:
 - CHECK amountPaidCents >= 0
+- CHECK platformFeeCents >= 0
+- CHECK organizationFeeCents >= 0
+- CHECK creatorPayoutCents >= 0
+- CRITICAL: amountPaidCents = platformFeeCents + organizationFeeCents + creatorPayoutCents
 - CHECK status: pending, completed, refunded, failed
+- Unique on stripePaymentIntentId (idempotency)
+- NO unique on (customerId, contentId) - users can retry or repurchase
 
-**Indexes:**
+**Indexes**:
 - Index on customerId
 - Index on contentId
 - Index on organizationId
 - Index on stripePaymentIntentId
 - Index on createdAt
+- Index on purchasedAt
+- Index on platformAgreementId
+- Index on creatorOrgAgreementId
 
-**Type Exports:**
+**Revenue Split**: Immutable snapshots captured at purchase time. Changes to fee agreements don't affect past purchases. Supports versioned agreements.
+
+**Status Flow**:
+1. `pending` - Payment processing
+2. `completed` - Purchase finalized
+3. `refunded` - Refund issued
+4. `failed` - Payment failed
+
+**Type Exports**:
 ```typescript
 type Purchase = typeof schema.purchases.$inferSelect;
 type NewPurchase = typeof schema.purchases.$inferInsert;
 ```
+
+#### platformFeeConfig
+
+Default platform fee configuration. One active config at any time.
+
+**Columns**:
+- `id: uuid` - Primary key
+- `platformFeePercentage: integer` - Fee in basis points (10000 = 100%, 1000 = 10%)
+- `effectiveFrom: timestamp` - Start date (required, default: now)
+- `effectiveUntil: timestamp` - End date (NULL = indefinite)
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+
+**Phase 1 Default**: 10% platform fee (1000 basis points)
+
+**Type Exports**:
+```typescript
+type PlatformFeeConfig = typeof schema.platformFeeConfig.$inferSelect;
+type NewPlatformFeeConfig = typeof schema.platformFeeConfig.$inferInsert;
+```
+
+#### organizationPlatformAgreements
+
+Custom platform fee agreements for specific organizations (volume discounts, etc).
+
+**Columns**:
+- `id: uuid` - Primary key
+- `organizationId: uuid` - Organization (FK -> organizations, cascade delete)
+- `platformFeePercentage: integer` - Custom fee in basis points
+- `effectiveFrom: timestamp` - Start date
+- `effectiveUntil: timestamp` - End date (NULL = indefinite)
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+
+**Behavior**: If no record exists, organization uses platformFeeConfig default.
+
+**Type Exports**:
+```typescript
+type OrganizationPlatformAgreement = typeof schema.organizationPlatformAgreements.$inferSelect;
+type NewOrganizationPlatformAgreement = typeof schema.organizationPlatformAgreements.$inferInsert;
+```
+
+#### creatorOrganizationAgreements
+
+Revenue split agreements between creators and organizations.
+
+**Columns**:
+- `id: uuid` - Primary key
+- `creatorId: text` - Creator (FK -> users, cascade delete)
+- `organizationId: uuid` - Organization (FK -> organizations, cascade delete)
+- `organizationFeePercentage: integer` - Organization's cut (basis points)
+- `effectiveFrom: timestamp` - Start date
+- `effectiveUntil: timestamp` - End date (NULL = indefinite)
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+
+**Phase 1 Default**: 0% to organization, 100% of remaining to creator
+
+**Phase 2+**: Orgs can negotiate revenue share (e.g., 20% to org, 80% to creator)
+
+**Behavior**: If no record exists, organization gets 0% (all remaining to creator).
+
+**Type Exports**:
+```typescript
+type CreatorOrganizationAgreement = typeof schema.creatorOrganizationAgreements.$inferSelect;
+type NewCreatorOrganizationAgreement = typeof schema.creatorOrganizationAgreements.$inferInsert;
+```
+
+---
 
 ### Playback Tables
 
@@ -812,7 +1210,7 @@ type NewPurchase = typeof schema.purchases.$inferInsert;
 
 Video playback progress for resume functionality.
 
-**Columns:**
+**Columns**:
 - `id: uuid` - Primary key
 - `userId: text` - Watcher (FK -> users, cascade delete)
 - `contentId: uuid` - Video content (FK -> content, cascade delete)
@@ -822,21 +1220,30 @@ Video playback progress for resume functionality.
 - `updatedAt: timestamp` - Last update timestamp (auto)
 - `createdAt: timestamp` - Creation timestamp (auto)
 
-**Constraints:**
+**Constraints**:
 - Unique (userId, contentId) - one playback record per user per video
 
-**Indexes:**
+**Indexes**:
 - Index on userId
 - Index on contentId
 
-**Update Pattern:**
-Frontend sends update every 30 seconds. Backend upserts the playback record. When position >= 95% of duration, `completed` is set to true.
+**Business Rules**:
+- Frontend updates every 30 seconds during playback
+- Backend auto-completes when position >= 95% of duration
+- No cleanup - historical record useful for analytics
 
-**Type Exports:**
+**Update Pattern**:
+- Frontend sends partial updates (position + duration)
+- Backend upserts the playback record
+- When position >= 95% * durationSeconds, `completed` set to true
+
+**Type Exports**:
 ```typescript
 type VideoPlayback = typeof schema.videoPlayback.$inferSelect;
 type NewVideoPlayback = typeof schema.videoPlayback.$inferInsert;
 ```
+
+---
 
 ## Usage Examples
 
@@ -988,18 +1395,20 @@ async function createUser(email: string, name: string) {
 }
 ```
 
+---
+
 ## Integration Points
 
 ### Packages Using @codex/database
 
 | Package | Purpose | Connection | Usage |
 |---------|---------|-----------|-------|
-| @codex/identity | User/org management | dbWs/dbHttp | Read/write users, organizations |
-| @codex/content | Content management | dbWs/dbHttp | CRUD operations on content, media |
-| @codex/access | Access control | dbWs/dbHttp | Query/grant content access |
+| @codex/identity | User/org management | dbWs/dbHttp | Read/write users, organizations, memberships |
+| @codex/content | Content management | dbWs/dbHttp | CRUD operations on content, media items |
+| @codex/access | Access control | dbWs/dbHttp | Query/grant content access, playback |
 | @codex/security | Auth/security | dbWs/dbHttp | Manage sessions, verify tokens |
+| @codex/purchase | E-commerce | dbWs/dbHttp | Purchase records, revenue splits |
 | @codex/test-utils | Test utilities | dbWs | Database setup/teardown |
-| @codex/service-errors | Error handling | dbHttp | Detect constraint violations |
 | @codex/worker-utils | Worker helpers | dbHttp/dbWs | Inject database clients |
 
 ### Workers Using @codex/database
@@ -1009,137 +1418,31 @@ async function createUser(email: string, name: string) {
 | workers/auth | dbWs/dbHttp | Authentication, session management |
 | workers/identity-api | dbHttp | User/organization API endpoints |
 | workers/content-api | dbHttp | Content, media, access endpoints |
-| workers/ecom-api | dbHttp | Payment processing |
+| workers/ecom-api | dbHttp | Payment processing, webhooks |
 
-### Dependency Direction
+### Service Integration Pattern
 
-All packages and workers depend on @codex/database for data access. It is a foundation package with minimal dependencies (only Drizzle ORM and Neon serverless driver).
+Services extend BaseService and receive database clients via constructor:
 
-## Configuration
+```typescript
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { dbHttp, type Database } from '@codex/database';
 
-### Environment Variables
+class MyService extends BaseService {
+  constructor(config: ServiceConfig) {
+    super(config);
+    // Database client available via this.db (from BaseService)
+  }
 
-```bash
-# Connection strategy
-DB_METHOD=LOCAL_PROXY | NEON_BRANCH | PRODUCTION
-
-# Database URLs
-DATABASE_URL=postgresql://...              # For NEON_BRANCH and PRODUCTION
-DATABASE_URL_LOCAL_PROXY=postgresql://...  # For LOCAL_PROXY mode
-
-# Optional
-NODE_ENV=development | production
+  async doSomething() {
+    const result = await this.db.query.users.findFirst({
+      where: (u) => eq(u.id, userId),
+    });
+  }
+}
 ```
 
-### Connection Strategies
-
-#### LOCAL_PROXY
-
-For local development with Docker Compose PostgreSQL:
-
-```bash
-DB_METHOD=LOCAL_PROXY
-DATABASE_URL_LOCAL_PROXY=postgresql://postgres:password@db.localtest.me:5432/codex
-```
-
-**Configuration:**
-- Uses local PostgreSQL instance
-- HTTP proxy for Neon compatibility
-- Non-secure WebSocket (ws:// not wss://)
-- Disabled in production
-
-#### NEON_BRANCH
-
-For CI/CD and ephemeral branch databases:
-
-```bash
-DB_METHOD=NEON_BRANCH
-DATABASE_URL=postgresql://user:pass@ep-xyz.us-east-2.aws.neon.tech/dbname
-```
-
-**Configuration:**
-- Neon ephemeral branch
-- Connection caching for read-your-writes consistency
-- Full WebSocket support (wss://)
-- Parallel test support
-
-#### PRODUCTION
-
-For production Neon database:
-
-```bash
-DB_METHOD=PRODUCTION
-DATABASE_URL=postgresql://user:pass@ep-abc.us-east-2.aws.neon.tech/dbname
-```
-
-**Configuration:**
-- Production Neon database
-- HTTP pooling optimized for edge
-- Full WebSocket support (wss://)
-
-### Environment Loading Strategy
-
-The package does NOT load `.env` files directly. Environment variables must be provided by:
-
-- **Tests**: Loaded by root `vitest.setup.ts`
-- **Local Dev**: Set in shell or `.env.dev`
-- **CI/CD**: GitHub Actions environment variables
-- **Production**: Wrangler secrets
-
-## Migrations
-
-Migrations are managed using Drizzle Kit and stored in `src/migrations/`.
-
-### Available Scripts
-
-```bash
-# Generate new migration from schema changes
-pnpm db:gen:drizzle
-
-# Generate auth-related migrations
-pnpm db:gen:auth
-
-# Generate all migrations
-pnpm db:gen
-
-# Apply migrations to database
-pnpm db:migrate
-
-# Open Drizzle Studio (database GUI)
-pnpm db:studio
-
-# Push schema changes directly (dev only)
-pnpm db:push
-```
-
-### Migration Workflow
-
-1. **Modify Schema** - Edit files in `src/schema/`
-2. **Generate Migration** - Run `pnpm db:gen`
-3. **Review SQL** - Check generated SQL in `src/migrations/`
-4. **Apply Migration** - Run `pnpm db:migrate`
-
-```bash
-# Example workflow
-pnpm db:gen:drizzle  # Generates migration file
-pnpm db:migrate      # Applies migration to database
-```
-
-### Migration Files
-
-Migrations are numbered sequentially:
-
-```
-src/migrations/
-├── 0000_clammy_dreadnoughts.sql      # Initial test table
-├── 0001_soft_mauler.sql              # Auth tables (better-auth)
-├── 0002_curved_darwin.sql            # Content tables
-├── 0003_purple_scourge.sql           # Schema updates
-├── 0004_add_org_deletion_trigger.sql # Custom trigger
-└── meta/
-    ├── _journal.json                 # Migration metadata
-    └── 0000_snapshot.json            # Schema snapshots
-```
+---
 
 ## Performance Notes
 
@@ -1152,7 +1455,7 @@ src/migrations/
 2. **Soft-Delete Performance**
    - Use `whereNotDeleted()` helper in all queries
    - Indexes are optimized for soft-delete patterns
-   - Deleted records remain in database (historical record)
+   - Deleted records remain in database for analytics
 
 3. **Pagination**
    - Use `withPagination()` helper for consistent offset calculation
@@ -1218,6 +1521,8 @@ src/migrations/
    - Configured for NEON_BRANCH (test) mode
    - Ensures consistent reads after writes
 
+---
+
 ## Testing
 
 ### Test Setup
@@ -1272,6 +1577,7 @@ The test database is configured by environment:
    - Uses `NEON_BRANCH` method
    - Neon creates ephemeral database branches
    - Parallel tests get separate branches
+   - Automatic cleanup
 
 2. **Local Development**
    - Uses `LOCAL_PROXY` method
@@ -1317,8 +1623,28 @@ const service = new UserService(mockDb as Database);
 
 ---
 
-**Last Updated**: 2025-11-23
+## FAQ
+
+**Q: Should I use dbHttp or dbWs?**
+A: Use `dbHttp` in production workers (stateless, fast). Use `dbWs` in tests and when you need transactions.
+
+**Q: Do I need to close dbHttp?**
+A: No, dbHttp is stateless. Only call `closeDbPool()` for dbWs in test cleanup.
+
+**Q: How do I handle unique constraint violations?**
+A: Use `isUniqueViolation(error)` to detect and handle appropriately.
+
+**Q: Can I use transactions in Cloudflare Workers?**
+A: Yes, but use `createPerRequestDbClient()` and call `cleanup()` before request ends.
+
+**Q: Why are some updates going to tables I didn't modify?**
+A: Check if you're using soft deletes. `whereNotDeleted()` helper filters them automatically.
+
+---
+
+**Last Updated**: 2025-12-14
 **Package Version**: 0.1.0
 **Drizzle ORM Version**: 0.44.7
-**Database**: PostgreSQL (Neon Serverless)
 **Node Versions**: Node.js 18+
+**Database**: PostgreSQL (Neon Serverless)
+**Cloudflare Runtime**: Compatible with Cloudflare Workers

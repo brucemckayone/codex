@@ -1,115 +1,179 @@
 # @codex/worker-utils
 
+Factory functions and middleware for standardized Cloudflare Workers setup. Eliminates boilerplate across all API workers by providing composable utilities for authentication, CORS, security headers, request tracking, route handlers, and health checks.
+
+**Primary purpose**: Reduce repetitive setup code and ensure consistency across auth, content-api, identity-api, and ecom-api workers.
+
+**Core responsibility**: Worker configuration, middleware composition, route-level security policies, and handler utilities.
+
 ## Overview
 
-Shared utilities and factory functions for Cloudflare Workers that eliminate boilerplate and ensure consistency across all API workers. Provides standardized middleware chains, route handlers, security policies, and health checks used by auth, content-api, identity-api, and ecom-api workers.
+@codex/worker-utils is a utility package that sits at the intersection of Hono web framework capabilities and Codex domain requirements. It provides:
 
-**Primary purpose**: Reduce repetitive setup code across workers by providing composable, well-tested utilities for common patterns like request tracking, authentication, CORS, security headers, error handling, and health checks.
+1. **Worker Factory** - createWorker() creates fully configured Hono app with production-ready middleware
+2. **Middleware Factories** - Composable middleware for auth, CORS, security headers, health checks, request tracking
+3. **Route Helpers** - createAuthenticatedHandler() unifies schema validation, auth checks, and error handling
+4. **Security Policies** - withPolicy() for declarative, route-level access control
+5. **Health Checks** - Standardized health check endpoints with optional dependency checks
+6. **Test Utilities** - Real session creation for integration testing without mocks
+7. **Middleware Chaining** - Builder utilities for custom middleware chains
 
-**Core responsibility**: Worker setup, middleware composition, and route-level security policy enforcement.
+Used by all four Codex workers (auth, content-api, identity-api, ecom-api) and directly imported by integration tests.
+
+---
 
 ## Public API
 
-All exports are organized by domain responsibility:
-
 ### Worker Factory
-- **createWorker(config)** - Create fully configured Hono app with standard middleware
-- **WorkerConfig** - Configuration interface for worker setup
-- **CORSConfig** - CORS configuration options
-- **HealthCheckOptions** - Health check configuration
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| **createWorker(config)** | Function | Create fully configured Hono app with standard middleware |
+| **WorkerConfig** | Interface | Configuration for createWorker() |
+| **CORSConfig** | Interface | CORS configuration options |
+| **HealthCheckOptions** | Interface | Health check configuration |
 
 ### Middleware Factories
-- **createAuthMiddleware()** - Session-based user authentication middleware
-- **createCorsMiddleware()** - CORS middleware with smart origin matching
-- **createSecurityHeadersMiddleware()** - Security headers (CSP, X-Frame-Options, etc.)
-- **createRequestTrackingMiddleware()** - UUID generation, IP extraction, user agent tracking
-- **createLoggerMiddleware()** - Request logging
-- **createHealthCheckHandler(serviceName, version, options)** - Health check endpoint handler
-- **createNotFoundHandler()** - Standard 404 error handler
-- **createErrorHandler(environment)** - Global error handler with env-specific responses
-- **createObservabilityMiddleware(serviceName)** - Request timing and error tracking
-- **createObservabilityErrorHandler(serviceName, environment)** - Observability-aware error handler
-- **sequence(...handlers)** - Chain multiple middleware handlers
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| **createRequestTrackingMiddleware()** | Function | UUID, IP, user agent extraction |
+| **createCorsMiddleware()** | Function | CORS validation and headers |
+| **createSecurityHeadersMiddleware()** | Function | CSP, X-Frame-Options, HSTS, etc. |
+| **createAuthMiddleware()** | Function | Session-based user authentication |
+| **createLoggerMiddleware()** | Function | Request/response logging |
+| **createHealthCheckHandler()** | Function | Health check endpoint handler |
+| **createNotFoundHandler()** | Function | Standard 404 handler |
+| **createErrorHandler()** | Function | Global error handler |
+| **createObservabilityMiddleware()** | Function | Request timing and error tracking |
+| **createObservabilityErrorHandler()** | Function | Error handler with observability |
+| **createRateLimitWrapper()** | Function | Apply rate limiting to routes |
+| **createSecurityHeadersWrapper()** | Function | Apply security headers to routes |
+| **createErrorResponse()** | Function | Standardized error response builder |
+| **sequence()** | Function | Chain multiple middleware handlers |
+| **ERROR_CODES** | Constant | Standard error code enum |
+| **MiddlewareConfig** | Interface | Configuration for middleware factories |
 
 ### Health Check Utilities
-- **standardDatabaseCheck(context)** - Reusable database connectivity check
-- **createKvCheck(bindingNames)** - Create KV namespace health checks
-- **createR2Check(bindingNames)** - Create R2 bucket health checks
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| **standardDatabaseCheck()** | Function | Reusable database connectivity check |
+| **createKvCheck()** | Function | Create KV namespace health checks |
+| **createR2Check()** | Function | Create R2 bucket health checks |
+| **HealthCheckResult** | Interface | Health check result structure |
 
 ### Middleware Chain Builders
-- **createStandardMiddlewareChain(options)** - Create array of standard middleware
-- **applyMiddlewareChain(app, path, options)** - Apply middleware to specific routes
-- **createMiddlewareChainBuilder(baseOptions)** - Create reusable chain builder with base config
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| **createStandardMiddlewareChain()** | Function | Create array of standard middleware |
+| **applyMiddlewareChain()** | Function | Apply middleware chain to specific routes |
+| **createMiddlewareChainBuilder()** | Function | Create reusable chain builder |
+| **MiddlewareChainOptions** | Interface | Options for middleware chains |
+| **ApplyMiddlewareChainOptions** | Interface | Options for applying chains to routes |
 
 ### Route Helpers
-- **createAuthenticatedHandler(options)** - Unified authenticated request handler with auto body parsing
-- **withErrorHandling(handler)** - Wrap handlers with error mapping
-- **formatValidationError(zodError)** - Format Zod validation errors
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| **createAuthenticatedHandler()** | Function | Unified handler with validation, auth, error handling |
+| **withErrorHandling()** | Function | Wrap handlers with error mapping |
+| **formatValidationError()** | Function | Format Zod validation errors |
 
 ### Security Policies
-- **withPolicy(policy)** - Route-level security policy middleware
-- **POLICY_PRESETS** - Pre-configured policies (public, authenticated, creator, admin, internal, sensitive)
-- **DEFAULT_SECURITY_POLICY** - Secure-by-default policy settings
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| **withPolicy()** | Function | Route-level security policy middleware |
+| **POLICY_PRESETS** | Constant | Pre-configured policies (public, authenticated, creator, admin, internal, sensitive) |
+| **DEFAULT_SECURITY_POLICY** | Constant | Default secure-by-default settings |
+| **RouteSecurityPolicy** | Interface | Security policy configuration |
 
 ### Response Types
-- **createErrorResponse(context, code, message, status)** - Standardized error response creator
-- **ERROR_CODES** - Standard error code constants
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| **HealthCheckResponse** | Interface | Standard health check response format |
+| **ErrorResponse** | Interface | Standard error response structure |
+| **SuccessResponse<T>** | Interface | Standard success response wrapper |
 
 ### Test Utilities
-- **createTestUser(email?)** - Create real test user and session in database
-- **cleanupTestUser(userId)** - Remove test user and sessions
-- **createAuthenticatedRequest(url, sessionToken, options)** - Create authenticated test request
 
-### Shared Types
-- **HealthCheckResponse** - Standard health check response format
-- **ErrorResponse** - Standard error response structure
-- **SuccessResponse<T>** - Standard success response wrapper
+| Export | Type | Purpose |
+|--------|------|---------|
+| **createTestUser()** | Function | Create real test user and session |
+| **cleanupTestUser()** | Function | Remove test user from database |
+| **createAuthenticatedRequest()** | Function | Create Request with auth cookie |
+| **TestUser** | Interface | Test user data structure |
 
-## Worker Factory: createWorker()
+---
 
-Creates a fully configured Hono application with production-ready middleware and routing.
+## Core Services & Utilities
 
-### Function Signature
+### createWorker(config)
+
+Creates fully configured Hono application with production-ready middleware stack and routing.
+
+**Function signature**:
 
 ```typescript
 function createWorker(config: WorkerConfig): Hono<HonoEnv>
 ```
 
-### Configuration (WorkerConfig)
+**Configuration (WorkerConfig)**:
 
 ```typescript
 interface WorkerConfig extends MiddlewareConfig {
-  serviceName: string;           // Required: Service name for identification
-  version?: string;              // Service version for health check (default: '1.0.0')
+  serviceName: string;           // Required: Service identifier
+  version?: string;              // Service version for health endpoint (default: '1.0.0')
   environment?: 'development' | 'staging' | 'production';
   enableLogging?: boolean;       // Default: true
   enableCors?: boolean;          // Default: true
   enableSecurityHeaders?: boolean; // Default: true
   enableRequestTracking?: boolean; // Default: true
-  enableGlobalAuth?: boolean;    // Default: true (auth on /api/* routes)
+  enableGlobalAuth?: boolean;    // Default: true (auto-auth on /api/*)
   publicRoutes?: string[];       // Routes bypassing auth (default: ['/health'])
-  internalRoutePrefix?: string;  // Prefix for worker-to-worker routes (default: '/internal')
+  internalRoutePrefix?: string;  // Prefix for worker-to-worker (default: '/internal')
   workerSharedSecret?: string;   // HMAC secret for internal routes
   allowedWorkerOrigins?: string[]; // IP whitelist for internal routes
   cors?: CORSConfig;             // Custom CORS configuration
-  healthCheck?: HealthCheckOptions; // Database, KV, R2 health checks
+  healthCheck?: HealthCheckOptions; // Database, KV, R2 checks
 }
 ```
 
-### Middleware Execution Order
+**What it does**:
 
-createWorker applies middleware in this specific order:
+1. Creates Hono<HonoEnv> instance
+2. Applies middleware in order: tracking → logging → CORS → security headers
+3. Registers /health endpoint (always public, no auth required)
+4. Sets up internal routes with HMAC authentication if secret provided
+5. Sets up API routes with session-based authentication
+6. Registers 404 and 500 error handlers
+7. Returns configured app ready for route mounting
 
-1. **Request Tracking** - Generates requestId, extracts clientIP, captures userAgent
-2. **Logging** - Request/response logging
-3. **CORS** - Origin validation and CORS headers
-4. **Security Headers** - CSP, X-Frame-Options, X-Content-Type-Options, etc.
-5. **Health Check Route** - GET /health (always public, no auth required)
-6. **Internal Routes Middleware** - HMAC authentication for /internal/* routes
-7. **API Authentication** - Session-based auth for /api/* routes
-8. **Error Handlers** - 404 and 500 handlers
+**Middleware execution order**:
 
-### Basic Usage
+1. Request Tracking (requestId, clientIP, userAgent)
+2. Logging (request/response logs)
+3. CORS (origin validation, CORS headers)
+4. Security Headers (CSP, X-Frame-Options, etc.)
+5. Route Matching:
+   - GET /health → No auth required
+   - /internal/* → HMAC authentication
+   - /api/* → Session authentication
+   - Other routes → No auth by default
+
+**What each middleware sets in context**:
+
+- `requestId` - UUID v4 for request correlation
+- `clientIP` - Client IP from CF-Connecting-IP, X-Real-IP, X-Forwarded-For
+- `user` - Authenticated user object (from session)
+- `session` - Session data (from database)
+- `organizationId` - Organization ID (if applicable)
+- `obs` - ObservabilityClient instance (if observability enabled)
+
+**Basic usage**:
 
 ```typescript
 import { createWorker } from '@codex/worker-utils';
@@ -127,13 +191,14 @@ app.route('/api/media', mediaRoutes);
 export default app;
 ```
 
-### With Health Checks
+**With health checks**:
 
 ```typescript
 import {
   createWorker,
   standardDatabaseCheck,
-  createKvCheck
+  createKvCheck,
+  createR2Check
 } from '@codex/worker-utils';
 
 const app = createWorker({
@@ -141,363 +206,91 @@ const app = createWorker({
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
     checkKV: createKvCheck(['RATE_LIMIT_KV', 'SESSIONS_KV']),
+    checkR2: createR2Check(['MEDIA_BUCKET']),
   },
 });
 ```
 
-### With Internal Routes
+**With internal routes (worker-to-worker HMAC auth)**:
 
 ```typescript
 const app = createWorker({
   serviceName: 'ecom-api',
   internalRoutePrefix: '/internal',
   workerSharedSecret: c.env.WORKER_SHARED_SECRET,
-  allowedWorkerOrigins: ['https://auth.revelations.studio'],
+  allowedWorkerOrigins: ['https://stripe.com', '10.0.0.0/8'],
 });
 
-// Mount internal routes (HMAC authenticated)
-app.route('/internal/webhook', webhookRoutes);
+// Mount internal routes (HMAC authenticated, no user session required)
+app.route('/internal/webhooks', webhookRoutes);
 ```
 
-### Custom CORS Configuration
+**With custom CORS**:
 
 ```typescript
 const app = createWorker({
-  serviceName: 'api',
+  serviceName: 'public-api',
   cors: {
-    allowedOrigins: ['https://partner.example.com'],
+    allowedOrigins: [
+      'https://partner.example.com',
+      'https://app.example.com'
+    ],
     allowCredentials: false,
     allowMethods: ['GET', 'POST'],
-    maxAge: 3600,
+    maxAge: 3600, // 1 hour
   },
 });
 ```
 
-## Middleware Factories
+**Returns**: Hono<HonoEnv> application ready for route mounting and export as Cloudflare Worker default handler.
 
-All middleware factories return MiddlewareHandler compatible with Hono.
-
-### createRequestTrackingMiddleware()
-
-Automatically injects request metadata into context for all handlers.
-
-```typescript
-function createRequestTrackingMiddleware(): MiddlewareHandler<HonoEnv>
-```
-
-**Sets in context**:
-- `requestId` - UUID v4 for correlation across logs
-- `clientIP` - Client IP from CF-Connecting-IP, X-Real-IP, or X-Forwarded-For headers
-- `userAgent` - User agent string from User-Agent header
-
-**Also sets response header**: `X-Request-ID` for client-side correlation
-
-**When to use**: Applied automatically by createWorker(), or apply manually to custom middleware chains.
-
-**Example**:
-
-```typescript
-app.use('*', createRequestTrackingMiddleware());
-
-app.get('/api/content/:id', (c) => {
-  const requestId = c.get('requestId');
-  const clientIP = c.get('clientIP');
-  console.log(`Request ${requestId} from ${clientIP}`);
-  return c.json({ ok: true });
-});
-```
-
-### createCorsMiddleware()
-
-Standard CORS middleware with smart origin matching supporting multiple deployment patterns.
-
-```typescript
-function createCorsMiddleware(): MiddlewareHandler<HonoEnv>
-```
-
-**Supported origins** (in order of matching):
-1. Exact matches: WEB_APP_URL, API_URL from environment
-2. Localhost: localhost:3000, localhost:5173, localhost:8787-8789, localhost:4001-4002
-3. Pattern-based:
-   - Preview deployments: `*-preview-{PR}.revelations.studio`
-   - Staging deployments: `*-staging.revelations.studio`
-   - Production: `*.revelations.studio`
-
-**Default response headers**:
-- `Access-Control-Allow-Methods`: GET, POST, PUT, PATCH, DELETE, OPTIONS
-- `Access-Control-Allow-Headers`: Content-Type, Authorization, Cookie
-- `Access-Control-Expose-Headers`: Content-Length, X-Request-Id
-- `Access-Control-Allow-Credentials`: true
-- `Access-Control-Max-Age`: 86400 (24 hours)
-
-**When to use**: Applied automatically by createWorker().
-
-### createSecurityHeadersMiddleware()
-
-Applies production-grade security headers based on environment.
-
-```typescript
-function createSecurityHeadersMiddleware(): MiddlewareHandler<HonoEnv>
-```
-
-**Headers applied** (environment-specific):
-- Content-Security-Policy with inline script restrictions
-- X-Frame-Options: DENY or SAMEORIGIN
-- X-Content-Type-Options: nosniff
-- Referrer-Policy: strict-no-referrer
-- X-XSS-Protection: 1; mode=block
-
-**When to use**: Applied automatically by createWorker().
-
-### createAuthMiddleware()
-
-Enforces session-based authentication using cookies.
-
-```typescript
-function createAuthMiddleware(): MiddlewareHandler<HonoEnv>
-```
-
-**Behavior**:
-- Looks for `codex-session` cookie
-- Validates session against database
-- Sets `user` and `session` in context if valid
-- Returns 401 if authentication fails
-
-**When to use**: Applied automatically by createWorker() to /api/* routes. Override with route-level withPolicy(auth: 'none').
-
-**Example** (accessing authenticated user):
-
-```typescript
-app.get('/api/content/:id', (c) => {
-  const user = c.get('user');     // AuthenticatedContext['user']
-  const session = c.get('session'); // AuthenticatedContext['session']
-  return c.json({ userId: user.id });
-});
-```
-
-### createHealthCheckHandler()
-
-Creates handler for /health endpoint with optional dependency checks.
-
-```typescript
-function createHealthCheckHandler(
-  serviceName: string,
-  version?: string,
-  options?: {
-    checkDatabase?: (c: Context) => Promise<{status: 'ok'|'error'; message?: string}>;
-    checkKV?: (c: Context) => Promise<{status: 'ok'|'error'; message?: string; details?: unknown}>;
-    checkR2?: (c: Context) => Promise<{status: 'ok'|'error'; message?: string; details?: unknown}>;
-  }
-): MiddlewareHandler
-```
-
-**Response format**:
-
-```json
-{
-  "status": "healthy|unhealthy",
-  "service": "content-api",
-  "version": "1.0.0",
-  "timestamp": "2024-01-15T10:30:00.000Z",
-  "checks": {
-    "database": { "status": "ok" },
-    "kv": { "status": "ok", "details": { ... } }
-  }
-}
-```
-
-**HTTP Status**:
-- 200 OK if healthy
-- 503 Service Unavailable if unhealthy
-
-**When to use**: Applied automatically by createWorker() to GET /health (no authentication).
-
-### createKvCheck() and createR2Check()
-
-Create reusable health check functions for KV and R2.
-
-```typescript
-function createKvCheck(bindingNames: string[]): (c: Context<HonoEnv>) => Promise<{
-  status: 'ok' | 'error';
-  message: string;
-  details?: {name, status, message}[];
-}>
-
-function createR2Check(bindingNames: string[]): (c: Context<HonoEnv>) => Promise<{
-  status: 'ok' | 'error';
-  message: string;
-  details?: {name, status, message}[];
-}>
-```
-
-**Example**:
-
-```typescript
-const app = createWorker({
-  serviceName: 'content-api',
-  healthCheck: {
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'SESSIONS_KV']),
-    checkR2: createR2Check(['MEDIA_BUCKET']),
-  },
-});
-```
-
-### createErrorResponse()
-
-Create standardized error response objects.
-
-```typescript
-function createErrorResponse(
-  c: Context,
-  code: string,
-  message: string,
-  status: number
-): Response
-```
-
-**Response structure**:
-
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Request validation failed"
-  }
-}
-```
-
-**Standard error codes** (ERROR_CODES constant):
-- `INVALID_JSON` - Malformed request body
-- `VALIDATION_ERROR` - Schema validation failed
-- `NOT_FOUND` - Resource not found
-- `UNAUTHORIZED` - Authentication required
-- `FORBIDDEN` - Permission denied
-- `INTERNAL_ERROR` - Unexpected server error
-- `BAD_REQUEST` - Generic client error
-
-**Example**:
-
-```typescript
-import { createErrorResponse, ERROR_CODES } from '@codex/worker-utils';
-
-return createErrorResponse(
-  c,
-  ERROR_CODES.VALIDATION_ERROR,
-  'Invalid email format',
-  400
-);
-```
-
-### createObservabilityMiddleware()
-
-Enables observability tracking with request timing and error logging.
-
-```typescript
-function createObservabilityMiddleware<T extends HonoEnv = HonoEnv>(
-  serviceName: string
-): MiddlewareHandler<T>
-```
-
-**Sets in context**:
-- `obs` - ObservabilityClient instance with logging methods
-
-**Methods available on context.obs**:
-- `info(message, metadata)` - Log info level
-- `warn(message, metadata)` - Log warning
-- `error(message, metadata)` - Log error
-- `trackError(error, metadata)` - Track error with stack trace
-
-**Automatic tracking**:
-- Request duration in milliseconds
-- Response status code
-- Request path and method
-
-**Example**:
-
-```typescript
-app.use('*', createObservabilityMiddleware('content-api'));
-
-app.get('/api/content/:id', (c) => {
-  const obs = c.get('obs');
-  obs.info('Fetching content', { contentId: c.req.param('id') });
-  return c.json({ ok: true });
-});
-```
-
-### sequence()
-
-Chain multiple middleware handlers in order.
-
-```typescript
-function sequence(
-  ...handlers: ((c: Context, next: Next) => Promise<Response | undefined>)[]
-): (c: Context, next: Next) => Promise<Response | undefined>
-```
-
-**Behavior**: Executes handlers one after another. If any handler returns a Response, subsequent handlers still execute but response is captured.
-
-**When to use**: Compose multiple middleware into a single handler for complex middleware chains.
-
-**Example**:
-
-```typescript
-app.use('/api/*',
-  sequence(
-    createSecurityHeadersMiddleware(),
-    createRateLimitWrapper('api'),
-    createAuthMiddleware()
-  )
-);
-```
-
-## Health Checks
-
-### standardDatabaseCheck()
-
-Reusable database connectivity check.
-
-```typescript
-async function standardDatabaseCheck(c: Context): Promise<{
-  status: 'ok' | 'error';
-  message?: string;
-}>
-```
-
-**Returns**:
-- Success: `{status: 'ok', message: 'Database connection is healthy.'}`
-- Failure: `{status: 'error', message: 'Database connection failed.'}`
-
-**When to use**: Pass to createWorker() healthCheck option, or use directly in custom health checks.
-
-## Route Helpers
+---
 
 ### createAuthenticatedHandler()
 
-Unified handler for authenticated routes with automatic schema validation and body parsing.
+Unified route handler with automatic schema validation, body parsing detection, authentication check, and error mapping.
+
+**Function signature**:
 
 ```typescript
-function createAuthenticatedHandler<TSchema extends RequestSchema>(options: {
+function createAuthenticatedHandler<
+  TSchema extends RequestSchema = RequestSchema,
+  TValidated = InferSchemaType<TSchema>,
+  TOutput = unknown,
+  TUseEnriched extends boolean = false,
+>(options: {
   schema: TSchema;  // Object with params, query, body ZodSchemas
-  handler: (c: Context, context: ValidatedContext) => Promise<unknown>;
+  handler: (c: Context, context: ValidatedContext | EnrichedValidatedContext) => Promise<TOutput>;
   successStatus?: 200 | 201 | 204;
-  useEnrichedContext?: boolean;
+  useEnrichedContext?: TUseEnriched;
 }): MiddlewareHandler
 ```
 
 **Features**:
-- Auto-detects body parsing based on schema presence
-- Type-safe validated data from params, query, body
-- Automatic 400 response on validation error
-- Automatic 401 response if unauthenticated
-- Supports enriched context with requestId, clientIP, userAgent
-- Returns 204 No Content when successStatus is 204
+
+- Auto-detects body parsing based on schema (only parses if body schema provided)
+- Type-safe validated data from params, query, body via Zod
+- Automatic 400 response on validation error with field details
+- Automatic 401 response if user not authenticated
+- Supports enriched context with requestId, clientIP, userAgent, permissions
+- Automatic error mapping from service layer to HTTP responses
+- Supports 204 No Content responses
 
 **Context provided to handler**:
+
+**Standard context**:
 - `user` - Authenticated user from session
-- `session` - Session data
-- `env` - Cloudflare bindings
-- `validated` - Validated params/query/body
-- (If useEnrichedContext): `requestId`, `clientIP`, `userAgent`, `permissions`, `organizationId`
+- `session` - Session object
+- `env` - Cloudflare bindings (D1, R2, KV, KV_NAMESPACE)
+- `validated` - Validated and parsed data (params, query, body)
+
+**Enriched context** (when useEnrichedContext: true):
+- All standard context fields, plus:
+- `requestId` - UUID v4 for request correlation
+- `clientIP` - Client IP address
+- `userAgent` - User agent string
+- `permissions` - Array of user permissions based on role
+- `organizationId` - Organization ID if applicable
 
 **GET example** (no body parsing):
 
@@ -514,18 +307,21 @@ app.get('/api/content/:id', createAuthenticatedHandler({
   handler: async (c, ctx) => {
     const contentId = ctx.validated.params.id;
     const userId = ctx.user.id;
+
     return await contentService.getById(contentId, userId);
   },
 }));
 ```
 
-**POST example** (with body parsing):
+**POST example** (with body parsing, 201 status):
 
 ```typescript
 const createContentSchema = z.object({
-  title: z.string().min(1),
-  slug: z.string().min(1),
+  title: z.string().min(1).max(200),
+  slug: z.string().min(1).max(100),
   contentType: z.enum(['video', 'audio', 'document']),
+  description: z.string().optional(),
+  priceCents: z.number().int().min(0).optional(),
 });
 
 app.post('/api/content', createAuthenticatedHandler({
@@ -539,13 +335,16 @@ app.post('/api/content', createAuthenticatedHandler({
 }));
 ```
 
-**PATCH example** (with params and body):
+**PATCH example** (params and body):
 
 ```typescript
 app.patch('/api/content/:id', createAuthenticatedHandler({
   schema: {
     params: z.object({ id: uuidSchema }),
-    body: z.object({ title: z.string().optional() }),
+    body: z.object({
+      title: z.string().optional(),
+      description: z.string().optional(),
+    }),
   },
   handler: async (c, ctx) => {
     return await contentService.update(
@@ -557,6 +356,21 @@ app.patch('/api/content/:id', createAuthenticatedHandler({
 }));
 ```
 
+**DELETE example** (204 No Content response):
+
+```typescript
+app.delete('/api/content/:id', createAuthenticatedHandler({
+  schema: {
+    params: z.object({ id: uuidSchema }),
+  },
+  successStatus: 204,
+  handler: async (c, ctx) => {
+    await contentService.delete(ctx.validated.params.id, ctx.user.id);
+    return null; // Response body ignored for 204
+  },
+}));
+```
+
 **With enriched context**:
 
 ```typescript
@@ -564,103 +378,118 @@ app.post('/api/content', createAuthenticatedHandler({
   schema: { body: createContentSchema },
   useEnrichedContext: true,
   handler: async (c, ctx) => {
+    // Access rich context metadata
     console.log(`Request ${ctx.requestId} from ${ctx.clientIP}`);
     console.log(`User permissions: ${ctx.permissions.join(', ')}`);
+
+    // Log with context
+    const obs = c.get('obs');
+    obs.info('Creating content', {
+      contentId: contentId,
+      userId: ctx.user.id,
+      requestId: ctx.requestId,
+    });
+
     return await contentService.create(ctx.validated.body, ctx.user.id);
   },
 }));
 ```
 
 **Error handling** (automatic):
+
 - Invalid JSON → 400 with INVALID_JSON code
-- Validation error → 400 with VALIDATION_ERROR + field errors
-- Service errors → Mapped using @codex/service-errors mapErrorToResponse()
-- Unauthenticated → 401 with UNAUTHORIZED code
+- Validation failed → 400 with VALIDATION_ERROR + field errors
+- Service NotFoundError → 404 with NOT_FOUND code
+- Service ValidationError → 400 with validation details
+- Service ForbiddenError → 403 with FORBIDDEN code
+- Service ConflictError → 409 with conflict details
+- Service BusinessLogicError → 422 with business logic message
+- Service InternalServiceError → 500 with error message
+- Any other error → 500 with INTERNAL_ERROR code
 
-### withErrorHandling()
+All service errors automatically mapped via mapErrorToResponse() from @codex/service-errors.
 
-Wrap handler functions with automatic error mapping.
-
-```typescript
-function withErrorHandling<T>(
-  handler: (c: Context) => Promise<T>
-): (c: Context) => Promise<Response>
-```
-
-**When to use**: For simple handlers that don't need full schema validation. Automatically maps service errors to HTTP responses.
-
-**Example**:
-
-```typescript
-app.get('/api/simple', withErrorHandling(async (c) => {
-  const data = await someService.fetch();
-  return c.json({ data });
-}));
-```
-
-## Security Policies
+---
 
 ### withPolicy()
 
 Route-level security policy middleware for declarative access control.
 
+**Function signature**:
+
 ```typescript
-function withPolicy(policy: Partial<RouteSecurityPolicy>): MiddlewareHandler<HonoEnv>
+function withPolicy(policy: Partial<RouteSecurityPolicy> = {}): MiddlewareHandler<HonoEnv>
 ```
 
-**When to use**: Apply to individual routes for role-based access, rate limiting, IP restrictions, and organization membership checks.
+**When to use**: Apply to individual routes to enforce authentication, role-based access, rate limiting, IP restrictions, organization membership.
 
 **Apply before handler**:
 
 ```typescript
 app.post('/api/content',
   withPolicy({ auth: 'required', roles: ['creator'] }),
-  createAuthenticatedHandler({ ... })
+  createAuthenticatedHandler({ /* ... */ })
 );
 ```
 
-### RouteSecurityPolicy Configuration
+**RouteSecurityPolicy configuration**:
 
 ```typescript
 interface RouteSecurityPolicy {
+  // Authentication requirement
   auth?: 'none' | 'optional' | 'required' | 'worker';
+
+  // Role-based access control
   roles?: Array<'user' | 'creator' | 'admin' | 'system'>;
+
+  // Require organization membership
   requireOrgMembership?: boolean;
+
+  // Rate limiting
   rateLimit?: keyof typeof RATE_LIMIT_PRESETS;
+
+  // Origin restrictions
   allowedOrigins?: string[];
+
+  // IP whitelist
   allowedIPs?: string[];
 }
 ```
 
 **auth levels**:
+
 - `'none'` - Public endpoint, no authentication required
-- `'optional'` - Authentication attempted but not required (c.get('user') may be null)
+- `'optional'` - Authentication attempted but not required (user may be null)
 - `'required'` - Must have authenticated user (default)
 - `'worker'` - Worker-to-worker HMAC authentication
 
 **roles** - User must have at least one role:
+
 - `'user'` - Basic authenticated user
-- `'creator'` - Content creator
+- `'creator'` - Content creator (can publish)
 - `'admin'` - Administrative access
 - `'system'` - System-level operations
 
 **rateLimit presets**:
+
 - `'api'` - 100 req/min (default)
 - `'strict'` - 20 req/min (sensitive operations)
 - `'auth'` - 10 req/min (login/signup)
 - `'public'` - 300 req/min (public content)
 - `'webhook'` - 1000 req/min (webhooks)
 
-**Example**: Public endpoint
+**Examples**:
+
+Public endpoint:
 
 ```typescript
 app.get('/api/public-content',
   withPolicy({ auth: 'none', rateLimit: 'public' }),
-  createAuthenticatedHandler({ ... })
+  createAuthenticatedHandler({ /* ... */ })
 );
 ```
 
-**Example**: Creator-only with strict rate limiting
+Creator-only with strict rate limiting:
 
 ```typescript
 app.post('/api/content',
@@ -669,11 +498,11 @@ app.post('/api/content',
     roles: ['creator', 'admin'],
     rateLimit: 'strict',
   }),
-  createAuthenticatedHandler({ ... })
+  createAuthenticatedHandler({ /* ... */ })
 );
 ```
 
-**Example**: Admin-only with IP whitelist
+Admin-only with IP whitelist:
 
 ```typescript
 app.delete('/api/users/:id',
@@ -682,11 +511,11 @@ app.delete('/api/users/:id',
     roles: ['admin'],
     allowedIPs: ['10.0.0.0/8', '203.0.113.42'],
   }),
-  createAuthenticatedHandler({ ... })
+  createAuthenticatedHandler({ /* ... */ })
 );
 ```
 
-**Example**: Organization-scoped access
+Organization-scoped access:
 
 ```typescript
 app.patch('/api/org/settings',
@@ -694,9 +523,11 @@ app.patch('/api/org/settings',
     auth: 'required',
     requireOrgMembership: true,
   }),
-  createAuthenticatedHandler({ ... })
+  createAuthenticatedHandler({ /* ... */ })
 );
 ```
+
+---
 
 ### POLICY_PRESETS
 
@@ -712,6 +543,17 @@ const POLICY_PRESETS = {
   sensitive(): Partial<RouteSecurityPolicy>,
 };
 ```
+
+**Preset definitions**:
+
+| Preset | Auth | Roles | Rate Limit | Use Case |
+|--------|------|-------|-----------|----------|
+| **public()** | none | [] | public (300/min) | Health checks, public content, open API |
+| **authenticated()** | required | [] | api (100/min) | Standard API endpoints |
+| **creator()** | required | [creator, admin] | api (100/min) | Content creation, publishing |
+| **admin()** | required | [admin] | auth (10/min) | Admin operations, user deletion |
+| **internal()** | worker | [] | webhook (1000/min) | Worker-to-worker communication |
+| **sensitive()** | required | [] | auth (10/min) | Login, signup, password reset |
 
 **Usage**:
 
@@ -734,142 +576,119 @@ app.post('/internal/sync', withPolicy(POLICY_PRESETS.internal()));
 app.post('/api/auth/login', withPolicy(POLICY_PRESETS.sensitive()));
 ```
 
-## Middleware Chain Builders
+---
 
-### createStandardMiddlewareChain()
+### createRequestTrackingMiddleware()
 
-Create array of middleware with fine-grained control.
+Injects request metadata into context for correlation and debugging.
 
-```typescript
-function createStandardMiddlewareChain(options: {
-  serviceName: string;
-  skipLogging?: boolean;
-  skipSecurityHeaders?: boolean;
-  skipRequestTracking?: boolean;
-  enableObservability?: boolean;
-  customMiddleware?: MiddlewareHandler<HonoEnv>[];
-}): MiddlewareHandler<HonoEnv>[]
-```
-
-**Order of execution**:
-1. Request tracking (unless skipRequestTracking)
-2. Logging (unless skipLogging)
-3. Security headers (unless skipSecurityHeaders)
-4. Observability (if enableObservability)
-5. Custom middleware (in order provided)
-
-**Example**: Standard chain with observability
+**Function signature**:
 
 ```typescript
-const middleware = createStandardMiddlewareChain({
-  serviceName: 'my-api',
-  enableObservability: true,
-});
-
-middleware.forEach(m => app.use('*', m));
+function createRequestTrackingMiddleware(): MiddlewareHandler<HonoEnv>
 ```
 
-**Example**: Skip certain middleware
+**Sets in context**:
 
-```typescript
-const middleware = createStandardMiddlewareChain({
-  serviceName: 'my-api',
-  skipLogging: true,
-  skipSecurityHeaders: true,
-  customMiddleware: [createCustomMiddleware()],
-});
-```
+- `requestId` - UUID v4 for request correlation across logs
+- `clientIP` - Client IP from CF-Connecting-IP, X-Real-IP, X-Forwarded-For
+- `userAgent` - User agent string from User-Agent header
 
-### applyMiddlewareChain()
+**Also sets**: X-Request-ID response header for client-side correlation
 
-Apply complete middleware chain to specific route pattern.
+**Extraction order** (for client IP):
 
-```typescript
-function applyMiddlewareChain<T extends HonoEnv = HonoEnv>(
-  app: Hono<T>,
-  path: string,
-  options: {
-    serviceName: string;
-    skipLogging?: boolean;
-    skipSecurityHeaders?: boolean;
-    skipRequestTracking?: boolean;
-    enableObservability?: boolean;
-    customMiddleware?: MiddlewareHandler<HonoEnv>[];
-    rateLimitPreset?: keyof typeof RATE_LIMIT_PRESETS;
-    rateLimitConfig?: object;
-  }
-): void
-```
+1. CF-Connecting-IP (Cloudflare provided)
+2. X-Real-IP (proxy header)
+3. X-Forwarded-For (proxy chain, takes first)
+4. 'unknown' (fallback)
 
-**When to use**: Apply complete middleware chain with optional rate limiting to specific routes.
-
-**Example**: Apply to all routes
-
-```typescript
-const app = new Hono();
-applyMiddlewareChain(app, '*', {
-  serviceName: 'my-api',
-  enableObservability: true,
-});
-```
-
-**Example**: Apply to specific routes with rate limiting
-
-```typescript
-const app = new Hono();
-
-applyMiddlewareChain(app, '/api/*', {
-  serviceName: 'my-api',
-  rateLimitPreset: 'api',
-});
-
-applyMiddlewareChain(app, '/webhooks/*', {
-  serviceName: 'my-api',
-  rateLimitPreset: 'webhook',
-});
-```
-
-### createMiddlewareChainBuilder()
-
-Create reusable builder with base configuration.
-
-```typescript
-function createMiddlewareChainBuilder(
-  baseOptions: MiddlewareChainOptions
-): <T extends HonoEnv = HonoEnv>(
-  app: Hono<T>,
-  path: string,
-  additionalOptions?: Partial<ApplyMiddlewareChainOptions>
-) => void
-```
-
-**When to use**: Apply same base configuration to multiple routes with different options.
+**When to use**: Applied automatically by createWorker(), or apply manually to custom middleware chains.
 
 **Example**:
 
 ```typescript
-const app = new Hono();
+app.use('*', createRequestTrackingMiddleware());
 
-const applyMiddleware = createMiddlewareChainBuilder({
-  serviceName: 'my-api',
-  enableObservability: true,
-});
-
-// Apply to different routes
-applyMiddleware(app, '*', {});
-applyMiddleware(app, '/api/*', { rateLimitPreset: 'api' });
-applyMiddleware(app, '/webhooks/*', { rateLimitPreset: 'webhook' });
-applyMiddleware(app, '/admin/*', {
-  rateLimitPreset: 'strict',
-  customMiddleware: [createAdminCheckMiddleware()],
+app.get('/api/content/:id', (c) => {
+  const requestId = c.get('requestId');
+  const clientIP = c.get('clientIP');
+  console.log(`Request ${requestId} from ${clientIP}`);
+  return c.json({ ok: true });
 });
 ```
 
-## Test Utilities
+---
+
+### createHealthCheckHandler()
+
+Creates handler for /health endpoint with optional dependency checks.
+
+**Function signature**:
+
+```typescript
+function createHealthCheckHandler(
+  serviceName: string,
+  version?: string,
+  options?: {
+    checkDatabase?: (c: Context) => Promise<{status: 'ok'|'error'; message?: string}>;
+    checkKV?: (c: Context) => Promise<{status: 'ok'|'error'; message?: string; details?: unknown}>;
+    checkR2?: (c: Context) => Promise<{status: 'ok'|'error'; message?: string; details?: unknown}>;
+  }
+): MiddlewareHandler
+```
+
+**Response format**:
+
+```json
+{
+  "status": "healthy|degraded|unhealthy",
+  "service": "content-api",
+  "version": "1.0.0",
+  "timestamp": 1705329000000,
+  "checks": {
+    "database": { "status": "ok" },
+    "kv": { "status": "ok" },
+    "r2": { "status": "error", "message": "Bucket not accessible" }
+  }
+}
+```
+
+**HTTP status**:
+
+- 200 OK if all checks pass or healthy
+- 503 Service Unavailable if any check fails
+
+**When to use**: Applied automatically by createWorker() to GET /health. Always public, no authentication.
+
+**Example with checks**:
+
+```typescript
+import { createHealthCheckHandler, standardDatabaseCheck } from '@codex/worker-utils';
+
+const handler = createHealthCheckHandler('content-api', '1.0.0', {
+  checkDatabase: standardDatabaseCheck,
+  checkKV: async (c) => {
+    try {
+      const kv = c.env.RATE_LIMIT_KV;
+      await kv.put('health-check', Date.now().toString(), { expirationTtl: 1 });
+      return { status: 'ok' };
+    } catch (error) {
+      return { status: 'error', message: 'KV write failed' };
+    }
+  },
+});
+
+app.get('/health', handler);
+```
+
+---
 
 ### createTestUser()
 
 Create real test user and session in test database for integration testing.
+
+**Function signature**:
 
 ```typescript
 async function createTestUser(email?: string): Promise<{
@@ -880,17 +699,24 @@ async function createTestUser(email?: string): Promise<{
 ```
 
 **What it does**:
-1. Creates user record in database with random unique email
+
+1. Creates user record in database with unique email
 2. Creates valid session with 24-hour expiration
-3. Returns session token for use in authenticated requests
+3. Returns session token for use in authenticated test requests
 
 **When to use**: Integration tests that need real authenticated sessions instead of mocks.
 
-**Important security notes**:
-- Only use in test files
-- Creates real records in test database
-- Always cleanup with cleanupTestUser() after tests
-- Do not use in production code
+**Important**: Only use in test files. Creates real records in test database. Always cleanup with cleanupTestUser() after tests.
+
+**Returns**: TestUser object:
+
+```typescript
+interface TestUser {
+  user: UserData;           // User object from database
+  session: SessionData;     // Session object with expiry
+  sessionToken: string;     // Session token for use in requests
+}
+```
 
 **Example**:
 
@@ -908,7 +734,7 @@ describe('Content API', () => {
     await cleanupTestUser(testUser.user.id);
   });
 
-  it('should create content', async () => {
+  it('should create content with valid auth', async () => {
     const req = new Request('http://localhost/api/content', {
       method: 'POST',
       headers: {
@@ -916,33 +742,62 @@ describe('Content API', () => {
         'Cookie': `codex-session=${testUser.sessionToken}`,
       },
       body: JSON.stringify({
-        title: 'Test',
-        slug: 'test',
-        contentType: 'video',
+        title: 'Test Article',
+        slug: 'test-article',
+        contentType: 'document',
       }),
     });
 
     const res = await app.fetch(req, testEnv);
     expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.data.title).toBe('Test Article');
+  });
+
+  it('should reject unauthenticated requests', async () => {
+    const req = new Request('http://localhost/api/content', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Test' }),
+    });
+
+    const res = await app.fetch(req, testEnv);
+    expect(res.status).toBe(401);
   });
 });
 ```
+
+---
 
 ### cleanupTestUser()
 
 Remove test user and all associated sessions from database.
 
+**Function signature**:
+
 ```typescript
 async function cleanupTestUser(userId: string): Promise<void>
 ```
 
-**Cleanup cascade**: Deleting user automatically removes all associated sessions.
+**Cleanup cascade**: Deleting user automatically removes all associated sessions via foreign key cascade.
 
-**When to use**: In afterAll() or afterEach() to clean up test data.
+**When to use**: In afterAll() or afterEach() to clean up test data and prevent database pollution.
+
+**Example**:
+
+```typescript
+afterAll(async () => {
+  await cleanupTestUser(testUser.user.id);
+});
+```
+
+---
 
 ### createAuthenticatedRequest()
 
-Helper to create Request with authentication cookie.
+Helper to create Request object with authentication cookie.
+
+**Function signature**:
 
 ```typescript
 function createAuthenticatedRequest(
@@ -952,10 +807,13 @@ function createAuthenticatedRequest(
 ): Request
 ```
 
+**What it does**: Creates Request with 'codex-session' cookie set to sessionToken.
+
 **Example**:
 
 ```typescript
 const testUser = await createTestUser();
+
 const req = createAuthenticatedRequest(
   'http://localhost/api/content/:id',
   testUser.sessionToken,
@@ -965,14 +823,17 @@ const req = createAuthenticatedRequest(
 );
 
 const res = await app.fetch(req, testEnv);
+expect(res.status).toBe(204);
 ```
+
+---
 
 ## Usage Examples
 
-### Complete Worker Setup
+### Basic Worker Setup
 
 ```typescript
-import { createWorker, POLICY_PRESETS, createAuthenticatedHandler } from '@codex/worker-utils';
+import { createWorker, withPolicy, createAuthenticatedHandler, POLICY_PRESETS } from '@codex/worker-utils';
 import { z } from 'zod';
 
 const app = createWorker({
@@ -982,11 +843,10 @@ const app = createWorker({
   enableGlobalAuth: true,
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV']),
   },
 });
 
-// Public endpoint
+// Public endpoint - no auth required
 app.get('/api/content/featured',
   withPolicy(POLICY_PRESETS.public()),
   createAuthenticatedHandler({
@@ -997,7 +857,7 @@ app.get('/api/content/featured',
   })
 );
 
-// Authenticated endpoint
+// Authenticated endpoint - any user
 app.get('/api/content/:id',
   withPolicy(POLICY_PRESETS.authenticated()),
   createAuthenticatedHandler({
@@ -1010,7 +870,7 @@ app.get('/api/content/:id',
   })
 );
 
-// Creator-only endpoint
+// Creator-only - must have creator role
 app.post('/api/content',
   withPolicy(POLICY_PRESETS.creator()),
   createAuthenticatedHandler({
@@ -1028,18 +888,18 @@ app.post('/api/content',
   })
 );
 
-// Admin-only endpoint
+// Admin-only - delete resource
 app.delete('/api/content/:id',
   withPolicy(POLICY_PRESETS.admin()),
   createAuthenticatedHandler({
     schema: {
       params: z.object({ id: z.string().uuid() }),
     },
+    successStatus: 204,
     handler: async (c, ctx) => {
       await contentService.delete(ctx.validated.params.id);
       return null;
     },
-    successStatus: 204,
   })
 );
 
@@ -1057,14 +917,13 @@ app.post('/api/content',
     },
     useEnrichedContext: true,
     handler: async (c, ctx) => {
-      // Access rich context metadata
+      // Access rich request metadata
       console.log(`Request ${ctx.requestId} from ${ctx.clientIP}`);
       console.log(`User permissions: ${ctx.permissions.join(', ')}`);
 
-      // Log with request context
+      // Get observability client
       const obs = c.get('obs');
       obs.info('Creating content', {
-        contentId: contentId,
         userId: ctx.user.id,
         requestId: ctx.requestId,
       });
@@ -1075,7 +934,7 @@ app.post('/api/content',
 );
 ```
 
-### Organization-Scoped Access
+### Organization-Scoped Routes
 
 ```typescript
 app.patch('/api/org/settings',
@@ -1090,8 +949,9 @@ app.patch('/api/org/settings',
         slug: z.string().optional(),
       }),
     },
+    useEnrichedContext: true,
     handler: async (c, ctx) => {
-      const organizationId = c.get('organizationId');
+      const organizationId = ctx.organizationId;
       return await organizationService.updateSettings(
         organizationId,
         ctx.validated.body
@@ -1113,9 +973,6 @@ const app = createWorker({
   allowedWorkerOrigins: ['https://stripe.com'],
 });
 
-// Public health check
-app.get('/health', createHealthCheckHandler('ecom-api', '1.0.0'));
-
 // Internal webhook (worker-to-worker auth only)
 app.post('/internal/webhook',
   withPolicy(POLICY_PRESETS.internal()),
@@ -1135,102 +992,125 @@ app.post('/internal/webhook',
 export default app;
 ```
 
+### Custom Middleware Chain
+
+```typescript
+import {
+  createStandardMiddlewareChain,
+  applyMiddlewareChain
+} from '@codex/worker-utils';
+
+const app = new Hono<HonoEnv>();
+
+// Apply standard middleware with observability
+applyMiddlewareChain(app, '/api/*', {
+  serviceName: 'my-api',
+  enableObservability: true,
+  rateLimitPreset: 'api',
+});
+
+// Apply stricter rate limiting to auth routes
+applyMiddlewareChain(app, '/api/auth/*', {
+  serviceName: 'my-api',
+  rateLimitPreset: 'auth',
+});
+
+// Mount your routes
+app.route('/api/content', contentRoutes);
+```
+
+---
+
 ## Integration Points
 
 ### Dependencies
 
-| Package | Why Used | Key Exports Used |
-|---------|----------|------------------|
-| **@codex/security** | Authentication & authorization | requireAuth, securityHeaders, rateLimit, workerAuth |
-| **@codex/database** | Database connectivity | testDbConnection, schema, dbHttp |
-| **@codex/shared-types** | Type definitions | HonoEnv, AuthenticatedContext |
+| Package | Why Used | Key Exports |
+|---------|----------|-------------|
+| **@codex/security** | Auth middleware, rate limiting, security headers | requireAuth, securityHeaders, rateLimit, workerAuth, RATE_LIMIT_PRESETS |
+| **@codex/database** | User/session lookups, organization checks | dbHttp, schema, query helpers |
+| **@codex/shared-types** | Type definitions | HonoEnv, AuthenticatedContext, EnrichedAuthContext |
 | **@codex/service-errors** | Error mapping | mapErrorToResponse |
-| **@codex/observability** | Request tracking | ObservabilityClient, createRequestTimer |
-| **hono** | Web framework | Hono, Context, MiddlewareHandler |
-| **zod** | Input validation | z.object, z.string, etc. |
+| **@codex/observability** | Request tracking, logging | ObservabilityClient, createRequestTimer |
+| **hono** | Web framework | Hono, Context, MiddlewareHandler, cors, logger |
+| **zod** | Input validation | z.object, z.string, z.enum, etc. |
 
 ### Dependents
 
 This package is imported by:
-- **@codex/workers/auth** - Authentication service
-- **@codex/workers/content-api** - Content management
-- **@codex/workers/identity-api** - User identity management
-- **@codex/workers/ecom-api** - Webhook processing
+
+- **workers/auth** - Authentication service
+- **workers/content-api** - Content management
+- **workers/identity-api** - User identity management
+- **workers/ecom-api** - E-commerce webhooks
+- **All integration tests** - createTestUser, createAuthenticatedRequest
 
 ### Data Flow
 
 ```
 Request
   ↓
-createWorker() [factory]
+createWorker() - Factory creates Hono<HonoEnv>
   ├─→ Request Tracking Middleware [requestId, clientIP, userAgent]
-  ├─→ CORS Middleware [origin validation]
+  ├─→ Logging Middleware [request/response logs]
+  ├─→ CORS Middleware [origin validation, CORS headers]
   ├─→ Security Headers Middleware [CSP, X-Frame-Options, etc.]
-  ├─→ Health Check Route [GET /health - no auth]
-  ├─→ Internal Route Auth [/internal/* - HMAC]
-  ├─→ API Route Auth [/api/* - Session]
-  └─→ Your Routes
-        ├─→ withPolicy() [access control]
-        ├─→ createAuthenticatedHandler() [validation, auth, error handling]
-        └─→ Your Handler Logic
-              └─→ @codex/service-errors [error mapping]
-              └─→ @codex/database [data access]
+  ├─→ Route Matching:
+  │   ├─→ GET /health [createHealthCheckHandler - no auth]
+  │   ├─→ /internal/* [HMAC auth via workerAuth]
+  │   └─→ /api/* [Session auth via requireAuth]
+  └─→ Your Routes:
+        ├─→ withPolicy() [auth level, roles, IP checks]
+        ├─→ createAuthenticatedHandler() [validation, error handling]
+        └─→ Your Handler:
+              ├─→ Service Layer [@codex/content, @codex/identity, etc.]
+              ├─→ Database Layer [@codex/database]
+              └─→ Error Mapping [@codex/service-errors]
   ↓
 Response
+  ├─→ Standard format: { data: T } or { error: {...} }
+  ├─→ HTTP status from policy (401, 403, 200, etc.)
+  └─→ Standard headers from middleware
 ```
 
-## Middleware Chain Execution Order
-
-When using createWorker(), middleware executes in this order:
-
-1. **Request Tracking** (requestId, clientIP, userAgent)
-2. **Logging** (request/response logs)
-3. **CORS** (origin validation, CORS headers)
-4. **Security Headers** (CSP, X-Frame-Options, etc.)
-5. **Route Matching**:
-   - GET /health → createHealthCheckHandler() (no auth)
-   - /internal/* → workerAuth (HMAC) → your handler
-   - /api/* → requireAuth (session) → your handler
-   - Other routes → your handler (no auth by default)
-
-Each middleware can:
-- Modify context (set/get values)
-- Modify request/response headers
-- Terminate request early with Response
-- Call next() to proceed to next middleware
+---
 
 ## Error Handling
 
 ### Error Response Format
 
-All errors follow this structure:
+All errors follow standardized structure:
 
 ```json
 {
   "error": {
     "code": "ERROR_CODE",
     "message": "Human-readable message",
-    "details": { ... },
-    "stack": [ ... ]
+    "details": { /* additional context */ },
+    "stack": [ /* stack trace in development */ ]
   }
 }
 ```
 
-### Common Error Scenarios
+### Common Scenarios
 
 | Scenario | Handler | Status | Code |
 |----------|---------|--------|------|
-| Invalid JSON | createAuthenticatedHandler | 400 | INVALID_JSON |
+| Malformed JSON | createAuthenticatedHandler | 400 | INVALID_JSON |
 | Validation failed | createAuthenticatedHandler | 400 | VALIDATION_ERROR |
-| Missing authentication | withPolicy/auth required | 401 | UNAUTHORIZED |
-| Insufficient permissions | withPolicy/roles | 403 | FORBIDDEN |
-| IP not whitelisted | withPolicy/allowedIPs | 403 | FORBIDDEN |
-| Resource not found | Service layer | 404 | NOT_FOUND |
-| Unhandled error | createErrorHandler | 500 | INTERNAL_ERROR |
+| IP not whitelisted | withPolicy | 403 | FORBIDDEN |
+| Missing authentication | withPolicy/createAuthenticatedHandler | 401 | UNAUTHORIZED |
+| Insufficient permissions | withPolicy | 403 | FORBIDDEN |
+| Service: Resource not found | mapErrorToResponse | 404 | NOT_FOUND |
+| Service: Business logic error | mapErrorToResponse | 422 | BUSINESS_LOGIC_ERROR |
+| Service: Conflict | mapErrorToResponse | 409 | CONFLICT |
+| Service: Unexpected error | mapErrorToResponse | 500 | INTERNAL_ERROR |
+| Route not found | createNotFoundHandler | 404 | NOT_FOUND |
+| Unhandled exception | createErrorHandler | 500 | INTERNAL_ERROR |
 
 ### Automatic Error Mapping
 
-Service errors from @codex/service-errors are automatically mapped to HTTP responses via mapErrorToResponse():
+Service layer errors from @codex/service-errors are automatically mapped to HTTP responses:
 
 ```typescript
 try {
@@ -1242,16 +1122,52 @@ try {
 }
 ```
 
+Mapping rules:
+
+- NotFoundError → 404
+- ValidationError → 400
+- ForbiddenError → 403
+- ConflictError → 409
+- BusinessLogicError → 422
+- InternalServiceError → 500
+
+---
+
+## Performance Notes
+
+### Middleware Overhead
+
+- **Request Tracking**: ~0.1ms (UUID generation, header extraction)
+- **CORS**: ~0.5ms (regex pattern matching)
+- **Security Headers**: <0.1ms (header injection)
+- **Logging**: <1ms (I/O dependent)
+- **Total middleware**: Typically <2ms for full chain
+
+### Optimization Tips
+
+1. **Early failure**: withPolicy() runs before handler, fails fast on auth/IP violations
+2. **Body parsing**: Only when schema requires it (createAuthenticatedHandler auto-detects)
+3. **Caching**: Organization membership checks support KV caching (future enhancement)
+4. **Request tracking**: Minimal overhead, run first for accurate correlation
+
+### Rate Limiting
+
+- KV-backed distributed rate limiting (@codex/security)
+- Presets optimized for common scenarios
+- Burst allowances built in for legitimate traffic spikes
+
+---
+
 ## Testing
 
 ### Integration Test Pattern
 
 ```typescript
-import { createTestUser, cleanupTestUser } from '@codex/worker-utils';
+import { createTestUser, cleanupTestUser, createAuthenticatedRequest } from '@codex/worker-utils';
 
 describe('Content API', () => {
-  let testUser: TestUser;
-  let app: Hono;
+  let testUser;
+  let app;
 
   beforeAll(() => {
     app = createWorker({ serviceName: 'content-api' });
@@ -1315,7 +1231,7 @@ describe('Content API', () => {
 });
 ```
 
-### Unit Test Pattern for Handlers
+### Unit Test Pattern
 
 ```typescript
 describe('createAuthenticatedHandler', () => {
@@ -1336,7 +1252,7 @@ describe('createAuthenticatedHandler', () => {
         query: () => ({}),
       },
       get: (key) => {
-        if (key === 'user') return { id: 'test' };
+        if (key === 'user') return { id: 'test', role: 'user' };
       },
       json: (data, status) => new Response(JSON.stringify(data), { status }),
     };
@@ -1349,96 +1265,206 @@ describe('createAuthenticatedHandler', () => {
 });
 ```
 
-### Testing Context Values
-
-```typescript
-it('should set request metadata in context', async () => {
-  const middleware = createRequestTrackingMiddleware();
-
-  let contextData = {};
-  const mockContext = {
-    req: {
-      header: (key) => {
-        if (key === 'User-Agent') return 'test-agent';
-        return undefined;
-      },
-      path: '/test',
-      method: 'GET',
-    },
-    set: (key, value) => {
-      contextData[key] = value;
-    },
-    header: () => {},
-  };
-
-  await middleware(mockContext, async () => {});
-
-  expect(contextData.requestId).toBeDefined();
-  expect(contextData.clientIP).toBeDefined();
-  expect(contextData.userAgent).toBe('test-agent');
-});
-```
-
-## Performance Considerations
-
-### Request Tracking Overhead
-- UUID generation: < 1ms per request
-- Header extraction: < 0.1ms per request
-- Minimal impact on overall latency
-
-### Middleware Chain Order
-- Critical: Request tracking must run first (generates requestId)
-- Recommended: CORS before security headers (header order matters)
-- Auth checks should run as early as possible to fail fast
-
-### Caching Opportunities
-- Organization membership checks can be cached in KV
-- Security policies are evaluated per-request (cannot cache)
-- CORS patterns are regex-compiled once on worker startup
-
-### Rate Limiting
-- Presets optimized for common scenarios
-- KV namespace provides distributed rate limit tracking
-- Burst allowances built into presets for legitimate spikes
+---
 
 ## Deployment
 
-### Environment Variables Required
+### Environment Variables
 
-```
+All workers using @codex/worker-utils require:
+
+```bash
 ENVIRONMENT=production|staging|development
 WEB_APP_URL=https://app.example.com
 API_URL=https://api.example.com
-WORKER_SHARED_SECRET=<random-secret-for-hmac>
+WORKER_SHARED_SECRET=<random-secret-for-hmac>  # if using internal routes
 DATABASE_URL=<database-connection-string>
 ```
 
-### Cloudflare Bindings Required
+### Cloudflare Bindings (wrangler.toml)
 
-```wrangler.toml
+```toml
+[env.production]
+vars = { ENVIRONMENT = "production" }
+
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
+id = "production-rate-limit-id"
 
 [[kv_namespaces]]
 binding = "SESSIONS_KV"
+id = "production-sessions-id"
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
+bucket_name = "production-media"
 
 [[d1_databases]]
 binding = "DB"
+database_name = "production-db"
 ```
 
 ### Health Check Verification
 
 ```bash
+# Public health endpoint (no auth required)
 curl https://api.example.com/health
-# Expected response:
-# {
-#   "status": "healthy",
-#   "service": "content-api",
-#   "version": "1.0.0",
-#   "timestamp": "2024-01-15T10:30:00.000Z",
-#   "checks": { ... }
-# }
+
+# Response:
+{
+  "status": "healthy",
+  "service": "content-api",
+  "version": "1.0.0",
+  "timestamp": 1705329000000,
+  "checks": {
+    "database": { "status": "ok" },
+    "kv": { "status": "ok" },
+    "r2": { "status": "ok" }
+  }
+}
 ```
+
+---
+
+## Critical Design Decisions
+
+### 1. Auto Body Parsing Detection
+
+createAuthenticatedHandler automatically detects whether to parse JSON body based on presence of `body` in schema. This reduces boilerplate and prevents accidental body parsing for GET requests.
+
+```typescript
+// No body parsing (GET, HEAD, DELETE without body)
+schema: { params: z.object({...}) }
+
+// Body parsing (POST, PATCH, PUT)
+schema: { body: z.object({...}) }
+```
+
+### 2. Middleware Execution Order
+
+Middleware order is carefully optimized:
+
+1. Request tracking first (generates requestId for logging)
+2. Logging second (uses requestId)
+3. CORS before security headers (header order matters)
+4. Health check and internal routes are excluded from auth
+
+### 3. Secure by Default
+
+- DEFAULT_SECURITY_POLICY requires auth on all routes
+- withPolicy() overrides only specify what's different
+- Public routes explicitly marked with POLICY_PRESETS.public()
+- HMAC auth for internal routes prevents accidental exposure
+
+### 4. Organization Subdomain Mapping
+
+requireOrgMembership: true extracts organization from subdomain:
+
+- `acme.revelations.studio` → organization slug "acme"
+- Prevents clashes with infrastructure subdomains (api, auth, etc.)
+- Falls back gracefully for localhost development
+
+---
+
+## Troubleshooting
+
+### "User not authenticated" on public routes
+
+**Problem**: Public route returning 401 when it shouldn't need auth.
+
+**Solution**: Apply POLICY_PRESETS.public() to route:
+
+```typescript
+app.get('/api/featured',
+  withPolicy(POLICY_PRESETS.public()),
+  createAuthenticatedHandler({...})
+);
+```
+
+### "Cannot read property 'id' of undefined" on ctx.user
+
+**Problem**: User object is null in handler.
+
+**Solution**: Ensure withPolicy() or createAuthenticatedHandler() enforces auth:
+
+```typescript
+// This fails - no auth check
+app.get('/api/content', createAuthenticatedHandler({...}));
+
+// This works - auth required
+app.get('/api/content',
+  withPolicy(POLICY_PRESETS.authenticated()),
+  createAuthenticatedHandler({...})
+);
+```
+
+### Validation errors not showing field details
+
+**Problem**: Error response doesn't list which field failed.
+
+**Solution**: formatValidationError() is called automatically. Verify schema is correct:
+
+```typescript
+// This provides detailed errors
+schema: {
+  body: z.object({
+    title: z.string().min(1, 'Title required'),
+    email: z.string().email('Invalid email'),
+  })
+}
+
+// Response on error:
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "details": [
+      { "path": "body.title", "message": "Title required" },
+      { "path": "body.email", "message": "Invalid email" }
+    ]
+  }
+}
+```
+
+### CORS errors in development
+
+**Problem**: "Access denied by CORS policy" in browser.
+
+**Solution**: createCorsMiddleware() supports localhost ports:
+
+```
+Supported: localhost:3000, 5173, 8787-8789, 4001-4002
+Supported patterns: *-preview-*.revelations.studio, *-staging.revelations.studio
+```
+
+Custom CORS:
+
+```typescript
+const app = createWorker({
+  cors: {
+    allowedOrigins: ['http://localhost:3000'],
+    allowCredentials: true,
+  }
+});
+```
+
+### Organization membership check always fails
+
+**Problem**: requireOrgMembership: true returning 403 for valid members.
+
+**Solution**: Verify organization lookup from subdomain works:
+
+```bash
+# Hostname must be organization-slug.revelations.studio
+# Not: api.revelations.studio (infrastructure subdomain)
+# Not: localhost:3000 (local development)
+```
+
+Local testing requires either:
+- Custom CORS + direct organizationId in context
+- Or disable requireOrgMembership for local tests
+
+---
+
+**Last Updated**: 2025-12-14
+**Version**: 1.0.0
+**Maintained by**: Codex Documentation Team

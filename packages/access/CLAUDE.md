@@ -16,24 +16,44 @@ Content access control, streaming URL generation, and playback tracking for the 
 
 ## Public API
 
+### Services & Classes
+
 | Export | Type | Purpose |
 |--------|------|---------|
 | `ContentAccessService` | Class | Main service for access control and streaming |
-| `createContentAccessService()` | Function | Factory function for dependency injection |
-| `ContentAccessServiceConfig` | Interface | Service configuration type |
-| `ContentAccessEnv` | Interface | Environment variables for R2 signing |
-| `AccessDeniedError` | Class | User lacks permission to access content |
-| `R2SigningError` | Class | R2 presigned URL generation failed |
-| `InvalidContentTypeError` | Class | Invalid media type for streaming |
-| `OrganizationMismatchError` | Class | Content belongs to different organization |
-| `UserLibraryItem` | Interface | Single item in user's library |
-| `UserLibraryResponse` | Interface | Paginated library response |
+| `createContentAccessService()` | Function | Factory function with dependency injection |
 
-**Validation schemas** (re-exported from @codex/validation):
-- `getStreamingUrlSchema` - Validates content ID and expiry seconds
-- `savePlaybackProgressSchema` - Validates position, duration, completed flag
-- `getPlaybackProgressSchema` - Validates content ID lookup
-- `listUserLibrarySchema` - Validates pagination, filter, sort options
+### Configuration Types
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| `ContentAccessServiceConfig` | Interface | Service constructor parameters (db, r2, obs, purchaseService) |
+| `ContentAccessEnv` | Interface | Environment variables for factory function |
+
+### Error Classes
+
+| Export | Base Class | HTTP Status | Purpose |
+|--------|----------|----------|---------|
+| `AccessDeniedError` | ServiceError | 403 | User lacks permission to access content |
+| `R2SigningError` | InternalServiceError | 500 | R2 presigned URL generation failed |
+| `InvalidContentTypeError` | InternalServiceError | 500 | Invalid media type for streaming |
+| `OrganizationMismatchError` | ServiceError | 403 | Content belongs to different organization |
+
+### Data Models
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| `UserLibraryItem` | Interface | Single item in user's library with content, purchase, and progress |
+| `UserLibraryResponse` | Interface | Paginated library response with items and pagination info |
+
+### Validation Schemas (re-exported from @codex/validation)
+
+| Schema | Purpose |
+|--------|---------|
+| `getStreamingUrlSchema` | Validates contentId (UUID) and expirySeconds (300-7200 seconds) |
+| `savePlaybackProgressSchema` | Validates contentId, positionSeconds, durationSeconds, completed |
+| `getPlaybackProgressSchema` | Validates contentId (UUID) |
+| `listUserLibrarySchema` | Validates page, limit, filter ('all', 'in-progress', 'completed'), sortBy ('recent', 'title', 'duration') |
 
 ## Core Service: ContentAccessService
 
@@ -47,10 +67,11 @@ Service that manages all aspects of content access and streaming. Handles permis
 constructor(config: ContentAccessServiceConfig)
 ```
 
-**Parameters**:
-- `config.db: Database` - Drizzle database client for queries
+**Parameters** (`ContentAccessServiceConfig`):
+- `config.db: DatabaseWs` - WebSocket database client for queries and transactions
 - `config.r2: R2Signer` - R2 signing service (R2Service in production, R2SigningClient in tests)
 - `config.obs: ObservabilityClient` - Observability/logging client
+- `config.purchaseService: PurchaseService` - Service for verifying customer purchases (imported from @codex/purchase)
 
 ### Methods
 
@@ -82,9 +103,10 @@ async getStreamingUrl(
 **Access control flow**:
 1. Content must exist, be published, and not deleted
 2. If free (priceCents = 0) → grant access
-3. If paid, check user purchase via contentAccess table → grant access
+3. If paid, call PurchaseService.verifyPurchase(contentId, userId) → grant access if true
 4. If no purchase, check user active membership in content's organization → grant access
-5. Otherwise → throw AccessDeniedError
+5. If content belongs to organization but user not a member → throw AccessDeniedError (403)
+6. If content is personal (no organizationId) and unpurchased → throw AccessDeniedError (403)
 
 **Transaction safety**: All queries wrapped in transaction with read-committed isolation for consistent access verification.
 
@@ -225,7 +247,10 @@ Create service instance with environment variable configuration. Used in API wor
 ```typescript
 export function createContentAccessService(
   env: ContentAccessEnv
-): ContentAccessService
+): {
+  service: ContentAccessService;
+  cleanup: () => Promise<void>;
+}
 ```
 
 **Parameters** (`ContentAccessEnv`):
@@ -234,9 +259,15 @@ export function createContentAccessService(
 - `R2_ACCESS_KEY_ID?: string` - R2 API access key ID (required)
 - `R2_SECRET_ACCESS_KEY?: string` - R2 API secret key (required)
 - `R2_BUCKET_MEDIA?: string` - R2 bucket name (e.g., "codex-media-production") (required)
+- `STRIPE_SECRET_KEY?: string` - Stripe API secret key (required for purchase verification)
+- `DB_METHOD?: string` - Database connection method (LOCAL_PROXY, NEON_BRANCH, PRODUCTION)
+- `DATABASE_URL?: string` - Database connection URL (required)
+- `DATABASE_URL_LOCAL_PROXY?: string` - Local proxy database URL (for LOCAL_PROXY mode)
 - `ENVIRONMENT?: string` - Environment name for observability (optional, defaults to "development")
 
-**Returns**: Fully configured ContentAccessService instance
+**Returns**: Object with two properties:
+- `service: ContentAccessService` - Fully configured service instance
+- `cleanup: () => Promise<void>` - Async cleanup function for closing database connections
 
 **Throws**: Error if any required environment variable missing
 
@@ -250,124 +281,139 @@ export function createContentAccessService(
 import { createContentAccessService } from '@codex/access';
 
 // In Hono route handler
-const service = createContentAccessService(ctx.env);
-const userId = ctx.user.id; // From JWT
+const { service, cleanup } = createContentAccessService(ctx.env);
+try {
+  const userId = ctx.user.id; // From JWT
 
-const result = await service.getStreamingUrl(userId, {
-  contentId: 'content-123',
-  expirySeconds: 3600, // 1 hour
-});
+  const result = await service.getStreamingUrl(userId, {
+    contentId: 'content-123',
+    expirySeconds: 3600, // 1 hour
+  });
 
-// Respond with presigned URL
-return {
-  streamingUrl: result.streamingUrl,
-  expiresAt: result.expiresAt.toISOString(),
-  contentType: result.contentType,
-};
+  // Respond with presigned URL
+  return {
+    streamingUrl: result.streamingUrl,
+    expiresAt: result.expiresAt.toISOString(),
+    contentType: result.contentType,
+  };
+} finally {
+  await cleanup();
+}
 ```
 
 ### Basic: Save playback progress
 
 ```typescript
-const service = createContentAccessService(ctx.env);
+import { createContentAccessService } from '@codex/access';
 
-await service.savePlaybackProgress(userId, {
-  contentId: 'content-123',
-  positionSeconds: 450, // 7:30 into video
-  durationSeconds: 1800, // 30 minutes
-  completed: false, // Optional
-});
+const { service, cleanup } = createContentAccessService(ctx.env);
+try {
+  await service.savePlaybackProgress(userId, {
+    contentId: 'content-123',
+    positionSeconds: 450, // 7:30 into video
+    durationSeconds: 1800, // 30 minutes
+    completed: false, // Optional
+  });
 
-// No return value, updates are fire-and-forget safe
+  // No return value, updates are fire-and-forget safe
+} finally {
+  await cleanup();
+}
 ```
 
 ### Basic: Resume from saved progress
 
 ```typescript
-const service = createContentAccessService(ctx.env);
+import { createContentAccessService } from '@codex/access';
 
-// Check if user has previous progress
-const progress = await service.getPlaybackProgress(userId, {
-  contentId: 'content-123',
-});
+const { service, cleanup } = createContentAccessService(ctx.env);
+try {
+  // Check if user has previous progress
+  const progress = await service.getPlaybackProgress(userId, {
+    contentId: 'content-123',
+  });
 
-if (progress) {
-  // User has watched this before
-  console.log(`Resume at ${progress.positionSeconds}s`);
-  console.log(`${progress.percentComplete}% complete`);
-} else {
-  // First time watching
-  console.log('Start from beginning');
+  if (progress) {
+    // User has watched this before
+    console.log(`Resume at ${progress.positionSeconds}s`);
+    console.log(`${Math.round((progress.positionSeconds / progress.durationSeconds) * 100)}% complete`);
+  } else {
+    // First time watching
+    console.log('Start from beginning');
+  }
+} finally {
+  await cleanup();
 }
 ```
 
 ### Advanced: User library with filters
 
 ```typescript
-const service = createContentAccessService(ctx.env);
+import { createContentAccessService } from '@codex/access';
 
-// Get page 2 of in-progress content, sorted by title
-const libraryPage = await service.listUserLibrary(userId, {
-  page: 2,
-  limit: 20,
-  filter: 'in-progress', // Only unwatched/partially watched
-  sortBy: 'title', // A-Z
-});
+const { service, cleanup } = createContentAccessService(ctx.env);
+try {
+  // Get page 2 of in-progress content, sorted by title
+  const libraryPage = await service.listUserLibrary(userId, {
+    page: 2,
+    limit: 20,
+    filter: 'in-progress', // Only unwatched/partially watched
+    sortBy: 'title', // A-Z
+  });
 
-libraryPage.items.forEach(item => {
-  console.log(`${item.content.title}`);
-  if (item.progress) {
-    console.log(`  ${item.progress.percentComplete}% watched`);
-  } else {
-    console.log(`  Not started`);
-  }
-});
+  libraryPage.items.forEach(item => {
+    console.log(`${item.content.title}`);
+    if (item.progress) {
+      console.log(`  ${item.progress.percentComplete}% watched`);
+    } else {
+      console.log(`  Not started`);
+    }
+  });
 
-console.log(`Page ${libraryPage.pagination.page} of ${libraryPage.pagination.totalPages}`);
+  console.log(`Page ${libraryPage.pagination.page} of ${libraryPage.pagination.totalPages}`);
+} finally {
+  await cleanup();
+}
 ```
 
 ### Advanced: Pagination with all options
 
 ```typescript
-const service = createContentAccessService(ctx.env);
+import { createContentAccessService } from '@codex/access';
 
-// Paginate through all completed purchases, sorted by duration
-const completed = await service.listUserLibrary(userId, {
-  page: 1,
-  limit: 50,
-  filter: 'completed',
-  sortBy: 'duration', // Longest first
-});
+const { service, cleanup } = createContentAccessService(ctx.env);
+try {
+  // Paginate through all completed purchases, sorted by duration
+  let currentPage = 1;
+  let hasMore = true;
 
-// Loop through all pages
-let currentPage = 1;
-let hasMore = true;
+  while (hasMore) {
+    const page = await service.listUserLibrary(userId, {
+      page: currentPage,
+      limit: 50,
+      filter: 'completed',
+      sortBy: currentPage === 1 ? 'duration' : 'recent', // Longest first on page 1
+    });
 
-while (hasMore) {
-  const page = await service.listUserLibrary(userId, {
-    page: currentPage,
-    limit: 50,
-    filter: 'completed',
-    sortBy: 'recent',
-  });
+    // Process items
+    page.items.forEach(item => {
+      console.log(`Completed: ${item.content.title}`);
+    });
 
-  // Process items
-  page.items.forEach(item => {
-    console.log(`Completed: ${item.content.title}`);
-  });
-
-  hasMore = currentPage < page.pagination.totalPages;
-  currentPage++;
+    hasMore = currentPage < page.pagination.totalPages;
+    currentPage++;
+  }
+} finally {
+  await cleanup();
 }
 ```
 
 ### Error handling: Access denied
 
 ```typescript
-import { AccessDeniedError } from '@codex/access';
+import { AccessDeniedError, createContentAccessService } from '@codex/access';
 
-const service = createContentAccessService(ctx.env);
-
+const { service, cleanup } = createContentAccessService(ctx.env);
 try {
   const result = await service.getStreamingUrl(userId, {
     contentId: 'content-123',
@@ -384,19 +430,23 @@ try {
     }, 403);
   }
   throw error;
+} finally {
+  await cleanup();
 }
 ```
 
 ### Error handling: Content not found
 
 ```typescript
-import { ContentNotFoundError } from '@codex/access';
+import { ContentNotFoundError, createContentAccessService } from '@codex/access';
 
+const { service, cleanup } = createContentAccessService(ctx.env);
 try {
   const result = await service.getStreamingUrl(userId, {
     contentId: 'content-missing',
     expirySeconds: 3600,
   });
+  return { streamingUrl: result.streamingUrl };
 } catch (error) {
   if (error instanceof ContentNotFoundError) {
     // Content doesn't exist, is draft, or deleted
@@ -407,19 +457,23 @@ try {
     }, 404);
   }
   throw error;
+} finally {
+  await cleanup();
 }
 ```
 
 ### Error handling: R2 signing failure
 
 ```typescript
-import { R2SigningError } from '@codex/access';
+import { R2SigningError, createContentAccessService } from '@codex/access';
 
+const { service, cleanup } = createContentAccessService(ctx.env);
 try {
   const result = await service.getStreamingUrl(userId, {
     contentId: 'content-123',
     expirySeconds: 3600,
   });
+  return { streamingUrl: result.streamingUrl };
 } catch (error) {
   if (error instanceof R2SigningError) {
     // Infrastructure error - R2 signing failed
@@ -431,6 +485,8 @@ try {
     }, 503);
   }
   throw error;
+} finally {
+  await cleanup();
 }
 ```
 
@@ -580,14 +636,13 @@ Library shows all completed purchases (purchases.status='completed') with:
 
 ### Database Tables
 
-| Table | Operations | Purpose |
+| Table | Operations | Columns Used |
 |-------|-----------|---------|
-| `content` | SELECT | Find content, check published status |
-| `media_items` | SELECT | Get R2 key, media type, duration |
-| `purchases` | SELECT | Verify user purchases (access via contentAccess) |
-| `content_access` | SELECT | Verify purchased content |
-| `video_playback` | SELECT, INSERT, UPDATE | Track playback progress |
-| `organization_memberships` | SELECT | Verify org member access to paid content |
+| `content` | SELECT | id, status, deletedAt, priceCents, organizationId |
+| `media_items` | SELECT | r2Key, hlsMasterPlaylistKey, mediaType (via content relation) |
+| `purchases` | SELECT | customerId, status, amountPaidCents, createdAt (for user library list) |
+| `video_playback` | SELECT, INSERT, UPDATE | userId, contentId, positionSeconds, durationSeconds, completed, updatedAt |
+| `organization_memberships` | SELECT | organizationId, userId, status (for org member verification) |
 
 ## Error Handling
 
@@ -769,31 +824,57 @@ import { ContentAccessService } from '@codex/access';
 import { setupTestDatabase, seedTestUsers } from '@codex/test-utils';
 import { ObservabilityClient } from '@codex/observability';
 import { createR2SigningClientFromEnv } from '@codex/cloudflare-clients';
+import { PurchaseService } from '@codex/purchase';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 // Setup
-const db = setupTestDatabase();
-const r2Client = createR2SigningClientFromEnv(); // Real signing for tests
-const obs = new ObservabilityClient('content-access-test', 'test');
+let db, service, userId, otherUserId;
 
-const service = new ContentAccessService({
-  db,
-  r2: r2Client,
-  obs,
+beforeAll(async () => {
+  db = setupTestDatabase();
+  const r2Client = createR2SigningClientFromEnv(); // Real signing for tests
+  const obs = new ObservabilityClient('content-access-test', 'test');
+
+  // Create mocked or real PurchaseService
+  const purchaseService = new PurchaseService(
+    { db, environment: 'test' },
+    createStripeClient('') // Mock stripe key for tests
+  );
+
+  service = new ContentAccessService({
+    db,
+    r2: r2Client,
+    obs,
+    purchaseService,
+  });
+
+  [userId, otherUserId] = await seedTestUsers(db, 2);
+});
+
+afterAll(async () => {
+  await teardownTestDatabase();
 });
 
 // Test: Free content accessible to anyone
-const freeContent = await contentService.create({
-  priceCents: 0, // Free!
-  // ... other fields
-}, userId);
+describe('Free Content Access', () => {
+  it('should allow any user to stream free content', async () => {
+    const freeContent = await contentService.create({
+      title: 'Free Video',
+      slug: 'free-video',
+      contentType: 'video',
+      priceCents: 0, // Free!
+      mediaItemId: mediaId,
+    }, userId);
 
-const result = await service.getStreamingUrl(otherUserId, {
-  contentId: freeContent.id,
-  expirySeconds: 3600,
+    const result = await service.getStreamingUrl(otherUserId, {
+      contentId: freeContent.id,
+      expirySeconds: 3600,
+    });
+
+    expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+    expect(result.contentType).toBe('video');
+  });
 });
-
-expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
-expect(result.contentType).toBe('video');
 ```
 
 ### Testing Access Control

@@ -2,217 +2,407 @@
 
 ## Overview
 
-The ecom-api worker is a Cloudflare Workers-based service that handles e-commerce operations: creating Stripe Checkout sessions for paid content purchases and processing Stripe webhook events with cryptographic signature verification. This worker acts as the API entry point for Codex platform commerce, coordinating with PurchaseService for recording purchases, calculating revenue splits, and granting content access. Authenticated endpoints handle checkout session creation (session required). Webhook endpoints require only Stripe HMAC-SHA256 signature verification (no user auth). The worker integrates payment processing with purchase tracking, enabling creators to monetize content via one-time purchases with immutable revenue splits.
+The ecom-api worker provides e-commerce and payment processing capabilities for the Codex platform. It handles two primary workflows: (1) authenticated checkout session creation for purchasing content via Stripe, and (2) webhook event processing with cryptographic signature verification for purchase completion. The worker acts as the bridge between Stripe payment system and Codex purchase records, coordinating with PurchaseService to create purchases, calculate revenue splits, and grant content access.
+
+**Business Purpose**: Enable creators to monetize content through one-time purchases with secure payment processing and immutable revenue splits.
+
+**Key Characteristics**:
+- Authenticated checkout endpoints require user session validation
+- Webhook endpoints require only Stripe HMAC-SHA256 signature verification (no session)
+- All operations are idempotent (safe to retry)
+- Always returns 200 OK to Stripe (prevents webhook retries on handler errors)
+- Comprehensive observability logging for debugging and auditing
 
 ## Architecture
 
 ### Deployment Target
 
-- **Service**: ecom-api
-- **Runtime**: Cloudflare Workers (wrangler)
-- **Development Port**: 42072
+- **Service Name**: ecom-api
+- **Runtime**: Cloudflare Workers
 - **Compatibility Date**: 2025-01-01
 - **Compatibility Flags**: nodejs_compat
-- **Environment URL**: https://ecom-api.revelations.studio
+- **Development Port**: 42072
+- **Production URL**: https://ecom-api.revelations.studio
+- **Build Tool**: Vite + wrangler
+- **Test Runner**: Vitest (workerd runtime)
 
-### Route Structure
+### Route Organization
 
-The worker defines checkout and webhook endpoints:
+The worker defines two main route files with distinct purposes:
 
-**Checkout API**:
-| Endpoint | Purpose | Auth | Rate Limit |
-|----------|---------|------|-----------|
-| `POST /checkout/create` | Create Stripe Checkout session for purchase | Session required | 100/min |
+| Route File | Endpoints | Purpose | Authentication |
+|---|---|---|---|
+| `src/routes/checkout.ts` | POST /checkout/create | Stripe Checkout session creation | Session required |
+| `src/routes/purchases.ts` | GET /purchases, GET /purchases/:id | Purchase history/details retrieval | Session required |
 
-**Webhook Endpoints**:
-| Endpoint | Purpose | Event Categories | Rate Limit |
-|----------|---------|------------------|-----------|
-| `POST /webhooks/stripe/booking` | Checkout completion (creates purchases, idempotent) | checkout.session.completed | 1000/min |
-| `POST /webhooks/stripe/payment` | Payment intent/charge events (future phase) | payment_intent.*, charge.* | 1000/min |
-| `POST /webhooks/stripe/subscription` | Subscription lifecycle (future phase) | customer.subscription.*, invoice.* | 1000/min |
-| `POST /webhooks/stripe/customer` | Customer account events (future phase) | customer.created/updated/deleted | 1000/min |
-| `POST /webhooks/stripe/connect` | Connect account events (future phase) | account.*, capability.*, person.* | 1000/min |
-| `POST /webhooks/stripe/dispute` | Dispute & fraud warnings (future phase) | charge.dispute.*, radar.early_fraud_warning.* | 1000/min |
+### Middleware Chain (Execution Order)
 
-**Health Checks**:
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /` | Simple status check |
-| `GET /health` | Detailed health check (database, KV, R2 status) |
-
-### Middleware Chain
-
-**Global Middleware** (all routes):
+**1. Environment Validation** (first request only):
+```typescript
+app.use('*', createEnvValidationMiddleware());
 ```
-Request
-  ↓
-Request Tracking (generates UUID, captures IP, user agent)
-  ↓
-Observability (logs request with context)
-  ↓
-Security Headers (CSP, X-Frame-Options, HSTS)
-  ↓
-Health Check Route (GET /health, /)
-  ↓
-Route Handlers
-  ↓
-Error Handler (catches exceptions, maps to HTTP responses)
-```
+- Runs once per worker instance
+- Validates required environment variables: DATABASE_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET_BOOKING, RATE_LIMIT_KV
+- Fails fast with clear error message if any required vars missing
+- Subsequent requests bypass this check
 
-**Checkout Route Middleware** (POST /checkout/create):
+**2. Global Middleware Stack** (all requests):
+```typescript
+const globalMiddleware = createStandardMiddlewareChain({
+  serviceName: 'ecom-api',
+  enableObservability: true,
+});
 ```
-Request
-  ↓
-Rate Limiting (100 req/min via KV store)
-  ↓
-Session Validation (auth required via Auth Worker)
-  ↓
-Schema Validation (Zod validation of request body)
-  ↓
-Authenticated Handler
-  ├─ Instantiate PurchaseService
-  ├─ Call createCheckoutSession()
-  └─ Return {sessionUrl, sessionId}
-  ↓
-Error Mapping (map service errors to HTTP responses)
+Applied via: `app.use('*', middleware)` for each
+
+Middleware in order:
+- **Request Tracking**: Generates UUID request ID, captures client IP address
+- **Observability**: Logs request/response with context (service name, method, path, status)
+- **Security Headers**: Applies CSP, X-Frame-Options, HSTS, X-Content-Type-Options
+- **Error Handler**: Catches unhandled exceptions, maps service errors to HTTP responses
+- **Not Found Handler**: Returns 404 for unmapped routes
+
+**3. Health Check Routes**:
+```typescript
+app.get('/', (c) => c.json({ status: 'ok', service: 'ecom-api' }))
+app.get('/health', createHealthCheckHandler(...))
 ```
 
-**Webhook Route Middleware** (POST /webhooks/stripe/*):
+**4. Checkout Routes** (POST /checkout/create):
+```typescript
+app.route('/checkout', checkout);
 ```
-Request
-  ↓
-Rate Limiting (1000 req/min via KV store)
-  ↓
-Stripe Signature Verification (HMAC-SHA256, verifyWebhookSignature)
-  ↓
-Webhook Handler
-  ├─ Extract event type
-  ├─ Route to handler (e.g., handleCheckoutCompleted)
-  ├─ Execute handler logic
-  └─ Return 200 OK (always, prevent Stripe retries)
-  ↓
-Error Logging (errors logged but don't affect response)
+Applied in checkout.ts:
+```typescript
+checkout.post('/create',
+  withPolicy({ auth: 'required', rateLimit: 'auth' }),  // 10 req/min
+  createAuthenticatedHandler({
+    schema: { body: createCheckoutSchema },
+    handler: async (_c, ctx) => { /* ... */ }
+  })
+);
 ```
 
-### Middleware Details
+Middleware order:
+- Rate Limiting (10 req/min per user via KV)
+- Session Validation (extract codex-session cookie, validate via Auth Worker)
+- Request Body Validation (Zod schema: contentId, successUrl, cancelUrl)
+- Authenticated Handler (executes with ctx.user and ctx.validated)
 
-### Middleware Implementation Details
+**5. Purchase Routes** (GET /purchases, GET /purchases/:id):
+```typescript
+app.route('/purchases', purchases);
+```
+Applied in purchases.ts:
+```typescript
+purchases.get('/',
+  withPolicy({ auth: 'required', rateLimit: 'api' }),  // 100 req/min
+  createAuthenticatedHandler({
+    schema: { query: purchaseQuerySchema },
+    handler: async (_c, ctx) => { /* ... */ }
+  })
+);
+```
 
-**Global Middleware Chain** (via @codex/worker-utils):
-- Service name: ecom-api
-- Enables observability: true
-- Applied to: all routes
-- Modules:
-  - Request Tracking: Generates UUID request ID, captures client IP
-  - Security Headers: CSP, X-Frame-Options, HSTS
-  - Health Check Handler: GET / and GET /health routes
-  - Error Handler: Maps service errors to HTTP responses
+Middleware order:
+- Rate Limiting (100 req/min per user via KV)
+- Session Validation
+- Query Parameter Validation (Zod schema)
+- Authenticated Handler
 
-**Checkout Route Middleware** (POST /checkout/create):
-- Policy: POLICY_PRESETS.authenticated() (session required)
-- Rate Limit: RATE_LIMIT_PRESETS.api (100 requests/min per user)
-- Validation: createCheckoutSchema via createAuthenticatedHandler
-- Handler: Authenticated context + PurchaseService
-- Error Mapping: Service errors → HTTP responses (400, 404, 409, 502, etc.)
+**6. Webhook Routes** (POST /webhooks/stripe/*):
+```typescript
+app.use('/webhooks/*', (c, next) =>
+  rateLimit({ kv: c.env.RATE_LIMIT_KV, ...RATE_LIMIT_PRESETS.webhook })(c, next)
+);
+app.post('/webhooks/stripe/booking', verifyStripeSignature(), createWebhookHandler(...));
+```
 
-**Webhook Routes** (POST /webhooks/stripe/*):
-- Rate Limiting: RATE_LIMIT_PRESETS.webhook (1000 requests/min)
-- Signature Verification: verifyWebhookSignature() from @codex/purchase
-  - Algorithm: HMAC-SHA256
-  - Header: stripe-signature
-  - Secret: STRIPE_WEBHOOK_SECRET_* per endpoint
-  - Errors: Returns 400 (missing header), 401 (invalid signature)
-- Handler: Event-specific processor (e.g., handleCheckoutCompleted)
-- Response: Always 200 OK (prevents Stripe retry logic)
-- Error Handling: Errors logged but never returned to Stripe
+Middleware order:
+- Rate Limiting (1000 req/min via KV, IP-based)
+- Stripe Signature Verification (HMAC-SHA256, extracts event into context)
+- Webhook Handler (routing to custom handler if provided)
 
-## Public Endpoints
+## Public API
 
 ### POST /checkout/create
 
-Create Stripe Checkout session for purchasing content.
+Create a Stripe Checkout session for purchasing content.
 
-**Authentication**: Session required (via Auth Worker)
+**Authentication**: Session required (validated via Auth Worker)
 
-**Rate Limiting**: 100 requests/minute per authenticated user
+**Rate Limiting**: 10 requests/minute per authenticated user
+
+**Path**: POST `/checkout/create`
+
+**Request Headers**:
+```
+Cookie: codex-session=<session-token>
+Content-Type: application/json
+```
 
 **Request Body**:
 ```typescript
 {
-  contentId: string;      // UUID of content to purchase
-  successUrl: string;     // URL redirect after payment success
-  cancelUrl: string;      // URL redirect if payment canceled
+  contentId: string;       // UUID of content to purchase (must exist, published, have price)
+  successUrl: string;      // Absolute URL for redirect after payment success
+  cancelUrl: string;       // Absolute URL for redirect if user cancels payment
 }
 ```
 
-**Response (200 Created)**:
+**Response (200 OK)**:
 ```typescript
 {
-  sessionUrl: string;     // Stripe-hosted checkout page URL
-  sessionId: string;      // Stripe session ID for tracking
+  data: {
+    sessionUrl: string;    // Stripe-hosted checkout page URL (e.g., https://checkout.stripe.com/...)
+    sessionId: string;     // Stripe session ID for reference/tracking
+  }
 }
-```
-
-**Example**:
-```bash
-curl -X POST http://localhost:42072/checkout/create \
-  -H "Cookie: codex-session=<token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "contentId": "content-abc-123",
-    "successUrl": "https://example.com/purchase-success",
-    "cancelUrl": "https://example.com/purchase-cancel"
-  }'
 ```
 
 **Error Responses**:
-- `400` - Invalid input (missing/invalid contentId, bad URLs)
-- `401` - Unauthorized (missing session)
-- `404` - Content not found or not published
-- `409` - Already purchased
-- `502` - Stripe API failure
 
-**What it does**:
-1. Validates session (authenticated user ID)
-2. Validates input (content ID format, valid URLs)
-3. Checks content exists, published, not deleted
-4. Validates content has price > 0
-5. Checks user hasn't already purchased
-6. Creates Stripe Checkout session with content price
-7. Returns checkout URL for frontend redirect
+| Status | Code | Condition | Cause | Recovery |
+|---|---|---|---|---|
+| 400 | VALIDATION_ERROR | Missing/invalid contentId, cancelUrl, successUrl | Client request malformed | Check field types and formats |
+| 401 | UNAUTHORIZED | Missing or expired session | User not authenticated | Login via Auth Worker, retry |
+| 404 | NOT_FOUND | Content doesn't exist, not published, or soft-deleted | Invalid contentId or content state | Verify content exists and is published |
+| 409 | CONFLICT | User already purchased this content | AlreadyPurchasedError from service | Direct user to view content instead |
+| 429 | TOO_MANY_REQUESTS | Rate limit exceeded (>10 req/min) | Too many checkout attempts | Wait 1 minute, retry |
+| 500 | PAYMENT_PROCESSING_ERROR | Stripe API failure, STRIPE_SECRET_KEY not configured | External service or config issue | Check Stripe status, verify secrets |
+| 503 | SERVICE_UNAVAILABLE | Database unavailable | PostgreSQL connection failure | Retry after database recovers |
+
+**Example Request**:
+```bash
+curl -X POST http://localhost:42072/checkout/create \
+  -H "Cookie: codex-session=sess_abc123xyz789" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contentId": "550e8400-e29b-41d4-a716-446655440000",
+    "successUrl": "https://app.example.com/purchase/success?contentId=550e8400-e29b-41d4-a716-446655440000",
+    "cancelUrl": "https://app.example.com/purchase/cancel"
+  }'
+```
+
+**Example Response (200)**:
+```json
+{
+  "data": {
+    "sessionUrl": "https://checkout.stripe.com/pay/cs_live_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z?",
+    "sessionId": "cs_live_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z"
+  }
+}
+```
+
+**What Happens**:
+1. Middleware validates session cookie (delegates to Auth Worker)
+2. Request body validated against createCheckoutSchema (Zod)
+3. PurchaseService initialized with Stripe client
+4. Content lookup (verify exists, published, not deleted)
+5. Price validation (must have price > 0 for paid purchase)
+6. Duplicate purchase check (user can't purchase same content twice)
+7. Stripe Checkout session created with:
+   - Content price (in cents, USD)
+   - Metadata: userId, contentId, organizationId (optional)
+   - Success/cancel URLs for redirects
+   - Stripe customer email
+8. Session URL returned to frontend
+9. Frontend redirects user to Stripe Checkout page
+10. User completes payment on Stripe
+11. Stripe sends webhook to /webhooks/stripe/booking
+
+---
+
+### GET /purchases
+
+List authenticated user's purchases with pagination and filtering.
+
+**Authentication**: Session required
+
+**Rate Limiting**: 100 requests/minute per user
+
+**Path**: GET `/purchases`
+
+**Request Headers**:
+```
+Cookie: codex-session=<session-token>
+```
+
+**Query Parameters**:
+
+| Parameter | Type | Default | Max | Description |
+|---|---|---|---|---|
+| page | integer | 1 | N/A | Page number (1-indexed) |
+| limit | integer | 20 | 100 | Items per page |
+| status | string | (all) | N/A | Filter: completed, refunded, failed |
+| contentId | string | (none) | N/A | Filter by specific content UUID |
+
+**Response (200 OK)**:
+```typescript
+{
+  items: Array<{
+    id: string;                      // Purchase UUID
+    stripePaymentIntentId: string;   // Stripe Payment Intent ID
+    customerId: string;              // Codex user ID
+    contentId: string;               // Content UUID
+    organizationId: string | null;   // Organization UUID if org-owned content
+    amountPaidCents: number;         // Amount paid in cents (e.g., 4999 = $49.99)
+    currency: string;                // Currency code (e.g., "usd")
+    status: "completed" | "refunded" | "failed"; // Purchase status
+    purchasedAt: string;             // ISO 8601 timestamp
+    content: {
+      id: string;
+      title: string;
+      slug: string;
+      contentType: "video" | "audio" | "document";
+      creatorId: string;
+      organizationId: string | null;
+    };
+  }>;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;                   // Total purchases (all filters applied)
+    totalPages: number;              // Math.ceil(total / limit)
+  };
+}
+```
+
+**Error Responses**:
+
+| Status | Code | Condition |
+|---|---|---|
+| 400 | VALIDATION_ERROR | Invalid page/limit (non-integer, page < 1, limit > 100) |
+| 401 | UNAUTHORIZED | Missing or expired session |
+| 429 | TOO_MANY_REQUESTS | Rate limit exceeded (>100 req/min) |
+
+**Example Request**:
+```bash
+curl "http://localhost:42072/purchases?page=1&limit=20&status=completed" \
+  -H "Cookie: codex-session=sess_abc123xyz789"
+```
+
+**Example Response (200)**:
+```json
+{
+  "items": [
+    {
+      "id": "purchase-uuid-1",
+      "stripePaymentIntentId": "pi_1234567890",
+      "customerId": "user-uuid-1",
+      "contentId": "content-uuid-1",
+      "organizationId": null,
+      "amountPaidCents": 4999,
+      "currency": "usd",
+      "status": "completed",
+      "purchasedAt": "2025-12-10T14:30:00Z",
+      "content": {
+        "id": "content-uuid-1",
+        "title": "Advanced TypeScript Patterns",
+        "slug": "advanced-typescript-patterns",
+        "contentType": "video",
+        "creatorId": "creator-uuid-1",
+        "organizationId": null
+      }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 42,
+    "totalPages": 3
+  }
+}
+```
+
+---
+
+### GET /purchases/:id
+
+Get single purchase details by ID.
+
+**Authentication**: Session required (returns 403 if purchase belongs to different user)
+
+**Rate Limiting**: 100 requests/minute per user
+
+**Path**: GET `/purchases/:id`
+
+**Path Parameters**:
+
+| Parameter | Type | Description |
+|---|---|---|
+| id | string (UUID) | Purchase UUID |
+
+**Response (200 OK)**:
+```typescript
+{
+  data: {
+    id: string;
+    stripePaymentIntentId: string;
+    customerId: string;
+    contentId: string;
+    organizationId: string | null;
+    amountPaidCents: number;
+    currency: string;
+    status: "completed" | "refunded" | "failed";
+    purchasedAt: string;
+    // ... additional fields
+  }
+}
+```
+
+**Error Responses**:
+
+| Status | Code | Condition |
+|---|---|---|
+| 401 | UNAUTHORIZED | Missing or expired session |
+| 403 | FORBIDDEN | Purchase belongs to different user |
+| 404 | NOT_FOUND | Purchase doesn't exist |
+| 429 | TOO_MANY_REQUESTS | Rate limit exceeded |
+
+**Example Request**:
+```bash
+curl "http://localhost:42072/purchases/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Cookie: codex-session=sess_abc123xyz789"
+```
 
 ---
 
 ### POST /webhooks/stripe/booking
 
-Process Stripe checkout.session.completed events. Records purchase and grants access.
+Process `checkout.session.completed` Stripe webhook events. Records purchases and grants content access. This is the only currently implemented webhook handler.
 
-**Authentication**: Stripe HMAC-SHA256 signature verification (no session required)
+**Authentication**: Stripe HMAC-SHA256 signature verification (no session)
 
 **Rate Limiting**: 1000 requests/minute
 
-**Event Type**: `checkout.session.completed`
+**Path**: POST `/webhooks/stripe/booking`
 
-**Request Headers**:
+**Request Headers** (from Stripe):
 ```
 stripe-signature: t=<timestamp>,v1=<signature>
+Content-Type: application/json
 ```
 
-**Request Body** (raw JSON from Stripe):
+**Request Body** (raw JSON from Stripe, not parsed):
 ```typescript
 {
-  type: "checkout.session.completed",
+  id: string;                          // Event ID (e.g., "evt_1IjA...")
+  object: "event";
+  api_version: string;                 // Stripe API version
+  created: number;                     // Unix timestamp
+  type: "checkout.session.completed";
   data: {
     object: {
-      id: string;                    // Stripe session ID
-      payment_intent: string;        // Stripe Payment Intent ID
-      customer_email: string;        // Customer email
-      amount_total: number;          // Amount in cents
-      currency: string;              // Currency code
+      id: string;                      // Stripe session ID
+      payment_intent: string;          // Stripe Payment Intent ID
+      customer_email: string;
+      amount_total: number;            // Amount in cents
+      currency: string;
       metadata: {
-        contentId: string;           // Content ID stored in checkout
-        customerId: string;          // Customer ID stored in checkout
-        organizationId?: string;     // Org ID (optional)
+        customerId: string;            // Codex user ID
+        contentId: string;             // Content UUID
+        organizationId?: string;       // Optional: org UUID
       };
       status: "complete";
     };
@@ -221,136 +411,85 @@ stripe-signature: t=<timestamp>,v1=<signature>
 ```
 
 **Response (200 OK)** (always, even on error):
-```typescript
-{ received: true }
+```json
+{ "received": true }
 ```
 
-**What it does**:
-1. Verifies Stripe signature (HMAC-SHA256)
-2. Extracts checkout.session.completed event
-3. Calls PurchaseService.completePurchase() with metadata
-4. Creates purchase record (idempotent via paymentIntentId)
-5. Calculates revenue split (10% platform / 90% creator default)
-6. Grants access via contentAccess table
-7. Logs purchase completion
-8. Returns 200 OK
+**What Happens**:
+1. Middleware verifies Stripe signature (HMAC-SHA256)
+   - Returns 400 if missing signature header
+   - Returns 401 if signature invalid (tampering detected)
+2. Extracts checkout.session.completed event from verified data
+3. Calls handleCheckoutCompleted() with Stripe event
+4. Handler extracts payment metadata (userId, contentId, price)
+5. Validates metadata against checkoutSessionMetadataSchema (Zod)
+6. Creates per-request database client with transaction support
+7. Calls PurchaseService.completePurchase() in transaction:
+   - Inserts purchase record (idempotent via paymentIntentId)
+   - Calculates revenue split (default 10% platform / 90% creator)
+   - Inserts contentAccess record (grants user access)
+8. Logs success with purchase details
+9. Returns 200 OK to Stripe
 
-**Idempotency**: Duplicate webhooks return existing purchase (no duplicates created)
+**Error Handling**:
+- All errors are caught and logged to observability
+- No errors are returned to Stripe (always 200 OK)
+- This prevents Stripe from retrying the webhook
+- Manual investigation required for failed purchases
 
-**Error Handling**: All errors logged internally. Always returns 200 OK to prevent Stripe retries.
+**Idempotency**:
+- Duplicate webhooks use paymentIntentId as unique constraint
+- Second webhook returns existing purchase (no duplicates created)
+- Safe to receive same event multiple times
 
 **Testing Locally**:
 ```bash
-# Start local listener
+# Terminal 1: Start worker
+pnpm dev
+
+# Terminal 2: Start Stripe listener and forward webhooks
 stripe listen --forward-to http://localhost:42072/webhooks/stripe/booking
 
-# Trigger test event
+# Terminal 3: Trigger test event
 stripe trigger checkout.session.completed
 
 # Check logs for success
+# Expected: "Purchase completed successfully" in observability logs
 ```
 
 ---
 
 ### POST /webhooks/stripe/payment (Future Phase)
 
-**Purpose**: Handle payment-related webhook events from Stripe (payment intent and charge events)
+Handle payment-related Stripe webhook events (payment intent and charge events).
 
-**Authentication**: None (Stripe signature verification in verifyStripeSignature middleware)
+**Status**: Not yet implemented (defined but no handler)
 
-**Rate Limit**: 1000 requests per minute
+**Supported Event Types**:
+- payment_intent.created
+- payment_intent.updated
+- payment_intent.succeeded
+- payment_intent.payment_failed
+- charge.created
+- charge.updated
+- charge.succeeded
+- charge.failed
+- charge.refunded
 
-**Request Format**:
-Stripe webhook request with raw body (not parsed) and stripe-signature header
+**To Implement**:
+1. Define Zod schema in `src/schemas/payment.ts`
+2. Create handler function: `async (event, stripe, c) => { ... }`
+3. Pass handler to `createWebhookHandler('Payment', handler)`
+4. Configure webhook in Stripe dashboard
+5. Test with `stripe trigger payment_intent.succeeded`
 
-```
-POST /webhooks/stripe/payment HTTP/1.1
-Host: ecom-api.example.com
-stripe-signature: t=1614556800,v1=abc123...
-Content-Type: application/json
+---
 
-{
-  "id": "evt_1IjA...",
-  "object": "event",
-  "api_version": "2025-10-29.clover",
-  "created": 1614556800,
-  "data": {
-    "object": {
-      "id": "pi_1IjA...",
-      "object": "payment_intent",
-      ...
-    }
-  },
-  "type": "payment_intent.succeeded"
-}
-```
+### POST /webhooks/stripe/subscription (Future Phase)
 
-**Request Parameters**:
-- Raw body must be the exact JSON string from Stripe (no parsing before signature verification)
-- stripe-signature header (required): Stripe signature for verification
+Handle subscription lifecycle and invoice Stripe webhook events.
 
-**Response** (200):
-```json
-{
-  "received": true
-}
-```
-
-The response always returns 200 OK if the signature is valid, even if event processing fails. This prevents Stripe from retrying the webhook.
-
-**Response** (200 with Handler Error):
-```json
-{
-  "received": true,
-  "error": "Handler error"
-}
-```
-
-If a custom webhook handler throws an error, the response still returns 200 OK with an error note. The error is logged for debugging.
-
-**Possible Errors**:
-- 400 Bad Request: Missing stripe-signature header
-- 401 Unauthorized: Invalid Stripe signature (tampering detected)
-- 429 Too Many Requests: Rate limit exceeded (1000 req/min)
-- 500 Internal Server Error: STRIPE_SECRET_KEY or webhook secret not configured
-
-**Example**:
-```bash
-# Using Stripe CLI to send test webhook
-stripe listen --forward-to localhost:42072/webhooks/stripe/payment
-stripe trigger payment_intent.succeeded
-
-# Or using curl (requires valid Stripe signature)
-curl -X POST http://localhost:42072/webhooks/stripe/payment \
-  -H "stripe-signature: $(stripe-signature-header)" \
-  -H "Content-Type: application/json" \
-  -d '{"id":"evt_test","type":"payment_intent.succeeded",...}'
-```
-
-### POST /webhooks/stripe/subscription
-
-**Purpose**: Handle subscription and invoice webhook events from Stripe
-
-**Authentication**: None (Stripe signature verification)
-
-**Rate Limit**: 1000 requests per minute
-
-**Request Parameters**:
-- Raw body with Stripe event JSON
-- stripe-signature header (required)
-
-**Response** (200):
-```json
-{
-  "received": true
-}
-```
-
-**Possible Errors**:
-- 400 Bad Request: Missing stripe-signature header
-- 401 Unauthorized: Invalid Stripe signature
-- 429 Too Many Requests: Rate limit exceeded
-- 500 Internal Server Error: Configuration error
+**Status**: Not yet implemented
 
 **Supported Event Types**:
 - customer.subscription.created
@@ -362,85 +501,43 @@ curl -X POST http://localhost:42072/webhooks/stripe/payment \
 - invoice.payment_failed
 - invoice.payment_succeeded
 
-### POST /webhooks/stripe/customer
+---
 
-**Purpose**: Handle customer account webhook events from Stripe
+### POST /webhooks/stripe/customer (Future Phase)
 
-**Authentication**: None (Stripe signature verification)
+Handle customer account Stripe webhook events.
 
-**Rate Limit**: 1000 requests per minute
-
-**Response** (200):
-```json
-{
-  "received": true
-}
-```
+**Status**: Not yet implemented
 
 **Supported Event Types**:
 - customer.created
 - customer.updated
 - customer.deleted
 
-### POST /webhooks/stripe/connect
+---
 
-**Purpose**: Handle Stripe Connect account webhook events
+### POST /webhooks/stripe/connect (Future Phase)
 
-**Authentication**: None (Stripe signature verification)
+Handle Stripe Connect account events.
 
-**Rate Limit**: 1000 requests per minute
-
-**Response** (200):
-```json
-{
-  "received": true
-}
-```
+**Status**: Not yet implemented
 
 **Supported Event Types**:
 - account.created
 - account.updated
 - account.external_account.created
 - account.external_account.updated
-- account.external_account.deleted
 - capability.updated
 - person.created
 - person.updated
 
-### POST /webhooks/stripe/booking
+---
 
-**Purpose**: Handle Stripe Checkout session webhook events for booking transactions
+### POST /webhooks/stripe/dispute (Future Phase)
 
-**Authentication**: None (Stripe signature verification)
+Handle payment dispute and fraud warning events.
 
-**Rate Limit**: 1000 requests per minute
-
-**Response** (200):
-```json
-{
-  "received": true
-}
-```
-
-**Supported Event Types**:
-- checkout.session.completed
-- checkout.session.async_payment_failed
-- checkout.session.async_payment_succeeded
-
-### POST /webhooks/stripe/dispute
-
-**Purpose**: Handle payment dispute and fraud warning webhook events from Stripe
-
-**Authentication**: None (Stripe signature verification)
-
-**Rate Limit**: 1000 requests per minute
-
-**Response** (200):
-```json
-{
-  "received": true
-}
-```
+**Status**: Not yet implemented
 
 **Supported Event Types**:
 - charge.dispute.created
@@ -449,15 +546,19 @@ curl -X POST http://localhost:42072/webhooks/stripe/payment \
 - radar.early_fraud_warning.created
 - radar.early_fraud_warning.updated
 
+---
+
 ### GET /health
 
-**Purpose**: Return detailed health status of the worker and dependencies
+Detailed health check endpoint for monitoring.
 
 **Authentication**: None
 
-**Rate Limit**: None
+**Rate Limiting**: None
 
-**Response** (200):
+**Path**: GET `/health`
+
+**Response (200 OK)** (all dependencies healthy):
 ```json
 {
   "status": "healthy",
@@ -473,11 +574,11 @@ curl -X POST http://localhost:42072/webhooks/stripe/payment \
       "latency": 2
     }
   },
-  "timestamp": "2025-11-23T10:30:00.000Z"
+  "timestamp": "2025-12-14T10:30:00.000Z"
 }
 ```
 
-**Response** (503):
+**Response (503 Service Unavailable)** (one or more dependencies unhealthy):
 ```json
 {
   "status": "unhealthy",
@@ -487,429 +588,790 @@ curl -X POST http://localhost:42072/webhooks/stripe/payment \
     "database": {
       "status": "unhealthy",
       "error": "Connection timeout"
+    },
+    "rate-limit-kv": {
+      "status": "healthy",
+      "latency": 2
     }
   },
-  "timestamp": "2025-11-23T10:30:00.000Z"
+  "timestamp": "2025-12-14T10:30:00.000Z"
 }
 ```
 
-**Possible Errors**:
-- 503 Service Unavailable: Database unreachable or KV unavailable
+**Checks Performed**:
+- **database**: Executes test query on PostgreSQL
+- **rate-limit-kv**: Writes test key to Cloudflare KV
 
-## Security Model
+---
 
-### Stripe Signature Verification
+### GET /
 
-The worker implements Stripe's HMAC-SHA256 webhook signature verification to prevent spoofing:
+Simple health check endpoint (no detailed checks).
 
-**How It Works**:
-1. Extract stripe-signature header from request
-2. Get raw request body (before JSON parsing)
-3. Retrieve webhook secret for the specific endpoint type
-4. Use Stripe SDK's `constructEvent()` to verify signature:
-   - Stripe SDK verifies HMAC-SHA256 using webhook secret
-   - Computes expected signature from raw body and secret
-   - Compares with received signature
-5. If valid, event object is constructed and stored in context
-6. If invalid, 401 Unauthorized response returned
+**Response (200 OK)**:
+```json
+{
+  "status": "ok",
+  "service": "ecom-api"
+}
+```
 
-**Why Raw Body is Required**:
-The signature verification must use the exact raw bytes from Stripe. If the body is JSON-parsed and re-stringified, the bytes change and signature verification fails. This is why this worker uses custom Hono setup instead of standard request parsing.
+---
 
-### Request Tracking & Logging
+## Core Services
 
-All requests are tracked with:
-- **UUID Request ID**: Unique identifier assigned to each request, included in all logs
-- **IP Address**: Client IP extracted from request headers
-- **User Agent**: User agent string from request
-- **Request Method & Path**: HTTP method and path for routing
-- **Timestamp**: ISO 8601 timestamp of request
+### PurchaseService
 
-Tracking is performed by `createStandardMiddlewareChain` middleware. All observability logs include the request ID for tracing.
+Main service for purchase operations. Provided by `@codex/purchase` package.
 
-### Security Headers
+**Location**: `packages/purchase/src/services/purchase.ts`
 
-Security headers are applied to all responses via `createStandardMiddlewareChain`:
-
-| Header | Value |
-|--------|-------|
-| X-Frame-Options | DENY (prevents clickjacking) |
-| X-Content-Type-Options | nosniff (prevents MIME sniffing) |
-| Content-Security-Policy | (API preset: strict, no external scripts) |
-| Strict-Transport-Security | max-age=31536000; includeSubDomains (HTTPS only) |
-
-### Rate Limiting Strategy
-
-Webhook endpoints are rate limited to 1000 requests per minute using Cloudflare KV:
-
-- **Key**: IP-based key (from rate limiter configuration)
-- **Storage**: RATE_LIMIT_KV namespace
-- **Window**: 60 seconds (1 minute)
-- **Limit**: 1000 requests per window
-- **Response**: 429 Too Many Requests when exceeded
-- **Headers**: x-ratelimit-limit and x-ratelimit-remaining included in responses
-
-This rate limit accommodates high-volume webhook delivery from Stripe while preventing abuse.
-
-### Input Validation
-
-The worker validates Stripe signatures at the middleware level. No additional input validation is required because:
-1. Signature verification ensures authenticity
-2. Stripe API guarantees event structure compliance
-3. Event type is read from Stripe event object
-
-Custom handlers can apply additional validation using Zod schemas in `src/schemas/` directory for metadata validation.
-
-### No User Authentication
-
-The worker requires no user authentication because:
-1. Webhook endpoints are not user-initiated
-2. Stripe signature serves as cryptographic proof of authenticity
-3. Events are scoped to Stripe account, not individual users
-4. Health endpoints are unauthenticated for monitoring
-
-## Event Processing
-
-### Event Types & Handling
-
-The worker defines six webhook endpoint categories, each processing a specific set of Stripe event types. Each endpoint:
-
-1. Verifies Stripe signature (middleware)
-2. Logs event receipt with type and ID
-3. Optionally executes a custom handler (if provided)
-4. Returns 200 OK response (regardless of handler success or failure)
-
-### Default Behavior
-
-If no custom handler is provided, the worker:
-- Verifies signature
-- Logs "Webhook received" message with event type and ID
-- Returns 200 OK
-- Does not process the event further
-
-This allows gradual implementation of event handlers without breaking webhook delivery.
-
-### Custom Handler Implementation
-
-To add event-specific processing, provide a handler function to `createWebhookHandler()`:
-
+**Initialization**:
 ```typescript
-// Example: Add custom payment handler
-app.post(
-  '/webhooks/stripe/payment',
-  verifyStripeSignature(),
-  createWebhookHandler('Payment', async (event, stripe, c) => {
-    // event is the verified Stripe event
-    // stripe is the Stripe API client
-    // c is the Hono context (includes observability client via c.get('obs'))
+import { createStripeClient, PurchaseService } from '@codex/purchase';
+import { dbHttp } from '@codex/database';
 
-    if (event.type === 'payment_intent.succeeded') {
-      const paymentIntent = event.data.object as Stripe.PaymentIntent;
-
-      // Process payment
-      const obs = c.get('obs');
-      obs.info('Processing payment', { id: paymentIntent.id });
-
-      // Save to database, trigger business logic, etc.
-      await someService.recordPayment(paymentIntent);
-    }
-  })
+const stripe = createStripeClient(env.STRIPE_SECRET_KEY);
+const purchaseService = new PurchaseService(
+  {
+    db: dbHttp,  // or transaction-capable db from createPerRequestDbClient()
+    environment: env.ENVIRONMENT || 'development'
+  },
+  stripe
 );
 ```
 
-### Event Metadata Access
+**Key Methods**:
 
-Stripe event structure:
+#### createCheckoutSession(input, customerId): Promise<CheckoutSession>
 
+Create Stripe Checkout session for content purchase.
+
+**Parameters**:
 ```typescript
-event: Stripe.Event = {
-  id: string;                           // Unique event ID
-  type: string;                         // Event type (e.g., "payment_intent.succeeded")
-  created: number;                      // Unix timestamp
-  data: {
-    object: Record<string, unknown>;    // The Stripe object (PaymentIntent, Subscription, etc.)
-    previous_attributes?: Record<string, unknown>;  // Previous values for .updated events
-  };
-  api_version: string;                  // Stripe API version
-  livemode: boolean;                    // Live vs test mode
-  pending_webhooks: number;             // How many webhooks pending for this event
-  request: {
-    id: string | null;
-    idempotency_key: string | null;
-  };
-  account: string;                      // Stripe account ID
+{
+  contentId: string;
+  successUrl: string;
+  cancelUrl: string;
 }
 ```
 
-### Metadata Validation Schemas
-
-Event metadata can be validated using Zod schemas defined in `src/schemas/`:
-
-- **src/schemas/payment.ts**: Schema for payment event metadata
-- **src/schemas/subscription.ts**: Schema for subscription event metadata
-- **src/schemas/customer.ts**: Schema for customer event metadata
-- **src/schemas/connect.ts**: Schema for Connect account metadata
-- **src/schemas/booking.ts**: Schema for booking/checkout metadata
-- **src/schemas/dispute.ts**: Schema for dispute event metadata
-
-Example using metadata utilities:
-
+**Returns**:
 ```typescript
-import { validateMetadata, extractField } from './utils/metadata';
-import { PaymentMetadataSchema } from './schemas/payment';
-
-const handler: WebhookHandler = async (event, stripe, c) => {
-  const paymentIntent = event.data.object as Stripe.PaymentIntent;
-
-  // Validate metadata
-  const metadataResult = validateMetadata(
-    paymentIntent.metadata,
-    PaymentMetadataSchema
-  );
-
-  if (!metadataResult.success) {
-    c.get('obs').warn('Invalid payment metadata', {
-      errors: formatValidationErrors(metadataResult.error)
-    });
-    return;
-  }
-
-  const metadata = metadataResult.data;
-  // Use validated metadata...
-};
+{
+  sessionUrl: string;
+  sessionId: string;
+}
 ```
 
-### Metadata Validation Utilities
+**Validates**:
+- Content exists and is published
+- Content has price > 0
+- User hasn't already purchased content
+- URLs are valid absolute URLs
 
-Available in `src/utils/metadata.ts`:
+**Throws**:
+- `NotFoundError` - Content doesn't exist or not published
+- `ContentNotPurchasableError` - Content has no price or already purchased
+- `PaymentProcessingError` - Stripe API failure
 
-| Function | Purpose | Returns |
-|----------|---------|---------|
-| `validateMetadata(metadata, schema)` | Validate with result object | { success: boolean; data?: T; error?: ZodError } |
-| `validateMetadataStrict(metadata, schema)` | Validate and throw on error | T or throws ZodError |
-| `validateMetadataWithDefault(metadata, schema, default)` | Validate with fallback | T |
-| `extractField(metadata, field, validator)` | Extract and validate single field | T or null |
-| `hasRequiredFields(metadata, fields)` | Check for required fields | boolean |
-| `formatValidationErrors(error)` | Format validation errors for logging | string[] |
-| `safeExtractMetadata(metadata)` | Type-safe metadata extraction | T or null |
+---
 
-## Error Handling
+#### completePurchase(paymentIntentId, metadata): Promise<Purchase>
 
-### Signature Verification Errors
+Record completed purchase atomically (creates purchase + grants access in transaction).
 
-| Status | Condition | Cause | Action |
-|--------|-----------|-------|--------|
-| 400 | Missing stripe-signature header | Client error: header not sent | Verify Stripe is properly configured to send webhooks |
-| 401 | Invalid signature | Security: tampering detected or wrong secret | Verify webhook secret is correct for the environment |
-| 500 | STRIPE_SECRET_KEY not configured | Configuration error | Set STRIPE_SECRET_KEY environment variable |
-| 500 | Webhook secret not configured | Configuration error | Set STRIPE_WEBHOOK_SECRET_* for endpoint |
-
-### Request Processing Errors
-
-| Status | Condition | Cause | Action |
-|--------|-----------|-------|--------|
-| 429 | Rate limit exceeded | Too many webhooks in time window | Implement exponential backoff; contact Stripe if legitimate spike |
-| 500 | Observability service unavailable | Internal infrastructure issue | Worker continues to process, logs to fallback |
-| 404 | Unmapped endpoint | Invalid webhook path | Verify webhook URL in Stripe dashboard |
-
-### Handler Errors
-
-If a custom webhook handler throws an error:
-1. Error is caught by try/catch in `createWebhookHandler`
-2. Error is logged to observability with full context
-3. Response still returns 200 OK to Stripe (prevents retries)
-4. Event is not retried by Stripe
-
-This behavior is intentional: Stripe retries webhook delivery on non-2xx responses. Returning 200 OK tells Stripe the webhook was received, even if internal processing failed. The error is logged for manual investigation.
-
-### Logging & Observability
-
-All webhook activity is logged via the observability client:
-
+**Parameters**:
 ```typescript
-// Signature verification success
-obs.info('Webhook signature verified', {
-  type: event.type,
-  id: event.id,
-  path: c.req.path
-});
-
-// Webhook received
-obs.info('Payment webhook received', {
-  type: event.type,
-  id: event.id
-});
-
-// Handler error
-obs.error('Payment webhook handler error', {
-  error: err.message,
-  eventType: event.type,
-  eventId: event.id
-});
+paymentIntentId: string;  // Stripe Payment Intent ID
+{
+  customerId: string;
+  contentId: string;
+  organizationId?: string | null;
+  amountPaidCents: number;
+  currency: string;
+}
 ```
 
-## Retry Strategy
-
-### Stripe Retry Behavior
-
-Stripe automatically retries webhook delivery based on the HTTP response status:
-
-- **2xx responses**: Considered delivered; no retry
-- **Non-2xx responses**: Triggers retry with exponential backoff
-  - First retry: ~5 minutes
-  - Second retry: ~30 minutes
-  - Third retry: ~2 hours
-  - Fourth retry: ~5 hours
-  - Fifth retry: ~10 hours
-  - Stops after 5 attempts
-
-### Worker Behavior
-
-The worker always returns 200 OK after signature verification, even if:
-- Custom handler throws an error
-- Database write fails
-- External service is unavailable
-
-This prevents Stripe from retrying the webhook delivery. Instead:
-1. Errors are logged to observability
-2. Manual investigation and retry is required
-3. Error handling code should implement compensation logic (e.g., query Stripe API for missing data)
-
-### Idempotency
-
-Webhook events can be retried, so handlers must be idempotent:
-
+**Returns**:
 ```typescript
-// BAD: Not idempotent (may create duplicate record)
-const handler = async (event, stripe, c) => {
-  await db.payments.create({
-    stripeId: event.data.object.id,
-    amount: event.data.object.amount
-  });
-};
-
-// GOOD: Idempotent (uses upsert)
-const handler = async (event, stripe, c) => {
-  await db.payments.upsert(
-    { stripeId: event.data.object.id },
-    {
-      stripeId: event.data.object.id,
-      amount: event.data.object.amount
-    }
-  );
-};
+{
+  id: string;
+  stripePaymentIntentId: string;
+  customerId: string;
+  contentId: string;
+  organizationId: string | null;
+  amountPaidCents: number;
+  currency: string;
+  status: "completed" | "refunded" | "failed";
+  purchasedAt: string;
+  // ... additional fields
+}
 ```
+
+**Behavior**:
+- Idempotent: duplicate calls with same paymentIntentId return existing purchase
+- Atomic: purchase and access grant happen in single transaction
+- Calculates revenue split (configurable in service)
+- Inserts access record to contentAccess table
+- Soft-deletes duplicate access records if exists
+
+**Throws**:
+- `NotFoundError` - Content doesn't exist
+- `PaymentProcessingError` - Transaction failure
+
+---
+
+#### getPurchaseHistory(userId, options): Promise<PaginatedResult<PurchaseWithContent>>
+
+Get paginated list of user's purchases.
+
+**Parameters**:
+```typescript
+userId: string;
+{
+  page?: number;
+  limit?: number;
+  status?: "completed" | "refunded" | "failed";
+  contentId?: string;
+}
+```
+
+**Returns**:
+```typescript
+{
+  items: PurchaseWithContent[];
+  page: number;
+  limit: number;
+  total: number;
+}
+```
+
+---
+
+#### getPurchase(purchaseId, userId): Promise<Purchase>
+
+Get single purchase (scoped to userId).
+
+**Throws**:
+- `NotFoundError` - Purchase doesn't exist
+- `ForbiddenError` - Purchase belongs to different user
+
+---
 
 ## Integration Points
 
-### Service Integration
+### Service Dependencies
 
-The worker integrates with these service packages:
+The ecom-api worker depends on these service packages:
 
-| Package | Purpose | Used For |
-|---------|---------|----------|
-| @codex/security | Rate limiting, security headers | Webhook rate limiting (1000 req/min), CSP headers |
-| @codex/worker-utils | Worker utilities | Health checks, middleware chains, error handling |
-| @codex/observability | Logging and metrics | Request tracking, event logging, error reporting |
-| @codex/database | Database access | Future: storing webhook events and processing results |
-| @codex/validation | Validation schemas | Metadata validation for Stripe events |
-| @codex/shared-types | Type definitions | Environment bindings, Stripe types |
+| Package | Module | Purpose | Used For |
+|---------|--------|---------|----------|
+| @codex/purchase | PurchaseService, createStripeClient, verifyWebhookSignature | Purchase management, Stripe integration | Checkout, webhook processing |
+| @codex/database | dbHttp, createPerRequestDbClient | Database access | Querying/inserting purchases, content, access records |
+| @codex/security | rateLimit, securityHeaders | Rate limiting, security middleware | Webhook rate limiting (1000 req/min), security headers |
+| @codex/worker-utils | createAuthenticatedHandler, withPolicy, createHealthCheckHandler | Worker utilities | Route handlers, health checks, error handling |
+| @codex/observability | ObservabilityClient | Logging and metrics | Request tracking, error logging, event logging |
+| @codex/validation | createCheckoutSchema, purchaseQuerySchema, checkoutSessionMetadataSchema | Input validation | Request body/query validation, metadata validation |
+| @codex/shared-types | HonoEnv, SingleItemResponse, PaginatedListResponse, Bindings | Type definitions | Environment types, response types |
+| stripe | Stripe SDK | Payment processing | Checkout sessions, signature verification, event types |
+| hono | Hono framework | Web framework | HTTP routing, middleware, context |
 
-### Data Flow
+### External Service Dependencies
 
-```
-Stripe Event
-  ↓
-[Verify Signature Middleware]
-  ↓
-Context: { stripeEvent, stripe, obs }
-  ↓
-[Custom Handler (if provided)]
-  ↓
-Save to Database / Update Services
-  ↓
-Return 200 OK to Stripe
-```
-
-### Webhook Integration Patterns
-
-**Pattern 1: Simple Logging**
-```typescript
-app.post('/webhooks/stripe/payment', verifyStripeSignature(),
-  createWebhookHandler('Payment', async (event, stripe, c) => {
-    c.get('obs').info('Payment event received', {
-      id: event.data.object.id,
-      amount: event.data.object.amount
-    });
-  })
-);
-```
-
-**Pattern 2: Database Update**
-```typescript
-app.post('/webhooks/stripe/payment', verifyStripeSignature(),
-  createWebhookHandler('Payment', async (event, stripe, c) => {
-    const paymentIntent = event.data.object as Stripe.PaymentIntent;
-    await db.query(
-      'UPDATE payments SET status = $1 WHERE stripe_id = $2',
-      [event.type, paymentIntent.id]
-    );
-  })
-);
-```
-
-**Pattern 3: Service Integration**
-```typescript
-app.post('/webhooks/stripe/subscription', verifyStripeSignature(),
-  createWebhookHandler('Subscription', async (event, stripe, c) => {
-    const subscription = event.data.object as Stripe.Subscription;
-    const service = new SubscriptionService(c.env.DATABASE_URL);
-
-    if (event.type === 'customer.subscription.deleted') {
-      await service.cancelSubscription(subscription.id);
-    }
-  })
-);
-```
-
-## Dependencies
-
-### Core Packages
-
-| Package | Version | Purpose | Why Used |
+| Service | Binding | Purpose | Used For |
 |---------|---------|---------|----------|
-| stripe | ^19.2.0 | Stripe SDK | Signature verification, event type definitions |
-| hono | ^4.6.20 | Web framework | HTTP routing, middleware, context |
-| zod | ^3.24.1 | Validation | Metadata schema validation |
-| @codex/security | workspace:* | Security middleware | Rate limiting, security headers |
-| @codex/worker-utils | workspace:* | Worker utilities | Health checks, standard middleware |
-| @codex/observability | workspace:* | Observability | Logging, request tracking |
-| @codex/database | workspace:* | Database access | Future: webhook event storage |
-| @codex/validation | workspace:* | Validation utilities | Shared validation patterns |
-| @codex/shared-types | workspace:* | Type definitions | Stripe/Cloudflare type definitions |
+| Stripe API | STRIPE_SECRET_KEY | Payment processing | Creating checkout sessions |
+| Stripe API | STRIPE_WEBHOOK_SECRET_BOOKING (+ others) | Webhook security | Verifying webhook signatures |
+| Neon PostgreSQL | DATABASE_URL | Data persistence | Storing purchases, access records, webhook logs |
+| Cloudflare KV | RATE_LIMIT_KV | Rate limiting storage | Tracking request counts per IP/user |
 
-### Cloudflare Bindings
+### Data Flow (Checkout)
 
-| Binding | Type | Purpose |
-|---------|------|---------|
-| RATE_LIMIT_KV | Cloudflare KV | Rate limit counter storage (webhook endpoint traffic) |
-| DATABASE_URL | Secret | PostgreSQL connection string |
-| STRIPE_SECRET_KEY | Secret | Stripe API secret key for client initialization |
-| STRIPE_WEBHOOK_SECRET_PAYMENT | Secret | HMAC secret for payment webhook endpoint |
-| STRIPE_WEBHOOK_SECRET_SUBSCRIPTION | Secret | HMAC secret for subscription webhook endpoint |
-| STRIPE_WEBHOOK_SECRET_CONNECT | Secret | HMAC secret for Connect webhook endpoint |
-| STRIPE_WEBHOOK_SECRET_CUSTOMER | Secret | HMAC secret for customer webhook endpoint |
-| STRIPE_WEBHOOK_SECRET_BOOKING | Secret | HMAC secret for booking webhook endpoint |
-| STRIPE_WEBHOOK_SECRET_DISPUTE | Secret | HMAC secret for dispute webhook endpoint |
+```
+Frontend
+  ↓
+POST /checkout/create (authenticated)
+  ├─ Validate session (Auth Worker)
+  ├─ Validate input (Zod schema)
+  └─ PurchaseService.createCheckoutSession()
+       ├─ Load content from PostgreSQL
+       ├─ Validate: exists, published, has price
+       ├─ Check: user hasn't purchased before
+       └─ Stripe.checkout.sessions.create()
+           └─ Returns session URL + ID
+       ↓
+  Response: { sessionUrl, sessionId }
+  ↓
+Frontend: Redirect to Stripe Checkout (sessionUrl)
+  ↓
+User: Complete payment on Stripe
+```
+
+### Data Flow (Webhook)
+
+```
+Stripe Servers
+  ↓
+POST /webhooks/stripe/booking (webhook)
+  ├─ Verify Stripe signature (HMAC-SHA256)
+  ├─ Extract event: checkout.session.completed
+  └─ handleCheckoutCompleted()
+       ├─ Extract metadata: customerId, contentId, amount
+       ├─ Validate metadata (Zod)
+       ├─ PurchaseService.completePurchase()
+       │   ├─ Create purchase record (idempotent)
+       │   ├─ Calculate revenue split
+       │   └─ Grant access via contentAccess table
+       └─ Log success
+       ↓
+  Response: 200 OK (always)
+  ↓
+PostgreSQL
+  ├─ purchases table: new row
+  ├─ contentAccess table: new row
+  └─ observability logs
+```
+
+### Session Validation Flow
+
+For authenticated endpoints (POST /checkout/create, GET /purchases):
+
+```
+Request with Cookie: codex-session=...
+  ↓
+withPolicy({ auth: 'required' })
+  └─ Extracts session cookie
+  └─ Calls Auth Worker: GET /api/auth/session
+       └─ Auth Worker validates session in PostgreSQL
+       └─ Checks AUTH_SESSION_KV cache (5min TTL)
+  ├─ 401: Session invalid/expired → Return 401
+  └─ 200: Session valid → Continues
+       └─ Sets c.set('user', userData)
+       └─ Sets c.set('session', sessionData)
+       ↓
+createAuthenticatedHandler()
+  └─ ctx.user.id available in handler
+```
+
+---
+
+## Data Models
+
+### Purchases Table
+
+Stores all purchase records. Used by PurchaseService.
+
+**Schema**:
+```typescript
+{
+  id: string;                    // UUID, primary key
+  stripePaymentIntentId: string; // Stripe Payment Intent ID, unique constraint
+  customerId: string;            // Codex user ID, foreign key to users.id
+  contentId: string;             // Content UUID, foreign key to content.id
+  organizationId: string | null; // Optional: organization UUID for org-owned content
+  amountPaidCents: number;       // Amount in cents (e.g., 4999 = $49.99)
+  currency: string;              // Currency code (e.g., "usd")
+  platformFeesCents: number;     // Platform fee portion (configurable, default 10%)
+  creatorEarningsCents: number;  // Creator earnings (100% - platform fee)
+  status: "completed" | "refunded" | "failed"; // Purchase status
+  purchasedAt: Date;             // ISO 8601 timestamp
+  refundedAt: Date | null;       // ISO 8601 timestamp if refunded
+  createdAt: Date;               // Created timestamp
+  updatedAt: Date;               // Last updated timestamp
+  deletedAt: Date | null;        // Soft delete timestamp
+}
+```
+
+**Indexes**:
+- PRIMARY KEY (id)
+- UNIQUE (stripePaymentIntentId) - ensures idempotency
+- FOREIGN KEY (customerId) → users.id
+- FOREIGN KEY (contentId) → content.id
+- FOREIGN KEY (organizationId) → organizations.id
+- INDEX (customerId, purchasedAt DESC) - for purchase history queries
+
+**Constraints**:
+- amountPaidCents > 0
+- platformFeesCents + creatorEarningsCents = amountPaidCents
+- status IN ('completed', 'refunded', 'failed')
+- currency IN ('usd') [additional currencies future]
+
+---
+
+### ContentAccess Table
+
+Tracks which users have access to which content (via purchase or membership).
+
+**Schema** (subset relevant to purchases):
+```typescript
+{
+  id: string;                    // UUID, primary key
+  userId: string;                // User ID, foreign key to users.id
+  contentId: string;             // Content UUID, foreign key to content.id
+  accessType: "free" | "purchased" | "members_only"; // How user got access
+  purchaseId: string | null;     // Purchase UUID if accessType="purchased"
+  grantedAt: Date;               // ISO 8601 timestamp
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+```
+
+**Constraints**:
+- UNIQUE (userId, contentId) - one access record per user per content
+- If accessType="purchased": purchaseId must be non-null and valid
+- If accessType="free" or "members_only": purchaseId must be null
+
+**Created By**:
+- PurchaseService.completePurchase() - inserts with accessType="purchased"
+
+---
+
+### Webhook Events Table (Future)
+
+For audit trail and idempotency:
+
+**Planned Schema**:
+```typescript
+{
+  id: string;                    // UUID, primary key
+  stripeEventId: string;         // Stripe Event ID, unique constraint
+  eventType: string;             // Event type (e.g., "checkout.session.completed")
+  status: "received" | "processing" | "completed" | "failed";
+  metadata: JSONB;               // Full event data
+  processedAt: Date | null;      // When handler completed
+  errorMessage: string | null;   // Error details if failed
+  createdAt: Date;
+}
+```
+
+---
+
+## Error Handling
+
+### Error Classes
+
+Errors thrown by services and caught by worker middleware:
+
+| Error Class | Status | Cause | Returned Message |
+|---|---|---|---|
+| ValidationError | 400 | Input validation failed | "Invalid input: {details}" |
+| NotFoundError | 404 | Resource doesn't exist | "Not found" |
+| ForbiddenError | 403 | User lacks permission | "Access denied" |
+| ConflictError | 409 | Duplicate/conflict | "Conflict" |
+| AlreadyPurchasedError | 409 | User already purchased | "Already purchased" |
+| ContentNotPurchasableError | 400 | Content not for sale | "Not purchasable" |
+| PaymentProcessingError | 502 | Stripe API failure | "Payment processing failed" |
+| InternalServiceError | 500 | Unexpected error | "Internal server error" |
+
+All errors are caught by the error handler middleware and mapped to standardized HTTP responses via `mapErrorToResponse()`.
+
+### Error Response Format
+
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable message",
+    "details": {}
+  },
+  "requestId": "uuid",
+  "timestamp": "2025-12-14T10:30:00Z"
+}
+```
+
+### Webhook Error Handling
+
+Webhook handlers catch errors and return 200 OK (prevents Stripe retries):
+
+```typescript
+try {
+  await handler(event, stripe, c);
+  return c.json({ received: true });
+} catch (error) {
+  obs.error('Handler error', { error: error.message });
+  return c.json({ received: true, error: 'Handler error' });  // Still 200!
+}
+```
+
+Errors are logged to observability for manual investigation.
+
+### Signature Verification Errors
+
+| Status | Cause | Resolution |
+|---|---|---|
+| 400 | Missing stripe-signature header | Verify Stripe is configured to send webhooks |
+| 401 | Invalid signature (tampering) | Verify webhook secret is correct |
+| 500 | STRIPE_SECRET_KEY or webhook secret not configured | Set environment variables |
+
+---
+
+## Security Model
+
+### Authentication
+
+**Authenticated Endpoints** (POST /checkout/create, GET /purchases):
+- Requires `codex-session` cookie
+- Validates session via Auth Worker
+- Auth Worker checks:
+  - Session exists in PostgreSQL
+  - Session not expired
+  - User ID extracted from session
+- Cached in AUTH_SESSION_KV (5 minute TTL)
+
+**Webhook Endpoints**:
+- No session required
+- Stripe HMAC-SHA256 signature verification required
+- Signature algorithm: HMAC-SHA256(raw_body, webhook_secret)
+- Stripe SDK handles verification via `constructEvent()`
+
+### Authorization
+
+**Scoping** (authenticated endpoints):
+- User can only operate on their own resources
+- `createCheckoutSession()` uses authenticated user ID
+- `getPurchaseHistory()` filters to authenticated user ID only
+- `getPurchase()` verifies purchase belongs to authenticated user
+
+**Webhook Authorization**:
+- No per-user authorization (Stripe signature is authorization)
+- completePurchase() writes purchase for user from webhook metadata
+- Trusted because Stripe signature is verified
+
+### Rate Limiting
+
+| Endpoint | Limit | Key | Window | Exceeded Response |
+|---|---|---|---|---|
+| POST /checkout/create | 10 | User ID | 60s | 429 Too Many Requests |
+| GET /purchases | 100 | User ID | 60s | 429 Too Many Requests |
+| POST /webhooks/stripe/* | 1000 | IP address | 60s | 429 Too Many Requests |
+
+Implemented via `rateLimit()` middleware using Cloudflare KV store.
+
+### Input Validation
+
+All inputs validated via Zod schemas before reaching handlers:
+
+**Checkout Request Body**:
+```typescript
+createCheckoutSchema = z.object({
+  contentId: z.string().uuid(),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url()
+});
+```
+
+**Purchase Query Parameters**:
+```typescript
+purchaseQuerySchema = z.object({
+  page: z.number().int().positive().default(1),
+  limit: z.number().int().positive().max(100).default(20),
+  status: z.enum(['completed', 'refunded', 'failed']).optional(),
+  contentId: z.string().uuid().optional()
+});
+```
+
+**Checkout Session Metadata**:
+```typescript
+checkoutSessionMetadataSchema = z.object({
+  customerId: z.string().uuid(),
+  contentId: z.string().uuid(),
+  organizationId: z.string().uuid().nullable().optional()
+});
+```
+
+Schema validation failures return 400 Bad Request with field-level error details.
+
+### Security Headers
+
+Applied by `createStandardMiddlewareChain()` to all responses:
+
+| Header | Value | Purpose |
+|---|---|---|
+| X-Content-Type-Options | nosniff | Prevent MIME sniffing attacks |
+| X-Frame-Options | DENY | Prevent clickjacking |
+| Referrer-Policy | strict-origin-when-cross-origin | Limit referrer leakage |
+| Content-Security-Policy | (API preset) | Restrict resource loading |
+| Strict-Transport-Security | max-age=31536000; includeSubDomains | Force HTTPS (production) |
+
+### Stripe Signature Verification (Critical)
+
+Located in `src/middleware/verify-signature.ts`:
+
+**Process**:
+1. Extract `stripe-signature` header from request
+2. Get raw request body (CRITICAL: before JSON parsing)
+3. Call `verifyWebhookSignature()` from Stripe SDK:
+   - Extracts timestamp and signature from header
+   - Computes expected HMAC-SHA256 signature
+   - Compares with received signature
+4. On success: event object set in context
+5. On failure: return 401 Unauthorized
+
+**Why Raw Body Required**:
+Signature is computed over exact raw bytes from Stripe. If body is JSON-parsed and re-stringified, bytes change and signature verification fails.
+
+**Secret Management**:
+- Per-endpoint secrets: STRIPE_WEBHOOK_SECRET_PAYMENT, STRIPE_WEBHOOK_SECRET_BOOKING, etc.
+- Extracted at middleware based on request path
+- Never logged (sensitive)
+- Stored as wrangler secrets (encrypted by Cloudflare)
+
+### PII Handling
+
+**What's Logged**:
+- Request metadata (method, path, status, duration)
+- Error types and messages (without sensitive details)
+- Purchase metadata (amounts, statuses)
+- Event types and IDs
+
+**What's NOT Logged**:
+- Request bodies (passwords, tokens, emails)
+- Response bodies with user data
+- Stripe raw event data (unless explicitly needed for debugging)
+- Full error stack traces in production
+
+**User Data Exposure**:
+- Purchase email only returned to authenticated user for their own purchase
+- User IDs scoped to authenticated context
+- No cross-user data visible
+
+---
+
+## Performance Notes
+
+### Rate Limiting
+
+- Webhook limit (1000 req/min): Accommodates normal Stripe webhook volume while preventing abuse
+- Checkout limit (10 req/min): Low limit prevents session spam
+- Purchase query limit (100 req/min): Standard API limit
+
+Limits enforced via KV store with atomic increment/expire operations.
+
+### Database Query Performance
+
+**Optimized Queries**:
+- Purchase history: Indexed by (customerId, purchasedAt DESC)
+- Purchase lookup: Indexed by stripePaymentIntentId (unique)
+- Content validation: Indexed by (id, deletedAt) and published status
+
+**Connection Pooling**:
+- dbHttp uses HTTP connection pooling (production)
+- Per-request db client uses direct connection (webhooks with transactions)
+- Connection reuse reduces latency per query
+
+### Signature Verification Latency
+
+- HMAC-SHA256 verification: ~5-10ms
+- No database access during verification
+- Parallel processing of multiple webhooks
+
+### Caching Strategy
+
+- Auth session cached in AUTH_SESSION_KV (5 minute TTL)
+- Reduces load on Auth Worker and PostgreSQL
+- Stale session possible but expires on next login
+
+### Webhook Processing
+
+- No blocking operations (all async)
+- Database transaction is atomic but may block briefly
+- Stripe timeout: ~5 seconds (should complete well before)
+
+To optimize:
+- Keep webhook handlers simple
+- Defer heavy computation to background jobs
+- Batch multiple updates if processing multiple events
+
+---
+
+## Testing
+
+### Unit Tests
+
+Located in `src/index.test.ts` and `src/security.test.ts`.
+
+**Running Tests**:
+```bash
+pnpm test              # Run once
+pnpm test:watch       # Watch mode
+pnpm test:coverage    # Coverage report
+```
+
+**Test Environment**:
+- Runs in Cloudflare Workers runtime (workerd) via `@cloudflare/vitest-pool-workers`
+- Access to environment bindings via `cloudflare:test` module
+- Isolated from production
+
+**Example Test**:
+```typescript
+import { env, SELF } from 'cloudflare:test';
+import { describe, it, expect } from 'vitest';
+
+describe('Health Check', () => {
+  it('should return health status', async () => {
+    const response = await SELF.fetch('http://localhost/health');
+    expect([200, 503]).toContain(response.status);
+    const json = await response.json();
+    expect(json.status).toBeDefined();
+  });
+});
+```
+
+### Integration Testing
+
+**Local Testing** (manual):
+
+**1. Checkout Flow**:
+```bash
+# Start worker
+pnpm dev
+
+# Create test user via Auth Worker
+curl -X POST http://localhost:42069/api/auth/email/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email":"test@example.com",
+    "password":"Test123!@#",
+    "name":"Test User"
+  }' \
+  -c cookies.txt
+
+# Login (if needed)
+curl -X POST http://localhost:42069/api/auth/email/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"Test123!@#"}' \
+  -c cookies.txt
+
+# Create test content (via Content-API Worker)
+# Then create checkout session
+curl -X POST http://localhost:42072/checkout/create \
+  -H "Cookie: codex-session=$(cat cookies.txt | grep codex-session | awk '{print $NF}')" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contentId":"550e8400-e29b-41d4-a716-446655440000",
+    "successUrl":"https://example.com/success",
+    "cancelUrl":"https://example.com/cancel"
+  }'
+
+# Expected: { "data": { "sessionUrl": "...", "sessionId": "..." } }
+```
+
+**2. Webhook Testing**:
+```bash
+# Terminal 1: Start worker
+pnpm dev
+
+# Terminal 2: Start Stripe listener
+stripe listen --forward-to http://localhost:42072/webhooks/stripe/booking
+
+# Note: Copy the signing secret output by stripe listen
+# Export it for use in trigger commands
+
+# Terminal 3: Trigger test event
+stripe trigger checkout.session.completed
+
+# Check worker logs for:
+# - "Webhook signature verified"
+# - "Processing checkout.session.completed"
+# - "Purchase completed successfully"
+```
+
+**3. Rate Limiting Test**:
+```bash
+# Exceed rate limit on checkout endpoint
+for i in {1..15}; do
+  curl -X POST http://localhost:42072/checkout/create \
+    -H "Cookie: codex-session=test" \
+    -d '{}' \
+  -H "Content-Type: application/json"
+done
+
+# 11th+ requests should return 429 Too Many Requests
+```
+
+### Security Testing
+
+**Stripe Signature Verification**:
+```bash
+# Test missing signature
+curl -X POST http://localhost:42072/webhooks/stripe/booking \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# Expected: 400 Bad Request: Missing signature
+
+# Test invalid signature
+curl -X POST http://localhost:42072/webhooks/stripe/booking \
+  -H "stripe-signature: t=1234567890,v1=invalid" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# Expected: 401 Unauthorized
+```
+
+**Session Validation**:
+```bash
+# Test missing session
+curl -X POST http://localhost:42072/checkout/create \
+  -H "Content-Type: application/json" \
+  -d '{ "contentId": "...", "successUrl": "...", "cancelUrl": "..." }'
+# Expected: 401 Unauthorized
+
+# Test invalid session
+curl -X POST http://localhost:42072/checkout/create \
+  -H "Cookie: codex-session=invalid" \
+  -H "Content-Type: application/json" \
+  -d '{ "contentId": "...", "successUrl": "...", "cancelUrl": "..." }'
+# Expected: 401 Unauthorized
+```
+
+### Test Utilities
+
+From `@codex/test-utils`:
+- `setupTestDatabase()` - Provision test database
+- `teardownTestDatabase()` - Clean up test database
+- `seedTestUsers()` - Create test user fixtures
+- `withNeonTestBranch()` - Ephemeral test database branches
+
+Example:
+```typescript
+import { setupTestDatabase, seedTestUsers } from '@codex/test-utils';
+
+describe('Purchase', () => {
+  beforeEach(async () => {
+    await setupTestDatabase();
+    const users = await seedTestUsers(1);
+    testUserId = users[0].id;
+  });
+
+  afterEach(async () => {
+    await teardownTestDatabase();
+  });
+
+  it('creates purchase', async () => {
+    // Test implementation
+  });
+});
+```
+
+---
 
 ## Development & Deployment
 
 ### Local Development
 
 **Prerequisites**:
-- Node.js 20+ (compatible with Cloudflare Workers)
-- wrangler CLI: `npm install -g wrangler`
-- Stripe CLI: https://stripe.com/docs/stripe-cli
+```bash
+# Node.js 20+ (Cloudflare Workers compatible)
+node --version  # >= 20.0.0
+
+# pnpm package manager
+npm install -g pnpm
+
+# Stripe CLI (for webhook testing)
+brew install stripe/stripe-cli/stripe  # macOS
+# or: https://stripe.com/docs/stripe-cli
+```
 
 **Setup**:
 ```bash
@@ -918,8 +1380,14 @@ cd workers/ecom-api
 # Install dependencies
 pnpm install
 
-# Create local environment file (copy from .env.example or setup manually)
-# Required: DATABASE_URL, STRIPE_SECRET_KEY, all STRIPE_WEBHOOK_SECRET_* vars
+# Create .dev.vars file with local environment
+cat > .dev.vars << 'EOF'
+ENVIRONMENT=development
+DATABASE_URL=postgresql://user:pass@localhost:5432/codex_dev
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET_BOOKING=whsec_test_...
+RATE_LIMIT_KV=test-kv
+EOF
 ```
 
 **Running Locally**:
@@ -927,107 +1395,82 @@ pnpm install
 # Start worker on port 42072
 pnpm dev
 
-# In another terminal, forward Stripe webhooks to local worker
-stripe listen --forward-to localhost:42072/webhooks/stripe/payment \
-  --forward-to localhost:42072/webhooks/stripe/subscription \
-  --forward-to localhost:42072/webhooks/stripe/connect \
-  --forward-to localhost:42072/webhooks/stripe/customer \
-  --forward-to localhost:42072/webhooks/stripe/booking \
-  --forward-to localhost:42072/webhooks/stripe/dispute
+# In another terminal: forward Stripe webhooks
+stripe listen --forward-to http://localhost:42072/webhooks/stripe/booking
 
-# Trigger test events
+# In another terminal: trigger test events
+stripe trigger checkout.session.completed
 stripe trigger payment_intent.succeeded
-stripe trigger customer.subscription.created
-# etc.
 ```
 
-**Building**:
+### Building
+
 ```bash
 # Build for deployment
 pnpm build
 
 # Output: dist/index.js
+# This is the compiled worker ready for wrangler deploy
 ```
 
 ### Testing
 
-**Unit Tests**:
 ```bash
-# Run all tests
+# Run tests once
 pnpm test
 
-# Watch mode
+# Watch mode (re-run on file changes)
 pnpm test:watch
 
 # Coverage report
 pnpm test:coverage
 ```
 
-**Test Environment**:
-- Tests run in Cloudflare Workers runtime (workerd) via @cloudflare/vitest-pool-workers
-- Access to environment bindings via cloudflare:test module
-- Database available in test environment (if configured)
-
-**Writing Tests**:
-```typescript
-import { env, SELF } from 'cloudflare:test';
-
-describe('Webhook', () => {
-  it('should reject missing signature', async () => {
-    const response = await SELF.fetch('http://localhost/webhooks/stripe/payment', {
-      method: 'POST',
-      body: JSON.stringify({ type: 'payment_intent.succeeded' })
-    });
-    expect(response.status).toBe(400);
-  });
-});
-```
-
 ### Environment Variables
 
-**Development (.env or wrangler dev)**:
+**Development** (`.dev.vars` or wrangler dev):
 ```
 ENVIRONMENT=development
 DATABASE_URL=postgresql://user:pass@localhost:5432/codex_dev
 STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_test_...
-STRIPE_WEBHOOK_SECRET_SUBSCRIPTION=whsec_test_...
-STRIPE_WEBHOOK_SECRET_CONNECT=whsec_test_...
-STRIPE_WEBHOOK_SECRET_CUSTOMER=whsec_test_...
 STRIPE_WEBHOOK_SECRET_BOOKING=whsec_test_...
-STRIPE_WEBHOOK_SECRET_DISPUTE=whsec_test_...
+STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_test_...
+RATE_LIMIT_KV=(local KV)
 ```
 
-**Staging (wrangler.jsonc)**:
+**Staging** (wrangler.jsonc):
 ```
 ENVIRONMENT=staging
-DB_METHOD=STAGING
+API_URL=https://api-staging.revelations.studio
 WEB_APP_URL=https://codex-staging.revelations.studio
-AUTH_WORKER_URL=https://auth-staging.revelations.studio
+DB_METHOD=PRODUCTION
 ```
 
-**Production (wrangler.jsonc)**:
+**Production** (wrangler.jsonc):
 ```
 ENVIRONMENT=production
-DB_METHOD=PRODUCTION
+API_URL=https://api.revelations.studio
 WEB_APP_URL=https://codex.revelations.studio
-AUTH_WORKER_URL=https://auth.revelations.studio
+DB_METHOD=PRODUCTION
 ```
 
-**Setting Secrets**:
+### Secrets Management
+
+Store sensitive values as wrangler secrets (never in wrangler.jsonc):
+
 ```bash
-# Set Stripe secret (shared across environments)
-wrangler secret put STRIPE_SECRET_KEY --env staging
-wrangler secret put STRIPE_SECRET_KEY --env production
-
-# Set webhook secrets
-wrangler secret put STRIPE_WEBHOOK_SECRET_PAYMENT --env staging
-wrangler secret put STRIPE_WEBHOOK_SECRET_PAYMENT --env production
-
-# Set database URL
+# Staging environment
 wrangler secret put DATABASE_URL --env staging
+wrangler secret put STRIPE_SECRET_KEY --env staging
+wrangler secret put STRIPE_WEBHOOK_SECRET_BOOKING --env staging
+
+# Production environment
 wrangler secret put DATABASE_URL --env production
+wrangler secret put STRIPE_SECRET_KEY --env production
+wrangler secret put STRIPE_WEBHOOK_SECRET_BOOKING --env production
 ```
+
+Secrets are encrypted by Cloudflare and injected at runtime.
 
 ### Deployment
 
@@ -1043,296 +1486,247 @@ pnpm deploy --env production
 
 The deploy script runs `pnpm build` then `wrangler deploy`.
 
-**Webhook URL Configuration in Stripe Dashboard**:
+### Webhook Configuration in Stripe Dashboard
 
 1. Login to https://dashboard.stripe.com
-2. Navigate to Settings → Webhooks
-3. Add new endpoint for each webhook type:
-   - **Payment**: https://api.revelations.studio/webhooks/stripe/payment
-   - **Subscription**: https://api.revelations.studio/webhooks/stripe/subscription
-   - **Connect**: https://api.revelations.studio/webhooks/stripe/connect
-   - **Customer**: https://api.revelations.studio/webhooks/stripe/customer
-   - **Booking**: https://api.revelations.studio/webhooks/stripe/booking
-   - **Dispute**: https://api.revelations.studio/webhooks/stripe/dispute
-4. Copy webhook signing secrets to environment variables (STRIPE_WEBHOOK_SECRET_*)
-5. Select which events each endpoint should receive
-6. Test webhook delivery using Stripe's test button
+2. Navigate to Settings → Developers → Webhooks
+3. Click "Add endpoint"
+4. For each webhook type, add endpoint:
 
-**Webhook Configuration Notes**:
-- Each endpoint has a separate signing secret in Stripe dashboard
-- Store secrets as wrangler secrets (never in source code)
-- Verify webhook URLs are accessible and return 200 OK responses
-- Monitor webhook delivery logs in Stripe dashboard for failures
-- Set up alerting for failed webhook deliveries in observability
+| Event Type | URL |
+|---|---|
+| Booking (checkout.session.completed) | https://ecom-api.revelations.studio/webhooks/stripe/booking |
+| Payment (payment_intent.*, charge.*) | https://ecom-api.revelations.studio/webhooks/stripe/payment |
+| Subscription (customer.subscription.*, invoice.*) | https://ecom-api.revelations.studio/webhooks/stripe/subscription |
+| Customer (customer.*) | https://ecom-api.revelations.studio/webhooks/stripe/customer |
+| Connect (account.*, capability.*, person.*) | https://ecom-api.revelations.studio/webhooks/stripe/connect |
+| Dispute (charge.dispute.*, radar.early_fraud_warning.*) | https://ecom-api.revelations.studio/webhooks/stripe/dispute |
 
-## Webhook Integration Checklist
+5. For each endpoint:
+   - Copy the "Signing secret" (starts with `whsec_`)
+   - Store as wrangler secret: `wrangler secret put STRIPE_WEBHOOK_SECRET_BOOKING --env production`
+   - Select which events to receive
+   - Click "Create endpoint"
 
-When adding a new webhook handler:
+6. Test webhook delivery:
+   - Click on endpoint
+   - Scroll to "Recent events"
+   - Click "Send test webhook"
+   - Check that delivery shows "Delivered" (200 status)
 
-1. [ ] Define Zod schema in `src/schemas/[event-type].ts`
-2. [ ] Implement handler function with proper error handling
-3. [ ] Add handler to endpoint via `createWebhookHandler('Type', handler)`
-4. [ ] Validate metadata using `validateMetadata()` or similar
-5. [ ] Log all operations via observability client
-6. [ ] Implement idempotent database operations (use upsert)
-7. [ ] Test with Stripe CLI: `stripe trigger [event-type]`
-8. [ ] Add unit tests for handler logic
-9. [ ] Configure webhook in Stripe dashboard
-10. [ ] Monitor webhook delivery logs post-deployment
-
-## Performance Notes
-
-### Rate Limiting
-
-Webhook endpoints are rate limited to 1000 requests per minute. For legitimate Stripe webhooks:
-- Stripe typically sends webhooks at low frequency (< 100/min for normal volume)
-- Rate limit can be adjusted in wrangler.jsonc if needed
-- Rate limit is per IP address by default
-
-### Response Time
-
-- Signature verification: ~5-10ms (HMAC-SHA256)
-- No handler (default): ~15-20ms (with observability logging)
-- With custom handler: depends on handler complexity
-
-To optimize performance:
-- Keep handlers simple and async where possible
-- Defer heavy operations to background jobs
-- Batch database writes if processing multiple events
-- Use database connection pooling
-
-### Observability Overhead
-
-Request tracking and logging adds ~5-10ms per request. This is acceptable for webhook processing where latency is not critical.
-
-### Caching
-
-No caching is implemented in the webhook handler because:
-- Each Stripe event should be processed once
-- Signatures change for each request
-- Event data often has time-sensitive information
-
-## Error Handling Patterns
-
-### Pattern 1: Graceful Degradation
-```typescript
-const handler: WebhookHandler = async (event, stripe, c) => {
-  const obs = c.get('obs');
-
-  try {
-    // Try to process
-    await processEvent(event);
-  } catch (error) {
-    // Log but don't throw (prevents Stripe retry)
-    obs.error('Failed to process event', { error: (error as Error).message });
-    // Return 200 anyway - event is acknowledged
-  }
-};
-```
-
-### Pattern 2: Validation with Fallback
-```typescript
-const handler: WebhookHandler = async (event, stripe, c) => {
-  const obs = c.get('obs');
-
-  const metadata = validateMetadataWithDefault(
-    (event.data.object as any).metadata,
-    PaymentMetadataSchema,
-    {}
-  );
-
-  // Use metadata or fallback to defaults
-  await processPayment(event, metadata);
-};
-```
-
-### Pattern 3: Retry with Exponential Backoff (Client-Side)
-```typescript
-async function processWithRetry(event: Stripe.Event) {
-  let attempt = 0;
-  const maxAttempts = 3;
-
-  while (attempt < maxAttempts) {
-    try {
-      await processEvent(event);
-      return;
-    } catch (error) {
-      attempt++;
-      if (attempt >= maxAttempts) throw error;
-      await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
-    }
-  }
-}
-```
-
-## Security Considerations
-
-### Why Stripe Signature Verification is Critical
-
-Stripe webhooks are delivered over the public internet. Without signature verification:
-1. Attackers could forge fake events
-2. Payment could be credited without actual charge
-3. Subscription could be cancelled without user action
-4. Customer data could be leaked
-
-**Always verify signatures** before processing any webhook event.
-
-### Preventing Replay Attacks
-
-The worker does not implement replay attack prevention because:
-- Each webhook from Stripe has unique ID and timestamp
-- Database upserts prevent duplicate event processing
-- Stripe rate-limits webhook delivery to prevent accidental duplicates
-
-### Securing Webhook Secrets
-
-Webhook secrets must be:
-- Never committed to source code
-- Stored as wrangler secrets (encrypted by Cloudflare)
-- Rotated in Stripe dashboard if compromised
-- Set separately per environment (staging vs production)
-- Accessed only in this worker (not shared with other services)
-
-### Metadata Validation
-
-Always validate Stripe metadata because:
-- Client-side code could manipulate metadata
-- Metadata is not cryptographically signed (event is signed, but object fields are not)
-- Validation prevents injection attacks
-
-```typescript
-// BAD: Trust metadata without validation
-const userId = paymentIntent.metadata?.userId;
-await db.users.findById(userId);
-
-// GOOD: Validate before use
-const metadata = validateMetadataStrict(
-  paymentIntent.metadata,
-  z.object({ userId: z.string().uuid() })
-);
-await db.users.findById(metadata.userId);
-```
-
-## Monitoring & Alerts
-
-### Key Metrics to Monitor
-
-1. **Webhook Delivery Rate**: Webhooks received per minute
-2. **Signature Verification Failure Rate**: Failed signature verifications per minute
-3. **Handler Error Rate**: Handler exceptions per minute
-4. **Response Time**: P50, P95, P99 latency
-5. **Rate Limit Hit Rate**: 429 responses per minute
-
-### Alerts to Configure
-
-1. **Signature Verification Failures**: Indicates compromised webhook secrets or tampering
-2. **Handler Errors**: Logic errors in webhook processing
-3. **High Error Rate**: Broader system issues
-4. **Deployment Issues**: Failed webhook delivery after deploy
-
-These are monitored via observability client and available in Cloudflare dashboard.
+---
 
 ## File Structure
 
 ```
 workers/ecom-api/
 ├── src/
-│   ├── index.ts                    # Main worker entry point
-│   ├── types.ts                    # TypeScript type definitions
-│   ├── index.test.ts              # Worker integration tests
-│   ├── security.test.ts           # Security middleware tests
+│   ├── index.ts                      # Main worker entry point (Hono app setup)
+│   ├── types.ts                      # TypeScript type definitions (StripeWebhookEnv)
+│   ├── index.test.ts                 # Worker integration tests
+│   ├── security.test.ts              # Security middleware tests
+│   │
+│   ├── routes/
+│   │   ├── checkout.ts               # Checkout session creation (POST /checkout/create)
+│   │   └── purchases.ts              # Purchase history/details (GET /purchases/:id)
+│   │
+│   ├── handlers/
+│   │   └── checkout.ts               # handleCheckoutCompleted() webhook handler
+│   │
 │   ├── middleware/
-│   │   └── verify-signature.ts    # Stripe signature verification
-│   ├── utils/
-│   │   ├── webhook-handler.ts     # Webhook handler factory
-│   │   └── metadata.ts            # Metadata validation utilities
-│   └── schemas/
-│       ├── payment.ts              # Payment event metadata schema
-│       ├── subscription.ts         # Subscription event metadata schema
-│       ├── customer.ts             # Customer event metadata schema
-│       ├── connect.ts              # Connect account metadata schema
-│       ├── booking.ts              # Booking event metadata schema
-│       └── dispute.ts              # Dispute event metadata schema
-├── dist/                           # Build output (generated)
-├── package.json                    # Dependencies and scripts
-├── wrangler.jsonc                 # Cloudflare Workers configuration
-├── tsconfig.json                  # TypeScript configuration
-├── vitest.config.ts               # Vitest configuration
-├── vite.config.ts                 # Vite build configuration
-└── README.clog                    # This documentation
+│   │   └── verify-signature.ts       # Stripe signature verification
+│   │
+│   └── utils/
+│       ├── webhook-handler.ts        # createWebhookHandler() factory
+│       ├── validate-env.ts           # Environment variable validation
+│       └── metadata.ts               # Stripe metadata validation utilities
+│
+├── dist/                             # Build output (generated)
+│   └── index.js                      # Compiled worker
+│
+├── package.json                      # Dependencies and scripts
+├── wrangler.jsonc                    # Cloudflare Workers configuration
+├── tsconfig.json                     # TypeScript configuration
+├── vitest.config.ts                  # Vitest configuration
+├── vite.config.ts                    # Vite build configuration
+└── CLAUDE.md                         # This documentation
 ```
+
+---
 
 ## Common Tasks
 
-### Task: Add Payment Processing Handler
+### Add New Webhook Handler
 
-1. Open `src/index.ts`
-2. Replace the payment handler placeholder:
-   ```typescript
-   app.post(
-     '/webhooks/stripe/payment',
-     verifyStripeSignature(),
-     createWebhookHandler('Payment', async (event, stripe, c) => {
-       const pi = event.data.object as Stripe.PaymentIntent;
-       const obs = c.get('obs');
+**Goal**: Process payment_intent.succeeded events
 
-       if (event.type === 'payment_intent.succeeded') {
-         obs.info('Recording payment', { id: pi.id });
-         // Implement payment recording logic
-       }
-     })
-   );
-   ```
-3. Add metadata schema in `src/schemas/payment.ts`
-4. Add tests in `src/index.test.ts`
-5. Deploy and test with Stripe CLI
+**Steps**:
 
-### Task: Validate Event Metadata
+1. **Create handler function** in `src/handlers/payment.ts`:
+```typescript
+import type { Context } from 'hono';
+import type Stripe from 'stripe';
+import type { StripeWebhookEnv } from '../types';
 
-1. Define schema in `src/schemas/[event-type].ts`
-2. In handler, validate using `validateMetadata()`:
-   ```typescript
-   const result = validateMetadata(metadata, MySchema);
-   if (!result.success) {
-     obs.warn('Invalid metadata', {
-       errors: formatValidationErrors(result.error)
-     });
-     return;
-   }
-   const validated = result.data;
-   ```
+export async function handlePaymentSucceeded(
+  event: Stripe.Event,
+  stripe: Stripe,
+  c: Context<StripeWebhookEnv>
+) {
+  const obs = c.get('obs');
+  const paymentIntent = event.data.object as Stripe.PaymentIntent;
 
-### Task: Debug Webhook Failures
+  obs.info('Processing payment.succeeded', {
+    id: paymentIntent.id,
+    amount: paymentIntent.amount
+  });
 
-1. Check observability logs: look for signature verification errors
-2. Verify webhook secret is correct for the environment
-3. Use Stripe CLI to trigger test events: `stripe trigger event.type`
-4. Check if handler is throwing exceptions (look for "handler error" logs)
-5. Verify database/service connections if doing downstream updates
+  // Add your logic here
+  // e.g., update payment status, send email, etc.
+}
+```
 
-### Task: Increase Rate Limit
+2. **Wire handler** in `src/index.ts`:
+```typescript
+import { handlePaymentSucceeded } from './handlers/payment';
 
-1. Open `src/index.ts`
-2. Find rate limiting middleware
-3. Create custom rate limit preset or modify:
-   ```typescript
-   app.use('/webhooks/*', (c, next) => {
-     return rateLimit({
-       kv: c.env.RATE_LIMIT_KV,
-       maxRequests: 5000,  // Increase from 1000
-       windowMs: 60 * 1000
-     })(c, next);
-   });
-   ```
+app.post(
+  '/webhooks/stripe/payment',
+  verifyStripeSignature(),
+  createWebhookHandler('Payment', handlePaymentSucceeded)
+);
+```
+
+3. **Test locally**:
+```bash
+stripe listen --forward-to http://localhost:42072/webhooks/stripe/payment
+stripe trigger payment_intent.succeeded
+```
+
+4. **Deploy and configure**:
+```bash
+pnpm deploy --env production
+# Then configure webhook in Stripe dashboard
+```
+
+---
+
+### Debug Webhook Issues
+
+**Symptom**: Webhook not being received
+
+**Troubleshooting**:
+```bash
+# 1. Check worker logs
+wrangler tail --env production
+
+# 2. Verify webhook endpoint in Stripe dashboard
+# Dashboard → Settings → Webhooks → Click endpoint → Recent events
+
+# 3. Check if event was sent and response status
+# Look for "Delivered" (200) or "Failed" (non-200)
+
+# 4. If 401 Unauthorized: Signature verification failed
+# - Verify webhook secret is correct
+# - Check that secret matches what's in wrangler secret
+
+# 5. If 400 Bad Request: Missing signature header
+# - This shouldn't happen with Stripe, indicates misconfiguration
+
+# 6. If handler error but 200 returned: Check error logs
+# - Error logged to observability but webhook still acknowledged
+# - Look in Cloudflare observability for error details
+```
+
+---
+
+### Increase Rate Limits
+
+**Goal**: Allow more checkout requests during flash sale
+
+**Steps**:
+
+1. **Update in src/routes/checkout.ts**:
+```typescript
+checkout.post('/create',
+  withPolicy({
+    auth: 'required',
+    rateLimit: 'api'  // Change from 'auth' (10/min) to 'api' (100/min)
+  }),
+  // ... rest of handler
+);
+```
+
+Or create custom rate limit:
+```typescript
+import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
+
+checkout.post('/create',
+  async (c, next) => {
+    return rateLimit({
+      kv: c.env.RATE_LIMIT_KV,
+      maxRequests: 50,  // Custom limit
+      windowMs: 60 * 1000
+    })(c, next);
+  },
+  withPolicy({ auth: 'required' }),
+  // ... rest
+);
+```
+
+2. **Deploy and verify**:
+```bash
+pnpm deploy --env production
+
+# Test new limit
+for i in {1..60}; do
+  curl -X POST https://ecom-api.revelations.studio/checkout/create ...
+done
+```
+
+---
+
+### Monitor Webhook Health
+
+**Using Stripe Dashboard**:
+1. Settings → Webhooks → Click endpoint
+2. "Recent events" tab shows delivery status
+3. Red "Failed" indicates issues
+
+**Using Worker Logs**:
+```bash
+wrangler tail --env production | grep webhook
+```
+
+**Metrics to Monitor**:
+- Webhook delivery success rate (% delivered vs failed)
+- Processing latency (time from receipt to completion)
+- Error rate (% handler errors)
+
+---
 
 ## References
 
-- [Stripe Webhooks Documentation](https://stripe.com/docs/webhooks)
-- [Stripe Webhook Signatures](https://stripe.com/docs/webhooks/signatures)
-- [Stripe API Reference](https://stripe.com/docs/api)
-- [Stripe CLI Documentation](https://stripe.com/docs/stripe-cli)
+**Stripe Documentation**:
+- [Stripe Webhooks](https://stripe.com/docs/webhooks)
+- [Webhook Signatures](https://stripe.com/docs/webhooks/signatures)
+- [Checkout Session API](https://stripe.com/docs/api/checkout/sessions/create)
+- [Payment Intent API](https://stripe.com/docs/api/payment_intents)
+
+**Codex Platform**:
+- [@codex/purchase Documentation](../../packages/purchase/CLAUDE.md)
+- [@codex/database Documentation](../../packages/database/CLAUDE.md)
+- [@codex/worker-utils Documentation](../../packages/worker-utils/CLAUDE.md)
+- [@codex/security Documentation](../../packages/security/CLAUDE.md)
+
+**Frameworks & Tools**:
 - [Hono Documentation](https://hono.dev/)
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
-- [@codex/worker-utils Documentation](../worker-utils/README.clog)
-- [@codex/security Documentation](../security/README.clog)
-- [@codex/observability Documentation](../observability/README.clog)
+- [Cloudflare Workers](https://developers.cloudflare.com/workers/)
+- [wrangler CLI](https://developers.cloudflare.com/workers/wrangler/)
+- [Stripe CLI](https://stripe.com/docs/stripe-cli)
+- [Zod Validation](https://zod.dev/)
+
+**External Services**:
+- [Stripe API Reference](https://stripe.com/docs/api)
+- [Stripe Test Mode](https://stripe.com/docs/testing)
+- [Stripe Signing Secrets](https://dashboard.stripe.com/apikeys)
