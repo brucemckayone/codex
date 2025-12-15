@@ -298,6 +298,7 @@ export function createKvCheck(bindingNames: string[]): (
   details?: unknown;
 }> {
   return async (c: Context<HonoEnv>) => {
+    const obs = c.get('obs');
     const bindings = bindingNames.map((name) => ({
       name,
       kv: (c.env as Record<string, KVNamespace | undefined>)[name],
@@ -317,7 +318,10 @@ export function createKvCheck(bindingNames: string[]): (
           return { name, status: 'ok', message: `'${name}' is accessible.` };
         } catch (e) {
           const error = e instanceof Error ? e.message : 'Unknown error';
-          console.error(`Health check for KV '${name}' failed: ${error}`);
+          obs?.error(`Health check for KV '${name}' failed`, {
+            error,
+            name,
+          });
           return {
             name,
             status: 'error',
@@ -363,6 +367,7 @@ export function createR2Check(bindingNames: string[]): (
   details?: unknown;
 }> {
   return async (c: Context<HonoEnv>) => {
+    const obs = c.get('obs');
     const bindings = bindingNames.map((name) => ({
       name,
       bucket: (c.env as Record<string, R2Bucket | undefined>)[name],
@@ -383,9 +388,10 @@ export function createR2Check(bindingNames: string[]): (
           return { name, status: 'ok', message: `'${name}' is accessible.` };
         } catch (e) {
           const error = e instanceof Error ? e.message : 'Unknown error';
-          console.error(
-            `Health check for R2 bucket '${name}' failed: ${error}`
-          );
+          obs?.error(`Health check for R2 bucket '${name}' failed`, {
+            error,
+            name,
+          });
           return {
             name,
             status: 'error',
@@ -434,7 +440,8 @@ export function createNotFoundHandler() {
  */
 export function createErrorHandler(environment?: string) {
   return (err: Error, c: Context) => {
-    console.error('Unhandled error:', {
+    const obs = c.get('obs');
+    obs?.error('Unhandled error', {
       error: err.message,
       stack: err.stack,
       path: c.req.path,

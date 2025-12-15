@@ -75,7 +75,11 @@ const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
     return response;
   } catch (error) {
     // BetterAuth threw an error - let error handler deal with it
-    console.error('BetterAuth handler error:', error);
+    const obs = c.get('obs');
+    obs?.error('BetterAuth handler error', {
+      error: error instanceof Error ? error.message : String(error),
+      path: c.req.path,
+    });
     throw error;
   }
 };

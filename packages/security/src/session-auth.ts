@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { dbHttp, schema } from '@codex/database';
+import type { ObservabilityClient } from '@codex/observability';
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context, Next } from 'hono';
 
@@ -94,10 +95,12 @@ function extractSessionCookie(
  * 4. Returns null if session invalid or expired
  *
  * @param sessionToken - Session token from cookie
+ * @param obs - Optional observability client for structured logging
  * @returns Session and user data, or null if invalid
  */
 async function querySessionFromDatabase(
-  sessionToken: string
+  sessionToken: string,
+  obs?: ObservabilityClient
 ): Promise<CachedSessionData | null> {
   try {
     // SECURITY: Use parameterized query via Drizzle ORM to prevent SQL injection
@@ -145,7 +148,7 @@ async function querySessionFromDatabase(
     return sessionData;
   } catch (error) {
     // SECURITY: Log error but don't expose database internals to caller
-    console.error('Database query error in session authentication:', {
+    obs?.error('Database query error in session authentication', {
       error: error instanceof Error ? error.message : 'Unknown error',
       // SECURITY: Don't log session token
     });
@@ -163,11 +166,13 @@ async function querySessionFromDatabase(
  * @param kv - KV namespace
  * @param sessionToken - Session token (used as cache key)
  * @param data - Session and user data to cache
+ * @param obs - Optional observability client for structured logging
  */
 async function cacheSessionInKV(
   kv: KVNamespace,
   sessionToken: string,
-  data: CachedSessionData
+  data: CachedSessionData,
+  obs?: ObservabilityClient
 ): Promise<void> {
   try {
     // Calculate TTL in seconds until session expires
@@ -187,7 +192,7 @@ async function cacheSessionInKV(
   } catch (error) {
     // SECURITY: Cache failure should not break authentication flow
     // Log error but continue (graceful degradation to database-only mode)
-    console.error('Failed to cache session in KV:', {
+    obs?.error('Failed to cache session in KV', {
       error: error instanceof Error ? error.message : 'Unknown error',
       // SECURITY: Don't log session token or data
     });
@@ -199,18 +204,20 @@ async function cacheSessionInKV(
  *
  * @param kv - KV namespace
  * @param sessionToken - Session token (cache key)
+ * @param obs - Optional observability client for structured logging
  * @returns Cached session data or null if not found
  */
 async function getSessionFromCache(
   kv: KVNamespace,
-  sessionToken: string
+  sessionToken: string,
+  obs?: ObservabilityClient
 ): Promise<CachedSessionData | null> {
   try {
     const cached = await kv.get(`session:${sessionToken}`, 'json');
     return cached as CachedSessionData | null;
   } catch (error) {
     // SECURITY: Cache read failure should not break authentication
-    console.error('Failed to read session from KV:', {
+    obs?.error('Failed to read session from KV', {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
     return null;
@@ -247,6 +254,9 @@ export function optionalAuth(config?: SessionAuthConfig) {
   const enableLogging = config?.enableLogging || false;
 
   return async (c: Context, next: Next) => {
+    // Get observability client from context if available
+    const obs = c.get('obs');
+
     // Extract session cookie from request
     const cookieHeader = c.req.header('cookie');
     const sessionToken = extractSessionCookie(cookieHeader, cookieName);
@@ -258,7 +268,11 @@ export function optionalAuth(config?: SessionAuthConfig) {
 
     // Try cache first (if KV available)
     if (config?.kv) {
-      const cachedSession = await getSessionFromCache(config.kv, sessionToken);
+      const cachedSession = await getSessionFromCache(
+        config.kv,
+        sessionToken,
+        obs
+      );
 
       if (cachedSession) {
         // SECURITY: Cache hit - validate expiration client-side too (defense in depth)
@@ -275,21 +289,18 @@ export function optionalAuth(config?: SessionAuthConfig) {
         } else {
           // SECURITY: Expired session in cache - clear it
           if (enableLogging) {
-            console.warn('Expired session found in cache', {
+            obs?.warn('Expired session found in cache', {
               userId: cachedSession.user.id,
               expiresAt: cachedSession.session.expiresAt,
             });
           }
           // Don't await - fire and forget cache cleanup
           try {
-            config.kv
-              .delete(`session:${sessionToken}`)
-              .catch((err: unknown) =>
-                console.error(
-                  'Failed to delete expired session from cache:',
-                  err
-                )
-              );
+            config.kv.delete(`session:${sessionToken}`).catch((err: unknown) =>
+              obs?.error('Failed to delete expired session from cache', {
+                error: err instanceof Error ? err.message : String(err),
+              })
+            );
           } catch {
             // Ignore synchronous errors (e.g., if delete is not a function)
           }
@@ -298,7 +309,7 @@ export function optionalAuth(config?: SessionAuthConfig) {
     }
 
     // Cache miss or no KV - query database
-    const sessionData = await querySessionFromDatabase(sessionToken);
+    const sessionData = await querySessionFromDatabase(sessionToken, obs);
 
     if (sessionData) {
       // Valid session from database - set context
@@ -308,13 +319,16 @@ export function optionalAuth(config?: SessionAuthConfig) {
       // Cache it for next time (if KV available)
       if (config?.kv) {
         // Don't await - fire and forget cache write
-        cacheSessionInKV(config.kv, sessionToken, sessionData).catch((err) =>
-          console.error('Failed to cache session:', err)
+        cacheSessionInKV(config.kv, sessionToken, sessionData, obs).catch(
+          (err) =>
+            obs?.error('Failed to cache session', {
+              error: err instanceof Error ? err.message : String(err),
+            })
         );
       }
 
       if (enableLogging) {
-        console.info('Session authenticated', {
+        obs?.info('Session authenticated', {
           userId: sessionData.user.id,
           method: config?.kv ? 'database' : 'database-only',
         });
@@ -322,7 +336,7 @@ export function optionalAuth(config?: SessionAuthConfig) {
     } else {
       // Invalid or expired session
       if (enableLogging) {
-        console.warn('Invalid session token', {
+        obs?.warn('Invalid session token', {
           // SECURITY: Don't log the actual token
           tokenLength: sessionToken.length,
         });
