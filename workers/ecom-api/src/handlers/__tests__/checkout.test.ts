@@ -19,16 +19,11 @@ import type { StripeWebhookEnv } from '../../types';
 
 // Mock modules before imports
 vi.mock('@codex/database', () => ({
-  createPerRequestDbClient: vi.fn(() => ({
-    db: {},
-    cleanup: vi.fn(),
-  })),
+  createPerRequestDbClient: vi.fn(),
 }));
 
 vi.mock('@codex/purchase', () => ({
-  PurchaseService: vi.fn().mockImplementation(() => ({
-    completePurchase: vi.fn(),
-  })),
+  PurchaseService: vi.fn(),
 }));
 
 vi.mock('@codex/validation', () => ({
@@ -155,6 +150,7 @@ describe('handleCheckoutCompleted', () => {
   let mockStripe: Stripe;
   let mockCompletePurchase: ReturnType<typeof vi.fn>;
   let mockCleanup: ReturnType<typeof vi.fn>;
+  let mockDb: Record<string, unknown>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -166,17 +162,33 @@ describe('handleCheckoutCompleted', () => {
       contentId: 'content_456',
     });
     mockCleanup = vi.fn();
+    mockDb = { mock: 'database' };
 
-    // Reset mocks
-    (createPerRequestDbClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      db: {},
-      cleanup: mockCleanup,
-    });
+    // Reset mocks with proper argument validation
+    (createPerRequestDbClient as ReturnType<typeof vi.fn>).mockImplementation(
+      (config: {
+        DATABASE_URL: string;
+        DATABASE_URL_LOCAL_PROXY?: string;
+        DB_METHOD: string;
+      }) => {
+        // Validate that config object is passed with required fields
+        expect(config).toBeDefined();
+        expect(config.DATABASE_URL).toBeDefined();
+        expect(typeof config.DATABASE_URL).toBe('string');
+        expect(config.DB_METHOD).toBeDefined();
+        return { db: mockDb, cleanup: mockCleanup };
+      }
+    );
 
     (PurchaseService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      () => ({
-        completePurchase: mockCompletePurchase,
-      })
+      (config: { db: unknown; environment: string }, stripeClient: Stripe) => {
+        // Validate that both config and stripe client are passed
+        expect(config).toBeDefined();
+        expect(config.db).toBeDefined();
+        expect(config.environment).toBeDefined();
+        expect(stripeClient).toBeDefined();
+        return { completePurchase: mockCompletePurchase };
+      }
     );
   });
 
@@ -489,6 +501,138 @@ describe('handleCheckoutCompleted', () => {
           paymentIntentId: 'pi_log_test',
         })
       );
+    });
+  });
+
+  describe('service initialization', () => {
+    it('should pass correct config to createPerRequestDbClient', async () => {
+      const event = createMockCheckoutEvent({});
+      const context = createMockContext({
+        DATABASE_URL: 'postgresql://custom-test-url',
+        DB_METHOD: 'PRODUCTION',
+      });
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(createPerRequestDbClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          DATABASE_URL: 'postgresql://custom-test-url',
+          DB_METHOD: 'PRODUCTION',
+        })
+      );
+    });
+
+    it('should pass db and environment to PurchaseService', async () => {
+      const event = createMockCheckoutEvent({});
+      const context = createMockContext({
+        ENVIRONMENT: 'production',
+      });
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(PurchaseService).toHaveBeenCalledWith(
+        expect.objectContaining({
+          db: mockDb,
+          environment: 'production',
+        }),
+        mockStripe
+      );
+    });
+
+    it('should pass stripe client to PurchaseService', async () => {
+      const event = createMockCheckoutEvent({});
+      const context = createMockContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      // Verify stripe client was passed as second argument
+      expect(PurchaseService).toHaveBeenCalledWith(
+        expect.anything(),
+        mockStripe
+      );
+    });
+
+    it('should default environment to development when not set', async () => {
+      const event = createMockCheckoutEvent({});
+      const context = createMockContext({
+        ENVIRONMENT: undefined,
+      });
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(PurchaseService).toHaveBeenCalledWith(
+        expect.objectContaining({
+          environment: 'development',
+        }),
+        expect.anything()
+      );
+    });
+  });
+
+  describe('currency handling', () => {
+    /**
+     * NOTE: The handler currently hardcodes currency to 'usd'.
+     * This test documents the current behavior.
+     *
+     * Future consideration: Should we use session.currency instead?
+     * For now, we only support USD purchases.
+     */
+    it('should use hardcoded USD currency regardless of session currency', async () => {
+      const event = createMockCheckoutEvent({});
+      // Even though session has currency, handler uses hardcoded 'usd'
+      (event.data.object as Stripe.Checkout.Session).currency = 'eur';
+
+      const context = createMockContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      // Handler hardcodes currency to 'usd'
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          currency: 'usd',
+        })
+      );
+    });
+  });
+
+  describe('payment_status edge cases', () => {
+    /**
+     * Stripe checkout.session.completed fires when:
+     * - payment_status = 'paid' for successful payments
+     * - payment_status = 'no_payment_required' for free trials or $0 checkouts
+     *
+     * Current behavior: Handler processes ALL events regardless of payment_status
+     * because Stripe guarantees the event only fires after successful payment.
+     *
+     * These tests document the current behavior.
+     */
+    it('should process no_payment_required status (free trials/zero-amount)', async () => {
+      const event = createMockCheckoutEvent({
+        paymentStatus: 'no_payment_required',
+        amountTotal: 0,
+      });
+      const context = createMockContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      // Handler processes the event (current behavior)
+      expect(mockCompletePurchase).toHaveBeenCalled();
+      expect(context._obs.error).not.toHaveBeenCalled();
+    });
+
+    it('should process unpaid status if Stripe sends it', async () => {
+      // This shouldn't happen per Stripe docs, but test defensive behavior
+      const event = createMockCheckoutEvent({
+        paymentStatus: 'unpaid',
+      });
+      const context = createMockContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      // Current behavior: processes anyway
+      // If we want to reject unpaid, add validation in handler
+      expect(mockCompletePurchase).toHaveBeenCalled();
     });
   });
 });
