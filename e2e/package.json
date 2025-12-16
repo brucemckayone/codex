@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@codex/access": "workspace:*",
+    "@codex/admin": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/identity": "workspace:*",

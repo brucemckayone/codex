@@ -59,7 +59,9 @@
       "@codex/service-errors": ["packages/service-errors/src/index.ts"],
       "@codex/service-errors/*": ["packages/service-errors/src/*"],
       "@codex/shared-types": ["packages/shared-types/src/index.ts"],
-      "@codex/shared-types/*": ["packages/shared-types/src/*"]
+      "@codex/shared-types/*": ["packages/shared-types/src/*"],
+      "@codex/admin": ["packages/admin/src/index.ts"],
+      "@codex/admin/*": ["packages/admin/src/*"]
     }
   }
 }

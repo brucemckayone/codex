@@ -1,0 +1,13 @@
+# Development Environment Variables
+# Copy to .dev.vars and fill in actual values
+
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/codex_dev
+
+# CORS URLs
+WEB_APP_URL=http://localhost:3000
+API_URL=http://localhost:8787
+
+# Environment
+ENVIRONMENT=development
+

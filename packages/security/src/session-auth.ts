@@ -28,6 +28,7 @@ export interface UserData {
   name: string;
   emailVerified: boolean;
   image: string | null;
+  role: string;
   createdAt: Date | string;
   updatedAt: Date | string;
 }
@@ -67,6 +68,10 @@ export interface SessionAuthConfig {
  *
  * SECURITY: Uses regex to safely extract cookie value without eval or injection risks
  *
+ * BetterAuth Format: The cookie value is `{token}.{signature}` format.
+ * We extract only the token part (before the dot) for database queries,
+ * as BetterAuth stores just the token in the sessions table.
+ *
  * @param cookieHeader - Raw Cookie header value
  * @param cookieName - Name of the session cookie
  * @returns Session token or null if not found
@@ -82,7 +87,19 @@ function extractSessionCookie(
   const regex = new RegExp(`${escapedName}=([^;]+)`);
   const match = cookieHeader.match(regex);
 
-  return match?.[1] ?? null;
+  if (!match?.[1]) return null;
+
+  // URL decode the cookie value first
+  const decodedValue = decodeURIComponent(match[1]);
+
+  // BetterAuth uses `{token}.{signature}` format - extract just the token
+  // The token part is stored in the database
+  const dotIndex = decodedValue.indexOf('.');
+  if (dotIndex > 0) {
+    return decodedValue.substring(0, dotIndex);
+  }
+
+  return decodedValue;
 }
 
 /**
@@ -140,6 +157,7 @@ async function querySessionFromDatabase(
         name: user.name,
         emailVerified: user.emailVerified,
         image: user.image,
+        role: user.role,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
@@ -261,8 +279,19 @@ export function optionalAuth(config?: SessionAuthConfig) {
     const cookieHeader = c.req.header('cookie');
     const sessionToken = extractSessionCookie(cookieHeader, cookieName);
 
+    // DEBUG: Log session extraction details
+    console.log('[session-auth] Cookie name:', cookieName);
+    console.log('[session-auth] Cookie header present:', !!cookieHeader);
+    console.log(
+      '[session-auth] Extracted token:',
+      sessionToken ? `${sessionToken.substring(0, 10)}...` : 'null'
+    );
+
     // No session cookie - proceed without authentication
     if (!sessionToken) {
+      console.log(
+        '[session-auth] No session token found, proceeding without auth'
+      );
       return next();
     }
 
@@ -309,7 +338,17 @@ export function optionalAuth(config?: SessionAuthConfig) {
     }
 
     // Cache miss or no KV - query database
+    console.log(
+      '[session-auth] Querying database for token:',
+      sessionToken.substring(0, 10) + '...'
+    );
     const sessionData = await querySessionFromDatabase(sessionToken, obs);
+    console.log(
+      '[session-auth] Database query result:',
+      sessionData
+        ? `user=${sessionData.user.id}, role=${sessionData.user.role}`
+        : 'null'
+    );
 
     if (sessionData) {
       // Valid session from database - set context
@@ -328,10 +367,17 @@ export function optionalAuth(config?: SessionAuthConfig) {
       }
 
       if (enableLogging) {
-        obs?.info('Session authenticated', {
-          userId: sessionData.user.id,
-          method: config?.kv ? 'database' : 'database-only',
-        });
+        if (obs) {
+          obs.info('Session authenticated', {
+            userId: sessionData.user.id,
+            method: config?.kv ? 'database' : 'database-only',
+          });
+        } else {
+          console.info('Session authenticated', {
+            userId: sessionData.user.id,
+            method: config?.kv ? 'database' : 'database-only',
+          });
+        }
       }
     } else {
       // Invalid or expired session

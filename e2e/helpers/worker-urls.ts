@@ -7,4 +7,5 @@ export const WORKER_URLS = {
   content: process.env.CONTENT_URL || 'http://localhost:4001',
   identity: process.env.IDENTITY_URL || 'http://localhost:42071',
   ecom: process.env.ECOM_URL || 'http://localhost:42072',
+  admin: process.env.ADMIN_URL || 'http://localhost:42073',
 } as const;

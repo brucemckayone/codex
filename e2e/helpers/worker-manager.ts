@@ -2,11 +2,14 @@
  * Worker Manager - Start and stop Cloudflare Workers for E2E tests
  * Loads .env.test environment variables for test isolation
  */
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, exec, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { config as dotenvConfig } from 'dotenv';
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -43,6 +46,12 @@ const WORKERS: WorkerConfig[] = [
     cwd: resolve(__dirname, '../../workers/ecom-api'),
     healthUrl: 'http://localhost:42072/health',
   },
+  {
+    name: 'admin-api',
+    port: 42073,
+    cwd: resolve(__dirname, '../../workers/admin-api'),
+    healthUrl: 'http://localhost:42073/health',
+  },
 ];
 
 // Assign unique inspector ports for each worker (used for debugging)
@@ -50,6 +59,48 @@ let nextInspectorPort = 9230;
 
 // Store spawned processes for cleanup
 const runningProcesses: ChildProcess[] = [];
+
+/**
+ * Kill any process running on a specific port
+ * Uses lsof to find PIDs and kills them
+ * Gracefully handles cases where no process is running
+ */
+async function killProcessOnPort(port: number): Promise<void> {
+  try {
+    // Find PIDs using the port (TCP only, listening or established)
+    const { stdout } = await execAsync(`lsof -ti:${port}`);
+    const pids = stdout
+      .trim()
+      .split('\n')
+      .filter((pid) => pid.length > 0);
+
+    if (pids.length === 0) {
+      return; // No process on this port
+    }
+
+    // Kill all processes on this port
+    for (const pid of pids) {
+      try {
+        await execAsync(`kill -9 ${pid}`);
+        console.log(`   Killed process ${pid} on port ${port}`);
+      } catch (killError) {
+        // Process may have already exited, ignore error
+      }
+    }
+  } catch (error) {
+    // lsof returns exit code 1 if no processes found - this is fine
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 1
+    ) {
+      return; // No processes found, port is free
+    }
+    // Other errors (e.g., lsof not installed) should be logged but not fail
+    console.warn(`   Warning: Could not check port ${port}:`, error);
+  }
+}
 
 /**
  * Load test environment variables into process.env
@@ -198,6 +249,11 @@ export async function startAllWorkers(): Promise<void> {
 
   // Load .env.test first
   loadTestEnvironment();
+
+  // Clean up ports before starting workers
+  console.log('🧹 Cleaning up ports...');
+  await Promise.all(WORKERS.map((worker) => killProcessOnPort(worker.port)));
+  console.log('✅ Ports cleaned up\n');
 
   // Start all workers in parallel
   await Promise.all(WORKERS.map((worker) => startWorker(worker)));

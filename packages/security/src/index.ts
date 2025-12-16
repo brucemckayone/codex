@@ -14,7 +14,7 @@ export {
   type SecurityHeadersOptions,
   securityHeaders,
 } from './headers';
-
+export { requirePlatformOwner } from './platform-owner-auth';
 export {
   RATE_LIMIT_PRESETS,
   type RateLimitOptions,

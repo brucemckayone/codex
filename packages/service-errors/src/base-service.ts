@@ -14,6 +14,7 @@
  */
 
 import type { dbHttp, dbWs } from '@codex/database';
+import { ObservabilityClient } from '@codex/observability';
 import { isServiceError, wrapError } from './base-errors';
 
 /**
@@ -65,6 +66,9 @@ export abstract class BaseService {
   /** Protected environment string - accessible to subclasses */
   protected readonly environment: string;
 
+  /** Protected observability client - accessible to subclasses */
+  protected obs: ObservabilityClient;
+
   /**
    * Initialize a service with configuration
    *
@@ -73,6 +77,7 @@ export abstract class BaseService {
   constructor(config: ServiceConfig) {
     this.db = config.db;
     this.environment = config.environment;
+    this.obs = new ObservabilityClient(this.constructor.name, this.environment);
   }
 
   /**

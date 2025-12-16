@@ -68,6 +68,7 @@ describe('Session Authentication Middleware', () => {
     name: 'Test User',
     emailVerified: true,
     image: null,
+    role: 'user',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

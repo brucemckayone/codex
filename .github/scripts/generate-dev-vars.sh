@@ -17,7 +17,7 @@ set -e
 
 echo "Generating .dev.vars.test files for workers..."
 
-WORKERS=("auth" "content-api" "identity-api" "ecom-api")
+WORKERS=("auth" "content-api" "identity-api" "ecom-api" "admin-api")
 
 for worker in "${WORKERS[@]}"; do
   VARS_FILE="workers/${worker}/.dev.vars.test"

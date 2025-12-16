@@ -1,6 +1,8 @@
 // Validation schemas entry point
 // Exports all Zod schemas for use across the application
 
+// Admin schemas
+export * from './admin/admin-schemas';
 // Content management schemas
 export * from './content/content-schemas';
 // User schemas

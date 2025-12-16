@@ -387,7 +387,7 @@ export class PurchaseService extends BaseService {
         return purchase;
       });
     } catch (error) {
-      this.obs?.error('Failed to complete purchase', {
+      this.obs.error('Failed to complete purchase', {
         error: error instanceof Error ? error.message : String(error),
         stripePaymentIntentId,
         customerId: metadata.customerId,
