@@ -969,6 +969,9 @@ importers:
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../../packages/service-errors
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
