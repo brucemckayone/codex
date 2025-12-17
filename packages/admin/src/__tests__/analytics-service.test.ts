@@ -15,7 +15,6 @@
  */
 
 import {
-  contentAccess,
   content as contentTable,
   mediaItems,
   organizations,
@@ -39,7 +38,6 @@ describe('AdminAnalyticsService', () => {
   let service: AdminAnalyticsService;
   let creatorId: string;
   let customerId: string;
-  let orgId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -49,12 +47,11 @@ describe('AdminAnalyticsService', () => {
     const userIds = await seedTestUsers(db, 2);
     [creatorId, customerId] = userIds;
 
-    // Create organization
-    const [org] = await db
+    // Create organization (result not needed beyond creation)
+    await db
       .insert(organizations)
       .values(createTestOrganizationInput())
       .returning();
-    orgId = org.id;
   });
 
   afterAll(async () => {

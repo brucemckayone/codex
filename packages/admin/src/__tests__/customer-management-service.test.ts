@@ -693,8 +693,8 @@ describe('AdminCustomerManagementService', () => {
       });
 
       expect(accessRecord).toBeDefined();
-      expect(accessRecord!.accessType).toBe('complimentary');
-      expect(accessRecord!.organizationId).toBe(testOrg.id);
+      expect(accessRecord?.accessType).toBe('complimentary');
+      expect(accessRecord?.organizationId).toBe(testOrg.id);
     });
 
     it('should be idempotent (return success if access already exists)', async () => {
@@ -849,7 +849,7 @@ describe('AdminCustomerManagementService', () => {
       });
 
       expect(accessRecord).toBeDefined();
-      expect(accessRecord!.accessType).toBe('complimentary');
+      expect(accessRecord?.accessType).toBe('complimentary');
     });
 
     it('should throw NotFoundError for non-existent organization', async () => {

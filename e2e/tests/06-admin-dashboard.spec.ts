@@ -19,7 +19,6 @@ import { adminFixture, authFixture } from '../fixtures';
 import {
   expectErrorResponse,
   expectForbidden,
-  expectSuccessResponse,
   unwrapApiResponse,
 } from '../helpers/assertions';
 import {
@@ -752,7 +751,7 @@ test.describe('Admin Dashboard', () => {
           },
         }
       );
-      const draft = unwrapApiResponse(await draftResponse.json());
+      unwrapApiResponse(await draftResponse.json());
 
       // Create published content
       const publishedResponse = await request.post(

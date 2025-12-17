@@ -340,7 +340,7 @@ export function optionalAuth(config?: SessionAuthConfig) {
     // Cache miss or no KV - query database
     console.log(
       '[session-auth] Querying database for token:',
-      sessionToken.substring(0, 10) + '...'
+      `${sessionToken.substring(0, 10)}...`
     );
     const sessionData = await querySessionFromDatabase(sessionToken, obs);
     console.log(

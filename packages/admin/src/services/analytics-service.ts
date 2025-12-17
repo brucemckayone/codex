@@ -7,31 +7,16 @@
 
 import { schema } from '@codex/database';
 import { BaseService, NotFoundError, wrapError } from '@codex/service-errors';
-import {
-  and,
-  count,
-  countDistinct,
-  desc,
-  eq,
-  gte,
-  lte,
-  sql,
-  sum,
-} from 'drizzle-orm';
+import { and, countDistinct, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import type {
   CustomerStats,
   DailyRevenue,
   RevenueQueryOptions,
   RevenueStats,
-  ServiceConfig,
   TopContentItem,
 } from '../types';
 
 export class AdminAnalyticsService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
   /**
    * Get revenue statistics for an organization
    *

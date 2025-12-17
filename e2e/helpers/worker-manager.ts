@@ -83,7 +83,7 @@ async function killProcessOnPort(port: number): Promise<void> {
       try {
         await execAsync(`kill -9 ${pid}`);
         console.log(`   Killed process ${pid} on port ${port}`);
-      } catch (killError) {
+      } catch {
         // Process may have already exited, ignore error
       }
     }

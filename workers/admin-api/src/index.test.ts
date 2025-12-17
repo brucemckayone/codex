@@ -5,7 +5,7 @@
  * Full admin functionality tests will be added in P1-ADMIN-001 Phase 2.
  */
 
-import { env, SELF } from 'cloudflare:test';
+import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 describe('Admin API Worker', () => {

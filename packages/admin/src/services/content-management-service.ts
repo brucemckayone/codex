@@ -22,14 +22,9 @@ import type {
   AdminContentItem,
   AdminContentListOptions,
   PaginatedResponse,
-  ServiceConfig,
 } from '../types';
 
 export class AdminContentManagementService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
   /**
    * List all content in an organization
    *

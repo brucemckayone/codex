@@ -118,6 +118,7 @@ export async function createTestUser(
       name: user.name,
       emailVerified: user.emailVerified,
       image: user.image,
+      role: user.role,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     },

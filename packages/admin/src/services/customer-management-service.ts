@@ -20,21 +20,16 @@ import {
   NotFoundError,
   wrapError,
 } from '@codex/service-errors';
-import { and, count, countDistinct, desc, eq, sql, sum } from 'drizzle-orm';
+import { and, countDistinct, desc, eq, sql } from 'drizzle-orm';
 import type {
   CustomerDetails,
   CustomerWithStats,
   PaginatedResponse,
   PaginationParams,
   PurchaseHistoryItem,
-  ServiceConfig,
 } from '../types';
 
 export class AdminCustomerManagementService extends BaseService {
-  constructor(config: ServiceConfig) {
-    super(config);
-  }
-
   /**
    * List customers who have purchased from organization
    *
@@ -218,15 +213,18 @@ export class AdminCustomerManagementService extends BaseService {
         )
         .orderBy(desc(schema.purchases.purchasedAt));
 
-      const historyItems: PurchaseHistoryItem[] = purchaseHistory.map(
-        (row) => ({
+      const historyItems: PurchaseHistoryItem[] = purchaseHistory
+        .filter(
+          (row): row is typeof row & { purchasedAt: Date } =>
+            row.purchasedAt !== null
+        )
+        .map((row) => ({
           purchaseId: row.purchaseId,
           contentId: row.contentId,
           contentTitle: row.contentTitle,
           amountPaidCents: row.amountPaidCents,
-          purchasedAt: row.purchasedAt!,
-        })
-      );
+          purchasedAt: row.purchasedAt,
+        }));
 
       return {
         userId: user.id,
