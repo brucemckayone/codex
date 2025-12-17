@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS "idx_purchases_org_status_created" ON "purchases" USING btree ("organization_id","status","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_purchases_org_status_purchased" ON "purchases" USING btree ("organization_id","status","purchased_at");
