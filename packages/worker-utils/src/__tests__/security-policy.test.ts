@@ -1,12 +1,28 @@
 import type { HonoEnv } from '@codex/shared-types';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_SECURITY_POLICY,
   mergePolicy,
   POLICY_PRESETS,
   withPolicy,
 } from '../security-policy';
+
+// Mock the database module for requireOrgManagement tests
+vi.mock('@codex/database', () => ({
+  dbHttp: {
+    query: {
+      organizationMemberships: {
+        findFirst: vi.fn(),
+      },
+    },
+  },
+  organizationMemberships: {
+    organizationId: 'organizationId',
+    userId: 'userId',
+    status: 'status',
+  },
+}));
 
 describe('Security Policy', () => {
   describe('DEFAULT_SECURITY_POLICY', () => {
@@ -88,6 +104,13 @@ describe('Security Policy', () => {
       const policy = POLICY_PRESETS.sensitive();
       expect(policy.auth).toBe('required');
       expect(policy.rateLimit).toBe('auth'); // strict
+    });
+
+    it('should have orgManagement preset with requireOrgManagement', () => {
+      const policy = POLICY_PRESETS.orgManagement();
+      expect(policy.auth).toBe('required');
+      expect(policy.requireOrgManagement).toBe(true);
+      expect(policy.rateLimit).toBe('api');
     });
   });
 
@@ -350,6 +373,196 @@ describe('Security Policy', () => {
         });
 
         expect(res.status).toBe(200);
+      });
+    });
+
+    describe('requireOrgManagement', () => {
+      beforeEach(async () => {
+        // Reset mock before each test
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(dbHttp.query.organizationMemberships.findFirst).mockReset();
+
+        // Set up authenticated user middleware
+        app.use('*', async (c, next) => {
+          c.set('user', {
+            id: 'user-1',
+            email: 'test@example.com',
+            name: 'Test User',
+            role: 'user',
+            emailVerified: true,
+            createdAt: new Date(),
+          });
+          await next();
+        });
+      });
+
+      it('should return 400 if organization ID not in route params', async () => {
+        app.get(
+          '/no-id-route',
+          withPolicy({ requireOrgManagement: true }),
+          (c) => c.json({ ok: true })
+        );
+
+        const res = await app.request('/no-id-route');
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({
+          error: {
+            code: 'BAD_REQUEST',
+            message:
+              'Organization ID required but not found in route parameters',
+          },
+        });
+      });
+
+      it('should deny non-members (403)', async () => {
+        // User has no membership record
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(
+          dbHttp.query.organizationMemberships.findFirst
+        ).mockResolvedValue(null);
+
+        app.patch(
+          '/organizations/:id',
+          withPolicy(POLICY_PRESETS.orgManagement()),
+          (c) => c.json({ ok: true })
+        );
+
+        const res = await app.request('/organizations/org-123', {
+          method: 'PATCH',
+        });
+        expect(res.status).toBe(403);
+        await expect(res.json()).resolves.toMatchObject({
+          error: {
+            code: 'FORBIDDEN',
+            message: 'You do not have permission to manage this organization',
+          },
+        });
+      });
+
+      it('should deny member role (403)', async () => {
+        // User is a member but not owner/admin
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(
+          dbHttp.query.organizationMemberships.findFirst
+        ).mockResolvedValue({ role: 'member' });
+
+        app.patch(
+          '/organizations/:id',
+          withPolicy(POLICY_PRESETS.orgManagement()),
+          (c) => c.json({ ok: true })
+        );
+
+        const res = await app.request('/organizations/org-123', {
+          method: 'PATCH',
+        });
+        expect(res.status).toBe(403);
+        await expect(res.json()).resolves.toMatchObject({
+          error: {
+            code: 'FORBIDDEN',
+            message: 'You do not have permission to manage this organization',
+          },
+        });
+      });
+
+      it('should deny creator role (403)', async () => {
+        // User is a creator but not owner/admin
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(
+          dbHttp.query.organizationMemberships.findFirst
+        ).mockResolvedValue({ role: 'creator' });
+
+        app.patch(
+          '/organizations/:id',
+          withPolicy(POLICY_PRESETS.orgManagement()),
+          (c) => c.json({ ok: true })
+        );
+
+        const res = await app.request('/organizations/org-123', {
+          method: 'PATCH',
+        });
+        expect(res.status).toBe(403);
+      });
+
+      it('should allow owner role (200)', async () => {
+        // User is an owner
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(
+          dbHttp.query.organizationMemberships.findFirst
+        ).mockResolvedValue({ role: 'owner' });
+
+        app.patch(
+          '/organizations/:id',
+          withPolicy(POLICY_PRESETS.orgManagement()),
+          (c) => c.json({ ok: true })
+        );
+
+        const res = await app.request('/organizations/org-123', {
+          method: 'PATCH',
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ ok: true });
+      });
+
+      it('should allow admin role (200)', async () => {
+        // User is an admin
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(
+          dbHttp.query.organizationMemberships.findFirst
+        ).mockResolvedValue({ role: 'admin' });
+
+        app.patch(
+          '/organizations/:id',
+          withPolicy(POLICY_PRESETS.orgManagement()),
+          (c) => c.json({ ok: true })
+        );
+
+        const res = await app.request('/organizations/org-123', {
+          method: 'PATCH',
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ ok: true });
+      });
+
+      it('should extract organization ID from :organizationId param', async () => {
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(
+          dbHttp.query.organizationMemberships.findFirst
+        ).mockResolvedValue({ role: 'owner' });
+
+        app.delete(
+          '/api/orgs/:organizationId',
+          withPolicy(POLICY_PRESETS.orgManagement()),
+          (c) => c.json({ ok: true })
+        );
+
+        const res = await app.request('/api/orgs/org-456', {
+          method: 'DELETE',
+        });
+        expect(res.status).toBe(200);
+      });
+
+      it('should set organizationId in context after successful check', async () => {
+        const { dbHttp } = await import('@codex/database');
+        vi.mocked(
+          dbHttp.query.organizationMemberships.findFirst
+        ).mockResolvedValue({ role: 'admin' });
+
+        app.patch(
+          '/organizations/:id',
+          withPolicy(POLICY_PRESETS.orgManagement()),
+          (c) => {
+            const orgId = c.get('organizationId');
+            return c.json({ organizationId: orgId });
+          }
+        );
+
+        const res = await app.request('/organizations/org-789', {
+          method: 'PATCH',
+        });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({
+          organizationId: 'org-789',
+        });
       });
     });
   });
