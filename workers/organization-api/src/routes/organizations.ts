@@ -20,6 +20,7 @@ import {
   OrganizationService,
   updateOrganizationSchema,
 } from '@codex/identity';
+import { NotFoundError } from '@codex/service-errors';
 import type {
   CheckSlugResponse,
   CreateOrganizationResponse,
@@ -130,10 +131,9 @@ app.get(
       const organization = await service.getBySlug(ctx.validated.params.slug);
 
       if (!organization) {
-        throw {
-          code: 'NOT_FOUND',
-          message: 'Organization not found',
-        };
+        throw new NotFoundError('Organization not found', {
+          slug: ctx.validated.params.slug,
+        });
       }
 
       return { data: organization };
@@ -165,10 +165,9 @@ app.get(
       const organization = await service.get(ctx.validated.params.id);
 
       if (!organization) {
-        throw {
-          code: 'NOT_FOUND',
-          message: 'Organization not found',
-        };
+        throw new NotFoundError('Organization not found', {
+          organizationId: ctx.validated.params.id,
+        });
       }
 
       return { data: organization };
@@ -182,12 +181,12 @@ app.get(
  *
  * Body: UpdateOrganizationInput
  * Returns: Organization (200)
- * Security: Authenticated users, API rate limit (100 req/min)
+ * Security: Requires owner/admin role in the organization, API rate limit (100 req/min)
  * @returns {UpdateOrganizationResponse}
  */
 app.patch(
   '/:id',
-  withPolicy(POLICY_PRESETS.authenticated()),
+  withPolicy(POLICY_PRESETS.orgManagement()),
   createAuthenticatedHandler({
     schema: {
       params: z.object({ id: uuidSchema }),
@@ -254,13 +253,13 @@ app.get(
  * Soft delete organization
  *
  * Returns: Success message (200)
- * Security: Authenticated users, Strict rate limit (5 req/15min)
+ * Security: Requires owner/admin role in the organization, Strict rate limit (5 req/15min)
  * @returns {DeleteOrganizationResponse}
  */
 app.delete(
   '/:id',
   withPolicy({
-    auth: 'required',
+    ...POLICY_PRESETS.orgManagement(),
     rateLimit: 'auth', // Stricter rate limit for deletion
   }),
   createAuthenticatedHandler({

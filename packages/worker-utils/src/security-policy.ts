@@ -61,6 +61,18 @@ export interface RouteSecurityPolicy {
   requireOrgMembership?: boolean;
 
   /**
+   * Require organization management privileges (owner/admin role)
+   *
+   * If true, validates that user has 'owner' or 'admin' role in the organization.
+   * Organization ID is extracted from route params (:id or :organizationId).
+   *
+   * Use for endpoints that modify organization settings.
+   *
+   * Requires auth: 'required'
+   */
+  requireOrgManagement?: boolean;
+
+  /**
    * Rate limiting preset
    *
    * Overrides default rate limit for this route.
@@ -104,6 +116,7 @@ export const DEFAULT_SECURITY_POLICY: Required<RouteSecurityPolicy> = {
   auth: 'required',
   roles: [],
   requireOrgMembership: false,
+  requireOrgManagement: false,
   rateLimit: 'api',
   allowedOrigins: [],
   allowedIPs: [],
@@ -237,6 +250,48 @@ async function checkOrganizationMembership(
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
+  }
+}
+
+/**
+ * Check if user has organization management privileges (owner/admin role)
+ *
+ * @param organizationId - Organization UUID
+ * @param userId - User ID
+ * @param obs - Optional observability client for structured logging
+ * @returns True if user has owner/admin role, false otherwise
+ */
+async function checkOrganizationManagementAccess(
+  organizationId: string,
+  userId: string,
+  obs?: ObservabilityClient
+): Promise<boolean> {
+  try {
+    const db = dbHttp;
+    const membership = await db.query.organizationMemberships.findFirst({
+      where: and(
+        eq(organizationMemberships.organizationId, organizationId),
+        eq(organizationMemberships.userId, userId),
+        eq(organizationMemberships.status, 'active')
+      ),
+      columns: {
+        role: true,
+      },
+    });
+
+    if (!membership) {
+      return false;
+    }
+
+    // Only owner and admin roles can manage the organization
+    return membership.role === 'owner' || membership.role === 'admin';
+  } catch (error) {
+    obs?.error('Error checking organization management access', {
+      organizationId,
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
   }
 }
 
@@ -521,6 +576,51 @@ export function withPolicy(
       c.set('organizationMembership', membership);
     }
 
+    // ========================================================================
+    // Organization Management Check (owner/admin role required)
+    // ========================================================================
+
+    if (mergedPolicy.requireOrgManagement) {
+      // Extract organization ID from route params (:id or :organizationId)
+      const organizationId =
+        c.req.param('id') || c.req.param('organizationId') || '';
+
+      if (!organizationId) {
+        return c.json(
+          {
+            error: {
+              code: 'BAD_REQUEST',
+              message:
+                'Organization ID required but not found in route parameters',
+            },
+          },
+          400
+        );
+      }
+
+      // Check if user has owner/admin role in this organization
+      const hasManagementAccess = await checkOrganizationManagementAccess(
+        organizationId,
+        user.id,
+        obs
+      );
+
+      if (!hasManagementAccess) {
+        return c.json(
+          {
+            error: {
+              code: 'FORBIDDEN',
+              message: 'You do not have permission to manage this organization',
+            },
+          },
+          403
+        );
+      }
+
+      // Store organization context for downstream handlers
+      c.set('organizationId', organizationId);
+    }
+
     // Policy checks passed, proceed to handler
     await next();
   };
@@ -584,5 +684,16 @@ export const POLICY_PRESETS = {
   sensitive: (): Partial<RouteSecurityPolicy> => ({
     auth: 'required',
     rateLimit: 'auth', // 5 req/15min (strict)
+  }),
+
+  /**
+   * Organization management endpoint (owner/admin role required)
+   * @example PATCH /api/organizations/:id
+   * @example DELETE /api/organizations/:id
+   */
+  orgManagement: (): Partial<RouteSecurityPolicy> => ({
+    auth: 'required',
+    requireOrgManagement: true,
+    rateLimit: 'api', // 100 req/min
   }),
 } as const;
