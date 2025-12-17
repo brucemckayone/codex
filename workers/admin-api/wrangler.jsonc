@@ -1,0 +1,104 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "admin-api",
+  "main": "dist/index.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Observability configuration
+  "observability": {
+    "enabled": true
+  },
+
+  // KV Namespaces
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT_KV",
+      "id": "cea7153364974737b16870df08f31083"
+    }
+  ],
+
+  // Default environment variables (local development)
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DB_METHOD": "LOCAL_PROXY",
+    "WEB_APP_URL": "http://localhost:3000",
+    "API_URL": "http://localhost:8787"
+  },
+
+  // Environment configurations
+  "env": {
+    // Test environment (E2E tests)
+    // Note: DB_METHOD is set via .dev.vars.test (NEON_BRANCH in CI, LOCAL_PROXY locally)
+    "test": {
+      "name": "admin-api-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "WEB_APP_URL": "http://localhost:3000",
+        "API_URL": "http://localhost:8787"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        }
+      ]
+    },
+
+    // Production environment
+    "production": {
+      "name": "admin-api-production",
+      "vars": {
+        "ENVIRONMENT": "production",
+        "DB_METHOD": "PRODUCTION",
+        "WEB_APP_URL": "https://codex.revelations.studio",
+        "AUTH_WORKER_URL": "https://auth.revelations.studio"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        }
+      ],
+      "routes": [
+        {
+          "pattern": "admin-api.revelations.studio",
+          "custom_domain": true
+        }
+      ]
+    },
+
+    // Staging environment
+    "staging": {
+      "name": "admin-api-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "WEB_APP_URL": "https://codex-staging.revelations.studio",
+        "AUTH_WORKER_URL": "https://auth-staging.revelations.studio"
+      },
+      "routes": [
+        {
+          "pattern": "admin-api-staging.revelations.studio/*",
+          "custom_domain": true
+        }
+      ]
+    }
+  }
+
+  // ==========================================================================
+  // Environment Variables & Secrets
+  // ==========================================================================
+  //
+  // Local Development:
+  //   Create .dev.vars file with required secrets (see .dev.vars.example)
+  //
+  // Test Environment:
+  //   Uses .dev.vars.test (already configured with test values)
+  //
+  // Production Secrets (set via wrangler CLI):
+  //   wrangler secret put DATABASE_URL --env production
+  //
+  // Required Variables:
+  //   - DATABASE_URL: PostgreSQL connection string
+  //   - RATE_LIMIT_KV: KV namespace binding (configured above)
+}

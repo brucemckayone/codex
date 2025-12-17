@@ -23,6 +23,7 @@ export default defineConfig({
       'workers/ecom-api',
       'workers/content-api',
       'workers/identity-api',
+      'workers/admin-api',
     ],
   },
 });

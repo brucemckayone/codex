@@ -301,6 +301,20 @@ export const purchases = pgTable(
       table.creatorOrgAgreementId
     ),
 
+    // Composite index for admin analytics queries (revenue by org + status + date)
+    index('idx_purchases_org_status_created').on(
+      table.organizationId,
+      table.status,
+      table.createdAt
+    ),
+
+    // Composite index for admin analytics queries filtering by purchasedAt
+    index('idx_purchases_org_status_purchased').on(
+      table.organizationId,
+      table.status,
+      table.purchasedAt
+    ),
+
     // CHECK constraint for status enum values
     check(
       'check_purchase_status',

@@ -11,6 +11,7 @@
  * - Supports enriched context for advanced use cases
  */
 
+import type { ObservabilityClient } from '@codex/observability';
 import { mapErrorToResponse } from '@codex/service-errors';
 import type {
   AuthenticatedContext,
@@ -315,7 +316,8 @@ export function createAuthenticatedHandler<
         return c.json({ data: output }, successStatus);
       }
     } catch (error) {
-      const { statusCode, response } = mapErrorToResponse(error);
+      const obs = c.get('obs') as ObservabilityClient | undefined;
+      const { statusCode, response } = mapErrorToResponse(error, { obs });
       return c.json(response, statusCode);
     }
   };
@@ -331,7 +333,8 @@ export function withErrorHandling<T>(
     try {
       return await handler(c);
     } catch (error) {
-      const { statusCode, response } = mapErrorToResponse(error);
+      const obs = c.get('obs') as ObservabilityClient | undefined;
+      const { statusCode, response } = mapErrorToResponse(error, { obs });
       return c.json(response, statusCode);
     }
   };

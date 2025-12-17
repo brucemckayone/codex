@@ -11,6 +11,7 @@ import {
   organizations,
   sessions,
 } from '@codex/database/schema';
+import type { ObservabilityClient } from '@codex/observability';
 import type { RATE_LIMIT_PRESETS } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import { and, eq, gt } from 'drizzle-orm';
@@ -120,7 +121,8 @@ export const DEFAULT_SECURITY_POLICY: Required<RouteSecurityPolicy> = {
  */
 async function extractOrganizationFromSubdomain(
   hostname: string,
-  _env: HonoEnv['Bindings']
+  _env: HonoEnv['Bindings'],
+  obs?: ObservabilityClient
 ): Promise<string | null> {
   // Parse subdomain from hostname
   // Examples:
@@ -170,10 +172,10 @@ async function extractOrganizationFromSubdomain(
 
     return org?.id || null;
   } catch (error) {
-    console.error('Error looking up organization from subdomain:', {
+    obs?.error('Error looking up organization from subdomain', {
       hostname,
       subdomain,
-      error,
+      error: error instanceof Error ? error.message : String(error),
     });
     return null;
   }
@@ -187,12 +189,14 @@ async function extractOrganizationFromSubdomain(
  * @param organizationId - Organization UUID
  * @param userId - User ID
  * @param env - Worker environment (for KV caching if available)
+ * @param obs - Optional observability client for structured logging
  * @returns Membership object or null if not a member
  */
 async function checkOrganizationMembership(
   organizationId: string,
   userId: string,
-  _env: HonoEnv['Bindings']
+  _env: HonoEnv['Bindings'],
+  obs?: ObservabilityClient
 ): Promise<{
   role: string;
   status: string;
@@ -227,10 +231,10 @@ async function checkOrganizationMembership(
       joinedAt: membership.createdAt,
     };
   } catch (error) {
-    console.error('Error checking organization membership:', {
+    obs?.error('Error checking organization membership', {
       organizationId,
       userId,
-      error,
+      error: error instanceof Error ? error.message : String(error),
     });
     return null;
   }
@@ -288,6 +292,9 @@ export function withPolicy(
   const mergedPolicy = mergePolicy(policy);
 
   return async (c: Context<HonoEnv>, next) => {
+    // Get observability client from context if available
+    const obs = c.get('obs');
+
     // ========================================================================
     // IP Whitelist Check
     // ========================================================================
@@ -382,14 +389,15 @@ export function withPolicy(
               c.set('session', sessionData);
               c.set('user', sessionData.user);
               user = sessionData.user;
-              console.log(
-                '[withPolicy] User set:',
-                sessionData.user.id,
-                sessionData.user.role
-              );
+              obs?.info('[withPolicy] User set', {
+                userId: sessionData.user.id,
+                role: sessionData.user.role,
+              });
             }
           } catch (error) {
-            console.error('[withPolicy] Session validation error:', error);
+            obs?.error('[withPolicy] Session validation error', {
+              error: error instanceof Error ? error.message : String(error),
+            });
             // Continue without auth - will be caught below if required
           }
         }
@@ -470,7 +478,8 @@ export function withPolicy(
       const hostname = c.req.header('host') || '';
       const organizationId = await extractOrganizationFromSubdomain(
         hostname,
-        c.env
+        c.env,
+        obs
       );
 
       if (!organizationId) {
@@ -490,7 +499,8 @@ export function withPolicy(
       const membership = await checkOrganizationMembership(
         organizationId,
         user.id,
-        c.env
+        c.env,
+        obs
       );
 
       if (!membership) {

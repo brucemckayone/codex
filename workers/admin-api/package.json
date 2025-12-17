@@ -1,0 +1,41 @@
+{
+  "name": "admin-api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "deploy": "pnpm build && wrangler deploy",
+    "dev": "pnpm build && wrangler dev --port 42073 --inspector-port 9233",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codex/admin": "workspace:*",
+    "@codex/database": "workspace:*",
+    "@codex/observability": "workspace:*",
+    "@codex/security": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "@codex/worker-utils": "workspace:*",
+    "drizzle-orm": "0.44.7",
+    "hono": "^4.6.20",
+    "vite-plugin-dts": "^4.5.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.10.0",
+    "@types/node": "22.13.0",
+    "@vitest/runner": "~3.2.4",
+    "@vitest/snapshot": "~3.2.4",
+    "@vitest/ui": "~3.2.4",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.47.0",
+    "cloudflare": "^4.0.0"
+  }
+}

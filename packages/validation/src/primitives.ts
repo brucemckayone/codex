@@ -213,3 +213,24 @@ export function createIdParamsSchema() {
 export function createSlugParamsSchema(maxLength: number = 255) {
   return z.object({ slug: createSlugSchema(maxLength) });
 }
+
+// ============================================================================
+// Dates
+// ============================================================================
+
+/**
+ * ISO date string validation
+ * Accepts ISO 8601 date strings and coerces to Date objects
+ * Works with query params (strings) and JSON bodies
+ *
+ * @example
+ * ```typescript
+ * const schema = z.object({ startDate: isoDateSchema.optional() });
+ * schema.parse({ startDate: '2025-01-15' }); // Date object
+ * ```
+ */
+export const isoDateSchema = z.coerce.date({
+  errorMap: () => ({
+    message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)',
+  }),
+});

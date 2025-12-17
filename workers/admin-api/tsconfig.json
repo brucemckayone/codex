@@ -1,0 +1,7 @@
+{
+  "extends": "../../config/tsconfig/worker.json",
+  "compilerOptions": {
+    "rootDir": "src"
+  },
+  "include": ["src", "../../config/vitest/cloudflare-test-env.d.ts"]
+}

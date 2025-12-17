@@ -5,6 +5,8 @@
  * These types ensure consistency across all API workers.
  */
 
+import type { ObservabilityClient } from '@codex/observability';
+
 /**
  * Standard Cloudflare Workers Bindings
  * Environment variables and resources available to all workers
@@ -122,7 +124,7 @@ export type Variables = {
    * Observability client
    * Set by observability middleware
    */
-  obs?: unknown; // Type from @codex/observability to avoid circular dependency
+  obs?: ObservabilityClient;
 
   /**
    * Request ID for tracking and correlation

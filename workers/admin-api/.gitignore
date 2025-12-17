@@ -1,0 +1,5 @@
+# Wrangler project
+.dev.vars*
+!.dev.vars.example
+.wrangler/
+
