@@ -113,57 +113,45 @@ app.get(
  * All admin routes require:
  * 1. Authentication (valid session)
  * 2. Platform owner role
+ * 3. Organization ID cached in context
  */
 app.use(
   '/api/admin/*',
   requirePlatformOwner({
     cookieName: 'better-auth.session_token',
-  })
+  }),
+  // Cache organization ID to avoid N+1 query on every request
+  async (c, next) => {
+    const user = c.get('user');
+    if (!user) {
+      // Should never happen - requirePlatformOwner ensures user exists
+      return c.json(
+        { error: { code: 'UNAUTHORIZED', message: 'User not found' } },
+        401
+      );
+    }
+
+    const membership = await dbHttp.query.organizationMemberships.findFirst({
+      where: eq(schema.organizationMemberships.userId, user.id),
+      columns: { organizationId: true },
+    });
+
+    if (!membership) {
+      return c.json(
+        {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Platform owner has no organization',
+          },
+        },
+        403
+      );
+    }
+
+    c.set('organizationId', membership.organizationId);
+    return next();
+  }
 );
-
-// ============================================================================
-// Helper: Get Platform Owner's Organization
-// ============================================================================
-
-/**
- * Get the organization ID for the authenticated platform owner.
- * Platform owners are identified by their membership with 'owner' role.
- *
- * @throws Error if user has no organization ownership
- */
-async function getOwnerOrganizationId(userId: string): Promise<string> {
-  const membership = await dbHttp.query.organizationMemberships.findFirst({
-    where: eq(schema.organizationMemberships.userId, userId),
-    columns: {
-      organizationId: true,
-      role: true,
-    },
-  });
-
-  if (!membership) {
-    throw new Error('Platform owner has no organization');
-  }
-
-  return membership.organizationId;
-}
-
-/**
- * Get user from context with type assertion.
- * requirePlatformOwner() middleware guarantees user exists.
- */
-function getUserFromContext(c: {
-  get: (key: 'user') => { id: string; role: string } | undefined;
-}): {
-  id: string;
-  role: string;
-} {
-  const user = c.get('user');
-  if (!user) {
-    // This should never happen - requirePlatformOwner() ensures user exists
-    throw new Error('User not found in context');
-  }
-  return user;
-}
 
 // ============================================================================
 // Analytics Endpoints
@@ -175,8 +163,7 @@ function getUserFromContext(c: {
  */
 app.get('/api/admin/analytics/revenue', async (c) => {
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Parse and validate query params
     const query = c.req.query();
@@ -204,8 +191,7 @@ app.get('/api/admin/analytics/revenue', async (c) => {
  */
 app.get('/api/admin/analytics/customers', async (c) => {
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     const service = new AdminAnalyticsService({
       db: dbHttp,
@@ -226,8 +212,7 @@ app.get('/api/admin/analytics/customers', async (c) => {
  */
 app.get('/api/admin/analytics/top-content', async (c) => {
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Parse and validate query params
     const query = c.req.query();
@@ -261,8 +246,7 @@ app.get('/api/admin/analytics/top-content', async (c) => {
  */
 app.get('/api/admin/content', async (c) => {
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Parse and validate query params
     const query = c.req.query();
@@ -302,8 +286,7 @@ app.post('/api/admin/content/:id/publish', async (c) => {
   const { db, cleanup } = createPerRequestDbClient(c.env);
 
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Validate path params
     const params = adminContentIdParamsSchema.parse({ id: c.req.param('id') });
@@ -331,8 +314,7 @@ app.post('/api/admin/content/:id/unpublish', async (c) => {
   const { db, cleanup } = createPerRequestDbClient(c.env);
 
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Validate path params
     const params = adminContentIdParamsSchema.parse({ id: c.req.param('id') });
@@ -360,8 +342,7 @@ app.delete('/api/admin/content/:id', async (c) => {
   const { db, cleanup } = createPerRequestDbClient(c.env);
 
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Validate path params
     const params = adminContentIdParamsSchema.parse({ id: c.req.param('id') });
@@ -391,8 +372,7 @@ app.delete('/api/admin/content/:id', async (c) => {
  */
 app.get('/api/admin/customers', async (c) => {
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Parse and validate query params
     const query = c.req.query();
@@ -420,8 +400,7 @@ app.get('/api/admin/customers', async (c) => {
  */
 app.get('/api/admin/customers/:id', async (c) => {
   try {
-    const user = getUserFromContext(c);
-    const organizationId = await getOwnerOrganizationId(user.id);
+    const organizationId = c.get('organizationId');
 
     // Validate path params
     const params = adminCustomerIdParamsSchema.parse({ id: c.req.param('id') });
@@ -449,8 +428,7 @@ app.post(
     const { db, cleanup } = createPerRequestDbClient(c.env);
 
     try {
-      const user = getUserFromContext(c);
-      const organizationId = await getOwnerOrganizationId(user.id);
+      const organizationId = c.get('organizationId');
 
       // Validate path params
       const params = adminGrantAccessParamsSchema.parse({

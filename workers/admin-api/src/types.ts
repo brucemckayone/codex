@@ -4,10 +4,21 @@
  * Type definitions for the admin-api worker environment and context.
  */
 
-import type { HonoEnv } from '@codex/shared-types';
+import type { Bindings, Variables } from '@codex/shared-types';
 
 /**
- * Admin API worker environment extends the base HonoEnv.
- * Inherits all standard bindings and variables.
+ * Extended Variables for admin-api that includes organizationId
+ * cached after platform owner authentication.
  */
-export type AdminApiEnv = HonoEnv;
+export interface AdminVariables extends Variables {
+  /** Platform owner's organization ID, set by middleware */
+  organizationId: string;
+}
+
+/**
+ * Admin API worker environment extends the base HonoEnv with AdminVariables.
+ */
+export type AdminApiEnv = {
+  Bindings: Bindings;
+  Variables: AdminVariables;
+};
