@@ -28,15 +28,7 @@ export class AdminAnalyticsService extends BaseService {
     options?: RevenueQueryOptions
   ): Promise<RevenueStats> {
     try {
-      // Verify organization exists
-      const org = await this.db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-      });
-
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
-
+      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       // Build date filter conditions
       const dateConditions = [
         eq(schema.purchases.organizationId, organizationId),
@@ -130,15 +122,7 @@ export class AdminAnalyticsService extends BaseService {
    */
   async getCustomerStats(organizationId: string): Promise<CustomerStats> {
     try {
-      // Verify organization exists
-      const org = await this.db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-      });
-
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
-
+      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       // Count distinct customers with completed purchases
       const totalResult = await this.db
         .select({
@@ -199,15 +183,7 @@ export class AdminAnalyticsService extends BaseService {
     limit = 10
   ): Promise<TopContentItem[]> {
     try {
-      // Verify organization exists
-      const org = await this.db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-      });
-
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
-
+      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       // Get top content by revenue with JOIN to content table
       const result = await this.db
         .select({

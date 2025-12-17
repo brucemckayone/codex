@@ -46,15 +46,7 @@ export class AdminCustomerManagementService extends BaseService {
     const { page = 1, limit = 20 } = options;
 
     try {
-      // Verify organization exists
-      const org = await this.db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-      });
-
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
-
+      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       const { limit: safeLimit, offset } = withPagination({ page, limit });
 
       // Get customers with aggregated stats
@@ -144,15 +136,7 @@ export class AdminCustomerManagementService extends BaseService {
     customerId: string
   ): Promise<CustomerDetails> {
     try {
-      // Verify organization exists
-      const org = await this.db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-      });
-
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
-
+      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       // Get user info
       const user = await this.db.query.users.findFirst({
         where: eq(schema.users.id, customerId),
@@ -261,15 +245,7 @@ export class AdminCustomerManagementService extends BaseService {
   ): Promise<boolean> {
     try {
       await this.db.transaction(async (tx) => {
-        // Verify organization exists
-        const org = await tx.query.organizations.findFirst({
-          where: eq(schema.organizations.id, organizationId),
-        });
-
-        if (!org) {
-          throw new NotFoundError('Organization not found', { organizationId });
-        }
-
+        // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
         // Verify customer exists and has relationship with org
         // (either via purchase or org membership)
         const customer = await tx.query.users.findFirst({

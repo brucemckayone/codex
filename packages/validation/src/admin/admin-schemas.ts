@@ -19,8 +19,14 @@ import { paginationSchema } from '../shared/pagination-schema';
 // ============================================================================
 
 /**
+ * Maximum date range in days for analytics queries (prevents DoS via large data queries)
+ */
+const MAX_DATE_RANGE_DAYS = 365;
+
+/**
  * Revenue analytics query parameters
  * Optional date range for filtering revenue data
+ * Max range: 365 days (prevents DoS via large data queries)
  */
 export const adminRevenueQuerySchema = z
   .object({
@@ -37,6 +43,20 @@ export const adminRevenueQuerySchema = z
     {
       message: 'Start date must be before or equal to end date',
       path: ['startDate'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        const diffMs = data.endDate.getTime() - data.startDate.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        return diffDays <= MAX_DATE_RANGE_DAYS;
+      }
+      return true;
+    },
+    {
+      message: `Date range cannot exceed ${MAX_DATE_RANGE_DAYS} days`,
+      path: ['endDate'],
     }
   );
 

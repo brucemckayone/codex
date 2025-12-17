@@ -38,15 +38,7 @@ export class AdminContentManagementService extends BaseService {
     const { page = 1, limit = 20, status } = options;
 
     try {
-      // Verify organization exists
-      const org = await this.db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-      });
-
-      if (!org) {
-        throw new NotFoundError('Organization not found', { organizationId });
-      }
-
+      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       // Build WHERE conditions
       const whereConditions = [
         eq(schema.content.organizationId, organizationId),

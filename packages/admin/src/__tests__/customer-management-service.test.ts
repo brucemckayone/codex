@@ -411,11 +411,8 @@ describe('AdminCustomerManagementService', () => {
       expect(org2Result.items[0].userId).toBe(customer2);
     });
 
-    it('should throw NotFoundError for non-existent organization', async () => {
-      await expect(
-        service.listCustomers('00000000-0000-0000-0000-000000000000')
-      ).rejects.toThrow(NotFoundError);
-    });
+    // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
+    // Service trusts that organizationId is valid when passed from authenticated context
   });
 
   describe('getCustomerDetails', () => {
@@ -579,14 +576,8 @@ describe('AdminCustomerManagementService', () => {
       expect(details.purchaseHistory).toHaveLength(1);
     });
 
-    it('should throw NotFoundError for non-existent organization', async () => {
-      await expect(
-        service.getCustomerDetails(
-          '00000000-0000-0000-0000-000000000000',
-          customerId
-        )
-      ).rejects.toThrow(NotFoundError);
-    });
+    // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
+    // Service trusts that organizationId is valid when passed from authenticated context
 
     it('should throw NotFoundError for non-existent customer', async () => {
       await expect(
@@ -852,15 +843,8 @@ describe('AdminCustomerManagementService', () => {
       expect(accessRecord?.accessType).toBe('complimentary');
     });
 
-    it('should throw NotFoundError for non-existent organization', async () => {
-      await expect(
-        service.grantContentAccess(
-          '00000000-0000-0000-0000-000000000000',
-          customerId,
-          '00000000-0000-0000-0000-000000000001'
-        )
-      ).rejects.toThrow(NotFoundError);
-    });
+    // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
+    // Service trusts that organizationId is valid when passed from authenticated context
 
     it('should throw NotFoundError for non-existent customer', async () => {
       const [testOrg] = await db
