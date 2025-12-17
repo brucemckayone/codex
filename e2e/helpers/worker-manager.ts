@@ -36,9 +36,21 @@ const WORKERS: WorkerConfig[] = [
   },
   {
     name: 'identity-api',
-    port: 42071,
+    port: 42074,
     cwd: resolve(__dirname, '../../workers/identity-api'),
+    healthUrl: 'http://localhost:42074/health',
+  },
+  {
+    name: 'organization-api',
+    port: 42071,
+    cwd: resolve(__dirname, '../../workers/organization-api'),
     healthUrl: 'http://localhost:42071/health',
+  },
+  {
+    name: 'notifications-api',
+    port: 42075,
+    cwd: resolve(__dirname, '../../workers/notifications-api'),
+    healthUrl: 'http://localhost:42075/health',
   },
   {
     name: 'ecom-api',

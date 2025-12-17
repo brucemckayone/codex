@@ -8,7 +8,7 @@ set -e
 #   ./upload-worker-secrets.sh <environment> <worker-name>
 #
 # Environments: production, preview, test
-# Workers: ecom-api, content-api, identity-api, admin-api, auth
+# Workers: ecom-api, content-api, identity-api, organization-api, notifications-api, admin-api, auth
 #
 # Environment variables required (set via GitHub Actions):
 #   - CLOUDFLARE_API_TOKEN
@@ -25,7 +25,7 @@ WORKER=$2
 if [ -z "$ENVIRONMENT" ] || [ -z "$WORKER" ]; then
   echo "Usage: $0 <environment> <worker-name>"
   echo "  Environments: production, preview, test"
-  echo "  Workers: ecom-api, content-api, identity-api, admin-api, auth"
+  echo "  Workers: ecom-api, content-api, identity-api, organization-api, notifications-api, admin-api, auth"
   exit 1
 fi
 
@@ -111,6 +111,26 @@ EOF
     ;;
 
   admin-api)
+    SECRETS_JSON=$(cat <<EOF
+{
+  "DATABASE_URL":"${DATABASE_URL}",
+  ${R2_BUCKETS}
+}
+EOF
+)
+    ;;
+
+  organization-api)
+    SECRETS_JSON=$(cat <<EOF
+{
+  "DATABASE_URL":"${DATABASE_URL}",
+  ${R2_BUCKETS}
+}
+EOF
+)
+    ;;
+
+  notifications-api)
     SECRETS_JSON=$(cat <<EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",

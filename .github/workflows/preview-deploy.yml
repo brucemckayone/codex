@@ -59,6 +59,8 @@ jobs:
           wrangler delete --name ecom-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name content-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name identity-api-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name organization-api-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name notifications-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name admin-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name auth-worker-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name codex-web-preview-${{ env.PR_NUMBER }} || true
@@ -402,6 +404,66 @@ jobs:
           echo "url=$ADMIN_API_URL" >> $GITHUB_OUTPUT
           echo "ADMIN_API_URL=$ADMIN_API_URL" >> $GITHUB_ENV
 
+      # Deploy organization-api worker
+      - name: Deploy organization-api (preview)
+        id: deploy-organization-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/organization-api
+          command: >
+            deploy --name organization-api-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --route "organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+
+      - name: Upload organization-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name organization-api-preview-${{ env.PR_NUMBER }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Set Organization API URL
+        id: organization-api-url
+        run: |
+          ORGANIZATION_API_URL="https://organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          echo "url=$ORGANIZATION_API_URL" >> $GITHUB_OUTPUT
+          echo "ORGANIZATION_API_URL=$ORGANIZATION_API_URL" >> $GITHUB_ENV
+
+      # Deploy notifications-api worker
+      - name: Deploy notifications-api (preview)
+        id: deploy-notifications-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/notifications-api
+          command: >
+            deploy --name notifications-api-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --route "notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+
+      - name: Upload notifications-api secrets
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name notifications-api-preview-${{ env.PR_NUMBER }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Set Notifications API URL
+        id: notifications-api-url
+        run: |
+          NOTIFICATIONS_API_URL="https://notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          echo "url=$NOTIFICATIONS_API_URL" >> $GITHUB_OUTPUT
+          echo "NOTIFICATIONS_API_URL=$NOTIFICATIONS_API_URL" >> $GITHUB_ENV
+
       # Set web URL first (needed for auth worker)
       - name: Set Web URL
         run: |
@@ -501,12 +563,14 @@ jobs:
             - **Stripe API:** https://api-preview-${prNumber}.revelations.studio
             - **Content API:** https://content-api-preview-${prNumber}.revelations.studio
             - **Identity API:** https://identity-api-preview-${prNumber}.revelations.studio
+            - **Organization API:** https://organization-api-preview-${prNumber}.revelations.studio
+            - **Notifications API:** https://notifications-api-preview-${prNumber}.revelations.studio
             - **Admin API:** https://admin-api-preview-${prNumber}.revelations.studio
             - **Auth:** https://auth-preview-${prNumber}.revelations.studio
             - **Database:** Neon branch \`${{ env.BRANCH_NAME }}\`
 
             ### ✅ All Health Checks Passed
-            All 6 services are healthy and responding
+            All 8 services are healthy and responding
 
             ### Testing Checklist
             - [ ] Visual confirmation of UI changes

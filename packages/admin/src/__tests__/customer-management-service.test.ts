@@ -39,7 +39,6 @@ describe('AdminCustomerManagementService', () => {
   let db: Database;
   let service: AdminCustomerManagementService;
   let creatorId: string;
-  let customerId: string;
   let orgId: string;
 
   beforeAll(async () => {
@@ -48,7 +47,7 @@ describe('AdminCustomerManagementService', () => {
 
     // Create test users
     const userIds = await seedTestUsers(db, 2);
-    [creatorId, customerId] = userIds;
+    [creatorId] = userIds;
 
     // Create organization
     const [org] = await db

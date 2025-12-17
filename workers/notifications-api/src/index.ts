@@ -1,7 +1,7 @@
 /**
- * Identity API Worker
+ * Notifications API Worker
  *
- * Minimal Cloudflare Worker placeholder for future identity endpoints.
+ * Minimal Cloudflare Worker placeholder for future notification endpoints.
  * Currently provides only health check endpoint.
  *
  * Security Features:
@@ -31,7 +31,7 @@ import { createEnvValidationMiddleware } from './utils/validate-env';
 // ============================================================================
 
 const app = createWorker({
-  serviceName: 'identity-api',
+  serviceName: 'notifications-api',
   version: '1.0.0',
   enableRequestTracking: true,
   enableLogging: true,

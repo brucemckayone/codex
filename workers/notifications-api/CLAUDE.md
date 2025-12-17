@@ -1,12 +1,12 @@
-# Identity API Worker - Documentation
+# Notifications API Worker - Documentation
 
 ## Overview
 
-Minimal Cloudflare Worker placeholder for future identity endpoints. Currently provides only health check endpoint.
+Minimal Cloudflare Worker placeholder for future notification endpoints. Currently provides only health check endpoint.
 
-**Deployment Target**: `identity-api.revelations.studio` (production), local port 42074 (development)
+**Deployment Target**: `notifications-api.revelations.studio` (production), local port 42075 (development)
 
-**Primary Responsibility**: Placeholder for future user identity management features
+**Primary Responsibility**: Placeholder for future notification management features
 
 ## Key Features
 
@@ -31,7 +31,7 @@ Minimal Cloudflare Worker placeholder for future identity endpoints. Currently p
 
 ```bash
 # Start local dev server
-pnpm dev  # http://localhost:42074
+pnpm dev  # http://localhost:42075
 
 # Run tests
 pnpm test
@@ -57,10 +57,9 @@ pnpm deploy:production
 
 ## Future Features
 
-This worker is a placeholder for future identity-related endpoints:
-- User profile management
-- User settings
-- Account preferences
-- User search/lookup
-
-Organization management has been moved to the `organization-api` worker.
+This worker is a placeholder for future notification-related endpoints:
+- Email notifications
+- In-app notifications
+- Push notifications
+- Notification preferences
+- Notification history

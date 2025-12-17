@@ -18,7 +18,10 @@
     { "path": "./workers/auth" },
     { "path": "./workers/content-api" },
     { "path": "./workers/identity-api" },
-    { "path": "./workers/ecom-api" }
+    { "path": "./workers/organization-api" },
+    { "path": "./workers/notifications-api" },
+    { "path": "./workers/ecom-api" },
+    { "path": "./workers/admin-api" }
   ],
   "compilerOptions": {
     "target": "ES2022",

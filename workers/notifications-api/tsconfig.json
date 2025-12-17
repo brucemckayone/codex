@@ -1,0 +1,12 @@
+{
+  "extends": "../../config/tsconfig/worker.json",
+  "compilerOptions": {
+    "rootDir": "src/",
+    "types": [
+      "@cloudflare/workers-types/2023-07-01",
+      "@cloudflare/vitest-pool-workers"
+    ]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
