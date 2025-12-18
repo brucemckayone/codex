@@ -703,8 +703,24 @@ jobs:
           echo "💾 Database: Migrations applied successfully"
           echo "⚡ All workers deployed and verified healthy"
 
-          # Add deployment metrics to job summary
+          # Add prominent URL section at TOP of summary
+          echo "## 🚀 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Deployed Services" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Web App | [codex.revelations.studio](https://codex.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stripe API | [api.revelations.studio](https://api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Content API | [content-api.revelations.studio](https://content-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Identity API | [identity-api.revelations.studio](https://identity-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Organization API | [organization-api.revelations.studio](https://organization-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Notifications API | [notifications-api.revelations.studio](https://notifications-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Admin API | [admin-api.revelations.studio](https://admin-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auth | [auth.revelations.studio](https://auth.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add deployment metrics
           echo "## ⚡ Deployment Metrics" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Trigger:** Merged to main" >> $GITHUB_STEP_SUMMARY
@@ -713,16 +729,6 @@ jobs:
           echo "- **Workers deployed:** 8 (stripe, content, identity, organization, notifications, admin, auth, web)" >> $GITHUB_STEP_SUMMARY
           echo "- **Health checks:** All passed ✅" >> $GITHUB_STEP_SUMMARY
           echo "- **Smoke tests:** All passed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Services" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ api.revelations.studio" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ content-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ identity-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ organization-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ notifications-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ admin-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ auth.revelations.studio" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ codex.revelations.studio" >> $GITHUB_STEP_SUMMARY
 
       - name: Rollback instructions on failure
         if: failure()
