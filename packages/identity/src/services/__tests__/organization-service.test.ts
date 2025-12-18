@@ -345,15 +345,40 @@ describe('OrganizationService', () => {
     });
 
     it('should paginate organization list', async () => {
-      const page1 = await service.list({}, { page: 1, limit: 2 });
+      // Create isolated test data with unique prefix for filtering
+      const testPrefix = `paginate-test-${Date.now()}`;
+      const createdIds: string[] = [];
+
+      for (let i = 0; i < 5; i++) {
+        const org = await service.create({
+          name: `${testPrefix} Org ${i}`,
+          slug: createUniqueSlug(`paginate-${i}`),
+        });
+        createdIds.push(org.id);
+      }
+
+      // Query only our test data using search filter
+      const page1 = await service.list(
+        { search: testPrefix },
+        { page: 1, limit: 2 }
+      );
+      const page2 = await service.list(
+        { search: testPrefix },
+        { page: 2, limit: 2 }
+      );
 
       expect(page1.items).toHaveLength(2);
-      expect(page1.pagination.totalPages).toBeGreaterThanOrEqual(3);
-
-      const page2 = await service.list({}, { page: 2, limit: 2 });
+      expect(page1.pagination.total).toBe(5);
+      expect(page1.pagination.totalPages).toBe(3);
 
       expect(page2.items).toHaveLength(2);
       expect(page1.items[0].id).not.toBe(page2.items[0].id);
+
+      // Verify all returned items are from our test data
+      const allReturnedIds = [...page1.items, ...page2.items].map((o) => o.id);
+      for (const id of allReturnedIds) {
+        expect(createdIds).toContain(id);
+      }
     });
 
     it('should search by name', async () => {
@@ -443,23 +468,26 @@ describe('OrganizationService', () => {
 
   describe('pagination determinism', () => {
     it('should return consistent order across pages with identical timestamps', async () => {
+      // Create isolated test data with unique prefix for filtering
+      const testPrefix = `determ-test-${Date.now()}`;
+
       // Create multiple organizations rapidly to potentially have identical timestamps
       const orgs = await Promise.all(
         Array.from({ length: 6 }, (_, i) =>
           service.create({
-            name: `Pagination Test Org ${i}`,
-            slug: createUniqueSlug(`pagination-test-${i}`),
+            name: `${testPrefix} Org ${i}`,
+            slug: createUniqueSlug(`determ-${i}`),
           })
         )
       );
 
-      // Get page 1 and page 2 with small page size
+      // Get page 1 and page 2 with small page size (filtered to our test data)
       const page1 = await service.list(
-        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { search: testPrefix, sortBy: 'createdAt', sortOrder: 'desc' },
         { page: 1, limit: 3 }
       );
       const page2 = await service.list(
-        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { search: testPrefix, sortBy: 'createdAt', sortOrder: 'desc' },
         { page: 2, limit: 3 }
       );
 
@@ -468,39 +496,45 @@ describe('OrganizationService', () => {
       const page2Ids = page2.items.map((org) => org.id);
       const allIds = [...page1Ids, ...page2Ids];
 
+      // Verify we got exactly our 6 orgs across 2 pages
+      expect(page1Ids).toHaveLength(3);
+      expect(page2Ids).toHaveLength(3);
+      expect(allIds).toHaveLength(6);
+
       // Verify no duplicates exist across pages (deterministic ordering)
       const uniqueIds = new Set(allIds);
-      expect(uniqueIds.size).toBe(allIds.length);
+      expect(uniqueIds.size).toBe(6);
 
-      // Verify our created orgs appear somewhere in the results
-      // (they should be at the top since sorted by createdAt desc)
-      const createdIds = orgs.map((org) => org.id);
-      const foundIds = createdIds.filter((id) => allIds.includes(id));
-      expect(foundIds.length).toBeGreaterThan(0);
+      // Verify all returned IDs are from our created orgs
+      const createdIds = new Set(orgs.map((org) => org.id));
+      for (const id of allIds) {
+        expect(createdIds.has(id)).toBe(true);
+      }
     });
 
     it('should maintain consistent order when fetching same page multiple times', async () => {
-      // Create some test organizations
-      await Promise.all(
-        Array.from({ length: 4 }, (_, i) =>
-          service.create({
-            name: `Consistency Test ${i}`,
-            slug: createUniqueSlug(`consistency-${i}`),
-          })
-        )
-      );
+      // Create isolated test data with unique prefix for filtering
+      const testPrefix = `consistency-test-${Date.now()}`;
 
-      // Fetch the same page multiple times
+      // Create test organizations (sequentially to ensure distinct timestamps)
+      for (let i = 0; i < 4; i++) {
+        await service.create({
+          name: `${testPrefix} Org ${i}`,
+          slug: createUniqueSlug(`consistency-${i}`),
+        });
+      }
+
+      // Fetch the same filtered page multiple times
       const fetch1 = await service.list(
-        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { search: testPrefix, sortBy: 'createdAt', sortOrder: 'desc' },
         { page: 1, limit: 3 }
       );
       const fetch2 = await service.list(
-        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { search: testPrefix, sortBy: 'createdAt', sortOrder: 'desc' },
         { page: 1, limit: 3 }
       );
       const fetch3 = await service.list(
-        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { search: testPrefix, sortBy: 'createdAt', sortOrder: 'desc' },
         { page: 1, limit: 3 }
       );
 
@@ -509,6 +543,7 @@ describe('OrganizationService', () => {
       const ids2 = fetch2.items.map((org) => org.id);
       const ids3 = fetch3.items.map((org) => org.id);
 
+      expect(ids1).toHaveLength(3);
       expect(ids1).toEqual(ids2);
       expect(ids2).toEqual(ids3);
     });
