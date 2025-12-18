@@ -7,11 +7,32 @@ import type { ErrorResponse } from './types';
 
 /**
  * Assert API response is successful (2xx)
+ * Logs detailed error information when status doesn't match for debugging CI failures
  */
 export async function expectSuccessResponse(
   response: APIResponse,
   expectedStatus = 200
 ): Promise<void> {
+  const actualStatus = response.status();
+  if (actualStatus !== expectedStatus) {
+    // Log detailed error info for debugging CI failures
+    const url = response.url();
+    let body = 'Unable to parse body';
+    try {
+      body = JSON.stringify(await response.json(), null, 2);
+    } catch {
+      try {
+        body = await response.text();
+      } catch {
+        // Ignore body parsing errors
+      }
+    }
+    console.error(`[E2E Debug] Request to ${url} failed:`);
+    console.error(
+      `[E2E Debug] Expected status: ${expectedStatus}, Actual: ${actualStatus}`
+    );
+    console.error(`[E2E Debug] Response body: ${body}`);
+  }
   expect(response.status()).toBe(expectedStatus);
   expect(response.headers()['content-type']).toContain('application/json');
 }

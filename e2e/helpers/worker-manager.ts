@@ -74,30 +74,28 @@ const runningProcesses: ChildProcess[] = [];
 
 /**
  * Kill any process running on a specific port
- * Uses lsof to find PIDs and kills them
+ * Uses lsof (macOS/Linux) or fuser (Linux fallback) to find PIDs and kills them
  * Gracefully handles cases where no process is running
  */
 async function killProcessOnPort(port: number): Promise<void> {
+  // Try lsof first (works on macOS and most Linux systems)
   try {
-    // Find PIDs using the port (TCP only, listening or established)
     const { stdout } = await execAsync(`lsof -ti:${port}`);
     const pids = stdout
       .trim()
       .split('\n')
       .filter((pid) => pid.length > 0);
 
-    if (pids.length === 0) {
-      return; // No process on this port
-    }
-
-    // Kill all processes on this port
-    for (const pid of pids) {
-      try {
-        await execAsync(`kill -9 ${pid}`);
-        console.log(`   Killed process ${pid} on port ${port}`);
-      } catch {
-        // Process may have already exited, ignore error
+    if (pids.length > 0) {
+      for (const pid of pids) {
+        try {
+          await execAsync(`kill -9 ${pid}`);
+          console.log(`   Killed process ${pid} on port ${port}`);
+        } catch {
+          // Process may have already exited, ignore error
+        }
       }
+      return;
     }
   } catch (error) {
     // lsof returns exit code 1 if no processes found - this is fine
@@ -109,8 +107,16 @@ async function killProcessOnPort(port: number): Promise<void> {
     ) {
       return; // No processes found, port is free
     }
-    // Other errors (e.g., lsof not installed) should be logged but not fail
-    console.warn(`   Warning: Could not check port ${port}:`, error);
+    // Continue to try fuser as fallback
+  }
+
+  // Fallback: Try fuser (available on Linux)
+  try {
+    await execAsync(`fuser -k ${port}/tcp 2>/dev/null || true`);
+    console.log(`   Cleaned up port ${port} using fuser`);
+  } catch {
+    // fuser not available or failed - port might still be free
+    console.log(`   Port ${port} cleanup attempted (may already be free)`);
   }
 }
 
@@ -155,6 +161,7 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
     // Spawn wrangler dev with --env test
     // Wrangler automatically loads .dev.vars file from worker directory
     // --live-reload=false prevents file watching and hot reloads during tests
+    // --local ensures all operations (KV, etc.) run locally without Cloudflare API calls
     const proc = spawn(
       'npx',
       [
@@ -167,6 +174,7 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
         '--inspector-port',
         inspectorPort.toString(),
         '--live-reload=false',
+        '--local',
       ],
       {
         cwd: worker.cwd,
