@@ -440,4 +440,77 @@ describe('OrganizationService', () => {
       expect(available).toBe(true);
     });
   });
+
+  describe('pagination determinism', () => {
+    it('should return consistent order across pages with identical timestamps', async () => {
+      // Create multiple organizations rapidly to potentially have identical timestamps
+      const orgs = await Promise.all(
+        Array.from({ length: 6 }, (_, i) =>
+          service.create({
+            name: `Pagination Test Org ${i}`,
+            slug: createUniqueSlug(`pagination-test-${i}`),
+          })
+        )
+      );
+
+      // Get page 1 and page 2 with small page size
+      const page1 = await service.list(
+        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { page: 1, limit: 3 }
+      );
+      const page2 = await service.list(
+        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { page: 2, limit: 3 }
+      );
+
+      // Collect IDs from both pages
+      const page1Ids = page1.items.map((org) => org.id);
+      const page2Ids = page2.items.map((org) => org.id);
+      const allIds = [...page1Ids, ...page2Ids];
+
+      // Verify no duplicates exist across pages (deterministic ordering)
+      const uniqueIds = new Set(allIds);
+      expect(uniqueIds.size).toBe(allIds.length);
+
+      // Verify our created orgs appear somewhere in the results
+      // (they should be at the top since sorted by createdAt desc)
+      const createdIds = orgs.map((org) => org.id);
+      const foundIds = createdIds.filter((id) => allIds.includes(id));
+      expect(foundIds.length).toBeGreaterThan(0);
+    });
+
+    it('should maintain consistent order when fetching same page multiple times', async () => {
+      // Create some test organizations
+      await Promise.all(
+        Array.from({ length: 4 }, (_, i) =>
+          service.create({
+            name: `Consistency Test ${i}`,
+            slug: createUniqueSlug(`consistency-${i}`),
+          })
+        )
+      );
+
+      // Fetch the same page multiple times
+      const fetch1 = await service.list(
+        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { page: 1, limit: 3 }
+      );
+      const fetch2 = await service.list(
+        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { page: 1, limit: 3 }
+      );
+      const fetch3 = await service.list(
+        { sortBy: 'createdAt', sortOrder: 'desc' },
+        { page: 1, limit: 3 }
+      );
+
+      // All fetches should return items in the same order
+      const ids1 = fetch1.items.map((org) => org.id);
+      const ids2 = fetch2.items.map((org) => org.id);
+      const ids3 = fetch3.items.map((org) => org.id);
+
+      expect(ids1).toEqual(ids2);
+      expect(ids2).toEqual(ids3);
+    });
+  });
 });

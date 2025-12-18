@@ -359,6 +359,118 @@ jobs:
           echo "Last HTTP code: $HTTP_CODE"
           exit 1
 
+      # Deploy organization-api to production
+      - name: Deploy organization-api
+        id: deploy-organization-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/organization-api
+          command: deploy --env production
+
+      - name: Upload organization-api secrets
+        run: .github/scripts/upload-worker-secrets.sh production organization-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
+
+      # Verify organization-api worker is healthy after deployment
+      - name: Health check - Organization API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Organization API worker health at https://organization-api.revelations.studio..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://organization-api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Organization API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Organization API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Organization API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
+
+      # Deploy notifications-api to production
+      - name: Deploy notifications-api
+        id: deploy-notifications-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/notifications-api
+          command: deploy --env production
+
+      - name: Upload notifications-api secrets
+        run: .github/scripts/upload-worker-secrets.sh production notifications-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
+
+      # Verify notifications-api worker is healthy after deployment
+      - name: Health check - Notifications API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Notifications API worker health at https://notifications-api.revelations.studio..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 15
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://notifications-api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Notifications API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Notifications API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Notifications API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
+
       # Deploy auth-worker to production
       - name: Deploy auth-worker
         id: deploy-auth
@@ -481,7 +593,7 @@ jobs:
           echo "Last HTTP code: $HTTP_CODE"
           exit 1
 
-      # Comprehensive smoke tests for all 6 services
+      # Comprehensive smoke tests for all 8 services
       - name: Comprehensive smoke tests
         timeout-minutes: 5
         run: |
@@ -519,7 +631,25 @@ jobs:
             FAILED=1
           fi
 
-          # Test 4: Admin API
+          # Test 4: Organization API
+          echo "Testing Organization API..."
+          if curl -f -s https://organization-api.revelations.studio/health > /dev/null 2>&1; then
+            echo "✅ Organization API (organization-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Organization API (organization-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
+
+          # Test 5: Notifications API
+          echo "Testing Notifications API..."
+          if curl -f -s https://notifications-api.revelations.studio/health > /dev/null 2>&1; then
+            echo "✅ Notifications API (notifications-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Notifications API (notifications-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
+
+          # Test 6: Admin API
           echo "Testing Admin API..."
           if curl -f -s https://admin-api.revelations.studio/health > /dev/null 2>&1; then
             echo "✅ Admin API (admin-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
@@ -528,7 +658,7 @@ jobs:
             FAILED=1
           fi
 
-          # Test 5: Auth Worker
+          # Test 7: Auth Worker
           echo "Testing Auth worker..."
           if curl -f -s https://auth.revelations.studio/health > /dev/null 2>&1; then
             echo "✅ Auth worker (auth.revelations.studio)" >> $GITHUB_STEP_SUMMARY
@@ -537,7 +667,7 @@ jobs:
             FAILED=1
           fi
 
-          # Test 6: Web App
+          # Test 8: Web App
           echo "Testing Web app..."
           if curl -f -s https://codex.revelations.studio > /dev/null 2>&1; then
             echo "✅ Web app (codex.revelations.studio)" >> $GITHUB_STEP_SUMMARY
@@ -549,7 +679,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ $FAILED -eq 0 ]; then
-            echo "✅ **All 6 services passed smoke tests**" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **All 8 services passed smoke tests**" >> $GITHUB_STEP_SUMMARY
             echo "✅ All smoke tests passed"
             exit 0
           else
@@ -566,6 +696,8 @@ jobs:
           echo "🔌 API (Stripe): https://api.revelations.studio - Health: OK"
           echo "📝 Content API: https://content-api.revelations.studio - Health: OK"
           echo "👤 Identity API: https://identity-api.revelations.studio - Health: OK"
+          echo "🏢 Organization API: https://organization-api.revelations.studio - Health: OK"
+          echo "📧 Notifications API: https://notifications-api.revelations.studio - Health: OK"
           echo "🛠️ Admin API: https://admin-api.revelations.studio - Health: OK"
           echo "🔐 Auth: https://auth.revelations.studio - Health: OK"
           echo "💾 Database: Migrations applied successfully"
@@ -578,7 +710,7 @@ jobs:
           echo "- **Trigger:** Merged to main" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Completed:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Workers deployed:** 6 (stripe, content, identity, admin, auth, web)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workers deployed:** 8 (stripe, content, identity, organization, notifications, admin, auth, web)" >> $GITHUB_STEP_SUMMARY
           echo "- **Health checks:** All passed ✅" >> $GITHUB_STEP_SUMMARY
           echo "- **Smoke tests:** All passed ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -586,6 +718,8 @@ jobs:
           echo "- ✅ api.revelations.studio" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ content-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ identity-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ organization-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ notifications-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ admin-api.revelations.studio" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ auth.revelations.studio" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ codex.revelations.studio" >> $GITHUB_STEP_SUMMARY

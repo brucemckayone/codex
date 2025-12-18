@@ -276,12 +276,12 @@ export class OrganizationService extends BaseService {
           ? desc(organizations[sortColumn])
           : asc(organizations[sortColumn]);
 
-      // Get items
+      // Get items (secondary sort by id ensures deterministic pagination)
       const items = await this.db.query.organizations.findMany({
         where: and(...whereConditions),
         limit,
         offset,
-        orderBy: [orderByClause],
+        orderBy: [orderByClause, asc(organizations.id)],
       });
 
       // Get total count

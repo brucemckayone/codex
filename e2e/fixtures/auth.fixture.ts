@@ -105,11 +105,6 @@ export const authFixture = {
       const loginCookie = loginResponse.headers()['set-cookie'];
       const cookieToSend = extractSessionCookie(loginCookie);
 
-      console.log(
-        '[DEBUG] Cookies being sent to /api/auth/get-session:',
-        cookieToSend
-      );
-
       // Get session from get-session endpoint
       const sessionResponse = await request.get(
         `${WORKER_URLS.auth}/api/auth/get-session`,

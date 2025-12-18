@@ -68,12 +68,12 @@ test.describe('Purchase History API', () => {
     // Create organization
     console.log('[Setup] 2/12 Creating organization...');
     const orgResponse = await request.post(
-      `${WORKER_URLS.identity}/api/organizations`,
+      `${WORKER_URLS.organization}/api/organizations`,
       {
         headers: {
           Cookie: creatorCookie,
           'Content-Type': 'application/json',
-          Origin: WORKER_URLS.identity,
+          Origin: WORKER_URLS.organization,
         },
         data: {
           name: `History Test Org ${Date.now()}`,

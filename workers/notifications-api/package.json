@@ -1,11 +1,11 @@
 {
-  "name": "identity-api",
+  "name": "notifications-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloudflare Worker for Identity API endpoints (minimal placeholder)",
+  "description": "Cloudflare Worker for Notifications API endpoints (minimal placeholder)",
   "type": "module",
   "scripts": {
-    "dev": "pnpm build && wrangler dev --port 42074 --inspector-port 9236",
+    "dev": "pnpm build && wrangler dev --port 42075 --inspector-port 9237",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:production": "wrangler deploy --env production",

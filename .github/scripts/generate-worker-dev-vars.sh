@@ -21,17 +21,17 @@ WORKER=$1
 
 if [ -z "$WORKER" ]; then
   echo "Usage: $0 <worker-name>"
-  echo "Available workers: auth, content-api, identity-api, ecom-api, admin-api"
+  echo "Available workers: auth, content-api, identity-api, organization-api, notifications-api, ecom-api, admin-api"
   exit 1
 fi
 
 # Validate worker name
 case "${WORKER}" in
-  "auth"|"content-api"|"identity-api"|"ecom-api"|"admin-api")
+  "auth"|"content-api"|"identity-api"|"organization-api"|"notifications-api"|"ecom-api"|"admin-api")
     ;;
   *)
     echo "Error: Unknown worker '${WORKER}'"
-    echo "Available workers: auth, content-api, identity-api, ecom-api, admin-api"
+    echo "Available workers: auth, content-api, identity-api, organization-api, notifications-api, ecom-api, admin-api"
     exit 1
     ;;
 esac

@@ -20,7 +20,6 @@ import {
   organizations,
   purchases,
 } from '@codex/database/schema';
-import { NotFoundError } from '@codex/service-errors';
 import {
   createTestMediaItemInput,
   createTestOrganizationInput,

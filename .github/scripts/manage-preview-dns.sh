@@ -22,6 +22,8 @@ PREVIEW_SUBDOMAINS=(
   "api-preview-${PR_NUMBER}"
   "content-api-preview-${PR_NUMBER}"
   "identity-api-preview-${PR_NUMBER}"
+  "organization-api-preview-${PR_NUMBER}"
+  "notifications-api-preview-${PR_NUMBER}"
   "admin-api-preview-${PR_NUMBER}"
   "auth-preview-${PR_NUMBER}"
 )
