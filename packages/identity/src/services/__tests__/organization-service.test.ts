@@ -480,8 +480,12 @@ describe('OrganizationService', () => {
     });
 
     it('should maintain consistent order when fetching same page multiple times', async () => {
+      // First, get current total count to understand database state
+      const initial = await service.list({}, { page: 1, limit: 1 });
+      const totalOrgs = initial.pagination.total;
+
       // Create some test organizations
-      await Promise.all(
+      const createdOrgs = await Promise.all(
         Array.from({ length: 4 }, (_, i) =>
           service.create({
             name: `Consistency Test ${i}`,
@@ -490,18 +494,22 @@ describe('OrganizationService', () => {
         )
       );
 
+      // Use a large enough page size to include all data from previous tests + new orgs
+      // This ensures we're querying a stable dataset
+      const pageSize = Math.min(totalOrgs + createdOrgs.length, 50);
+
       // Fetch the same page multiple times
       const fetch1 = await service.list(
         { sortBy: 'createdAt', sortOrder: 'desc' },
-        { page: 1, limit: 3 }
+        { page: 1, limit: pageSize }
       );
       const fetch2 = await service.list(
         { sortBy: 'createdAt', sortOrder: 'desc' },
-        { page: 1, limit: 3 }
+        { page: 1, limit: pageSize }
       );
       const fetch3 = await service.list(
         { sortBy: 'createdAt', sortOrder: 'desc' },
-        { page: 1, limit: 3 }
+        { page: 1, limit: pageSize }
       );
 
       // All fetches should return items in the same order
@@ -511,6 +519,12 @@ describe('OrganizationService', () => {
 
       expect(ids1).toEqual(ids2);
       expect(ids2).toEqual(ids3);
+
+      // Verify our newly created orgs appear in results (should be at top due to createdAt desc)
+      const createdIds = new Set(createdOrgs.map((org) => org.id));
+      const topIds = ids1.slice(0, 4);
+      const foundNewOrgs = topIds.filter((id) => createdIds.has(id));
+      expect(foundNewOrgs.length).toBe(4);
     });
   });
 });
