@@ -299,6 +299,15 @@ jobs:
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
 
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
   # ============================================================================
   # WORKER TESTS - 5 Parallel Jobs
   # Each worker gets its own Neon branch for test isolation
@@ -412,6 +421,15 @@ jobs:
       - name: Fail if tests failed
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
+
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   content-api-test:
     name: Content API Tests
@@ -538,6 +556,15 @@ jobs:
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
 
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
   identity-api-test:
     name: Identity API Tests
     needs: [changes, test]
@@ -647,6 +674,15 @@ jobs:
       - name: Fail if tests failed
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
+
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   admin-api-test:
     name: Admin API Tests
@@ -760,6 +796,15 @@ jobs:
       - name: Fail if tests failed
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
+
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   ecom-api-test:
     name: Ecom API Tests
@@ -876,6 +921,15 @@ jobs:
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
 
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
   organization-api-test:
     name: Organization API Tests
     needs: [changes, test]
@@ -986,6 +1040,15 @@ jobs:
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
 
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
   notifications-api-test:
     name: Notifications API Tests
     needs: [changes, test]
@@ -1094,6 +1157,15 @@ jobs:
       - name: Fail if tests failed
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
+
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   # ============================================================================
   # E2E API TESTS - Root /e2e/ directory tests
@@ -1228,6 +1300,15 @@ jobs:
       - name: Fail if E2E API tests failed
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
+
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   # ============================================================================
   # E2E WEB TESTS - Web application E2E tests
@@ -1380,6 +1461,15 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 30
+
+      # Cleanup: Delete Neon branch immediately after job completes
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   cleanup-neon-branches:
     name: Cleanup Neon Branches

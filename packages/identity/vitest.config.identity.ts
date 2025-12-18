@@ -9,5 +9,5 @@ export default packageVitestConfig({
   testTimeout: 60000,
   hookTimeout: 60000,
   enableNeonTesting: true, // Enable ephemeral Neon branches for test isolation
-  // sequentialTests no longer needed - each test file gets its own database
+  sequentialTests: true, // Required: tests share same DB and create orgs with similar timestamps
 });
