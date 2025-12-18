@@ -52,12 +52,12 @@ test.describe('Paid Content Purchase Flow', () => {
 
     // Create organization (required for paid content in Phase 1)
     const orgResponse = await request.post(
-      `${WORKER_URLS.identity}/api/organizations`,
+      `${WORKER_URLS.organization}/api/organizations`,
       {
         headers: {
           Cookie: creatorCookie,
           'Content-Type': 'application/json',
-          Origin: WORKER_URLS.identity,
+          Origin: WORKER_URLS.organization,
         },
         data: {
           name: `Test Org ${Date.now()}`,
@@ -301,12 +301,12 @@ test.describe('Paid Content Purchase Flow', () => {
 
     // Create organization (required for paid content)
     const orgResponse = await request.post(
-      `${WORKER_URLS.identity}/api/organizations`,
+      `${WORKER_URLS.organization}/api/organizations`,
       {
         headers: {
           Cookie: creatorCookie,
           'Content-Type': 'application/json',
-          Origin: WORKER_URLS.identity,
+          Origin: WORKER_URLS.organization,
         },
         data: {
           name: `Idem Org ${Date.now()}`,
@@ -497,12 +497,12 @@ test.describe('Paid Content Purchase Flow', () => {
 
     // Create organization (required for paid content)
     const orgResponse = await request.post(
-      `${WORKER_URLS.identity}/api/organizations`,
+      `${WORKER_URLS.organization}/api/organizations`,
       {
         headers: {
           Cookie: creatorCookie,
           'Content-Type': 'application/json',
-          Origin: WORKER_URLS.identity,
+          Origin: WORKER_URLS.organization,
         },
         data: {
           name: `409 Org ${Date.now()}`,
