@@ -1,9 +1,10 @@
 # P1-NOTIFY-001: Email Notification Service Implementation Plan
 
-**Status**: Draft (feedback-driven)
+**Status**: Draft (reviewed)
 **Work Packet**: P1-NOTIFY-001
 **Created**: 2025-12-18
 **Last Updated**: 2025-12-19
+**Reviewed**: 2025-12-19 (codebase alignment review)
 **Owner**: TBD
 
 ---
@@ -153,7 +154,10 @@
 
 **@codex/security**
 - Core middleware: `requireAuth`, `optionalAuth`, `rateLimit`, `securityHeaders`.
-- `requirePlatformOwner` enforces `user.role === 'platform_owner'` (use for global template management).
+- `requirePlatformOwner` is a **standalone middleware** (not a policy preset) that enforces `user.role === 'platform_owner'`.
+- Located at: `packages/security/src/platform-owner-auth.ts`.
+- Must be applied **before** `withPolicy()` in route chain, not via `POLICY_PRESETS`.
+- Usage: `app.post('/global', requirePlatformOwner(), withPolicy(...), handler)`.
 
 **@codex/validation**
 - Central Zod schemas and primitives.
@@ -162,8 +166,10 @@
 
 **@codex/observability**
 - `ObservabilityClient` with built-in redaction.
-- Redaction defaults are environment-based; for notifications, override to always redact emails.
-- Use structured logs and avoid raw email addresses in metadata.
+- Default: `redactEmails: true` in production (see `packages/observability/src/index.ts:53-57`).
+- Default `EMAIL_PATTERN` catches standard email formats.
+- For additional fields (e.g., `recipientEmail`, `templateData`), use `customKeys` option.
+- Use structured logs; avoid passing raw email addresses in metadata keys.
 
 **@codex/shared-types**
 - `HonoEnv` Bindings and Variables are the shared contract for workers.
@@ -182,8 +188,9 @@
 ## External Dependencies (Context-7 + Web Sources)
 
 - `resend`: Production email provider SDK (HTML/text or template send); source Context-7.
-- `nodemailer`: Local SMTP provider for dev (MailHog); source Context-7.
 - `hono`: Worker routing framework used by `workers/notifications-api`; source Context-7.
+
+**Note**: Nodemailer is NOT compatible with Cloudflare Workers (requires Node.js TCP/TLS). See Local Development Strategy section for alternatives.
 - `drizzle-orm`: Database query layer used by `@codex/database`; source Context-7.
 - `zod`: Schema validation engine used by `@codex/validation`; source Context-7.
 - `wrangler`: Worker config and secrets management; source Cloudflare docs (web).
@@ -203,12 +210,14 @@
 - Response returns a unique email `id`; capture it for logging.
 - Node SDK uses `resend.emails.send({ from, to, subject, html, text })`.
 
-**Nodemailer (local SMTP)**
-- `createTransport({ host, port, secure, auth })` is the core setup.
-- `sendMail({ from, to, subject, text, html })` returns `messageId` and delivery info.
-- `verify()` can confirm SMTP connectivity in dev.
-- Common error codes: `EAUTH`, `ECONNREFUSED`, `ETIMEDOUT`, `ETLS`.
-- Connection pooling exists for high-volume sending, but is not required for Phase 1.
+**Local Development Strategy (Workers-compatible)**
+- Nodemailer is NOT compatible with Cloudflare Workers (no TCP sockets).
+- Options for local email testing:
+  1. **Console mock provider**: Logs email to console instead of sending. Simplest approach.
+  2. **MailHog HTTP API**: POST to `http://localhost:8025/api/v2/messages` (HTTP-based, not SMTP).
+  3. **Resend test mode**: Use Resend SDK with test API key (sends real emails to test addresses).
+- Recommended: Console mock provider for unit tests; MailHog HTTP for integration tests.
+- Provider selection via `USE_MOCK_EMAIL` env var.
 
 **Hono (worker routing)**
 - Middleware runs before/after handlers; returning a `Response` short-circuits the chain.
@@ -286,13 +295,18 @@ This plan focuses on notification infrastructure and template management; featur
 
 ## Access Control Matrix (English)
 
-- **Global templates**: platform owner only (use `requirePlatformOwner`).
-- **Organization templates (write)**: org owner/admin via `POLICY_PRESETS.orgManagement()` with `:organizationId` in route params.
-- **Organization templates (read/list)**: authenticated + explicit membership check (subdomain-based policy does not apply here).
-- **Creator templates (write)**: authenticated creator + creatorId must match userId + active org membership.
-- **Creator templates (read)**: authenticated + active org membership for the org the creator belongs to.
+- **Global templates (read/write)**: Platform owner only.
+  - Apply `requirePlatformOwner()` middleware (from `@codex/security`) **before** `withPolicy()`.
+  - Example: `app.post('/global', requirePlatformOwner(), withPolicy(POLICY_PRESETS.authenticated()), handler)`.
+- **Organization templates (write)**: Org owner/admin via `POLICY_PRESETS.orgManagement()`.
+  - Requires `:organizationId` in route params (e.g., `/organizations/:organizationId/templates`).
+- **Organization templates (read/list)**: Authenticated + explicit membership check in service layer.
+  - `requireOrgMembership` relies on subdomain which doesn't apply here.
+  - Use `checkOrganizationMembership()` from `packages/worker-utils/src/security-policy.ts` in handler.
+- **Creator templates (write)**: Authenticated + creatorId === userId + active org membership.
+- **Creator templates (read)**: Authenticated + active org membership for the creator's org.
 
-This section should be updated when we finalize the route shapes and auth flows.
+**Important**: `POLICY_PRESETS` roles are: `user`, `creator`, `admin`, `system`. There is no `platform_owner` preset.
 
 ---
 
@@ -313,10 +327,28 @@ This section should be updated when we finalize the route shapes and auth flows.
 - Creator templates require `creator_id` and (optionally) an org association for visibility rules.
 - Unique template key per scope and owner.
 
-**Indexes**:
-- (organization_id, name) for org lookup.
-- (creator_id, name) for creator lookup.
-- (scope, name) for global lookups.
+**Indexes** (following `content.ts` partial unique index pattern):
+- `idx_email_templates_org_id` on (organization_id) for org lookup.
+- `idx_email_templates_creator_id` on (creator_id) for creator lookup.
+- `idx_email_templates_scope` on (scope) for scope filtering.
+
+**Partial Unique Indexes** (ensure name uniqueness per scope):
+```typescript
+// Global: unique name when scope = 'global'
+uniqueIndex('idx_unique_template_global')
+  .on(table.name)
+  .where(sql`${table.scope} = 'global'`)
+
+// Organization: unique (name, organization_id) when scope = 'organization'
+uniqueIndex('idx_unique_template_org')
+  .on(table.name, table.organizationId)
+  .where(sql`${table.scope} = 'organization'`)
+
+// Creator: unique (name, creator_id) when scope = 'creator'
+uniqueIndex('idx_unique_template_creator')
+  .on(table.name, table.creatorId)
+  .where(sql`${table.scope} = 'creator'`)
+```
 
 **Seed data**:
 - Global defaults for verification, password reset, purchase receipt (and password changed if included).
@@ -372,9 +404,22 @@ Decide whether creator templates can override brand tokens or only supply conten
 
 ## Data Access Strategy (Workers)
 
-- Read-only endpoints (list/get/preview) should use `dbHttp`.
-- Write endpoints (create/update/delete) should use `createPerRequestDbClient` with explicit cleanup (follow `workers/content-api/src/routes/content.ts` pattern).
-- Use query utilities from `@codex/database` for pagination and scoping (`withPagination`, `withOrgScope`, `orgScopedNotDeleted`).
+**When to use each client** (following `workers/content-api/src/routes/content.ts` pattern):
+
+- **`dbHttp`**: Use for all simple CRUD operations (single-table reads/writes).
+  - GET endpoints (list, get by ID, preview)
+  - Simple POST/PATCH/DELETE that don't need transactions
+  - Most template operations fall here
+
+- **`createPerRequestDbClient`**: Use ONLY when you need **transactions**.
+  - Multi-table atomic writes (e.g., create template + audit log)
+  - Operations requiring rollback capability
+  - **Must call `cleanup()` before request ends** (use `c.executionCtx.waitUntil(cleanup())`)
+
+**Query utilities from `@codex/database`**:
+- `withPagination({ page, limit })` → `{ limit, offset }`
+- `whereNotDeleted(table)` for soft-delete filtering
+- Note: `withOrgScope` / `orgScopedNotDeleted` require `organizationId` column - not applicable to global templates
 
 ---
 
@@ -386,42 +431,99 @@ Decide whether creator templates can override brand tokens or only supply conten
 
 ---
 
-## Environment Variables and Bindings (Draft)
+## Environment Variables and Bindings
 
-Add to `packages/shared-types/src/worker-types.ts` and validate in `workers/notifications-api/src/utils/validate-env.ts`:
+**Add to `packages/shared-types/src/worker-types.ts` Bindings type:**
 
-- `RESEND_API_KEY` (prod provider auth)
-- `FROM_EMAIL` (sender address)
-- `FROM_NAME` (sender display name) - pick this naming and align docs
-- `REPLY_TO_EMAIL` (optional)
-- `USE_MOCK_EMAIL` (dev switch)
-- `SMTP_HOST`, `SMTP_PORT` (MailHog/local SMTP)
+```typescript
+// Email provider configuration
+RESEND_API_KEY?: string;        // Resend API key (secret)
+FROM_EMAIL?: string;            // Sender email address (e.g., "noreply@codex.io")
+FROM_NAME?: string;             // Sender display name (e.g., "Codex Platform")
+REPLY_TO_EMAIL?: string;        // Reply-to address (optional)
 
-Align names with existing env conventions and update `workers/notifications-api/wrangler.jsonc` accordingly.
-Wrangler notes:
-- `vars` are non-secret environment bindings and are not inherited across `env.*` blocks.
-- Secrets should be set via `wrangler secret put` per environment; this creates a new Worker version and deploys.
+// Local development
+USE_MOCK_EMAIL?: string;        // "true" to use mock provider instead of Resend
+MAILHOG_API_URL?: string;       // MailHog HTTP API URL (e.g., "http://localhost:8025")
+```
+
+**Update `workers/notifications-api/src/utils/validate-env.ts`:**
+
+```typescript
+// Required in production
+const required = ['DATABASE_URL', 'RESEND_API_KEY', 'FROM_EMAIL'];
+
+// Required KV bindings
+if (!env.RATE_LIMIT_KV) { ... }
+
+// Optional with defaults
+const optional = ['ENVIRONMENT', 'FROM_NAME', 'REPLY_TO_EMAIL', 'USE_MOCK_EMAIL'];
+```
+
+**Wrangler notes:**
+- `vars` are non-secret bindings; not inherited across `env.*` blocks - must define per environment.
+- Secrets (`RESEND_API_KEY`) via `wrangler secret put` per environment.
+- `wrangler secret put` creates a new Worker version and deploys immediately.
 
 ---
 
 ## Worker Endpoints (Phase 1)
 
-**Core**
-- List templates for org (global + org + creator members).
-- Create template (org or creator).
-- Read template by id.
-- Update template.
-- Delete or archive template.
+**Route Shapes** (concrete paths):
 
-**Recommended**
-- Preview template with test data.
-- Test-send template to a specified email.
+```
+# Global templates (platform owner only)
+GET    /api/templates/global                    # List global templates
+POST   /api/templates/global                    # Create global template
+GET    /api/templates/global/:id                # Get global template
+PATCH  /api/templates/global/:id                # Update global template
+DELETE /api/templates/global/:id                # Delete global template
 
-All endpoints should follow route patterns in `workers/content-api/src/routes/content.ts` and use `@codex/worker-utils` policies for auth and role checks.
-Key policy notes:
-- `requirePlatformOwner` is needed for global template management (platform_owner role is not part of `POLICY_PRESETS`).
-- `POLICY_PRESETS.orgManagement()` requires `:id` or `:organizationId` route params.
-- `requireOrgMembership` uses org subdomain; notifications-api is not org-scoped by subdomain, so membership checks likely live in handler/repository.
+# Organization templates
+GET    /api/organizations/:organizationId/templates      # List org templates
+POST   /api/organizations/:organizationId/templates      # Create org template
+GET    /api/templates/:id                                # Get any template by ID
+PATCH  /api/organizations/:organizationId/templates/:id  # Update org template
+DELETE /api/organizations/:organizationId/templates/:id  # Delete org template
+
+# Creator templates
+GET    /api/templates/creator                   # List current user's creator templates
+POST   /api/templates/creator                   # Create creator template
+PATCH  /api/templates/creator/:id               # Update own creator template
+DELETE /api/templates/creator/:id               # Delete own creator template
+
+# Preview/Test (recommended - make mandatory for Phase 1)
+POST   /api/templates/:id/preview               # Render with test data, return HTML/text
+POST   /api/templates/:id/test-send             # Send test email to specified address
+```
+
+**Middleware composition per route type:**
+
+```typescript
+// Global template routes
+app.post('/api/templates/global',
+  requirePlatformOwner(),                    // Standalone middleware from @codex/security
+  withPolicy(POLICY_PRESETS.authenticated()),
+  createAuthenticatedHandler({ ... })
+);
+
+// Org template routes
+app.post('/api/organizations/:organizationId/templates',
+  withPolicy(POLICY_PRESETS.orgManagement()), // Extracts :organizationId from params
+  createAuthenticatedHandler({ ... })
+);
+
+// Creator template routes
+app.post('/api/templates/creator',
+  withPolicy(POLICY_PRESETS.creator()),       // Requires creator role
+  createAuthenticatedHandler({ ... })
+);
+```
+
+**Key implementation notes:**
+- `requirePlatformOwner()` is separate middleware, not a policy preset.
+- `POLICY_PRESETS.orgManagement()` requires `:id` or `:organizationId` in route params.
+- Membership checks for read/list use `checkOrganizationMembership()` in service layer.
 
 ---
 
@@ -449,14 +551,19 @@ Key policy notes:
 ### Phase 2: Notifications Library Package
 
 - [ ] Create `packages/notifications` with standard package setup.
+- [ ] Add `packages/notifications/src/errors.ts` with domain-specific errors (TemplateNotFoundError, etc.).
 - [ ] Add repository layer for template lookup and access rules (org + creator + global).
-- [ ] Add renderer with token replacement and HTML escaping (no arbitrary code).
-- [ ] Add provider interface and Resend provider implementation.
-- [ ] Add NotificationService with PII-safe logging and single retry.
-- [ ] Use `@codex/observability` with `redactEmails: true` override.
-- [ ] Use `@codex/service-errors` for consistent error mapping.
+- [ ] Add renderer with regex-based token replacement and HTML escaping (see Template Rendering Strategy).
+- [ ] Add provider interface with implementations:
+  - [ ] `ResendProvider` - production email via Resend SDK.
+  - [ ] `ConsoleProvider` - logs email to console (dev/test).
+  - [ ] `MailHogHttpProvider` - posts to MailHog HTTP API (integration tests).
+- [ ] Add `NotificationService` extending `BaseService` from `@codex/service-errors`.
+- [ ] Implement single retry on provider failure with immediate retry (no backoff in Phase 1).
+- [ ] Use `@codex/observability` - default redaction handles emails in production.
+- [ ] Add custom keys to redaction if needed: `recipientEmail`, `templateData`.
 - [ ] Add re-exports in `packages/notifications/src/index.ts`.
-- [ ] Add package dependencies (Resend, validation, observability, service-errors).
+- [ ] Add package dependencies (resend, @codex/validation, @codex/observability, @codex/service-errors, @codex/database).
 
 ### Phase 3: Validation and Shared Types
 
@@ -469,14 +576,15 @@ Key policy notes:
 ### Phase 4: Notifications API Worker
 
 - [ ] Add template routes in `workers/notifications-api/src/routes/templates.ts`.
-- [ ] Add preview/test routes in `workers/notifications-api/src/routes/preview.ts` (if in scope).
+- [ ] Add preview/test routes in `workers/notifications-api/src/routes/preview.ts` (mandatory for Phase 1).
 - [ ] Wire routes in `workers/notifications-api/src/index.ts`.
 - [ ] Update `workers/notifications-api/src/utils/validate-env.ts` for new vars.
 - [ ] Update `workers/notifications-api/wrangler.jsonc` for bindings and vars.
+- [ ] Add `[env.test]` block to wrangler.jsonc for test environment.
 - [ ] Add `@codex/notifications` and `@codex/validation` to `workers/notifications-api/package.json`.
-- [ ] Apply `requirePlatformOwner` for global template routes.
-- [ ] Use `POLICY_PRESETS.orgManagement()` for org template writes (organizationId in route params).
-- [ ] Add explicit membership checks for read/list when subdomain is not available.
+- [ ] Import and apply `requirePlatformOwner()` from `@codex/security` for global template routes (standalone middleware, not policy preset).
+- [ ] Use `POLICY_PRESETS.orgManagement()` for org template writes (requires `:organizationId` in route path).
+- [ ] Add explicit membership checks via `checkOrganizationMembership()` for read/list (subdomain not available).
 
 ### Phase 5: Branding Integration
 
@@ -502,14 +610,72 @@ Key policy notes:
 
 ---
 
+## Template Rendering Strategy
+
+**Token Replacement Implementation:**
+- Use simple regex-based replacement: `{{tokenName}}` pattern.
+- No third-party template libraries (Handlebars, etc.) - security risk and bundle size.
+- Whitelist allowed tokens per template type (defined in validation schemas).
+
+**Escaping:**
+- All injected values HTML-escaped via built-in `escapeHtml()` function.
+- Escape: `<`, `>`, `&`, `"`, `'` → HTML entities.
+- URLs validated via Zod before injection (prevent javascript: URIs).
+
+**Missing Token Handling:**
+- Log warning with template key and missing token name.
+- Render as empty string (not placeholder text).
+- Do NOT fail the send - partial content better than no email.
+
+**Implementation:**
+```typescript
+function renderTemplate(
+  template: string,
+  data: Record<string, string>,
+  allowedTokens: string[]
+): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, token) => {
+    if (!allowedTokens.includes(token)) {
+      console.warn(`Unknown token: ${token}`);
+      return '';
+    }
+    const value = data[token];
+    if (value === undefined) {
+      console.warn(`Missing token value: ${token}`);
+      return '';
+    }
+    return escapeHtml(value);
+  });
+}
+```
+
+---
+
 ## Testing Strategy (English)
 
-- Unit tests for template rendering and brand token injection.
-- Unit tests for access rules and template resolution order.
-- Worker route tests for CRUD and preview/test.
-- Redaction tests to ensure no raw emails in logs.
-- Provider tests using mock adapters only.
-- Use worker test pool (`@cloudflare/vitest-pool-workers`) for notifications worker routes.
+**Unit tests** (`packages/notifications/src/__tests__/`):
+- Template rendering with valid/invalid tokens.
+- HTML escaping (XSS prevention).
+- Brand token injection and fallbacks.
+- Access rules for each scope (global/org/creator).
+- Template resolution order.
+- Provider mocks (Resend, console mock).
+
+**Worker route tests** (`workers/notifications-api/src/__tests__/`):
+- CRUD operations for each scope.
+- Preview endpoint rendering.
+- Access control enforcement (403 for unauthorized).
+- Validation errors (400 for bad input).
+
+**Existing test infrastructure:**
+- Vitest config exists: `workers/notifications-api/vitest.config.ts`
+- Uses `@cloudflare/vitest-pool-workers` with Miniflare.
+- Config references `wrangler.jsonc` with `environment: 'test'`.
+- Add `[env.test]` block to wrangler.jsonc with test bindings.
+
+**Redaction tests:**
+- Verify `recipientEmail`, `senderEmail` not in log output.
+- Use `customKeys` option in observability if needed beyond default `EMAIL_PATTERN`.
 
 ---
 
@@ -529,12 +695,14 @@ Key policy notes:
 
 ## Risks and Mitigations
 
-- Access control mistakes: add explicit tests for every scope and role.
-- Brand data missing: enforce fallbacks and log warnings only in dev.
-- Template resolution confusion: log which scope was selected.
-- Deliverability issues: verify sender domain early and test in staging.
-- Scope creep: keep Phase 1 limited to transactional templates only.
-- Org membership checks: `requireOrgMembership` relies on subdomain; add explicit checks for notifications API routes.
+- **Access control mistakes**: Add explicit tests for every scope and role combination.
+- **Brand data missing**: Enforce fallbacks (org profile → hardcoded defaults) and log warnings only in dev.
+- **Template resolution confusion**: Log which scope was selected for debugging.
+- **Deliverability issues**: Verify sender domain early and test in staging before production.
+- **Scope creep**: Keep Phase 1 limited to transactional templates only.
+- **Org membership checks**: `requireOrgMembership` relies on subdomain; use `checkOrganizationMembership()` directly in service layer.
+- **Local dev email testing**: Nodemailer incompatible with Workers; use console mock or MailHog HTTP API.
+- **Platform settings dependency**: If P1-SETTINGS-001 not complete, use org profile data as fallback for branding.
 
 ---
 
@@ -554,3 +722,13 @@ Key policy notes:
 - 2025-12-18: Use notifications API worker with shared library package.
 - 2025-12-18: Brand defaults aligned with platform settings.
 - 2025-12-18: Added deep-dive package context, access control matrix, and env binding notes.
+- 2025-12-19: **Codebase alignment review** - Fixed critical issues:
+  - Clarified `requirePlatformOwner` is standalone middleware, not a policy preset.
+  - Replaced Nodemailer (incompatible with Workers) with console mock / MailHog HTTP API.
+  - Clarified `dbHttp` vs `createPerRequestDbClient` usage (transactions only for latter).
+  - Added explicit TypeScript additions for Bindings type.
+  - Added concrete route shapes with middleware composition examples.
+  - Added partial unique index pattern matching `content.ts`.
+  - Added Template Rendering Strategy section with escaping and token handling.
+  - Updated Testing Strategy to reference existing vitest.config.ts.
+  - Made preview endpoint mandatory for Phase 1.
