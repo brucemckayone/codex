@@ -55,9 +55,6 @@ import {
   DEFAULT_FEATURES,
 } from '@codex/validation';
 
-// Import the settings routes after mocks
-import settingsApp from '../routes/settings';
-
 /**
  * Create a mock PlatformSettingsFacade
  */
@@ -104,20 +101,6 @@ describe('Settings API Routes', () => {
       PlatformSettingsFacade as unknown as ReturnType<typeof vi.fn>
     ).mockImplementation(() => mockFacade);
   });
-
-  // Helper to create test request context
-  function createTestContext(orgId = '550e8400-e29b-41d4-a716-446655440000') {
-    return {
-      env: {
-        ENVIRONMENT: 'test',
-        MEDIA_BUCKET: { put: vi.fn(), delete: vi.fn() },
-      },
-      validated: {
-        params: { id: orgId },
-      },
-      user: { id: 'test-user-id' },
-    };
-  }
 
   describe('GET / (all settings)', () => {
     it('should return all settings with defaults', async () => {

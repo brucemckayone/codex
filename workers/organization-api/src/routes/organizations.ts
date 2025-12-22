@@ -14,7 +14,7 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { createDbClient, dbHttp } from '@codex/database';
+import { createDbClient } from '@codex/database';
 import {
   createOrganizationSchema,
   OrganizationService,

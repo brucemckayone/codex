@@ -9,6 +9,7 @@
  * - Logo upload/delete operations
  */
 
+import type { R2Service } from '@codex/cloudflare-clients';
 import { schema } from '@codex/database';
 import {
   type Database,
@@ -26,11 +27,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import {
-  FileTooLargeError,
-  InvalidFileTypeError,
-  SettingsUpsertError,
-} from '../errors';
+import { FileTooLargeError, InvalidFileTypeError } from '../errors';
 import { BrandingSettingsService } from '../services/branding-settings-service';
 
 describe('BrandingSettingsService', () => {
@@ -73,7 +70,7 @@ describe('BrandingSettingsService', () => {
       db,
       environment: 'test',
       organizationId,
-      r2,
+      r2: r2 as unknown as R2Service,
       r2PublicUrlBase: 'https://cdn.example.com',
     });
   }

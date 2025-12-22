@@ -44,8 +44,13 @@ export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
 
   // Real observability client
   const obs = new ObservabilityClient('e2e-tests', 'test');
-  // MAY NOT BE RIGHT
-  const stripe = createStripeClient(process.env.STRIPE_SECRET_KEY!);
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    throw new Error('STRIPE_SECRET_KEY is not set');
+  }
+
+  const stripe = createStripeClient(stripeSecretKey);
 
   fixtureInstance = {
     db,

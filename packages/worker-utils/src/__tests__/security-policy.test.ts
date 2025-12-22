@@ -8,15 +8,24 @@ import {
   withPolicy,
 } from '../security-policy';
 
-// Mock the database module for requireOrgManagement tests
-vi.mock('@codex/database', () => ({
-  dbHttp: {
+// Create a mock db instance using vi.hoisted so it's available in vi.mock factory
+const { mockDb } = vi.hoisted(() => ({
+  mockDb: {
     query: {
       organizationMemberships: {
         findFirst: vi.fn(),
       },
+      sessions: {
+        findFirst: vi.fn(),
+      },
     },
   },
+}));
+
+// Mock the database module for requireOrgManagement tests
+vi.mock('@codex/database', () => ({
+  mockDb: mockDb,
+  createDbClient: vi.fn(() => mockDb),
   organizationMemberships: {
     organizationId: 'organizationId',
     userId: 'userId',
@@ -379,8 +388,7 @@ describe('Security Policy', () => {
     describe('requireOrgManagement', () => {
       beforeEach(async () => {
         // Reset mock before each test
-        const { dbHttp } = await import('@codex/database');
-        vi.mocked(dbHttp.query.organizationMemberships.findFirst).mockReset();
+        vi.mocked(mockDb.query.organizationMemberships.findFirst).mockReset();
 
         // Set up authenticated user middleware
         app.use('*', async (c, next) => {
@@ -416,9 +424,8 @@ describe('Security Policy', () => {
 
       it('should deny non-members (403)', async () => {
         // User has no membership record
-        const { dbHttp } = await import('@codex/database');
         vi.mocked(
-          dbHttp.query.organizationMemberships.findFirst
+          mockDb.query.organizationMemberships.findFirst
         ).mockResolvedValue(null);
 
         app.patch(
@@ -441,9 +448,8 @@ describe('Security Policy', () => {
 
       it('should deny member role (403)', async () => {
         // User is a member but not owner/admin
-        const { dbHttp } = await import('@codex/database');
         vi.mocked(
-          dbHttp.query.organizationMemberships.findFirst
+          mockDb.query.organizationMemberships.findFirst
         ).mockResolvedValue({ role: 'member' });
 
         app.patch(
@@ -466,9 +472,8 @@ describe('Security Policy', () => {
 
       it('should deny creator role (403)', async () => {
         // User is a creator but not owner/admin
-        const { dbHttp } = await import('@codex/database');
         vi.mocked(
-          dbHttp.query.organizationMemberships.findFirst
+          mockDb.query.organizationMemberships.findFirst
         ).mockResolvedValue({ role: 'creator' });
 
         app.patch(
@@ -485,9 +490,8 @@ describe('Security Policy', () => {
 
       it('should allow owner role (200)', async () => {
         // User is an owner
-        const { dbHttp } = await import('@codex/database');
         vi.mocked(
-          dbHttp.query.organizationMemberships.findFirst
+          mockDb.query.organizationMemberships.findFirst
         ).mockResolvedValue({ role: 'owner' });
 
         app.patch(
@@ -505,9 +509,8 @@ describe('Security Policy', () => {
 
       it('should allow admin role (200)', async () => {
         // User is an admin
-        const { dbHttp } = await import('@codex/database');
         vi.mocked(
-          dbHttp.query.organizationMemberships.findFirst
+          mockDb.query.organizationMemberships.findFirst
         ).mockResolvedValue({ role: 'admin' });
 
         app.patch(
@@ -524,9 +527,8 @@ describe('Security Policy', () => {
       });
 
       it('should set organizationId in context after successful check', async () => {
-        const { dbHttp } = await import('@codex/database');
         vi.mocked(
-          dbHttp.query.organizationMemberships.findFirst
+          mockDb.query.organizationMemberships.findFirst
         ).mockResolvedValue({ role: 'admin' });
 
         app.patch(

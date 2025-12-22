@@ -558,7 +558,7 @@ export function withPolicy(
             if (!user) {
               console.log(
                 '[withPolicy] Querying database with splitToken:',
-                splitToken.substring(0, 30) + '...'
+                `${splitToken.substring(0, 30)}...`
               );
               console.log(
                 '[withPolicy] fullToken differs:',
@@ -583,7 +583,7 @@ export function withPolicy(
               if (!sessionData && splitToken !== fullToken) {
                 console.log(
                   '[withPolicy] Split token not found, trying full token:',
-                  fullToken.substring(0, 30) + '...'
+                  `${fullToken.substring(0, 30)}...`
                 );
                 sessionData = await db.query.sessions.findFirst({
                   where: and(
