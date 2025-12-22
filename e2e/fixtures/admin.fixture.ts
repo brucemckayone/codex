@@ -4,9 +4,9 @@
  */
 
 import { dbHttp, schema } from '@codex/database';
-import type { APIRequestContext } from '@playwright/test';
 import { eq } from 'drizzle-orm';
 
+import { httpClient } from '../helpers/http-client';
 import type {
   AdminContentItem,
   AdminPaginatedResponse,
@@ -29,18 +29,15 @@ export const adminFixture = {
    * 3. Creates organization
    * 4. Creates organization membership with role='owner'
    */
-  async createPlatformOwner(
-    request: APIRequestContext,
-    data: {
-      email: string;
-      password: string;
-      name?: string;
-      orgName: string;
-      orgSlug: string;
-    }
-  ): Promise<PlatformOwnerContext> {
+  async createPlatformOwner(data: {
+    email: string;
+    password: string;
+    name?: string;
+    orgName: string;
+    orgSlug: string;
+  }): Promise<PlatformOwnerContext> {
     // Step 1: Register user via auth worker
-    const registeredUser = await authFixture.registerUser(request, {
+    const registeredUser = await authFixture.registerUser({
       email: data.email,
       password: data.password,
       name: data.name ?? 'Platform Admin',
@@ -93,7 +90,6 @@ export const adminFixture = {
    * GET /api/admin/analytics/revenue
    */
   async getRevenueStats(
-    request: APIRequestContext,
     cookie: string,
     params?: { startDate?: string; endDate?: string }
   ): Promise<RevenueStats> {
@@ -101,18 +97,16 @@ export const adminFixture = {
     if (params?.startDate) url.searchParams.set('startDate', params.startDate);
     if (params?.endDate) url.searchParams.set('endDate', params.endDate);
 
-    const response = await request.get(url.toString(), {
+    const response = await httpClient.get(url.toString(), {
       headers: {
         Cookie: cookie,
         Origin: WORKER_URLS.admin,
       },
     });
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
-      throw new Error(
-        `getRevenueStats failed (${response.status()}): ${error}`
-      );
+      throw new Error(`getRevenueStats failed (${response.status}): ${error}`);
     }
 
     const body = await response.json();
@@ -122,11 +116,8 @@ export const adminFixture = {
   /**
    * GET /api/admin/analytics/customers
    */
-  async getCustomerStats(
-    request: APIRequestContext,
-    cookie: string
-  ): Promise<CustomerStats> {
-    const response = await request.get(
+  async getCustomerStats(cookie: string): Promise<CustomerStats> {
+    const response = await httpClient.get(
       `${WORKER_URLS.admin}/api/admin/analytics/customers`,
       {
         headers: {
@@ -136,11 +127,9 @@ export const adminFixture = {
       }
     );
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
-      throw new Error(
-        `getCustomerStats failed (${response.status()}): ${error}`
-      );
+      throw new Error(`getCustomerStats failed (${response.status}): ${error}`);
     }
 
     const body = await response.json();
@@ -151,23 +140,22 @@ export const adminFixture = {
    * GET /api/admin/analytics/top-content
    */
   async getTopContent(
-    request: APIRequestContext,
     cookie: string,
     limit?: number
   ): Promise<TopContentItem[]> {
     const url = new URL(`${WORKER_URLS.admin}/api/admin/analytics/top-content`);
     if (limit) url.searchParams.set('limit', limit.toString());
 
-    const response = await request.get(url.toString(), {
+    const response = await httpClient.get(url.toString(), {
       headers: {
         Cookie: cookie,
         Origin: WORKER_URLS.admin,
       },
     });
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
-      throw new Error(`getTopContent failed (${response.status()}): ${error}`);
+      throw new Error(`getTopContent failed (${response.status}): ${error}`);
     }
 
     const body = await response.json();
@@ -182,7 +170,6 @@ export const adminFixture = {
    * GET /api/admin/content
    */
   async listAllContent(
-    request: APIRequestContext,
     cookie: string,
     params?: { page?: number; limit?: number; status?: string }
   ): Promise<AdminPaginatedResponse<AdminContentItem>> {
@@ -191,16 +178,16 @@ export const adminFixture = {
     if (params?.limit) url.searchParams.set('limit', params.limit.toString());
     if (params?.status) url.searchParams.set('status', params.status);
 
-    const response = await request.get(url.toString(), {
+    const response = await httpClient.get(url.toString(), {
       headers: {
         Cookie: cookie,
         Origin: WORKER_URLS.admin,
       },
     });
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
-      throw new Error(`listAllContent failed (${response.status()}): ${error}`);
+      throw new Error(`listAllContent failed (${response.status}): ${error}`);
     }
 
     return response.json();
@@ -210,24 +197,22 @@ export const adminFixture = {
    * POST /api/admin/content/:id/publish
    */
   async publishContent(
-    request: APIRequestContext,
     cookie: string,
     contentId: string
   ): Promise<AdminContentItem> {
-    const response = await request.post(
+    const response = await httpClient.post(
       `${WORKER_URLS.admin}/api/admin/content/${contentId}/publish`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.admin,
         },
       }
     );
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
-      throw new Error(`publishContent failed (${response.status()}): ${error}`);
+      throw new Error(`publishContent failed (${response.status}): ${error}`);
     }
 
     const body = await response.json();
@@ -238,26 +223,22 @@ export const adminFixture = {
    * POST /api/admin/content/:id/unpublish
    */
   async unpublishContent(
-    request: APIRequestContext,
     cookie: string,
     contentId: string
   ): Promise<AdminContentItem> {
-    const response = await request.post(
+    const response = await httpClient.post(
       `${WORKER_URLS.admin}/api/admin/content/${contentId}/unpublish`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.admin,
         },
       }
     );
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
-      throw new Error(
-        `unpublishContent failed (${response.status()}): ${error}`
-      );
+      throw new Error(`unpublishContent failed (${response.status}): ${error}`);
     }
 
     const body = await response.json();
@@ -267,12 +248,8 @@ export const adminFixture = {
   /**
    * DELETE /api/admin/content/:id
    */
-  async deleteContent(
-    request: APIRequestContext,
-    cookie: string,
-    contentId: string
-  ): Promise<boolean> {
-    const response = await request.delete(
+  async deleteContent(cookie: string, contentId: string): Promise<boolean> {
+    const response = await httpClient.delete(
       `${WORKER_URLS.admin}/api/admin/content/${contentId}`,
       {
         headers: {
@@ -282,9 +259,9 @@ export const adminFixture = {
       }
     );
 
-    if (!response.ok() && response.status() !== 204) {
+    if (!response.ok && response.status !== 204) {
       const error = await response.text();
-      throw new Error(`deleteContent failed (${response.status()}): ${error}`);
+      throw new Error(`deleteContent failed (${response.status}): ${error}`);
     }
 
     return true;
@@ -298,7 +275,6 @@ export const adminFixture = {
    * GET /api/admin/customers
    */
   async listCustomers(
-    request: APIRequestContext,
     cookie: string,
     params?: { page?: number; limit?: number }
   ): Promise<AdminPaginatedResponse<CustomerWithStats>> {
@@ -306,16 +282,16 @@ export const adminFixture = {
     if (params?.page) url.searchParams.set('page', params.page.toString());
     if (params?.limit) url.searchParams.set('limit', params.limit.toString());
 
-    const response = await request.get(url.toString(), {
+    const response = await httpClient.get(url.toString(), {
       headers: {
         Cookie: cookie,
         Origin: WORKER_URLS.admin,
       },
     });
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
-      throw new Error(`listCustomers failed (${response.status()}): ${error}`);
+      throw new Error(`listCustomers failed (${response.status}): ${error}`);
     }
 
     return response.json();
@@ -325,11 +301,10 @@ export const adminFixture = {
    * GET /api/admin/customers/:id
    */
   async getCustomerDetails(
-    request: APIRequestContext,
     cookie: string,
     customerId: string
   ): Promise<CustomerDetails> {
-    const response = await request.get(
+    const response = await httpClient.get(
       `${WORKER_URLS.admin}/api/admin/customers/${customerId}`,
       {
         headers: {
@@ -339,10 +314,10 @@ export const adminFixture = {
       }
     );
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
       throw new Error(
-        `getCustomerDetails failed (${response.status()}): ${error}`
+        `getCustomerDetails failed (${response.status}): ${error}`
       );
     }
 
@@ -354,26 +329,24 @@ export const adminFixture = {
    * POST /api/admin/customers/:customerId/grant-access/:contentId
    */
   async grantContentAccess(
-    request: APIRequestContext,
     cookie: string,
     customerId: string,
     contentId: string
   ): Promise<boolean> {
-    const response = await request.post(
+    const response = await httpClient.post(
       `${WORKER_URLS.admin}/api/admin/customers/${customerId}/grant-access/${contentId}`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.admin,
         },
       }
     );
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.text();
       throw new Error(
-        `grantContentAccess failed (${response.status()}): ${error}`
+        `grantContentAccess failed (${response.status}): ${error}`
       );
     }
 

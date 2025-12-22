@@ -191,35 +191,49 @@ Stateless HTTP-based client optimized for Cloudflare Workers and one-off queries
 - Subsequent calls reuse the same client instance
 - No cleanup needed (stateless HTTP)
 
-**Example**:
+**Best Practice - Use createDbClient**:
+
+In Cloudflare Workers, use `createDbClient(env)` instead of the global `dbHttp` instance to ensure each request gets a properly scoped client with correct environment configuration:
 
 ```typescript
-import { dbHttp, schema } from '@codex/database';
+import { createDbClient, schema } from '@codex/database';
 import { eq } from 'drizzle-orm';
 
+// In route handler - create client with request's environment
+const db = createDbClient(c.env);
+
 // Simple queries work perfectly
-const users = await dbHttp.select().from(schema.users);
+const users = await db.select().from(schema.users);
 
 // CRUD operations
-const [user] = await dbHttp.insert(schema.users).values({
+const [user] = await db.insert(schema.users).values({
   id: 'user-123',
   name: 'John Doe',
   email: 'john@example.com',
 }).returning();
 
 // Update
-await dbHttp.update(schema.users)
+await db.update(schema.users)
   .set({ emailVerified: true })
   .where(eq(schema.users.id, 'user-123'));
 
 // Delete (soft delete recommended)
-await dbHttp.update(schema.users)
+await db.update(schema.users)
   .set({ deletedAt: new Date() })
   .where(eq(schema.users.id, 'user-123'));
 
 // Raw SQL
 import { sql } from 'drizzle-orm';
-const result = await dbHttp.execute(sql`SELECT COUNT(*) as count FROM users`);
+const result = await db.execute(sql`SELECT COUNT(*) as count FROM users`);
+```
+
+**Direct dbHttp Usage** (legacy):
+
+For backward compatibility, direct `dbHttp` access is still supported but should be replaced with `createDbClient(env)`:
+
+```typescript
+import { dbHttp } from '@codex/database';
+// Only use this in non-Worker environments or legacy code
 ```
 
 ### dbWs: WebSocket Client with Transactions
@@ -279,7 +293,7 @@ const user = await dbWs.query.users.findFirst({
 
 ### createDbClient(env): Factory for Explicit Environment
 
-Creates HTTP database client with explicit environment variables. Useful for Better-auth configuration and custom initialization.
+Creates HTTP database client with explicit environment variables. **This is the recommended approach for all Cloudflare Worker routes** to ensure each request gets proper environment configuration.
 
 **Signature**:
 ```typescript
@@ -287,21 +301,42 @@ function createDbClient(env: DbEnvVars): Database;
 ```
 
 **Parameters**:
-- `env` - Database environment variables containing DB_METHOD and DATABASE_URL
+- `env` - Database environment variables containing DB_METHOD and DATABASE_URL (from Hono context `c.env`)
 
 **Returns**: Fresh HTTP database client instance with schema
 
-**Example**:
+**Example - Recommended Pattern**:
+
+```typescript
+import { createDbClient, schema } from '@codex/database';
+
+// In route handler - always create with c.env
+const db = createDbClient(c.env);
+
+// Use like any database client
+const users = await db.select().from(schema.users);
+const [user] = await db.insert(schema.users).values({...}).returning();
+```
+
+**Example - Better-auth Configuration**:
 
 ```typescript
 import { createDbClient } from '@codex/database';
 
-// In Better-auth configuration
+// In Better-auth config
 const db = createDbClient(c.env);
-
-// Use like dbHttp
-const users = await db.select().from(schema.users);
+const auth = betterAuth({
+  database: db,
+  // ... other config
+});
 ```
+
+**Why createDbClient instead of global dbHttp?**
+
+1. **Request Scoping**: Each request gets its own client instance with proper environment
+2. **Multi-Environment Support**: Handles different DB_METHOD per environment (LOCAL_PROXY, NEON_BRANCH, PRODUCTION)
+3. **Testing**: Easier to mock in tests by passing different env
+4. **Configuration**: Ensures latest environment variables are used (important for secrets rotation)
 
 ### createPerRequestDbClient(env): Per-Request Transactions in Workers
 

@@ -19,7 +19,7 @@ import {
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
-import { createPerRequestDbClient, dbHttp } from '@codex/database';
+import { createDbClient, createPerRequestDbClient } from '@codex/database';
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,
@@ -59,7 +59,7 @@ app.post(
     },
     handler: async (_c, ctx): Promise<CreateMediaResponse> => {
       const service = new MediaItemService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
       const media = await service.create(ctx.validated.body, ctx.user.id);
@@ -86,7 +86,7 @@ app.get(
     },
     handler: async (_c, ctx): Promise<MediaResponse> => {
       const service = new MediaItemService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
       const media = await service.get(ctx.validated.params.id, ctx.user.id);
@@ -162,7 +162,7 @@ app.get(
     },
     handler: async (_c, ctx): Promise<MediaListResponse> => {
       const service = new MediaItemService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
@@ -195,7 +195,7 @@ app.delete(
     },
     handler: async (_c, ctx): Promise<DeleteMediaResponse> => {
       const service = new MediaItemService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 

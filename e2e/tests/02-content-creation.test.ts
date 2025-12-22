@@ -3,24 +3,22 @@
  * Tests creating content, managing media items, and publishing workflow
  */
 
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
-import { authFixture } from '../fixtures';
+import { authFixture, httpClient } from '../fixtures';
 import {
   expectSuccessResponse,
   unwrapApiResponse,
 } from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
-test.describe('Content Creation Flow', () => {
-  test('should create draft content, add media, and publish', async ({
-    request,
-  }) => {
+describe('Content Creation Flow', () => {
+  test('should create draft content, add media, and publish', async () => {
     // Step 1: Register and login user (content creator)
     const testEmail = `creator-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const testPassword = 'SecurePassword123!';
 
-    const { user, cookie } = await authFixture.registerUser(request, {
+    const { user, cookie } = await authFixture.registerUser({
       email: testEmail,
       password: testPassword,
       name: 'Content Creator',
@@ -28,12 +26,11 @@ test.describe('Content Creation Flow', () => {
     });
 
     // Step 2: Create media item (simulating upload)
-    const mediaResponse = await request.post(
+    const mediaResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/media`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -52,12 +49,11 @@ test.describe('Content Creation Flow', () => {
     expect(media.status).toBe('uploading');
 
     // Step 3: Update media status to 'ready' (simulating transcoding completion)
-    const updateMediaResponse = await request.patch(
+    const updateMediaResponse = await httpClient.patch(
       `${WORKER_URLS.content}/api/media/${media.id}`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -66,11 +62,11 @@ test.describe('Content Creation Flow', () => {
       }
     );
 
-    if (!updateMediaResponse.ok()) {
+    if (!updateMediaResponse.ok) {
       const errorBody = await updateMediaResponse.text();
       console.log(
         '[TEST DEBUG] Media update failed:',
-        updateMediaResponse.status(),
+        updateMediaResponse.status,
         errorBody
       );
     }
@@ -79,12 +75,11 @@ test.describe('Content Creation Flow', () => {
     expect(updatedMedia.status).toBe('ready');
 
     // Step 4: Create draft content with media
-    const contentResponse = await request.post(
+    const contentResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -105,12 +100,11 @@ test.describe('Content Creation Flow', () => {
     expect(content.title).toBe('My First Video');
 
     // Step 5: Publish content
-    const publishResponse = await request.post(
+    const publishResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {},
@@ -123,7 +117,7 @@ test.describe('Content Creation Flow', () => {
     expect(publishedContent.publishedAt).toBeDefined();
 
     // Step 6: Get content by ID
-    const getContentResponse = await request.get(
+    const getContentResponse = await httpClient.get(
       `${WORKER_URLS.content}/api/content/${content.id}`,
       {
         headers: {
@@ -138,12 +132,10 @@ test.describe('Content Creation Flow', () => {
     expect(retrievedContent.status).toBe('published');
   });
 
-  test('should reject publishing content without ready media', async ({
-    request,
-  }) => {
+  test('should reject publishing content without ready media', async () => {
     // Step 1: Register and login
     const testEmail = `creator-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-    const { user, cookie } = await authFixture.registerUser(request, {
+    const { user, cookie } = await authFixture.registerUser({
       email: testEmail,
       password: 'SecurePassword123!',
       name: 'Content Creator',
@@ -151,12 +143,11 @@ test.describe('Content Creation Flow', () => {
     });
 
     // Step 2: Create media item (leave in 'uploading' status)
-    const mediaResponse = await request.post(
+    const mediaResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/media`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -172,12 +163,11 @@ test.describe('Content Creation Flow', () => {
     const media = unwrapApiResponse(await mediaResponse.json());
 
     // Step 3: Create draft content with non-ready media
-    const contentResponse = await request.post(
+    const contentResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -193,12 +183,11 @@ test.describe('Content Creation Flow', () => {
     const content = unwrapApiResponse(await contentResponse.json());
 
     // Step 4: Attempt to publish (should fail)
-    const publishResponse = await request.post(
+    const publishResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,
       {
         headers: {
           Cookie: cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {},
@@ -206,28 +195,25 @@ test.describe('Content Creation Flow', () => {
     );
 
     // Expect validation error (422) or business logic error (400)
-    expect(publishResponse.ok()).toBeFalsy();
-    expect([400, 422]).toContain(publishResponse.status());
+    expect(publishResponse.ok).toBe(false);
+    expect([400, 422]).toContain(publishResponse.status);
   });
 
-  test('should enforce creator ownership for content operations', async ({
-    request,
-  }) => {
+  test('should enforce creator ownership for content operations', async () => {
     // Step 1: Create first user and their content
     const creator1Email = `creator1-${Date.now()}@example.com`;
-    const { cookie: creator1Cookie } = await authFixture.registerUser(request, {
+    const { cookie: creator1Cookie } = await authFixture.registerUser({
       email: creator1Email,
       password: 'Password123!',
       name: 'Creator 1',
       role: 'creator',
     });
 
-    const mediaResponse = await request.post(
+    const mediaResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/media`,
       {
         headers: {
           Cookie: creator1Cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -241,21 +227,19 @@ test.describe('Content Creation Flow', () => {
     );
     const media = unwrapApiResponse(await mediaResponse.json());
 
-    await request.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
+    await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
       headers: {
         Cookie: creator1Cookie,
-        'Content-Type': 'application/json',
         Origin: WORKER_URLS.content,
       },
       data: { status: 'ready' },
     });
 
-    const contentResponse = await request.post(
+    const contentResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content`,
       {
         headers: {
           Cookie: creator1Cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -271,7 +255,7 @@ test.describe('Content Creation Flow', () => {
 
     // Step 2: Create second user
     const creator2Email = `creator2-${Date.now()}@example.com`;
-    const { cookie: creator2Cookie } = await authFixture.registerUser(request, {
+    const { cookie: creator2Cookie } = await authFixture.registerUser({
       email: creator2Email,
       password: 'Password123!',
       name: 'Creator 2',
@@ -279,12 +263,11 @@ test.describe('Content Creation Flow', () => {
     });
 
     // Step 3: Attempt to update content as different user (should fail)
-    const unauthorizedUpdate = await request.patch(
+    const unauthorizedUpdate = await httpClient.patch(
       `${WORKER_URLS.content}/api/content/${content.id}`,
       {
         headers: {
           Cookie: creator2Cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -294,7 +277,7 @@ test.describe('Content Creation Flow', () => {
     );
 
     // Expect 404 (content not found due to creator scoping) or 403 (forbidden)
-    expect(unauthorizedUpdate.ok()).toBeFalsy();
-    expect([403, 404]).toContain(unauthorizedUpdate.status());
+    expect(unauthorizedUpdate.ok).toBe(false);
+    expect([403, 404]).toContain(unauthorizedUpdate.status);
   });
 });

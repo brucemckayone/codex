@@ -67,7 +67,8 @@ const WORKERS: WorkerConfig[] = [
 ];
 
 // Assign unique inspector ports for each worker (used for debugging)
-let nextInspectorPort = 9230;
+// Start at 9240 to avoid conflicts with manually-started workers (which use 9230-9239)
+let nextInspectorPort = 9240;
 
 // Store spawned processes for cleanup
 const runningProcesses: ChildProcess[] = [];
@@ -149,9 +150,43 @@ export function loadTestEnvironment(): void {
 }
 
 /**
+ * Check if a worker is already running on its port
+ * Returns true if anything responds (even 503) - we just want to know if port is in use
+ */
+async function isWorkerRunning(worker: WorkerConfig): Promise<boolean> {
+  try {
+    const response = await fetch(worker.healthUrl, {
+      signal: AbortSignal.timeout(1000),
+    });
+    // Any response means something is running (even 503 from dev mode without test DB)
+    return response.status > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Start a single worker with test environment variables
+ * Skips starting if SKIP_WORKER_<name> env var is set or worker already running
  */
 async function startWorker(worker: WorkerConfig): Promise<void> {
+  // Check if we should skip this worker (for debugging with external worker)
+  const skipEnvVar = `SKIP_WORKER_${worker.name.replace(/-/g, '_').toUpperCase()}`;
+  if (process.env[skipEnvVar] === 'true') {
+    console.log(
+      `⏭️  Skipping ${worker.name} (${skipEnvVar}=true, using external worker)`
+    );
+    return;
+  }
+
+  // Check if worker is already running (for debugging)
+  if (await isWorkerRunning(worker)) {
+    console.log(
+      `✅ ${worker.name} already running on port ${worker.port} (using external worker)`
+    );
+    return;
+  }
+
   console.log(`🚀 Starting ${worker.name} on port ${worker.port}...`);
 
   return new Promise((resolve, reject) => {
@@ -270,13 +305,45 @@ export async function startAllWorkers(): Promise<void> {
   // Load .env.test first
   loadTestEnvironment();
 
-  // Clean up ports before starting workers
+  // Check which workers are already running (for debugging with external workers)
+  console.log('🔍 Checking for already-running workers...');
+  const runningWorkers = new Set<string>();
+  for (const worker of WORKERS) {
+    if (await isWorkerRunning(worker)) {
+      console.log(
+        `✅ ${worker.name} already running on port ${worker.port} (using external worker)`
+      );
+      runningWorkers.add(worker.name);
+    }
+  }
+
+  // Clean up ports only for workers that aren't already running
   console.log('🧹 Cleaning up ports...');
-  await Promise.all(WORKERS.map((worker) => killProcessOnPort(worker.port)));
+  const workersToCleanup = WORKERS.filter((worker) => {
+    const skipEnvVar = `SKIP_WORKER_${worker.name.replace(/-/g, '_').toUpperCase()}`;
+    if (process.env[skipEnvVar] === 'true') return false;
+    if (runningWorkers.has(worker.name)) return false;
+    return true;
+  });
+
+  // Clean up worker ports
+  await Promise.all(
+    workersToCleanup.map((worker) => killProcessOnPort(worker.port))
+  );
+
+  // Also clean up inspector ports (9240-9250 range used by E2E tests)
+  // These can get orphaned if previous test runs crashed
+  const inspectorPorts = Array.from(
+    { length: WORKERS.length + 2 },
+    (_, i) => 9240 + i
+  );
+  await Promise.all(inspectorPorts.map((port) => killProcessOnPort(port)));
+
   console.log('✅ Ports cleaned up\n');
 
-  // Start all workers in parallel
-  await Promise.all(WORKERS.map((worker) => startWorker(worker)));
+  // Start only workers that aren't already running
+  const workersToStart = WORKERS.filter((w) => !runningWorkers.has(w.name));
+  await Promise.all(workersToStart.map((worker) => startWorker(worker)));
 
   // Wait for all health checks
   await Promise.all(WORKERS.map((worker) => waitForHealth(worker)));

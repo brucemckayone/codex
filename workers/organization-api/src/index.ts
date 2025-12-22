@@ -31,6 +31,7 @@ import {
 
 // Import route modules
 import organizationRoutes from './routes/organizations';
+import settingsRoutes from './routes/settings';
 import { createEnvValidationMiddleware } from './utils/validate-env';
 
 // ============================================================================
@@ -74,6 +75,10 @@ app.use('*', createEnvValidationMiddleware());
  * All routes inherit authentication from createWorker middleware
  */
 app.route('/api/organizations', organizationRoutes);
+
+// Mount settings routes under /api/organizations/:id/settings
+// Settings are nested under organization to scope them properly
+app.route('/api/organizations/:id/settings', settingsRoutes);
 
 // ============================================================================
 // Export

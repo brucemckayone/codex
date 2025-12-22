@@ -7,6 +7,7 @@
  */
 
 import { createDbClient, schema } from '@codex/database';
+import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth, type User } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { AuthBindings } from './types';
@@ -40,10 +41,15 @@ export function createAuthInstance(options: AuthConfigOptions) {
       },
     }),
 
+    // KV-backed secondary storage for session caching
+    // This enables unified session caching across all workers
+    secondaryStorage: createKVSecondaryStorage(env.AUTH_SESSION_KV),
+
     session: {
       expiresIn: 60 * 60 * 24, // 24 hours
       updateAge: 60 * 60 * 24, // Update session every 24 hours
       cookieName: 'codex-session',
+      storeSessionInDatabase: true,
       cookieCache: {
         enabled: true,
         maxAge: 60 * 5, // 5 minutes (short-lived)

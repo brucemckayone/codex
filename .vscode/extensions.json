@@ -6,6 +6,7 @@
 
     // Testing
     "vitest.explorer",
+    "ms-playwright.playwright",
 
     // Database
     "drizzle-team.drizzle-vscode",

@@ -3,22 +3,20 @@
  * Tests user registration, login, session validation, and logout
  */
 
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
-import { authFixture } from '../fixtures';
+import { authFixture, httpClient } from '../fixtures';
 import { expectSuccessResponse } from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
-test.describe('Auth Flow', () => {
-  test('should register new user, login, validate session, and logout', async ({
-    request,
-  }) => {
+describe('Auth Flow', () => {
+  test('should register new user, login, validate session, and logout', async () => {
     // Generate unique email for this test run
     const testEmail = `test-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const testPassword = 'SecurePassword123!';
 
     // Step 1: Register new user
-    const registered = await authFixture.registerUser(request, {
+    const registered = await authFixture.registerUser({
       email: testEmail,
       password: testPassword,
       name: 'Test User',
@@ -33,7 +31,7 @@ test.describe('Auth Flow', () => {
     );
 
     // Step 2: Validate session is active
-    const sessionResponse = await request.get(
+    const sessionResponse = await httpClient.get(
       `${WORKER_URLS.auth}/api/auth/get-session`,
       {
         headers: { Cookie: registered.cookie },
@@ -46,19 +44,18 @@ test.describe('Auth Flow', () => {
     expect(session.user.email).toBe(testEmail);
 
     // Step 3: Logout
-    const logoutResponse = await request.post(
+    const logoutResponse = await httpClient.post(
       `${WORKER_URLS.auth}/api/auth/sign-out`,
       {
         headers: {
           Cookie: registered.cookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.auth, // Better Auth requires Origin header
         },
         data: {}, // Better Auth requires JSON body even if empty
       }
     );
 
-    expect(logoutResponse.ok()).toBeTruthy();
+    expect(logoutResponse.ok).toBe(true);
 
     // Step 4: Session invalidation
     // Note: Due to session caching (5min TTL), the session may still appear valid immediately after sign-out.
@@ -66,18 +63,18 @@ test.describe('Auth Flow', () => {
     // For this E2E test, we'll skip session validation to avoid flakiness from cache timing.
   });
 
-  test('should login with existing credentials', async ({ request }) => {
+  test('should login with existing credentials', async () => {
     // Create user first
     const testEmail = `test-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const testPassword = 'SecurePassword123!';
 
-    await authFixture.registerUser(request, {
+    await authFixture.registerUser({
       email: testEmail,
       password: testPassword,
     });
 
     // Login with same credentials
-    const loggedIn = await authFixture.loginUser(request, {
+    const loggedIn = await authFixture.loginUser({
       email: testEmail,
       password: testPassword,
     });
@@ -90,13 +87,13 @@ test.describe('Auth Flow', () => {
     );
 
     // Verify session works
-    const session = await authFixture.getSession(request, loggedIn.cookie);
+    const session = await authFixture.getSession(loggedIn.cookie);
     expect(session).not.toBeNull();
     expect(session.user.email).toBe(testEmail);
   });
 
-  test('should reject invalid credentials', async ({ request }) => {
-    const loginResponse = await request.post(
+  test('should reject invalid credentials', async () => {
+    const loginResponse = await httpClient.post(
       `${WORKER_URLS.auth}/api/auth/sign-in/email`,
       {
         data: {
@@ -106,21 +103,21 @@ test.describe('Auth Flow', () => {
       }
     );
 
-    expect(loginResponse.ok()).toBeFalsy();
-    expect(loginResponse.status()).toBe(401);
+    expect(loginResponse.ok).toBe(false);
+    expect(loginResponse.status).toBe(401);
   });
 
-  test('should reject duplicate email registration', async ({ request }) => {
+  test('should reject duplicate email registration', async () => {
     const testEmail = `test-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 
     // Register first time
-    await authFixture.registerUser(request, {
+    await authFixture.registerUser({
       email: testEmail,
       password: 'password123',
     });
 
     // Try to register again with same email
-    const duplicateResponse = await request.post(
+    const duplicateResponse = await httpClient.post(
       `${WORKER_URLS.auth}/api/auth/sign-up/email`,
       {
         headers: {
@@ -134,7 +131,7 @@ test.describe('Auth Flow', () => {
       }
     );
 
-    expect(duplicateResponse.ok()).toBeFalsy();
-    expect(duplicateResponse.status()).toBe(422); // Unprocessable Entity (validation error)
+    expect(duplicateResponse.ok).toBe(false);
+    expect(duplicateResponse.status).toBe(422); // Unprocessable Entity (validation error)
   });
 });

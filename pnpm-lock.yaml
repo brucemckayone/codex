@@ -170,12 +170,15 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../packages/database
-      '@playwright/test':
-        specifier: ^1.56.1
-        version: 1.56.1
+      dotenv:
+        specifier: ^16.5.0
+        version: 16.6.1
       drizzle-orm:
         specifier: ^0.44.7
         version: 0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)
+      vitest:
+        specifier: ^3.2.2
+        version: 3.2.4(@types/node@22.13.0)(@vitest/ui@3.2.4)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
 
   packages/access:
     dependencies:
@@ -405,6 +408,46 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^4.0.2
+        version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  packages/platform-settings:
+    dependencies:
+      '@codex/cloudflare-clients':
+        specifier: workspace:*
+        version: link:../cloudflare-clients
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../database
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../service-errors
+      '@codex/validation':
+        specifier: workspace:*
+        version: link:../validation
+      drizzle-orm:
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20241127.0
+        version: 4.20251121.0
+      '@codex/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.13.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.2.2
+        version: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
       vitest:
         specifier: ^4.0.2
         version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -960,12 +1003,18 @@ importers:
 
   workers/organization-api:
     dependencies:
+      '@codex/cloudflare-clients':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare-clients
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
       '@codex/identity':
         specifier: workspace:*
         version: link:../../packages/identity
+      '@codex/platform-settings':
+        specifier: workspace:*
+        version: link:../../packages/platform-settings
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security

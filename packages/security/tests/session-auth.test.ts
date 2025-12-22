@@ -16,18 +16,22 @@ type TestEnv = {
   };
 };
 
-// Mock @codex/database
-vi.mock('@codex/database', () => {
-  const mockDbHttp = {
+// Create a mock db instance using vi.hoisted so it's available in vi.mock factory
+const { mockDb } = vi.hoisted(() => ({
+  mockDb: {
     query: {
       sessions: {
         findFirst: vi.fn(),
       },
     },
-  };
+  },
+}));
 
+// Mock @codex/database
+vi.mock('@codex/database', () => {
   return {
-    dbHttp: mockDbHttp,
+    dbHttp: mockDb,
+    createDbClient: vi.fn(() => mockDb),
     schema: {
       sessions: {},
       users: {},
@@ -42,8 +46,7 @@ vi.mock('drizzle-orm', () => ({
   gt: vi.fn((a, b) => ({ gt: [a, b] })),
 }));
 
-// Import mocked database after mocks are set up
-import { dbHttp } from '@codex/database';
+// No import needed - we use mockDb directly which is returned by createDbClient
 
 describe('Session Authentication Middleware', () => {
   let app: Hono<TestEnv>;
@@ -130,7 +133,7 @@ describe('Session Authentication Middleware', () => {
           'json'
         );
         // Should not query database if cache hit
-        expect(dbHttp.query.sessions.findFirst).not.toHaveBeenCalled();
+        expect(mockDb.query.sessions.findFirst).not.toHaveBeenCalled();
       });
 
       it('should handle custom cookie name', async () => {
@@ -165,7 +168,7 @@ describe('Session Authentication Middleware', () => {
 
         // Mock database query success
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
@@ -202,7 +205,7 @@ describe('Session Authentication Middleware', () => {
         expect(body.session).toBeDefined();
 
         // Verify database was queried
-        expect(dbHttp.query.sessions.findFirst).toHaveBeenCalled();
+        expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
 
         // Verify result was cached
         expect(mockKV.put).toHaveBeenCalled();
@@ -214,7 +217,7 @@ describe('Session Authentication Middleware', () => {
       it('should work without KV (database-only mode)', async () => {
         // Mock database query success
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
@@ -243,7 +246,7 @@ describe('Session Authentication Middleware', () => {
         expect(res.status).toBe(200);
         const body = (await res.json()) as { userId?: string };
         expect(body.userId).toBe('user_1');
-        expect(dbHttp.query.sessions.findFirst).toHaveBeenCalled();
+        expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
       });
     });
 
@@ -261,7 +264,7 @@ describe('Session Authentication Middleware', () => {
           expiredSession
         );
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue(null);
 
         app.use('*', optionalAuth({ kv: mockKV }));
@@ -291,7 +294,7 @@ describe('Session Authentication Middleware', () => {
 
         // Database returns null for expired session (handled by query WHERE clause)
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue(null);
 
         app.use('*', optionalAuth({ kv: mockKV }));
@@ -330,7 +333,7 @@ describe('Session Authentication Middleware', () => {
 
         // Should not query cache or database
         expect(mockKV.get).not.toHaveBeenCalled();
-        expect(dbHttp.query.sessions.findFirst).not.toHaveBeenCalled();
+        expect(mockDb.query.sessions.findFirst).not.toHaveBeenCalled();
       });
 
       it('should handle multiple cookies correctly', async () => {
@@ -358,7 +361,7 @@ describe('Session Authentication Middleware', () => {
       it('should handle invalid session token from database', async () => {
         (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue(null);
 
         app.use('*', optionalAuth({ kv: mockKV }));
@@ -383,7 +386,7 @@ describe('Session Authentication Middleware', () => {
       it('should handle database errors gracefully', async () => {
         (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockRejectedValue(new Error('Database connection failed'));
 
         app.use('*', optionalAuth({ kv: mockKV }));
@@ -409,7 +412,7 @@ describe('Session Authentication Middleware', () => {
           new Error('KV unavailable')
         );
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
@@ -438,7 +441,7 @@ describe('Session Authentication Middleware', () => {
         expect(res.status).toBe(200);
         const body = (await res.json()) as { hasUser: boolean };
         expect(body.hasUser).toBe(true);
-        expect(dbHttp.query.sessions.findFirst).toHaveBeenCalled();
+        expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
       });
 
       it('should handle KV write errors gracefully', async () => {
@@ -447,7 +450,7 @@ describe('Session Authentication Middleware', () => {
           new Error('KV write failed')
         );
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
@@ -490,7 +493,7 @@ describe('Session Authentication Middleware', () => {
 
         // Mock database query success
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
@@ -594,7 +597,7 @@ describe('Session Authentication Middleware', () => {
       it('should return 401 when session invalid', async () => {
         (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockResolvedValue(null);
 
         app.use('/protected/*', requireAuth({ kv: mockKV }));
@@ -643,7 +646,7 @@ describe('Session Authentication Middleware', () => {
       it('should return 401 on database error (fail closed)', async () => {
         (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
         (
-          dbHttp.query.sessions.findFirst as ReturnType<typeof vi.fn>
+          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
         ).mockRejectedValue(new Error('Database error'));
 
         app.use('/protected/*', requireAuth({ kv: mockKV }));

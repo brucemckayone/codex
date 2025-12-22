@@ -234,3 +234,47 @@ export const isoDateSchema = z.coerce.date({
     message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)',
   }),
 });
+
+// ============================================================================
+// Colors
+// ============================================================================
+
+/**
+ * Hex color validation
+ * - Must be # followed by exactly 6 hex characters
+ * - Normalizes to uppercase (e.g., #3b82f6 → #3B82F6)
+ * - Trims whitespace
+ *
+ * @example
+ * ```typescript
+ * hexColorSchema.parse('#3B82F6'); // Valid → '#3B82F6'
+ * hexColorSchema.parse('#3b82f6'); // Valid → '#3B82F6'
+ * hexColorSchema.parse(' #3b82f6 '); // Valid → '#3B82F6'
+ * hexColorSchema.parse('#fff');    // Invalid (must be 6 chars)
+ * ```
+ */
+export const hexColorSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^#[0-9A-F]{6}$/, 'Color must be hex format (#RRGGBB)');
+
+// ============================================================================
+// Timezone
+// ============================================================================
+
+/**
+ * IANA timezone identifier validation
+ * - Non-empty string, max 100 chars
+ * - Examples: 'UTC', 'America/New_York', 'Europe/London'
+ *
+ * @example
+ * ```typescript
+ * timezoneSchema.parse('America/New_York'); // Valid
+ * timezoneSchema.parse('');                  // Invalid (empty)
+ * ```
+ */
+export const timezoneSchema = z
+  .string()
+  .min(1, 'Timezone is required')
+  .max(100, 'Timezone must be 100 characters or less');

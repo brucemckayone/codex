@@ -16,7 +16,7 @@
  * - PurchaseService - Queries purchases from database
  */
 
-import { dbHttp } from '@codex/database';
+import { createDbClient } from '@codex/database';
 import {
   createStripeClient,
   type Purchase,
@@ -94,7 +94,7 @@ purchases.get(
 
       const purchaseService = new PurchaseService(
         {
-          db: dbHttp,
+          db: createDbClient(ctx.env),
           environment: ctx.env.ENVIRONMENT || 'development',
         },
         stripe
@@ -162,7 +162,7 @@ purchases.get(
 
       const purchaseService = new PurchaseService(
         {
-          db: dbHttp,
+          db: createDbClient(ctx.env),
           environment: ctx.env.ENVIRONMENT || 'development',
         },
         stripe

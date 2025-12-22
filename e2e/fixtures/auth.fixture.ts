@@ -3,9 +3,8 @@
  * Handles user registration, login, and session management via REAL auth worker
  */
 
-import type { APIRequestContext } from '@playwright/test';
-
 import { extractSessionCookie } from '../helpers/cookies';
+import { httpClient } from '../helpers/http-client';
 import type { RegisteredUser } from '../helpers/types';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
@@ -20,17 +19,14 @@ export const authFixture = {
    * 3. Verifying email via HTTP GET
    * 4. Logging in to get session
    */
-  async registerUser(
-    request: APIRequestContext,
-    data: {
-      email: string;
-      password: string;
-      name?: string;
-      role?: string;
-    }
-  ): Promise<RegisteredUser> {
+  async registerUser(data: {
+    email: string;
+    password: string;
+    name?: string;
+    role?: string;
+  }): Promise<RegisteredUser> {
     // Step 1: Register via HTTP POST to /api/auth/sign-up/email
-    const registerResponse = await request.post(
+    const registerResponse = await httpClient.post(
       `${WORKER_URLS.auth}/api/auth/sign-up/email`,
       {
         headers: {
@@ -45,18 +41,18 @@ export const authFixture = {
       }
     );
 
-    if (!registerResponse.ok()) {
+    if (!registerResponse.ok) {
       const error = await registerResponse.json();
       throw new Error(`Registration failed: ${JSON.stringify(error)}`);
     }
 
     // Step 2: Get verification token from test endpoint
     // BetterAuth doesn't persist tokens to DB, so we capture them in KV
-    const tokenResponse = await request.get(
+    const tokenResponse = await httpClient.get(
       `${WORKER_URLS.auth}/api/test/verification-token/${encodeURIComponent(data.email)}`
     );
 
-    if (!tokenResponse.ok()) {
+    if (!tokenResponse.ok) {
       const error = await tokenResponse.text();
       throw new Error(`Verification token not found: ${error}`);
     }
@@ -65,24 +61,24 @@ export const authFixture = {
 
     // Step 3: Verify email via HTTP GET to /api/auth/verify-email
     // BetterAuth with autoSignInAfterVerification will create session and redirect
-    const verifyResponse = await request.get(
+    const verifyResponse = await httpClient.get(
       `${WORKER_URLS.auth}/api/auth/verify-email?token=${token}&callbackURL=/`,
       { maxRedirects: 0 } // Don't follow redirects - we want to capture the cookie
     );
 
     // Verification returns 302 redirect with Set-Cookie header
-    if (verifyResponse.status() !== 302 && !verifyResponse.ok()) {
+    if (verifyResponse.status !== 302 && !verifyResponse.ok) {
       const error = await verifyResponse.json();
       throw new Error(`Email verification failed: ${JSON.stringify(error)}`);
     }
 
     // Session cookie is set in verify-email response (autoSignInAfterVerification: true)
-    const verifyCookie = verifyResponse.headers()['set-cookie'];
+    const verifyCookie = verifyResponse.headers.get('set-cookie');
 
     // If no cookie from verification, we need to explicitly sign in
     if (!verifyCookie || !verifyCookie.includes('codex-session')) {
       // Fallback: explicit sign-in
-      const loginResponse = await request.post(
+      const loginResponse = await httpClient.post(
         `${WORKER_URLS.auth}/api/auth/sign-in/email`,
         {
           data: {
@@ -95,18 +91,18 @@ export const authFixture = {
         }
       );
 
-      if (!loginResponse.ok()) {
+      if (!loginResponse.ok) {
         const error = await loginResponse.json();
         throw new Error(
           `Login after verification failed: ${JSON.stringify(error)}`
         );
       }
 
-      const loginCookie = loginResponse.headers()['set-cookie'];
+      const loginCookie = loginResponse.headers.get('set-cookie');
       const cookieToSend = extractSessionCookie(loginCookie);
 
       // Get session from get-session endpoint
-      const sessionResponse = await request.get(
+      const sessionResponse = await httpClient.get(
         `${WORKER_URLS.auth}/api/auth/get-session`,
         {
           headers: {
@@ -115,12 +111,12 @@ export const authFixture = {
         }
       );
 
-      console.log('[DEBUG] Session response status:', sessionResponse.status());
-      if (!sessionResponse.ok()) {
+      console.log('[DEBUG] Session response status:', sessionResponse.status);
+      if (!sessionResponse.ok) {
         const errorBody = await sessionResponse.text();
         console.log('[DEBUG] Session error response:', errorBody);
         throw new Error(
-          `Failed to get session after login: ${sessionResponse.status()} - ${errorBody}`
+          `Failed to get session after login: ${sessionResponse.status} - ${errorBody}`
         );
       }
 
@@ -134,7 +130,7 @@ export const authFixture = {
     }
 
     // Get user info from get-session endpoint using the cookie from verification
-    const sessionResponse = await request.get(
+    const sessionResponse = await httpClient.get(
       `${WORKER_URLS.auth}/api/auth/get-session`,
       {
         headers: {
@@ -143,9 +139,9 @@ export const authFixture = {
       }
     );
 
-    if (!sessionResponse.ok()) {
+    if (!sessionResponse.ok) {
       throw new Error(
-        `Failed to get session after verification: ${sessionResponse.status()}`
+        `Failed to get session after verification: ${sessionResponse.status}`
       );
     }
 
@@ -161,14 +157,11 @@ export const authFixture = {
   /**
    * Login existing user via auth worker
    */
-  async loginUser(
-    request: APIRequestContext,
-    credentials: {
-      email: string;
-      password: string;
-    }
-  ): Promise<RegisteredUser> {
-    const response = await request.post(
+  async loginUser(credentials: {
+    email: string;
+    password: string;
+  }): Promise<RegisteredUser> {
+    const response = await httpClient.post(
       `${WORKER_URLS.auth}/api/auth/sign-in/email`,
       {
         data: credentials,
@@ -178,15 +171,15 @@ export const authFixture = {
       }
     );
 
-    if (!response.ok()) {
+    if (!response.ok) {
       const error = await response.json();
       throw new Error(`Login failed: ${JSON.stringify(error)}`);
     }
 
-    const setCookie = response.headers()['set-cookie'];
+    const setCookie = response.headers.get('set-cookie');
 
     // Get session from get-session endpoint
-    const sessionResponse = await request.get(
+    const sessionResponse = await httpClient.get(
       `${WORKER_URLS.auth}/api/auth/get-session`,
       {
         headers: {
@@ -195,9 +188,9 @@ export const authFixture = {
       }
     );
 
-    if (!sessionResponse.ok()) {
+    if (!sessionResponse.ok) {
       throw new Error(
-        `Failed to get session after login: ${sessionResponse.status()}`
+        `Failed to get session after login: ${sessionResponse.status}`
       );
     }
 
@@ -213,15 +206,15 @@ export const authFixture = {
   /**
    * Get current session from auth worker
    */
-  async getSession(request: APIRequestContext, sessionCookie: string) {
-    const response = await request.get(
+  async getSession(sessionCookie: string) {
+    const response = await httpClient.get(
       `${WORKER_URLS.auth}/api/auth/get-session`,
       {
         headers: { Cookie: sessionCookie },
       }
     );
 
-    if (!response.ok()) {
+    if (!response.ok) {
       return null;
     }
 
@@ -231,11 +224,8 @@ export const authFixture = {
   /**
    * Logout (invalidate session) via auth worker
    */
-  async logout(
-    request: APIRequestContext,
-    sessionCookie: string
-  ): Promise<void> {
-    await request.post(`${WORKER_URLS.auth}/api/auth/signout`, {
+  async logout(sessionCookie: string): Promise<void> {
+    await httpClient.post(`${WORKER_URLS.auth}/api/auth/signout`, {
       headers: { Cookie: sessionCookie },
     });
   },

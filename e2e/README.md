@@ -14,22 +14,9 @@ Tests validate complete user journeys across:
 
 ## Prerequisites
 
-### 1. All 4 workers must be running
+### 1. Environment variables configured
 
-```bash
-# Start all workers
-pnpm dev
-
-# Or start individually:
-pnpm dev:auth        # Port 42069
-pnpm dev:content-api # Port 4001
-pnpm dev:identity-api # Port 42071
-pnpm dev:ecom-api    # Port 42072
-```
-
-### 2. Environment variables configured
-
-Required in `.env.dev`:
+Required in `.env.test`:
 
 ```bash
 # Database
@@ -46,39 +33,29 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET_BOOKING=whsec_...
 ```
 
-### 3. Verify workers are healthy
+### 2. Workers will be started automatically
 
-```bash
-curl http://localhost:42069/api/health
-curl http://localhost:4001/api/health
-curl http://localhost:42071/api/health
-curl http://localhost:42072/api/health
-```
-
-All should return `200 OK`.
+The test setup (`setup.ts`) automatically starts and stops all 4 workers.
 
 ## Running Tests
 
 ```bash
 # Run all e2e API tests
-pnpm test:e2e:api
+pnpm test
 
-# Run with Playwright UI (interactive)
-pnpm test:e2e:api:ui
+# Run in watch mode
+pnpm test:watch
 
-# Run with headed browser (visible)
-pnpm test:e2e:api:headed
-
-# Run in debug mode
-pnpm test:e2e:api:debug
+# Run with Vitest UI (interactive)
+pnpm test:ui
 
 # Run specific test file
-pnpm test:e2e:api tests/01-auth-flow.spec.ts
+pnpm test tests/01-auth-flow.test.ts
 ```
 
 ## Test Flows
 
-### 1. Auth Flow (`01-auth-flow.spec.ts`)
+### 1. Auth Flow (`01-auth-flow.test.ts`)
 - Register new user
 - Login with credentials
 - Validate session
@@ -86,34 +63,38 @@ pnpm test:e2e:api tests/01-auth-flow.spec.ts
 - Reject invalid credentials
 - Reject duplicate email
 
-### 2. Content Creation (`02-content-creation.spec.ts`)
+### 2. Content Creation (`02-content-creation.test.ts`)
 - Create draft content
 - Upload media item
 - Publish content
 - Validate media requirements
 
-### 3. Free Content Access (`03-free-content-access.spec.ts`)
+### 3. Free Content Access (`03-free-content-access.test.ts`)
 - Login as viewer
 - Request streaming URL for free content
 - Verify presigned R2 URL
 - Test actual R2 access (HEAD request)
 
-### 4. Paid Content Purchase (`04-paid-content-purchase.spec.ts`)
+### 4. Paid Content Purchase (`04-paid-content-purchase.test.ts`)
 - Create checkout session
 - Simulate Stripe webhook (real signature)
 - Verify purchase recorded
 - Verify access granted
 
-### 5. Organization Flow (`05-organization-flow.spec.ts`)
-- Create organization
-- Create org-scoped content
-- Verify creator access
-- Verify isolation from other users
+### 5. Purchase History (`05-purchase-history.test.ts`)
+- Verify purchase history retrieval
+- Test pagination
+
+### 6. Admin Dashboard (`06-admin-dashboard.test.ts`)
+- Admin analytics and management
+
+### 7. Platform Settings (`07-platform-settings.test.ts`)
+- Platform configuration management
 
 ## Architecture
 
 ```
-Playwright Request
+Vitest HTTP Request
     ↓
 Real Workers (localhost:42069, 4001, 42071, 42072)
     ↓
@@ -132,7 +113,7 @@ Real Stripe (test mode)
 ```typescript
 import { authFixture } from '../fixtures';
 
-const user = await authFixture.registerUser(request, {
+const user = await authFixture.registerUser({
   email: 'test@example.com',
   password: 'password123',
 });
@@ -155,11 +136,12 @@ await expectSuccessResponse(response, 201);
 await expectAuthRequired(response);
 ```
 
-### Wait Helpers
+### HTTP Client
 ```typescript
-import { waitForWebhook } from '../helpers/wait-for';
+import { httpClient } from '../fixtures';
 
-await waitForWebhook(db, stripePaymentIntentId);
+const response = await httpClient.get(url, { headers: { Cookie } });
+const response = await httpClient.post(url, { body, headers });
 ```
 
 ## Test Data Management
@@ -190,7 +172,7 @@ pnpm db:studio
 ```
 
 ### R2 access issues
-- Verify R2 credentials in `.env.dev`
+- Verify R2 credentials in `.env.test`
 - Check bucket exists and is accessible
 - Ensure test bucket is separate from production
 
@@ -202,7 +184,7 @@ pnpm db:studio
 ## CI Integration
 
 E2E tests can run in CI with:
-1. Workers started via `wrangler dev`
+1. Workers started automatically via setup
 2. Ephemeral Neon branch for database
 3. Test R2 bucket
 4. Stripe test mode
@@ -211,7 +193,7 @@ See `.github/workflows/` for CI configuration.
 
 ## Adding New Tests
 
-1. Create spec file in `tests/`
+1. Create test file in `tests/` with `.test.ts` extension
 2. Import fixtures from `../fixtures/`
 3. Use `authFixture` for user sessions
 4. Use `setupDatabaseFixture` for services
@@ -219,24 +201,26 @@ See `.github/workflows/` for CI configuration.
 
 Example:
 ```typescript
-import { test, expect } from '@playwright/test';
-import { authFixture, setupDatabaseFixture } from '../fixtures';
+import { describe, expect, test } from 'vitest';
+import { authFixture, httpClient, setupDatabaseFixture } from '../fixtures';
 import { expectSuccessResponse } from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
-test('my new flow', async ({ request }) => {
-  const { db, contentService } = await setupDatabaseFixture();
+describe('My New Flow', () => {
+  test('should do something', async () => {
+    const { db, contentService } = await setupDatabaseFixture();
 
-  const user = await authFixture.registerUser(request, {
-    email: `test-${Date.now()}@example.com`,
-    password: 'password123',
+    const user = await authFixture.registerUser({
+      email: `test-${Date.now()}@example.com`,
+      password: 'password123',
+    });
+
+    const response = await httpClient.get(`${WORKER_URLS.content}/api/content`, {
+      headers: { Cookie: user.cookie },
+    });
+
+    await expectSuccessResponse(response);
   });
-
-  const response = await request.get(`${WORKER_URLS.content}/api/content`, {
-    headers: { Cookie: user.cookie },
-  });
-
-  await expectSuccessResponse(response);
 });
 ```
 
@@ -246,11 +230,10 @@ test('my new flow', async ({ request }) => {
 |-------|----------|
 | Port conflicts | Update `helpers/worker-urls.ts` with correct ports |
 | Slow tests | Check worker logs for performance issues |
-| Flaky tests | Add `waitFor()` helpers for async operations |
-| Auth failures | Clear browser cookies, restart auth worker |
+| Flaky tests | Add retry or waitFor helpers for async operations |
+| Auth failures | Restart workers, check session handling |
 
 ## Resources
 
-- [Playwright Docs](https://playwright.dev/docs/intro)
-- [Implementation Plan](../e2e/IMPLEMENTATION_PLAN.md)
+- [Vitest Docs](https://vitest.dev/)
 - [@codex/test-utils](../packages/test-utils/README.md)

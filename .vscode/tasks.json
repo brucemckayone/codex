@@ -271,12 +271,35 @@
       }
     },
     {
+      "label": "Start Organization-API Worker (debug)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--filter", "organization-api", "dev"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Ready on|Debugger listening"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "workers"
+      }
+    },
+    {
       "label": "Start All Workers (debug)",
       "dependsOn": [
         "Start Auth Worker (debug)",
         "Start Ecom-API Worker (debug)",
         "Start Content-API Worker (debug)",
-        "Start Identity-API Worker (debug)"
+        "Start Identity-API Worker (debug)",
+        "Start Organization-API Worker (debug)"
       ],
       "problemMatcher": []
     }

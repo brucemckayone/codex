@@ -18,8 +18,10 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@codex/cloudflare-clients": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/identity": "workspace:*",
+    "@codex/platform-settings": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",

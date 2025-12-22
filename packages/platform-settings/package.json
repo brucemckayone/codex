@@ -1,0 +1,48 @@
+{
+  "name": "@codex/platform-settings",
+  "version": "1.0.0",
+  "description": "Platform settings service for branding, contact, and features management",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./services": {
+      "types": "./dist/services/index.d.ts",
+      "default": "./dist/services/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.platform-settings.ts",
+    "dev": "vite build --config vite.config.platform-settings.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.platform-settings.ts",
+    "test:watch": "vitest --config vitest.config.platform-settings.ts",
+    "test:coverage": "vitest run --config vitest.config.platform-settings.ts --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@codex/cloudflare-clients": "workspace:*",
+    "@codex/database": "workspace:*",
+    "@codex/observability": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "drizzle-orm": "0.44.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "@codex/test-utils": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.2.2",
+    "vitest": "^4.0.2"
+  }
+}

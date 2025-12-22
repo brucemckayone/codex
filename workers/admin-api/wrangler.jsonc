@@ -15,6 +15,19 @@
     {
       "binding": "RATE_LIMIT_KV",
       "id": "cea7153364974737b16870df08f31083"
+    },
+    {
+      "binding": "AUTH_SESSION_KV",
+      "id": "82d04a4236df4aac8e9d87793344f0ed"
+    }
+  ],
+
+  // R2 Buckets (for logo uploads)
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "codex-media-production",
+      "preview_bucket_name": "codex-media-test"
     }
   ],
 
@@ -22,8 +35,7 @@
   "vars": {
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
-    "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "WEB_APP_URL": "http://localhost:3000", "API_URL": "http://localhost:8787"
   },
 
   // Environment configurations
@@ -41,6 +53,10 @@
         {
           "binding": "RATE_LIMIT_KV",
           "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
         }
       ]
     },
@@ -58,6 +74,10 @@
         {
           "binding": "RATE_LIMIT_KV",
           "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
         }
       ],
       "routes": [

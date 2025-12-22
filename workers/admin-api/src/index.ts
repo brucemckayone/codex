@@ -24,7 +24,11 @@ import {
   AdminCustomerManagementService,
   mapErrorToResponse,
 } from '@codex/admin';
-import { createPerRequestDbClient, dbHttp, schema } from '@codex/database';
+import {
+  createDbClient,
+  createPerRequestDbClient,
+  schema,
+} from '@codex/database';
 import {
   RATE_LIMIT_PRESETS,
   rateLimit,
@@ -118,7 +122,8 @@ app.get(
 app.use(
   '/api/admin/*',
   requirePlatformOwner({
-    cookieName: 'better-auth.session_token',
+    cookieName: 'codex-session',
+    // KV is automatically detected from c.env.AUTH_SESSION_KV
   }),
   // Cache organization ID to avoid N+1 query on every request
   async (c, next) => {
@@ -130,8 +135,9 @@ app.use(
         401
       );
     }
+    const db = createDbClient(c.env);
 
-    const membership = await dbHttp.query.organizationMemberships.findFirst({
+    const membership = await db.query.organizationMemberships.findFirst({
       where: eq(schema.organizationMemberships.userId, user.id),
       columns: { organizationId: true },
     });
@@ -173,7 +179,7 @@ app.get('/api/admin/analytics/revenue', async (c) => {
     });
 
     const service = new AdminAnalyticsService({
-      db: dbHttp,
+      db: createDbClient(c.env),
       environment: c.env.ENVIRONMENT || 'development',
     });
 
@@ -194,7 +200,7 @@ app.get('/api/admin/analytics/customers', async (c) => {
     const organizationId = c.get('organizationId');
 
     const service = new AdminAnalyticsService({
-      db: dbHttp,
+      db: createDbClient(c.env),
       environment: c.env.ENVIRONMENT || 'development',
     });
 
@@ -221,7 +227,7 @@ app.get('/api/admin/analytics/top-content', async (c) => {
     });
 
     const service = new AdminAnalyticsService({
-      db: dbHttp,
+      db: createDbClient(c.env),
       environment: c.env.ENVIRONMENT || 'development',
     });
 
@@ -257,7 +263,7 @@ app.get('/api/admin/content', async (c) => {
     });
 
     const service = new AdminContentManagementService({
-      db: dbHttp,
+      db: createDbClient(c.env),
       environment: c.env.ENVIRONMENT || 'development',
     });
 
@@ -382,7 +388,7 @@ app.get('/api/admin/customers', async (c) => {
     });
 
     const service = new AdminCustomerManagementService({
-      db: dbHttp,
+      db: createDbClient(c.env),
       environment: c.env.ENVIRONMENT || 'development',
     });
 
@@ -406,7 +412,7 @@ app.get('/api/admin/customers/:id', async (c) => {
     const params = adminCustomerIdParamsSchema.parse({ id: c.req.param('id') });
 
     const service = new AdminCustomerManagementService({
-      db: dbHttp,
+      db: createDbClient(c.env),
       environment: c.env.ENVIRONMENT || 'development',
     });
 

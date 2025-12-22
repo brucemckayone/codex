@@ -688,16 +688,19 @@ Status: `401 Unauthorized`
 1. Extract session cookie from Cookie header
    ├─ If missing → proceed without auth
    │
-2. Try cache (if KV available)
+2. Create database client with c.env
+   └─ Uses createDbClient(env) for request-scoped connection
+   │
+3. Try cache (if KV available)
    ├─ Cache hit with valid session → set context, proceed
    ├─ Cache hit but expired → clear cache, query DB
    │
-3. Query database
+4. Query database (using request-scoped client)
    ├─ Valid session found → set context, cache for next time, proceed
    ├─ Invalid or expired → log if enabled, proceed without auth
    ├─ Database error → log, proceed without auth
    │
-4. Always proceed to next middleware
+5. Always proceed to next middleware
 ```
 
 **requireAuth Flow:**
@@ -708,6 +711,18 @@ Status: `401 Unauthorized`
    ├─ User exists → proceed to handler
    ├─ User missing → return 401
 ```
+
+**Database Client Creation:**
+
+The session auth middleware creates a request-scoped database client using `createDbClient(env)`:
+
+```typescript
+// Inside session auth middleware
+const db = createDbClient(env);  // Uses environment from request context
+const result = await db.query.sessions.findFirst({...});
+```
+
+This ensures each request uses the correct environment configuration and prevents connection pool exhaustion.
 
 ---
 

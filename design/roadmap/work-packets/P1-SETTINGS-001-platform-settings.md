@@ -1,7 +1,7 @@
 # P1-SETTINGS-001: Platform Settings
 
 **Priority**: P2
-**Status**: 🚧 Not Started
+**Status**: 🚧 E2E Tests Pending
 **Estimated Effort**: 2-3 days
 
 ---

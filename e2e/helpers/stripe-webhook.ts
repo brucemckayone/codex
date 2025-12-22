@@ -9,7 +9,6 @@
  */
 
 import { createStripeClient } from '@codex/purchase';
-import type { APIRequestContext, APIResponse } from '@playwright/test';
 
 /**
  * Checkout session object as embedded in webhook events
@@ -180,40 +179,38 @@ export function createCheckoutCompletedEvent(
  * 3. Set required headers (Content-Type, stripe-signature)
  * 4. Send POST request
  *
- * @param request - Playwright API request context
  * @param webhookUrl - Full webhook endpoint URL
  * @param event - Stripe event object (will be JSON serialized)
  * @param webhookSecret - Webhook signing secret for signature generation
- * @returns Playwright API response
+ * @returns Native fetch Response
  *
  * @example
  * const event = createCheckoutCompletedEvent({ ... });
  * const response = await sendSignedWebhook(
- *   request,
  *   'http://localhost:42072/webhooks/stripe/booking',
  *   event,
  *   process.env.STRIPE_WEBHOOK_SECRET_BOOKING!
  * );
- * expect(response.status()).toBe(200);
+ * expect(response.status).toBe(200);
  */
 export async function sendSignedWebhook(
-  request: APIRequestContext,
   webhookUrl: string,
   event: StripeCheckoutWebhookEvent,
   webhookSecret: string
-): Promise<APIResponse> {
+): Promise<Response> {
   // Serialize event to exact JSON string (critical for signature verification)
   const rawBody = JSON.stringify(event);
 
   // Generate valid signature using Stripe's official method
   const signature = generateStripeSignature(rawBody, webhookSecret);
 
-  // Send webhook with signature header
-  return await request.post(webhookUrl, {
+  // Send webhook with signature header using native fetch
+  return await fetch(webhookUrl, {
+    method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'stripe-signature': signature,
     },
-    data: rawBody, // Send as raw string, not parsed JSON
+    body: rawBody,
   });
 }
