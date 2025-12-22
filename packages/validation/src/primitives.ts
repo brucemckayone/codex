@@ -242,17 +242,22 @@ export const isoDateSchema = z.coerce.date({
 /**
  * Hex color validation
  * - Must be # followed by exactly 6 hex characters
- * - Case insensitive (e.g., #3B82F6 or #3b82f6)
+ * - Normalizes to uppercase (e.g., #3b82f6 → #3B82F6)
+ * - Trims whitespace
  *
  * @example
  * ```typescript
- * hexColorSchema.parse('#3B82F6'); // Valid
+ * hexColorSchema.parse('#3B82F6'); // Valid → '#3B82F6'
+ * hexColorSchema.parse('#3b82f6'); // Valid → '#3B82F6'
+ * hexColorSchema.parse(' #3b82f6 '); // Valid → '#3B82F6'
  * hexColorSchema.parse('#fff');    // Invalid (must be 6 chars)
  * ```
  */
 export const hexColorSchema = z
   .string()
-  .regex(/^#[0-9A-Fa-f]{6}$/, 'Color must be hex format (#RRGGBB)');
+  .trim()
+  .toUpperCase()
+  .regex(/^#[0-9A-F]{6}$/, 'Color must be hex format (#RRGGBB)');
 
 // ============================================================================
 // Timezone

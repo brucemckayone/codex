@@ -30,6 +30,53 @@ import {
 import { FileTooLargeError, InvalidFileTypeError } from '../errors';
 import { BrandingSettingsService } from '../services/branding-settings-service';
 
+/**
+ * Helper to create valid image file data for testing
+ * Uses real PNG/JPEG magic numbers for content validation
+ */
+function createValidImageBuffer(
+  mimeType: string,
+  sizeBytes = 1024
+): ArrayBuffer {
+  const buffer = new ArrayBuffer(sizeBytes);
+  const view = new Uint8Array(buffer);
+
+  // Add magic numbers based on MIME type
+  if (mimeType === 'image/png') {
+    // PNG magic number: 89 50 4E 47 0D 0A 1A 0A
+    const pngHeader = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    pngHeader.forEach((byte, i) => {
+      view[i] = byte;
+    });
+  } else if (mimeType === 'image/jpeg') {
+    // JPEG magic number: FF D8 FF
+    const jpegHeader = [0xff, 0xd8, 0xff];
+    jpegHeader.forEach((byte, i) => {
+      view[i] = byte;
+    });
+  } else if (mimeType === 'image/webp') {
+    // WebP: RIFF....WEBP
+    const riff = [0x52, 0x49, 0x46, 0x46]; // RIFF
+    const webp = [0x57, 0x45, 0x42, 0x50]; // WEBP
+    riff.forEach((byte, i) => {
+      view[i] = byte;
+    });
+    webp.forEach((byte, i) => {
+      view[i + 8] = byte;
+    });
+  } else if (mimeType === 'image/svg+xml') {
+    // SVG: starts with <?xml or <svg
+    const svg = '<?xml version="1.0"?><svg></svg>';
+    const encoder = new TextEncoder();
+    const encoded = encoder.encode(svg);
+    encoded.forEach((byte, i) => {
+      view[i] = byte;
+    });
+  }
+
+  return buffer;
+}
+
 describe('BrandingSettingsService', () => {
   let db: Database;
   let organizationId: string;
@@ -213,7 +260,7 @@ describe('BrandingSettingsService', () => {
       const mockR2 = createMockR2();
       const service = createService(mockR2);
 
-      const fileData = new ArrayBuffer(1024);
+      const fileData = createValidImageBuffer('image/png', 1024);
       const result = await service.uploadLogo(fileData, 'image/png', 1024);
 
       // Verify R2 was called
@@ -245,7 +292,11 @@ describe('BrandingSettingsService', () => {
       });
 
       // Upload new logo
-      await service.uploadLogo(new ArrayBuffer(1024), 'image/jpeg', 1024);
+      await service.uploadLogo(
+        createValidImageBuffer('image/jpeg', 1024),
+        'image/jpeg',
+        1024
+      );
 
       // Verify old logo was deleted
       expect(mockR2.delete).toHaveBeenCalledWith('logos/old/logo.png');
@@ -256,7 +307,11 @@ describe('BrandingSettingsService', () => {
       const service = createService(mockR2);
 
       // Test PNG
-      await service.uploadLogo(new ArrayBuffer(100), 'image/png', 100);
+      await service.uploadLogo(
+        createValidImageBuffer('image/png', 100),
+        'image/png',
+        100
+      );
       expect(mockR2.put).toHaveBeenLastCalledWith(
         expect.stringContaining('.png'),
         expect.anything(),
@@ -266,7 +321,11 @@ describe('BrandingSettingsService', () => {
 
       // Reset and test JPEG
       mockR2.put.mockClear();
-      await service.uploadLogo(new ArrayBuffer(100), 'image/jpeg', 100);
+      await service.uploadLogo(
+        createValidImageBuffer('image/jpeg', 100),
+        'image/jpeg',
+        100
+      );
       expect(mockR2.put).toHaveBeenLastCalledWith(
         expect.stringContaining('.jpg'),
         expect.anything(),
@@ -276,7 +335,11 @@ describe('BrandingSettingsService', () => {
 
       // Reset and test WebP
       mockR2.put.mockClear();
-      await service.uploadLogo(new ArrayBuffer(100), 'image/webp', 100);
+      await service.uploadLogo(
+        createValidImageBuffer('image/webp', 100),
+        'image/webp',
+        100
+      );
       expect(mockR2.put).toHaveBeenLastCalledWith(
         expect.stringContaining('.webp'),
         expect.anything(),

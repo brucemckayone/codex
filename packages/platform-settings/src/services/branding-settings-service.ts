@@ -21,6 +21,10 @@ import {
   InvalidFileTypeError,
   SettingsUpsertError,
 } from '../errors';
+import {
+  isValidImageHeader,
+  sanitizeSvgContent,
+} from '../utils/file-validation';
 
 /**
  * Configuration for BrandingSettingsService
@@ -166,9 +170,27 @@ export class BrandingSettingsService extends BaseService {
       throw new FileTooLargeError(fileSize, MAX_LOGO_FILE_SIZE_BYTES);
     }
 
-    // Generate R2 path for logo
+    // Convert to ArrayBuffer for validation
+    const buffer = file instanceof Blob ? await file.arrayBuffer() : file;
+
+    // Validate file content matches MIME type (prevent spoofing)
+    if (!isValidImageHeader(buffer, mimeType)) {
+      throw new InvalidFileTypeError(mimeType, ALLOWED_LOGO_MIME_TYPES);
+    }
+
+    // Special handling for SVG: sanitize content to prevent XSS
+    let uploadData: ArrayBuffer | Blob | Uint8Array = file;
+    if (mimeType === 'image/svg+xml') {
+      const textDecoder = new TextDecoder();
+      const svgContent = textDecoder.decode(buffer);
+      const sanitized = sanitizeSvgContent(svgContent);
+      uploadData = new TextEncoder().encode(sanitized);
+    }
+
+    // Generate R2 path for logo (sanitize organizationId for path safety)
     const extension = this.getExtensionFromMimeType(mimeType);
-    const r2Path = `logos/${this.organizationId}/logo.${extension}`;
+    const sanitizedOrgId = this.organizationId.replace(/[^a-zA-Z0-9-]/g, '');
+    const r2Path = `logos/${sanitizedOrgId}/logo.${extension}`;
 
     // Delete old logo if exists
     const currentResult = await this.db
@@ -195,7 +217,7 @@ export class BrandingSettingsService extends BaseService {
     }
 
     // Upload new logo
-    await this.r2.put(r2Path, file, undefined, {
+    await this.r2.put(r2Path, uploadData, undefined, {
       contentType: mimeType,
       cacheControl: 'public, max-age=31536000', // 1 year cache
     });

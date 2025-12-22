@@ -39,12 +39,12 @@ describe('hexColorSchema', () => {
       ];
 
       validColors.forEach((color) => {
-        expect(hexColorSchema.parse(color)).toBe(color);
+        expect(hexColorSchema.parse(color)).toBe(color.toLocaleUpperCase());
       });
     });
 
     it('should accept mixed case hex colors', () => {
-      expect(hexColorSchema.parse('#aAbBcC')).toBe('#aAbBcC');
+      expect(hexColorSchema.parse('#aAbBcC')).toBe('#AABBCC');
     });
   });
 

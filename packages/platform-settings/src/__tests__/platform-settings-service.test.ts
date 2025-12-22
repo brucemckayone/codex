@@ -31,6 +31,27 @@ import {
 } from 'vitest';
 import { PlatformSettingsFacade } from '../services/platform-settings-service';
 
+/**
+ * Helper to create valid image file data for testing
+ * Uses real PNG magic numbers for content validation
+ */
+function createValidImageBuffer(
+  mimeType: string,
+  sizeBytes = 1024
+): ArrayBuffer {
+  const buffer = new ArrayBuffer(sizeBytes);
+  const view = new Uint8Array(buffer);
+
+  if (mimeType === 'image/png') {
+    const pngHeader = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    pngHeader.forEach((byte, i) => {
+      view[i] = byte;
+    });
+  }
+
+  return buffer;
+}
+
 describe('PlatformSettingsFacade', () => {
   let db: Database;
   let organizationId: string;
@@ -176,7 +197,7 @@ describe('PlatformSettingsFacade', () => {
       const facade = createFacade(mockR2);
 
       const result = await facade.uploadLogo(
-        new ArrayBuffer(1024),
+        createValidImageBuffer('image/png', 1024),
         'image/png',
         1024
       );

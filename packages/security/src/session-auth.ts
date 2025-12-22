@@ -319,19 +319,8 @@ export function optionalAuth(config?: SessionAuthConfig) {
     const cookieHeader = c.req.header('cookie');
     const sessionToken = extractSessionCookie(cookieHeader, cookieName);
 
-    // DEBUG: Log session extraction details
-    console.log('[session-auth] Cookie name:', cookieName);
-    console.log('[session-auth] Cookie header present:', !!cookieHeader);
-    console.log(
-      '[session-auth] Extracted token:',
-      sessionToken ? `${sessionToken.substring(0, 10)}...` : 'null'
-    );
-
     // No session cookie - proceed without authentication
     if (!sessionToken) {
-      console.log(
-        '[session-auth] No session token found, proceeding without auth'
-      );
       return next();
     }
 

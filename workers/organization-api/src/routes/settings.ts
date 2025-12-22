@@ -16,19 +16,11 @@
  * - PUT    /api/organizations/:id/settings/features     - Update feature settings
  */
 
-import { R2Service } from '@codex/cloudflare-clients';
-import {
-  createPerRequestDbClient,
-  type Database,
-  type DatabaseWs,
-} from '@codex/database';
 import {
   FileTooLargeError,
   InvalidFileTypeError,
-  PlatformSettingsFacade,
   SettingsUpsertError,
 } from '@codex/platform-settings';
-import type { HonoEnv } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   MAX_LOGO_FILE_SIZE_BYTES,
@@ -42,43 +34,34 @@ import {
   POLICY_PRESETS,
   withPolicy,
 } from '@codex/worker-utils';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { z } from 'zod';
+import { withSettingsFacade } from '../middleware/settings-facade';
+import type { HonoEnv } from '../types';
 
 const app = new Hono<HonoEnv>();
+
+// Type guard to access extended context variables
+function getSettingsFacade(c: Context<HonoEnv>) {
+  const facade = c.get('settingsFacade');
+  if (!facade) {
+    throw new Error('Settings facade not initialized');
+  }
+  return facade;
+}
 
 // Param schema for org ID validation
 const orgIdParamSchema = z.object({ id: uuidSchema });
 
 // ============================================================================
-// Helper: Create PlatformSettingsFacade
+// Middleware: Auto-inject PlatformSettingsFacade
 // ============================================================================
 
 /**
- * Creates a PlatformSettingsFacade with the provided database client.
- * Use createPerRequestDbClient() to get a WebSocket client for upsert operations.
+ * Apply facade middleware to all settings routes.
+ * Automatically creates database client and facade, handles cleanup.
  */
-function createSettingsFacade(
-  db: Database | DatabaseWs,
-  organizationId: string,
-  env: HonoEnv['Bindings']
-): PlatformSettingsFacade {
-  // Create R2Service if bucket is available
-  const r2 = env.MEDIA_BUCKET ? new R2Service(env.MEDIA_BUCKET) : undefined;
-
-  // Build public URL base for logos
-  // In production, configure via R2 custom domain or CDN
-  // For now, we use direct R2 paths that the service will store
-  const r2PublicUrlBase = undefined;
-
-  return new PlatformSettingsFacade({
-    db,
-    environment: env.ENVIRONMENT || 'development',
-    organizationId,
-    r2,
-    r2PublicUrlBase,
-  });
-}
+app.use('*', withSettingsFacade());
 
 // ============================================================================
 // GET /api/organizations/:id/settings - Get all settings
@@ -93,6 +76,7 @@ app.get(
     },
     handler: async (c, ctx) => {
       const obs = c.get('obs');
+      const facade = getSettingsFacade(c);
 
       const { id: orgId } = ctx.validated.params;
       obs?.info('[Settings] GET / - getAllSettings', {
@@ -100,9 +84,7 @@ app.get(
         userId: ctx.user?.id,
       });
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
       try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
         const allSettings = await facade.getAllSettings();
         obs?.info('[Settings] getAllSettings result', { orgId, allSettings });
         return allSettings;
@@ -112,8 +94,6 @@ app.get(
           error: String(error),
         });
         throw error;
-      } finally {
-        await cleanup();
       }
     },
   })
@@ -136,12 +116,12 @@ app.get(
     },
     handler: async (c, ctx) => {
       const obs = c.get('obs');
+      const facade = getSettingsFacade(c);
+
       const { id: orgId } = ctx.validated.params;
       obs?.info('[Settings] GET /branding', { orgId, userId: ctx.user?.id });
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
       try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
         const branding = await facade.getBranding();
         obs?.info('[Settings] getBranding result', { orgId, branding });
         return branding;
@@ -151,8 +131,6 @@ app.get(
           error: String(error),
         });
         throw error;
-      } finally {
-        await cleanup();
       }
     },
   })
@@ -172,6 +150,8 @@ app.put(
     },
     handler: async (c, ctx) => {
       const obs = c.get('obs');
+      const facade = getSettingsFacade(c);
+
       const { id: orgId } = ctx.validated.params;
       obs?.info('[Settings] PUT /branding', {
         orgId,
@@ -179,9 +159,7 @@ app.put(
         body: ctx.validated.body,
       });
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
       try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
         const branding = await facade.updateBranding(ctx.validated.body);
         obs?.info('[Settings] updateBranding result', { orgId, branding });
         return branding;
@@ -191,8 +169,6 @@ app.put(
           error: String(error),
         });
         throw error;
-      } finally {
-        await cleanup();
       }
     },
   })
@@ -210,6 +186,8 @@ app.post(
   '/branding/logo',
   withPolicy(POLICY_PRESETS.orgManagement()),
   async (c) => {
+    const facade = getSettingsFacade(c);
+
     // Validate org ID param
     const orgIdResult = orgIdParamSchema.safeParse({
       id: c.req.param('id'),
@@ -225,8 +203,6 @@ app.post(
         400
       );
     }
-
-    const { id: orgId } = orgIdResult.data;
 
     // Check if R2 bucket is configured
     if (!c.env.MEDIA_BUCKET) {
@@ -292,20 +268,14 @@ app.post(
       // Read file data
       const fileBuffer = await logoFile.arrayBuffer();
 
-      // Upload via facade with per-request db client
-      const { db, cleanup } = createPerRequestDbClient(c.env);
-      try {
-        const facade = createSettingsFacade(db, orgId, c.env);
-        const branding = await facade.uploadLogo(
-          fileBuffer,
-          logoFile.type,
-          logoFile.size
-        );
+      // Upload via facade (middleware handles cleanup)
+      const branding = await facade.uploadLogo(
+        fileBuffer,
+        logoFile.type,
+        logoFile.size
+      );
 
-        return c.json({ data: branding });
-      } finally {
-        await cleanup();
-      }
+      return c.json({ data: branding });
     } catch (err) {
       if (err instanceof InvalidFileTypeError) {
         return c.json(
@@ -360,7 +330,7 @@ app.delete(
       params: orgIdParamSchema,
     },
     handler: async (c, ctx) => {
-      const { id: orgId } = ctx.validated.params;
+      const facade = getSettingsFacade(c);
 
       // Check if R2 bucket is configured
       if (!ctx.env.MEDIA_BUCKET) {
@@ -375,14 +345,8 @@ app.delete(
         );
       }
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
-      try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
-        const branding = await facade.deleteLogo();
-        return branding;
-      } finally {
-        await cleanup();
-      }
+      const branding = await facade.deleteLogo();
+      return branding;
     },
   })
 );
@@ -404,12 +368,12 @@ app.get(
     },
     handler: async (c, ctx) => {
       const obs = c.get('obs');
+      const facade = getSettingsFacade(c);
+
       const { id: orgId } = ctx.validated.params;
       obs?.info('[Settings] GET /contact', { orgId, userId: ctx.user?.id });
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
       try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
         const contact = await facade.getContact();
         obs?.info('[Settings] getContact result', { orgId, contact });
         return contact;
@@ -419,8 +383,6 @@ app.get(
           error: String(error),
         });
         throw error;
-      } finally {
-        await cleanup();
       }
     },
   })
@@ -440,6 +402,8 @@ app.put(
     },
     handler: async (c, ctx) => {
       const obs = c.get('obs');
+      const facade = getSettingsFacade(c);
+
       const { id: orgId } = ctx.validated.params;
       obs?.info('[Settings] PUT /contact', {
         orgId,
@@ -447,9 +411,7 @@ app.put(
         body: ctx.validated.body,
       });
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
       try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
         const contact = await facade.updateContact(ctx.validated.body);
         obs?.info('[Settings] updateContact result', { orgId, contact });
         return contact;
@@ -459,8 +421,6 @@ app.put(
           error: String(error),
         });
         throw error;
-      } finally {
-        await cleanup();
       }
     },
   })
@@ -483,12 +443,12 @@ app.get(
     },
     handler: async (c, ctx) => {
       const obs = c.get('obs');
+      const facade = getSettingsFacade(c);
+
       const { id: orgId } = ctx.validated.params;
       obs?.info('[Settings] GET /features', { orgId, userId: ctx.user?.id });
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
       try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
         const features = await facade.getFeatures();
         obs?.info('[Settings] getFeatures result', { orgId, features });
         return features;
@@ -498,8 +458,6 @@ app.get(
           error: String(error),
         });
         throw error;
-      } finally {
-        await cleanup();
       }
     },
   })
@@ -519,6 +477,8 @@ app.put(
     },
     handler: async (c, ctx) => {
       const obs = c.get('obs');
+      const facade = getSettingsFacade(c);
+
       const { id: orgId } = ctx.validated.params;
       obs?.info('[Settings] PUT /features', {
         orgId,
@@ -526,9 +486,7 @@ app.put(
         body: ctx.validated.body,
       });
 
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
       try {
-        const facade = createSettingsFacade(db, orgId, ctx.env);
         const features = await facade.updateFeatures(ctx.validated.body);
         obs?.info('[Settings] updateFeatures result', { orgId, features });
         return features;
@@ -538,8 +496,6 @@ app.put(
           error: String(error),
         });
         throw error;
-      } finally {
-        await cleanup();
       }
     },
   })

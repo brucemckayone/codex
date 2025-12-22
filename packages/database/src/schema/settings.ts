@@ -63,7 +63,9 @@ export const contactSettings = pgTable('contact_settings', {
   platformName: varchar('platform_name', { length: 100 })
     .notNull()
     .default('Codex Platform'),
-  supportEmail: varchar('support_email', { length: 255 }).notNull(),
+  supportEmail: varchar('support_email', { length: 255 })
+    .notNull()
+    .default('support@example.com'),
   contactUrl: text('contact_url'),
   timezone: varchar('timezone', { length: 100 }).notNull().default('UTC'),
 
