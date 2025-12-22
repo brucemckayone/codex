@@ -10,23 +10,21 @@
  * This test validates the access control logic for public free content.
  */
 
-import { expect, test } from '@playwright/test';
-import { authFixture } from '../fixtures';
+import { describe, expect, test } from 'vitest';
+import { authFixture, httpClient } from '../fixtures';
 import {
   expectSuccessResponse,
   unwrapApiResponse,
 } from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
-test.describe('Free Content Access Flow', () => {
-  test('should allow any authenticated user to access free content', async ({
-    request,
-  }) => {
+describe('Free Content Access Flow', () => {
+  test('should allow any authenticated user to access free content', async () => {
     // Step 1: Create a creator and publish free content
     const testEmail = `creator-free-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const testPassword = 'SecurePassword123!';
 
-    const { cookie: creatorCookie } = await authFixture.registerUser(request, {
+    const { cookie: creatorCookie } = await authFixture.registerUser({
       email: testEmail,
       password: testPassword,
       name: 'Free Content Creator',
@@ -37,12 +35,11 @@ test.describe('Free Content Access Flow', () => {
     // R2 structure: {creatorId}/originals/{mediaId}/original.mp4
     const testCreatorId = 'e2e-test-creator';
     const testMediaId = 'e2e-test-video-001';
-    const mediaResponse = await request.post(
+    const mediaResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/media`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -59,12 +56,11 @@ test.describe('Free Content Access Flow', () => {
     const media = unwrapApiResponse(await mediaResponse.json());
 
     // Mark media as ready (using test HLS and thumbnail uploaded to R2)
-    const readyMediaResponse = await request.patch(
+    const readyMediaResponse = await httpClient.patch(
       `${WORKER_URLS.content}/api/media/${media.id}`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -80,12 +76,11 @@ test.describe('Free Content Access Flow', () => {
     await expectSuccessResponse(readyMediaResponse);
 
     // Create free content (priceCents = 0)
-    const contentResponse = await request.post(
+    const contentResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -105,12 +100,11 @@ test.describe('Free Content Access Flow', () => {
     const content = unwrapApiResponse(await contentResponse.json());
 
     // Publish the content
-    const publishResponse = await request.post(
+    const publishResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
       }
@@ -123,7 +117,7 @@ test.describe('Free Content Access Flow', () => {
     const viewerEmail = `viewer-free-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const viewerPassword = 'SecurePassword123!';
 
-    const { cookie: viewerCookie } = await authFixture.registerUser(request, {
+    const { cookie: viewerCookie } = await authFixture.registerUser({
       email: viewerEmail,
       password: viewerPassword,
       name: 'Free Content Viewer',
@@ -131,7 +125,7 @@ test.describe('Free Content Access Flow', () => {
     });
 
     // Step 3: Viewer can access free content without purchase
-    const accessResponse = await request.get(
+    const accessResponse = await httpClient.get(
       `${WORKER_URLS.content}/api/access/content/${content.id}/stream`,
       {
         headers: {
@@ -150,12 +144,11 @@ test.describe('Free Content Access Flow', () => {
     expect(accessData.data.contentType).toBe('video');
 
     // Step 4: Track playback progress
-    const progressResponse = await request.post(
+    const progressResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/access/content/${content.id}/progress`,
       {
         headers: {
           Cookie: viewerCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -165,10 +158,10 @@ test.describe('Free Content Access Flow', () => {
         },
       }
     );
-    expect(progressResponse.status()).toBe(204); // No content response
+    expect(progressResponse.status).toBe(204); // No content response
 
     // Step 5: Retrieve playback progress
-    const getProgressResponse = await request.get(
+    const getProgressResponse = await httpClient.get(
       `${WORKER_URLS.content}/api/access/content/${content.id}/progress`,
       {
         headers: {
@@ -191,14 +184,12 @@ test.describe('Free Content Access Flow', () => {
     // If we want to show watched free content, that would be a separate "watch history" endpoint
   });
 
-  test('should deny access to unpublished free content', async ({
-    request,
-  }) => {
+  test('should deny access to unpublished free content', async () => {
     // Create creator and draft free content
     const creatorEmail = `creator-draft-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const creatorPassword = 'SecurePassword123!';
 
-    const { cookie: creatorCookie } = await authFixture.registerUser(request, {
+    const { cookie: creatorCookie } = await authFixture.registerUser({
       email: creatorEmail,
       password: creatorPassword,
       name: 'Draft Creator',
@@ -206,12 +197,11 @@ test.describe('Free Content Access Flow', () => {
     });
 
     // Create draft content (not published)
-    const contentResponse = await request.post(
+    const contentResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -232,7 +222,7 @@ test.describe('Free Content Access Flow', () => {
     const viewerEmail = `viewer-draft-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const viewerPassword = 'SecurePassword123!';
 
-    const { cookie: viewerCookie } = await authFixture.registerUser(request, {
+    const { cookie: viewerCookie } = await authFixture.registerUser({
       email: viewerEmail,
       password: viewerPassword,
       name: 'Viewer',
@@ -240,7 +230,7 @@ test.describe('Free Content Access Flow', () => {
     });
 
     // Attempt to access draft content - should fail
-    const accessResponse = await request.get(
+    const accessResponse = await httpClient.get(
       `${WORKER_URLS.content}/api/access/content/${content.id}/stream`,
       {
         headers: {
@@ -251,19 +241,17 @@ test.describe('Free Content Access Flow', () => {
     );
 
     // Should deny access (403 or 404)
-    expect(accessResponse.ok()).toBeFalsy();
-    expect(accessResponse.status()).toBeGreaterThanOrEqual(403);
-    expect(accessResponse.status()).toBeLessThanOrEqual(404);
+    expect(accessResponse.ok).toBe(false);
+    expect(accessResponse.status).toBeGreaterThanOrEqual(403);
+    expect(accessResponse.status).toBeLessThanOrEqual(404);
   });
 
-  test('should handle multiple viewers accessing same free content', async ({
-    request,
-  }) => {
+  test('should handle multiple viewers accessing same free content', async () => {
     // Create creator and publish free content
     const creatorEmail = `creator-popular-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const creatorPassword = 'SecurePassword123!';
 
-    const { cookie: creatorCookie } = await authFixture.registerUser(request, {
+    const { cookie: creatorCookie } = await authFixture.registerUser({
       email: creatorEmail,
       password: creatorPassword,
       name: 'Popular Creator',
@@ -273,12 +261,11 @@ test.describe('Free Content Access Flow', () => {
     // Create media item (using test files uploaded to R2 in global setup)
     const testCreatorId = 'e2e-test-creator';
     const testMediaId = 'e2e-test-video-001';
-    const mediaResponse = await request.post(
+    const mediaResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/media`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -295,12 +282,11 @@ test.describe('Free Content Access Flow', () => {
     const media = unwrapApiResponse(await mediaResponse.json());
 
     // Update media to ready status
-    const updateMediaResponse = await request.patch(
+    const updateMediaResponse = await httpClient.patch(
       `${WORKER_URLS.content}/api/media/${media.id}`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -316,12 +302,11 @@ test.describe('Free Content Access Flow', () => {
     await expectSuccessResponse(updateMediaResponse);
 
     // Create and publish free video content
-    const contentResponse = await request.post(
+    const contentResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
         data: {
@@ -339,12 +324,11 @@ test.describe('Free Content Access Flow', () => {
     const content = unwrapApiResponse(await contentResponse.json());
 
     // Publish
-    const publishResponse = await request.post(
+    const publishResponse = await httpClient.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,
       {
         headers: {
           Cookie: creatorCookie,
-          'Content-Type': 'application/json',
           Origin: WORKER_URLS.content,
         },
       }
@@ -356,21 +340,21 @@ test.describe('Free Content Access Flow', () => {
     const viewer2Email = `viewer2-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const viewer3Email = `viewer3-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 
-    const { cookie: cookie1 } = await authFixture.registerUser(request, {
+    const { cookie: cookie1 } = await authFixture.registerUser({
       email: viewer1Email,
       password: 'SecurePassword123!',
       name: 'Viewer 1',
       role: 'user',
     });
 
-    const { cookie: cookie2 } = await authFixture.registerUser(request, {
+    const { cookie: cookie2 } = await authFixture.registerUser({
       email: viewer2Email,
       password: 'SecurePassword123!',
       name: 'Viewer 2',
       role: 'user',
     });
 
-    const { cookie: cookie3 } = await authFixture.registerUser(request, {
+    const { cookie: cookie3 } = await authFixture.registerUser({
       email: viewer3Email,
       password: 'SecurePassword123!',
       name: 'Viewer 3',
@@ -378,19 +362,19 @@ test.describe('Free Content Access Flow', () => {
     });
 
     // All viewers can access the same free content
-    const access1 = await request.get(
+    const access1 = await httpClient.get(
       `${WORKER_URLS.content}/api/access/content/${content.id}/stream`,
       {
         headers: { Cookie: cookie1, Origin: WORKER_URLS.content },
       }
     );
-    const access2 = await request.get(
+    const access2 = await httpClient.get(
       `${WORKER_URLS.content}/api/access/content/${content.id}/stream`,
       {
         headers: { Cookie: cookie2, Origin: WORKER_URLS.content },
       }
     );
-    const access3 = await request.get(
+    const access3 = await httpClient.get(
       `${WORKER_URLS.content}/api/access/content/${content.id}/stream`,
       {
         headers: { Cookie: cookie3, Origin: WORKER_URLS.content },

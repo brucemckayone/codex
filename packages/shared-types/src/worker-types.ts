@@ -43,6 +43,12 @@ export type Bindings = {
   RATE_LIMIT_KV?: import('@cloudflare/workers-types').KVNamespace;
 
   /**
+   * Session caching KV namespace
+   * Used for caching authenticated sessions to reduce database load
+   */
+  AUTH_SESSION_KV?: import('@cloudflare/workers-types').KVNamespace;
+
+  /**
    * R2 bucket binding for media storage
    */
   MEDIA_BUCKET?: import('@cloudflare/workers-types').R2Bucket;

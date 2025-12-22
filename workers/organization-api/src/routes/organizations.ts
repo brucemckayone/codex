@@ -14,7 +14,7 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { dbHttp } from '@codex/database';
+import { createDbClient, dbHttp } from '@codex/database';
 import {
   createOrganizationSchema,
   OrganizationService,
@@ -67,7 +67,7 @@ app.post(
     },
     handler: async (_c, ctx): Promise<CreateOrganizationResponse> => {
       const service = new OrganizationService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
       const organization = await service.create(ctx.validated.body);
@@ -94,7 +94,7 @@ app.get(
     },
     handler: async (_c, ctx): Promise<CheckSlugResponse> => {
       const service = new OrganizationService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
@@ -124,7 +124,7 @@ app.get(
     },
     handler: async (_c, ctx): Promise<OrganizationBySlugResponse> => {
       const service = new OrganizationService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
@@ -158,7 +158,7 @@ app.get(
     },
     handler: async (_c, ctx): Promise<OrganizationResponse> => {
       const service = new OrganizationService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
@@ -194,7 +194,7 @@ app.patch(
     },
     handler: async (_c, ctx): Promise<UpdateOrganizationResponse> => {
       const service = new OrganizationService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
       const organization = await service.update(
@@ -226,7 +226,7 @@ app.get(
       const { search, sortBy, sortOrder, page, limit } = ctx.validated.query;
 
       const service = new OrganizationService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
@@ -268,7 +268,7 @@ app.delete(
     },
     handler: async (_c, ctx): Promise<DeleteOrganizationResponse> => {
       const service = new OrganizationService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 

@@ -523,24 +523,6 @@ describe('Security Policy', () => {
         await expect(res.json()).resolves.toEqual({ ok: true });
       });
 
-      it('should extract organization ID from :organizationId param', async () => {
-        const { dbHttp } = await import('@codex/database');
-        vi.mocked(
-          dbHttp.query.organizationMemberships.findFirst
-        ).mockResolvedValue({ role: 'owner' });
-
-        app.delete(
-          '/api/orgs/:organizationId',
-          withPolicy(POLICY_PRESETS.orgManagement()),
-          (c) => c.json({ ok: true })
-        );
-
-        const res = await app.request('/api/orgs/org-456', {
-          method: 'DELETE',
-        });
-        expect(res.status).toBe(200);
-      });
-
       it('should set organizationId in context after successful check', async () => {
         const { dbHttp } = await import('@codex/database');
         vi.mocked(

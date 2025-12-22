@@ -92,6 +92,13 @@
       "when": 1765971682620,
       "tag": "0012_sleepy_vanisher",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1766095054099,
+      "tag": "0013_zippy_sabretooth",
+      "breakpoints": true
     }
   ]
 }

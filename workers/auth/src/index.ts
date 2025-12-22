@@ -22,10 +22,7 @@ import {
 } from '@codex/worker-utils';
 import { type Context, Hono, type Next } from 'hono';
 import { createAuthInstance } from './auth-config';
-import {
-  createAuthRateLimiter,
-  createSessionCacheMiddleware,
-} from './middleware';
+import { createAuthRateLimiter } from './middleware';
 import type { AuthEnv } from './types';
 import { createEnvValidationMiddleware } from './utils/validate-env';
 
@@ -140,17 +137,13 @@ const securityHeadersMiddleware = async (
 
 /**
  * Middleware chain for auth routes
- * Applies security headers, rate limiting, session caching, and auth handling
+ * Applies security headers, rate limiting, and auth handling
+ * Note: Session caching is now handled by Better Auth's secondaryStorage
  * Excludes /health endpoint
  */
 app.use(
   '/api/*',
-  sequence(
-    securityHeadersMiddleware,
-    createAuthRateLimiter(),
-    createSessionCacheMiddleware(),
-    authHandler
-  )
+  sequence(securityHeadersMiddleware, createAuthRateLimiter(), authHandler)
 );
 
 /**

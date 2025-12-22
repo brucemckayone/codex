@@ -21,7 +21,7 @@ import {
   createContentSchema,
   updateContentSchema,
 } from '@codex/content';
-import { createPerRequestDbClient, dbHttp } from '@codex/database';
+import { createDbClient, createPerRequestDbClient } from '@codex/database';
 import type {
   ContentListResponse,
   ContentResponse,
@@ -101,7 +101,7 @@ app.get(
     },
     handler: async (_c, ctx): Promise<ContentResponse> => {
       const service = new ContentService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 
@@ -171,7 +171,7 @@ app.get(
     },
     handler: async (_c, ctx): Promise<ContentListResponse> => {
       const service = new ContentService({
-        db: dbHttp,
+        db: createDbClient(ctx.env),
         environment: ctx.env.ENVIRONMENT || 'development',
       });
 

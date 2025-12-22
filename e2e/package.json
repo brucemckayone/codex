@@ -4,16 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:e2e": "playwright test",
-    "test:ui": "playwright test --ui",
-    "test:headed": "playwright test --headed",
-    "test:debug": "playwright test --debug"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.937.0",
     "@codex/database": "workspace:*",
-    "@playwright/test": "^1.56.1",
-    "drizzle-orm": "^0.44.7"
+    "dotenv": "^16.5.0",
+    "drizzle-orm": "^0.44.7",
+    "vitest": "^3.2.2"
   },
   "dependencies": {
     "@codex/access": "workspace:*",

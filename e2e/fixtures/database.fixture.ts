@@ -13,6 +13,7 @@ import { ContentService, MediaItemService } from '@codex/content';
 import { closeDbPool, type DatabaseWs, dbWs } from '@codex/database';
 import { OrganizationService } from '@codex/identity';
 import { ObservabilityClient } from '@codex/observability';
+import { createStripeClient, PurchaseService } from '@codex/purchase';
 
 export interface DatabaseFixture {
   db: DatabaseWs;
@@ -43,6 +44,8 @@ export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
 
   // Real observability client
   const obs = new ObservabilityClient('e2e-tests', 'test');
+  // MAY NOT BE RIGHT
+  const stripe = createStripeClient(process.env.STRIPE_SECRET_KEY!);
 
   fixtureInstance = {
     db,
@@ -51,9 +54,10 @@ export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
     mediaService: new MediaItemService(config),
     orgService: new OrganizationService(config),
     accessService: new ContentAccessService({
-      db,
+      db: db,
       r2: r2Client,
       obs,
+      purchaseService: new PurchaseService({ db, environment: 'test' }, stripe),
     }),
   };
 

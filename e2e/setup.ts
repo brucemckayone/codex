@@ -1,12 +1,24 @@
+/**
+ * Vitest Global Setup for E2E Tests
+ *
+ * This runs once before all tests:
+ * 1. Loads environment variables
+ * 2. Uploads test media files to R2
+ * 3. Starts all workers
+ *
+ * And once after all tests:
+ * 4. Stops all workers
+ */
+
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { FullConfig } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
-import { setupTestMediaFiles } from './helpers/r2-test-setup.js';
-import { startAllWorkers } from './helpers/worker-manager.js';
+import type { GlobalSetupContext } from 'vitest/node';
 
-// ESM equivalent of __dirname
+import { setupTestMediaFiles } from './helpers/r2-test-setup.js';
+import { startAllWorkers, stopAllWorkers } from './helpers/worker-manager.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -22,19 +34,19 @@ const REQUIRED_ENV_VARS = [
 ];
 
 /**
- * Global setup runs once before all tests
- * 1. Loads environment variables (from GitHub Actions in CI, or .env.test locally)
- * 2. Uploads test media files to R2
- * 3. Starts all 4 workers with test environment variables
+ * Global setup - runs once before all tests
  */
-async function globalSetup(_config: FullConfig) {
-  console.log('\n Starting E2E test setup...\n');
+export async function setup(
+  _ctx: GlobalSetupContext
+): Promise<() => Promise<void>> {
+  console.log('\n🚀 Starting E2E test setup...\n');
 
   const isCI = process.env.CI === 'true';
 
   if (isCI) {
-    // In CI, environment variables are injected by GitHub Actions via the `test` environment
-    console.log(' CI mode: Using environment variables from GitHub Actions\n');
+    console.log(
+      '☁️  CI mode: Using environment variables from GitHub Actions\n'
+    );
 
     // Validate required env vars are present
     const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
@@ -60,7 +72,7 @@ async function globalSetup(_config: FullConfig) {
     if (result.error) {
       throw new Error(`Failed to load .env.test: ${result.error.message}`);
     }
-    console.log(` Loaded environment from ${envPath}\n`);
+    console.log(`📁 Loaded environment from ${envPath}\n`);
   }
 
   try {
@@ -74,6 +86,19 @@ async function globalSetup(_config: FullConfig) {
     console.error('\n❌ Failed to start workers:', error);
     throw error;
   }
+
+  // Return teardown function
+  return async () => {
+    console.log('\n🧹 Cleaning up E2E test environment...\n');
+
+    try {
+      await stopAllWorkers();
+      console.log('\n✅ E2E tests completed and workers stopped\n');
+    } catch (error) {
+      console.error('\n❌ Failed to stop workers:', error);
+      // Don't throw - allow test process to complete
+    }
+  };
 }
 
-export default globalSetup;
+export default setup;

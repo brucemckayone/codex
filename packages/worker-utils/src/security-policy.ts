@@ -5,7 +5,9 @@
  * Provides a unified way to configure auth, RBAC, rate limiting, and network restrictions.
  */
 
-import { dbHttp } from '@codex/database';
+/// <reference types="@cloudflare/workers-types" />
+
+import { createDbClient } from '@codex/database';
 import {
   organizationMemberships,
   organizations,
@@ -16,6 +18,88 @@ import type { RATE_LIMIT_PRESETS } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context, MiddlewareHandler } from 'hono';
+
+/**
+ * Cached session data structure stored in KV
+ */
+interface CachedSessionData {
+  session: {
+    id: string;
+    userId: string;
+    token: string;
+    expiresAt: string;
+    ipAddress: string | null;
+    userAgent: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    emailVerified: boolean;
+    image: string | null;
+    role: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+function isCachedSessionData(value: unknown): value is CachedSessionData {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as { session?: unknown; user?: unknown };
+  return Boolean(data.session && data.user);
+}
+
+/**
+ * Retrieve session from KV cache
+ */
+async function getSessionFromCache(
+  kv: KVNamespace,
+  sessionToken: string,
+  obs?: ObservabilityClient
+): Promise<CachedSessionData | null> {
+  try {
+    const keys = [`session:${sessionToken}`, sessionToken];
+    for (const key of keys) {
+      const cached = await kv.get(key, 'json');
+      if (isCachedSessionData(cached)) {
+        return cached;
+      }
+    }
+    return null;
+  } catch (error) {
+    obs?.error('[withPolicy] Failed to read session from KV', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return null;
+  }
+}
+
+/**
+ * Cache session data in KV with TTL based on session expiration
+ */
+async function cacheSessionInKV(
+  kv: KVNamespace,
+  sessionToken: string,
+  data: CachedSessionData,
+  obs?: ObservabilityClient
+): Promise<void> {
+  try {
+    const expiresAt = new Date(data.session.expiresAt);
+    const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
+
+    if (ttl > 0) {
+      await kv.put(`session:${sessionToken}`, JSON.stringify(data), {
+        expirationTtl: ttl,
+      });
+    }
+  } catch (error) {
+    obs?.error('[withPolicy] Failed to cache session in KV', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
 
 /**
  * Security policy configuration for individual routes
@@ -64,7 +148,7 @@ export interface RouteSecurityPolicy {
    * Require organization management privileges (owner/admin role)
    *
    * If true, validates that user has 'owner' or 'admin' role in the organization.
-   * Organization ID is extracted from route params (:id or :organizationId).
+   * Organization ID is extracted from route params (:id).
    *
    * Use for endpoints that modify organization settings.
    *
@@ -134,7 +218,7 @@ export const DEFAULT_SECURITY_POLICY: Required<RouteSecurityPolicy> = {
  */
 async function extractOrganizationFromSubdomain(
   hostname: string,
-  _env: HonoEnv['Bindings'],
+  env: HonoEnv['Bindings'],
   obs?: ObservabilityClient
 ): Promise<string | null> {
   // Parse subdomain from hostname
@@ -175,7 +259,7 @@ async function extractOrganizationFromSubdomain(
 
   // Query database for organization by slug
   try {
-    const db = dbHttp;
+    const db = createDbClient(env);
     const org = await db.query.organizations.findFirst({
       where: eq(organizations.slug, subdomain),
       columns: {
@@ -208,7 +292,7 @@ async function extractOrganizationFromSubdomain(
 async function checkOrganizationMembership(
   organizationId: string,
   userId: string,
-  _env: HonoEnv['Bindings'],
+  env: HonoEnv['Bindings'],
   obs?: ObservabilityClient
 ): Promise<{
   role: string;
@@ -220,7 +304,7 @@ async function checkOrganizationMembership(
   // TTL: 5 minutes
 
   try {
-    const db = dbHttp;
+    const db = createDbClient(env);
     const membership = await db.query.organizationMemberships.findFirst({
       where: and(
         eq(organizationMemberships.organizationId, organizationId),
@@ -258,16 +342,18 @@ async function checkOrganizationMembership(
  *
  * @param organizationId - Organization UUID
  * @param userId - User ID
+ * @param env - Worker environment with DATABASE_URL
  * @param obs - Optional observability client for structured logging
  * @returns True if user has owner/admin role, false otherwise
  */
 async function checkOrganizationManagementAccess(
   organizationId: string,
   userId: string,
+  env: HonoEnv['Bindings'],
   obs?: ObservabilityClient
 ): Promise<boolean> {
   try {
-    const db = dbHttp;
+    const db = createDbClient(env);
     const membership = await db.query.organizationMemberships.findFirst({
       where: and(
         eq(organizationMemberships.organizationId, organizationId),
@@ -402,52 +488,175 @@ export function withPolicy(
       if (sessionCookie) {
         // Extract session token from cookie
         // Try codex-session first (configured name), then better-auth.session_token
+        console.log(
+          '[withPolicy] Full cookie header:',
+          sessionCookie.substring(0, 200)
+        );
         let match = sessionCookie.match(/codex-session=([^;]+)/);
         if (!match) {
+          match = sessionCookie.match(/__Secure-codex-session=([^;]+)/);
+        }
+        if (!match) {
           match = sessionCookie.match(/better-auth\.session_token=([^;]+)/);
+        }
+        if (!match) {
+          match = sessionCookie.match(
+            /__Secure-better-auth\.session_token=([^;]+)/
+          );
         }
         const rawToken = match?.[1];
         console.log(
           '[withPolicy] Session token:',
-          rawToken ? 'found' : 'not found'
+          rawToken ? `found (${rawToken.substring(0, 50)}...)` : 'not found'
         );
 
         if (rawToken) {
           // URL-decode the token (cookies are URL-encoded)
           const fullToken = decodeURIComponent(rawToken);
-          // Better Auth tokens are in format: token.signature
-          // Database only stores the token part (before the dot)
-          const sessionToken = fullToken.split('.')[0] || fullToken;
+          // Better Auth tokens may be in format: token.signature
+          // Try both the split token (before dot) and full token
+          const splitToken = fullToken.split('.')[0] || fullToken;
           console.log(
             '[withPolicy] Decoded token:',
-            `${sessionToken.substring(0, 20)}...`
+            `${splitToken.substring(0, 20)}...`
           );
 
           try {
-            // Query session from database
-            const sessionData = await dbHttp.query.sessions.findFirst({
-              where: and(
-                eq(sessions.token, sessionToken),
-                gt(sessions.expiresAt, new Date())
-              ),
-              with: {
-                user: true,
-              },
-            });
+            // Get KV namespace for caching (if available)
+            const kv = c.env.AUTH_SESSION_KV as KVNamespace | undefined;
 
-            console.log(
-              '[withPolicy] Session query result:',
-              sessionData ? 'found' : 'not found'
-            );
-            if (sessionData) {
-              // Valid session found - set context
-              c.set('session', sessionData);
-              c.set('user', sessionData.user);
-              user = sessionData.user;
-              obs?.info('[withPolicy] User set', {
-                userId: sessionData.user.id,
-                role: sessionData.user.role,
+            // Try cache first (if KV available)
+            if (kv) {
+              const cachedSession = await getSessionFromCache(
+                kv,
+                splitToken,
+                obs
+              );
+
+              if (cachedSession) {
+                // Validate expiration (defense in depth)
+                const expiresAt = new Date(cachedSession.session.expiresAt);
+                if (expiresAt > new Date()) {
+                  // Valid cached session - set context
+                  c.set('session', cachedSession.session);
+                  c.set('user', cachedSession.user);
+                  user = cachedSession.user;
+                  console.log('[withPolicy] Session found in KV cache');
+                  obs?.info('[withPolicy] User set from cache', {
+                    userId: cachedSession.user.id,
+                    role: cachedSession.user.role,
+                  });
+                } else {
+                  // Expired session in cache - clear it
+                  console.log('[withPolicy] Cached session expired, clearing');
+                  kv.delete(`session:${splitToken}`).catch(() => {});
+                }
+              }
+            }
+
+            // If still no user, query database
+            if (!user) {
+              console.log(
+                '[withPolicy] Querying database with splitToken:',
+                splitToken.substring(0, 30) + '...'
+              );
+              console.log(
+                '[withPolicy] fullToken differs:',
+                splitToken !== fullToken
+              );
+
+              // Create database client with request environment
+              const db = createDbClient(c.env);
+
+              // Query session from database - try split token first
+              let sessionData = await db.query.sessions.findFirst({
+                where: and(
+                  eq(sessions.token, splitToken),
+                  gt(sessions.expiresAt, new Date())
+                ),
+                with: {
+                  user: true,
+                },
               });
+
+              // If not found and tokens differ, try full token
+              if (!sessionData && splitToken !== fullToken) {
+                console.log(
+                  '[withPolicy] Split token not found, trying full token:',
+                  fullToken.substring(0, 30) + '...'
+                );
+                sessionData = await db.query.sessions.findFirst({
+                  where: and(
+                    eq(sessions.token, fullToken),
+                    gt(sessions.expiresAt, new Date())
+                  ),
+                  with: {
+                    user: true,
+                  },
+                });
+              }
+
+              console.log(
+                '[withPolicy] Session query result:',
+                sessionData
+                  ? `found (user: ${sessionData.user?.id})`
+                  : 'not found'
+              );
+              if (sessionData) {
+                // Valid session found - set context
+                c.set('session', sessionData);
+                c.set('user', sessionData.user);
+                user = sessionData.user;
+                obs?.info('[withPolicy] User set from database', {
+                  userId: sessionData.user.id,
+                  role: sessionData.user.role,
+                });
+
+                // Cache it for next time (if KV available)
+                if (kv) {
+                  const cacheData: CachedSessionData = {
+                    session: {
+                      id: sessionData.id,
+                      userId: sessionData.userId,
+                      token: sessionData.token,
+                      expiresAt:
+                        sessionData.expiresAt instanceof Date
+                          ? sessionData.expiresAt.toISOString()
+                          : sessionData.expiresAt,
+                      ipAddress: sessionData.ipAddress ?? null,
+                      userAgent: sessionData.userAgent ?? null,
+                      createdAt:
+                        sessionData.createdAt instanceof Date
+                          ? sessionData.createdAt.toISOString()
+                          : sessionData.createdAt,
+                      updatedAt:
+                        sessionData.updatedAt instanceof Date
+                          ? sessionData.updatedAt.toISOString()
+                          : sessionData.updatedAt,
+                    },
+                    user: {
+                      id: sessionData.user.id,
+                      email: sessionData.user.email,
+                      name: sessionData.user.name,
+                      emailVerified: sessionData.user.emailVerified,
+                      image: sessionData.user.image ?? null,
+                      role: sessionData.user.role,
+                      createdAt:
+                        sessionData.user.createdAt instanceof Date
+                          ? sessionData.user.createdAt.toISOString()
+                          : sessionData.user.createdAt,
+                      updatedAt:
+                        sessionData.user.updatedAt instanceof Date
+                          ? sessionData.user.updatedAt.toISOString()
+                          : sessionData.user.updatedAt,
+                    },
+                  };
+                  // Fire and forget - don't wait for cache
+                  cacheSessionInKV(kv, splitToken, cacheData, obs).catch(
+                    () => {}
+                  );
+                }
+              }
             }
           } catch (error) {
             obs?.error('[withPolicy] Session validation error', {
@@ -581,9 +790,8 @@ export function withPolicy(
     // ========================================================================
 
     if (mergedPolicy.requireOrgManagement) {
-      // Extract organization ID from route params (:id or :organizationId)
-      const organizationId =
-        c.req.param('id') || c.req.param('organizationId') || '';
+      // Extract organization ID from route params (:id)
+      const organizationId = c.req.param('id') || '';
 
       if (!organizationId) {
         return c.json(
@@ -602,6 +810,7 @@ export function withPolicy(
       const hasManagementAccess = await checkOrganizationManagementAccess(
         organizationId,
         user.id,
+        c.env,
         obs
       );
 

@@ -15,9 +15,9 @@
  */
 
 import { dbHttp, schema } from '@codex/database';
-import { expect, test } from '@playwright/test';
 import { and, eq } from 'drizzle-orm';
-import { authFixture } from '../fixtures';
+import { beforeAll, describe, expect, test } from 'vitest';
+import { authFixture, httpClient } from '../fixtures';
 import {
   expectSuccessResponse,
   unwrapApiResponse,
@@ -28,10 +28,7 @@ import {
 } from '../helpers/stripe-webhook';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
-test.describe('Purchase History API', () => {
-  // Run tests serially in same worker to share beforeAll setup
-  test.describe.configure({ mode: 'serial' });
-
+describe('Purchase History API', () => {
   // Test data stored across tests
   let creatorCookie: string;
   let buyerCookie: string;
@@ -44,19 +41,16 @@ test.describe('Purchase History API', () => {
   let purchaseId: string;
   let purchase2Id: string;
 
-  // Use slow() to increase timeout for complex setup (3x default = 180s)
-  test.slow();
-
-  test.beforeAll(async ({ request }) => {
+  beforeAll(async () => {
     // Explicitly set longer timeout for this hook (3 minutes)
-    test.setTimeout(180000);
     console.log('[Setup] Starting purchase history test setup...');
     // ========================================================================
     // Setup: Create creator with organization and two paid content items
     // ========================================================================
     const creatorEmail = `creator-history-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     console.log('[Setup] 1/12 Registering creator...');
-    const { cookie: _creatorCookie } = await authFixture.registerUser(request, {
+
+    const { cookie: _creatorCookie } = await authFixture.registerUser({
       email: creatorEmail,
       password: 'SecurePassword123!',
       name: 'History Test Creator',
@@ -67,7 +61,7 @@ test.describe('Purchase History API', () => {
 
     // Create organization
     console.log('[Setup] 2/12 Creating organization...');
-    const orgResponse = await request.post(
+    const orgResponse = await httpClient.post(
       `${WORKER_URLS.organization}/api/organizations`,
       {
         headers: {
@@ -87,12 +81,13 @@ test.describe('Purchase History API', () => {
     organizationId = organization.id;
     console.log('[Setup] 2/12 Organization created:', organizationId);
 
-    // Create first media item
-    console.log('[Setup] 3/12 Creating media item 1...');
+    // Create both media items in parallel
+    console.log('[Setup] 3/12 Creating both media items in parallel...');
     const testMediaId1 = `e2e-history-video-1-${Date.now()}`;
-    const mediaResponse1 = await request.post(
-      `${WORKER_URLS.content}/api/media`,
-      {
+    const testMediaId2 = `e2e-history-video-2-${Date.now()}`;
+
+    const [mediaResponse1, mediaResponse2] = await Promise.all([
+      httpClient.post(`${WORKER_URLS.content}/api/media`, {
         headers: {
           Cookie: creatorCookie,
           'Content-Type': 'application/json',
@@ -105,34 +100,70 @@ test.describe('Purchase History API', () => {
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
-      }
-    );
-    await expectSuccessResponse(mediaResponse1, 201);
+      }),
+      httpClient.post(`${WORKER_URLS.content}/api/media`, {
+        headers: {
+          Cookie: creatorCookie,
+          'Content-Type': 'application/json',
+          Origin: WORKER_URLS.content,
+        },
+        data: {
+          title: 'History Test Video 2',
+          mediaType: 'video',
+          r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
+          fileSizeBytes: 2097152,
+          mimeType: 'video/mp4',
+        },
+      }),
+    ]);
+
+    await Promise.all([
+      expectSuccessResponse(mediaResponse1, 201),
+      expectSuccessResponse(mediaResponse2, 201),
+    ]);
+
     const media1 = unwrapApiResponse(await mediaResponse1.json());
-    console.log('[Setup] 3/12 Media item 1 created');
+    const media2 = unwrapApiResponse(await mediaResponse2.json());
+    console.log('[Setup] 3/12 Both media items created');
 
-    // Mark media 1 as ready
-    console.log('[Setup] 4/12 Marking media 1 as ready...');
-    await request.patch(`${WORKER_URLS.content}/api/media/${media1.id}`, {
-      headers: {
-        Cookie: creatorCookie,
-        'Content-Type': 'application/json',
-        Origin: WORKER_URLS.content,
-      },
-      data: {
-        status: 'ready',
-        hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
-        thumbnailKey: `e2e/thumbnails/${testMediaId1}/thumb.jpg`,
-        durationSeconds: 300,
-      },
-    });
-    console.log('[Setup] 4/12 Media 1 ready');
+    // Mark both media items as ready in parallel
+    console.log(
+      '[Setup] 4/12 Marking both media items as ready in parallel...'
+    );
+    await Promise.all([
+      httpClient.patch(`${WORKER_URLS.content}/api/media/${media1.id}`, {
+        headers: {
+          Cookie: creatorCookie,
+          'Content-Type': 'application/json',
+          Origin: WORKER_URLS.content,
+        },
+        data: {
+          status: 'ready',
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId1}/thumb.jpg`,
+          durationSeconds: 300,
+        },
+      }),
+      httpClient.patch(`${WORKER_URLS.content}/api/media/${media2.id}`, {
+        headers: {
+          Cookie: creatorCookie,
+          'Content-Type': 'application/json',
+          Origin: WORKER_URLS.content,
+        },
+        data: {
+          status: 'ready',
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
+          durationSeconds: 600,
+        },
+      }),
+    ]);
+    console.log('[Setup] 4/12 Both media items ready');
 
-    // Create first paid content
-    console.log('[Setup] 5/12 Creating content 1...');
-    const contentResponse1 = await request.post(
-      `${WORKER_URLS.content}/api/content`,
-      {
+    // Create both content items in parallel
+    console.log('[Setup] 5/12 Creating both content items in parallel...');
+    const [contentResponse1, contentResponse2] = await Promise.all([
+      httpClient.post(`${WORKER_URLS.content}/api/content`, {
         headers: {
           Cookie: creatorCookie,
           'Content-Type': 'application/json',
@@ -148,73 +179,8 @@ test.describe('Purchase History API', () => {
           visibility: 'purchased_only',
           priceCents: 2999,
         },
-      }
-    );
-    await expectSuccessResponse(contentResponse1, 201);
-    const content1 = unwrapApiResponse(await contentResponse1.json());
-    contentId = content1.id;
-    console.log('[Setup] 5/12 Content 1 created:', contentId);
-
-    // Publish content 1
-    console.log('[Setup] 6/12 Publishing content 1...');
-    await request.post(
-      `${WORKER_URLS.content}/api/content/${contentId}/publish`,
-      {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-          Origin: WORKER_URLS.content,
-        },
-      }
-    );
-    console.log('[Setup] 6/12 Content 1 published');
-
-    // Create second media item
-    console.log('[Setup] 7/12 Creating media item 2...');
-    const testMediaId2 = `e2e-history-video-2-${Date.now()}`;
-    const mediaResponse2 = await request.post(
-      `${WORKER_URLS.content}/api/media`,
-      {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-          Origin: WORKER_URLS.content,
-        },
-        data: {
-          title: 'History Test Video 2',
-          mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
-          fileSizeBytes: 2097152,
-          mimeType: 'video/mp4',
-        },
-      }
-    );
-    await expectSuccessResponse(mediaResponse2, 201);
-    const media2 = unwrapApiResponse(await mediaResponse2.json());
-    console.log('[Setup] 7/12 Media item 2 created');
-
-    // Mark media 2 as ready
-    console.log('[Setup] 8/12 Marking media 2 as ready...');
-    await request.patch(`${WORKER_URLS.content}/api/media/${media2.id}`, {
-      headers: {
-        Cookie: creatorCookie,
-        'Content-Type': 'application/json',
-        Origin: WORKER_URLS.content,
-      },
-      data: {
-        status: 'ready',
-        hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
-        thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
-        durationSeconds: 600,
-      },
-    });
-    console.log('[Setup] 8/12 Media 2 ready');
-
-    // Create second paid content
-    console.log('[Setup] 9/12 Creating content 2...');
-    const contentResponse2 = await request.post(
-      `${WORKER_URLS.content}/api/content`,
-      {
+      }),
+      httpClient.post(`${WORKER_URLS.content}/api/content`, {
         headers: {
           Cookie: creatorCookie,
           'Content-Type': 'application/json',
@@ -230,33 +196,56 @@ test.describe('Purchase History API', () => {
           visibility: 'purchased_only',
           priceCents: 4999,
         },
-      }
-    );
-    await expectSuccessResponse(contentResponse2, 201);
-    const content2 = unwrapApiResponse(await contentResponse2.json());
-    content2Id = content2.id;
-    console.log('[Setup] 9/12 Content 2 created:', content2Id);
+      }),
+    ]);
 
-    // Publish content 2
-    console.log('[Setup] 10/12 Publishing content 2...');
-    await request.post(
-      `${WORKER_URLS.content}/api/content/${content2Id}/publish`,
-      {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-          Origin: WORKER_URLS.content,
-        },
-      }
+    await Promise.all([
+      expectSuccessResponse(contentResponse1, 201),
+      expectSuccessResponse(contentResponse2, 201),
+    ]);
+
+    const content1 = unwrapApiResponse(await contentResponse1.json());
+    const content2 = unwrapApiResponse(await contentResponse2.json());
+    contentId = content1.id;
+    content2Id = content2.id;
+    console.log(
+      '[Setup] 5/12 Both content items created:',
+      contentId,
+      content2Id
     );
-    console.log('[Setup] 10/12 Content 2 published');
+
+    // Publish both content items in parallel
+    console.log('[Setup] 6/12 Publishing both content items in parallel...');
+    await Promise.all([
+      httpClient.post(
+        `${WORKER_URLS.content}/api/content/${contentId}/publish`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+            Origin: WORKER_URLS.content,
+          },
+        }
+      ),
+      httpClient.post(
+        `${WORKER_URLS.content}/api/content/${content2Id}/publish`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+            Origin: WORKER_URLS.content,
+          },
+        }
+      ),
+    ]);
+    console.log('[Setup] 6/12 Both content items published');
 
     // ========================================================================
     // Setup: Create buyer and complete two purchases
     // ========================================================================
     console.log('[Setup] 11/12 Registering buyer...');
     const buyerEmail = `buyer-history-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-    const buyerResult = await authFixture.registerUser(request, {
+    const buyerResult = await authFixture.registerUser({
       email: buyerEmail,
       password: 'SecurePassword123!',
       name: 'History Test Buyer',
@@ -268,7 +257,7 @@ test.describe('Purchase History API', () => {
 
     // Create checkout and complete purchase for content 1
     console.log('[Setup] 12/12 Creating purchases via webhooks...');
-    const checkoutResponse1 = await request.post(
+    const checkoutResponse1 = await httpClient.post(
       `${WORKER_URLS.ecom}/checkout/create`,
       {
         headers: {
@@ -298,7 +287,6 @@ test.describe('Purchase History API', () => {
 
     console.log('[Setup] Sending webhook 1...');
     await sendSignedWebhook(
-      request,
       `${WORKER_URLS.ecom}/webhooks/stripe/booking`,
       webhookEvent1,
       process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
@@ -321,7 +309,7 @@ test.describe('Purchase History API', () => {
 
     // Create checkout and complete purchase for content 2
     console.log('[Setup] Creating checkout 2...');
-    const checkoutResponse2 = await request.post(
+    const checkoutResponse2 = await httpClient.post(
       `${WORKER_URLS.ecom}/checkout/create`,
       {
         headers: {
@@ -351,7 +339,6 @@ test.describe('Purchase History API', () => {
 
     console.log('[Setup] Sending webhook 2...');
     await sendSignedWebhook(
-      request,
       `${WORKER_URLS.ecom}/webhooks/stripe/booking`,
       webhookEvent2,
       process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
@@ -377,7 +364,7 @@ test.describe('Purchase History API', () => {
     // ========================================================================
     console.log('[Setup] Registering other buyer...');
     const otherBuyerEmail = `other-buyer-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-    const otherBuyerResult = await authFixture.registerUser(request, {
+    const otherBuyerResult = await authFixture.registerUser({
       email: otherBuyerEmail,
       password: 'SecurePassword123!',
       name: 'Other Buyer',
@@ -387,17 +374,15 @@ test.describe('Purchase History API', () => {
     otherBuyerCookie = otherBuyerResult.cookie;
     console.log('[Setup] Other buyer registered:', otherBuyer.id);
     console.log('[Setup] ✅ Setup complete!');
-  });
+  }, 180000);
 
   // ============================================================================
   // GET /purchases - List Purchases
   // ============================================================================
 
-  test.describe('GET /purchases - List Purchases', () => {
-    test('should return paginated list of customer purchases', async ({
-      request,
-    }) => {
-      const response = await request.get(`${WORKER_URLS.ecom}/purchases`, {
+  describe('GET /purchases - List Purchases', () => {
+    test('should return paginated list of customer purchases', async () => {
+      const response = await httpClient.get(`${WORKER_URLS.ecom}/purchases`, {
         headers: {
           Cookie: buyerCookie,
           Origin: WORKER_URLS.ecom,
@@ -432,8 +417,8 @@ test.describe('Purchase History API', () => {
       expect(purchase.content.contentType).toBe('video');
     });
 
-    test('should filter purchases by status', async ({ request }) => {
-      const response = await request.get(
+    test('should filter purchases by status', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases?status=completed`,
         {
           headers: {
@@ -454,8 +439,8 @@ test.describe('Purchase History API', () => {
       }
     });
 
-    test('should filter purchases by contentId', async ({ request }) => {
-      const response = await request.get(
+    test('should filter purchases by contentId', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases?contentId=${contentId}`,
         {
           headers: {
@@ -475,8 +460,8 @@ test.describe('Purchase History API', () => {
       expect(data.items[0].amountPaidCents).toBe(2999);
     });
 
-    test('should handle custom pagination', async ({ request }) => {
-      const response = await request.get(
+    test('should handle custom pagination', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases?page=1&limit=1`,
         {
           headers: {
@@ -497,10 +482,8 @@ test.describe('Purchase History API', () => {
       expect(data.pagination.totalPages).toBeGreaterThanOrEqual(2);
     });
 
-    test('should return empty items for page beyond total', async ({
-      request,
-    }) => {
-      const response = await request.get(
+    test('should return empty items for page beyond total', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases?page=999`,
         {
           headers: {
@@ -518,10 +501,8 @@ test.describe('Purchase History API', () => {
       expect(data.pagination.page).toBe(999);
     });
 
-    test('should return empty list for user with no purchases', async ({
-      request,
-    }) => {
-      const response = await request.get(`${WORKER_URLS.ecom}/purchases`, {
+    test('should return empty list for user with no purchases', async () => {
+      const response = await httpClient.get(`${WORKER_URLS.ecom}/purchases`, {
         headers: {
           Cookie: otherBuyerCookie,
           Origin: WORKER_URLS.ecom,
@@ -536,20 +517,18 @@ test.describe('Purchase History API', () => {
       expect(data.pagination.total).toBe(0);
     });
 
-    test('should return 401 when not authenticated', async ({ request }) => {
-      const response = await request.get(`${WORKER_URLS.ecom}/purchases`, {
+    test('should return 401 when not authenticated', async () => {
+      const response = await httpClient.get(`${WORKER_URLS.ecom}/purchases`, {
         headers: {
           Origin: WORKER_URLS.ecom,
         },
       });
 
-      expect(response.status()).toBe(401);
+      expect(response.status).toBe(401);
     });
 
-    test('should return 400 for invalid query parameters', async ({
-      request,
-    }) => {
-      const response = await request.get(
+    test('should return 400 for invalid query parameters', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases?status=invalid_status`,
         {
           headers: {
@@ -559,9 +538,9 @@ test.describe('Purchase History API', () => {
         }
       );
 
-      expect(response.ok()).toBeFalsy();
-      expect(response.status()).toBeGreaterThanOrEqual(400);
-      expect(response.status()).toBeLessThanOrEqual(422);
+      expect(response.ok).toBeFalsy();
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(response.status).toBeLessThanOrEqual(422);
     });
   });
 
@@ -569,11 +548,9 @@ test.describe('Purchase History API', () => {
   // GET /purchases/:id - Single Purchase
   // ============================================================================
 
-  test.describe('GET /purchases/:id - Single Purchase', () => {
-    test('should return single purchase owned by authenticated user', async ({
-      request,
-    }) => {
-      const response = await request.get(
+  describe('GET /purchases/:id - Single Purchase', () => {
+    test('should return single purchase owned by authenticated user', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
           headers: {
@@ -611,8 +588,8 @@ test.describe('Purchase History API', () => {
       ).toBe(2999);
     });
 
-    test('should return 401 when not authenticated', async ({ request }) => {
-      const response = await request.get(
+    test('should return 401 when not authenticated', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
           headers: {
@@ -621,14 +598,12 @@ test.describe('Purchase History API', () => {
         }
       );
 
-      expect(response.status()).toBe(401);
+      expect(response.status).toBe(401);
     });
 
-    test('should return 403 when purchase belongs to another user', async ({
-      request,
-    }) => {
+    test('should return 403 when purchase belongs to another user', async () => {
       // otherBuyer tries to access buyer's purchase
-      const response = await request.get(
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
           headers: {
@@ -638,14 +613,12 @@ test.describe('Purchase History API', () => {
         }
       );
 
-      expect(response.status()).toBe(403);
+      expect(response.status).toBe(403);
     });
 
-    test('should return 404 when purchase does not exist', async ({
-      request,
-    }) => {
+    test('should return 404 when purchase does not exist', async () => {
       const fakeId = '00000000-0000-0000-0000-000000000000';
-      const response = await request.get(
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${fakeId}`,
         {
           headers: {
@@ -655,11 +628,11 @@ test.describe('Purchase History API', () => {
         }
       );
 
-      expect(response.status()).toBe(404);
+      expect(response.status).toBe(404);
     });
 
-    test('should return 400 for invalid UUID format', async ({ request }) => {
-      const response = await request.get(
+    test('should return 400 for invalid UUID format', async () => {
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/not-a-valid-uuid`,
         {
           headers: {
@@ -669,9 +642,9 @@ test.describe('Purchase History API', () => {
         }
       );
 
-      expect(response.ok()).toBeFalsy();
-      expect(response.status()).toBeGreaterThanOrEqual(400);
-      expect(response.status()).toBeLessThanOrEqual(422);
+      expect(response.ok).toBeFalsy();
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(response.status).toBeLessThanOrEqual(422);
     });
   });
 
@@ -679,17 +652,18 @@ test.describe('Purchase History API', () => {
   // Access Control Tests
   // ============================================================================
 
-  test.describe('Access Control', () => {
-    test('should only return purchases belonging to authenticated user', async ({
-      request,
-    }) => {
+  describe('Access Control', () => {
+    test('should only return purchases belonging to authenticated user', async () => {
       // Buyer should see their 2 purchases
-      const buyerResponse = await request.get(`${WORKER_URLS.ecom}/purchases`, {
-        headers: {
-          Cookie: buyerCookie,
-          Origin: WORKER_URLS.ecom,
-        },
-      });
+      const buyerResponse = await httpClient.get(
+        `${WORKER_URLS.ecom}/purchases`,
+        {
+          headers: {
+            Cookie: buyerCookie,
+            Origin: WORKER_URLS.ecom,
+          },
+        }
+      );
 
       await expectSuccessResponse(buyerResponse);
       const buyerJson = await buyerResponse.json();
@@ -701,12 +675,15 @@ test.describe('Purchase History API', () => {
       }
 
       // OtherBuyer should see zero purchases
-      const otherResponse = await request.get(`${WORKER_URLS.ecom}/purchases`, {
-        headers: {
-          Cookie: otherBuyerCookie,
-          Origin: WORKER_URLS.ecom,
-        },
-      });
+      const otherResponse = await httpClient.get(
+        `${WORKER_URLS.ecom}/purchases`,
+        {
+          headers: {
+            Cookie: otherBuyerCookie,
+            Origin: WORKER_URLS.ecom,
+          },
+        }
+      );
 
       await expectSuccessResponse(otherResponse);
       const otherJson = await otherResponse.json();
@@ -715,11 +692,9 @@ test.describe('Purchase History API', () => {
       expect(otherData.items.length).toBe(0);
     });
 
-    test('creator cannot access buyer purchase records', async ({
-      request,
-    }) => {
+    test('creator cannot access buyer purchase records', async () => {
       // Creator tries to access buyer's purchase by ID
-      const response = await request.get(
+      const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
           headers: {
@@ -730,7 +705,7 @@ test.describe('Purchase History API', () => {
       );
 
       // Creator is not the customer, should be forbidden
-      expect(response.status()).toBe(403);
+      expect(response.status).toBe(403);
     });
   });
 });

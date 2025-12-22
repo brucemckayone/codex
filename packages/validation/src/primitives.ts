@@ -234,3 +234,42 @@ export const isoDateSchema = z.coerce.date({
     message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)',
   }),
 });
+
+// ============================================================================
+// Colors
+// ============================================================================
+
+/**
+ * Hex color validation
+ * - Must be # followed by exactly 6 hex characters
+ * - Case insensitive (e.g., #3B82F6 or #3b82f6)
+ *
+ * @example
+ * ```typescript
+ * hexColorSchema.parse('#3B82F6'); // Valid
+ * hexColorSchema.parse('#fff');    // Invalid (must be 6 chars)
+ * ```
+ */
+export const hexColorSchema = z
+  .string()
+  .regex(/^#[0-9A-Fa-f]{6}$/, 'Color must be hex format (#RRGGBB)');
+
+// ============================================================================
+// Timezone
+// ============================================================================
+
+/**
+ * IANA timezone identifier validation
+ * - Non-empty string, max 100 chars
+ * - Examples: 'UTC', 'America/New_York', 'Europe/London'
+ *
+ * @example
+ * ```typescript
+ * timezoneSchema.parse('America/New_York'); // Valid
+ * timezoneSchema.parse('');                  // Invalid (empty)
+ * ```
+ */
+export const timezoneSchema = z
+  .string()
+  .min(1, 'Timezone is required')
+  .max(100, 'Timezone must be 100 characters or less');
