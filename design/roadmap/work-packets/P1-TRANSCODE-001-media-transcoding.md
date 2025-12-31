@@ -1,8 +1,10 @@
 # P1-TRANSCODE-001: Media Transcoding Service
 
 **Priority**: P1 (High - enables streaming)
-**Status**: 🚧 Not Implemented
+**Status**: 📋 Ready for Implementation
 **Estimated Effort**: 5-7 days
+
+> **Implementation Plan**: See [`P1-TRANSCODE-001-implementation-plan.md`](../implementation-plans/P1-TRANSCODE-001-implementation-plan.md) for complete technical details, Python handler code, FFmpeg commands, Dockerfile, and all contracts.
 
 ---
 
@@ -196,7 +198,7 @@ Access Service can generate streaming URLs
 
 2. **RunPod Job Configuration**:
    - Video: Generate HLS with 4 quality levels (1080p, 720p, 480p, 360p)
-   - Video: Extract 30-second preview starting at 10% mark
+  - Video: Extract 30-second preview starting at 0 seconds (first 30s)
    - Video: Generate thumbnail at 10% mark
    - Audio: Generate HLS audio stream
    - Audio: Generate waveform visualization data (JSON)
@@ -273,7 +275,7 @@ export class TranscodingService extends BaseService {
         body: JSON.stringify({
           input: {
             mediaId: media.id,
-            type: media.mediaType,
+          mediaType: media.mediaType,
             creatorId: media.creatorId,
             inputKey: media.r2Key, // Where to fetch input file
             webhookUrl,
@@ -306,13 +308,13 @@ export class TranscodingService extends BaseService {
 
 ```typescript
 export async function handleTranscodingWebhook(
-  payload: RunPodWebhookPayload,
+  rawBody: string,
   signature: string,
   webhookSecret: string
 ): Promise<void> {
-  // Step 1: Verify webhook signature
+  // Step 1: Verify webhook signature against raw body
   const computedSignature = createHmac('sha256', webhookSecret)
-    .update(JSON.stringify(payload))
+    .update(rawBody)
     .digest('hex');
 
   if (computedSignature !== signature) {
@@ -320,6 +322,7 @@ export async function handleTranscodingWebhook(
   }
 
   // Step 2: Call service to process webhook
+  const payload = JSON.parse(rawBody) as RunPodWebhookPayload;
   const service = new TranscodingService(config);
   await service.handleWebhook(payload);
 }
@@ -436,7 +439,7 @@ FUNCTION triggerJob(mediaId, userId):
   // Step 4: Prepare RunPod job input
   jobInput = {
     mediaId: media.id,
-    type: media.mediaType,  // 'video' | 'audio'
+    mediaType: media.mediaType,  // 'video' | 'audio'
     creatorId: media.creatorId,
     inputKey: media.r2Key,  // R2 path to original file
     webhookUrl: webhookUrl
@@ -472,7 +475,7 @@ FUNCTION triggerJob(mediaId, userId):
   LOG.info("Transcoding job started", {
     mediaId: mediaId,
     runpodJobId: runpodJobId,
-    type: media.mediaType
+    mediaType: media.mediaType
   })
 
   // Job is running, webhook will handle completion
@@ -605,11 +608,11 @@ app.post('/api/transcoding/webhook',
       return c.json({ error: 'Missing signature' }, 401);
     }
 
-    const payload = await c.req.json() as RunPodWebhookPayload;
+    const rawBody = await c.req.text();
 
     // Verify HMAC signature
     const computedSignature = createHmac('sha256', webhookSecret)
-      .update(JSON.stringify(payload))
+      .update(rawBody)
       .digest('hex');
 
     if (computedSignature !== signature) {
@@ -617,6 +620,7 @@ app.post('/api/transcoding/webhook',
     }
 
     // Process webhook
+    const payload = JSON.parse(rawBody) as RunPodWebhookPayload;
     const service = new TranscodingService(c.env);
     await service.handleWebhook(payload);
 
@@ -742,7 +746,7 @@ export const runpodWebhookSchema = z.object({
   status: z.enum(['completed', 'failed']),
   output: z.object({
     mediaId: z.string().uuid(),
-    type: z.enum(['video', 'audio']),
+  mediaType: z.enum(['video', 'audio']),
     hlsMasterKey: z.string().optional(),
     hlsPreviewKey: z.string().optional(),
     thumbnailKey: z.string().optional(),
@@ -815,7 +819,7 @@ const obs = new ObservabilityClient('transcoding-service', env.ENVIRONMENT);
 obs.info('Transcoding job triggered', {
   mediaId,
   runpodJobId,
-  type: media.mediaType,
+  mediaType: media.mediaType,
 });
 
 // Log job completed
@@ -854,7 +858,7 @@ const response = await fetch(
     body: JSON.stringify({
       input: {
         mediaId,
-        type: 'video',
+        mediaType: 'video',
         inputKey: 'creator-123/originals/media-456/video.mp4',
         webhookUrl: 'https://yourapp.com/api/transcoding/webhook',
       },
