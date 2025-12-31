@@ -5,8 +5,8 @@
  * enable signups, enable purchases.
  */
 
-import { type dbWs, schema } from '@codex/database';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { type DatabaseWs, schema } from '@codex/database';
+import { BaseService } from '@codex/service-errors';
 import {
   DEFAULT_FEATURES,
   type FeatureSettingsResponse,
@@ -18,7 +18,11 @@ import { SettingsUpsertError } from '../errors';
 /**
  * Configuration for FeatureSettingsService
  */
-export interface FeatureSettingsConfig extends ServiceConfig {
+export interface FeatureSettingsConfig {
+  /** Database connection (requires transaction support) */
+  db: DatabaseWs;
+  /** Runtime environment */
+  environment: string;
   /** Organization ID for scoping */
   organizationId: string;
 }
@@ -88,7 +92,7 @@ export class FeatureSettingsService extends BaseService {
     }
 
     // Upsert feature settings
-    const result = await (this.db as typeof dbWs)
+    const result = await this.db
       .insert(schema.featureSettings)
       .values({
         organizationId: this.organizationId,
@@ -128,7 +132,7 @@ export class FeatureSettingsService extends BaseService {
    * Creates if missing.
    */
   private async ensurePlatformSettingsExists(): Promise<void> {
-    await (this.db as typeof dbWs)
+    await this.db
       .insert(schema.platformSettings)
       .values({ organizationId: this.organizationId })
       .onConflictDoNothing();

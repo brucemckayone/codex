@@ -6,8 +6,8 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { type dbWs, schema } from '@codex/database';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { type DatabaseWs, schema } from '@codex/database';
+import { BaseService } from '@codex/service-errors';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   type BrandingSettingsResponse,
@@ -29,7 +29,11 @@ import {
 /**
  * Configuration for BrandingSettingsService
  */
-export interface BrandingSettingsConfig extends ServiceConfig {
+export interface BrandingSettingsConfig {
+  /** Database connection (requires transaction support) */
+  db: DatabaseWs;
+  /** Runtime environment */
+  environment: string;
   /** Organization ID for scoping */
   organizationId: string;
   /** R2 service for logo storage */
@@ -104,7 +108,7 @@ export class BrandingSettingsService extends BaseService {
     }
 
     // Upsert branding settings
-    const result = await (this.db as typeof dbWs)
+    const result = await this.db
       .insert(schema.brandingSettings)
       .values({
         organizationId: this.organizationId,
@@ -187,36 +191,20 @@ export class BrandingSettingsService extends BaseService {
       uploadData = new TextEncoder().encode(sanitized);
     }
 
-    // Generate R2 path for logo (sanitize organizationId for path safety)
+    // Generate R2 path for logo
     const extension = this.getExtensionFromMimeType(mimeType);
-    const sanitizedOrgId = this.organizationId.replace(/[^a-zA-Z0-9-]/g, '');
-    const r2Path = `logos/${sanitizedOrgId}/logo.${extension}`;
+    const r2Path = `logos/${this.organizationId}/logo.${extension}`;
 
-    // Delete old logo if exists
+    // Get old logo path before upload (for deletion after success)
     const currentResult = await this.db
       .select({ logoR2Path: schema.brandingSettings.logoR2Path })
       .from(schema.brandingSettings)
       .where(eq(schema.brandingSettings.organizationId, this.organizationId))
       .limit(1);
 
-    const currentRow = currentResult[0];
-    if (currentRow?.logoR2Path) {
-      try {
-        await this.r2.delete(currentRow.logoR2Path);
-        this.obs.info('Deleted old logo', {
-          organizationId: this.organizationId,
-          r2Path: currentRow.logoR2Path,
-        });
-      } catch (error) {
-        this.obs.warn('Failed to delete old logo', {
-          organizationId: this.organizationId,
-          r2Path: currentRow.logoR2Path,
-          error: String(error),
-        });
-      }
-    }
+    const oldLogoPath = currentResult[0]?.logoR2Path;
 
-    // Upload new logo
+    // Step 1: Upload new logo to R2 first
     await this.r2.put(r2Path, uploadData, undefined, {
       contentType: mimeType,
       cacheControl: 'public, max-age=31536000', // 1 year cache
@@ -227,49 +215,87 @@ export class BrandingSettingsService extends BaseService {
       ? `${this.r2PublicUrlBase}/${r2Path}`
       : r2Path;
 
-    // Ensure hub row exists
-    await this.ensurePlatformSettingsExists();
+    try {
+      // Step 2: Update database with new logo
+      // Ensure hub row exists
+      await this.ensurePlatformSettingsExists();
 
-    // Update database with new logo
-    const result = await (this.db as typeof dbWs)
-      .insert(schema.brandingSettings)
-      .values({
-        organizationId: this.organizationId,
-        logoUrl,
-        logoR2Path: r2Path,
-        primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
-      })
-      .onConflictDoUpdate({
-        target: schema.brandingSettings.organizationId,
-        set: {
+      const result = await this.db
+        .insert(schema.brandingSettings)
+        .values({
+          organizationId: this.organizationId,
           logoUrl,
           logoR2Path: r2Path,
-          updatedAt: new Date(),
-        },
-      })
-      .returning({
-        logoUrl: schema.brandingSettings.logoUrl,
-        primaryColorHex: schema.brandingSettings.primaryColorHex,
+          primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
+        })
+        .onConflictDoUpdate({
+          target: schema.brandingSettings.organizationId,
+          set: {
+            logoUrl,
+            logoR2Path: r2Path,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({
+          logoUrl: schema.brandingSettings.logoUrl,
+          primaryColorHex: schema.brandingSettings.primaryColorHex,
+        });
+
+      this.obs.info('Logo uploaded', {
+        organizationId: this.organizationId,
+        r2Path,
+        logoUrl,
       });
 
-    this.obs.info('Logo uploaded', {
-      organizationId: this.organizationId,
-      r2Path,
-      logoUrl,
-    });
+      const row = result[0];
+      if (!row) {
+        throw new SettingsUpsertError(
+          'branding',
+          this.organizationId,
+          'logo_upload'
+        );
+      }
 
-    const row = result[0];
-    if (!row) {
-      throw new SettingsUpsertError(
-        'branding',
-        this.organizationId,
-        'logo_upload'
-      );
+      // Step 3: Success - delete old logo (non-blocking)
+      if (oldLogoPath && oldLogoPath !== r2Path) {
+        try {
+          await this.r2.delete(oldLogoPath);
+          this.obs.info('Deleted old logo', {
+            organizationId: this.organizationId,
+            r2Path: oldLogoPath,
+          });
+        } catch (error) {
+          // R2 delete failures are non-blocking. Orphaned files are acceptable
+          // tradeoff vs failing the operation. Background cleanup can handle later.
+          this.obs.warn('Failed to delete old logo', {
+            organizationId: this.organizationId,
+            r2Path: oldLogoPath,
+            error: String(error),
+          });
+        }
+      }
+
+      return {
+        logoUrl: row.logoUrl,
+        primaryColorHex: row.primaryColorHex,
+      };
+    } catch (error) {
+      // Step 4: Compensation - delete the new logo we just uploaded
+      try {
+        await this.r2.delete(r2Path);
+        this.obs.info('Compensation: deleted new logo after DB failure', {
+          organizationId: this.organizationId,
+          r2Path,
+        });
+      } catch (cleanupError) {
+        this.obs.error('Failed to cleanup new logo after DB failure', {
+          organizationId: this.organizationId,
+          r2Path,
+          error: String(cleanupError),
+        });
+      }
+      throw error;
     }
-    return {
-      logoUrl: row.logoUrl,
-      primaryColorHex: row.primaryColorHex,
-    };
   }
 
   /**
@@ -325,7 +351,7 @@ export class BrandingSettingsService extends BaseService {
    * Creates if missing.
    */
   private async ensurePlatformSettingsExists(): Promise<void> {
-    await (this.db as typeof dbWs)
+    await this.db
       .insert(schema.platformSettings)
       .values({ organizationId: this.organizationId })
       .onConflictDoNothing();
@@ -342,8 +368,10 @@ export class BrandingSettingsService extends BaseService {
         return 'jpg';
       case 'image/webp':
         return 'webp';
+      case 'image/svg+xml':
+        return 'svg';
       default:
-        return 'png';
+        throw new InvalidFileTypeError(mimeType, ALLOWED_LOGO_MIME_TYPES);
     }
   }
 }

@@ -43,19 +43,27 @@ export interface SecondaryStorage {
 }
 
 /**
+ * ObservabilityClient interface for logging
+ */
+export interface ObservabilityClient {
+  warn: (message: string, context?: Record<string, unknown>) => void;
+}
+
+/**
  * Create a KV-backed secondary storage adapter for Better Auth
  *
  * This adapter wraps Cloudflare KV to provide Better Auth's secondaryStorage interface.
  * It handles JSON serialization/deserialization and TTL-based expiration.
  *
  * @param kv - Cloudflare KV namespace binding
+ * @param obs - Optional observability client for logging (if not provided, uses console.error)
  * @returns SecondaryStorage adapter
  *
  * @example
  * ```typescript
  * import { createKVSecondaryStorage } from '@codex/security';
  *
- * const storage = createKVSecondaryStorage(env.AUTH_SESSION_KV);
+ * const storage = createKVSecondaryStorage(env.AUTH_SESSION_KV, obs);
  *
  * // Use with Better Auth
  * betterAuth({
@@ -64,7 +72,10 @@ export interface SecondaryStorage {
  * });
  * ```
  */
-export function createKVSecondaryStorage(kv: KVNamespace): SecondaryStorage {
+export function createKVSecondaryStorage(
+  kv: KVNamespace,
+  obs?: ObservabilityClient
+): SecondaryStorage {
   return {
     async get(key: string): Promise<unknown> {
       try {
@@ -75,10 +86,17 @@ export function createKVSecondaryStorage(kv: KVNamespace): SecondaryStorage {
         return JSON.parse(value);
       } catch (error) {
         // Log error but don't throw - graceful degradation
-        console.error('[KV Secondary Storage] Get error:', {
+        const errorMessage = '[KV Secondary Storage] Get error';
+        const context = {
           key,
           error: error instanceof Error ? error.message : String(error),
-        });
+        };
+
+        if (obs) {
+          obs.warn(errorMessage, context);
+        } else {
+          console.error(errorMessage, context);
+        }
         return null;
       }
     },
@@ -92,11 +110,18 @@ export function createKVSecondaryStorage(kv: KVNamespace): SecondaryStorage {
         }
       } catch (error) {
         // Log error but don't throw - cache write failure shouldn't break auth
-        console.error('[KV Secondary Storage] Set error:', {
+        const errorMessage = '[KV Secondary Storage] Set error';
+        const context = {
           key,
           ttl,
           error: error instanceof Error ? error.message : String(error),
-        });
+        };
+
+        if (obs) {
+          obs.warn(errorMessage, context);
+        } else {
+          console.error(errorMessage, context);
+        }
       }
     },
 
@@ -105,10 +130,17 @@ export function createKVSecondaryStorage(kv: KVNamespace): SecondaryStorage {
         await kv.delete(key);
       } catch (error) {
         // Log error but don't throw - cache deletion failure is non-critical
-        console.error('[KV Secondary Storage] Delete error:', {
+        const errorMessage = '[KV Secondary Storage] Delete error';
+        const context = {
           key,
           error: error instanceof Error ? error.message : String(error),
-        });
+        };
+
+        if (obs) {
+          obs.warn(errorMessage, context);
+        } else {
+          console.error(errorMessage, context);
+        }
       }
     },
   };

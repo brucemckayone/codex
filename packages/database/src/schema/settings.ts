@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm';
 import {
   boolean,
+  index,
   pgTable,
   text,
   timestamp,
@@ -13,90 +14,120 @@ import { organizations } from './content';
  * Hub table - exists primarily for CASCADE DELETE coordination
  * One row per organization (lazy-created on first settings access)
  */
-export const platformSettings = pgTable('platform_settings', {
-  organizationId: uuid('organization_id')
-    .primaryKey()
-    .references(() => organizations.id, { onDelete: 'cascade' }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()),
-});
+export const platformSettings = pgTable(
+  'platform_settings',
+  {
+    organizationId: uuid('organization_id')
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    updatedAtIdx: index('platform_settings_updated_at_idx').on(table.updatedAt),
+  })
+);
 
 /**
  * Branding settings - visual identity
  */
-export const brandingSettings = pgTable('branding_settings', {
-  organizationId: uuid('organization_id')
-    .primaryKey()
-    .references(() => platformSettings.organizationId, { onDelete: 'cascade' }),
+export const brandingSettings = pgTable(
+  'branding_settings',
+  {
+    organizationId: uuid('organization_id')
+      .primaryKey()
+      .references(() => platformSettings.organizationId, {
+        onDelete: 'cascade',
+      }),
 
-  // Logo (store both URL and R2 path for efficient deletion)
-  logoUrl: text('logo_url'),
-  logoR2Path: text('logo_r2_path'),
+    // Logo (store both URL and R2 path for efficient deletion)
+    logoUrl: text('logo_url'),
+    logoR2Path: text('logo_r2_path'),
 
-  // Colors
-  primaryColorHex: varchar('primary_color_hex', { length: 7 })
-    .notNull()
-    .default('#3B82F6'),
+    // Colors
+    primaryColorHex: varchar('primary_color_hex', { length: 7 })
+      .notNull()
+      .default('#3B82F6'),
 
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()),
-});
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    updatedAtIdx: index('branding_settings_updated_at_idx').on(table.updatedAt),
+  })
+);
 
 /**
  * Contact settings - business information
  */
-export const contactSettings = pgTable('contact_settings', {
-  organizationId: uuid('organization_id')
-    .primaryKey()
-    .references(() => platformSettings.organizationId, { onDelete: 'cascade' }),
+export const contactSettings = pgTable(
+  'contact_settings',
+  {
+    organizationId: uuid('organization_id')
+      .primaryKey()
+      .references(() => platformSettings.organizationId, {
+        onDelete: 'cascade',
+      }),
 
-  platformName: varchar('platform_name', { length: 100 })
-    .notNull()
-    .default('Codex Platform'),
-  supportEmail: varchar('support_email', { length: 255 })
-    .notNull()
-    .default('support@example.com'),
-  contactUrl: text('contact_url'),
-  timezone: varchar('timezone', { length: 100 }).notNull().default('UTC'),
+    platformName: varchar('platform_name', { length: 100 })
+      .notNull()
+      .default('Codex Platform'),
+    supportEmail: varchar('support_email', { length: 255 })
+      .notNull()
+      .default('support@example.com'),
+    contactUrl: text('contact_url'),
+    timezone: varchar('timezone', { length: 100 }).notNull().default('UTC'),
 
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()),
-});
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    updatedAtIdx: index('contact_settings_updated_at_idx').on(table.updatedAt),
+  })
+);
 
 /**
  * Feature settings - toggles and capabilities
  */
-export const featureSettings = pgTable('feature_settings', {
-  organizationId: uuid('organization_id')
-    .primaryKey()
-    .references(() => platformSettings.organizationId, { onDelete: 'cascade' }),
+export const featureSettings = pgTable(
+  'feature_settings',
+  {
+    organizationId: uuid('organization_id')
+      .primaryKey()
+      .references(() => platformSettings.organizationId, {
+        onDelete: 'cascade',
+      }),
 
-  enableSignups: boolean('enable_signups').notNull().default(true),
-  enablePurchases: boolean('enable_purchases').notNull().default(true),
+    enableSignups: boolean('enable_signups').notNull().default(true),
+    enablePurchases: boolean('enable_purchases').notNull().default(true),
 
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()),
-});
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    updatedAtIdx: index('feature_settings_updated_at_idx').on(table.updatedAt),
+  })
+);
 
 // Relations
 export const platformSettingsRelations = relations(

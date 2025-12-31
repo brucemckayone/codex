@@ -5,8 +5,8 @@
  * platform name, support email, contact URL, timezone.
  */
 
-import { type dbWs, schema } from '@codex/database';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { type DatabaseWs, schema } from '@codex/database';
+import { BaseService } from '@codex/service-errors';
 import {
   type ContactSettingsResponse,
   DEFAULT_CONTACT,
@@ -18,7 +18,11 @@ import { SettingsUpsertError } from '../errors';
 /**
  * Configuration for ContactSettingsService
  */
-export interface ContactSettingsConfig extends ServiceConfig {
+export interface ContactSettingsConfig {
+  /** Database connection (requires transaction support) */
+  db: DatabaseWs;
+  /** Runtime environment */
+  environment: string;
   /** Organization ID for scoping */
   organizationId: string;
 }
@@ -98,7 +102,7 @@ export class ContactSettingsService extends BaseService {
     }
 
     // Upsert contact settings
-    const result = await (this.db as typeof dbWs)
+    const result = await this.db
       .insert(schema.contactSettings)
       .values({
         organizationId: this.organizationId,
@@ -143,7 +147,7 @@ export class ContactSettingsService extends BaseService {
    * Creates if missing.
    */
   private async ensurePlatformSettingsExists(): Promise<void> {
-    await (this.db as typeof dbWs)
+    await this.db
       .insert(schema.platformSettings)
       .values({ organizationId: this.organizationId })
       .onConflictDoNothing();
