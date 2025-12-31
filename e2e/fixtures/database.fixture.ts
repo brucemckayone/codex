@@ -11,8 +11,8 @@ import {
 } from '@codex/cloudflare-clients';
 import { ContentService, MediaItemService } from '@codex/content';
 import { closeDbPool, type DatabaseWs, dbWs } from '@codex/database';
-import { OrganizationService } from '@codex/identity';
 import { ObservabilityClient } from '@codex/observability';
+import { OrganizationService } from '@codex/organization';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
 
 export interface DatabaseFixture {

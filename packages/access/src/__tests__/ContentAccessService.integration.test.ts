@@ -97,13 +97,13 @@ describe('ContentAccessService Integration', () => {
       .values({
         name: 'Test Organization',
         slug: createUniqueSlug('test-org'),
-        ownerId: userId,
       })
       .returning();
 
     if (!org) {
       throw new Error('Failed to create test organization');
     }
+
     organizationId = org.id;
   });
 

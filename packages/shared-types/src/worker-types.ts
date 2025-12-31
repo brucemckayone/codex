@@ -112,8 +112,13 @@ export type Bindings = {
 /**
  * Context Variables
  * Data set during request processing by middleware
+ *
+ * NOTE: This is an interface (not type) to allow declaration merging.
+ * Service packages augment this interface to add their service types:
+ * - @codex/content adds: contentService, mediaItemService
+ * - @codex/access adds: contentAccessService
  */
-export type Variables = {
+export interface Variables {
   /**
    * Authenticated user session
    * Set by requireAuth middleware
@@ -177,7 +182,7 @@ export type Variables = {
     status: string;
     joinedAt: Date;
   };
-};
+}
 
 /**
  * User session data

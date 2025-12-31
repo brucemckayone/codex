@@ -4,6 +4,7 @@
  * Type definitions for the admin-api worker environment and context.
  */
 
+import type { DatabaseWs } from '@codex/database';
 import type { Bindings, Variables } from '@codex/shared-types';
 
 /**
@@ -13,6 +14,8 @@ import type { Bindings, Variables } from '@codex/shared-types';
 export interface AdminVariables extends Variables {
   /** Platform owner's organization ID, set by middleware */
   organizationId: string;
+  /** Per-request database client for transaction support, set by withPerRequestDb middleware */
+  perRequestDb?: DatabaseWs;
 }
 
 /**

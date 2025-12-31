@@ -90,3 +90,22 @@ export class OrganizationMismatchError extends ServiceError {
     );
   }
 }
+
+/**
+ * Media not ready for streaming error
+ * Thrown when media item is not in 'ready' status (still uploading, transcoding, or failed)
+ * HTTP 422 - Business rule violation (content exists but media not ready)
+ */
+export class MediaNotReadyForStreamingError extends ServiceError {
+  constructor(mediaId: string, status: string) {
+    super(
+      `Media item is not ready for streaming (status: ${status})`,
+      'MEDIA_NOT_READY',
+      422,
+      {
+        mediaId,
+        status,
+      }
+    );
+  }
+}

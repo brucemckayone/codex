@@ -4,7 +4,7 @@ Factory functions and middleware for standardized Cloudflare Workers setup. Elim
 
 **Primary purpose**: Reduce repetitive setup code and ensure consistency across auth, content-api, identity-api, and ecom-api workers.
 
-**Core responsibility**: Worker configuration, middleware composition, route-level security policies, and handler utilities.
+**Core responsibility**: Worker configuration, middleware composition, procedure-based route handlers, and handler utilities.
 
 ## Overview
 
@@ -12,11 +12,10 @@ Factory functions and middleware for standardized Cloudflare Workers setup. Elim
 
 1. **Worker Factory** - createWorker() creates fully configured Hono app with production-ready middleware
 2. **Middleware Factories** - Composable middleware for auth, CORS, security headers, health checks, request tracking
-3. **Route Helpers** - createAuthenticatedHandler() unifies schema validation, auth checks, and error handling
-4. **Security Policies** - withPolicy() for declarative, route-level access control
-5. **Health Checks** - Standardized health check endpoints with optional dependency checks
-6. **Test Utilities** - Real session creation for integration testing without mocks
-7. **Middleware Chaining** - Builder utilities for custom middleware chains
+3. **Procedure Handler** - procedure() combines policy enforcement, validation, service injection, and error handling
+4. **Health Checks** - Standardized health check endpoints with optional dependency checks
+5. **Test Utilities** - Real session creation for integration testing without mocks
+6. **Middleware Chaining** - Builder utilities for custom middleware chains
 
 Used by all four Codex workers (auth, content-api, identity-api, ecom-api) and directly imported by integration tests.
 
@@ -73,22 +72,18 @@ Used by all four Codex workers (auth, content-api, identity-api, ecom-api) and d
 | **MiddlewareChainOptions** | Interface | Options for middleware chains |
 | **ApplyMiddlewareChainOptions** | Interface | Options for applying chains to routes |
 
-### Route Helpers
+### Procedure Pattern
 
 | Export | Type | Purpose |
 |--------|------|---------|
-| **createAuthenticatedHandler()** | Function | Unified handler with validation, auth, error handling |
-| **withErrorHandling()** | Function | Wrap handlers with error mapping |
-| **formatValidationError()** | Function | Format Zod validation errors |
-
-### Security Policies
-
-| Export | Type | Purpose |
-|--------|------|---------|
-| **withPolicy()** | Function | Route-level security policy middleware |
-| **POLICY_PRESETS** | Constant | Pre-configured policies (public, authenticated, creator, admin, internal, sensitive) |
-| **DEFAULT_SECURITY_POLICY** | Constant | Default secure-by-default settings |
-| **RouteSecurityPolicy** | Interface | Security policy configuration |
+| **procedure()** | Function | tRPC-style procedure handler with policy, validation, services |
+| **createServiceRegistry()** | Function | Service registry factory for lazy-loaded services |
+| **ProcedureConfig** | Interface | Configuration for procedure() |
+| **ProcedureContext** | Interface | Context provided to procedure handlers |
+| **ProcedurePolicy** | Interface | Security policy configuration |
+| **InputSchema** | Interface | Input schema definition (params/query/body) |
+| **InferInput** | Type | Infer validated input types from schema |
+| **ServiceRegistry** | Interface | All available services (lazy-loaded) |
 
 ### Response Types
 
@@ -145,7 +140,7 @@ interface WorkerConfig extends MiddlewareConfig {
 **What it does**:
 
 1. Creates Hono<HonoEnv> instance
-2. Applies middleware in order: tracking → logging → CORS → security headers
+2. Applies middleware in order: tracking -> logging -> CORS -> security headers
 3. Registers /health endpoint (always public, no auth required)
 4. Sets up internal routes with HMAC authentication if secret provided
 5. Sets up API routes with session-based authentication
@@ -159,10 +154,10 @@ interface WorkerConfig extends MiddlewareConfig {
 3. CORS (origin validation, CORS headers)
 4. Security Headers (CSP, X-Frame-Options, etc.)
 5. Route Matching:
-   - GET /health → No auth required
-   - /internal/* → HMAC authentication
-   - /api/* → Session authentication
-   - Other routes → No auth by default
+   - GET /health -> No auth required
+   - /internal/* -> HMAC authentication
+   - /api/* -> Session authentication
+   - Other routes -> No auth by default
 
 **What each middleware sets in context**:
 
@@ -246,71 +241,157 @@ const app = createWorker({
 
 ---
 
-### createAuthenticatedHandler()
+### procedure()
 
-Unified route handler with automatic schema validation, body parsing detection, authentication check, and error mapping.
+tRPC-style procedure handler that combines policy enforcement, input validation, service injection, error handling, and response envelope into a single declarative function.
 
 **Function signature**:
 
 ```typescript
-function createAuthenticatedHandler<
-  TSchema extends RequestSchema = RequestSchema,
-  TValidated = InferSchemaType<TSchema>,
+function procedure<
+  TPolicy extends ProcedurePolicy = { auth: 'required' },
+  TInput extends InputSchema | undefined = undefined,
   TOutput = unknown,
-  TUseEnriched extends boolean = false,
->(options: {
-  schema: TSchema;  // Object with params, query, body ZodSchemas
-  handler: (c: Context, context: ValidatedContext | EnrichedValidatedContext) => Promise<TOutput>;
+>(config: ProcedureConfig<TPolicy, TInput, TOutput>): ProcedureHandler
+```
+
+**Configuration (ProcedureConfig)**:
+
+```typescript
+interface ProcedureConfig<TPolicy, TInput, TOutput> {
+  // Security policy configuration (default: { auth: 'required' })
+  policy?: TPolicy;
+
+  // Input validation schemas (optional)
+  input?: TInput;
+
+  // Handler function with fully typed context
+  handler: (ctx: ProcedureContext<TPolicy, TInput>) => Promise<TOutput>;
+
+  // Success HTTP status code (default: 200)
   successStatus?: 200 | 201 | 204;
-  useEnrichedContext?: TUseEnriched;
-}): MiddlewareHandler
+}
+```
+
+**Policy options (ProcedurePolicy)**:
+
+```typescript
+interface ProcedurePolicy {
+  // Authentication requirement
+  auth?: 'none' | 'optional' | 'required' | 'worker' | 'platform_owner';
+
+  // Role-based access control
+  roles?: Array<'user' | 'creator' | 'admin' | 'system'>;
+
+  // Require organization membership
+  requireOrgMembership?: boolean;
+
+  // Require organization management privileges (owner/admin)
+  requireOrgManagement?: boolean;
+
+  // Rate limiting preset
+  rateLimit?: 'api' | 'auth' | 'strict' | 'public' | 'webhook' | 'streaming';
+
+  // IP whitelist
+  allowedIPs?: string[];
+}
+```
+
+**Auth levels**:
+
+- `'none'` - Public endpoint, no authentication required
+- `'optional'` - Authentication attempted but not required (user may be undefined)
+- `'required'` - Must have authenticated user (default)
+- `'worker'` - Worker-to-worker HMAC authentication
+- `'platform_owner'` - Must be platform owner role
+
+**Input schema (InputSchema)**:
+
+```typescript
+interface InputSchema {
+  params?: ZodSchema;  // URL path parameters
+  query?: ZodSchema;   // Query string parameters
+  body?: ZodSchema;    // Request body
+}
+```
+
+**Context provided to handler (ProcedureContext)**:
+
+```typescript
+interface ProcedureContext<TPolicy, TInput> {
+  // Auth context - type depends on policy.auth
+  user: UserForAuth<TPolicy['auth']>;      // UserData, UserData | undefined, or undefined
+  session: SessionForAuth<TPolicy['auth']>;
+
+  // Validated input from schema
+  input: InferInput<TInput>;  // Type-safe validated data
+
+  // Request metadata
+  requestId: string;
+  clientIP: string;
+  userAgent: string;
+
+  // Organization context
+  organizationId: string | undefined;
+  organizationRole: string | undefined;
+
+  // Environment bindings
+  env: Bindings;
+
+  // Observability client
+  obs: ObservabilityClient | undefined;
+
+  // Service registry (lazy-loaded)
+  services: ServiceRegistry;
+}
+```
+
+**Service registry**:
+
+Services are lazy-loaded on first access to avoid creating unused instances:
+
+```typescript
+interface ServiceRegistry {
+  content: ContentService;
+  media: MediaItemService;
+  access: ContentAccessService;
+  organization: OrganizationService;
+  settings: PlatformSettingsFacade;
+  purchase: PurchaseService;
+  adminAnalytics: AdminAnalyticsService;
+  adminContent: AdminContentManagementService;
+  adminCustomer: AdminCustomerManagementService;
+}
 ```
 
 **Features**:
 
-- Auto-detects body parsing based on schema (only parses if body schema provided)
+- Automatic policy enforcement (auth, RBAC, IP whitelist, org membership)
 - Type-safe validated data from params, query, body via Zod
 - Automatic 400 response on validation error with field details
-- Automatic 401 response if user not authenticated
-- Supports enriched context with requestId, clientIP, userAgent, permissions
+- Automatic 401/403 responses for auth/permission failures
 - Automatic error mapping from service layer to HTTP responses
-- Supports 204 No Content responses
-
-**Context provided to handler**:
-
-**Standard context**:
-- `user` - Authenticated user from session
-- `session` - Session object
-- `env` - Cloudflare bindings (D1, R2, KV, KV_NAMESPACE)
-- `validated` - Validated and parsed data (params, query, body)
-
-**Enriched context** (when useEnrichedContext: true):
-- All standard context fields, plus:
-- `requestId` - UUID v4 for request correlation
-- `clientIP` - Client IP address
-- `userAgent` - User agent string
-- `permissions` - Array of user permissions based on role
-- `organizationId` - Organization ID if applicable
+- Automatic response envelope wrapping (`{ data: T }`)
+- Lazy-loaded services via `ctx.services`
+- Automatic service cleanup via `c.executionCtx.waitUntil(cleanup())`
 
 **GET example** (no body parsing):
 
 ```typescript
 import { z } from 'zod';
-import { createAuthenticatedHandler } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 
-const uuidSchema = z.string().uuid();
-
-app.get('/api/content/:id', createAuthenticatedHandler({
-  schema: {
-    params: z.object({ id: uuidSchema }),
-  },
-  handler: async (c, ctx) => {
-    const contentId = ctx.validated.params.id;
-    const userId = ctx.user.id;
-
-    return await contentService.getById(contentId, userId);
-  },
-}));
+app.get('/api/content/:id',
+  procedure({
+    policy: { auth: 'required' },
+    input: {
+      params: z.object({ id: z.string().uuid() }),
+    },
+    handler: async (ctx) => {
+      return await ctx.services.content.getById(ctx.input.params.id, ctx.user.id);
+    },
+  })
+);
 ```
 
 **POST example** (with body parsing, 201 status):
@@ -324,257 +405,111 @@ const createContentSchema = z.object({
   priceCents: z.number().int().min(0).optional(),
 });
 
-app.post('/api/content', createAuthenticatedHandler({
-  schema: {
-    body: createContentSchema,
-  },
-  successStatus: 201,
-  handler: async (c, ctx) => {
-    return await contentService.create(ctx.validated.body, ctx.user.id);
-  },
-}));
+app.post('/api/content',
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: { body: createContentSchema },
+    successStatus: 201,
+    handler: async (ctx) => {
+      return await ctx.services.content.create(ctx.input.body, ctx.user.id);
+    },
+  })
+);
 ```
 
 **PATCH example** (params and body):
 
 ```typescript
-app.patch('/api/content/:id', createAuthenticatedHandler({
-  schema: {
-    params: z.object({ id: uuidSchema }),
-    body: z.object({
-      title: z.string().optional(),
-      description: z.string().optional(),
-    }),
-  },
-  handler: async (c, ctx) => {
-    return await contentService.update(
-      ctx.validated.params.id,
-      ctx.validated.body,
-      ctx.user.id
-    );
-  },
-}));
+app.patch('/api/content/:id',
+  procedure({
+    policy: { auth: 'required' },
+    input: {
+      params: z.object({ id: z.string().uuid() }),
+      body: z.object({
+        title: z.string().optional(),
+        description: z.string().optional(),
+      }),
+    },
+    handler: async (ctx) => {
+      return await ctx.services.content.update(
+        ctx.input.params.id,
+        ctx.input.body,
+        ctx.user.id
+      );
+    },
+  })
+);
 ```
 
 **DELETE example** (204 No Content response):
 
 ```typescript
-app.delete('/api/content/:id', createAuthenticatedHandler({
-  schema: {
-    params: z.object({ id: uuidSchema }),
-  },
-  successStatus: 204,
-  handler: async (c, ctx) => {
-    await contentService.delete(ctx.validated.params.id, ctx.user.id);
-    return null; // Response body ignored for 204
-  },
-}));
+app.delete('/api/content/:id',
+  procedure({
+    policy: { auth: 'required' },
+    input: {
+      params: z.object({ id: z.string().uuid() }),
+    },
+    successStatus: 204,
+    handler: async (ctx) => {
+      await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
+      return null; // Response body ignored for 204
+    },
+  })
+);
 ```
 
-**With enriched context**:
+**Public endpoint example**:
 
 ```typescript
-app.post('/api/content', createAuthenticatedHandler({
-  schema: { body: createContentSchema },
-  useEnrichedContext: true,
-  handler: async (c, ctx) => {
-    // Access rich context metadata
-    console.log(`Request ${ctx.requestId} from ${ctx.clientIP}`);
-    console.log(`User permissions: ${ctx.permissions.join(', ')}`);
+app.get('/api/content/featured',
+  procedure({
+    policy: { auth: 'none' },
+    handler: async (ctx) => {
+      return await ctx.services.content.getFeatured();
+    },
+  })
+);
+```
 
-    // Log with context
-    const obs = c.get('obs');
-    obs.info('Creating content', {
-      contentId: contentId,
-      userId: ctx.user.id,
-      requestId: ctx.requestId,
-    });
+**Organization-scoped example**:
 
-    return await contentService.create(ctx.validated.body, ctx.user.id);
-  },
-}));
+```typescript
+app.patch('/api/org/settings',
+  procedure({
+    policy: { auth: 'required', requireOrgMembership: true },
+    input: {
+      body: z.object({
+        name: z.string().optional(),
+        description: z.string().optional(),
+      }),
+    },
+    handler: async (ctx) => {
+      // organizationId is guaranteed to exist when requireOrgMembership: true
+      return await ctx.services.organization.updateSettings(
+        ctx.organizationId,
+        ctx.input.body
+      );
+    },
+  })
+);
 ```
 
 **Error handling** (automatic):
 
-- Invalid JSON → 400 with INVALID_JSON code
-- Validation failed → 400 with VALIDATION_ERROR + field errors
-- Service NotFoundError → 404 with NOT_FOUND code
-- Service ValidationError → 400 with validation details
-- Service ForbiddenError → 403 with FORBIDDEN code
-- Service ConflictError → 409 with conflict details
-- Service BusinessLogicError → 422 with business logic message
-- Service InternalServiceError → 500 with error message
-- Any other error → 500 with INTERNAL_ERROR code
+- Invalid JSON -> 400 with INVALID_JSON code
+- Validation failed -> 400 with VALIDATION_ERROR + field errors
+- No authentication -> 401 with UNAUTHORIZED code
+- Insufficient permissions -> 403 with FORBIDDEN code
+- Service NotFoundError -> 404 with NOT_FOUND code
+- Service ValidationError -> 400 with validation details
+- Service ForbiddenError -> 403 with FORBIDDEN code
+- Service ConflictError -> 409 with conflict details
+- Service BusinessLogicError -> 422 with business logic message
+- Service InternalServiceError -> 500 with error message
+- Any other error -> 500 with INTERNAL_ERROR code
 
 All service errors automatically mapped via mapErrorToResponse() from @codex/service-errors.
-
----
-
-### withPolicy()
-
-Route-level security policy middleware for declarative access control.
-
-**Function signature**:
-
-```typescript
-function withPolicy(policy: Partial<RouteSecurityPolicy> = {}): MiddlewareHandler<HonoEnv>
-```
-
-**When to use**: Apply to individual routes to enforce authentication, role-based access, rate limiting, IP restrictions, organization membership.
-
-**Apply before handler**:
-
-```typescript
-app.post('/api/content',
-  withPolicy({ auth: 'required', roles: ['creator'] }),
-  createAuthenticatedHandler({ /* ... */ })
-);
-```
-
-**RouteSecurityPolicy configuration**:
-
-```typescript
-interface RouteSecurityPolicy {
-  // Authentication requirement
-  auth?: 'none' | 'optional' | 'required' | 'worker';
-
-  // Role-based access control
-  roles?: Array<'user' | 'creator' | 'admin' | 'system'>;
-
-  // Require organization membership
-  requireOrgMembership?: boolean;
-
-  // Rate limiting
-  rateLimit?: keyof typeof RATE_LIMIT_PRESETS;
-
-  // Origin restrictions
-  allowedOrigins?: string[];
-
-  // IP whitelist
-  allowedIPs?: string[];
-}
-```
-
-**auth levels**:
-
-- `'none'` - Public endpoint, no authentication required
-- `'optional'` - Authentication attempted but not required (user may be null)
-- `'required'` - Must have authenticated user (default)
-- `'worker'` - Worker-to-worker HMAC authentication
-
-**roles** - User must have at least one role:
-
-- `'user'` - Basic authenticated user
-- `'creator'` - Content creator (can publish)
-- `'admin'` - Administrative access
-- `'system'` - System-level operations
-
-**rateLimit presets**:
-
-- `'api'` - 100 req/min (default)
-- `'strict'` - 20 req/min (sensitive operations)
-- `'auth'` - 10 req/min (login/signup)
-- `'public'` - 300 req/min (public content)
-- `'webhook'` - 1000 req/min (webhooks)
-
-**Examples**:
-
-Public endpoint:
-
-```typescript
-app.get('/api/public-content',
-  withPolicy({ auth: 'none', rateLimit: 'public' }),
-  createAuthenticatedHandler({ /* ... */ })
-);
-```
-
-Creator-only with strict rate limiting:
-
-```typescript
-app.post('/api/content',
-  withPolicy({
-    auth: 'required',
-    roles: ['creator', 'admin'],
-    rateLimit: 'strict',
-  }),
-  createAuthenticatedHandler({ /* ... */ })
-);
-```
-
-Admin-only with IP whitelist:
-
-```typescript
-app.delete('/api/users/:id',
-  withPolicy({
-    auth: 'required',
-    roles: ['admin'],
-    allowedIPs: ['10.0.0.0/8', '203.0.113.42'],
-  }),
-  createAuthenticatedHandler({ /* ... */ })
-);
-```
-
-Organization-scoped access:
-
-```typescript
-app.patch('/api/org/settings',
-  withPolicy({
-    auth: 'required',
-    requireOrgMembership: true,
-  }),
-  createAuthenticatedHandler({ /* ... */ })
-);
-```
-
----
-
-### POLICY_PRESETS
-
-Pre-configured policies for common scenarios.
-
-```typescript
-const POLICY_PRESETS = {
-  public(): Partial<RouteSecurityPolicy>,
-  authenticated(): Partial<RouteSecurityPolicy>,
-  creator(): Partial<RouteSecurityPolicy>,
-  admin(): Partial<RouteSecurityPolicy>,
-  internal(): Partial<RouteSecurityPolicy>,
-  sensitive(): Partial<RouteSecurityPolicy>,
-};
-```
-
-**Preset definitions**:
-
-| Preset | Auth | Roles | Rate Limit | Use Case |
-|--------|------|-------|-----------|----------|
-| **public()** | none | [] | public (300/min) | Health checks, public content, open API |
-| **authenticated()** | required | [] | api (100/min) | Standard API endpoints |
-| **creator()** | required | [creator, admin] | api (100/min) | Content creation, publishing |
-| **admin()** | required | [admin] | auth (10/min) | Admin operations, user deletion |
-| **internal()** | worker | [] | webhook (1000/min) | Worker-to-worker communication |
-| **sensitive()** | required | [] | auth (10/min) | Login, signup, password reset |
-
-**Usage**:
-
-```typescript
-import { POLICY_PRESETS, withPolicy } from '@codex/worker-utils';
-
-// Public endpoint
-app.get('/api/public', withPolicy(POLICY_PRESETS.public()));
-
-// Creator-only
-app.post('/api/content', withPolicy(POLICY_PRESETS.creator()));
-
-// Admin-only
-app.delete('/api/users/:id', withPolicy(POLICY_PRESETS.admin()));
-
-// Internal worker-to-worker
-app.post('/internal/sync', withPolicy(POLICY_PRESETS.internal()));
-
-// Sensitive operation
-app.post('/api/auth/login', withPolicy(POLICY_PRESETS.sensitive()));
-```
 
 ---
 
@@ -833,7 +768,7 @@ expect(res.status).toBe(204);
 ### Basic Worker Setup
 
 ```typescript
-import { createWorker, withPolicy, createAuthenticatedHandler, POLICY_PRESETS } from '@codex/worker-utils';
+import { createWorker, procedure, standardDatabaseCheck } from '@codex/worker-utils';
 import { z } from 'zod';
 
 const app = createWorker({
@@ -848,33 +783,32 @@ const app = createWorker({
 
 // Public endpoint - no auth required
 app.get('/api/content/featured',
-  withPolicy(POLICY_PRESETS.public()),
-  createAuthenticatedHandler({
-    schema: {},
-    handler: async (c, ctx) => {
-      return await contentService.getFeatured();
+  procedure({
+    policy: { auth: 'none' },
+    handler: async (ctx) => {
+      return await ctx.services.content.getFeatured();
     },
   })
 );
 
 // Authenticated endpoint - any user
 app.get('/api/content/:id',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required' },
+    input: {
       params: z.object({ id: z.string().uuid() }),
     },
-    handler: async (c, ctx) => {
-      return await contentService.getById(ctx.validated.params.id, ctx.user.id);
+    handler: async (ctx) => {
+      return await ctx.services.content.getById(ctx.input.params.id, ctx.user.id);
     },
   })
 );
 
 // Creator-only - must have creator role
 app.post('/api/content',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: {
       body: z.object({
         title: z.string().min(1),
         slug: z.string().min(1),
@@ -882,22 +816,22 @@ app.post('/api/content',
       }),
     },
     successStatus: 201,
-    handler: async (c, ctx) => {
-      return await contentService.create(ctx.validated.body, ctx.user.id);
+    handler: async (ctx) => {
+      return await ctx.services.content.create(ctx.input.body, ctx.user.id);
     },
   })
 );
 
 // Admin-only - delete resource
 app.delete('/api/content/:id',
-  withPolicy(POLICY_PRESETS.admin()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', roles: ['admin'] },
+    input: {
       params: z.object({ id: z.string().uuid() }),
     },
     successStatus: 204,
-    handler: async (c, ctx) => {
-      await contentService.delete(ctx.validated.params.id);
+    handler: async (ctx) => {
+      await ctx.services.content.delete(ctx.input.params.id);
       return null;
     },
   })
@@ -906,29 +840,26 @@ app.delete('/api/content/:id',
 export default app;
 ```
 
-### With Enriched Context
+### With Observability
 
 ```typescript
 app.post('/api/content',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
-      body: createContentSchema,
-    },
-    useEnrichedContext: true,
-    handler: async (c, ctx) => {
-      // Access rich request metadata
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: { body: createContentSchema },
+    handler: async (ctx) => {
+      // Access request metadata
       console.log(`Request ${ctx.requestId} from ${ctx.clientIP}`);
-      console.log(`User permissions: ${ctx.permissions.join(', ')}`);
 
       // Get observability client
-      const obs = c.get('obs');
-      obs.info('Creating content', {
-        userId: ctx.user.id,
-        requestId: ctx.requestId,
-      });
+      if (ctx.obs) {
+        ctx.obs.info('Creating content', {
+          userId: ctx.user.id,
+          requestId: ctx.requestId,
+        });
+      }
 
-      return await contentService.create(ctx.validated.body, ctx.user.id);
+      return await ctx.services.content.create(ctx.input.body, ctx.user.id);
     },
   })
 );
@@ -938,23 +869,19 @@ app.post('/api/content',
 
 ```typescript
 app.patch('/api/org/settings',
-  withPolicy({
-    auth: 'required',
-    requireOrgMembership: true,
-  }),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', requireOrgMembership: true },
+    input: {
       body: z.object({
         name: z.string().optional(),
         slug: z.string().optional(),
       }),
     },
-    useEnrichedContext: true,
-    handler: async (c, ctx) => {
-      const organizationId = ctx.organizationId;
-      return await organizationService.updateSettings(
-        organizationId,
-        ctx.validated.body
+    handler: async (ctx) => {
+      // organizationId is guaranteed when requireOrgMembership: true
+      return await ctx.services.organization.updateSettings(
+        ctx.organizationId,
+        ctx.input.body
       );
     },
   })
@@ -964,7 +891,7 @@ app.patch('/api/org/settings',
 ### Internal Worker Routes
 
 ```typescript
-import { createWorker, POLICY_PRESETS } from '@codex/worker-utils';
+import { createWorker, procedure } from '@codex/worker-utils';
 
 const app = createWorker({
   serviceName: 'ecom-api',
@@ -975,16 +902,16 @@ const app = createWorker({
 
 // Internal webhook (worker-to-worker auth only)
 app.post('/internal/webhook',
-  withPolicy(POLICY_PRESETS.internal()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'worker' },
+    input: {
       body: z.object({
         type: z.string(),
         data: z.object({}).passthrough(),
       }),
     },
-    handler: async (c, ctx) => {
-      return await webhookService.process(ctx.validated.body);
+    handler: async (ctx) => {
+      return await ctx.services.purchase.processWebhook(ctx.input.body);
     },
   })
 );
@@ -1049,28 +976,28 @@ This package is imported by:
 
 ```
 Request
-  ↓
+  |
 createWorker() - Factory creates Hono<HonoEnv>
-  ├─→ Request Tracking Middleware [requestId, clientIP, userAgent]
-  ├─→ Logging Middleware [request/response logs]
-  ├─→ CORS Middleware [origin validation, CORS headers]
-  ├─→ Security Headers Middleware [CSP, X-Frame-Options, etc.]
-  ├─→ Route Matching:
-  │   ├─→ GET /health [createHealthCheckHandler - no auth]
-  │   ├─→ /internal/* [HMAC auth via workerAuth]
-  │   └─→ /api/* [Session auth via requireAuth]
-  └─→ Your Routes:
-        ├─→ withPolicy() [auth level, roles, IP checks]
-        ├─→ createAuthenticatedHandler() [validation, error handling]
-        └─→ Your Handler:
-              ├─→ Service Layer [@codex/content, @codex/identity, etc.]
-              ├─→ Database Layer [@codex/database]
-              └─→ Error Mapping [@codex/service-errors]
-  ↓
+  |-> Request Tracking Middleware [requestId, clientIP, userAgent]
+  |-> Logging Middleware [request/response logs]
+  |-> CORS Middleware [origin validation, CORS headers]
+  |-> Security Headers Middleware [CSP, X-Frame-Options, etc.]
+  |-> Route Matching:
+  |   |-> GET /health [createHealthCheckHandler - no auth]
+  |   |-> /internal/* [HMAC auth via workerAuth]
+  |   |-> /api/* [Session auth via requireAuth]
+  |-> Your Routes:
+        |-> procedure() [policy + validation + services + error handling]
+        |-> Handler:
+              |-> ctx.services (lazy-loaded)
+              |-> Service Layer [@codex/content, @codex/identity, etc.]
+              |-> Database Layer [@codex/database]
+              |-> Error Mapping [@codex/service-errors]
+  |
 Response
-  ├─→ Standard format: { data: T } or { error: {...} }
-  ├─→ HTTP status from policy (401, 403, 200, etc.)
-  └─→ Standard headers from middleware
+  |-> Standard format: { data: T } or { error: {...} }
+  |-> HTTP status from handler (200, 201, 204, 4xx, 5xx)
+  |-> Standard headers from middleware
 ```
 
 ---
@@ -1096,11 +1023,11 @@ All errors follow standardized structure:
 
 | Scenario | Handler | Status | Code |
 |----------|---------|--------|------|
-| Malformed JSON | createAuthenticatedHandler | 400 | INVALID_JSON |
-| Validation failed | createAuthenticatedHandler | 400 | VALIDATION_ERROR |
-| IP not whitelisted | withPolicy | 403 | FORBIDDEN |
-| Missing authentication | withPolicy/createAuthenticatedHandler | 401 | UNAUTHORIZED |
-| Insufficient permissions | withPolicy | 403 | FORBIDDEN |
+| Malformed JSON | procedure | 400 | INVALID_JSON |
+| Validation failed | procedure | 400 | VALIDATION_ERROR |
+| IP not whitelisted | procedure | 403 | FORBIDDEN |
+| Missing authentication | procedure | 401 | UNAUTHORIZED |
+| Insufficient permissions | procedure | 403 | FORBIDDEN |
 | Service: Resource not found | mapErrorToResponse | 404 | NOT_FOUND |
 | Service: Business logic error | mapErrorToResponse | 422 | BUSINESS_LOGIC_ERROR |
 | Service: Conflict | mapErrorToResponse | 409 | CONFLICT |
@@ -1113,23 +1040,24 @@ All errors follow standardized structure:
 Service layer errors from @codex/service-errors are automatically mapped to HTTP responses:
 
 ```typescript
+// In procedure() - automatic error handling
 try {
-  return await contentService.create(data, userId);
+  const result = await handler(ctx);
+  return c.json({ data: result }, successStatus);
 } catch (error) {
-  // Automatically mapped by createAuthenticatedHandler
-  const { statusCode, response } = mapErrorToResponse(error);
+  const { statusCode, response } = mapErrorToResponse(error, { obs });
   return c.json(response, statusCode);
 }
 ```
 
 Mapping rules:
 
-- NotFoundError → 404
-- ValidationError → 400
-- ForbiddenError → 403
-- ConflictError → 409
-- BusinessLogicError → 422
-- InternalServiceError → 500
+- NotFoundError -> 404
+- ValidationError -> 400
+- ForbiddenError -> 403
+- ConflictError -> 409
+- BusinessLogicError -> 422
+- InternalServiceError -> 500
 
 ---
 
@@ -1145,10 +1073,10 @@ Mapping rules:
 
 ### Optimization Tips
 
-1. **Early failure**: withPolicy() runs before handler, fails fast on auth/IP violations
-2. **Body parsing**: Only when schema requires it (createAuthenticatedHandler auto-detects)
-3. **Caching**: Organization membership checks support KV caching (future enhancement)
-4. **Request tracking**: Minimal overhead, run first for accurate correlation
+1. **Early failure**: procedure() policy enforcement runs before handler, fails fast on auth/IP violations
+2. **Body parsing**: Only when schema requires it (auto-detected from input.body presence)
+3. **Lazy services**: Services are only instantiated when first accessed via ctx.services
+4. **Automatic cleanup**: Service cleanup registered via c.executionCtx.waitUntil()
 
 ### Rate Limiting
 
@@ -1234,30 +1162,28 @@ describe('Content API', () => {
 ### Unit Test Pattern
 
 ```typescript
-describe('createAuthenticatedHandler', () => {
+describe('procedure', () => {
   it('should validate schema before calling handler', async () => {
-    const handler = createAuthenticatedHandler({
-      schema: {
-        body: z.object({ email: z.string().email() }),
-      },
-      handler: async (c, ctx) => {
-        throw new Error('Should not reach here');
-      },
+    const app = new Hono();
+
+    app.post('/test',
+      procedure({
+        policy: { auth: 'none' },
+        input: {
+          body: z.object({ email: z.string().email() }),
+        },
+        handler: async (ctx) => {
+          throw new Error('Should not reach here');
+        },
+      })
+    );
+
+    const res = await app.request('/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'invalid' }),
     });
 
-    const c = {
-      req: {
-        json: async () => ({ email: 'invalid' }),
-        param: () => ({}),
-        query: () => ({}),
-      },
-      get: (key) => {
-        if (key === 'user') return { id: 'test', role: 'user' };
-      },
-      json: (data, status) => new Response(JSON.stringify(data), { status }),
-    };
-
-    const res = await handler(c);
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error.code).toBe('VALIDATION_ERROR');
@@ -1328,19 +1254,62 @@ curl https://api.example.com/health
 
 ## Critical Design Decisions
 
-### 1. Auto Body Parsing Detection
+### 1. procedure() Pattern
 
-createAuthenticatedHandler automatically detects whether to parse JSON body based on presence of `body` in schema. This reduces boilerplate and prevents accidental body parsing for GET requests.
+The procedure() function replaces the old withPolicy() + createAuthenticatedHandler() pattern. Key benefits:
+
+- Single function combines all concerns
+- Type-safe context based on policy (user is guaranteed when auth: 'required')
+- Lazy-loaded services avoid instantiating unused dependencies
+- Automatic cleanup via waitUntil()
+
+```typescript
+// OLD (deprecated):
+app.post('/api/content',
+  withPolicy(POLICY_PRESETS.creator()),
+  createAuthenticatedHandler({
+    schema: { body: createContentSchema },
+    handler: async (c, ctx) => {
+      return await contentService.create(ctx.validated.body, ctx.user.id);
+    },
+  })
+);
+
+// NEW:
+app.post('/api/content',
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: { body: createContentSchema },
+    successStatus: 201,
+    handler: async (ctx) => {
+      return await ctx.services.content.create(ctx.input.body, ctx.user.id);
+    },
+  })
+);
+```
+
+Key differences:
+- `policy: { auth: 'required' }` replaces `withPolicy(POLICY_PRESETS.authenticated())`
+- `policy: { auth: 'none' }` replaces `withPolicy(POLICY_PRESETS.public())`
+- `policy: { auth: 'required', roles: ['creator'] }` replaces `withPolicy(POLICY_PRESETS.creator())`
+- `input:` replaces `schema:`
+- `ctx.input` replaces `ctx.validated`
+- Handler gets just `(ctx)` not `(c, ctx)`
+- Services accessed via `ctx.services.content`, `ctx.services.media`, etc.
+
+### 2. Auto Body Parsing Detection
+
+procedure() automatically detects whether to parse JSON body based on presence of `body` in input schema. This reduces boilerplate and prevents accidental body parsing for GET requests.
 
 ```typescript
 // No body parsing (GET, HEAD, DELETE without body)
-schema: { params: z.object({...}) }
+input: { params: z.object({...}) }
 
 // Body parsing (POST, PATCH, PUT)
-schema: { body: z.object({...}) }
+input: { body: z.object({...}) }
 ```
 
-### 2. Middleware Execution Order
+### 3. Middleware Execution Order
 
 Middleware order is carefully optimized:
 
@@ -1349,18 +1318,17 @@ Middleware order is carefully optimized:
 3. CORS before security headers (header order matters)
 4. Health check and internal routes are excluded from auth
 
-### 3. Secure by Default
+### 4. Secure by Default
 
-- DEFAULT_SECURITY_POLICY requires auth on all routes
-- withPolicy() overrides only specify what's different
-- Public routes explicitly marked with POLICY_PRESETS.public()
+- Default policy requires auth (`{ auth: 'required' }`)
+- Public routes explicitly marked with `policy: { auth: 'none' }`
 - HMAC auth for internal routes prevents accidental exposure
 
-### 4. Organization Subdomain Mapping
+### 5. Organization Subdomain Mapping
 
 requireOrgMembership: true extracts organization from subdomain:
 
-- `acme.revelations.studio` → organization slug "acme"
+- `acme.revelations.studio` -> organization slug "acme"
 - Prevents clashes with infrastructure subdomains (api, auth, etc.)
 - Falls back gracefully for localhost development
 
@@ -1372,41 +1340,49 @@ requireOrgMembership: true extracts organization from subdomain:
 
 **Problem**: Public route returning 401 when it shouldn't need auth.
 
-**Solution**: Apply POLICY_PRESETS.public() to route:
+**Solution**: Set policy.auth to 'none':
 
 ```typescript
 app.get('/api/featured',
-  withPolicy(POLICY_PRESETS.public()),
-  createAuthenticatedHandler({...})
+  procedure({
+    policy: { auth: 'none' },
+    handler: async (ctx) => {...},
+  })
 );
 ```
 
 ### "Cannot read property 'id' of undefined" on ctx.user
 
-**Problem**: User object is null in handler.
+**Problem**: User object is undefined in handler.
 
-**Solution**: Ensure withPolicy() or createAuthenticatedHandler() enforces auth:
+**Solution**: Ensure policy requires auth:
 
 ```typescript
-// This fails - no auth check
-app.get('/api/content', createAuthenticatedHandler({...}));
+// This fails - no auth check (user can be undefined)
+procedure({
+  policy: { auth: 'optional' },
+  handler: async (ctx) => {
+    // ctx.user may be undefined!
+  },
+});
 
-// This works - auth required
-app.get('/api/content',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({...})
-);
+// This works - auth required (user is guaranteed)
+procedure({
+  policy: { auth: 'required' },
+  handler: async (ctx) => {
+    // ctx.user is guaranteed to exist
+  },
+});
 ```
 
 ### Validation errors not showing field details
 
 **Problem**: Error response doesn't list which field failed.
 
-**Solution**: formatValidationError() is called automatically. Verify schema is correct:
+**Solution**: Ensure schema uses Zod with custom messages:
 
 ```typescript
-// This provides detailed errors
-schema: {
+input: {
   body: z.object({
     title: z.string().min(1, 'Title required'),
     email: z.string().email('Invalid email'),
@@ -1465,6 +1441,6 @@ Local testing requires either:
 
 ---
 
-**Last Updated**: 2025-12-14
-**Version**: 1.0.0
+**Last Updated**: 2025-12-30
+**Version**: 2.0.0
 **Maintained by**: Codex Documentation Team

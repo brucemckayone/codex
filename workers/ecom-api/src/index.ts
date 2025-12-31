@@ -11,36 +11,46 @@
  * - Stripe signature verification
  * - No authentication required for webhooks (Stripe signature serves as auth)
  *
- * Note: This worker uses custom Hono setup instead of createWorker
- * because it requires StripeWebhookEnv with Stripe-specific variables.
+ * Configuration:
+ * - enableGlobalAuth: false (webhooks use signature auth, checkout uses procedure())
  */
 
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
-  createHealthCheckHandler,
+  createEnvValidationMiddleware,
   createKvCheck,
-  createNotFoundHandler,
-  createObservabilityErrorHandler,
-  createStandardMiddlewareChain,
+  createWorker,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
-import { Hono } from 'hono';
 import { handleCheckoutCompleted } from './handlers/checkout';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import checkout from './routes/checkout';
 import purchases from './routes/purchases';
-import type { StripeWebhookEnv } from './types';
-import { createEnvValidationMiddleware } from './utils/validate-env';
 import { createWebhookHandler } from './utils/webhook-handler';
 
 // ============================================================================
 // Application Setup
 // ============================================================================
 
-const app = new Hono<StripeWebhookEnv>();
+/**
+ * Create worker with standard middleware
+ *
+ * Configuration:
+ * - enableGlobalAuth: false (webhooks don't use session auth)
+ * - healthCheck: database and KV checks
+ */
+const app = createWorker({
+  serviceName: 'ecom-api',
+  version: '1.0.0',
+  enableGlobalAuth: false,
+  healthCheck: {
+    checkDatabase: standardDatabaseCheck,
+    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+  },
+});
 
 // ============================================================================
-// Global Middleware
+// Environment Validation
 // ============================================================================
 
 /**
@@ -48,20 +58,31 @@ const app = new Hono<StripeWebhookEnv>();
  * Validates required environment variables on first request
  * Runs once per worker instance (not per request)
  */
-app.use('*', createEnvValidationMiddleware());
+app.use(
+  '*',
+  createEnvValidationMiddleware({
+    required: [
+      'DATABASE_URL',
+      'STRIPE_SECRET_KEY',
+      'STRIPE_WEBHOOK_SECRET_BOOKING',
+      'RATE_LIMIT_KV',
+    ],
+    optional: [
+      'ENVIRONMENT',
+      'WEB_APP_URL',
+      'API_URL',
+      'STRIPE_WEBHOOK_SECRET_PAYMENT',
+      'STRIPE_WEBHOOK_SECRET_SUBSCRIPTION',
+      'STRIPE_WEBHOOK_SECRET_CUSTOMER',
+      'STRIPE_WEBHOOK_SECRET_CONNECT',
+      'STRIPE_WEBHOOK_SECRET_DISPUTE',
+    ],
+  })
+);
 
-/**
- * Global middleware chain
- * Applies request tracking, logging, security headers, and observability to all routes
- */
-const globalMiddleware = createStandardMiddlewareChain({
-  serviceName: 'ecom-api',
-  enableObservability: true,
-});
-
-for (const middleware of globalMiddleware) {
-  app.use('*', middleware);
-}
+// ============================================================================
+// Custom Middleware
+// ============================================================================
 
 // Rate limiting for webhook endpoints
 app.use('/webhooks/*', (c, next) => {
@@ -70,29 +91,6 @@ app.use('/webhooks/*', (c, next) => {
     ...RATE_LIMIT_PRESETS.webhook, // 1000 req/min
   })(c, next);
 });
-
-// ============================================================================
-// Error Handling
-// ============================================================================
-
-app.onError(createObservabilityErrorHandler('ecom-api'));
-app.notFound(createNotFoundHandler());
-
-// ============================================================================
-// Health Check Endpoints
-// ============================================================================
-
-app.get('/', (c) => {
-  return c.json({ status: 'ok', service: 'ecom-api' });
-});
-
-app.get(
-  '/health',
-  createHealthCheckHandler('ecom-api', '1.0.0', {
-    checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV']),
-  })
-);
 
 // ============================================================================
 // API Routes
@@ -122,7 +120,6 @@ app.post(
   '/webhooks/stripe/payment',
   verifyStripeSignature(),
   createWebhookHandler('Payment')
-  // TODO: Add handler: async (event, stripe, c) => { /* process payment */ }
 );
 
 /**
@@ -133,7 +130,6 @@ app.post(
   '/webhooks/stripe/subscription',
   verifyStripeSignature(),
   createWebhookHandler('Subscription')
-  // TODO: Add handler: async (event, stripe, c) => { /* process subscription */ }
 );
 
 /**
@@ -144,7 +140,6 @@ app.post(
   '/webhooks/stripe/connect',
   verifyStripeSignature(),
   createWebhookHandler('Connect')
-  // TODO: Add handler: async (event, stripe, c) => { /* process connect */ }
 );
 
 /**
@@ -155,7 +150,6 @@ app.post(
   '/webhooks/stripe/customer',
   verifyStripeSignature(),
   createWebhookHandler('Customer')
-  // TODO: Add handler: async (event, stripe, c) => { /* process customer */ }
 );
 
 /**
@@ -176,7 +170,6 @@ app.post(
   '/webhooks/stripe/dispute',
   verifyStripeSignature(),
   createWebhookHandler('Dispute')
-  // TODO: Add handler: async (event, stripe, c) => { /* process dispute */ }
 );
 
 export default app;

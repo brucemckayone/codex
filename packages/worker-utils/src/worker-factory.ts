@@ -8,8 +8,8 @@
 import { workerAuth } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import { type Context, Hono } from 'hono';
+import { createSessionMiddleware } from './auth-middleware';
 import {
-  createAuthMiddleware,
   createCorsMiddleware,
   createErrorHandler,
   createHealthCheckHandler,
@@ -204,7 +204,9 @@ export interface WorkerConfig extends MiddlewareConfig {
  * });
  * ```
  */
-export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
+export function createWorker<TEnv extends HonoEnv = HonoEnv>(
+  config: WorkerConfig
+): Hono<TEnv> {
   const {
     serviceName,
     version = '1.0.0',
@@ -221,7 +223,7 @@ export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
     healthCheck,
   } = config;
 
-  const app = new Hono<HonoEnv>();
+  const app = new Hono<TEnv>();
 
   // ============================================================================
   // Global Middleware (Applied to ALL routes)
@@ -248,7 +250,7 @@ export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
   // Public Routes (No Authentication)
   // ============================================================================
 
-  // Health check is always public
+  // Health check - full check with dependency validation
   app.get(
     '/health',
     createHealthCheckHandler(serviceName, version, healthCheck)
@@ -281,7 +283,9 @@ export function createWorker(config: WorkerConfig): Hono<HonoEnv> {
   // ============================================================================
 
   if (enableGlobalAuth) {
-    app.use('/api/*', createAuthMiddleware());
+    // Apply session middleware to all API routes
+    // Requires authentication by default - use withPolicy(POLICY_PRESETS.public()) for public routes
+    app.use('/api/*', createSessionMiddleware({ required: true }));
   }
 
   // ============================================================================

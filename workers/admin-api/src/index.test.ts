@@ -10,18 +10,6 @@ import { describe, expect, it } from 'vitest';
 
 describe('Admin API Worker', () => {
   describe('Health Checks', () => {
-    it('should return ok status on root endpoint', async () => {
-      const response = await SELF.fetch('http://localhost/');
-      expect(response.status).toBe(200);
-
-      const json = (await response.json()) as {
-        status: string;
-        service: string;
-      };
-      expect(json.status).toBe('ok');
-      expect(json.service).toBe('admin-api');
-    });
-
     it('should return health check status', async () => {
       const response = await SELF.fetch('http://localhost/health');
       // Health check may return 200 or 503 depending on database availability

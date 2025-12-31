@@ -77,3 +77,42 @@ export interface OrganizationFilters {
  * Re-export database types for convenience
  */
 export type { Organization, NewOrganization };
+
+// ============================================================================
+// API Response Types
+// ============================================================================
+
+import type {
+  PaginatedListResponse,
+  SingleItemResponse,
+} from '@codex/shared-types';
+
+/**
+ * Response for GET /api/organizations/:id
+ * Returns a single organization
+ */
+export type OrganizationResponse = SingleItemResponse<Organization>;
+
+/**
+ * Response for GET /api/organizations
+ * Returns paginated list of organizations
+ */
+export type OrganizationListResponse = PaginatedListResponse<Organization>;
+
+/**
+ * Response for GET /api/organizations/slug/:slug
+ * Returns organization by slug
+ */
+export type OrganizationBySlugResponse = SingleItemResponse<Organization>;
+
+/**
+ * Response for POST /api/organizations
+ * Returns newly created organization
+ */
+export type CreateOrganizationResponse = SingleItemResponse<Organization>;
+
+/**
+ * Response for PATCH /api/organizations/:id
+ * Returns updated organization
+ */
+export type UpdateOrganizationResponse = SingleItemResponse<Organization>;

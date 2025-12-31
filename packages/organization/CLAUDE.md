@@ -1,8 +1,8 @@
-# @codex/identity
+# @codex/organization
 
-**Identity and Organization Management Service**
+**Organization Management Service**
 
-Core service package for managing organizations and user identity within Codex. Provides type-safe business logic for organization creation, retrieval, updates, and deletions with full transaction safety and soft-delete preservation of historical data.
+Core service package for managing organizations within Codex. Provides type-safe business logic for organization creation, retrieval, updates, and deletions with full transaction safety and soft-delete preservation of historical data.
 
 ---
 
@@ -52,7 +52,7 @@ The primary exported service class. Extends `BaseService` to provide type-safe o
 ### Initialization
 
 ```typescript
-import { OrganizationService } from '@codex/identity';
+import { OrganizationService } from '@codex/organization';
 import { dbHttp } from '@codex/database';
 
 const service = new OrganizationService({
@@ -331,7 +331,7 @@ Database table: `organizations`
 ### Basic Organization Creation
 
 ```typescript
-import { OrganizationService } from '@codex/identity';
+import { OrganizationService } from '@codex/organization';
 import { dbHttp } from '@codex/database';
 
 const service = new OrganizationService({
@@ -352,7 +352,7 @@ console.log(`Created organization: ${org.slug} (${org.id})`);
 ### Error Handling for Duplicate Slug
 
 ```typescript
-import { ConflictError, OrganizationService } from '@codex/identity';
+import { ConflictError, OrganizationService } from '@codex/organization';
 
 try {
   const org = await service.create({
@@ -434,7 +434,7 @@ console.log(deleted); // null (filtered by whereNotDeleted)
 
 ```typescript
 // Typical pattern: Create organization then initialize membership
-import { OrganizationService } from '@codex/identity';
+import { OrganizationService } from '@codex/organization';
 // import { UserService } from '@codex/users'; // Future
 
 const orgService = new OrganizationService({
@@ -508,7 +508,7 @@ Thrown when attempting to access or modify non-existent organization.
 
 **How to handle**:
 ```typescript
-import { OrganizationNotFoundError } from '@codex/identity';
+import { OrganizationNotFoundError } from '@codex/organization';
 
 try {
   const org = await service.get(unknownId);
@@ -531,7 +531,7 @@ Thrown when a unique constraint is violated (e.g., duplicate slug).
 
 **How to handle**:
 ```typescript
-import { ConflictError } from '@codex/identity';
+import { ConflictError } from '@codex/organization';
 
 try {
   const org = await service.create({ slug: 'taken-slug' });
@@ -555,7 +555,7 @@ Thrown when input data fails Zod schema validation.
 
 **How to handle**:
 ```typescript
-import { ValidationError } from '@codex/identity';
+import { ValidationError } from '@codex/organization';
 
 try {
   const org = await service.create({ name: '' }); // Too short
@@ -578,7 +578,7 @@ Wrapped database errors and unexpected failures.
 
 **How to handle**:
 ```typescript
-import { InternalServiceError } from '@codex/identity';
+import { InternalServiceError } from '@codex/organization';
 
 try {
   const org = await service.get(id);
@@ -618,7 +618,7 @@ if (!org) {
 **Validation Failures**:
 ```typescript
 // Re-validate with schema before service call
-import { createOrganizationSchema } from '@codex/identity';
+import { createOrganizationSchema } from '@codex/organization';
 
 try {
   const validated = createOrganizationSchema.parse(userInput);
@@ -989,27 +989,27 @@ npm run format  # Format with Biome
 
 ```typescript
 // Service class
-import { OrganizationService } from '@codex/identity';
+import { OrganizationService } from '@codex/organization';
 
 // Data types
 import type {
   Organization,
   OrganizationFilters,
   PaginatedResponse,
-} from '@codex/identity';
+} from '@codex/organization';
 
 // Validation schemas
 import {
   createOrganizationSchema,
   updateOrganizationSchema,
-} from '@codex/identity';
+} from '@codex/organization';
 
 // Error handling
 import {
   OrganizationNotFoundError,
   ConflictError,
   ValidationError,
-} from '@codex/identity';
+} from '@codex/organization';
 ```
 
 ---

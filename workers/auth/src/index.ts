@@ -10,44 +10,52 @@
 
 import { securityHeaders } from '@codex/security';
 import {
-  createErrorHandler,
+  createEnvValidationMiddleware,
   createErrorResponse,
-  createHealthCheckHandler,
   createKvCheck,
-  createNotFoundHandler,
-  createStandardMiddlewareChain,
+  createWorker,
   ERROR_CODES,
   sequence,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
-import { type Context, Hono, type Next } from 'hono';
+import type { Context, Next } from 'hono';
 import { createAuthInstance } from './auth-config';
 import { createAuthRateLimiter } from './middleware';
 import type { AuthEnv } from './types';
-import { createEnvValidationMiddleware } from './utils/validate-env';
 
-const app = new Hono<AuthEnv>();
+/**
+ * Create worker with standard middleware
+ *
+ * Configuration:
+ * - enableGlobalAuth: false (BetterAuth handles its own authentication)
+ * - enableLogging: false (BetterAuth has custom logging)
+ * - enableSecurityHeaders: false (custom security headers applied below)
+ * - enableRequestTracking: true (default - needed for request correlation)
+ */
+const app = createWorker({
+  serviceName: 'auth-worker',
+  version: '1.0.0',
+  enableGlobalAuth: false,
+  enableLogging: false,
+  enableSecurityHeaders: false,
+  healthCheck: {
+    checkDatabase: standardDatabaseCheck,
+    checkKV: createKvCheck(['AUTH_SESSION_KV', 'RATE_LIMIT_KV']),
+  },
+});
 
 /**
  * Environment validation
  * Validates required environment variables on first request
  * Runs once per worker instance (not per request)
  */
-app.use('*', createEnvValidationMiddleware());
-
-/**
- * Global middleware chain
- * Applies request tracking to all routes
- */
-const globalMiddleware = createStandardMiddlewareChain({
-  serviceName: 'auth-worker',
-  skipLogging: true,
-  skipSecurityHeaders: true,
-});
-
-for (const middleware of globalMiddleware) {
-  app.use('*', middleware);
-}
+app.use(
+  '*',
+  createEnvValidationMiddleware({
+    required: ['DATABASE_URL', 'BETTER_AUTH_SECRET'],
+    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+  })
+);
 
 /**
  * BetterAuth handler
@@ -82,18 +90,6 @@ const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
 };
 
 /**
- * Health check endpoint
- * Must be registered before the catch-all auth handler
- */
-app.get(
-  '/health',
-  createHealthCheckHandler('auth-worker', '1.0.0', {
-    checkKV: createKvCheck(['AUTH_SESSION_KV', 'RATE_LIMIT_KV']),
-    checkDatabase: standardDatabaseCheck,
-  })
-);
-
-/**
  * Test-only endpoint to retrieve verification tokens
  * ONLY available in development/test environments
  * Returns 404 in staging/production
@@ -108,7 +104,12 @@ app.get('/api/test/verification-token/:email', async (c) => {
   const email = c.req.param('email');
 
   try {
-    const token = await c.env.AUTH_SESSION_KV.get(`verification:${email}`);
+    const kv = c.env.AUTH_SESSION_KV;
+    if (!kv) {
+      return c.json({ error: 'AUTH_SESSION_KV not configured' }, 500);
+    }
+
+    const token = await kv.get(`verification:${email}`);
 
     if (!token) {
       return c.json({ error: 'Verification token not found or expired' }, 404);
@@ -145,18 +146,5 @@ app.use(
   '/api/*',
   sequence(securityHeadersMiddleware, createAuthRateLimiter(), authHandler)
 );
-
-/**
- * 404 handler for unknown routes
- */
-app.notFound(createNotFoundHandler());
-
-/**
- * Global error handler
- */
-app.onError((err, c) => {
-  const environment = c.env?.ENVIRONMENT || 'development';
-  return createErrorHandler(environment)(err, c);
-});
 
 export default app;

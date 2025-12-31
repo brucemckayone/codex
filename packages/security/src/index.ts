@@ -18,7 +18,6 @@ export {
   createKVSecondaryStorage,
   type SecondaryStorage,
 } from './kv-secondary-storage';
-export { requirePlatformOwner } from './platform-owner-auth';
 export {
   RATE_LIMIT_PRESETS,
   type RateLimitOptions,

@@ -1,5 +1,5 @@
 {
-  "name": "@codex/identity",
+  "name": "@codex/organization",
   "version": "1.0.0",
   "description": "Identity and organization management service for Codex platform",
   "type": "module",
@@ -24,10 +24,10 @@
     }
   },
   "scripts": {
-    "build": "vite build --config vite.config.identity.ts",
-    "dev": "vite build --config vite.config.identity.ts --watch",
+    "build": "vite build --config vite.config.organization.ts",
+    "dev": "vite build --config vite.config.organization.ts --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config vitest.config.identity.ts",
+    "test": "vitest run --config vitest.config.organization.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint --write .",
@@ -36,6 +36,7 @@
   "dependencies": {
     "@codex/database": "workspace:*",
     "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7"
   },

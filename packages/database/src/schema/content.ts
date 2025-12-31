@@ -169,6 +169,12 @@ export const mediaItems = pgTable(
       sql`${table.status} IN ('uploading', 'uploaded', 'transcoding', 'ready', 'failed')`
     ),
     check('check_media_type', sql`${table.mediaType} IN ('video', 'audio')`),
+
+    // Media lifecycle constraint: status='ready' requires transcoding outputs
+    check(
+      'status_ready_requires_keys',
+      sql`${table.status} != 'ready' OR (${table.hlsMasterPlaylistKey} IS NOT NULL AND ${table.thumbnailKey} IS NOT NULL AND ${table.durationSeconds} IS NOT NULL)`
+    ),
   ]
 );
 

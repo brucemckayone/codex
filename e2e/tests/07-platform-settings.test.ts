@@ -36,15 +36,16 @@ describe('Platform Settings', () => {
 
     test('should reject non-org-member users', { timeout: 60000 }, async () => {
       // Create org owner with their org
-      const admin1 = await adminFixture.createPlatformOwner({
+      const admin1 = await adminFixture.createOrgOwner({
         email: `admin1-settings-${Date.now()}@example.com`,
         password: 'SecurePassword123!',
         orgName: `Settings Org 1 ${Date.now()}`,
         orgSlug: `settings-org-1-${Date.now()}`,
       });
 
-      // Create another user with different org
-      const admin2 = await adminFixture.createPlatformOwner({
+      // Create another org owner with different org (NOT platform_owner)
+      // Regular org owners should NOT have cross-org access
+      const admin2 = await adminFixture.createOrgOwner({
         email: `admin2-settings-${Date.now()}@example.com`,
         password: 'SecurePassword123!',
         orgName: `Settings Org 2 ${Date.now()}`,
@@ -472,15 +473,16 @@ describe('Platform Settings', () => {
       'should prevent cross-org settings modification',
       { timeout: 120000 },
       async () => {
-        // Create two orgs
-        const admin1 = await adminFixture.createPlatformOwner({
+        // Create two regular org owners (NOT platform_owner)
+        // Regular org owners should NOT have cross-org access
+        const admin1 = await adminFixture.createOrgOwner({
           email: `admin1-crossmod-${Date.now()}@example.com`,
           password: 'SecurePassword123!',
           orgName: `CrossMod Org 1 ${Date.now()}`,
           orgSlug: `crossmod-org-1-${Date.now()}`,
         });
 
-        const admin2 = await adminFixture.createPlatformOwner({
+        const admin2 = await adminFixture.createOrgOwner({
           email: `admin2-crossmod-${Date.now()}@example.com`,
           password: 'SecurePassword123!',
           orgName: `CrossMod Org 2 ${Date.now()}`,

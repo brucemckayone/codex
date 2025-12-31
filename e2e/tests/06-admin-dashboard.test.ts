@@ -88,28 +88,23 @@ describe('Admin Dashboard', () => {
   // ============================================================================
 
   describe('Revenue Analytics', () => {
-    test(
-      'should return zero stats for new org',
-      async () => {
-        const admin = await adminFixture.createPlatformOwner({
-          email: `admin-zero-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          orgName: `Zero Org ${Date.now()}`,
-          orgSlug: `zero-org-${Date.now()}`,
-        });
+    test('should return zero stats for new org', async () => {
+      const admin = await adminFixture.createPlatformOwner({
+        email: `admin-zero-${Date.now()}@example.com`,
+        password: 'SecurePassword123!',
+        orgName: `Zero Org ${Date.now()}`,
+        orgSlug: `zero-org-${Date.now()}`,
+      });
 
-        const stats = await adminFixture.getRevenueStats(admin.cookie);
+      const stats = await adminFixture.getRevenueStats(admin.cookie);
 
-        expect(stats.totalRevenueCents).toBe(0);
-        expect(stats.totalPurchases).toBe(0);
-        expect(stats.averageOrderValueCents).toBe(0);
-        expect(stats.platformFeeCents).toBe(0);
-        expect(stats.creatorPayoutCents).toBe(0);
-        expect(stats.revenueByDay).toEqual([]);
-      },
-      { timeout: 60000 }
-    );
-
+      expect(stats.totalRevenueCents).toBe(0);
+      expect(stats.totalPurchases).toBe(0);
+      expect(stats.averageOrderValueCents).toBe(0);
+      expect(stats.platformFeeCents).toBe(0);
+      expect(stats.creatorPayoutCents).toBe(0);
+      expect(stats.revenueByDay).toEqual([]);
+    }, 60000);
     test(
       'should calculate revenue from completed purchases',
       async () => {
@@ -1263,213 +1258,203 @@ describe('Admin Dashboard', () => {
       { timeout: 180000 }
     );
 
-    test(
-      'should grant complimentary access',
-      async () => {
-        const admin = await adminFixture.createPlatformOwner({
-          email: `admin-grant-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          orgName: `Grant Org ${Date.now()}`,
-          orgSlug: `grant-org-${Date.now()}`,
-        });
+    test('should grant complimentary access', async () => {
+      const admin = await adminFixture.createPlatformOwner({
+        email: `admin-grant-${Date.now()}@example.com`,
+        password: 'SecurePassword123!',
+        orgName: `Grant Org ${Date.now()}`,
+        orgSlug: `grant-org-${Date.now()}`,
+      });
 
-        // Create initial purchase to establish customer relationship
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-grant-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+      // Create initial purchase to establish customer relationship
+      const { cookie: creatorCookie } = await authFixture.registerUser({
+        email: `creator-grant-${Date.now()}@example.com`,
+        password: 'SecurePassword123!',
+        role: 'creator',
+      });
 
-        // First content (for initial purchase)
-        const testMediaId1 = `e2e-grant-1-${Date.now()}`;
-        const media1Response = await httpClient.post(
-          `${WORKER_URLS.content}/api/media`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              title: 'Grant Test Media 1',
-              mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId1}/original.mp4`,
-              fileSizeBytes: 1048576,
-              mimeType: 'video/mp4',
-            },
-          }
-        );
-        const media1 = unwrapApiResponse(await media1Response.json());
+      // First content (for initial purchase)
+      const testMediaId1 = `e2e-grant-1-${Date.now()}`;
+      const media1Response = await httpClient.post(
+        `${WORKER_URLS.content}/api/media`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+          },
+          data: {
+            title: 'Grant Test Media 1',
+            mediaType: 'video',
+            r2Key: `e2e/originals/${testMediaId1}/original.mp4`,
+            fileSizeBytes: 1048576,
+            mimeType: 'video/mp4',
+          },
+        }
+      );
+      const media1 = unwrapApiResponse(await media1Response.json());
 
-        await httpClient.patch(
-          `${WORKER_URLS.content}/api/media/${media1.id}`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              status: 'ready',
-              hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
-              durationSeconds: 300,
-            },
-          }
-        );
+      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media1.id}`, {
+        headers: {
+          Cookie: creatorCookie,
+          'Content-Type': 'application/json',
+        },
+        data: {
+          status: 'ready',
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
+          durationSeconds: 300,
+        },
+      });
 
-        const content1Response = await httpClient.post(
-          `${WORKER_URLS.content}/api/content`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              title: 'First Content',
-              slug: `first-${Date.now()}`,
-              contentType: 'video',
-              mediaItemId: media1.id,
-              organizationId: admin.organization.id,
-              visibility: 'purchased_only',
-              priceCents: 999,
-            },
-          }
-        );
-        const content1 = unwrapApiResponse(await content1Response.json());
-
-        await httpClient.post(
-          `${WORKER_URLS.content}/api/content/${content1.id}/publish`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-
-        // Second content (for complimentary access)
-        const testMediaId2 = `e2e-grant-2-${Date.now()}`;
-        const media2Response = await httpClient.post(
-          `${WORKER_URLS.content}/api/media`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              title: 'Grant Test Media 2',
-              mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
-              fileSizeBytes: 1048576,
-              mimeType: 'video/mp4',
-            },
-          }
-        );
-        const media2 = unwrapApiResponse(await media2Response.json());
-
-        await httpClient.patch(
-          `${WORKER_URLS.content}/api/media/${media2.id}`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              status: 'ready',
-              hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
-              durationSeconds: 300,
-            },
-          }
-        );
-
-        const content2Response = await httpClient.post(
-          `${WORKER_URLS.content}/api/content`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              title: 'Complimentary Content',
-              slug: `complimentary-${Date.now()}`,
-              contentType: 'video',
-              mediaItemId: media2.id,
-              organizationId: admin.organization.id,
-              visibility: 'purchased_only',
-              priceCents: 4999,
-            },
-          }
-        );
-        const content2 = unwrapApiResponse(await content2Response.json());
-
-        await httpClient.post(
-          `${WORKER_URLS.content}/api/content/${content2.id}/publish`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-
-        // Customer buys first content to establish relationship
-        const { user: buyer, cookie: buyerCookie } =
-          await authFixture.registerUser({
-            email: `buyer-grant-${Date.now()}@example.com`,
-            password: 'SecurePassword123!',
-          });
-
-        const checkoutResponse = await httpClient.post(
-          `${WORKER_URLS.ecom}/checkout/create`,
-          {
-            headers: {
-              Cookie: buyerCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              contentId: content1.id,
-              successUrl: 'http://localhost:3000/success',
-              cancelUrl: 'http://localhost:3000/cancel',
-            },
-          }
-        );
-        const checkout = unwrapApiResponse(await checkoutResponse.json());
-
-        await sendSignedWebhook(
-          `${WORKER_URLS.ecom}/webhooks/stripe/booking`,
-          createCheckoutCompletedEvent({
-            sessionId: checkout.sessionId,
-            paymentIntentId: `pi_grant_${Date.now()}`,
-            customerId: buyer.id,
-            contentId: content1.id,
-            amountCents: 999,
+      const content1Response = await httpClient.post(
+        `${WORKER_URLS.content}/api/content`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+          },
+          data: {
+            title: 'First Content',
+            slug: `first-${Date.now()}`,
+            contentType: 'video',
+            mediaItemId: media1.id,
             organizationId: admin.organization.id,
-          }),
-          process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
+            visibility: 'purchased_only',
+            priceCents: 999,
+          },
+        }
+      );
+      const content1 = unwrapApiResponse(await content1Response.json());
+
+      await httpClient.post(
+        `${WORKER_URLS.content}/api/content/${content1.id}/publish`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      // Second content (for complimentary access)
+      const testMediaId2 = `e2e-grant-2-${Date.now()}`;
+      const media2Response = await httpClient.post(
+        `${WORKER_URLS.content}/api/media`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+          },
+          data: {
+            title: 'Grant Test Media 2',
+            mediaType: 'video',
+            r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
+            fileSizeBytes: 1048576,
+            mimeType: 'video/mp4',
+          },
+        }
+      );
+      const media2 = unwrapApiResponse(await media2Response.json());
+
+      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media2.id}`, {
+        headers: {
+          Cookie: creatorCookie,
+          'Content-Type': 'application/json',
+        },
+        data: {
+          status: 'ready',
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
+          durationSeconds: 300,
+        },
+      });
+
+      const content2Response = await httpClient.post(
+        `${WORKER_URLS.content}/api/content`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+          },
+          data: {
+            title: 'Complimentary Content',
+            slug: `complimentary-${Date.now()}`,
+            contentType: 'video',
+            mediaItemId: media2.id,
+            organizationId: admin.organization.id,
+            visibility: 'purchased_only',
+            priceCents: 4999,
+          },
+        }
+      );
+      const content2 = unwrapApiResponse(await content2Response.json());
+
+      await httpClient.post(
+        `${WORKER_URLS.content}/api/content/${content2.id}/publish`,
+        {
+          headers: {
+            Cookie: creatorCookie,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      // Customer buys first content to establish relationship
+      const { user: buyer, cookie: buyerCookie } =
+        await authFixture.registerUser({
+          email: `buyer-grant-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+        });
+
+      const checkoutResponse = await httpClient.post(
+        `${WORKER_URLS.ecom}/checkout/create`,
+        {
+          headers: {
+            Cookie: buyerCookie,
+            'Content-Type': 'application/json',
+          },
+          data: {
+            contentId: content1.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+        }
+      );
+      const checkout = unwrapApiResponse(await checkoutResponse.json());
+
+      await sendSignedWebhook(
+        `${WORKER_URLS.ecom}/webhooks/stripe/booking`,
+        createCheckoutCompletedEvent({
+          sessionId: checkout.sessionId,
+          paymentIntentId: `pi_grant_${Date.now()}`,
+          customerId: buyer.id,
+          contentId: content1.id,
+          amountCents: 999,
+          organizationId: admin.organization.id,
+        }),
+        process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
+      );
+
+      // Admin grants complimentary access to second content
+      const granted = await adminFixture.grantContentAccess(
+        admin.cookie,
+        buyer.id,
+        content2.id
+      );
+      expect(granted).toBe(true);
+
+      // Verify access was granted in database
+      const accessRecords = await dbHttp
+        .select()
+        .from(schema.contentAccess)
+        .where(
+          and(
+            eq(schema.contentAccess.userId, buyer.id),
+            eq(schema.contentAccess.contentId, content2.id)
+          )
         );
 
-        // Admin grants complimentary access to second content
-        const granted = await adminFixture.grantContentAccess(
-          admin.cookie,
-          buyer.id,
-          content2.id
-        );
-        expect(granted).toBe(true);
-
-        // Verify access was granted in database
-        const accessRecords = await dbHttp
-          .select()
-          .from(schema.contentAccess)
-          .where(
-            and(
-              eq(schema.contentAccess.userId, buyer.id),
-              eq(schema.contentAccess.contentId, content2.id)
-            )
-          );
-
-        expect(accessRecords).toHaveLength(1);
-        expect(accessRecords[0].accessType).toBe('complimentary');
-      },
-      { timeout: 180000 }
-    );
+      expect(accessRecords).toHaveLength(1);
+      expect(accessRecords[0].accessType).toBe('complimentary');
+    }, 180000);
 
     test('should handle duplicate access grant (idempotent)', async () => {
       const admin = await adminFixture.createPlatformOwner({

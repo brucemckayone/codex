@@ -24,6 +24,7 @@
  */
 
 import {
+  createEnvValidationMiddleware,
   createKvCheck,
   createWorker,
   standardDatabaseCheck,
@@ -32,7 +33,6 @@ import {
 // Import route modules
 import organizationRoutes from './routes/organizations';
 import settingsRoutes from './routes/settings';
-import { createEnvValidationMiddleware } from './utils/validate-env';
 
 // ============================================================================
 // Application Setup
@@ -45,10 +45,10 @@ const app = createWorker({
   enableLogging: true,
   enableCors: true,
   enableSecurityHeaders: true,
-  enableGlobalAuth: false, // Using route-level withPolicy() instead
+  enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV']),
+    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
   },
 });
 
@@ -57,13 +57,19 @@ const app = createWorker({
  * Validates required environment variables on first request
  * Runs once per worker instance (not per request)
  */
-app.use('*', createEnvValidationMiddleware());
+app.use(
+  '*',
+  createEnvValidationMiddleware({
+    required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
+    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+  })
+);
 
 // ============================================================================
 // Rate Limiting
 // ============================================================================
 
-// Note: Rate limiting is now applied at the route level via withPolicy()
+// Note: Rate limiting is now applied at the route level via procedure()
 // Each route declares its own rate limit preset (api, auth, etc.)
 
 // ============================================================================

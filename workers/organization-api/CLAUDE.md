@@ -426,14 +426,14 @@ Update feature toggles.
 
 ### Route Security Levels
 
-**Authenticated Only** (`POLICY_PRESETS.authenticated()`):
+**Authenticated Only** (`policy: { auth: 'required' }`):
 - POST /api/organizations (create new org)
 - GET /api/organizations
 - GET /api/organizations/:id
 - GET /api/organizations/slug/:slug
 - GET /api/organizations/check-slug/:slug
 
-**Organization Management** (`POLICY_PRESETS.orgManagement()`):
+**Organization Management** (`policy: { auth: 'required', requireOrgMembership: true }`):
 - PATCH /api/organizations/:id (update)
 - DELETE /api/organizations/:id (strict rate limit)
 - All settings endpoints
@@ -719,11 +719,11 @@ Uses HTTP client for all database operations:
 - Organizations table
 - Settings tables (branding, contact, features)
 
-### With @codex/security
+### With @codex/worker-utils
 
-Uses `POLICY_PRESETS`:
-- `authenticated()` - General authenticated access
-- `orgManagement()` - Organization member access
+Uses `procedure()` policy configuration:
+- `{ auth: 'required' }` - General authenticated access
+- `{ auth: 'required', requireOrgMembership: true }` - Organization member access
 
 ---
 

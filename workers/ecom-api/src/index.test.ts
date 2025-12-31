@@ -22,23 +22,9 @@ describe('Stripe Webhook Handler', () => {
     });
   });
 
-  describe('Webhook Endpoint', () => {
-    // TODO: Implement when webhook endpoint is added
-    it.todo('should reject requests without stripe signature');
-  });
-
   describe('Environment Bindings', () => {
     it('should have environment bindings available', () => {
       expect(env).toBeDefined();
     });
   });
-
-  // TODO: Implement when webhook validation logic is added
-  it.todo('validates Stripe webhook signatures');
-
-  // TODO: Implement when payment event handling is added
-  it.todo('processes payment.succeeded events');
-
-  // TODO: Implement when database integration is complete
-  it.todo('writes payment data to database');
 });

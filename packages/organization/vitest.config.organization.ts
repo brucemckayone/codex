@@ -4,7 +4,7 @@ import { packageVitestConfig } from '../../config/vitest/package.config';
 // Neon Testing plugin will provision ephemeral branches for each test file
 
 export default packageVitestConfig({
-  packageName: 'identity',
+  packageName: 'organization',
   setupFiles: ['../../vitest.setup.ts'],
   testTimeout: 60000,
   hookTimeout: 60000,

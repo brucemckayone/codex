@@ -82,6 +82,55 @@ export const adminFixture = {
     };
   },
 
+  /**
+   * Create regular organization owner (NOT a platform owner)
+   * For testing cross-org access denial - regular users should only access their own org
+   *
+   * 1. Registers user via auth worker (keeps default role)
+   * 2. Creates organization
+   * 3. Creates organization membership with role='owner'
+   */
+  async createOrgOwner(data: {
+    email: string;
+    password: string;
+    name?: string;
+    orgName: string;
+    orgSlug: string;
+  }): Promise<PlatformOwnerContext> {
+    // Step 1: Register user via auth worker (keeps default role, NOT platform_owner)
+    const registeredUser = await authFixture.registerUser({
+      email: data.email,
+      password: data.password,
+      name: data.name ?? 'Org Owner',
+      role: 'customer',
+    });
+
+    // Step 2: Create organization directly in database
+    const [organization] = await dbHttp
+      .insert(schema.organizations)
+      .values({
+        name: data.orgName,
+        slug: data.orgSlug,
+        description: 'E2E Test Organization',
+      })
+      .returning();
+
+    // Step 3: Create organization membership with owner role
+    await dbHttp.insert(schema.organizationMemberships).values({
+      organizationId: organization.id,
+      userId: registeredUser.user.id,
+      role: 'owner',
+      status: 'active',
+    });
+
+    return {
+      user: registeredUser.user,
+      session: registeredUser.session,
+      cookie: registeredUser.cookie,
+      organization,
+    };
+  },
+
   // ============================================================================
   // Analytics API Helpers
   // ============================================================================
@@ -190,7 +239,8 @@ export const adminFixture = {
       throw new Error(`listAllContent failed (${response.status}): ${error}`);
     }
 
-    return response.json();
+    const body = await response.json();
+    return body.data;
   },
 
   /**
@@ -294,7 +344,8 @@ export const adminFixture = {
       throw new Error(`listCustomers failed (${response.status}): ${error}`);
     }
 
-    return response.json();
+    const body = await response.json();
+    return body.data;
   },
 
   /**

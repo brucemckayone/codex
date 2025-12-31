@@ -21,47 +21,27 @@ import {
   InvalidFileTypeError,
   SettingsUpsertError,
 } from '@codex/platform-settings';
+import type { HonoEnv } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
+  type AllSettingsResponse,
+  type BrandingSettingsResponse,
+  type ContactSettingsResponse,
+  type FeatureSettingsResponse,
   MAX_LOGO_FILE_SIZE_BYTES,
   updateBrandingSchema,
   updateContactSchema,
   updateFeaturesSchema,
   uuidSchema,
 } from '@codex/validation';
-import {
-  createAuthenticatedHandler,
-  POLICY_PRESETS,
-  withPolicy,
-} from '@codex/worker-utils';
-import { type Context, Hono } from 'hono';
+import { procedure } from '@codex/worker-utils';
+import { Hono } from 'hono';
 import { z } from 'zod';
-import { withSettingsFacade } from '../middleware/settings-facade';
-import type { HonoEnv } from '../types';
 
 const app = new Hono<HonoEnv>();
 
-// Type guard to access extended context variables
-function getSettingsFacade(c: Context<HonoEnv>) {
-  const facade = c.get('settingsFacade');
-  if (!facade) {
-    throw new Error('Settings facade not initialized');
-  }
-  return facade;
-}
-
 // Param schema for org ID validation
 const orgIdParamSchema = z.object({ id: uuidSchema });
-
-// ============================================================================
-// Middleware: Auto-inject PlatformSettingsFacade
-// ============================================================================
-
-/**
- * Apply facade middleware to all settings routes.
- * Automatically creates database client and facade, handles cleanup.
- */
-app.use('*', withSettingsFacade());
 
 // ============================================================================
 // GET /api/organizations/:id/settings - Get all settings
@@ -69,32 +49,11 @@ app.use('*', withSettingsFacade());
 
 app.get(
   '/',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
-      params: orgIdParamSchema,
-    },
-    handler: async (c, ctx) => {
-      const obs = c.get('obs');
-      const facade = getSettingsFacade(c);
-
-      const { id: orgId } = ctx.validated.params;
-      obs?.info('[Settings] GET / - getAllSettings', {
-        orgId,
-        userId: ctx.user?.id,
-      });
-
-      try {
-        const allSettings = await facade.getAllSettings();
-        obs?.info('[Settings] getAllSettings result', { orgId, allSettings });
-        return allSettings;
-      } catch (error) {
-        obs?.error('[Settings] getAllSettings error', {
-          orgId,
-          error: String(error),
-        });
-        throw error;
-      }
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx): Promise<AllSettingsResponse> => {
+      return await ctx.services.settings.getAllSettings();
     },
   })
 );
@@ -109,29 +68,11 @@ app.get(
  */
 app.get(
   '/branding',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
-      params: orgIdParamSchema,
-    },
-    handler: async (c, ctx) => {
-      const obs = c.get('obs');
-      const facade = getSettingsFacade(c);
-
-      const { id: orgId } = ctx.validated.params;
-      obs?.info('[Settings] GET /branding', { orgId, userId: ctx.user?.id });
-
-      try {
-        const branding = await facade.getBranding();
-        obs?.info('[Settings] getBranding result', { orgId, branding });
-        return branding;
-      } catch (error) {
-        obs?.error('[Settings] getBranding error', {
-          orgId,
-          error: String(error),
-        });
-        throw error;
-      }
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx): Promise<BrandingSettingsResponse> => {
+      return await ctx.services.settings.getBranding();
     },
   })
 );
@@ -142,34 +83,14 @@ app.get(
  */
 app.put(
   '/branding',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
       params: orgIdParamSchema,
       body: updateBrandingSchema,
     },
-    handler: async (c, ctx) => {
-      const obs = c.get('obs');
-      const facade = getSettingsFacade(c);
-
-      const { id: orgId } = ctx.validated.params;
-      obs?.info('[Settings] PUT /branding', {
-        orgId,
-        userId: ctx.user?.id,
-        body: ctx.validated.body,
-      });
-
-      try {
-        const branding = await facade.updateBranding(ctx.validated.body);
-        obs?.info('[Settings] updateBranding result', { orgId, branding });
-        return branding;
-      } catch (error) {
-        obs?.error('[Settings] updateBranding error', {
-          orgId,
-          error: String(error),
-        });
-        throw error;
-      }
+    handler: async (ctx): Promise<BrandingSettingsResponse> => {
+      return await ctx.services.settings.updateBranding(ctx.input.body);
     },
   })
 );
@@ -178,97 +99,129 @@ app.put(
  * POST /api/organizations/:id/settings/branding/logo
  * Upload a new logo (multipart form data)
  *
+ * NOTE: This endpoint uses manual handling for multipart form data
+ * which cannot be easily abstracted into the procedure() pattern.
+ *
  * Request body: multipart/form-data with 'logo' file field
  * Allowed types: image/png, image/jpeg, image/webp
  * Max size: 5MB
  */
-app.post(
-  '/branding/logo',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  async (c) => {
-    const facade = getSettingsFacade(c);
+app.post('/branding/logo', async (c) => {
+  // Check if R2 bucket is configured
+  if (!c.env.MEDIA_BUCKET) {
+    return c.json(
+      {
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Logo uploads not configured',
+        },
+      },
+      503
+    );
+  }
 
-    // Validate org ID param
-    const orgIdResult = orgIdParamSchema.safeParse({
-      id: c.req.param('id'),
-    });
-    if (!orgIdResult.success) {
+  // Validate org ID param
+  const id = c.req.param('id');
+  const paramResult = uuidSchema.safeParse(id);
+  if (!paramResult.success) {
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Invalid organization ID',
+        },
+      },
+      400
+    );
+  }
+
+  // Auth is handled by middleware in parent app
+  const user = c.get('user');
+  if (!user) {
+    return c.json(
+      {
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        },
+      },
+      401
+    );
+  }
+
+  // Get organization context (set by org management check)
+  // Use paramResult.data since it's validated, falling back to context if set
+  const organizationId = c.get('organizationId') ?? paramResult.data;
+
+  try {
+    // Parse multipart form data
+    const formData = await c.req.formData();
+    const logoFile = formData.get('logo');
+
+    if (!logoFile || !(logoFile instanceof File)) {
       return c.json(
         {
           error: {
             code: 'INVALID_INPUT',
-            message: 'Invalid organization ID',
+            message: 'Logo file is required',
           },
         },
         400
       );
     }
 
-    // Check if R2 bucket is configured
-    if (!c.env.MEDIA_BUCKET) {
+    // Validate MIME type
+    if (
+      !ALLOWED_LOGO_MIME_TYPES.includes(
+        logoFile.type as (typeof ALLOWED_LOGO_MIME_TYPES)[number]
+      )
+    ) {
       return c.json(
         {
           error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'Logo uploads not configured',
+            code: 'INVALID_FILE_TYPE',
+            message: `Logo must be one of: ${ALLOWED_LOGO_MIME_TYPES.join(', ')}`,
           },
         },
-        503
+        400
       );
     }
 
+    // Validate file size
+    if (logoFile.size > MAX_LOGO_FILE_SIZE_BYTES) {
+      const maxSizeMB = MAX_LOGO_FILE_SIZE_BYTES / (1024 * 1024);
+      return c.json(
+        {
+          error: {
+            code: 'FILE_TOO_LARGE',
+            message: `Logo must be less than ${maxSizeMB}MB`,
+          },
+        },
+        400
+      );
+    }
+
+    // Read file data
+    const fileBuffer = await logoFile.arrayBuffer();
+
+    // Create facade with org context for upload
+    const { PlatformSettingsFacade } = await import('@codex/platform-settings');
+    const { createPerRequestDbClient } = await import('@codex/database');
+    const { R2Service } = await import('@codex/cloudflare-clients');
+
+    const { db, cleanup } = createPerRequestDbClient(c.env);
+    const r2 = new R2Service(c.env.MEDIA_BUCKET);
+
     try {
-      // Parse multipart form data
-      const formData = await c.req.formData();
-      const logoFile = formData.get('logo');
+      const environment = c.env.ENVIRONMENT ?? 'development';
+      const facade = new PlatformSettingsFacade({
+        db,
+        environment,
+        organizationId,
+        r2,
+        r2PublicUrlBase: undefined,
+      });
 
-      if (!logoFile || !(logoFile instanceof File)) {
-        return c.json(
-          {
-            error: {
-              code: 'INVALID_INPUT',
-              message: 'Logo file is required',
-            },
-          },
-          400
-        );
-      }
-
-      // Validate MIME type
-      if (
-        !ALLOWED_LOGO_MIME_TYPES.includes(
-          logoFile.type as (typeof ALLOWED_LOGO_MIME_TYPES)[number]
-        )
-      ) {
-        return c.json(
-          {
-            error: {
-              code: 'INVALID_FILE_TYPE',
-              message: `Logo must be one of: ${ALLOWED_LOGO_MIME_TYPES.join(', ')}`,
-            },
-          },
-          400
-        );
-      }
-
-      // Validate file size
-      if (logoFile.size > MAX_LOGO_FILE_SIZE_BYTES) {
-        const maxSizeMB = MAX_LOGO_FILE_SIZE_BYTES / (1024 * 1024);
-        return c.json(
-          {
-            error: {
-              code: 'FILE_TOO_LARGE',
-              message: `Logo must be less than ${maxSizeMB}MB`,
-            },
-          },
-          400
-        );
-      }
-
-      // Read file data
-      const fileBuffer = await logoFile.arrayBuffer();
-
-      // Upload via facade (middleware handles cleanup)
       const branding = await facade.uploadLogo(
         fileBuffer,
         logoFile.type,
@@ -276,47 +229,49 @@ app.post(
       );
 
       return c.json({ data: branding });
-    } catch (err) {
-      if (err instanceof InvalidFileTypeError) {
-        return c.json(
-          {
-            error: {
-              code: 'INVALID_FILE_TYPE',
-              message: (err as InvalidFileTypeError).message,
-            },
-          },
-          400
-        );
-      }
-
-      if (err instanceof FileTooLargeError) {
-        return c.json(
-          {
-            error: {
-              code: 'FILE_TOO_LARGE',
-              message: (err as FileTooLargeError).message,
-            },
-          },
-          400
-        );
-      }
-
-      if (err instanceof SettingsUpsertError) {
-        return c.json(
-          {
-            error: {
-              code: 'INTERNAL_ERROR',
-              message: (err as SettingsUpsertError).message,
-            },
-          },
-          500
-        );
-      }
-
-      throw err;
+    } finally {
+      c.executionCtx.waitUntil(cleanup());
     }
+  } catch (err) {
+    if (err instanceof InvalidFileTypeError) {
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_FILE_TYPE',
+            message: (err as InvalidFileTypeError).message,
+          },
+        },
+        400
+      );
+    }
+
+    if (err instanceof FileTooLargeError) {
+      return c.json(
+        {
+          error: {
+            code: 'FILE_TOO_LARGE',
+            message: (err as FileTooLargeError).message,
+          },
+        },
+        400
+      );
+    }
+
+    if (err instanceof SettingsUpsertError) {
+      return c.json(
+        {
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: (err as SettingsUpsertError).message,
+          },
+        },
+        500
+      );
+    }
+
+    throw err;
   }
-);
+});
 
 /**
  * DELETE /api/organizations/:id/settings/branding/logo
@@ -324,29 +279,15 @@ app.post(
  */
 app.delete(
   '/branding/logo',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
-      params: orgIdParamSchema,
-    },
-    handler: async (c, ctx) => {
-      const facade = getSettingsFacade(c);
-
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx): Promise<BrandingSettingsResponse> => {
       // Check if R2 bucket is configured
       if (!ctx.env.MEDIA_BUCKET) {
-        return c.json(
-          {
-            error: {
-              code: 'SERVICE_UNAVAILABLE',
-              message: 'Logo operations not configured',
-            },
-          },
-          503
-        );
+        throw new Error('Logo operations not configured');
       }
-
-      const branding = await facade.deleteLogo();
-      return branding;
+      return await ctx.services.settings.deleteLogo();
     },
   })
 );
@@ -361,29 +302,11 @@ app.delete(
  */
 app.get(
   '/contact',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
-      params: orgIdParamSchema,
-    },
-    handler: async (c, ctx) => {
-      const obs = c.get('obs');
-      const facade = getSettingsFacade(c);
-
-      const { id: orgId } = ctx.validated.params;
-      obs?.info('[Settings] GET /contact', { orgId, userId: ctx.user?.id });
-
-      try {
-        const contact = await facade.getContact();
-        obs?.info('[Settings] getContact result', { orgId, contact });
-        return contact;
-      } catch (error) {
-        obs?.error('[Settings] getContact error', {
-          orgId,
-          error: String(error),
-        });
-        throw error;
-      }
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx): Promise<ContactSettingsResponse> => {
+      return await ctx.services.settings.getContact();
     },
   })
 );
@@ -394,34 +317,14 @@ app.get(
  */
 app.put(
   '/contact',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
       params: orgIdParamSchema,
       body: updateContactSchema,
     },
-    handler: async (c, ctx) => {
-      const obs = c.get('obs');
-      const facade = getSettingsFacade(c);
-
-      const { id: orgId } = ctx.validated.params;
-      obs?.info('[Settings] PUT /contact', {
-        orgId,
-        userId: ctx.user?.id,
-        body: ctx.validated.body,
-      });
-
-      try {
-        const contact = await facade.updateContact(ctx.validated.body);
-        obs?.info('[Settings] updateContact result', { orgId, contact });
-        return contact;
-      } catch (error) {
-        obs?.error('[Settings] updateContact error', {
-          orgId,
-          error: String(error),
-        });
-        throw error;
-      }
+    handler: async (ctx): Promise<ContactSettingsResponse> => {
+      return await ctx.services.settings.updateContact(ctx.input.body);
     },
   })
 );
@@ -436,29 +339,11 @@ app.put(
  */
 app.get(
   '/features',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
-      params: orgIdParamSchema,
-    },
-    handler: async (c, ctx) => {
-      const obs = c.get('obs');
-      const facade = getSettingsFacade(c);
-
-      const { id: orgId } = ctx.validated.params;
-      obs?.info('[Settings] GET /features', { orgId, userId: ctx.user?.id });
-
-      try {
-        const features = await facade.getFeatures();
-        obs?.info('[Settings] getFeatures result', { orgId, features });
-        return features;
-      } catch (error) {
-        obs?.error('[Settings] getFeatures error', {
-          orgId,
-          error: String(error),
-        });
-        throw error;
-      }
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx): Promise<FeatureSettingsResponse> => {
+      return await ctx.services.settings.getFeatures();
     },
   })
 );
@@ -469,34 +354,14 @@ app.get(
  */
 app.put(
   '/features',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
       params: orgIdParamSchema,
       body: updateFeaturesSchema,
     },
-    handler: async (c, ctx) => {
-      const obs = c.get('obs');
-      const facade = getSettingsFacade(c);
-
-      const { id: orgId } = ctx.validated.params;
-      obs?.info('[Settings] PUT /features', {
-        orgId,
-        userId: ctx.user?.id,
-        body: ctx.validated.body,
-      });
-
-      try {
-        const features = await facade.updateFeatures(ctx.validated.body);
-        obs?.info('[Settings] updateFeatures result', { orgId, features });
-        return features;
-      } catch (error) {
-        obs?.error('[Settings] updateFeatures error', {
-          orgId,
-          error: String(error),
-        });
-        throw error;
-      }
+    handler: async (ctx): Promise<FeatureSettingsResponse> => {
+      return await ctx.services.settings.updateFeatures(ctx.input.body);
     },
   })
 );

@@ -112,22 +112,26 @@ export function createTestMediaItemInput(
 ): NewMediaItem {
   const mediaType = overrides.mediaType || 'video';
   const tempId = randomUUID(); // For generating R2 key
+  const status = overrides.status || 'uploading';
+
+  // If status is 'ready', automatically populate required fields to satisfy DB constraint
+  const isReady = status === 'ready';
 
   return {
     creatorId,
     title: `Test ${mediaType} ${Date.now()}`,
     description: `Test ${mediaType} for automated testing`,
     mediaType,
-    status: 'uploading', // Always start as uploading
+    status,
     r2Key: `originals/${tempId}/${mediaType}.mp4`,
     fileSizeBytes: 1024 * 1024 * 10, // 10MB
     mimeType: mediaType === 'video' ? 'video/mp4' : 'audio/mpeg',
-    durationSeconds: null,
-    width: null,
-    height: null,
-    hlsMasterPlaylistKey: null,
-    thumbnailKey: null,
-    uploadedAt: null,
+    durationSeconds: isReady ? 120 : null, // Required for status='ready'
+    width: isReady && mediaType === 'video' ? 1920 : null,
+    height: isReady && mediaType === 'video' ? 1080 : null,
+    hlsMasterPlaylistKey: isReady ? `hls/${tempId}/master.m3u8` : null, // Required for status='ready'
+    thumbnailKey: isReady ? `thumbnails/${tempId}/thumb.jpg` : null, // Required for status='ready'
+    uploadedAt: isReady ? new Date() : null,
     ...overrides,
   };
 }

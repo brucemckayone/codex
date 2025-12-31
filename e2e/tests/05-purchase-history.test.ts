@@ -563,12 +563,10 @@ describe('Purchase History API', () => {
       await expectSuccessResponse(response);
       const json = await response.json();
 
-      // Response is double-wrapped: { data: { data: purchase } }
-      // Handler returns SingleItemResponse { data: purchase }
-      // createAuthenticatedHandler wraps it in { data: output }
+      // Response: { data: purchase }
+      // procedure() wraps handler return in { data: ... }
       expect(json.data).toBeDefined();
-      expect(json.data.data).toBeDefined();
-      const purchase = json.data.data;
+      const purchase = json.data;
 
       expect(purchase.id).toBe(purchaseId);
       expect(purchase.customerId).toBe(buyer.id);

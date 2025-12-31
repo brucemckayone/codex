@@ -151,12 +151,12 @@ importers:
       '@codex/content':
         specifier: workspace:*
         version: link:../packages/content
-      '@codex/identity':
-        specifier: workspace:*
-        version: link:../packages/identity
       '@codex/observability':
         specifier: workspace:*
         version: link:../packages/observability
+      '@codex/organization':
+        specifier: workspace:*
+        version: link:../packages/organization
       '@codex/purchase':
         specifier: workspace:*
         version: link:../packages/purchase
@@ -200,6 +200,9 @@ importers:
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -290,12 +293,15 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../database
-      '@codex/identity':
+      '@codex/organization':
         specifier: workspace:*
-        version: link:../identity
+        version: link:../organization
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -365,7 +371,23 @@ importers:
         specifier: ^4.0.2
         version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
 
-  packages/identity:
+  packages/observability:
+    dependencies:
+      vite-plugin-dts:
+        specifier: ^4.5.4
+        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.13.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.2
+        version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  packages/organization:
     dependencies:
       '@codex/database':
         specifier: workspace:*
@@ -373,6 +395,9 @@ importers:
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -392,22 +417,6 @@ importers:
       vite:
         specifier: ^7.2.2
         version: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
-      vitest:
-        specifier: ^4.0.2
-        version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
-
-  packages/observability:
-    dependencies:
-      vite-plugin-dts:
-        specifier: ^4.5.4
-        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.13.0
-      typescript:
-        specifier: ^5.6.3
-        version: 5.9.3
       vitest:
         specifier: ^4.0.2
         version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -541,12 +550,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250102.0
         version: 4.20251121.0
-      '@codex/content':
-        specifier: workspace:*
-        version: link:../content
-      '@codex/identity':
-        specifier: workspace:*
-        version: link:../identity
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
@@ -612,12 +615,33 @@ importers:
 
   packages/worker-utils:
     dependencies:
+      '@codex/access':
+        specifier: workspace:*
+        version: link:../access
+      '@codex/admin':
+        specifier: workspace:*
+        version: link:../admin
+      '@codex/cloudflare-clients':
+        specifier: workspace:*
+        version: link:../cloudflare-clients
+      '@codex/content':
+        specifier: workspace:*
+        version: link:../content
       '@codex/database':
         specifier: workspace:*
         version: link:../database
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
+      '@codex/organization':
+        specifier: workspace:*
+        version: link:../organization
+      '@codex/platform-settings':
+        specifier: workspace:*
+        version: link:../platform-settings
+      '@codex/purchase':
+        specifier: workspace:*
+        version: link:../purchase
       '@codex/security':
         specifier: workspace:*
         version: link:../security
@@ -627,6 +651,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/validation':
+        specifier: workspace:*
+        version: link:../validation
       drizzle-orm:
         specifier: 0.44.7
         version: 0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)
@@ -681,7 +708,7 @@ importers:
         version: 4.10.6
       vite-plugin-dts:
         specifier: ^4.5.4
-        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -786,6 +813,9 @@ importers:
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../../packages/service-errors
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -1009,9 +1039,9 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@codex/identity':
+      '@codex/organization':
         specifier: workspace:*
-        version: link:../../packages/identity
+        version: link:../../packages/organization
       '@codex/platform-settings':
         specifier: workspace:*
         version: link:../../packages/platform-settings

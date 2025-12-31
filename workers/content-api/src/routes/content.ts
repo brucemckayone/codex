@@ -14,36 +14,27 @@
  * - DELETE /api/content/:id        - Soft delete
  */
 
-import {
-  ContentNotFoundError,
-  ContentService,
-  contentQuerySchema,
-  createContentSchema,
-  updateContentSchema,
-} from '@codex/content';
-import { createDbClient, createPerRequestDbClient } from '@codex/database';
 import type {
   ContentListResponse,
   ContentResponse,
   CreateContentResponse,
   DeleteContentResponse,
-  HonoEnv,
   PublishContentResponse,
   UnpublishContentResponse,
   UpdateContentResponse,
-} from '@codex/shared-types';
-import { createIdParamsSchema } from '@codex/validation';
+} from '@codex/content';
 import {
-  createAuthenticatedHandler,
-  POLICY_PRESETS,
-  withPolicy,
-} from '@codex/worker-utils';
+  ContentNotFoundError,
+  contentQuerySchema,
+  createContentSchema,
+  updateContentSchema,
+} from '@codex/content';
+import type { HonoEnv } from '@codex/shared-types';
+import { createIdParamsSchema } from '@codex/validation';
+import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
-
-// Note: Route-level security policies applied via withPolicy()
-// Each route declares its own authentication and authorization requirements
 
 /**
  * POST /api/content
@@ -54,34 +45,13 @@ const app = new Hono<HonoEnv>();
  */
 app.post(
   '/',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
-      body: createContentSchema,
-    },
-    handler: async (c, ctx): Promise<CreateContentResponse> => {
-      // Create per-request database client with transaction support
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
-
-      try {
-        const service = new ContentService({
-          db,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        });
-
-        const content = await service.create(ctx.validated.body, ctx.user.id);
-
-        // Schedule cleanup after response is sent
-        c.executionCtx.waitUntil(cleanup());
-
-        return { data: content };
-      } catch (error) {
-        // Ensure cleanup happens even on error
-        await cleanup();
-        throw error;
-      }
-    },
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: { body: createContentSchema },
     successStatus: 201,
+    handler: async (ctx): Promise<CreateContentResponse['data']> => {
+      return await ctx.services.content.create(ctx.input.body, ctx.user.id);
+    },
   })
 );
 
@@ -94,23 +64,18 @@ app.post(
  */
 app.get(
   '/:id',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
-    },
-    handler: async (_c, ctx): Promise<ContentResponse> => {
-      const service = new ContentService({
-        db: createDbClient(ctx.env),
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const content = await service.get(ctx.validated.params.id, ctx.user.id);
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<ContentResponse['data']> => {
+      const content = await ctx.services.content.get(
+        ctx.input.params.id,
+        ctx.user.id
+      );
       if (!content) {
-        throw new ContentNotFoundError(ctx.validated.params.id);
+        throw new ContentNotFoundError(ctx.input.params.id);
       }
-
-      return { data: content };
+      return content;
     },
   })
 );
@@ -124,33 +89,18 @@ app.get(
  */
 app.patch(
   '/:id',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: {
       params: createIdParamsSchema(),
       body: updateContentSchema,
     },
-    handler: async (c, ctx): Promise<UpdateContentResponse> => {
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
-
-      try {
-        const service = new ContentService({
-          db,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        });
-
-        const content = await service.update(
-          ctx.validated.params.id,
-          ctx.validated.body,
-          ctx.user.id
-        );
-
-        c.executionCtx.waitUntil(cleanup());
-        return { data: content };
-      } catch (error) {
-        await cleanup();
-        throw error;
-      }
+    handler: async (ctx): Promise<UpdateContentResponse['data']> => {
+      return await ctx.services.content.update(
+        ctx.input.params.id,
+        ctx.input.body,
+        ctx.user.id
+      );
     },
   })
 );
@@ -164,21 +114,11 @@ app.patch(
  */
 app.get(
   '/',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      query: contentQuerySchema,
-    },
-    handler: async (_c, ctx): Promise<ContentListResponse> => {
-      const service = new ContentService({
-        db: createDbClient(ctx.env),
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const result = await service.list(ctx.user.id, ctx.validated.query);
-
-      // Service returns PaginatedResponse<T> which already matches our response type
-      return result;
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: contentQuerySchema },
+    handler: async (ctx): Promise<ContentListResponse> => {
+      return await ctx.services.content.list(ctx.user.id, ctx.input.query);
     },
   })
 );
@@ -192,31 +132,14 @@ app.get(
  */
 app.post(
   '/:id/publish',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
-    },
-    handler: async (c, ctx): Promise<PublishContentResponse> => {
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
-
-      try {
-        const service = new ContentService({
-          db,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        });
-
-        const content = await service.publish(
-          ctx.validated.params.id,
-          ctx.user.id
-        );
-
-        c.executionCtx.waitUntil(cleanup());
-        return { data: content };
-      } catch (error) {
-        await cleanup();
-        throw error;
-      }
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<PublishContentResponse['data']> => {
+      return await ctx.services.content.publish(
+        ctx.input.params.id,
+        ctx.user.id
+      );
     },
   })
 );
@@ -230,31 +153,14 @@ app.post(
  */
 app.post(
   '/:id/unpublish',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
-    },
-    handler: async (c, ctx): Promise<UnpublishContentResponse> => {
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
-
-      try {
-        const service = new ContentService({
-          db,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        });
-
-        const content = await service.unpublish(
-          ctx.validated.params.id,
-          ctx.user.id
-        );
-
-        c.executionCtx.waitUntil(cleanup());
-        return { data: content };
-      } catch (error) {
-        await cleanup();
-        throw error;
-      }
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<UnpublishContentResponse['data']> => {
+      return await ctx.services.content.unpublish(
+        ctx.input.params.id,
+        ctx.user.id
+      );
     },
   })
 );
@@ -268,34 +174,18 @@ app.post(
  */
 app.delete(
   '/:id',
-  withPolicy({
-    auth: 'required',
-    roles: ['creator', 'admin'],
-    rateLimit: 'auth', // Stricter rate limit for deletion
-  }),
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: ['creator', 'admin'],
+      rateLimit: 'auth', // Stricter rate limit for deletion
     },
-    handler: async (c, ctx): Promise<DeleteContentResponse> => {
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
-
-      try {
-        const service = new ContentService({
-          db,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        });
-
-        await service.delete(ctx.validated.params.id, ctx.user.id);
-
-        c.executionCtx.waitUntil(cleanup());
-        return null;
-      } catch (error) {
-        await cleanup();
-        throw error;
-      }
-    },
+    input: { params: createIdParamsSchema() },
     successStatus: 204,
+    handler: async (ctx): Promise<DeleteContentResponse> => {
+      await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
+      return null;
+    },
   })
 );
 

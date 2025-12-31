@@ -30,8 +30,6 @@
   ],
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250102.0",
-    "@codex/content": "workspace:*",
-    "@codex/identity": "workspace:*",
     "@codex/observability": "workspace:*",
     "typescript": "^5.7.3",
     "vite": "^7.2.2"

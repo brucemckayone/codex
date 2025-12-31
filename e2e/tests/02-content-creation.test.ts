@@ -49,6 +49,7 @@ describe('Content Creation Flow', () => {
     expect(media.status).toBe('uploading');
 
     // Step 3: Update media status to 'ready' (simulating transcoding completion)
+    // DB constraint requires hlsMasterPlaylistKey, thumbnailKey, and durationSeconds when status='ready'
     const updateMediaResponse = await httpClient.patch(
       `${WORKER_URLS.content}/api/media/${media.id}`,
       {
@@ -58,6 +59,9 @@ describe('Content Creation Flow', () => {
         },
         data: {
           status: 'ready',
+          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+          durationSeconds: 120,
         },
       }
     );
@@ -227,12 +231,18 @@ describe('Content Creation Flow', () => {
     );
     const media = unwrapApiResponse(await mediaResponse.json());
 
+    // DB constraint requires hlsMasterPlaylistKey, thumbnailKey, and durationSeconds when status='ready'
     await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
       headers: {
         Cookie: creator1Cookie,
         Origin: WORKER_URLS.content,
       },
-      data: { status: 'ready' },
+      data: {
+        status: 'ready',
+        hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+        thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+        durationSeconds: 120,
+      },
     });
 
     const contentResponse = await httpClient.post(

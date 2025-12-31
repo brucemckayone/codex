@@ -63,16 +63,21 @@ export { OrganizationService } from './services';
 // ============================================================================
 
 export type {
+  CreateOrganizationResponse,
   Database,
   DatabaseTransaction,
   NewOrganization,
   Organization,
+  OrganizationBySlugResponse,
   OrganizationFilters,
+  OrganizationListResponse,
+  OrganizationResponse,
   PaginatedResponse,
   PaginationMetadata,
   PaginationParams,
   ServiceConfig,
   SortOrder,
+  UpdateOrganizationResponse,
 } from './types';
 
 // ============================================================================
