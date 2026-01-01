@@ -4,6 +4,8 @@
  * Validates files by checking magic numbers (file signatures) to prevent
  * MIME type spoofing attacks. This ensures uploaded files are actually
  * the type they claim to be.
+ *
+ * Note: SVG sanitization moved to @codex/validation package.
  */
 
 /**
@@ -104,30 +106,18 @@ function matchesMagicNumbers(
 }
 
 /**
- * Sanitizes SVG content to remove potentially dangerous elements
+ * Sanitizes SVG content to remove XSS vectors using DOMPurify.
  *
- * @param content - SVG file content as string
- * @returns Sanitized SVG content
+ * @deprecated Moved to @codex/validation package. Import from there instead:
+ * ```typescript
+ * import { sanitizeSvgContent } from '@codex/validation';
+ * ```
  *
- * Note: This is a basic sanitizer. For production, consider using
- * a library like DOMPurify or svg-sanitizer.
+ * @param content - Raw SVG file content as string
+ * @returns Sanitized SVG content safe for rendering
  */
 export function sanitizeSvgContent(content: string): string {
-  // Remove script tags
-  let sanitized = content.replace(
-    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-    ''
-  );
-
-  // Remove on* event handlers
-  sanitized = sanitized.replace(/\son\w+="[^"]*"/gi, '');
-  sanitized = sanitized.replace(/\son\w+='[^']*'/gi, '');
-
-  // Remove javascript: URLs
-  sanitized = sanitized.replace(/javascript:/gi, '');
-
-  // Remove data: URLs (can contain scripts)
-  sanitized = sanitized.replace(/data:[^,]*,/gi, '');
-
-  return sanitized;
+  // Re-export from validation package for backwards compatibility
+  const { sanitizeSvgContent: sanitize } = require('@codex/validation');
+  return sanitize(content);
 }

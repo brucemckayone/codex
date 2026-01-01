@@ -5,7 +5,7 @@ import { packageVitestConfig } from '../../config/vitest/package.config';
 
 export default packageVitestConfig({
   packageName: 'organization',
-  setupFiles: ['../../vitest.setup.ts'],
+  setupFiles: ['../../vitest.setup.ts', './vitest.setup.ts'],
   testTimeout: 60000,
   hookTimeout: 60000,
   enableNeonTesting: true, // Enable ephemeral Neon branches for test isolation

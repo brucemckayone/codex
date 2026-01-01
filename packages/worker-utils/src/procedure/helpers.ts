@@ -12,7 +12,7 @@ import {
   UnauthorizedError,
   ValidationError,
 } from '@codex/service-errors';
-import type { Bindings, HonoEnv } from '@codex/shared-types';
+import type { HonoEnv } from '@codex/shared-types';
 import { uuidSchema } from '@codex/validation';
 import type { Context } from 'hono';
 import type { ZodError, ZodSchema } from 'zod';
@@ -60,8 +60,9 @@ export function getClientIP(c: Context<HonoEnv>): string {
 
 /**
  * Format Zod validation errors into standardized structure
+ * (Internal helper - not exported from package)
  */
-export function formatValidationError(zodError: ZodError): {
+function formatValidationError(zodError: ZodError): {
   code: string;
   message: string;
   details: Array<{ path: string; message: string }>;

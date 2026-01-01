@@ -11,6 +11,8 @@ export * from './identity/user-schema';
 export * from './primitives';
 // Access schemas
 export * from './schemas/access';
+// File upload schemas
+export * from './schemas/file-upload';
 // Purchase schemas
 export * from './schemas/purchase';
 // Settings schemas

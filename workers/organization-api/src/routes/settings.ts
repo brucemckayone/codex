@@ -99,179 +99,37 @@ app.put(
  * POST /api/organizations/:id/settings/branding/logo
  * Upload a new logo (multipart form data)
  *
- * NOTE: This endpoint uses manual handling for multipart form data
- * which cannot be easily abstracted into the procedure() pattern.
- *
- * Request body: multipart/form-data with 'logo' file field
- * Allowed types: image/png, image/jpeg, image/webp
- * Max size: 5MB
+ * Now uses procedure() with FormData validation!
+ * Validation handled by @codex/validation validateLogoUpload():
+ * - MIME type allowlist (PNG, JPEG, WebP, SVG)
+ * - File size limit (5MB)
+ * - Magic number verification (prevents MIME spoofing)
+ * - SVG sanitization via DOMPurify (XSS prevention)
  */
-app.post('/branding/logo', async (c) => {
-  // Check if R2 bucket is configured
-  if (!c.env.MEDIA_BUCKET) {
-    return c.json(
-      {
-        error: {
-          code: 'SERVICE_UNAVAILABLE',
-          message: 'Logo uploads not configured',
-        },
+app.post(
+  '/branding/logo',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
+      params: orgIdParamSchema,
+      // Custom FormData parser using validation package
+      formData: async (c) => {
+        const { validateLogoUpload } = await import('@codex/validation');
+        const formData = await c.req.formData();
+        return await validateLogoUpload(formData);
       },
-      503
-    );
-  }
+    },
+    handler: async (ctx): Promise<BrandingSettingsResponse> => {
+      // Check if R2 bucket is configured
+      if (!ctx.env.MEDIA_BUCKET) {
+        throw new Error('Logo operations not configured');
+      }
 
-  // Validate org ID param
-  const id = c.req.param('id');
-  const paramResult = uuidSchema.safeParse(id);
-  if (!paramResult.success) {
-    return c.json(
-      {
-        error: {
-          code: 'INVALID_INPUT',
-          message: 'Invalid organization ID',
-        },
-      },
-      400
-    );
-  }
-
-  // Auth is handled by middleware in parent app
-  const user = c.get('user');
-  if (!user) {
-    return c.json(
-      {
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
-        },
-      },
-      401
-    );
-  }
-
-  // Get organization context (set by org management check)
-  // Use paramResult.data since it's validated, falling back to context if set
-  const organizationId = c.get('organizationId') ?? paramResult.data;
-
-  try {
-    // Parse multipart form data
-    const formData = await c.req.formData();
-    const logoFile = formData.get('logo');
-
-    if (!logoFile || !(logoFile instanceof File)) {
-      return c.json(
-        {
-          error: {
-            code: 'INVALID_INPUT',
-            message: 'Logo file is required',
-          },
-        },
-        400
-      );
-    }
-
-    // Validate MIME type
-    if (
-      !ALLOWED_LOGO_MIME_TYPES.includes(
-        logoFile.type as (typeof ALLOWED_LOGO_MIME_TYPES)[number]
-      )
-    ) {
-      return c.json(
-        {
-          error: {
-            code: 'INVALID_FILE_TYPE',
-            message: `Logo must be one of: ${ALLOWED_LOGO_MIME_TYPES.join(', ')}`,
-          },
-        },
-        400
-      );
-    }
-
-    // Validate file size
-    if (logoFile.size > MAX_LOGO_FILE_SIZE_BYTES) {
-      const maxSizeMB = MAX_LOGO_FILE_SIZE_BYTES / (1024 * 1024);
-      return c.json(
-        {
-          error: {
-            code: 'FILE_TOO_LARGE',
-            message: `Logo must be less than ${maxSizeMB}MB`,
-          },
-        },
-        400
-      );
-    }
-
-    // Read file data
-    const fileBuffer = await logoFile.arrayBuffer();
-
-    // Create facade with org context for upload
-    const { PlatformSettingsFacade } = await import('@codex/platform-settings');
-    const { createPerRequestDbClient } = await import('@codex/database');
-    const { R2Service } = await import('@codex/cloudflare-clients');
-
-    const { db, cleanup } = createPerRequestDbClient(c.env);
-    const r2 = new R2Service(c.env.MEDIA_BUCKET);
-
-    try {
-      const environment = c.env.ENVIRONMENT ?? 'development';
-      const facade = new PlatformSettingsFacade({
-        db,
-        environment,
-        organizationId,
-        r2,
-        r2PublicUrlBase: undefined,
-      });
-
-      const branding = await facade.uploadLogo(
-        fileBuffer,
-        logoFile.type,
-        logoFile.size
-      );
-
-      return c.json({ data: branding });
-    } finally {
-      c.executionCtx.waitUntil(cleanup());
-    }
-  } catch (err) {
-    if (err instanceof InvalidFileTypeError) {
-      return c.json(
-        {
-          error: {
-            code: 'INVALID_FILE_TYPE',
-            message: (err as InvalidFileTypeError).message,
-          },
-        },
-        400
-      );
-    }
-
-    if (err instanceof FileTooLargeError) {
-      return c.json(
-        {
-          error: {
-            code: 'FILE_TOO_LARGE',
-            message: (err as FileTooLargeError).message,
-          },
-        },
-        400
-      );
-    }
-
-    if (err instanceof SettingsUpsertError) {
-      return c.json(
-        {
-          error: {
-            code: 'INTERNAL_ERROR',
-            message: (err as SettingsUpsertError).message,
-          },
-        },
-        500
-      );
-    }
-
-    throw err;
-  }
-});
+      // Upload validated file (validation already done in input.formData)
+      return await ctx.services.settings.uploadLogo(ctx.input.formData);
+    },
+  })
+);
 
 /**
  * DELETE /api/organizations/:id/settings/branding/logo

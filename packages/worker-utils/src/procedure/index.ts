@@ -32,7 +32,6 @@ export type { OrganizationMembership } from './helpers';
 export {
   enforceIPWhitelist,
   enforcePolicyInline,
-  formatValidationError,
   generateRequestId,
   getClientIP,
   validateInput,

@@ -245,15 +245,10 @@ describe('BrandingSettingsService', () => {
       ).rejects.toThrow(InvalidFileTypeError);
     });
 
-    it('should reject files exceeding max size', async () => {
-      const mockR2 = createMockR2();
-      const service = createService(mockR2);
-
-      const largeSize = 10 * 1024 * 1024; // 10MB, exceeds 5MB limit
-
-      await expect(
-        service.uploadLogo(new ArrayBuffer(largeSize), 'image/png', largeSize)
-      ).rejects.toThrow(FileTooLargeError);
+    it.skip('file size validation moved to @codex/validation validateLogoUpload()', async () => {
+      // NOTE: File size validation now happens in @codex/validation validateLogoUpload()
+      // before the service is called. See packages/validation/src/schemas/file-upload.ts
+      // and packages/validation/src/__tests__/svg-sanitization.test.ts for validation tests.
     });
 
     it('should upload logo and update database', async () => {
@@ -261,7 +256,11 @@ describe('BrandingSettingsService', () => {
       const service = createService(mockR2);
 
       const fileData = createValidImageBuffer('image/png', 1024);
-      const result = await service.uploadLogo(fileData, 'image/png', 1024);
+      const result = await service.uploadLogo({
+        buffer: fileData,
+        mimeType: 'image/png',
+        size: 1024,
+      });
 
       // Verify R2 was called
       expect(mockR2.put).toHaveBeenCalledWith(
@@ -292,11 +291,11 @@ describe('BrandingSettingsService', () => {
       });
 
       // Upload new logo
-      await service.uploadLogo(
-        createValidImageBuffer('image/jpeg', 1024),
-        'image/jpeg',
-        1024
-      );
+      await service.uploadLogo({
+        buffer: createValidImageBuffer('image/jpeg', 1024),
+        mimeType: 'image/jpeg',
+        size: 1024,
+      });
 
       // Verify old logo was deleted
       expect(mockR2.delete).toHaveBeenCalledWith('logos/old/logo.png');
@@ -307,11 +306,11 @@ describe('BrandingSettingsService', () => {
       const service = createService(mockR2);
 
       // Test PNG
-      await service.uploadLogo(
-        createValidImageBuffer('image/png', 100),
-        'image/png',
-        100
-      );
+      await service.uploadLogo({
+        buffer: createValidImageBuffer('image/png', 100),
+        mimeType: 'image/png',
+        size: 100,
+      });
       expect(mockR2.put).toHaveBeenLastCalledWith(
         expect.stringContaining('.png'),
         expect.anything(),
@@ -321,11 +320,11 @@ describe('BrandingSettingsService', () => {
 
       // Reset and test JPEG
       mockR2.put.mockClear();
-      await service.uploadLogo(
-        createValidImageBuffer('image/jpeg', 100),
-        'image/jpeg',
-        100
-      );
+      await service.uploadLogo({
+        buffer: createValidImageBuffer('image/jpeg', 100),
+        mimeType: 'image/jpeg',
+        size: 100,
+      });
       expect(mockR2.put).toHaveBeenLastCalledWith(
         expect.stringContaining('.jpg'),
         expect.anything(),
@@ -335,11 +334,11 @@ describe('BrandingSettingsService', () => {
 
       // Reset and test WebP
       mockR2.put.mockClear();
-      await service.uploadLogo(
-        createValidImageBuffer('image/webp', 100),
-        'image/webp',
-        100
-      );
+      await service.uploadLogo({
+        buffer: createValidImageBuffer('image/webp', 100),
+        mimeType: 'image/webp',
+        size: 100,
+      });
       expect(mockR2.put).toHaveBeenLastCalledWith(
         expect.stringContaining('.webp'),
         expect.anything(),

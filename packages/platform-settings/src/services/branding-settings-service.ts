@@ -6,7 +6,7 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { type DatabaseWs, schema } from '@codex/database';
+import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
 import {
   ALLOWED_LOGO_MIME_TYPES,
@@ -30,8 +30,8 @@ import {
  * Configuration for BrandingSettingsService
  */
 export interface BrandingSettingsConfig {
-  /** Database connection (requires transaction support) */
-  db: DatabaseWs;
+  /** Database connection (supports both HTTP and WebSocket clients) */
+  db: typeof dbHttp | typeof dbWs;
   /** Runtime environment */
   environment: string;
   /** Organization ID for scoping */
@@ -144,52 +144,20 @@ export class BrandingSettingsService extends BaseService {
 
   /**
    * Upload a new logo.
-   * Validates file type and size, uploads to R2, updates database.
+   * File validation (MIME type, size, magic numbers, SVG sanitization) handled
+   * by @codex/validation validateLogoUpload() before calling this method.
    *
-   * @param file - Logo file (ArrayBuffer or Blob)
-   * @param mimeType - File MIME type
-   * @param fileSize - File size in bytes
+   * @param validatedFile - Validated file data from validateLogoUpload()
    * @returns Updated branding settings with new logo URL
    */
   async uploadLogo(
-    file: ArrayBuffer | Blob,
-    mimeType: string,
-    fileSize: number
+    validatedFile: import('@codex/validation').ValidatedLogoFile
   ): Promise<BrandingSettingsResponse> {
     if (!this.r2) {
       throw new Error('R2 service not configured for logo uploads');
     }
 
-    // Validate file type
-    if (
-      !ALLOWED_LOGO_MIME_TYPES.includes(
-        mimeType as (typeof ALLOWED_LOGO_MIME_TYPES)[number]
-      )
-    ) {
-      throw new InvalidFileTypeError(mimeType, ALLOWED_LOGO_MIME_TYPES);
-    }
-
-    // Validate file size
-    if (fileSize > MAX_LOGO_FILE_SIZE_BYTES) {
-      throw new FileTooLargeError(fileSize, MAX_LOGO_FILE_SIZE_BYTES);
-    }
-
-    // Convert to ArrayBuffer for validation
-    const buffer = file instanceof Blob ? await file.arrayBuffer() : file;
-
-    // Validate file content matches MIME type (prevent spoofing)
-    if (!isValidImageHeader(buffer, mimeType)) {
-      throw new InvalidFileTypeError(mimeType, ALLOWED_LOGO_MIME_TYPES);
-    }
-
-    // Special handling for SVG: sanitize content to prevent XSS
-    let uploadData: ArrayBuffer | Blob | Uint8Array = file;
-    if (mimeType === 'image/svg+xml') {
-      const textDecoder = new TextDecoder();
-      const svgContent = textDecoder.decode(buffer);
-      const sanitized = sanitizeSvgContent(svgContent);
-      uploadData = new TextEncoder().encode(sanitized);
-    }
+    const { buffer, mimeType } = validatedFile;
 
     // Generate R2 path for logo
     const extension = this.getExtensionFromMimeType(mimeType);
@@ -205,7 +173,7 @@ export class BrandingSettingsService extends BaseService {
     const oldLogoPath = currentResult[0]?.logoR2Path;
 
     // Step 1: Upload new logo to R2 first
-    await this.r2.put(r2Path, uploadData, undefined, {
+    await this.r2.put(r2Path, buffer, undefined, {
       contentType: mimeType,
       cacheControl: 'public, max-age=31536000', // 1 year cache
     });

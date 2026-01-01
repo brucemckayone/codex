@@ -114,7 +114,7 @@ export function procedure<
     // Create service registry with cleanup
     // Note: organizationId may be undefined initially, updated after policy enforcement
     let registry: ReturnType<typeof createServiceRegistry>['registry'];
-    let cleanup: () => Promise<void>;
+    let cleanup: (() => Promise<void>) | undefined;
 
     try {
       // ====================================================================
@@ -184,7 +184,7 @@ export function procedure<
       // Step 8: Cleanup Services
       // ====================================================================
       // Only cleanup if registry was created
-      if (cleanup!) {
+      if (cleanup) {
         c.executionCtx.waitUntil(cleanup());
       }
     }

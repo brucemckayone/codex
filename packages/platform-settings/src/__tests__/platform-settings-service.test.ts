@@ -196,11 +196,11 @@ describe('PlatformSettingsFacade', () => {
       const mockR2 = createMockR2();
       const facade = createFacade(mockR2);
 
-      const result = await facade.uploadLogo(
-        createValidImageBuffer('image/png', 1024),
-        'image/png',
-        1024
-      );
+      const result = await facade.uploadLogo({
+        buffer: createValidImageBuffer('image/png', 1024),
+        mimeType: 'image/png',
+        size: 1024,
+      });
 
       expect(mockR2.put).toHaveBeenCalled();
       expect(result.logoUrl).toContain('logos/');
@@ -306,7 +306,11 @@ describe('PlatformSettingsFacade', () => {
 
       // Logo operations should throw
       await expect(
-        facade.uploadLogo(new ArrayBuffer(100), 'image/png', 100)
+        facade.uploadLogo({
+          buffer: new ArrayBuffer(100),
+          mimeType: 'image/png',
+          size: 100,
+        })
       ).rejects.toThrow('R2 service not configured');
     });
 

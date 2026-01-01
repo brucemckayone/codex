@@ -140,28 +140,26 @@ describe('logoMimeTypeSchema', () => {
       expect(logoMimeTypeSchema.parse('image/png')).toBe('image/png');
       expect(logoMimeTypeSchema.parse('image/jpeg')).toBe('image/jpeg');
       expect(logoMimeTypeSchema.parse('image/webp')).toBe('image/webp');
+      expect(logoMimeTypeSchema.parse('image/svg+xml')).toBe('image/svg+xml');
     });
   });
 
   describe('invalid MIME types', () => {
     it('should reject non-image MIME types', () => {
       expect(() => logoMimeTypeSchema.parse('application/pdf')).toThrow(
-        'Logo must be PNG, JPEG, or WebP format'
+        'Logo must be PNG, JPEG, WebP, or SVG format'
       );
       expect(() => logoMimeTypeSchema.parse('text/html')).toThrow(
-        'Logo must be PNG, JPEG, or WebP format'
+        'Logo must be PNG, JPEG, WebP, or SVG format'
       );
     });
 
     it('should reject unsupported image formats', () => {
       expect(() => logoMimeTypeSchema.parse('image/gif')).toThrow(
-        'Logo must be PNG, JPEG, or WebP format'
-      );
-      expect(() => logoMimeTypeSchema.parse('image/svg+xml')).toThrow(
-        'Logo must be PNG, JPEG, or WebP format'
+        'Logo must be PNG, JPEG, WebP, or SVG format'
       );
       expect(() => logoMimeTypeSchema.parse('image/bmp')).toThrow(
-        'Logo must be PNG, JPEG, or WebP format'
+        'Logo must be PNG, JPEG, WebP, or SVG format'
       );
     });
   });
@@ -434,6 +432,7 @@ describe('logo validation constants', () => {
       'image/png',
       'image/jpeg',
       'image/webp',
+      'image/svg+xml',
     ]);
   });
 

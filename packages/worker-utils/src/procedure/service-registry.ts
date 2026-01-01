@@ -60,7 +60,7 @@ export interface ServiceRegistryResult {
  */
 export function createServiceRegistry(
   env: Bindings,
-  obs?: ObservabilityClient,
+  _obs?: ObservabilityClient,
   organizationId?: string
 ): ServiceRegistryResult {
   // Track cleanup functions for per-request DB clients

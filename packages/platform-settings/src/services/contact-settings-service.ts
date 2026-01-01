@@ -5,7 +5,7 @@
  * platform name, support email, contact URL, timezone.
  */
 
-import { type DatabaseWs, schema } from '@codex/database';
+import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
 import {
   type ContactSettingsResponse,
@@ -19,8 +19,8 @@ import { SettingsUpsertError } from '../errors';
  * Configuration for ContactSettingsService
  */
 export interface ContactSettingsConfig {
-  /** Database connection (requires transaction support) */
-  db: DatabaseWs;
+  /** Database connection (supports both HTTP and WebSocket clients) */
+  db: typeof dbHttp | typeof dbWs;
   /** Runtime environment */
   environment: string;
   /** Organization ID for scoping */
