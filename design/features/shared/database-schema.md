@@ -146,8 +146,8 @@ CREATE TABLE media_items (
   media_type media_type NOT NULL,
   status media_status DEFAULT 'uploading' NOT NULL,
 
-  -- R2 Storage (in creator's bucket: codex-media-{creator_id})
-  r2_key VARCHAR(500) NOT NULL, -- e.g., "originals/{media_id}/video.mp4"
+  -- R2 Storage (unified buckets, creator-scoped prefixes)
+  r2_key VARCHAR(500) NOT NULL, -- e.g., "{creatorId}/originals/{media_id}/original.mp4"
   file_size_bytes BIGINT,
   mime_type VARCHAR(100),
 
@@ -157,8 +157,16 @@ CREATE TABLE media_items (
   height INTEGER, -- For video
 
   -- HLS Transcoding (Phase 1+, handled by Media Transcoding feature)
-  hls_master_playlist_key VARCHAR(500), -- e.g., "hls/{media_id}/master.m3u8"
-  thumbnail_key VARCHAR(500), -- e.g., "thumbnails/{media_id}/thumb.jpg"
+  hls_master_playlist_key VARCHAR(500), -- e.g., "{creatorId}/hls/{media_id}/master.m3u8"
+  hls_preview_key VARCHAR(500), -- e.g., "{creatorId}/hls/{media_id}/preview/preview.m3u8"
+  thumbnail_key VARCHAR(500), -- e.g., "{creatorId}/thumbnails/media/{media_id}/auto-generated.jpg"
+  waveform_key VARCHAR(500), -- e.g., "{creatorId}/waveforms/{media_id}/waveform.json"
+  waveform_image_key VARCHAR(500), -- e.g., "{creatorId}/thumbnails/media/{media_id}/waveform.png"
+
+  -- Transcoding tracking
+  transcoding_error TEXT,
+  transcoding_attempts INTEGER DEFAULT 0 NOT NULL,
+  runpod_job_id TEXT,
 
   -- Timestamps
   uploaded_at TIMESTAMPTZ,
@@ -176,7 +184,7 @@ CREATE TABLE media_items (
 **Phase 1 Usage**:
 
 - Creator uploads video/audio → creates media_item
-- Media stored in creator's R2 bucket (`codex-media-{creator_id}`)
+- Media stored in unified media bucket with creator-scoped prefixes
 - Status tracks upload/transcoding lifecycle
 - One media_item can be referenced by multiple content posts
 

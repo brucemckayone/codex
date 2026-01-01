@@ -126,7 +126,23 @@ export function createTestMediaItemInput(
     width: null,
     height: null,
     hlsMasterPlaylistKey: null,
+    hlsPreviewKey: null,
     thumbnailKey: null,
+    waveformKey: null,
+    waveformImageKey: null,
+    // Mezzanine (B2 archival)
+    mezzanineKey: null,
+    mezzanineStatus: null,
+    // Transcoding tracking
+    transcodingPriority: 'standard',
+    readyVariants: [],
+    transcodingError: null,
+    transcodingAttempts: 0,
+    runpodJobId: null,
+    // Loudness metadata
+    loudnessIntegrated: null,
+    loudnessPeak: null,
+    loudnessRange: null,
     uploadedAt: null,
     ...overrides,
   };
@@ -160,7 +176,28 @@ export function createTestMediaItem(
     width: mediaType === 'video' ? 1920 : null,
     height: mediaType === 'video' ? 1080 : null,
     hlsMasterPlaylistKey: `hls/${id}/master.m3u8`,
+    hlsPreviewKey:
+      mediaType === 'video' ? `hls/${id}/preview/preview.m3u8` : null,
     thumbnailKey: `thumbnails/${id}/thumb.jpg`,
+    waveformKey: mediaType === 'audio' ? `waveforms/${id}/waveform.json` : null,
+    waveformImageKey:
+      mediaType === 'audio' ? `thumbnails/${id}/waveform.png` : null,
+    // Mezzanine (B2 archival)
+    mezzanineKey: `mezzanine/${creatorId}/${id}/mezzanine.mp4`,
+    mezzanineStatus: 'ready',
+    // Transcoding tracking
+    transcodingPriority: 'standard',
+    readyVariants:
+      mediaType === 'video'
+        ? ['1080p', '720p', '480p', 'preview']
+        : ['128k', '64k'],
+    transcodingError: null,
+    transcodingAttempts: 0,
+    runpodJobId: null,
+    // Loudness metadata (normalized EBU R128)
+    loudnessIntegrated: -1600, // -16 LUFS
+    loudnessPeak: -150, // -1.5 dBFS
+    loudnessRange: 720, // 7.2 LU
     uploadedAt: now,
     createdAt: now,
     updatedAt: now,

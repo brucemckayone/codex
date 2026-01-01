@@ -133,8 +133,8 @@ export const mediaItems = pgTable(
     status: varchar('status', { length: 50 }).default('uploading').notNull(),
     // 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed'
 
-    // R2 Storage (in creator's bucket: codex-media-{creator_id}) // TODO: double check this is correct becuase it should be that we are 4 buckets and each has its own creator id subfolder within
-    r2Key: varchar('r2_key', { length: 500 }).notNull(), // "originals/{media_id}/video.mp4"
+    // R2 Storage (unified buckets with creator-scoped prefixes)
+    r2Key: varchar('r2_key', { length: 500 }).notNull(), // "{creatorId}/originals/{media_id}/original.mp4"
     fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
     mimeType: varchar('mime_type', { length: 100 }),
 
@@ -144,8 +144,29 @@ export const mediaItems = pgTable(
     height: integer('height'), // For video
 
     // HLS Transcoding (Phase 1+)
-    hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }), // "hls/{media_id}/master.m3u8"
-    thumbnailKey: varchar('thumbnail_key', { length: 500 }), // "thumbnails/{media_id}/thumb.jpg"
+    hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }), // "{creatorId}/hls/{media_id}/master.m3u8"
+    hlsPreviewKey: varchar('hls_preview_key', { length: 500 }), // "{creatorId}/hls/{media_id}/preview/preview.m3u8"
+    thumbnailKey: varchar('thumbnail_key', { length: 500 }), // "{creatorId}/thumbnails/media/{media_id}/auto-generated.jpg"
+    waveformKey: varchar('waveform_key', { length: 500 }), // "{creatorId}/waveforms/{media_id}/waveform.json"
+    waveformImageKey: varchar('waveform_image_key', { length: 500 }), // "{creatorId}/thumbnails/media/{media_id}/waveform.png"
+
+    // Mezzanine (B2 archival storage for re-encoding)
+    mezzanineKey: varchar('mezzanine_key', { length: 500 }), // B2: "mezzanine/{creatorId}/{media_id}/mezzanine.mp4"
+    mezzanineStatus: varchar('mezzanine_status', { length: 50 }), // 'pending' | 'creating' | 'ready' | 'failed'
+
+    // Transcoding tracking
+    transcodingPriority: varchar('transcoding_priority', {
+      length: 50,
+    }).default('standard'), // 'immediate' | 'standard' | 'on_demand'
+    readyVariants: jsonb('ready_variants').$type<string[]>().default([]), // e.g., ["1080p", "720p", "480p", "preview"]
+    transcodingError: text('transcoding_error'), // Stores failure reason
+    transcodingAttempts: integer('transcoding_attempts').default(0).notNull(), // Tracks retry count (max 1 retry)
+    runpodJobId: text('runpod_job_id'), // RunPod job ID for status tracking
+
+    // Loudness metadata (stored as integer ×100 for precision)
+    loudnessIntegrated: integer('loudness_integrated'), // ×100, e.g., -1600 for -16 LUFS
+    loudnessPeak: integer('loudness_peak'), // ×100, e.g., -150 for -1.5 dBFS (true peak)
+    loudnessRange: integer('loudness_range'), // ×100, e.g., 720 for 7.2 LU (loudness range)
 
     // Timestamps
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
@@ -169,6 +190,14 @@ export const mediaItems = pgTable(
       sql`${table.status} IN ('uploading', 'uploaded', 'transcoding', 'ready', 'failed')`
     ),
     check('check_media_type', sql`${table.mediaType} IN ('video', 'audio')`),
+    check(
+      'check_mezzanine_status',
+      sql`${table.mezzanineStatus} IS NULL OR ${table.mezzanineStatus} IN ('pending', 'creating', 'ready', 'failed')`
+    ),
+    check(
+      'check_transcoding_priority',
+      sql`${table.transcodingPriority} IN ('immediate', 'standard', 'on_demand')`
+    ),
   ]
 );
 

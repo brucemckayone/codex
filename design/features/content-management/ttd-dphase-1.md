@@ -7,29 +7,29 @@ The content management system enables Creators to upload, organize, and manage v
 **Key Architecture Decisions**:
 
 - **Media Library Pattern**: Separate `media_items` table for uploaded files, `content` table references media via `media_item_id`
-- **Shared Buckets with Organization Scoping** (Phase 1 Simplification):
+- **Shared Buckets with Creator Scoping** (Phase 1):
   - Shared R2 buckets: `codex-media-production`, `codex-assets-production`
-  - Organization-scoped paths: `{organizationId}/media/{mediaId}/`, `{organizationId}/assets/{type}/`
-  - **Future**: Bucket-per-creator isolation (Phase 2+)
+  - Creator-scoped paths: `{creatorId}/originals/{mediaId}/`, `{creatorId}/assets/{type}/`
+  - **Future**: Bucket-per-creator isolation (if needed)
 - **Reusable Resources**: PDF/workbooks stored once, attached to multiple content via `content_resources`
 - **Direct Upload Strategy**: Browser → R2 uploads via presigned URLs (bypasses server)
-- **Transcoding Separation**: Video transcoding handled by separate Media Transcoding feature (Phase 2)
+- **Transcoding Separation**: Media transcoding handled by separate Media Transcoding feature (Phase 1)
 
 **Architecture**:
 
-- **Storage Layer**: Cloudflare R2 (shared buckets with org-scoped paths) for media files, resources, assets
+- **Storage Layer**: Cloudflare R2 (shared buckets with creator-scoped paths) for media files, resources, assets
 - **Metadata Layer**: Neon Postgres for `media_items`, `content`, `resources` records
 - **Upload Strategy**: Direct browser → R2 (bypasses server, tracks progress)
 - **Access Control**: Presigned URLs for secure file access
-- **Multi-Tenancy**: Organization-scoped queries on all database operations
+- **Multi-Tenancy**: Creator-scoped queries on all media operations
 
 **Architecture Diagram**:
 
 ![Content Management Architecture](./assets/content-management-architecture.png)
 
-The diagram illustrates the direct upload strategy (browser → R2 via presigned URLs), media library pattern, organization-scoped storage paths, and transcoding queue integration.
+The diagram illustrates the direct upload strategy (browser → R2 via presigned URLs), media library pattern, creator-scoped storage paths, and media-api trigger integration.
 
-**Phase 1 Note**: This TDD describes the simplified Phase 1 architecture using shared R2 buckets with organization-scoped paths. For the full bucket-per-creator architecture, see the Phase 2+ evolution plan in [EVOLUTION.md](./EVOLUTION.md).
+**Phase 1 Note**: This TDD describes shared R2 buckets with creator-scoped paths. For the full bucket-per-creator architecture, see the Phase 2+ evolution plan in [EVOLUTION.md](./EVOLUTION.md).
 
 ---
 
@@ -42,17 +42,17 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 1.  **Drizzle ORM Setup**: The database schema for content, media, and resources must be in place.
 2.  **Cloudflare R2 Buckets**: Shared buckets (`codex-media-production`, `codex-assets-production`) must be configured.
 3.  **Auth System**: The `requireAuth()` middleware is necessary to protect content management routes and provide user context.
-4.  **Cloudflare Queue**: The `TRANSCODING_QUEUE` is needed to handle video processing jobs (Phase 2).
+4.  **Media API**: Internal media-api worker handles transcoding triggers and webhook processing.
 
 ---
 
 ## Component List
 
 > **Phase 1 Simplifications:**
-> - **Shared R2 Buckets**: Using `codex-media-production` and `codex-assets-production` shared buckets with organization-scoped paths
-> - **Organization-Level Isolation**: All queries filtered by `organizationId` from user context
+> - **Shared R2 Buckets**: Using `codex-media-production` and `codex-assets-production` shared buckets with creator-scoped paths
+> - **Creator-Level Isolation**: All media queries filtered by `creatorId`
 > - **Bucket-per-creator Architecture**: Deferred to Phase 2+ (see [EVOLUTION.md](./EVOLUTION.md))
-> - **Auth Context**: `requireAuth()` middleware provides user context including `organizationId`
+> - **Auth Context**: `requireAuth()` middleware provides user context including `creatorId`
 
 ### 1. Media Items Service (`packages/web/src/lib/server/media/service.ts`)
 
@@ -825,6 +825,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 ```typescript
 import { mediaItemsService } from '$lib/server/media/service';
+import { workerFetch } from '@codex/security';
 import { requireAuth } from '$lib/server/guards';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
@@ -846,23 +847,14 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
     mimeType,
   });
 
-  // If video, enqueue transcoding job
-  if (mediaItem.type === 'video') {
-    await platform.env.TRANSCODING_QUEUE.send({
-      mediaId: mediaItem.id,
-      organizationId: user.organizationId,
-      inputBucket: bucketName,
-      inputPath: r2Path,
-      outputBucket: bucketName,
-      outputPrefix: `${user.organizationId}/media/${mediaId}/hls/`,
-    });
-
-    // Update status to transcoding
-    await mediaItemsService.updateMediaItemStatus(mediaId, 'transcoding');
-  } else {
-    // Audio files are immediately ready
-    await mediaItemsService.updateMediaItemStatus(mediaId, 'ready');
-  }
+  // Trigger transcoding for both video and audio via media-api
+  await workerFetch(
+    `${platform.env.MEDIA_WORKER_URL}/internal/media/${mediaId}/transcode`,
+    {
+      method: 'POST',
+    },
+    platform.env.WORKER_SHARED_SECRET
+  );
 
   return json(mediaItem, { status: 201 });
 };

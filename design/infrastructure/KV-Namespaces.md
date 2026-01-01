@@ -689,8 +689,8 @@ declare global {
         AUTH_SESSION_KV: KVNamespace;
         CACHE_KV: KVNamespace;
 
-        // Queues
-        TRANSCODING_QUEUE: Queue;
+        // Queues (Phase 2 - deferred)
+        TRANSCODING_QUEUE?: Queue;
 
         // Environment variables
         DATABASE_URL: string;
@@ -878,7 +878,7 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 
 ### 3. Worker Integration
 
-#### Queue Consumer Worker
+#### Queue Consumer Worker (Phase 2 - Deferred)
 
 **`workers/queue-consumer/src/index.ts`**:
 ```typescript
@@ -886,7 +886,8 @@ import { CacheClient } from '@codex/cloudflare-clients';
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 interface Env {
-  TRANSCODING_QUEUE: Queue;
+  // Phase 2 - deferred
+  TRANSCODING_QUEUE?: Queue;
   CACHE_KV: KVNamespace;
   RUNPOD_API_KEY: string;
   // ... other env vars
@@ -1340,7 +1341,7 @@ kv_namespaces = [
   { binding = "CACHE_KV", id = "prod-cache-id" }
 ]
 
-# Queue Bindings (for transcoding worker)
+# Queue Bindings (Phase 2 - Deferred)
 [[queues.producers]]
 queue = "transcoding-queue"
 binding = "TRANSCODING_QUEUE"

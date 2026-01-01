@@ -164,21 +164,12 @@ r2: {
   }
 }
 
-# Transcoding Queue
-queue: {
-  label: "Cloudflare Queue"
-
-  transcoding_queue: {
-    label: "TRANSCODING_QUEUE\n\nJobs for video\nprocessing"
-    style: {
-      fill: ${color-redis}
-      stroke: ${stroke-redis}
-    }
-  }
-
+# Media API (Transcoding Trigger)
+media_api: {
+  label: "media-api\n\nInternal transcoding trigger"
   style: {
-    fill: "#FFEBEE"
-    stroke: "#EF9A9A"
+    fill: ${color-worker}
+    stroke: ${stroke-worker}
     stroke-width: 2
   }
 }
@@ -225,7 +216,7 @@ services.media_service -> postgres.tables: "INSERT INTO media_items\n(id, creato
   style.stroke: ${arrow-sql}
 }
 
-services.media_service -> queue.transcoding_queue: "Enqueue video\nfor transcoding" {
+services.media_service -> media_api: "Trigger transcoding\nPOST /internal/media/:id/transcode" {
   style.stroke: ${arrow-cache}
 }
 
@@ -264,12 +255,12 @@ sveltekit.media_routes -> browser.media_library: "SSR HTML\n(media list)" {
 
 # Notes
 note_direct_upload: {
-  label: "🚀 Direct Upload Strategy:\n1. Browser requests presigned URL from server\n2. Server generates R2 presigned URL (15min)\n3. Browser uploads DIRECTLY to R2 (bypasses server)\n4. Browser confirms upload → Server creates DB record\n5. Video enqueued for transcoding"
+  label: "🚀 Direct Upload Strategy:\n1. Browser requests presigned URL from server\n2. Server generates R2 presigned URL (15min)\n3. Browser uploads DIRECTLY to R2 (bypasses server)\n4. Browser confirms upload → Server creates DB record\n5. media-api triggers transcoding"
   shape: text
 }
 
 note_bucket_isolation: {
-  label: "🗂️ Bucket-Per-Creator:\n• Each creator gets 3 isolated buckets:\n  - codex-media-{creatorId}\n  - codex-assets-{creatorId}\n  - codex-resources-{creatorId}\n• Prevents cross-creator data leakage\n• Simplifies access control"
+  label: "🗂️ Unified Buckets:\n• Shared buckets per env:\n  - codex-media-{env}\n  - codex-assets-{env}\n  - codex-resources-{env}\n• Creator-scoped prefixes prevent leakage\n• Simplifies access control"
   shape: text
 }
 

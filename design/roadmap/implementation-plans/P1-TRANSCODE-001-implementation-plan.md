@@ -1674,6 +1674,67 @@ export function verifyRunPodSignature(secret: string) {
 }
 ```
 
+### 5.5 Security: Rate Limiting & Access Control
+
+**Rate Limiting Strategy** (via `withPolicy()` from @codex/worker-utils):
+
+| Endpoint | Preset | Rate | Rationale |
+|----------|--------|------|-----------|
+| `POST /internal/media/:id/transcode` | n/a | workerAuth only | Internal, no public rate limit |
+| `POST /api/transcoding/webhook` | `webhook` | 1000/min | High volume from RunPod |
+| `GET /api/transcoding/status/:id` | `api` | 100/min | Standard API rate |
+| `POST /api/transcoding/retry/:id` | `auth` | 10/min | Prevent retry abuse |
+
+**Route Implementation**:
+```typescript
+import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
+import { createAuthenticatedHandler, withPolicy } from '@codex/worker-utils';
+
+// Internal trigger - workerAuth only, no public rate limit
+app.post('/internal/media/:id/transcode',
+  verifyWorkerAuth(c.env.SHARED_SECRET),
+  triggerHandler
+);
+
+// Webhook - high volume rate limit
+app.use('/api/transcoding/webhook', (c, next) =>
+  rateLimit({
+    kv: c.env.RATE_LIMIT_KV,
+    ...RATE_LIMIT_PRESETS.webhook, // 1000 req/min
+  })(c, next)
+);
+app.post('/api/transcoding/webhook',
+  verifyRunPodSignature(c.env.RUNPOD_WEBHOOK_SECRET),
+  webhookHandler
+);
+
+// Status check - standard API rate
+app.get('/api/transcoding/status/:id',
+  withPolicy({ auth: 'required', rateLimit: 'api' }), // 100 req/min
+  createAuthenticatedHandler({
+    schema: { params: mediaIdSchema },
+    handler: statusHandler,
+  })
+);
+
+// Retry - strict rate limit
+app.post('/api/transcoding/retry/:id',
+  withPolicy({ auth: 'required', rateLimit: 'auth' }), // 10 req/min
+  createAuthenticatedHandler({
+    schema: { params: mediaIdSchema },
+    handler: retryHandler,
+  })
+);
+```
+
+**Security Checklist**:
+- [x] HMAC-SHA256 on all webhooks (verifyRunPodSignature)
+- [x] workerAuth on internal endpoints
+- [x] No secrets in job payloads (env vars on RunPod)
+- [x] Creator prefix validation on all paths (validateCreatorPrefix)
+- [x] Rate limiting on public endpoints via withPolicy()
+- [x] Timing-safe signature comparison
+
 ---
 
 ## Part 6: Implementation Phases

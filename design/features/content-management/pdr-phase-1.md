@@ -137,9 +137,9 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 4. System:
    - Validates file type (MP4, WebM, MOV) and size (max 5GB)
    - Requests presigned upload URL from backend
-   - Backend generates R2 presigned URL for creator's bucket: `codex-media-{creatorId}/originals/{mediaId}/original.mp4`
+   - Backend generates R2 presigned URL for unified media bucket: `codex-media-{env}/{creatorId}/originals/{mediaId}/original.mp4`
    - Shows upload progress bar
-   - Uploads directly to creator's R2 media bucket (creator-owned storage)
+   - Uploads directly to unified media bucket (creator-scoped prefix)
 5. On upload complete:
    - Frontend notifies backend: `POST /api/media/upload-complete`
    - Backend creates `media_items` record:
@@ -147,8 +147,8 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
      - `creator_id = {creatorId}` ← Media is creator-owned
      - `type = 'video'`
      - `status = 'uploaded'`
-     - `r2_key = 'originals/{mediaId}/original.mp4'`
-   - Backend enqueues transcoding job (see [Media Transcoding](../media-transcoding/pdr-phase-1.md))
+     - `r2_key = '{creatorId}/originals/{mediaId}/original.mp4'`
+   - Backend triggers media-api to start transcoding (see [Media Transcoding](../media-transcoding/pdr-phase-1.md))
    - `media_items.status` updated to `'transcoding'`
 6. Creator sees media item in media library with status "Transcoding..."
 7. When transcoding completes, status updates to "Ready"
@@ -158,7 +158,7 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 - Video file uploaded to creator's R2 bucket successfully
 - Progress bar shows accurate upload percentage
 - `media_items` record created with correct metadata
-- Transcoding job enqueued automatically
+- Transcoding triggered automatically via media-api
 - Media item appears in media library with status indicator
 - Upload fails gracefully if file too large or wrong format
 - Creator sees success message after upload
@@ -237,17 +237,18 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 1. Creator navigates to `/admin/media/upload`
 2. Creator clicks "Upload Audio" button
 3. Creator selects MP3 file from computer (50MB)
-4. System uploads to `codex-media-{creatorId}/audio/{mediaId}/audio.mp3`
+4. System uploads to `codex-media-{env}/{creatorId}/originals/{mediaId}/original.mp3`
 5. Backend creates `media_items` record:
    - `type = 'audio'`
-   - `status = 'ready'` (no transcoding needed for audio)
-6. Creator creates content referencing audio media item (same flow as video)
+   - `status = 'uploaded'` (ready for transcoding)
+6. Backend triggers media-api to start transcoding
+7. Creator creates content referencing audio media item (same flow as video)
 
 **Acceptance Criteria:**
 
 - Audio file uploaded to R2 successfully
 - `media_items` record created with type = 'audio'
-- No transcoding for audio (status immediately 'ready')
+- Audio transcoding + waveform generation required before status is 'ready'
 - Content can reference audio media items
 - Audio playback works in customer-facing player
 
@@ -437,7 +438,7 @@ See diagrams:
 
 - **Cloudflare R2**: Object storage for media, resources, assets
   - Unified buckets with creator-specific folder structure (see [R2 Bucket Structure](../../infrastructure/R2BucketStructure.md))
-  - Folder paths: `{creatorId}/originals/`, `{creatorId}/hls/`, `{creatorId}/audio/`
+- Folder paths: `{creatorId}/originals/`, `{creatorId}/hls/`, `{creatorId}/hls-audio/`
   - Access via R2 API with presigned URLs
 - **Neon Postgres**: Metadata storage
   - `media_items` table (uploaded files)
@@ -591,7 +592,7 @@ See [Database Schema](../../features/shared/database-schema.md) for full schema:
 2. Backend generates R2 presigned PUT URL for creator's bucket
 3. Browser uploads directly to R2 (progress tracking)
 4. On complete, browser notifies backend: `POST /api/media/upload-complete`
-5. Backend creates `media_items` record and enqueues transcoding job
+5. Backend creates `media_items` record and triggers media-api transcoding
 
 **Benefits**:
 
