@@ -47,13 +47,14 @@ This document is the **single source of truth** for implementing media transcodi
 
 ## Part 1: Contracts (Ground Truth)
 
-### 1.1 R2 Path Contract
+### 1.1 Storage Path Contract
 
-All R2 keys include the creator prefix. This is the single source of truth.
+All paths include creator prefix for multi-tenancy. The system uses **tiered storage**:
+- **R2**: Delivery (zero egress to Cloudflare)
+- **B2**: Archival (cheaper storage, Bandwidth Alliance for free egress)
 
-**Media Bucket** (`codex-media-{env}`):
+**R2 Media Bucket** (`codex-media-{env}`) - Delivery:
 ```
-{creatorId}/originals/{mediaId}/original.<ext>     # Input file
 {creatorId}/hls/{mediaId}/master.m3u8              # Video HLS master
 {creatorId}/hls/{mediaId}/1080p/playlist.m3u8      # Video variant
 {creatorId}/hls/{mediaId}/1080p/segment_000.ts     # Video segment
@@ -62,12 +63,24 @@ All R2 keys include the creator prefix. This is the single source of truth.
 {creatorId}/hls-audio/{mediaId}/128k/playlist.m3u8 # Audio variant
 ```
 
-**Assets Bucket** (`codex-assets-{env}`):
+**R2 Assets Bucket** (`codex-assets-{env}`) - Public Assets:
 ```
 {creatorId}/thumbnails/media/{mediaId}/auto-generated.jpg  # Video thumbnail
 {creatorId}/waveforms/{mediaId}/waveform.json              # Audio waveform data
 {creatorId}/thumbnails/media/{mediaId}/waveform.png        # Audio waveform image
 ```
+
+**Backblaze B2 Archive Bucket** (`codex-archive`) - Archival:
+```
+originals/{creatorId}/{mediaId}/original.<ext>     # Raw upload (temporary)
+mezzanine/{creatorId}/{mediaId}/mezzanine.mp4      # High-quality intermediate (permanent)
+```
+
+**Why Tiered Storage?**
+- R2: $15/TB storage, $0 egress to CF Workers → best for delivery
+- B2: $6/TB storage, free egress to CF via Bandwidth Alliance → best for archival
+- Mezzanine retained indefinitely for future re-encoding
+- Original deleted 24h after mezzanine verified (saves 50% archival storage)
 
 ### 1.2 RunPod Input Payload (media-api → RunPod)
 
@@ -91,7 +104,7 @@ All R2 keys include the creator prefix. This is the single source of truth.
 
 ### 1.3 RunPod Webhook Payload (RunPod → media-api)
 
-**Success**:
+**Success (Video)**:
 ```json
 {
   "id": "runpod-job-12345",
@@ -102,11 +115,42 @@ All R2 keys include the creator prefix. This is the single source of truth.
     "hlsMasterPlaylistKey": "{creatorId}/hls/{mediaId}/master.m3u8",
     "hlsPreviewKey": "{creatorId}/hls/{mediaId}/preview/preview.m3u8",
     "thumbnailKey": "{creatorId}/thumbnails/media/{mediaId}/auto-generated.jpg",
+    "mezzanineKey": "mezzanine/{creatorId}/{mediaId}/mezzanine.mp4",
     "durationSeconds": 120,
     "width": 1920,
-    "height": 1080
+    "height": 1080,
+    "readyVariants": ["1080p", "720p", "480p", "360p", "preview"],
+    "loudness": {
+      "integrated": -1600,
+      "peak": -150,
+      "range": 720
+    }
   },
   "executionTime": 45000
+}
+```
+
+**Success (Audio)**:
+```json
+{
+  "id": "runpod-job-12345",
+  "status": "COMPLETED",
+  "output": {
+    "mediaId": "uuid",
+    "mediaType": "audio",
+    "hlsMasterPlaylistKey": "{creatorId}/hls-audio/{mediaId}/master.m3u8",
+    "waveformKey": "{creatorId}/waveforms/{mediaId}/waveform.json",
+    "waveformImageKey": "{creatorId}/thumbnails/media/{mediaId}/waveform.png",
+    "mezzanineKey": "mezzanine/{creatorId}/{mediaId}/mezzanine.mp4",
+    "durationSeconds": 180,
+    "readyVariants": ["128k", "64k"],
+    "loudness": {
+      "integrated": -1600,
+      "peak": -150,
+      "range": 720
+    }
+  },
+  "executionTime": 15000
 }
 ```
 
@@ -136,12 +180,25 @@ failed → uploaded       (manual retry, max 1)
 
 Add to `media_items` table:
 ```typescript
+// Phase 1 core fields
 hlsPreviewKey: varchar('hls_preview_key', { length: 500 }),
 waveformKey: varchar('waveform_key', { length: 500 }),
 waveformImageKey: varchar('waveform_image_key', { length: 500 }),
 transcodingError: text('transcoding_error'),
 transcodingAttempts: integer('transcoding_attempts').default(0),
 runpodJobId: varchar('runpod_job_id', { length: 100 }),
+
+// Extensibility fields (mezzanine + future features)
+mezzanineKey: varchar('mezzanine_key', { length: 500 }),           // B2 archive bucket path
+mezzanineStatus: varchar('mezzanine_status', { length: 50 }),      // pending|ready|deleted
+transcodingPriority: varchar('transcoding_priority', { length: 20 })
+  .default('standard'),                                             // immediate|standard|on_demand
+readyVariants: jsonb('ready_variants').$type<string[]>().default([]), // ['1080p','720p','preview']
+
+// Loudness metadata (populated by RunPod)
+loudnessIntegrated: integer('loudness_integrated'),   // -16 LUFS (×100 for precision, e.g. -1600)
+loudnessPeak: integer('loudness_peak'),               // dBFS (×100)
+loudnessRange: integer('loudness_range'),             // LU (×100)
 ```
 
 ---
@@ -550,6 +607,143 @@ class R2Client:
 
 
 # ============================================================================
+# Backblaze B2 Storage Client (Archival)
+# ============================================================================
+
+class B2Client:
+    """S3-compatible client for Backblaze B2 archival storage."""
+
+    def __init__(self):
+        self.key_id = os.environ.get('B2_KEY_ID')
+        self.app_key = os.environ.get('B2_APPLICATION_KEY')
+        self.bucket_name = os.environ.get('B2_BUCKET_NAME')
+        self.endpoint = os.environ.get('B2_ENDPOINT')
+        self.region = os.environ.get('B2_REGION', 'us-west-004')
+
+        if not all([self.key_id, self.app_key, self.bucket_name, self.endpoint]):
+            raise ValueError("B2 credentials not configured in environment")
+
+        self.client = boto3.client(
+            's3',
+            endpoint_url=self.endpoint,
+            aws_access_key_id=self.key_id,
+            aws_secret_access_key=self.app_key,
+            region_name=self.region
+        )
+
+    def download(self, key: str, local_path: str):
+        """Download file from B2 to local path."""
+        print(f"Downloading b2://{self.bucket_name}/{key} to {local_path}")
+        self.client.download_file(self.bucket_name, key, local_path)
+
+    def upload(self, local_path: str, key: str, content_type: str = None):
+        """Upload local file to B2."""
+        print(f"Uploading {local_path} to b2://{self.bucket_name}/{key}")
+        extra_args = {}
+        if content_type:
+            extra_args['ContentType'] = content_type
+        self.client.upload_file(local_path, self.bucket_name, key, ExtraArgs=extra_args or None)
+
+    def delete(self, key: str):
+        """Delete file from B2."""
+        print(f"Deleting b2://{self.bucket_name}/{key}")
+        self.client.delete_object(Bucket=self.bucket_name, Key=key)
+
+
+# ============================================================================
+# Mezzanine Creation (High-Quality Intermediate)
+# ============================================================================
+
+def create_mezzanine(input_path: str, output_path: str) -> dict:
+    """
+    Create high-quality mezzanine from original.
+    Uses H.264 CRF 18 (not ProRes - too large for cloud storage).
+
+    Returns metadata about the mezzanine file.
+    """
+    cmd = [
+        'ffmpeg', '-y', '-i', input_path,
+        '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',  # High quality
+        '-c:a', 'aac', '-b:a', '320k',                        # High-quality audio
+        '-movflags', '+faststart',                            # Web optimization
+        output_path
+    ]
+    run_command(cmd, "Create mezzanine")
+
+    # Get mezzanine file size for logging
+    mezzanine_size = os.path.getsize(output_path)
+    print(f"Mezzanine created: {mezzanine_size / (1024*1024):.1f} MB")
+
+    return {'path': output_path, 'size': mezzanine_size}
+
+
+# ============================================================================
+# Two-Pass Loudness Normalization
+# ============================================================================
+
+def analyze_loudness(input_path: str) -> dict:
+    """
+    Analyze audio loudness using ffmpeg loudnorm filter (first pass).
+    Returns measured loudness values for second pass.
+    """
+    cmd = [
+        'ffmpeg', '-i', input_path,
+        '-af', f'loudnorm=I={Config.LOUDNORM_I}:TP={Config.LOUDNORM_TP}:LRA={Config.LOUDNORM_LRA}:print_format=json',
+        '-f', 'null', '-'
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    # Parse loudnorm JSON output from stderr
+    stderr = result.stderr
+    json_start = stderr.rfind('{')
+    json_end = stderr.rfind('}') + 1
+
+    if json_start == -1 or json_end == 0:
+        raise RuntimeError("Failed to parse loudnorm analysis output")
+
+    loudnorm_json = json.loads(stderr[json_start:json_end])
+
+    return {
+        'input_i': float(loudnorm_json.get('input_i', -23)),
+        'input_tp': float(loudnorm_json.get('input_tp', -1)),
+        'input_lra': float(loudnorm_json.get('input_lra', 7)),
+        'input_thresh': float(loudnorm_json.get('input_thresh', -33)),
+    }
+
+
+def normalize_with_measurements(input_path: str, output_path: str) -> dict:
+    """
+    Two-pass loudness normalization with measurements.
+    Returns measured loudness values for database storage.
+    """
+    # Pass 1: Analyze
+    analysis = analyze_loudness(input_path)
+    print(f"Loudness analysis: I={analysis['input_i']:.1f} LUFS, TP={analysis['input_tp']:.1f} dBFS, LRA={analysis['input_lra']:.1f} LU")
+
+    # Pass 2: Normalize using measured values
+    loudnorm_filter = (
+        f"loudnorm=I={Config.LOUDNORM_I}:TP={Config.LOUDNORM_TP}:LRA={Config.LOUDNORM_LRA}:"
+        f"measured_I={analysis['input_i']}:measured_TP={analysis['input_tp']}:"
+        f"measured_LRA={analysis['input_lra']}:measured_thresh={analysis['input_thresh']}:linear=true"
+    )
+
+    cmd = [
+        'ffmpeg', '-y', '-i', input_path,
+        '-af', loudnorm_filter,
+        '-c:a', 'aac', '-b:a', '320k',
+        output_path
+    ]
+    run_command(cmd, "Two-pass loudness normalization")
+
+    # Return measurements for database (×100 for integer precision)
+    return {
+        'integrated': int(analysis['input_i'] * 100),   # e.g., -1600 for -16 LUFS
+        'peak': int(analysis['input_tp'] * 100),        # e.g., -150 for -1.5 dBFS
+        'range': int(analysis['input_lra'] * 100),      # e.g., 720 for 7.2 LU
+    }
+
+
+# ============================================================================
 # Media Processing Utilities
 # ============================================================================
 
@@ -923,9 +1117,28 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         metadata = probe_media(input_path)
         print(f"Media metadata: {metadata}")
 
+        # Initialize B2 client for archival storage
+        b2 = B2Client()
+
+        # Step 1: Create mezzanine (high-quality intermediate)
+        mezzanine_path = os.path.join(work_dir, 'mezzanine.mp4')
+        mezzanine_result = create_mezzanine(input_path, mezzanine_path)
+
+        # Step 2: Upload mezzanine to B2 archival storage
+        mezzanine_key = f"mezzanine/{creator_id}/{media_id}/mezzanine.mp4"
+        b2.upload(mezzanine_path, mezzanine_key, 'video/mp4')
+
+        # Step 3: Measure loudness (two-pass analysis)
+        loudness = analyze_loudness(mezzanine_path)
+        loudness_output = {
+            'integrated': int(loudness['input_i'] * 100),
+            'peak': int(loudness['input_tp'] * 100),
+            'range': int(loudness['input_lra'] * 100),
+        }
+
         # Process based on media type
         if media_type == 'video':
-            result = transcode_video(input_path, work_dir, metadata)
+            result = transcode_video(mezzanine_path, work_dir, metadata)
 
             # Upload HLS files
             r2.sync_directory(
@@ -957,13 +1170,16 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                 'hlsMasterPlaylistKey': job_input['outputPrefix'] + 'master.m3u8',
                 'hlsPreviewKey': preview_prefix + 'preview.m3u8',
                 'thumbnailKey': thumbnail_key,
+                'mezzanineKey': mezzanine_key,
                 'durationSeconds': result['duration'],
                 'width': result['width'],
                 'height': result['height'],
+                'readyVariants': result['variants'] + ['preview'],
+                'loudness': loudness_output,
             }
 
         else:  # audio
-            result = transcode_audio(input_path, work_dir, metadata)
+            result = transcode_audio(mezzanine_path, work_dir, metadata)
 
             # Upload HLS audio files
             audio_prefix = f"{creator_id}/hls-audio/{media_id}/"
@@ -997,7 +1213,10 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                 'hlsMasterPlaylistKey': audio_prefix + 'master.m3u8',
                 'waveformKey': waveform_key,
                 'waveformImageKey': waveform_image_key,
+                'mezzanineKey': mezzanine_key,
                 'durationSeconds': result['duration'],
+                'readyVariants': ['128k', '64k'],
+                'loudness': loudness_output,
             }
 
         # Send success webhook
@@ -1135,16 +1354,15 @@ packages/transcoding/
 
 ```typescript
 /**
- * R2 path generation utilities.
- * This is the ONLY place R2 keys should be constructed.
+ * Storage path generation utilities.
+ * This is the ONLY place storage keys should be constructed.
+ * Supports both R2 (delivery) and B2 (archival) buckets.
  */
 
-// Media bucket paths (codex-media-{env})
+// =============================================================================
+// R2 Media Bucket (codex-media-{env}) - Delivery
+// =============================================================================
 export const mediaBucketPaths = {
-  /** Original uploaded file */
-  original: (creatorId: string, mediaId: string, ext: string) =>
-    `${creatorId}/originals/${mediaId}/original.${ext}`,
-
   /** Video HLS master playlist */
   hlsMaster: (creatorId: string, mediaId: string) =>
     `${creatorId}/hls/${mediaId}/master.m3u8`,
@@ -1166,7 +1384,9 @@ export const mediaBucketPaths = {
     `${creatorId}/hls-audio/${mediaId}/`,
 };
 
-// Assets bucket paths (codex-assets-{env})
+// =============================================================================
+// R2 Assets Bucket (codex-assets-{env}) - Public Assets
+// =============================================================================
 export const assetsBucketPaths = {
   /** Video auto-generated thumbnail */
   thumbnail: (creatorId: string, mediaId: string) =>
@@ -1181,9 +1401,30 @@ export const assetsBucketPaths = {
     `${creatorId}/thumbnails/media/${mediaId}/waveform.png`,
 };
 
+// =============================================================================
+// Backblaze B2 Archive Bucket (codex-archive) - Archival
+// =============================================================================
+export const archiveBucketPaths = {
+  /** Raw uploaded file (temporary - deleted after mezzanine verified) */
+  original: (creatorId: string, mediaId: string, ext: string) =>
+    `originals/${creatorId}/${mediaId}/original.${ext}`,
+
+  /** High-quality mezzanine intermediate (permanent - for re-encoding) */
+  mezzanine: (creatorId: string, mediaId: string) =>
+    `mezzanine/${creatorId}/${mediaId}/mezzanine.mp4`,
+};
+
+// =============================================================================
+// Validation Helpers
+// =============================================================================
 /** Validate that a key starts with the expected creator prefix */
 export function validateCreatorPrefix(key: string, creatorId: string): boolean {
   return key.startsWith(`${creatorId}/`);
+}
+
+/** Validate archive paths (different prefix structure) */
+export function validateArchivePrefix(key: string, creatorId: string): boolean {
+  return key.includes(`/${creatorId}/`);
 }
 ```
 
@@ -1536,7 +1777,7 @@ export function verifyRunPodSignature(secret: string) {
 # Database
 DATABASE_URL=postgresql://...
 
-# R2 Storage
+# R2 Storage (Delivery)
 MEDIA_BUCKET=codex-media-production
 ASSETS_BUCKET=codex-assets-production
 R2_ACCOUNT_ID=your-account-id
@@ -1544,6 +1785,12 @@ R2_ACCESS_KEY_ID=your-access-key
 R2_SECRET_ACCESS_KEY=your-secret-key
 R2_BUCKET_MEDIA=codex-media-production
 R2_BUCKET_ASSETS=codex-assets-production
+
+# Backblaze B2 (Archival) - Optional for media-api, required for signed URL generation
+B2_KEY_ID=your-b2-key-id
+B2_APPLICATION_KEY=your-b2-app-key
+B2_BUCKET_NAME=codex-archive
+B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com
 
 # RunPod
 RUNPOD_API_KEY=your-runpod-api-key
@@ -1567,9 +1814,19 @@ WORKER_SHARED_SECRET=shared-secret-for-internal-calls
 ### RunPod Endpoint Environment
 
 ```env
+# R2 (Delivery - for HLS output)
 R2_ACCOUNT_ID=your-account-id
 R2_ACCESS_KEY_ID=your-access-key
 R2_SECRET_ACCESS_KEY=your-secret-key
+R2_MEDIA_BUCKET=codex-media-production
+R2_ASSETS_BUCKET=codex-assets-production
+
+# Backblaze B2 (Archival - for mezzanine storage)
+B2_KEY_ID=your-b2-key-id
+B2_APPLICATION_KEY=your-b2-app-key
+B2_BUCKET_NAME=codex-archive
+B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com
+B2_REGION=us-west-004
 ```
 
 ---

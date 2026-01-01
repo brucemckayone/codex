@@ -2,32 +2,42 @@
 
 ## System Overview
 
-The media transcoding system asynchronously converts uploaded videos to HLS format and audio files to HLS with waveform generation. Processing happens via Cloudflare Queue → Cloudflare Worker → Runpod GPU workers.
+The media transcoding system asynchronously converts uploaded videos to HLS format and audio files to HLS with waveform generation. Processing happens via content-api → media-api → Runpod GPU workers (no queue in Phase 1).
 
 **Key Architecture Decisions**:
 
-- **Asynchronous Processing**: Queue-based to avoid blocking uploads
+- **Asynchronous Processing**: Internal trigger to avoid blocking uploads (no queue in Phase 1)
 - **GPU Acceleration**: Runpod serverless for 10x faster transcoding
 - **Webhook Callbacks**: Runpod notifies when jobs complete
 - **Single Retry**: Cost control, serverless failures are deterministic
 - **Automatic Cleanup**: Failed items auto-deleted after 24 hours
 - **Waveform in R2**: Waveform JSON stored in R2 (not database) to save DB costs
+- **Tiered Storage**: R2 for delivery (zero egress), B2 for archival (~60% cheaper)
+- **Mezzanine Preservation**: High-quality intermediate retained for future re-encoding
+- **Two-Pass Loudness**: Measure then normalize, store measurements for analytics
 
 **Architecture**:
 
-- **Queue Layer**: Cloudflare Queue for job management
-- **Worker Layer**: Cloudflare Worker processes queue messages, calls Runpod
+- **Media API Layer**: media-api worker orchestrates Runpod jobs and webhook handling
 - **Processing Layer**: Runpod GPU workers (custom Docker image with ffmpeg + audiowaveform)
-- **Storage Layer**: R2 for input/output files, waveforms, thumbnails
-- **Metadata Layer**: Neon Postgres for status tracking only (no waveform data)
+- **Delivery Storage**: Cloudflare R2 for HLS, thumbnails, waveforms (zero egress)
+- **Archival Storage**: Backblaze B2 for originals, mezzanines (cheap, Bandwidth Alliance)
+- **Metadata Layer**: Neon Postgres for status tracking and loudness metadata
 
 **Architecture Diagram**:
 
 ![Transcoding Architecture](./assets/transcoding-architecture.png)
 
-The diagram shows the complete transcoding pipeline: queue-based job management, Cloudflare Worker orchestration, Runpod GPU processing, and R2 storage integration.
+The diagram shows the transcoding pipeline: media-api orchestration, Runpod GPU processing, and R2 storage integration.
 
 ---
+
+## Phase 1 Alignment Note (Authoritative)
+
+- Phase 1 does not use Cloudflare Queues; content-api calls the internal media-api trigger.
+- media-api owns Runpod job orchestration and webhook handling (`/api/transcoding/webhook` with raw-body HMAC).
+- R2 keys are creator-scoped with `{creatorId}/` prefixes (see implementation plans for the exact contract).
+- Queue consumer examples below are deferred to Phase 2 and should be treated as legacy.
 
 ## Dependencies
 
@@ -36,44 +46,45 @@ See the centralized [Cross-Feature Dependencies](../../cross-feature-dependencie
 ### Technical Prerequisites
 
 1.  **Content Management Service**: The media upload flow and `media_items` table are required as inputs to the transcoding process.
-2.  **Cloudflare Queue**: The `TRANSCODING_QUEUE` must be set up for asynchronous job handling.
-3.  **Runpod Account & Endpoint**: A serverless GPU endpoint with the custom Docker image is necessary for processing.
-4.  **R2 Buckets**: Creator-specific buckets must be provisioned for input and output storage.
+2.  **Runpod Account & Endpoint**: A serverless GPU endpoint with the custom Docker image is necessary for processing.
+3.  **R2 Buckets**: Unified buckets must be provisioned with `{creatorId}/` prefixes for input and output storage.
 
 ---
 
 ## Component List
 
-### 1. Transcoding Service (`packages/web/src/lib/server/transcoding/service.ts`)
+### 1. Transcoding Service (`packages/transcoding/src/services/transcoding-service.ts`)
 
-**Responsibility**: Enqueue transcoding jobs and handle webhook callbacks
+**Responsibility**: Trigger Runpod jobs and handle webhook callbacks
 
 **Interface**:
 
 ```typescript
 export interface ITranscodingService {
-  // Enqueue transcoding job (called after media upload)
-  enqueueTranscodingJob(mediaItem: MediaItem): Promise<void>;
+  // Trigger transcoding job (called after media upload)
+  triggerJob(mediaId: string, creatorId: string): Promise<void>;
 
   // Handle webhook callback from Runpod
   handleWebhook(payload: RunpodWebhookPayload): Promise<void>;
 
   // Retry failed job (manual retry by creator)
-  retryTranscoding(mediaId: string): Promise<void>;
+  retryTranscoding(mediaId: string, creatorId: string): Promise<void>;
 
-  // Cleanup job (cron: delete failed items after 24 hours)
-  cleanupFailedItems(): Promise<void>;
+  // Query current transcoding status
+  getTranscodingStatus(mediaId: string, creatorId: string): Promise<MediaStatus>;
 }
 
 export interface TranscodingJobPayload {
   mediaId: string;
-  type: 'video' | 'audio';
+  creatorId: string;
+  mediaType: 'video' | 'audio';
   inputBucket: string;
   inputKey: string;
   outputBucket: string;
-  outputPrefix?: string; // For video/audio HLS output
+  outputPrefix: string; // For video/audio HLS output
   assetsBucket: string; // For thumbnails/waveforms
-  attemptNumber: number; // 1 or 2 (single retry)
+  webhookUrl: string;
+  webhookSecret: string;
 }
 
 export interface RunpodWebhookPayload {
@@ -81,16 +92,25 @@ export interface RunpodWebhookPayload {
   status: 'completed' | 'failed';
   output?: {
     mediaId: string;
-    type: 'video' | 'audio';
+    mediaType: 'video' | 'audio';
     // Video/Audio outputs
     hlsMasterPlaylistKey?: string;
+    hlsPreviewKey?: string;
     thumbnailKey?: string;
     durationSeconds?: number;
     width?: number;
     height?: number;
     // Audio-specific outputs
-    waveformKey?: string; // R2 key: 'waveforms/{mediaId}/waveform.json'
+    waveformKey?: string; // R2 key: '{creatorId}/waveforms/{mediaId}/waveform.json'
     waveformImageKey?: string;
+    // Extensibility fields (Phase 1)
+    mezzanineKey?: string; // B2 key: 'mezzanine/{creatorId}/{mediaId}/mezzanine.mp4'
+    readyVariants?: string[]; // ['1080p', '720p', '480p', '360p', 'preview']
+    loudness?: {
+      integrated: number; // -16 LUFS stored as -1600 (×100)
+      peak: number; // dBFS ×100
+      range: number; // LU ×100
+    };
   };
   error?: string;
 }
@@ -98,113 +118,111 @@ export interface RunpodWebhookPayload {
 
 **Implementation**:
 
+Note: Example below reflects Phase 1 (`media-api` trigger, no queue).
+
 ```typescript
-import { db } from '$lib/server/db';
-import { mediaItems } from '$lib/server/db/schema';
-import { eq, and, lt } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { mediaItems } from '@codex/database/schema';
 
 export class TranscodingService implements ITranscodingService {
-  async enqueueTranscodingJob(mediaItem: MediaItem): Promise<void> {
-    const payload: TranscodingJobPayload = {
-      mediaId: mediaItem.id,
-      type: mediaItem.type,
-      inputBucket: mediaItem.bucketName,
-      inputKey: mediaItem.fileKey,
-      assetsBucket: `codex-assets-${mediaItem.ownerId}`,
-      attemptNumber: 1,
-    };
+  async triggerJob(mediaId: string, creatorId: string): Promise<void> {
+    const mediaItem = await db.query.mediaItems.findFirst({
+      where: and(eq(mediaItems.id, mediaId), eq(mediaItems.creatorId, creatorId)),
+    });
 
-    if (mediaItem.type === 'video') {
-      payload.outputBucket = mediaItem.bucketName;
-      payload.outputPrefix = `hls/${mediaItem.id}/`;
-    } else {
-      // Audio
-      payload.outputBucket = mediaItem.bucketName;
-      payload.outputPrefix = `hls-audio/${mediaItem.id}/`; // HLS output for audio
+    if (!mediaItem) {
+      throw new Error('Media item not found');
     }
 
-    // Enqueue to Cloudflare Queue
-    // (Actual enqueue happens in Content Management with platform.env.TRANSCODING_QUEUE)
+    const outputPrefix =
+      mediaItem.mediaType === 'video'
+        ? `${creatorId}/hls/${mediaItem.id}/`
+        : `${creatorId}/hls-audio/${mediaItem.id}/`;
+
+    const payload: TranscodingJobPayload = {
+      mediaId: mediaItem.id,
+      creatorId,
+      mediaType: mediaItem.mediaType,
+      inputBucket: env.R2_BUCKET_MEDIA,
+      inputKey: mediaItem.r2Key,
+      outputBucket: env.R2_BUCKET_MEDIA,
+      outputPrefix,
+      assetsBucket: env.R2_BUCKET_ASSETS,
+      webhookUrl: `${env.APP_URL}/api/transcoding/webhook`,
+      webhookSecret: env.RUNPOD_WEBHOOK_SECRET,
+    };
+
+    const response = await fetch(
+      `https://api.runpod.ai/v2/${env.RUNPOD_ENDPOINT_ID}/run`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.RUNPOD_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ input: payload }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Runpod API error: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+
+    await db
+      .update(mediaItems)
+      .set({
+        status: 'transcoding',
+        runpodJobId: result.id,
+        transcodingError: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(mediaItems.id, mediaItem.id));
   }
 
   async handleWebhook(payload: RunpodWebhookPayload): Promise<void> {
-    const { mediaId, status, output, error } = payload;
+    const { output, status, error } = payload;
 
-    if (status === 'completed' && output) {
-      // Success: Update media_items with output metadata
-      if (output.type === 'video') {
-        await db
-          .update(mediaItems)
-          .set({
-            status: 'ready',
-            hlsMasterPlaylistKey: output.hlsMasterPlaylistKey,
-            thumbnailKey: output.thumbnailKey,
-            durationSeconds: output.durationSeconds,
-            width: output.width,
-            height: output.height,
-            updatedAt: new Date(),
-          })
-          .where(eq(mediaItems.id, mediaId));
-      } else {
-        // Audio
-        await db
-          .update(mediaItems)
-          .set({
-            status: 'ready',
-            hlsMasterPlaylistKey: output.hlsMasterPlaylistKey, // HLS master playlist for audio
-            waveformKey: output.waveformKey, // R2 key to waveform JSON
-            waveformImageKey: output.waveformImageKey,
-            durationSeconds: output.durationSeconds,
-            updatedAt: new Date(),
-          })
-          .where(eq(mediaItems.id, mediaId));
-      }
-    } else if (status === 'failed') {
-      // Failure: Check if this is first or second attempt
-      const mediaItem = await db.query.mediaItems.findFirst({
-        where: eq(mediaItems.id, mediaId),
-      });
+    if (!output) {
+      return;
+    }
 
-      if (!mediaItem) {
-        throw new Error(`Media item ${mediaId} not found`);
-      }
-
-      // Store error message in media_items for debugging
+    if (status === 'completed') {
       await db
         .update(mediaItems)
         .set({
-          errorMessage: error || 'Unknown transcoding error',
+          status: 'ready',
+          hlsMasterPlaylistKey: output.hlsMasterPlaylistKey ?? null,
+          hlsPreviewKey: output.hlsPreviewKey ?? null,
+          thumbnailKey: output.thumbnailKey ?? null,
+          waveformKey: output.waveformKey ?? null,
+          waveformImageKey: output.waveformImageKey ?? null,
+          durationSeconds: output.durationSeconds ?? null,
+          width: output.width ?? null,
+          height: output.height ?? null,
+          transcodingError: null,
           updatedAt: new Date(),
         })
-        .where(eq(mediaItems.id, mediaId));
+        .where(eq(mediaItems.id, output.mediaId));
 
-      // Check attempt number from error message (or track separately)
-      // For now, if already has errorMessage, this is 2nd failure
-      if (mediaItem.errorMessage) {
-        // Second failure: Mark as failed, will be cleaned up automatically
-        await db
-          .update(mediaItems)
-          .set({
-            status: 'failed',
-            errorMessage: `Permanent failure: ${error}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(mediaItems.id, mediaId));
-
-        console.error(
-          `Transcoding permanently failed for ${mediaId}: ${error}`
-        );
-      } else {
-        // First failure: Will be retried by queue consumer
-        console.log(`Transcoding failed for ${mediaId}, will retry: ${error}`);
-      }
+      return;
     }
+
+    await db
+      .update(mediaItems)
+      .set({
+        status: 'failed',
+        transcodingError: error || 'Unknown transcoding error',
+        transcodingAttempts: sql`${mediaItems.transcodingAttempts} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(mediaItems.id, output.mediaId));
   }
 
-  async retryTranscoding(mediaId: string): Promise<void> {
-    // Manual retry triggered by creator from admin UI
+  async retryTranscoding(mediaId: string, creatorId: string): Promise<void> {
     const mediaItem = await db.query.mediaItems.findFirst({
-      where: eq(mediaItems.id, mediaId),
+      where: and(eq(mediaItems.id, mediaId), eq(mediaItems.creatorId, creatorId)),
     });
 
     if (!mediaItem) {
@@ -215,41 +233,21 @@ export class TranscodingService implements ITranscodingService {
       throw new Error('Can only retry failed transcoding jobs');
     }
 
-    // Reset status and clear error
+    if (mediaItem.transcodingAttempts >= 1) {
+      throw new Error('Retry limit reached');
+    }
+
     await db
       .update(mediaItems)
       .set({
-        status: 'transcoding',
-        errorMessage: null,
+        status: 'uploaded',
+        transcodingError: null,
+        runpodJobId: null,
         updatedAt: new Date(),
       })
       .where(eq(mediaItems.id, mediaId));
 
-    await this.enqueueTranscodingJob(mediaItem);
-  }
-
-  async cleanupFailedItems(): Promise<void> {
-    // Cron job: Delete failed media items older than 24 hours
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-    const failedItems = await db.query.mediaItems.findMany({
-      where: and(
-        eq(mediaItems.status, 'failed'),
-        lt(mediaItems.updatedAt, cutoff)
-      ),
-    });
-
-    for (const item of failedItems) {
-      console.log(`Cleaning up failed media item: ${item.id}`);
-
-      // Delete from database
-      await db.delete(mediaItems).where(eq(mediaItems.id, item.id));
-
-      // TODO: Delete original file from R2 (optional, could keep for debugging)
-      // await r2Service.deleteFile(item.bucketName, item.fileKey);
-    }
-
-    console.log(`Cleaned up ${failedItems.length} failed media items`);
+    await this.triggerJob(mediaId, creatorId);
   }
 }
 
@@ -258,9 +256,12 @@ export const transcodingService = new TranscodingService();
 
 ---
 
-### 2. Queue Consumer Worker (`workers/transcoding-queue-consumer/src/index.ts`)
+### 2. Queue Consumer Worker (`workers/transcoding-queue-consumer/src/index.ts`) (Phase 2 - Deferred)
 
 **Responsibility**: Process Cloudflare Queue messages and call Runpod API
+
+Phase 1 uses `media-api` without a queue; this worker is not implemented in the
+current plan.
 
 **Implementation**:
 
@@ -277,32 +278,31 @@ export default {
 
       try {
         // Call Runpod serverless endpoint
-        const response = await fetch(env.RUNPOD_ENDPOINT_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${env.RUNPOD_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            input: {
-              mediaId: job.mediaId,
-              type: job.type,
-              inputBucket: job.inputBucket,
-              inputKey: job.inputKey,
-              outputBucket: job.outputBucket,
-              outputPrefix: job.outputPrefix,
-              assetsBucket: job.assetsBucket,
-              // R2 credentials for Runpod to download/upload
-              // (Passed securely via Runpod, not exposed to client)
-              r2AccountId: env.CLOUDFLARE_ACCOUNT_ID,
-              r2AccessKeyId: env.R2_ACCESS_KEY_ID,
-              r2SecretAccessKey: env.R2_SECRET_ACCESS_KEY,
-              // Webhook URL for completion notification
-              webhookUrl: `${env.APP_URL}/api/transcoding/webhook`,
-              webhookSecret: env.WEBHOOK_SECRET, // For signature verification
+        const response = await fetch(
+          `https://api.runpod.ai/v2/${env.RUNPOD_ENDPOINT_ID}/run`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${env.RUNPOD_API_KEY}`,
+              'Content-Type': 'application/json',
             },
-          }),
-        });
+            body: JSON.stringify({
+              input: {
+                mediaId: job.mediaId,
+                creatorId: job.creatorId,
+                mediaType: job.mediaType,
+                inputBucket: job.inputBucket,
+                inputKey: job.inputKey,
+                outputBucket: job.outputBucket,
+                outputPrefix: job.outputPrefix,
+                assetsBucket: job.assetsBucket,
+                // Webhook URL for completion notification
+                webhookUrl: `${env.APP_URL}/api/transcoding/webhook`,
+                webhookSecret: env.RUNPOD_WEBHOOK_SECRET, // For signature verification
+              },
+            }),
+          }
+        );
 
         if (!response.ok) {
           throw new Error(`Runpod API error: ${response.statusText}`);
@@ -321,26 +321,8 @@ export default {
           error
         );
 
-        // Single retry logic
-        if (job.attemptNumber < 2) {
-          // Retry after 5 minutes with incremented attempt number
-          const retryJob = { ...job, attemptNumber: job.attemptNumber + 1 };
-          message.retry({ delaySeconds: 300 });
-        } else {
-          // Permanent failure: ACK and notify webhook
-          message.ack();
-
-          await fetch(`${env.APP_URL}/api/transcoding/webhook`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: 'internal-failure',
-              status: 'failed',
-              output: { mediaId: job.mediaId, type: job.type },
-              error: `Queue consumer error: ${error.message}`,
-            }),
-          });
-        }
+        // Let queue retry once (max_retries=1 in wrangler config)
+        message.retry({ delaySeconds: 300 });
       }
     }
   },
@@ -768,25 +750,45 @@ docker push your-dockerhub-username/codex-transcoder:latest
 
 ## Data Models / Schema
 
-**Update to Media Items Table** (add error tracking and waveform key):
+**Update to Media Items Table** (add transcoding fields with extensibility):
 
 ```typescript
-// In packages/web/src/lib/server/db/schema/media.ts
+// In packages/database/src/schema/content.ts
 export const mediaItems = pgTable('media_items', {
   // ... existing fields ...
 
-  // HLS output (if video or audio, populated after transcoding)
-  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }), // 'hls/{mediaId}/master.m3u8' or 'hls-audio/{mediaId}/master.m3u8'
+  // HLS output (populated after transcoding)
+  hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }),
+  hlsPreviewKey: varchar('hls_preview_key', { length: 500 }),
 
-  // Waveform data (R2 key, not stored in DB)
-  waveformKey: varchar('waveform_key', { length: 500 }), // 'waveforms/{mediaId}/waveform.json'
+  // Audio-specific
+  waveformKey: varchar('waveform_key', { length: 500 }),
+  waveformImageKey: varchar('waveform_image_key', { length: 500 }),
+  thumbnailKey: varchar('thumbnail_key', { length: 500 }),
 
-  // Error tracking (for failed transcoding)
-  errorMessage: text('error_message'), // Null if successful, error string if failed
+  // Error tracking
+  transcodingError: text('transcoding_error'),
+  transcodingAttempts: integer('transcoding_attempts').default(0),
+  runpodJobId: varchar('runpod_job_id', { length: 100 }),
+
+  // Extensibility fields (Phase 1 foundation for Phase 2+)
+  mezzanineKey: varchar('mezzanine_key', { length: 500 }), // B2 path
+  mezzanineStatus: varchar('mezzanine_status', { length: 50 }), // pending|ready|deleted
+  transcodingPriority: varchar('transcoding_priority', { length: 20 }).default('standard'),
+  readyVariants: jsonb('ready_variants').$type<string[]>().default([]),
+
+  // Loudness metadata (populated by two-pass analysis)
+  loudnessIntegrated: integer('loudness_integrated'), // -16 LUFS as -1600 (×100)
+  loudnessPeak: integer('loudness_peak'), // dBFS ×100
+  loudnessRange: integer('loudness_range'), // LU ×100
 });
 ```
 
-**Note**: No separate `transcoding_errors` table. Errors stored directly in `media_items.errorMessage` for simplicity. Failed items auto-deleted after 24 hours by cron job.
+**Storage Tiers**:
+- **R2 (Delivery)**: `hlsMasterPlaylistKey`, `hlsPreviewKey`, `waveformKey`, `thumbnailKey`
+- **B2 (Archival)**: `mezzanineKey` (permanent), originals (temporary, deleted after 24h)
+
+**Note**: Failed items tracked via `transcodingError` and `transcodingAttempts`. Auto-cleanup after 24 hours by cron job.
 
 ---
 
@@ -826,22 +828,33 @@ crons = ["0 2 * * *"]  # Daily at 2am UTC
 ```bash
 # Runpod
 RUNPOD_API_KEY=your-runpod-api-key
-RUNPOD_ENDPOINT_URL=https://api.runpod.ai/v2/{endpoint-id}/run
+RUNPOD_ENDPOINT_ID=your-endpoint-id
+RUNPOD_WEBHOOK_SECRET=random-webhook-secret
 
-# Webhook security
-WEBHOOK_SECRET=random-secret-key-for-signature-verification
+# Cloudflare R2 (delivery storage)
+R2_ACCOUNT_ID=your-cf-account-id
+R2_ACCESS_KEY_ID=your-r2-access-key
+R2_SECRET_ACCESS_KEY=your-r2-secret
+R2_MEDIA_BUCKET=codex-media-production
+R2_ASSETS_BUCKET=codex-assets-production
+
+# Backblaze B2 (archival storage - mezzanines/originals)
+B2_KEY_ID=your-b2-key-id
+B2_APPLICATION_KEY=your-b2-app-key
+B2_BUCKET_NAME=codex-archive
+B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com
 
 # Cron security
 CRON_SECRET=random-secret-for-cron-endpoint
 
-# Cloudflare (already configured)
-CLOUDFLARE_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=your-r2-access-key
-R2_SECRET_ACCESS_KEY=your-r2-secret-key
-
 # App URL (for webhooks)
 APP_URL=https://codex.example.com
+WORKER_SHARED_SECRET=internal-auth-secret
 ```
+
+**Storage Configuration Notes**:
+- **R2**: Zero egress to Cloudflare Workers (delivery)
+- **B2**: ~$6/TB vs R2 $15/TB (archival), Bandwidth Alliance = free egress to CF
 
 **wrangler.jsonc** (Queue Worker):
 
@@ -961,6 +974,12 @@ describe('TranscodingService', () => {
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2025-10-20
-**Status**: Draft - Awaiting Review
+**Document Version**: 1.1
+**Last Updated**: 2026-01-01
+**Status**: Ready for Implementation
+
+**Revision Notes**:
+- Added tiered storage (R2 delivery + B2 archival)
+- Added mezzanine preservation and loudness metadata fields
+- Updated webhook payload with extensibility fields
+- Added B2 environment configuration

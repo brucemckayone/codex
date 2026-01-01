@@ -9,7 +9,7 @@ content_mgmt: {
   label: "Content Management"
 
   upload_confirm: {
-    label: "Upload Confirmed\n\nPOST /api/media/confirm\nVideo uploaded to R2"
+    label: "Upload Confirmed\n\nPOST /api/media/confirm\nVideo uploaded to B2"
     style: {
       fill: ${color-nextjs-sub}
       stroke: ${stroke-nextjs-sub}
@@ -23,31 +23,12 @@ content_mgmt: {
   }
 }
 
-# Queue Layer
-queue: {
-  label: "Cloudflare Queue"
-
-  transcoding_queue: {
-    label: "TRANSCODING_QUEUE\n\nJob payload:\n• mediaItemId\n• inputKey\n• outputKeyPrefix\n• type (video/audio)"
-    style: {
-      fill: ${color-redis}
-      stroke: ${stroke-redis}
-    }
-  }
-
-  style: {
-    fill: "#FFEBEE"
-    stroke: "#EF9A9A"
-    stroke-width: 2
-  }
-}
-
 # Worker Layer
 worker: {
-  label: "Cloudflare Worker"
+  label: "media-api Worker"
 
-  queue_consumer: {
-    label: "Queue Consumer\n(transcoding-worker)\n\nProcesses queue messages\nCalls Runpod API"
+  internal_trigger: {
+    label: "Internal Trigger\n\nPOST /internal/media/:id/transcode\nCalls Runpod API"
     style: {
       fill: ${color-worker}
       stroke: ${stroke-worker}
@@ -55,7 +36,7 @@ worker: {
   }
 
   webhook_handler: {
-    label: "Webhook Handler\n\nPOST /api/webhooks/runpod\nProcesses completion events"
+    label: "Webhook Handler\n\nPOST /api/transcoding/webhook\nProcesses completion events"
     style: {
       fill: ${color-worker}
       stroke: ${stroke-worker}
@@ -74,7 +55,7 @@ runpod: {
   label: "Runpod Serverless GPU"
 
   endpoint: {
-    label: "Custom Docker Image\n\nffmpeg (video transcoding)\naudiowaveform (waveform gen)\n\nGPU-accelerated processing"
+    label: "Custom Docker Image\n\n1. Create mezzanine\n2. Measure loudness\n3. Transcode to HLS\n4. Generate assets\n\nGPU-accelerated processing"
     style: {
       fill: "#E1BEE7"
       stroke: "#BA68C8"
@@ -88,20 +69,47 @@ runpod: {
   }
 }
 
-# Storage Layer
-r2: {
-  label: "Cloudflare R2 (Creator Buckets)"
+# Backblaze B2 Archival Storage
+b2: {
+  label: "Backblaze B2 (Archival)"
 
-  input_bucket: {
-    label: "Input Files\n\ncodex-media-{creatorId}\n\nOriginal video/audio uploads"
+  original_bucket: {
+    label: "Original Files\n\ncodex-archive\n\noriginals/{creatorId}/{mediaId}/\noriginal.*\n\n(Temporary - deleted after\nmezzanine verified)"
+    style: {
+      fill: "#FFF3E0"
+      stroke: "#FFB74D"
+    }
+  }
+
+  mezzanine_bucket: {
+    label: "Mezzanine Files\n\ncodex-archive\n\nmezzanine/{creatorId}/{mediaId}/\nmezzanine.mp4\n\n(Permanent - for re-encoding)"
+    style: {
+      fill: "#FFF3E0"
+      stroke: "#FFB74D"
+    }
+  }
+
+  style: {
+    fill: "#FFF8E1"
+    stroke: "#FFB74D"
+    stroke-width: 2
+  }
+}
+
+# Cloudflare R2 Delivery Storage
+r2: {
+  label: "Cloudflare R2 (Delivery)"
+
+  output_bucket: {
+    label: "Transcoded Output\n\ncodex-media-{env}\n\n• {creatorId}/hls/{mediaId}/\n• {creatorId}/hls-audio/{mediaId}/\n• Preview clips"
     style: {
       fill: ${color-r2}
       stroke: ${stroke-r2}
     }
   }
 
-  output_bucket: {
-    label: "Transcoded Output\n\ncodex-media-{creatorId}\n\n• HLS master playlist\n• Video segments (.ts)\n• Audio HLS\n• Waveform JSON\n• Thumbnails"
+  assets_bucket: {
+    label: "Assets\n\ncodex-assets-{env}\n\n• Thumbnails\n• Waveform JSON/PNG"
     style: {
       fill: ${color-r2}
       stroke: ${stroke-r2}
@@ -121,7 +129,7 @@ postgres: {
   shape: cylinder
 
   tables: {
-    label: "Database Tables\n\n• media_items\n  (transcodingStatus:\n   pending/processing/\n   completed/failed)\n• transcoding_jobs\n  (runpodJobId, status)"
+    label: "Database Tables\n\n• media_items\n  status: uploaded/transcoding/\n  ready/failed\n  mezzanineKey, mezzanineStatus\n  readyVariants, loudness*\n  runpodJobId, transcodingError"
     style: {
       fill: ${color-postgres}
       stroke: ${stroke-postgres}
@@ -135,90 +143,98 @@ postgres: {
   }
 }
 
-# Flow Step 1: Upload complete, enqueue job
-content_mgmt.upload_confirm -> queue.transcoding_queue: "1. Enqueue job\n{mediaItemId, inputKey, type}" {
+# Flow Step 1: Upload complete, trigger job
+content_mgmt.upload_confirm -> worker.internal_trigger: "1. Trigger transcoding\nPOST /internal/media/:id/transcode" {
   style.stroke: ${arrow-cache}
   style.stroke-width: 2
 }
 
-content_mgmt.upload_confirm -> postgres.tables: "UPDATE media_items\nSET transcodingStatus='pending'" {
+content_mgmt.upload_confirm -> postgres.tables: "UPDATE media_items\nSET status='uploaded'" {
   style.stroke: ${arrow-sql}
 }
 
-# Flow Step 2: Worker consumes queue
-queue.transcoding_queue -> worker.queue_consumer: "2. Consume message\n(auto-triggered)" {
-  style.stroke: ${arrow-cache}
-  style.stroke-width: 2
-}
-
-worker.queue_consumer -> postgres.tables: "UPDATE transcodingStatus\n='processing'" {
-  style.stroke: ${arrow-sql}
-}
-
-# Flow Step 3: Call Runpod API
-worker.queue_consumer -> runpod.endpoint: "3. POST /run\n{input: s3Url,\n outputPrefix,\n type: video/audio}" {
+# Flow Step 2: Call Runpod API
+worker.internal_trigger -> runpod.endpoint: "2. POST /run\n{inputKey, outputPrefix,\n mediaType: video/audio}" {
   style.stroke: ${arrow-external}
   style.stroke-width: 3
 }
 
-runpod.endpoint -> worker.queue_consumer: "Return {jobId}" {
+runpod.endpoint -> worker.internal_trigger: "Return {jobId}" {
   style.stroke: ${arrow-external}
   style.stroke-dash: 3
 }
 
-worker.queue_consumer -> postgres.tables: "INSERT transcoding_jobs\n(runpodJobId, mediaItemId)" {
+worker.internal_trigger -> postgres.tables: "UPDATE media_items\nSET status='transcoding',\nrunpodJobId=jobId" {
   style.stroke: ${arrow-sql}
 }
 
-# Flow Step 4: Runpod processes video
-runpod.endpoint -> r2.input_bucket: "4. Download input file\n(via presigned URL)" {
+# Flow Step 3: Runpod downloads from B2
+runpod.endpoint -> b2.original_bucket: "3. Download original\n(via S3-compatible API)" {
   style.stroke: ${arrow-external}
   style.stroke-width: 2
 }
 
-runpod.endpoint -> runpod.endpoint: "Transcode:\nVideo → HLS (multiple resolutions)\nAudio → HLS + waveform JSON" {
+# Flow Step 4: Runpod creates mezzanine
+runpod.endpoint -> runpod.endpoint: "4. Create mezzanine\n(H.264 CRF 18)\nMeasure loudness" {
   style.stroke: "#BA68C8"
   style.stroke-dash: 3
 }
 
-runpod.endpoint -> r2.output_bucket: "5. Upload outputs\n(HLS playlists,\nsegments, waveforms)" {
+runpod.endpoint -> b2.mezzanine_bucket: "5. Upload mezzanine\n(via Bandwidth Alliance)" {
+  style.stroke: "#FFB74D"
+  style.stroke-width: 2
+}
+
+# Flow Step 5: Runpod generates HLS
+runpod.endpoint -> runpod.endpoint: "6. Transcode:\nVideo → HLS variants\nAudio → HLS + waveform" {
+  style.stroke: "#BA68C8"
+  style.stroke-dash: 3
+}
+
+runpod.endpoint -> r2.output_bucket: "7. Upload HLS outputs\n(playlists, segments)" {
   style.stroke: ${arrow-external}
   style.stroke-width: 2
 }
 
-# Flow Step 5: Runpod sends webhook
-runpod.endpoint -> worker.webhook_handler: "6. POST /api/webhooks/runpod\n{jobId, status: completed/failed}" {
+runpod.endpoint -> r2.assets_bucket: "Upload assets\n(thumbnails, waveforms)" {
+  style.stroke: ${arrow-external}
+}
+
+# Flow Step 6: Runpod sends webhook
+runpod.endpoint -> worker.webhook_handler: "8. POST /api/transcoding/webhook\n{status, mezzanineKey,\nreadyVariants, loudness}" {
   style.stroke: ${arrow-external}
   style.stroke-width: 2
 }
 
-worker.webhook_handler -> postgres.tables: "UPDATE media_items\nSET transcodingStatus='completed'\nSET hlsMasterKey, waveformKey" {
+worker.webhook_handler -> postgres.tables: "UPDATE media_items\nSET status='ready',\nmezzanineKey, readyVariants,\nloudness*, hlsKeys" {
   style.stroke: ${arrow-sql}
   style.stroke-width: 2
 }
 
-worker.webhook_handler -> postgres.tables: "UPDATE transcoding_jobs\nSET status='completed'" {
-  style.stroke: ${arrow-sql}
+# Original deletion (deferred)
+b2.original_bucket -> b2.original_bucket: "Delete original\n(24h after mezzanine verified)" {
+  style.stroke: "#FF5722"
+  style.stroke-dash: 5
 }
 
 # Error flow
-worker.webhook_handler -> postgres.tables: "If failed:\nSET transcodingStatus='failed'\nSchedule retry (1 retry max)" {
+worker.webhook_handler -> postgres.tables: "If failed:\nSET status='failed'\nUpdate transcodingError\nIncrement attempts" {
   style.stroke: ${arrow-sql}
   style.stroke-dash: 3
 }
 
 # Notes
-note_async: {
-  label: "⚡ Async Processing:\n1. Upload completes → Enqueue job\n2. Worker consumes queue → Calls Runpod\n3. Runpod processes (GPU-accelerated)\n4. Runpod uploads outputs to R2\n5. Webhook → Update status to 'completed'"
+note_tiered: {
+  label: "💰 Tiered Storage Strategy:\n\nB2 (Archival): ~$6/TB\n• Original files (temporary)\n• Mezzanine files (permanent)\n• Bandwidth Alliance: Free egress to CF\n\nR2 (Delivery): ~$15/TB\n• HLS playlists & segments\n• Zero egress to CF Workers"
   shape: text
 }
 
-note_gpu: {
-  label: "🚀 GPU Acceleration:\n• Runpod serverless (pay-per-second)\n• 10x faster than CPU transcoding\n• Custom Docker image: ffmpeg + audiowaveform\n• Single retry on failure (cost control)"
+note_mezzanine: {
+  label: "🎬 Mezzanine Pipeline:\n1. Download original from B2\n2. Create high-quality H.264 CRF 18\n3. Measure loudness (two-pass EBU R128)\n4. Upload mezzanine to B2\n5. Transcode HLS from mezzanine\n6. Delete original after 24h"
   shape: text
 }
 
 note_outputs: {
-  label: "📹 Transcoding Outputs:\n\nVideo:\n• HLS master playlist\n• Multiple resolutions (1080p, 720p, 480p)\n• Segmented .ts files\n• Thumbnails (extracted frames)\n\nAudio:\n• HLS playlist\n• Waveform JSON (for UI visualization)"
+  label: "📹 Transcoding Outputs:\n\nVideo:\n• HLS master + variants (1080p→360p)\n• 30-sec preview clip\n• Auto-generated thumbnail\n• readyVariants: ['1080p','720p'...]\n\nAudio:\n• HLS variants (128k, 64k)\n• Waveform JSON + PNG\n• Loudness measurements"
   shape: text
 }

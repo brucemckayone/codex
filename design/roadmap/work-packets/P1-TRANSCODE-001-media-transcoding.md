@@ -124,37 +124,60 @@ Access Service can generate streaming URLs
 
 ### Extended Media Items Fields
 
-**Purpose**: Track transcoding job state and output asset locations.
+**Purpose**: Track transcoding job state, output asset locations, and extensibility metadata.
 
 **New Fields** (added to existing `media_items` table from P1-CONTENT-001):
 
-- `hlsMasterPlaylistKey` (text, nullable): HLS master playlist R2 path
+#### Core Transcoding Fields
+- `hlsMasterPlaylistKey` (varchar 500, nullable): HLS master playlist R2 path
   - Example: `{creatorId}/hls/{mediaId}/master.m3u8`
   - Populated after transcoding completes
   - Used by access service to generate streaming URLs
 
-- `hlsPreviewKey` (text, nullable): 30-second preview clip HLS path
+- `hlsPreviewKey` (varchar 500, nullable): 30-second preview clip HLS path
   - Example: `{creatorId}/hls/{mediaId}/preview/preview.m3u8`
   - For content discovery (show preview before purchase)
 
-- `thumbnailKey` (text, nullable): Auto-generated thumbnail image
+- `thumbnailKey` (varchar 500, nullable): Auto-generated thumbnail image
   - Example: `{creatorId}/thumbnails/media/{mediaId}/auto-generated.jpg`
   - Extracted at 10% mark of video
 
-- `waveformKey` (text, nullable): Audio waveform data (JSON)
+- `waveformKey` (varchar 500, nullable): Audio waveform data (JSON) in R2
   - Example: `{creatorId}/waveforms/{mediaId}/waveform.json`
   - Only for audio media type
-  - Used for visual playback UI
 
+- `waveformImageKey` (varchar 500, nullable): Audio waveform preview image
+  - Example: `{creatorId}/thumbnails/media/{mediaId}/waveform.png`
+
+#### Job Tracking Fields
 - `transcodingError` (text, nullable): Error message if transcoding fails
-  - Stored for debugging and user-facing error messages
+- `transcodingAttempts` (integer, default 0): Retry count (max 1)
+- `runpodJobId` (varchar 100, nullable): RunPod job identifier
 
-- `transcodingAttempts` (integer, default 0): Retry count
-  - Maximum 1 retry allowed
-  - Prevents infinite retry loops
+#### Extensibility Fields (Phase 1 foundation for Phase 2+)
+- `mezzanineKey` (varchar 500, nullable): B2 archival path for high-quality intermediate
+  - Example: `mezzanine/{creatorId}/{mediaId}/mezzanine.mp4`
+  - Stored in Backblaze B2 (cheaper than R2)
+  - Enables future re-encoding without quality loss
 
-- `runpodJobId` (text, nullable): RunPod job identifier
-  - For tracking job status and debugging
+- `mezzanineStatus` (varchar 50, nullable): `pending` | `ready` | `deleted`
+
+- `transcodingPriority` (varchar 20, default 'standard'): `immediate` | `standard` | `on_demand`
+  - Prepares for future on-demand variant generation
+
+- `readyVariants` (jsonb, default []): Array of generated variant names
+  - Example: `['1080p', '720p', '480p', '360p', 'preview']`
+  - Enables future selective/lazy variant generation
+
+#### Loudness Metadata (populated by two-pass analysis)
+- `loudnessIntegrated` (integer, nullable): Integrated loudness ×100
+  - Example: `-1600` = -16 LUFS (EBU R128 target)
+
+- `loudnessPeak` (integer, nullable): True peak ×100
+  - Example: `-150` = -1.5 dBFS
+
+- `loudnessRange` (integer, nullable): Loudness range ×100
+  - Example: `720` = 7.2 LU
 
 **Media Status Enum** (already in P1-CONTENT-001, clarified here):
 - `uploading`: Upload in progress
@@ -881,7 +904,8 @@ const result = await response.json();
 | Dependency | Status | Description |
 |------------|--------|-------------|
 | Content Service (P1-CONTENT-001) | ✅ Complete | Need `media_items` table and media upload flow |
-| R2 Storage (@codex/cloudflare-clients) | ✅ Available | Input/output file storage |
+| R2 Storage (@codex/cloudflare-clients) | ✅ Available | Delivery storage (HLS, thumbnails, waveforms) |
+| Backblaze B2 Account | ⚠️ Required | Archival storage (mezzanines, originals) - cheaper than R2 |
 | RunPod Account | ⚠️ Required | GPU transcoding service (requires setup) |
 
 ### Optional (Nice to Have)
@@ -894,9 +918,15 @@ const result = await response.json();
 
 - ✅ Database schema tooling (Drizzle ORM)
 - ✅ Worker deployment pipeline
-- ✅ R2 storage service
+- ✅ R2 storage service (delivery)
 - ✅ Error handling (@codex/service-errors)
 - ✅ Validation (@codex/validation)
+
+### New Infrastructure Required
+
+- ⚠️ Backblaze B2 bucket creation and credentials
+- ⚠️ B2 client in RunPod handler (boto3 with B2 endpoint)
+- ⚠️ Bandwidth Alliance configuration (B2 → Cloudflare)
 
 ### RunPod Setup Required
 
@@ -918,14 +948,26 @@ const result = await response.json();
 ## Implementation Checklist
 
 - [ ] **Database Setup**
-  - [ ] Extend `media_items` schema with transcoding fields
+  - [ ] Extend `media_items` schema with transcoding fields (15 new fields)
+  - [ ] Include extensibility fields: mezzanineKey, mezzanineStatus, transcodingPriority, readyVariants
+  - [ ] Include loudness fields: loudnessIntegrated, loudnessPeak, loudnessRange
   - [ ] Generate migration with new columns
   - [ ] Run migration in development
   - [ ] Verify media status enum includes 'transcoding', 'ready', 'failed'
 
+- [ ] **Backblaze B2 Setup**
+  - [ ] Create B2 account and bucket (codex-archive)
+  - [ ] Generate application key with bucket access
+  - [ ] Configure Bandwidth Alliance (B2 → Cloudflare)
+  - [ ] Add B2 credentials to environment variables
+  - [ ] Test B2 access from RunPod handler
+
 - [ ] **RunPod Setup**
   - [ ] Create RunPod account and API key
   - [ ] Build custom Docker image (FFmpeg + audiowaveform)
+  - [ ] Add B2 client alongside R2 client
+  - [ ] Implement mezzanine creation step
+  - [ ] Implement two-pass loudness analysis
   - [ ] Deploy serverless endpoint
   - [ ] Test endpoint with sample video
   - [ ] Configure webhook URL in RunPod dashboard
@@ -1128,5 +1170,15 @@ CMD ["python", "/handler.py"]
 
 ---
 
-**Last Updated**: 2025-11-23
-**Version**: 2.0 (Enhanced with implementation patterns and RunPod integration details)
+## Future Phases
+
+This Phase 1 implementation establishes foundations for:
+
+- **Phase 2**: On-demand variant generation, Cloudflare Queues integration
+- **Phase 3**: Audio mediation (voice-first mixing), smart variants (clips, vertical crops)
+- **Phase 4**: Watermarking, DRM encryption, live streaming
+
+---
+
+**Last Updated**: 2026-01-01
+**Version**: 2.1 (Added tiered storage, mezzanine preservation, loudness metadata, extensibility fields)

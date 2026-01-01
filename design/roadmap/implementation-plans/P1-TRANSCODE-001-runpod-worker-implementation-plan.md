@@ -93,27 +93,51 @@ Optional fields (set on success):
 - `output.thumbnailKey`
 - `output.waveformKey`
 - `output.waveformImageKey`
+- `output.mezzanineKey` (B2 archive path)
 - `output.durationSeconds`
 - `output.width`
 - `output.height`
+- `output.readyVariants` (array: e.g., `["1080p", "720p", "480p", "preview"]`)
+- `output.loudness.integrated` (×100, e.g., -1600 for -16 LUFS)
+- `output.loudness.peak` (×100, e.g., -150 for -1.5 dBFS)
+- `output.loudness.range` (×100, e.g., 720 for 7.2 LU)
 
 Error field on failure:
 - `error` (human-readable)
 
 ---
 
-## R2 Path Contract (Must Match media-api)
+## Storage Path Contract (Must Match media-api)
 
-Media bucket keys:
-- `{creatorId}/originals/{mediaId}/original.<ext>`
+### Backblaze B2 Archive Bucket (codex-archive) - Archival
+
+Original keys (temporary - deleted after mezzanine verified):
+- `originals/{creatorId}/{mediaId}/original.<ext>`
+
+Mezzanine keys (permanent - for re-encoding):
+- `mezzanine/{creatorId}/{mediaId}/mezzanine.mp4`
+
+### Cloudflare R2 Media Bucket (codex-media-{env}) - Delivery
+
+HLS output keys:
 - `{creatorId}/hls/{mediaId}/master.m3u8`
+- `{creatorId}/hls/{mediaId}/{variant}/playlist.m3u8`
 - `{creatorId}/hls/{mediaId}/preview/preview.m3u8`
 - `{creatorId}/hls-audio/{mediaId}/master.m3u8`
 
-Assets bucket keys:
+### Cloudflare R2 Assets Bucket (codex-assets-{env}) - Public Assets
+
+Asset keys:
 - `{creatorId}/thumbnails/media/{mediaId}/auto-generated.jpg`
 - `{creatorId}/waveforms/{mediaId}/waveform.json`
 - `{creatorId}/thumbnails/media/{mediaId}/waveform.png`
+
+### Why Tiered Storage?
+
+- **B2**: ~$6/TB storage, free egress via Bandwidth Alliance → best for archival
+- **R2**: ~$15/TB storage, zero egress to CF Workers → best for delivery
+- Mezzanine retained indefinitely for future re-encoding
+- Original deleted 24h after mezzanine verified (saves ~50% archival storage)
 
 ---
 
@@ -131,9 +155,12 @@ Assets bucket keys:
 - Use a fast preset (p4 in TDD) for predictable performance.
 - If NVENC is unavailable, fall back to CPU with a documented preset and log the change.
 
-**Audio normalization**:
+**Audio normalization** (Two-Pass EBU R128):
 - Loudness target -16 LUFS, true peak -1.5, LRA 11 (EBU R128 loudnorm filter).
-- Decide and document one-pass vs two-pass loudnorm; log measured values if available.
+- Use two-pass normalization for accuracy:
+  - Pass 1: Analyze with `loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json`
+  - Pass 2: Apply with measured values `measured_I`, `measured_TP`, `measured_LRA`, `measured_thresh`
+- Store measured loudness values in webhook output (×100 for integer precision).
 
 **audiowaveform**:
 - Waveform JSON at 10 points per second, 8-bit amplitude.
@@ -154,10 +181,10 @@ Source references:
 
 - ffmpeg (includes ffprobe) compiled with NVENC support.
 - audiowaveform with JSON and PNG output support.
-- AWS CLI or S3 SDK for R2 uploads (document the chosen approach).
-- RunPod serverless SDK (python or node).
-- HTTP client for webhook posts.
-- Crypto library for HMAC signing.
+- boto3 SDK for both R2 and B2 (S3-compatible API).
+- RunPod serverless SDK (python).
+- HTTP client for webhook posts (requests).
+- Crypto library for HMAC signing (hmac, hashlib).
 
 ---
 
@@ -191,15 +218,25 @@ Source references:
 ## Credential Strategy
 
 Preferred approach:
-- Store R2 credentials and bucket names in RunPod endpoint env vars.
+- Store all credentials in RunPod endpoint env vars.
 - Do not pass secrets per job payload.
 
+Required environment variables:
+- **R2 (Delivery)**:
+  - `R2_ACCOUNT_ID`
+  - `R2_ACCESS_KEY_ID`
+  - `R2_SECRET_ACCESS_KEY`
+  - `R2_MEDIA_BUCKET`
+  - `R2_ASSETS_BUCKET`
+- **B2 (Archival)**:
+  - `B2_KEY_ID`
+  - `B2_APPLICATION_KEY`
+  - `B2_BUCKET_NAME`
+  - `B2_ENDPOINT` (e.g., `https://s3.us-west-004.backblazeb2.com`)
+  - `B2_REGION` (e.g., `us-west-004`)
+
 Fallback approach:
-- If endpoint env vars are not available, extend the job payload to include:
-  - `r2AccountId`
-  - `r2AccessKeyId`
-  - `r2SecretAccessKey`
-  - `outputBucket`, `assetsBucket`
+- If endpoint env vars are not available, extend the job payload to include credentials.
 - If this is required, update both this plan and the media-api contract.
 
 ---
@@ -235,21 +272,33 @@ Audio:
 
 ## Feature Breakdown
 
+### Common Pipeline (Both Video and Audio)
+1. Download original from B2 archive bucket.
+2. Create mezzanine (H.264 CRF 18, high-quality intermediate).
+3. Upload mezzanine to B2 archive bucket.
+4. Measure loudness (two-pass EBU R128 analysis).
+5. Transcode from mezzanine (not original) for consistency.
+
 ### Video Pipeline
 - Detect source resolution and duration.
 - Generate HLS variants (1080p, 720p, 480p, 360p) without upscaling.
 - Produce HLS master playlist that references only generated variants.
 - Create a 30-second preview HLS at 720p (first 30 seconds).
 - Extract a thumbnail at the 10 percent mark.
+- Include `readyVariants` array in output (e.g., `["1080p", "720p", "preview"]`).
 
 ### Audio Pipeline
-- Normalize loudness to -16 LUFS.
+- Normalize loudness to -16 LUFS (two-pass for accuracy).
 - Generate HLS audio variants (128 kbps, 64 kbps AAC).
-- Produce waveform JSON (1000 data points).
+- Produce waveform JSON (10 points per second).
 - Render a waveform image thumbnail (PNG).
+- Include `readyVariants` array in output (e.g., `["128k", "64k"]`).
 
 ### Output Publishing
-- Upload all outputs into the correct bucket and prefix.
+- Upload HLS outputs to R2 media bucket (delivery).
+- Upload assets to R2 assets bucket.
+- Upload mezzanine to B2 archive bucket.
+- Include `mezzanineKey`, `readyVariants`, and `loudness` in webhook payload.
 - Only include keys that were actually generated in the webhook payload.
 
 ---
@@ -318,10 +367,16 @@ If a separate repo is preferred, mirror this layout there and link it from `desi
 
 **Checklist**:
 - Validate payload and fail fast on invalid input.
-- Download input media from R2 into a temp workspace.
+- Initialize both R2 and B2 clients.
+- Download input media from B2 archive into a temp workspace.
 - Probe media metadata (duration, dimensions, audio channels).
+- Create mezzanine (H.264 CRF 18 high-quality intermediate).
+- Upload mezzanine to B2 archive bucket.
+- Measure loudness using two-pass EBU R128 analysis.
 - Run video or audio pipeline based on `mediaType`.
-- Upload outputs to R2 using the declared key contract.
+- Upload HLS outputs to R2 delivery bucket using the declared key contract.
+- Upload assets to R2 assets bucket.
+- Include `mezzanineKey`, `readyVariants`, and `loudness` in webhook output.
 - Post webhook payload to `media-api`.
 - Clean up temp files to avoid disk bloat.
 - Enforce output verification checklist before sending success webhook.
@@ -406,25 +461,37 @@ If a separate repo is preferred, mirror this layout there and link it from `desi
 
 **Checklist**:
 - Rotate RunPod API key and webhook secret quarterly.
+- Rotate B2 application key quarterly.
 - Monitor GPU cost per job and success rate.
 - Update ffmpeg and audiowaveform versions on a scheduled cadence.
 - Keep a regression fixture for video and audio outputs.
+- Implement original file cleanup job (delete from B2 24h after mezzanine verified).
+- Monitor B2 storage costs and verify Bandwidth Alliance egress is free.
 
 **Definition of Done**:
 - Documented maintenance playbook in `design/infrastructure/RunpodSetup.md`.
+- Original cleanup job implemented and tested.
 
 ---
 
 ## Risks and Mitigations
 
 - R2 key mismatch causes broken playback. Mitigation: validate keys in handler and test harness.
+- B2 key mismatch causes missing mezzanines. Mitigation: use centralized path generation.
 - Webhook signature mismatch causes jobs to look failed. Mitigation: single shared contract with media-api.
 - Output size explosion from too many variants. Mitigation: skip upscales, limit to known variants.
+- Mezzanine storage costs grow unexpectedly. Mitigation: monitor B2 usage, consider lifecycle rules.
+- Bandwidth Alliance egress not working. Mitigation: verify CF partnership, monitor egress costs.
+- Original files deleted before mezzanine verified. Mitigation: 24h delay, status check before deletion.
 
 ---
 
 ## Final Definition of Done
 
 - RunPod worker can process both video and audio with correct outputs.
+- Mezzanine files are created and stored in B2 archive bucket.
+- Loudness measurements are included in webhook output.
+- `readyVariants` array tracks all generated variants.
 - Webhook payloads update media-api without manual intervention.
 - A documented setup and maintenance guide exists in the repo.
+- B2 and R2 credentials are configured in RunPod endpoint env vars.
