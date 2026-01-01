@@ -1,0 +1,256 @@
+{
+  "$schema": "https://design-tokens.github.io/schemas/design-tokens-schema-v1.0.0.json",
+  "$description": "Codex Design System - Color Tokens",
+  "$version": "1.0.0",
+
+  "color": {
+    "text": {
+      "primary": {
+        "value": "#111827",
+        "type": "color",
+        "description": "Default text color for body content",
+        "$extensions": {
+          "mode": {
+            "light": "#111827",
+            "dark": "#f3f4f6"
+          }
+        }
+      },
+      "secondary": {
+        "value": "#4b5563",
+        "type": "color",
+        "description": "Secondary text (less emphasis)",
+        "$extensions": {
+          "mode": {
+            "light": "#4b5563",
+            "dark": "#9ca3af"
+          }
+        }
+      },
+      "tertiary": {
+        "value": "#6b7280",
+        "type": "color",
+        "description": "Tertiary text (captions, metadata)",
+        "$extensions": {
+          "mode": {
+            "light": "#6b7280",
+            "dark": "#6b7280"
+          }
+        }
+      },
+      "disabled": {
+        "value": "#9ca3af",
+        "type": "color",
+        "description": "Disabled text state",
+        "$extensions": {
+          "mode": {
+            "light": "#9ca3af",
+            "dark": "#6b7280"
+          }
+        }
+      },
+      "inverse": {
+        "value": "#ffffff",
+        "type": "color",
+        "description": "Text on dark backgrounds (buttons, badges)",
+        "$extensions": {
+          "mode": {
+            "light": "#ffffff",
+            "dark": "#111827"
+          }
+        }
+      }
+    },
+
+    "bg": {
+      "primary": {
+        "value": "#ffffff",
+        "type": "color",
+        "description": "Primary background (page background)",
+        "$extensions": {
+          "mode": {
+            "light": "#ffffff",
+            "dark": "#030712"
+          }
+        }
+      },
+      "secondary": {
+        "value": "#f9fafb",
+        "type": "color",
+        "description": "Secondary background (cards, panels)",
+        "$extensions": {
+          "mode": {
+            "light": "#f9fafb",
+            "dark": "#111827"
+          }
+        }
+      },
+      "tertiary": {
+        "value": "#f3f4f6",
+        "type": "color",
+        "description": "Tertiary background (hover states)",
+        "$extensions": {
+          "mode": {
+            "light": "#f3f4f6",
+            "dark": "#1f2937"
+          }
+        }
+      }
+    },
+
+    "border": {
+      "default": {
+        "value": "#e5e7eb",
+        "type": "color",
+        "description": "Default border color",
+        "$extensions": {
+          "mode": {
+            "light": "#e5e7eb",
+            "dark": "#374151"
+          }
+        }
+      },
+      "strong": {
+        "value": "#d1d5db",
+        "type": "color",
+        "description": "Stronger border (emphasized)",
+        "$extensions": {
+          "mode": {
+            "light": "#d1d5db",
+            "dark": "#4b5563"
+          }
+        }
+      }
+    },
+
+    "action": {
+      "primary": {
+        "default": {
+          "value": "#3b82f6",
+          "type": "color",
+          "description": "Primary action color (buttons, links)"
+        },
+        "hover": {
+          "value": "#2563eb",
+          "type": "color",
+          "description": "Primary action hover state"
+        },
+        "active": {
+          "value": "#1d4ed8",
+          "type": "color",
+          "description": "Primary action active state"
+        },
+        "focus": {
+          "value": "#93c5fd",
+          "type": "color",
+          "description": "Primary action focus ring"
+        }
+      },
+      "secondary": {
+        "default": {
+          "value": "#6b7280",
+          "type": "color",
+          "description": "Secondary action color"
+        },
+        "hover": {
+          "value": "#4b5563",
+          "type": "color",
+          "description": "Secondary action hover"
+        },
+        "active": {
+          "value": "#374151",
+          "type": "color",
+          "description": "Secondary action active"
+        }
+      }
+    },
+
+    "feedback": {
+      "success": {
+        "bg": {
+          "value": "#f0fdf4",
+          "type": "color"
+        },
+        "border": {
+          "value": "#bbf7d0",
+          "type": "color"
+        },
+        "text": {
+          "value": "#15803d",
+          "type": "color"
+        },
+        "icon": {
+          "value": "#16a34a",
+          "type": "color"
+        }
+      },
+      "error": {
+        "bg": {
+          "value": "#fef2f2",
+          "type": "color"
+        },
+        "border": {
+          "value": "#fecaca",
+          "type": "color"
+        },
+        "text": {
+          "value": "#b91c1c",
+          "type": "color"
+        },
+        "icon": {
+          "value": "#ef4444",
+          "type": "color"
+        }
+      },
+      "warning": {
+        "bg": {
+          "value": "#fffbeb",
+          "type": "color"
+        },
+        "border": {
+          "value": "#fde68a",
+          "type": "color"
+        },
+        "text": {
+          "value": "#b45309",
+          "type": "color"
+        },
+        "icon": {
+          "value": "#f59e0b",
+          "type": "color"
+        }
+      },
+      "info": {
+        "bg": {
+          "value": "#f8fafc",
+          "type": "color"
+        },
+        "border": {
+          "value": "#e2e8f0",
+          "type": "color"
+        },
+        "text": {
+          "value": "#334155",
+          "type": "color"
+        },
+        "icon": {
+          "value": "#64748b",
+          "type": "color"
+        }
+      }
+    },
+
+    "brand": {
+      "primary": {
+        "value": "#3b82f6",
+        "type": "color",
+        "description": "Primary brand color (Codex blue)"
+      },
+      "creator": {
+        "value": "#a855f7",
+        "type": "color",
+        "description": "Creator accent color (purple)"
+      }
+    }
+  }
+}

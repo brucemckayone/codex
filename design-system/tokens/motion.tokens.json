@@ -1,0 +1,63 @@
+{
+  "$schema": "https://design-tokens.github.io/schemas/design-tokens-schema-v1.0.0.json",
+  "$description": "Codex Design System - Motion Tokens",
+  "$version": "1.0.0",
+
+  "motion": {
+    "duration": {
+      "instant": {
+        "value": "0ms",
+        "type": "duration",
+        "description": "No animation (reduced-motion, instant feedback)"
+      },
+      "snap": {
+        "value": "100ms",
+        "type": "duration",
+        "description": "Micro-feedback (hover states)"
+      },
+      "quick": {
+        "value": "200ms",
+        "type": "duration",
+        "description": "Standard interactions (button press, default)"
+      },
+      "smooth": {
+        "value": "300ms",
+        "type": "duration",
+        "description": "Moderate transitions (dropdown, tooltip)"
+      },
+      "deliberate": {
+        "value": "400ms",
+        "type": "duration",
+        "description": "Complex changes (modal open/close)"
+      },
+      "slow": {
+        "value": "600ms",
+        "type": "duration",
+        "description": "Large state shifts (page transition, max duration)"
+      }
+    },
+
+    "easing": {
+      "easeOut": {
+        "value": "cubic-bezier(0.0, 0.0, 0.2, 1)",
+        "type": "cubicBezier",
+        "description": "Entering elements (fade in, slide in)"
+      },
+      "easeIn": {
+        "value": "cubic-bezier(0.4, 0.0, 1, 1)",
+        "type": "cubicBezier",
+        "description": "Exiting elements (fade out, slide out)"
+      },
+      "easeInOut": {
+        "value": "cubic-bezier(0.4, 0.0, 0.2, 1)",
+        "type": "cubicBezier",
+        "description": "State changes (hover, active, focus)"
+      },
+      "sharp": {
+        "value": "cubic-bezier(0.4, 0.0, 0.6, 1)",
+        "type": "cubicBezier",
+        "description": "Snappy interactions (dropdowns, tooltips)"
+      }
+    }
+  }
+}

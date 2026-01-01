@@ -1,0 +1,202 @@
+{
+  "$schema": "https://design-tokens.github.io/schemas/design-tokens-schema-v1.0.0.json",
+  "$description": "Codex Design System - Typography Tokens",
+  "$version": "1.0.0",
+
+  "typography": {
+    "fontFamily": {
+      "primary": {
+        "value": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        "type": "fontFamily",
+        "description": "Primary font (UI, body text)"
+      },
+      "mono": {
+        "value": "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+        "type": "fontFamily",
+        "description": "Monospace font (code, technical data)"
+      }
+    },
+
+    "fontSize": {
+      "xs": {
+        "value": "0.75rem",
+        "type": "dimension",
+        "description": "12px - Captions, meta"
+      },
+      "sm": {
+        "value": "0.875rem",
+        "type": "dimension",
+        "description": "14px - Small labels"
+      },
+      "base": {
+        "value": "1rem",
+        "type": "dimension",
+        "description": "16px - Body text (default)"
+      },
+      "lg": {
+        "value": "1.125rem",
+        "type": "dimension",
+        "description": "18px - Emphasized body"
+      },
+      "xl": {
+        "value": "1.25rem",
+        "type": "dimension",
+        "description": "20px - Small headings (h5, h6)"
+      },
+      "2xl": {
+        "value": "1.5rem",
+        "type": "dimension",
+        "description": "24px - Subheadings (h4)"
+      },
+      "3xl": {
+        "value": "1.875rem",
+        "type": "dimension",
+        "description": "30px - Section headings (h3)"
+      },
+      "4xl": {
+        "value": "2.25rem",
+        "type": "dimension",
+        "description": "36px - Page headings (h2)"
+      },
+      "5xl": {
+        "value": "3rem",
+        "type": "dimension",
+        "description": "48px - Hero headings (h1)"
+      },
+      "6xl": {
+        "value": "3.75rem",
+        "type": "dimension",
+        "description": "60px - Display (marketing)"
+      }
+    },
+
+    "fontWeight": {
+      "light": {
+        "value": "300",
+        "type": "fontWeight",
+        "description": "Light weight (captions)"
+      },
+      "regular": {
+        "value": "400",
+        "type": "fontWeight",
+        "description": "Regular weight (body)"
+      },
+      "medium": {
+        "value": "500",
+        "type": "fontWeight",
+        "description": "Medium weight (labels, buttons)"
+      },
+      "semibold": {
+        "value": "600",
+        "type": "fontWeight",
+        "description": "Semibold (subheadings)"
+      },
+      "bold": {
+        "value": "700",
+        "type": "fontWeight",
+        "description": "Bold (headings)"
+      }
+    },
+
+    "lineHeight": {
+      "tight": {
+        "value": "1.25",
+        "type": "number",
+        "description": "Tight (large headings)"
+      },
+      "normal": {
+        "value": "1.5",
+        "type": "number",
+        "description": "Normal (body text, default)"
+      },
+      "relaxed": {
+        "value": "1.6",
+        "type": "number",
+        "description": "Relaxed (long-form content)"
+      },
+      "loose": {
+        "value": "1.75",
+        "type": "number",
+        "description": "Loose (very relaxed)"
+      }
+    },
+
+    "letterSpacing": {
+      "tight": {
+        "value": "-0.025em",
+        "type": "dimension",
+        "description": "Tight tracking (large text)"
+      },
+      "normal": {
+        "value": "0em",
+        "type": "dimension",
+        "description": "Normal tracking (default)"
+      },
+      "wide": {
+        "value": "0.05em",
+        "type": "dimension",
+        "description": "Wide tracking (all-caps, small labels)"
+      }
+    },
+
+    "heading": {
+      "h1": {
+        "fontSize": {
+          "value": "{typography.fontSize.5xl.value}",
+          "type": "dimension"
+        },
+        "fontWeight": {
+          "value": "{typography.fontWeight.bold.value}",
+          "type": "fontWeight"
+        },
+        "lineHeight": {
+          "value": "1.2",
+          "type": "number"
+        }
+      },
+      "h2": {
+        "fontSize": {
+          "value": "{typography.fontSize.4xl.value}",
+          "type": "dimension"
+        },
+        "fontWeight": {
+          "value": "{typography.fontWeight.bold.value}",
+          "type": "fontWeight"
+        },
+        "lineHeight": {
+          "value": "1.25",
+          "type": "number"
+        }
+      },
+      "h3": {
+        "fontSize": {
+          "value": "{typography.fontSize.3xl.value}",
+          "type": "dimension"
+        },
+        "fontWeight": {
+          "value": "{typography.fontWeight.semibold.value}",
+          "type": "fontWeight"
+        },
+        "lineHeight": {
+          "value": "1.3",
+          "type": "number"
+        }
+      }
+    },
+
+    "body": {
+      "fontSize": {
+        "value": "{typography.fontSize.base.value}",
+        "type": "dimension"
+      },
+      "fontWeight": {
+        "value": "{typography.fontWeight.regular.value}",
+        "type": "fontWeight"
+      },
+      "lineHeight": {
+        "value": "{typography.lineHeight.normal.value}",
+        "type": "number"
+      }
+    }
+  }
+}

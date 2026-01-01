@@ -1,0 +1,83 @@
+{
+  "$schema": "https://design-tokens.github.io/schemas/design-tokens-schema-v1.0.0.json",
+  "$description": "Codex Design System - Spacing Tokens",
+  "$version": "1.0.0",
+
+  "spacing": {
+    "0": {
+      "value": "0px",
+      "type": "dimension",
+      "description": "No space (flush elements)"
+    },
+    "px": {
+      "value": "1px",
+      "type": "dimension",
+      "description": "Hairline (borders only)"
+    },
+    "0.5": {
+      "value": "0.125rem",
+      "type": "dimension",
+      "description": "2px - Minimal spacing"
+    },
+    "1": {
+      "value": "0.25rem",
+      "type": "dimension",
+      "description": "4px - Tight (inline elements)"
+    },
+    "2": {
+      "value": "0.5rem",
+      "type": "dimension",
+      "description": "8px - Cozy (related items)"
+    },
+    "3": {
+      "value": "0.75rem",
+      "type": "dimension",
+      "description": "12px - Comfortable"
+    },
+    "4": {
+      "value": "1rem",
+      "type": "dimension",
+      "description": "16px - Generous (default)"
+    },
+    "5": {
+      "value": "1.25rem",
+      "type": "dimension",
+      "description": "20px - Spacious"
+    },
+    "6": {
+      "value": "1.5rem",
+      "type": "dimension",
+      "description": "24px - Section padding"
+    },
+    "8": {
+      "value": "2rem",
+      "type": "dimension",
+      "description": "32px - Between sections"
+    },
+    "10": {
+      "value": "2.5rem",
+      "type": "dimension",
+      "description": "40px - Major gaps"
+    },
+    "12": {
+      "value": "3rem",
+      "type": "dimension",
+      "description": "48px - Page margins"
+    },
+    "16": {
+      "value": "4rem",
+      "type": "dimension",
+      "description": "64px - Hero spacing"
+    },
+    "20": {
+      "value": "5rem",
+      "type": "dimension",
+      "description": "80px - Rare, major breaks"
+    },
+    "24": {
+      "value": "6rem",
+      "type": "dimension",
+      "description": "96px - Luxurious spacing"
+    }
+  }
+}
