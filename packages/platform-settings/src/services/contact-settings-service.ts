@@ -118,12 +118,7 @@ export class ContactSettingsService extends BaseService {
           updatedAt: new Date(),
         },
       })
-      .returning({
-        platformName: schema.contactSettings.platformName,
-        supportEmail: schema.contactSettings.supportEmail,
-        contactUrl: schema.contactSettings.contactUrl,
-        timezone: schema.contactSettings.timezone,
-      });
+      .returning();
 
     this.obs.info('Contact settings updated', {
       organizationId: this.organizationId,

@@ -12,19 +12,10 @@ import {
   ALLOWED_LOGO_MIME_TYPES,
   type BrandingSettingsResponse,
   DEFAULT_BRANDING,
-  MAX_LOGO_FILE_SIZE_BYTES,
   type UpdateBrandingInput,
 } from '@codex/validation';
 import { eq } from 'drizzle-orm';
-import {
-  FileTooLargeError,
-  InvalidFileTypeError,
-  SettingsUpsertError,
-} from '../errors';
-import {
-  isValidImageHeader,
-  sanitizeSvgContent,
-} from '../utils/file-validation';
+import { InvalidFileTypeError, SettingsUpsertError } from '../errors';
 
 /**
  * Configuration for BrandingSettingsService
@@ -122,10 +113,7 @@ export class BrandingSettingsService extends BaseService {
           updatedAt: new Date(),
         },
       })
-      .returning({
-        logoUrl: schema.brandingSettings.logoUrl,
-        primaryColorHex: schema.brandingSettings.primaryColorHex,
-      });
+      .returning();
 
     this.obs.info('Branding settings updated', {
       organizationId: this.organizationId,
@@ -204,10 +192,7 @@ export class BrandingSettingsService extends BaseService {
             updatedAt: new Date(),
           },
         })
-        .returning({
-          logoUrl: schema.brandingSettings.logoUrl,
-          primaryColorHex: schema.brandingSettings.primaryColorHex,
-        });
+        .returning();
 
       this.obs.info('Logo uploaded', {
         organizationId: this.organizationId,

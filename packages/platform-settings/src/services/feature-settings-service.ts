@@ -107,10 +107,7 @@ export class FeatureSettingsService extends BaseService {
           updatedAt: new Date(),
         },
       })
-      .returning({
-        enableSignups: schema.featureSettings.enableSignups,
-        enablePurchases: schema.featureSettings.enablePurchases,
-      });
+      .returning();
 
     this.obs.info('Feature settings updated', {
       organizationId: this.organizationId,

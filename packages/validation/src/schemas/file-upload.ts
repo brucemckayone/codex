@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { sanitizeSvgContent } from '../primitives';
-import { ALLOWED_LOGO_MIME_TYPES, MAX_LOGO_FILE_SIZE_BYTES } from './settings';
+import {
+  ALLOWED_LOGO_MIME_TYPES,
+  type AllowedLogoMimeType,
+  MAX_LOGO_FILE_SIZE_BYTES,
+} from './settings';
 
 /**
  * File Upload Validation
@@ -126,11 +130,21 @@ export async function validateLogoUpload(
   }
 
   // Validate MIME type (allowlist)
-  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type as any)) {
+  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type as AllowedLogoMimeType)) {
     throw new z.ZodError([
       {
         code: 'custom',
         message: `Invalid file type. Allowed: ${ALLOWED_LOGO_MIME_TYPES.join(', ')}`,
+        path: ['logo'],
+      },
+    ]);
+  }
+
+  if (file.size <= 0) {
+    throw new z.ZodError([
+      {
+        code: 'custom',
+        message: 'File size cannot be zero',
         path: ['logo'],
       },
     ]);
@@ -169,7 +183,7 @@ export async function validateLogoUpload(
     const textDecoder = new TextDecoder();
     const svgContent = textDecoder.decode(buffer);
     const sanitized = sanitizeSvgContent(svgContent);
-    finalBuffer = new TextEncoder().encode(sanitized).buffer;
+    finalBuffer = new TextEncoder().encode(sanitized).buffer as ArrayBuffer;
   }
 
   return {

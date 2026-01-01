@@ -27,7 +27,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import { FileTooLargeError, InvalidFileTypeError } from '../errors';
+import { InvalidFileTypeError } from '../errors';
 import { BrandingSettingsService } from '../services/branding-settings-service';
 
 /**

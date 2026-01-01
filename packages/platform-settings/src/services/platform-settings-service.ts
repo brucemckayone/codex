@@ -120,16 +120,12 @@ export class PlatformSettingsFacade {
   /**
    * Upload a new logo
    *
-   * @param file - Logo file data
-   * @param mimeType - File MIME type
-   * @param fileSize - File size in bytes
+   * @param validatedFile - Validated file data from validateLogoUpload()
    */
   async uploadLogo(
-    file: ArrayBuffer | Blob,
-    mimeType: string,
-    fileSize: number
+    validatedFile: import('@codex/validation').ValidatedLogoFile
   ): Promise<BrandingSettingsResponse> {
-    return this.branding.uploadLogo(file, mimeType, fileSize);
+    return this.branding.uploadLogo(validatedFile);
   }
 
   /**

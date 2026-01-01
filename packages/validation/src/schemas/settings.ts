@@ -22,14 +22,18 @@ import { hexColorSchema, timezoneSchema, urlSchema } from '../primitives';
  * Allowed MIME types for logo uploads
  * Only common web-safe image formats
  */
+export type AllowedLogoMimeType =
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/webp'
+  | 'image/svg+xml';
+
 export const ALLOWED_LOGO_MIME_TYPES = [
   'image/png',
   'image/jpeg',
   'image/webp',
   'image/svg+xml',
 ] as const;
-
-export type AllowedLogoMimeType = (typeof ALLOWED_LOGO_MIME_TYPES)[number];
 
 /**
  * Maximum logo file size: 5MB
