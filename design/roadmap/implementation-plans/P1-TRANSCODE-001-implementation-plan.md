@@ -43,6 +43,8 @@ This document is the **single source of truth** for implementing media transcodi
 | Waveform resolution | 10 pts/sec | Balance detail vs size |
 | Handler language | Python | Better FFmpeg integration |
 
+> **Future Direction**: This Phase 1 implementation uses eager transcoding but is architected to evolve toward Mux-style JIT transcoding. See [ADR: JIT Transcoding Vision](../../features/media-transcoding/adr-jit-transcoding-vision.md) for the evolution path and Phase 1 constraints that preserve this migration path.
+
 ---
 
 ## Part 1: Contracts (Ground Truth)

@@ -1170,13 +1170,39 @@ CMD ["python", "/handler.py"]
 
 ---
 
-## Future Phases
+## Future Direction: Just-In-Time Transcoding
 
-This Phase 1 implementation establishes foundations for:
+> **Architecture Decision Record**: See [ADR: JIT Transcoding Vision](../../features/media-transcoding/adr-jit-transcoding-vision.md) for full details.
 
-- **Phase 2**: On-demand variant generation, Cloudflare Queues integration
-- **Phase 3**: Audio mediation (voice-first mixing), smart variants (clips, vertical crops)
-- **Phase 4**: Watermarking, DRM encryption, live streaming
+Phase 1 uses **eager transcoding** (all variants on upload) but is architected to evolve toward **Mux-style JIT transcoding** where content is only transcoded when requested.
+
+**Evolution Path**:
+| Phase | Model | Cost Scaling |
+|-------|-------|--------------|
+| 1 (now) | Eager - all variants on upload | O(uploads) |
+| 2 | On-demand variants - transcode on first play | O(views) |
+| 3 | JIT segments - transcode segments on request | O(popular segments) |
+| 4 | Real-time packaging - no transcode, repackage fMP4 | O(0) GPU |
+
+**Phase 1 decisions enabling JIT**:
+- Mezzanine preservation in B2 (source for future transcodes)
+- `readyVariants` tracking (know what exists)
+- `transcodingPriority` field (switch modes without migration)
+- Deterministic segment naming (predictable cache keys)
+
+**Trigger for Phase 2**: Content volume where eager costs become prohibitive, or analytics show <30% of content is ever watched.
+
+---
+
+## Additional Future Capabilities
+
+Beyond JIT, this Phase 1 implementation establishes foundations for:
+
+- **Audio mediation**: Voice-first mixing, smart audio levels
+- **Smart variants**: Auto-generated clips, vertical crops for social
+- **Watermarking**: Per-user watermarks for piracy tracking
+- **DRM encryption**: Widevine/FairPlay for premium content
+- **Live streaming**: Real-time ingest and packaging
 
 ---
 

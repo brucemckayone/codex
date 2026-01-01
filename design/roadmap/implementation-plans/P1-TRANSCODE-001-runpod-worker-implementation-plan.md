@@ -19,6 +19,8 @@
 - Avoid leaking secrets in payloads or logs.
 - Keep all operational steps documented so future you is not stuck.
 
+> **Future Direction**: This Phase 1 worker generates all variants eagerly. Future phases will evolve toward JIT transcoding where specific variants/segments are generated on-demand. The mezzanine-first architecture and `readyVariants` tracking enable this migration. See [ADR: JIT Transcoding Vision](../../features/media-transcoding/adr-jit-transcoding-vision.md).
+
 ---
 
 ## Context Sources (read before implementation)
