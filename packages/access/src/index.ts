@@ -30,6 +30,16 @@ export {
   type SavePlaybackProgressInput,
   savePlaybackProgressSchema,
 } from '@codex/validation';
+// Export error classes
+export {
+  AccessDeniedError,
+  ContentNotFoundError,
+  InvalidContentTypeError,
+  MediaNotFoundError,
+  MediaNotReadyForStreamingError,
+  OrganizationMismatchError,
+  R2SigningError,
+} from './errors';
 export type {
   ContentAccessEnv,
   ContentAccessServiceConfig,

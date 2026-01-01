@@ -5,6 +5,18 @@
  * Reduces boilerplate and ensures consistency across all API workers.
  */
 
+// Authentication middleware
+export {
+  createSessionMiddleware,
+  type SessionMiddlewareOptions,
+} from './auth-middleware';
+// Body parsing middleware
+export { createBodyParsingMiddleware } from './body-parsing-middleware';
+// Environment validation
+export {
+  createEnvValidationMiddleware,
+  type EnvValidationConfig,
+} from './env-validation';
 // Health check utilities
 export {
   type HealthCheckResult,
@@ -39,19 +51,31 @@ export {
   createStandardMiddlewareChain,
   type MiddlewareChainOptions,
 } from './middleware-chain';
-// Route handler helpers
+// Procedure pattern (tRPC-style)
 export {
-  createAuthenticatedHandler,
-  formatValidationError,
-  withErrorHandling,
-} from './route-helpers';
-// Security policy
-export {
-  DEFAULT_SECURITY_POLICY,
-  POLICY_PRESETS,
-  type RouteSecurityPolicy,
-  withPolicy,
-} from './security-policy';
+  type AuthLevel,
+  checkOrganizationMembership,
+  createServiceRegistry,
+  enforceIPWhitelist,
+  enforcePolicyInline,
+  extractOrganizationFromSubdomain,
+  // Helper utilities (for advanced use cases)
+  generateRequestId,
+  getClientIP,
+  type InferInput,
+  type InputSchema,
+  type OrganizationMembership,
+  type ProcedureConfig,
+  type ProcedureContext,
+  type ProcedureHandler,
+  type ProcedurePolicy,
+  procedure,
+  type ServiceRegistry,
+  type ServiceRegistryResult,
+  type SessionForAuth,
+  type UserForAuth,
+  validateInput,
+} from './procedure';
 // Test utilities (for integration tests only)
 export {
   cleanupTestUser,

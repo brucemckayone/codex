@@ -100,7 +100,7 @@ You work within the Codex platform architecture:
 
 ## Worker Layer Integration
 - Webhook endpoint in content-api worker
-- Use createAuthenticatedHandler() for job trigger endpoint
+- Use procedure() for job trigger endpoint
 - Apply rate limiting for webhook endpoint
 - Verify HMAC signatures using @codex/security
 

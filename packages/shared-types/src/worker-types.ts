@@ -43,6 +43,12 @@ export type Bindings = {
   RATE_LIMIT_KV?: import('@cloudflare/workers-types').KVNamespace;
 
   /**
+   * Session caching KV namespace
+   * Used for caching authenticated sessions to reduce database load
+   */
+  AUTH_SESSION_KV?: import('@cloudflare/workers-types').KVNamespace;
+
+  /**
    * R2 bucket binding for media storage
    */
   MEDIA_BUCKET?: import('@cloudflare/workers-types').R2Bucket;
@@ -66,6 +72,12 @@ export type Bindings = {
    * R2 bucket name for media storage
    */
   R2_BUCKET_MEDIA?: string;
+
+  /**
+   * Public URL base for R2 bucket (e.g., https://pub-codex-media.r2.dev)
+   * Used to generate public URLs for logo uploads and other static assets
+   */
+  R2_PUBLIC_URL_BASE?: string;
 
   /**
    * Stripe API secret key
@@ -106,8 +118,13 @@ export type Bindings = {
 /**
  * Context Variables
  * Data set during request processing by middleware
+ *
+ * NOTE: This is an interface (not type) to allow declaration merging.
+ * Service packages augment this interface to add their service types:
+ * - @codex/content adds: contentService, mediaItemService
+ * - @codex/access adds: contentAccessService
  */
-export type Variables = {
+export interface Variables {
   /**
    * Authenticated user session
    * Set by requireAuth middleware
@@ -171,7 +188,7 @@ export type Variables = {
     status: string;
     joinedAt: Date;
   };
-};
+}
 
 /**
  * User session data

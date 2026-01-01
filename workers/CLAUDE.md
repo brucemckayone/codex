@@ -479,6 +479,7 @@ Workers are organized by business responsibility:
 
 **@codex/worker-utils**:
 - `createWorker()` - Standardized worker setup (middleware chain, health checks, error handling)
+- `procedure()` - tRPC-style unified handler with policy, validation, service injection, and error handling
 - `createHealthCheckHandler()` - Health endpoint responses
 - `createStandardMiddlewareChain()` - Request tracking, security headers
 - `createErrorResponse()` - Consistent error response format
@@ -487,7 +488,6 @@ Workers are organized by business responsibility:
 **@codex/security**:
 - `securityHeaders()` - CSP, XFO, X-Content-Type-Options middleware
 - `createRateLimiter()` - IP-based rate limiting via KV
-- `withPolicy()` - Route-level authentication/authorization middleware
 - `RATE_LIMIT_PRESETS` - Predefined rate limit configs (auth, api, webhook)
 
 **@codex/database**:
@@ -870,26 +870,37 @@ x-request-id: 550e8400-e29b-41d4-a716-446655440000
 
 ## Common Integration Patterns
 
-### Pattern: Call Auth Worker from Other Workers
+### Pattern: Authenticated API Endpoint with procedure()
 
-**Use Case**: Validate session before proceeding with protected operation
+**Use Case**: Create a protected API endpoint with validation
 
 **Code Pattern**:
 ```typescript
-// In Content-API route handler
-const response = await fetch('http://localhost:42069/api/auth/session', {
-  headers: {
-    'Cookie': c.req.header('Cookie') || '',
-  },
-});
+import { procedure } from '@codex/worker-utils';
+import { z } from 'zod';
 
-if (response.status === 401) {
-  return createErrorResponse(c, 'UNAUTHORIZED', 'Session expired', 401);
-}
+// GET endpoint with params validation
+app.get('/api/content/:id',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: z.object({ id: z.string().uuid() }) },
+    handler: async (ctx) => {
+      return await ctx.services.content.getById(ctx.input.params.id, ctx.user.id);
+    },
+  })
+);
 
-const { user, session } = await response.json();
-c.set('user', user);
-c.set('session', session);
+// POST endpoint with body validation
+app.post('/api/content',
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: { body: createContentSchema },
+    successStatus: 201,
+    handler: async (ctx) => {
+      return await ctx.services.content.create(ctx.input.body, ctx.user.id);
+    },
+  })
+);
 ```
 
 ### Pattern: Check Membership/Ownership
@@ -923,27 +934,20 @@ async function getContent(id: string, userId: string) {
 
 **Code Pattern**:
 ```typescript
-// In ContentAccessService
-async function getStreamingUrl(
-  contentId: string,
-  userId: string,
-  r2: R2Bucket
-) {
-  // 1. Verify access
-  const canAccess = await this.verifyAccess(contentId, userId);
-  if (!canAccess) throw new ForbiddenError('Access denied');
-
-  // 2. Get media item
-  const mediaItem = await this.getMediaItem(contentId);
-
-  // 3. Generate signed URL
-  const url = await r2.createSignedUrl({
-    key: mediaItem.r2Key,
-    expiresIn: 3600, // 1 hour
-  });
-
-  return { url, expiresAt: Date.now() + 3600000 };
-}
+// Using procedure() for streaming URL endpoint
+app.get('/api/access/streaming-url/:contentId',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: z.object({ contentId: z.string().uuid() }) },
+    handler: async (ctx) => {
+      // Service handles access verification and URL generation
+      return await ctx.services.access.getStreamingUrl(
+        ctx.input.params.contentId,
+        ctx.user.id
+      );
+    },
+  })
+);
 ```
 
 ### Pattern: Handle Stripe Webhook with Signature Verification
@@ -952,7 +956,8 @@ async function getStreamingUrl(
 
 **Code Pattern**:
 ```typescript
-// In Stripe Webhook Handler
+// Stripe webhooks use custom middleware for signature verification
+// instead of procedure() since they don't use session auth
 app.post('/webhooks/stripe/payment', verifyStripeSignature, async (c) => {
   // Event already verified by middleware
   const event = c.get('stripeEvent');
@@ -969,6 +974,32 @@ app.post('/webhooks/stripe/payment', verifyStripeSignature, async (c) => {
 
   return c.json({ received: true });
 });
+```
+
+**Note**: Webhooks typically don't use procedure() because they use Stripe signature verification instead of session authentication. The `verifyStripeSignature` middleware handles authentication via HMAC-SHA256.
+
+### Pattern: Organization-Scoped Endpoint
+
+**Use Case**: Endpoint requires organization membership
+
+**Code Pattern**:
+```typescript
+app.patch('/api/organizations/:id/settings',
+  procedure({
+    policy: { auth: 'required', requireOrgMembership: true },
+    input: {
+      params: z.object({ id: z.string().uuid() }),
+      body: updateSettingsSchema,
+    },
+    handler: async (ctx) => {
+      // organizationId is guaranteed when requireOrgMembership: true
+      return await ctx.services.settings.update(
+        ctx.organizationId,
+        ctx.input.body
+      );
+    },
+  })
+);
 ```
 
 ---

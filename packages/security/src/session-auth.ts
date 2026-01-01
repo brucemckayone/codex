@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import { dbHttp, schema } from '@codex/database';
+import { createDbClient, type DbEnvVars, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context, Next } from 'hono';
@@ -39,6 +39,12 @@ export interface UserData {
 export interface CachedSessionData {
   session: SessionData;
   user: UserData;
+}
+
+function isCachedSessionData(value: unknown): value is CachedSessionData {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as { session?: unknown; user?: unknown };
+  return Boolean(data.session && data.user);
 }
 
 /**
@@ -82,15 +88,30 @@ function extractSessionCookie(
 ): string | null {
   if (!cookieHeader) return null;
 
-  // SECURITY: Escape special regex characters in cookie name
-  const escapedName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`${escapedName}=([^;]+)`);
-  const match = cookieHeader.match(regex);
+  const cookieNames = [
+    cookieName,
+    `__Secure-${cookieName}`,
+    'better-auth.session_token',
+    '__Secure-better-auth.session_token',
+  ];
+  let matchedValue: string | null = null;
 
-  if (!match?.[1]) return null;
+  for (const name of new Set(cookieNames)) {
+    // SECURITY: Escape special regex characters in cookie name
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`${escapedName}=([^;]+)`);
+    const match = cookieHeader.match(regex);
+
+    if (match?.[1]) {
+      matchedValue = match[1];
+      break;
+    }
+  }
+
+  if (!matchedValue) return null;
 
   // URL decode the cookie value first
-  const decodedValue = decodeURIComponent(match[1]);
+  const decodedValue = decodeURIComponent(matchedValue);
 
   // BetterAuth uses `{token}.{signature}` format - extract just the token
   // The token part is stored in the database
@@ -112,16 +133,21 @@ function extractSessionCookie(
  * 4. Returns null if session invalid or expired
  *
  * @param sessionToken - Session token from cookie
+ * @param env - Database environment variables from request context
  * @param obs - Optional observability client for structured logging
  * @returns Session and user data, or null if invalid
  */
 async function querySessionFromDatabase(
   sessionToken: string,
+  env: DbEnvVars,
   obs?: ObservabilityClient
 ): Promise<CachedSessionData | null> {
   try {
+    // Create a request-scoped database client using the environment from c.env
+    const db = createDbClient(env);
+
     // SECURITY: Use parameterized query via Drizzle ORM to prevent SQL injection
-    const result = await dbHttp.query.sessions.findFirst({
+    const result = await db.query.sessions.findFirst({
       where: and(
         eq(schema.sessions.token, sessionToken),
         gt(schema.sessions.expiresAt, new Date()) // SECURITY: Only valid (non-expired) sessions
@@ -231,8 +257,14 @@ async function getSessionFromCache(
   obs?: ObservabilityClient
 ): Promise<CachedSessionData | null> {
   try {
-    const cached = await kv.get(`session:${sessionToken}`, 'json');
-    return cached as CachedSessionData | null;
+    const keys = [`session:${sessionToken}`, sessionToken];
+    for (const key of keys) {
+      const cached = await kv.get(key, 'json');
+      if (isCachedSessionData(cached)) {
+        return cached;
+      }
+    }
+    return null;
   } catch (error) {
     // SECURITY: Cache read failure should not break authentication
     obs?.error('Failed to read session from KV', {
@@ -275,33 +307,26 @@ export function optionalAuth(config?: SessionAuthConfig) {
     // Get observability client from context if available
     const obs = c.get('obs');
 
+    // Get KV namespace from config or automatically from context
+    // This allows workers to automatically benefit from caching without explicit config
+    const kv =
+      config?.kv ||
+      ((c.env as { AUTH_SESSION_KV?: KVNamespace })?.AUTH_SESSION_KV as
+        | KVNamespace
+        | undefined);
+
     // Extract session cookie from request
     const cookieHeader = c.req.header('cookie');
     const sessionToken = extractSessionCookie(cookieHeader, cookieName);
 
-    // DEBUG: Log session extraction details
-    console.log('[session-auth] Cookie name:', cookieName);
-    console.log('[session-auth] Cookie header present:', !!cookieHeader);
-    console.log(
-      '[session-auth] Extracted token:',
-      sessionToken ? `${sessionToken.substring(0, 10)}...` : 'null'
-    );
-
     // No session cookie - proceed without authentication
     if (!sessionToken) {
-      console.log(
-        '[session-auth] No session token found, proceeding without auth'
-      );
       return next();
     }
 
     // Try cache first (if KV available)
-    if (config?.kv) {
-      const cachedSession = await getSessionFromCache(
-        config.kv,
-        sessionToken,
-        obs
-      );
+    if (kv) {
+      const cachedSession = await getSessionFromCache(kv, sessionToken, obs);
 
       if (cachedSession) {
         // SECURITY: Cache hit - validate expiration client-side too (defense in depth)
@@ -325,7 +350,7 @@ export function optionalAuth(config?: SessionAuthConfig) {
           }
           // Don't await - fire and forget cache cleanup
           try {
-            config.kv.delete(`session:${sessionToken}`).catch((err: unknown) =>
+            kv.delete(`session:${sessionToken}`).catch((err: unknown) =>
               obs?.error('Failed to delete expired session from cache', {
                 error: err instanceof Error ? err.message : String(err),
               })
@@ -342,7 +367,11 @@ export function optionalAuth(config?: SessionAuthConfig) {
       '[session-auth] Querying database for token:',
       `${sessionToken.substring(0, 10)}...`
     );
-    const sessionData = await querySessionFromDatabase(sessionToken, obs);
+    const sessionData = await querySessionFromDatabase(
+      sessionToken,
+      c.env as DbEnvVars,
+      obs
+    );
     console.log(
       '[session-auth] Database query result:',
       sessionData
@@ -356,13 +385,12 @@ export function optionalAuth(config?: SessionAuthConfig) {
       c.set('user', sessionData.user);
 
       // Cache it for next time (if KV available)
-      if (config?.kv) {
+      if (kv) {
         // Don't await - fire and forget cache write
-        cacheSessionInKV(config.kv, sessionToken, sessionData, obs).catch(
-          (err) =>
-            obs?.error('Failed to cache session', {
-              error: err instanceof Error ? err.message : String(err),
-            })
+        cacheSessionInKV(kv, sessionToken, sessionData, obs).catch((err) =>
+          obs?.error('Failed to cache session', {
+            error: err instanceof Error ? err.message : String(err),
+          })
         );
       }
 
@@ -370,12 +398,12 @@ export function optionalAuth(config?: SessionAuthConfig) {
         if (obs) {
           obs.info('Session authenticated', {
             userId: sessionData.user.id,
-            method: config?.kv ? 'database' : 'database-only',
+            method: kv ? 'database' : 'database-only',
           });
         } else {
           console.info('Session authenticated', {
             userId: sessionData.user.id,
-            method: config?.kv ? 'database' : 'database-only',
+            method: kv ? 'database' : 'database-only',
           });
         }
       }

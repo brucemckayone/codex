@@ -59,6 +59,8 @@ function getR2Client(): S3Client {
         accessKeyId: R2_ACCESS_KEY_ID,
         secretAccessKey: R2_SECRET_ACCESS_KEY,
       },
+      // R2 requires path-style addressing (bucket in path, not subdomain)
+      forcePathStyle: true,
     });
   }
   return r2ClientInstance;

@@ -75,10 +75,10 @@ app.route('/checkout', checkout);
 Applied in checkout.ts:
 ```typescript
 checkout.post('/create',
-  withPolicy({ auth: 'required', rateLimit: 'auth' }),  // 10 req/min
-  createAuthenticatedHandler({
-    schema: { body: createCheckoutSchema },
-    handler: async (_c, ctx) => { /* ... */ }
+  procedure({
+    policy: { auth: 'required', rateLimit: 'auth' },  // 10 req/min
+    input: { body: createCheckoutSchema },
+    handler: async (ctx) => { /* ... */ }
   })
 );
 ```
@@ -96,10 +96,10 @@ app.route('/purchases', purchases);
 Applied in purchases.ts:
 ```typescript
 purchases.get('/',
-  withPolicy({ auth: 'required', rateLimit: 'api' }),  // 100 req/min
-  createAuthenticatedHandler({
-    schema: { query: purchaseQuerySchema },
-    handler: async (_c, ctx) => { /* ... */ }
+  procedure({
+    policy: { auth: 'required', rateLimit: 'api' },  // 100 req/min
+    input: { query: purchaseQuerySchema },
+    handler: async (ctx) => { /* ... */ }
   })
 );
 ```
@@ -770,7 +770,7 @@ The ecom-api worker depends on these service packages:
 | @codex/purchase | PurchaseService, createStripeClient, verifyWebhookSignature | Purchase management, Stripe integration | Checkout, webhook processing |
 | @codex/database | dbHttp, createPerRequestDbClient | Database access | Querying/inserting purchases, content, access records |
 | @codex/security | rateLimit, securityHeaders | Rate limiting, security middleware | Webhook rate limiting (1000 req/min), security headers |
-| @codex/worker-utils | createAuthenticatedHandler, withPolicy, createHealthCheckHandler | Worker utilities | Route handlers, health checks, error handling |
+| @codex/worker-utils | procedure, createHealthCheckHandler | Worker utilities | Route handlers, health checks, error handling |
 | @codex/observability | ObservabilityClient | Logging and metrics | Request tracking, error logging, event logging |
 | @codex/validation | createCheckoutSchema, purchaseQuerySchema, checkoutSessionMetadataSchema | Input validation | Request body/query validation, metadata validation |
 | @codex/shared-types | HonoEnv, SingleItemResponse, PaginatedListResponse, Bindings | Type definitions | Environment types, response types |
@@ -840,7 +840,7 @@ For authenticated endpoints (POST /checkout/create, GET /purchases):
 ```
 Request with Cookie: codex-session=...
   ↓
-withPolicy({ auth: 'required' })
+procedure({ policy: { auth: 'required' } })
   └─ Extracts session cookie
   └─ Calls Auth Worker: GET /api/auth/session
        └─ Auth Worker validates session in PostgreSQL
@@ -850,7 +850,7 @@ withPolicy({ auth: 'required' })
        └─ Sets c.set('user', userData)
        └─ Sets c.set('session', sessionData)
        ↓
-createAuthenticatedHandler()
+procedure()
   └─ ctx.user.id available in handler
 ```
 
@@ -1653,11 +1653,13 @@ wrangler tail --env production
 1. **Update in src/routes/checkout.ts**:
 ```typescript
 checkout.post('/create',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'api'  // Change from 'auth' (10/min) to 'api' (100/min)
-  }),
-  // ... rest of handler
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api'  // Change from 'auth' (10/min) to 'api' (100/min)
+    },
+    // ... rest of handler
+  })
 );
 ```
 
@@ -1673,8 +1675,10 @@ checkout.post('/create',
       windowMs: 60 * 1000
     })(c, next);
   },
-  withPolicy({ auth: 'required' }),
-  // ... rest
+  procedure({
+    policy: { auth: 'required' },
+    // ... rest
+  })
 );
 ```
 

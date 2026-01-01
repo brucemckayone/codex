@@ -11,8 +11,9 @@ import {
 } from '@codex/cloudflare-clients';
 import { ContentService, MediaItemService } from '@codex/content';
 import { closeDbPool, type DatabaseWs, dbWs } from '@codex/database';
-import { OrganizationService } from '@codex/identity';
 import { ObservabilityClient } from '@codex/observability';
+import { OrganizationService } from '@codex/organization';
+import { createStripeClient, PurchaseService } from '@codex/purchase';
 
 export interface DatabaseFixture {
   db: DatabaseWs;
@@ -44,6 +45,13 @@ export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
   // Real observability client
   const obs = new ObservabilityClient('e2e-tests', 'test');
 
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    throw new Error('STRIPE_SECRET_KEY is not set');
+  }
+
+  const stripe = createStripeClient(stripeSecretKey);
+
   fixtureInstance = {
     db,
     r2Client,
@@ -51,9 +59,10 @@ export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
     mediaService: new MediaItemService(config),
     orgService: new OrganizationService(config),
     accessService: new ContentAccessService({
-      db,
+      db: db,
       r2: r2Client,
       obs,
+      purchaseService: new PurchaseService({ db, environment: 'test' }, stripe),
     }),
   };
 

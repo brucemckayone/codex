@@ -284,9 +284,24 @@ describe('MediaItemService', () => {
       );
 
       await service.updateStatus(created.id, 'transcoding', creatorId);
-      const ready = await service.updateStatus(created.id, 'ready', creatorId);
+
+      // Use markAsReady() which provides required fields for status='ready'
+      const ready = await service.markAsReady(
+        created.id,
+        {
+          hlsMasterPlaylistKey: `hls/${created.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${created.id}/thumb.jpg`,
+          durationSeconds: 120,
+          width: 1920,
+          height: 1080,
+        },
+        creatorId
+      );
 
       expect(ready.status).toBe('ready');
+      expect(ready.hlsMasterPlaylistKey).toBeDefined();
+      expect(ready.thumbnailKey).toBeDefined();
+      expect(ready.durationSeconds).toBe(120);
     });
 
     it('should update status from transcoding to failed', async () => {

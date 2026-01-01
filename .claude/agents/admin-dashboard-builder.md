@@ -109,7 +109,7 @@ When implementing admin features:
 
 3. **Worker route** (content-api or new admin-api worker):
    - Apply requireAuth() and requirePlatformOwner() middleware
-   - Use createAuthenticatedHandler() with validation schema
+   - Use procedure() with input validation schema
    - Call service method
    - Map errors with mapErrorToResponse()
 

@@ -39,7 +39,7 @@ All routes inherit middleware from `createWorker()` in `index.ts`:
 3. **Security Headers**: CSP, XFO, X-Content-Type-Options
 4. **Error Sanitization**: Internal details not exposed in responses
 
-Route-level authentication via `withPolicy()` middleware (declared per endpoint).
+Route-level authentication via `procedure()` policy configuration (declared per endpoint).
 
 ### Dependency Injection
 
@@ -728,7 +728,7 @@ Configured in `index.ts`:
 - Populates `ctx.user` with user data (id, email, role)
 - Returns 401 Unauthorized if invalid
 
-**Route-Level Override**: `withPolicy()` middleware declares per-route auth requirement
+**Route-Level Override**: `procedure()` policy configuration declares per-route auth requirement
 
 ### Authorization
 
@@ -770,7 +770,7 @@ Configured in `index.ts`:
 | streaming | 60 req/min | Streaming URL requests (allows HLS segment refreshes) |
 | strict | 5 req/15min | Deletion operations |
 
-**Configuration**: Declared in `withPolicy()` for each route
+**Configuration**: Declared in `procedure()` policy for each route
 
 **Implementation**: KV namespace `RATE_LIMIT_KV` for distributed rate limit tracking
 
@@ -915,7 +915,7 @@ content-api worker
   │   └── @codex/validation (schemas)
   │
   ├── @codex/security (authentication middleware)
-  ├── @codex/worker-utils (createWorker, withPolicy, createAuthenticatedHandler)
+  ├── @codex/worker-utils (createWorker, procedure)
   ├── @codex/shared-types (HonoEnv, response types)
   └── Hono framework (routing)
 ```
@@ -923,8 +923,8 @@ content-api worker
 ### Data Flow - Create Content
 
 1. **Client Request**: POST /api/content with title, slug, mediaItemId, etc.
-2. **Authentication**: `withPolicy()` verifies session (ctx.user set)
-3. **Authorization**: `POLICY_PRESETS.creator()` checks user has creator role
+2. **Authentication**: `procedure()` verifies session via policy.auth (ctx.user set)
+3. **Authorization**: `policy.roles: ['creator']` checks user has creator role
 4. **Validation**: `createContentSchema.parse()` validates request body
 5. **Service Call**: `ContentService.create(validatedInput, ctx.user.id)`
 6. **Database Transaction**: Service inserts content record, validates media item
@@ -933,7 +933,7 @@ content-api worker
 ### Data Flow - Get Streaming URL
 
 1. **Client Request**: GET /api/access/content/:id/stream with valid session
-2. **Authentication**: `withPolicy()` verifies session
+2. **Authentication**: `procedure()` verifies session via policy
 3. **Authorization**: Standard authenticated user policy
 4. **Service Call**: `ContentAccessService.getStreamingUrl(userId, input)`
 5. **Verification**: Service checks content published, verifies user access (free/purchased/org member)
@@ -952,7 +952,7 @@ content-api worker
 | `@codex/access` | ContentAccessService factory, access control logic |
 | `@codex/database` | PostgreSQL client (dbHttp), database schema, helpers |
 | `@codex/security` | Authentication middleware, rate limiting, session validation |
-| `@codex/worker-utils` | createWorker factory, withPolicy, createAuthenticatedHandler, health checks |
+| `@codex/worker-utils` | createWorker factory, procedure, health checks |
 | `@codex/shared-types` | HonoEnv, response types, user/context types |
 | `@codex/validation` | Zod schemas for all requests |
 | `@codex/cloudflare-clients` | R2Service for signed URL generation |
@@ -1324,7 +1324,7 @@ Deletion sets `deleted_at` timestamp, never removes records. Allows recovery, au
 
 ### Route-Level Security Policies
 
-Security declared in each route via `withPolicy()` (declarative, not hidden in middleware). Easier to understand security requirements by reading route definitions.
+Security declared in each route via `procedure()` policy (declarative, not hidden in middleware). Easier to understand security requirements by reading route definitions.
 
 ### Access Verification in Service Layer
 

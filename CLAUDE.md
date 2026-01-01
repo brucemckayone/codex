@@ -247,8 +247,7 @@ All packages live in `packages/`. They're organized into three architectural lay
 **@codex/worker-utils** [Read Full Docs](packages/worker-utils/CLAUDE.md)
 - createWorker(config) - Fully configured Hono app with middleware
 - Middleware factories: auth, CORS, security headers, request tracking, logging
-- createAuthenticatedHandler() - Route handler with schema validation
-- withPolicy() - Route-level security policies (POLICY_PRESETS.authenticated, creator, admin, etc.)
+- procedure() - tRPC-style handler combining policy, validation, services, and error handling
 - Health checks (database, KV, R2)
 - Test helpers: createTestUser(), createAuthenticatedRequest()
 
@@ -277,7 +276,7 @@ All packages live in `packages/`. They're organized into three architectural lay
 
 1. **Validation** - Add schema to @codex/validation
 2. **Service** - Add method to service (@codex/content, @codex/identity, or @codex/access)
-3. **Worker** - Create route in appropriate worker using createAuthenticatedHandler()
+3. **Worker** - Create route in appropriate worker using procedure()
 4. **Types** - Return types from @codex/shared-types
 
 Example: New endpoint to list user's content library
@@ -307,10 +306,8 @@ See [packages/service-errors/CLAUDE.md](packages/service-errors/CLAUDE.md) for e
 
 All workers:
 1. Use createWorker() from @codex/worker-utils
-2. Apply createAuthenticatedHandler() for protected routes
-3. Use withPolicy() for security policies
-4. Catch errors with mapErrorToResponse()
-5. Return standardized responses from @codex/shared-types
+2. Use procedure() for routes with policy, validation, and error handling
+3. Return standardized responses from @codex/shared-types
 
 See [packages/worker-utils/CLAUDE.md](packages/worker-utils/CLAUDE.md) for worker setup examples.
 
@@ -328,8 +325,7 @@ import type { ServiceConfig } from '@codex/service-errors';
 
 ### For Workers
 ```typescript
-import { createWorker, createAuthenticatedHandler, withPolicy, POLICY_PRESETS } from '@codex/worker-utils';
-import { mapErrorToResponse } from '@codex/service-errors';
+import { createWorker, procedure } from '@codex/worker-utils';
 import { createContentSchema } from '@codex/validation';
 import type { HonoEnv } from '@codex/shared-types';
 ```
@@ -402,10 +398,11 @@ Worker Middleware Chain
   ├─ Authentication
   └─ Rate Limiting
     ↓
-Route Handler (createAuthenticatedHandler)
+procedure() Handler
+  ├─ Enforce policy (auth, roles)
   ├─ Validate input (Zod)
-  ├─ Instantiate Service
-  └─ Call Service method
+  ├─ Inject services
+  └─ Call handler with context
     ↓
 Service Layer
   ├─ Load from database (dbHttp)
@@ -413,7 +410,7 @@ Service Layer
   ├─ Throw specific errors
   └─ Return typed response
     ↓
-Worker Error Handler
+procedure() Error Handler
   ├─ mapErrorToResponse()
   └─ Return standardized error
     ↓

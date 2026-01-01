@@ -1,3 +1,4 @@
+import DOMPurify from 'isomorphic-dompurify';
 import { z } from 'zod';
 
 /**
@@ -5,6 +6,7 @@ import { z } from 'zod';
  *
  * Reusable validation schemas for common data types used across the application.
  * These are the building blocks for more complex validation schemas.
+ * Includes SVG sanitization via DOMPurify for XSS prevention.
  */
 
 // ============================================================================
@@ -234,3 +236,114 @@ export const isoDateSchema = z.coerce.date({
     message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)',
   }),
 });
+
+// ============================================================================
+// Colors
+// ============================================================================
+
+/**
+ * Hex color validation
+ * - Must be # followed by exactly 6 hex characters
+ * - Normalizes to uppercase (e.g., #3b82f6 → #3B82F6)
+ * - Trims whitespace
+ *
+ * @example
+ * ```typescript
+ * hexColorSchema.parse('#3B82F6'); // Valid → '#3B82F6'
+ * hexColorSchema.parse('#3b82f6'); // Valid → '#3B82F6'
+ * hexColorSchema.parse(' #3b82f6 '); // Valid → '#3B82F6'
+ * hexColorSchema.parse('#fff');    // Invalid (must be 6 chars)
+ * ```
+ */
+export const hexColorSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^#[0-9A-F]{6}$/, 'Color must be hex format (#RRGGBB)');
+
+// ============================================================================
+// Timezone
+// ============================================================================
+
+/**
+ * IANA timezone identifier validation
+ * - Non-empty string, max 100 chars
+ * - Examples: 'UTC', 'America/New_York', 'Europe/London'
+ *
+ * @example
+ * ```typescript
+ * timezoneSchema.parse('America/New_York'); // Valid
+ * timezoneSchema.parse('');                  // Invalid (empty)
+ * ```
+ */
+export const timezoneSchema = z
+  .string()
+  .min(1, 'Timezone is required')
+  .max(100, 'Timezone must be 100 characters or less');
+
+// ============================================================================
+// SVG Sanitization
+// ============================================================================
+
+/**
+ * Sanitizes SVG content to remove XSS vectors using DOMPurify.
+ *
+ * Production-grade sanitization that:
+ * - Removes <script> tags and event handlers
+ * - Blocks javascript:, data:, and other dangerous URIs
+ * - Prevents <foreignObject> and other embedding vectors
+ * - Allows safe SVG elements and attributes
+ *
+ * @param content - Raw SVG file content as string
+ * @returns Sanitized SVG content safe for rendering
+ * @throws Error if sanitization results in empty content (indicates malicious file)
+ *
+ * @example
+ * ```typescript
+ * const safeSvg = sanitizeSvgContent(userUploadedSvg);
+ * // <script> tags removed, onclick handlers stripped, etc.
+ * ```
+ */
+export function sanitizeSvgContent(content: string): string {
+  const clean = DOMPurify.sanitize(content, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+
+    // Explicitly allow common safe SVG tags
+    ADD_TAGS: [
+      'svg',
+      'path',
+      'circle',
+      'rect',
+      'g',
+      'defs',
+      'use',
+      'linearGradient',
+      'stop',
+    ],
+
+    // Block dangerous embedding tags
+    FORBID_TAGS: [
+      'script',
+      'iframe',
+      'object',
+      'embed',
+      'foreignObject',
+      'image',
+    ],
+
+    // Block all event handler attributes
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onmouseout'],
+
+    // Return as string (not DOM nodes)
+    RETURN_DOM: false,
+    RETURN_DOM_FRAGMENT: false,
+  });
+
+  if (!clean || clean.trim().length === 0) {
+    throw new Error(
+      'SVG sanitization resulted in empty content - file may be malicious'
+    );
+  }
+
+  return clean;
+}

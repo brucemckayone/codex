@@ -28,11 +28,19 @@
     "utilities"
   ],
   "dependencies": {
+    "@codex/access": "workspace:*",
+    "@codex/admin": "workspace:*",
+    "@codex/cloudflare-clients": "workspace:*",
+    "@codex/organization": "workspace:*",
+    "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
+    "@codex/platform-settings": "workspace:*",
+    "@codex/purchase": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
+    "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7",
     "hono": "^4.7.8",
     "zod": "^3.24.1"

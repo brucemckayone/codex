@@ -3,42 +3,25 @@
  *
  * Shared TypeScript types for the Codex platform.
  * Provides common type definitions used across workers and services.
+ *
+ * NOTE: Entity-specific response types (ContentResponse, MediaResponse, etc.)
+ * are defined in their respective packages (@codex/content, @codex/identity)
+ * to avoid circular dependencies.
  */
 
-// API response types
+// API response types (generic wrappers and non-entity-specific types)
 export type {
   CheckSlugResponse,
-  ContentListResponse,
-  // Content responses
-  ContentResponse,
-  CreateContentResponse,
-  CreateMediaResponse,
-  CreateOrganizationResponse,
-  DeleteContentResponse,
-  DeleteMediaResponse,
   DeleteOrganizationResponse,
-  MediaListResponse,
-  // Media responses
-  MediaResponse,
-  OrganizationBySlugResponse,
-  OrganizationListResponse,
-  // Organization responses
-  OrganizationResponse,
   PaginatedListResponse,
-  // Base types
   PaginationMetadata,
   PlaybackProgressResponse,
-  PublishContentResponse,
   SingleItemResponse,
-  // Access responses
   StreamingUrlResponse,
-  UnpublishContentResponse,
-  UpdateContentResponse,
-  UpdateMediaResponse,
-  UpdateOrganizationResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
 } from './api-responses';
+
 // Worker types
 export type {
   AuthenticatedContext,

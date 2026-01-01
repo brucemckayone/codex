@@ -51,7 +51,7 @@ export function verifyStripeSignature() {
     // Get signature from headers
     const signature = c.req.header('stripe-signature');
     if (!signature) {
-      obs.warn('Webhook rejected: Missing stripe-signature header', {
+      obs?.warn('Webhook rejected: Missing stripe-signature header', {
         path: c.req.path,
         method: c.req.method,
       });
@@ -64,7 +64,7 @@ export function verifyStripeSignature() {
     // Get the appropriate webhook secret for this endpoint
     const webhookSecret = getWebhookSecret(c, c.req.path);
     if (!webhookSecret) {
-      obs.error('Webhook rejected: No webhook secret configured', {
+      obs?.error('Webhook rejected: No webhook secret configured', {
         path: c.req.path,
       });
       return c.json({ error: 'Webhook secret not configured' }, 500);
@@ -72,7 +72,7 @@ export function verifyStripeSignature() {
 
     // Initialize Stripe client
     if (!c.env.STRIPE_SECRET_KEY) {
-      obs.error('Webhook rejected: STRIPE_SECRET_KEY not configured');
+      obs?.error('Webhook rejected: STRIPE_SECRET_KEY not configured');
       return c.json({ error: 'Stripe not configured' }, 500);
     }
 
@@ -88,7 +88,7 @@ export function verifyStripeSignature() {
         stripe
       );
 
-      obs.info('Webhook signature verified', {
+      obs?.info('Webhook signature verified', {
         type: event.type,
         id: event.id,
         path: c.req.path,
@@ -101,7 +101,7 @@ export function verifyStripeSignature() {
       await next();
     } catch (err) {
       const error = err as Error;
-      obs.error('Webhook signature verification failed', {
+      obs?.error('Webhook signature verification failed', {
         error: error.message,
         path: c.req.path,
         signaturePrefix: signature.substring(0, 20),

@@ -11,12 +11,12 @@
  *
  * @example
  * import { PurchaseService, calculateRevenueSplit } from '@codex/purchase';
- * import { dbHttp } from '@codex/database';
+ * import { createDbClient } from '@codex/database';
  * import Stripe from 'stripe';
  *
  * const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
  * const purchaseService = new PurchaseService(
- *   { db: dbHttp, environment: 'production' },
+ *   { db: createDbClient(c.env), environment: 'production' },
  *   stripe
  * );
  *
