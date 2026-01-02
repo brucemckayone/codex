@@ -43,9 +43,12 @@ Templates (product experiences)
 
 ---
 
-## The 13 Pillars
+## The 14 Pillars
 
 Every world-class design system must nail these. Miss one and the system rots.
+
+### 0. [Mission & Purpose](./00-mission/README.md) ⭐ START HERE
+The why behind everything. Community, collaboration, Collectives. This drives all decisions.
 
 ### 1. [Design Philosophy](./01-philosophy/README.md)
 Non-negotiable principles. The root of everything.
@@ -90,25 +93,28 @@ If it's not taught, it doesn't exist.
 
 ## Platform Context
 
-**Codex** is a content streaming platform where creators:
+**Codex** is a platform for creative Collectives — communities of creators who collaborate to share knowledge and serve their members.
 
-- Upload and sell video courses, tutorials, podcasts
-- Set pricing (free or paid)
-- Control access (public, members-only, paid)
-- Track analytics (views, revenue, engagement)
-- Manage organizations (multi-creator teams)
+**The Core Idea**: Creators don't compete. They complete each other.
+
+**What makes Codex different**:
+- **Collectives** — groups of creators with shared purpose (yoga studios, coaching academies, dance collectives)
+- **Multi-membership** — creators can belong to multiple Collectives
+- **Community-first** — members belong to something, they don't just buy products
+- **Collaboration** — revenue shared, rising tide lifts all boats
+- **Ownership** — creators own their content forever, Collectives enable distribution
 
 **Architecture**: Cloudflare Workers (serverless edge compute)
 **Stack**: Hono (API), Drizzle ORM (database), R2 (storage), Stripe (payments)
 **Database**: Neon PostgreSQL
 **Auth**: BetterAuth (session-based)
 
-### User Roles
+### The People
 
-- **Creators**: Upload, price, publish content
-- **Customers**: Browse, purchase, watch content
-- **Platform Owners**: Analytics, settings, revenue dashboards
-- **Organization Members**: Team content management
+- **Creators**: Individuals who own their knowledge/media, collaborate with Collectives
+- **Collectives**: Communities of creators with shared purpose (not "organizations")
+- **Members**: People who belong to a Collective's community (not "customers")
+- **Platform Owner**: The developer who maintains Codex infrastructure
 
 ### Key Experiences to Design For
 
@@ -203,7 +209,8 @@ If code contradicts docs, code is wrong.
 
 | Pillar | Status | Completion |
 |--------|--------|------------|
-| 01. Philosophy | 🟡 In Progress | 20% |
+| 00. Mission & Purpose | ✅ Complete | 100% |
+| 01. Philosophy | 🟡 Needs Update | 20% |
 | 02. Visual Language | 🔴 Not Started | 0% |
 | 03. Color System | 🔴 Not Started | 0% |
 | 04. Typography | 🔴 Not Started | 0% |
@@ -224,6 +231,9 @@ If code contradicts docs, code is wrong.
 ```
 design-system/
 ├── README.md (this file)
+│
+├── 00-mission/              ⭐ START HERE
+│   └── README.md            (The why - community, collaboration, Collectives)
 │
 ├── 01-philosophy/
 │   ├── README.md
