@@ -24,6 +24,9 @@ export default defineConfig({
     // Global setup/teardown
     globalSetup: './setup.ts',
 
+    // Setup files (run before each test file)
+    setupFiles: ['./vitest.setup.ts'],
+
     // Environment
     env: {
       NODE_ENV: 'test',
