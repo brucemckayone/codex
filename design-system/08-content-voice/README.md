@@ -1,128 +1,254 @@
 # 08. Content & Voice
 
-**Words are UI. Tone, microcopy, naming, formatting.**
+**Words that welcome. How language creates belonging.**
 
 ---
 
-## Purpose
+## Foundation
 
-Copy is not an afterthought. **Words are interface elements** that:
+This document extends the philosophy from [01. Philosophy](../01-philosophy/README.md) into language.
 
-- Guide users through tasks
-- Communicate system state
-- Build trust through transparency
-- Reflect brand personality
-
-**Bad copy = confused users. Good copy = invisible guidance.**
+Every word must answer: **Does this make the reader feel like a member of a community, or a customer in a transaction?**
 
 ---
 
-## Voice Principles
+## Voice Philosophy
 
-### 1. Clear Over Clever
+### Words as Welcome
 
-**Priority**: Understanding > creativity
+In creative studios, language matters:
 
-❌ **Bad**: "Oops! Gremlins in the system 😅"
-✅ **Good**: "Upload failed. Check your connection and try again."
+| Space | Language Character |
+|-------|-------------------|
+| Yoga studio | Warm, encouraging, inviting to join the practice |
+| Dance company | Inclusive, celebrating the ensemble |
+| Music school | Supportive, focused on the journey |
+| Art collective | Collaborative, we're in this together |
 
----
-
-### 2. Professional Not Corporate
-
-**Tone**: Helpful colleague, not HR department
-
-❌ **Corporate**: "Pursuant to your request, the system has processed your submission."
-✅ **Professional**: "Your content has been published."
+**Codex voice embodies**: Warm, clear, welcoming, professional.
 
 ---
 
-### 3. Direct Not Wordy
+### The Voice Spectrum
 
-**Rule**: Remove every unnecessary word
+```
+Cold ◄──────────────────────────────────────────────► Casual
 
-❌ **Wordy**: "You can click on the button below to proceed with publishing your content."
-✅ **Direct**: "Publish your content"
+Corporate   Formal   Neutral  ║ Codex ║  Friendly   Chatty
+Legal       Stiff    Generic  ║       ║  Warm       Slang
+    │          │         │    ║       ║    │           │
+    └──────────┴─────────┴────╨───────╨────┴───────────┘
+                              ▲
+                        We live here
+```
+
+**Codex voice is:**
+- Warmer than corporate (not stiff or formal)
+- More professional than chatty (not "Hey! 🎉")
+- Clear above all else
+- Welcoming, like a good host
 
 ---
 
-### 4. Active Not Passive
+### Core Voice Principles
 
-**Use active voice**: Subject does the action
+1. **Community Over Transaction**
+   - "Members" not "customers"
+   - "Join" not "buy"
+   - "Library" not "purchases"
+   - See [Language Guide](#language-guide) below
 
-❌ **Passive**: "Your upload has been completed by the system."
-✅ **Active**: "Upload complete."
+2. **Clear Over Clever**
+   - Understanding > creativity
+   - Function > personality
+   - If someone might misunderstand, rewrite
+
+3. **Warm Professionalism**
+   - Helpful colleague, not HR department
+   - Friendly expert, not cold system
+   - Human, but not trying too hard
+
+4. **Action-Oriented**
+   - Tell people what to do
+   - Show the path forward
+   - Never leave someone stuck
 
 ---
 
-## Tone Variations by Context
+## Language Guide
+
+**This is non-negotiable.** These terms align with our mission.
+
+### Core Terms
+
+| ❌ Don't Use | ✅ Use Instead | Why |
+|-------------|----------------|-----|
+| Buy | Join, Get access | Joining a community, not shopping |
+| Purchase | Join, Get access | Same reason |
+| Customer | Member | They belong, they don't just transact |
+| Product | Offering, Content | Not a commodity |
+| Shopping cart | (no equivalent) | No shopping metaphor at all |
+| Checkout | Complete, Continue | Not a store |
+| Order | Access, Membership | Not a transaction |
+| Your purchases | Your library | Collections you belong to |
+| Sell | Share, Offer | Creators share with their community |
+| Price | Access level, Contribution | Framing matters |
+| Consumer | Member, Learner | Active participant, not passive consumer |
+
+### Context-Specific Terms
+
+| Context | ❌ Avoid | ✅ Prefer |
+|---------|---------|----------|
+| After payment | "Order complete" | "Welcome to [Collective]" |
+| Content access | "You purchased this" | "In your library" |
+| Creator dashboard | "Sales" | "New members" |
+| Revenue | "Total sales" | "Community earnings" |
+| Metrics | "Customers acquired" | "Members joined" |
+
+### Example Transformations
+
+**Transaction-focused → Community-focused:**
+
+```
+❌ "Add to cart"
+✅ "Get access"
+
+❌ "Complete purchase"
+✅ "Join now"
+
+❌ "Thank you for your purchase!"
+✅ "Welcome to the community!"
+
+❌ "View your orders"
+✅ "Your library"
+
+❌ "12 customers bought this course"
+✅ "12 members have joined"
+
+❌ "Best seller"
+✅ "Community favorite" (or just don't rank)
+```
+
+---
+
+## Tone by Context
 
 ### Success States
 
-**Tone**: Confident, brief
+**Tone:** Warm, brief, celebratory without excess.
 
-- ✅ "Content published"
-- ✅ "Changes saved"
-- ✅ "Upload complete"
+```
+✅ Good:
+"Welcome to Mindful Movement"
+"You're in. Here's what to explore first."
+"Content published"
+"Changes saved"
 
-**Not**:
-- ❌ "Yay! Success! 🎉"
-- ❌ "Awesome job!"
+❌ Avoid:
+"Yay! Success! 🎉" (too casual)
+"Transaction complete" (transactional)
+"Awesome job!" (patronizing)
+```
 
 ---
 
 ### Error States
 
-**Tone**: Calm, helpful, actionable
+**Tone:** Calm, helpful, specific, actionable.
 
-**Structure**: [What happened] + [Why] + [How to fix]
+**Structure:** [What happened] + [Why if known] + [What to do]
 
-✅ **Good**:
 ```
+✅ Good:
 "Upload failed: File exceeds 5GB limit.
-Try compressing or splitting into parts."
-```
+Try compressing the video or splitting into parts."
 
-❌ **Bad**:
-```
-"Error 0x4A2B"  (unhelpful)
+"We couldn't process that. Check your connection and try again."
+
+"Email already registered. Sign in instead?"
+
+❌ Avoid:
+"Error 0x4A2B" (meaningless)
 "Upload failed" (no guidance)
-"Oops!"         (unprofessional)
+"Oops! Something went wrong 😅" (wrong tone)
+"Error" (useless)
 ```
 
 ---
 
 ### Warning States
 
-**Tone**: Cautious, informative
+**Tone:** Clear, specific about consequences, not alarming.
 
-✅ **Good**:
 ```
-"Deleting this content is permanent.
-Customers who purchased will lose access."
-```
+✅ Good:
+"Delete this offering?
+Members who have access will lose it permanently."
 
-❌ **Bad**:
-```
+"Unpublishing will hide this from your community.
+Existing members keep their access."
+
+❌ Avoid:
 "Are you sure?" (vague)
-"This action cannot be undone" (obvious, unhelpful)
+"This cannot be undone" (obvious, unhelpful alone)
+"WARNING!" (alarming)
+```
+
+---
+
+### Empty States
+
+**Tone:** Encouraging, show the path forward.
+
+**Structure:** [What's empty] + [Why it matters] + [Action]
+
+```
+✅ Good:
+"Your library is empty
+
+Join a Collective to start your journey.
+
+[Explore offerings]"
+
+---
+
+"No offerings yet
+
+Share your knowledge with your community.
+
+[Create your first offering]"
+
+❌ Avoid:
+"Nothing here" (unhelpful)
+"No data" (cold)
+"0 results" (just a number)
 ```
 
 ---
 
 ### Onboarding
 
-**Tone**: Welcoming, instructional
+**Tone:** Welcoming, clear, guiding.
 
-✅ **Good**:
 ```
+✅ Good:
 "Welcome to Codex
-Upload your first video to get started"
-```
 
-❌ **Bad**:
-```
-"Hey there! Ready to become a creator superstar? Let's do this! 🚀"
+You're joining a community of creators who
+share knowledge and grow together.
+
+Let's set up your Collective."
+
+---
+
+"Welcome to [Collective Name]
+
+Here's how to make the most of your membership."
+
+❌ Avoid:
+"Hey there! Ready to crush it? Let's go! 🚀" (wrong tone)
+"Step 1 of 7" (focus on journey, not steps)
+"Complete your profile to unlock features" (transactional)
 ```
 
 ---
@@ -131,133 +257,113 @@ Upload your first video to get started"
 
 ### Button Labels
 
-**Rule**: Start with verb
+**Rule:** Verb + specific object. Say what happens.
 
-✅ **Good**:
-- "Save Changes"
-- "Publish Content"
-- "Delete Account"
+```
+✅ Good:
+"Save changes"
+"Publish offering"
+"Join this Collective"
+"Start your journey"
+"Create offering"
 
-❌ **Bad**:
-- "Save"           (ambiguous context)
-- "OK"             (meaningless)
-- "Click Here"     (redundant)
+❌ Avoid:
+"Submit" (vague)
+"OK" (meaningless)
+"Click here" (redundant)
+"Save" (what are we saving?)
+"Go" (where?)
+```
+
+### Confirmation Buttons (Destructive)
+
+**Rule:** Match the label to the consequence.
+
+```
+✅ Good:
+"Cancel" / "Delete offering"
+"Keep editing" / "Discard changes"
+"Stay here" / "Leave page"
+
+❌ Avoid:
+"No" / "Yes" (unclear what yes means)
+"Cancel" / "OK" (OK what?)
+```
 
 ---
 
 ### Form Labels
 
-**Rule**: Question or noun phrase
+**Rule:** Short, specific, no punctuation.
 
-✅ **Good**:
-- "Content Title"
-- "What's your email?"
-- "Choose a price"
+```
+✅ Good:
+"Offering title"
+"Description"
+"Access level"
+"Your email"
 
-❌ **Bad**:
-- "Title:"         (colon unnecessary)
-- "Email Address*" (asterisk handled separately)
+❌ Avoid:
+"Title:" (no colon)
+"Please enter your email" (not a sentence)
+"Email Address*" (asterisk handled elsewhere)
+```
 
 ---
 
 ### Placeholder Text
 
-**Rule**: Example, not instruction (label is instruction)
+**Rule:** Example content, not instructions.
 
-✅ **Good**:
-- Placeholder: "My Course Title"
-- Label: "Content Title"
+```
+✅ Good:
+Label: "Offering title"
+Placeholder: "Introduction to Mindful Breathing"
 
-❌ **Bad**:
-- Placeholder: "Enter title here"
+Label: "Description"
+Placeholder: "What will members learn?"
+
+❌ Avoid:
+Placeholder: "Enter title here" (instruction, not example)
+Placeholder: "Required" (that's not an example)
+```
+
+---
+
+### Helper Text
+
+**Rule:** Useful guidance, not obvious statements.
+
+```
+✅ Good:
+"This appears on your offering's card"
+"Members see this when browsing"
+"Keep it under 60 characters for best display"
+
+❌ Avoid:
+"Enter the title" (obvious)
+"This field is required" (show, don't tell)
+```
 
 ---
 
 ### Error Messages
 
-**Format**: `[Field] [problem]. [Solution]`
+**Format:** [Field] [problem]. [Solution or example]
 
-✅ **Good**:
 ```
-"Email is invalid. Use format: name@example.com"
-"Password too short. Use at least 8 characters"
-"Title required. Enter a title to continue"
-```
+✅ Good:
+"Email isn't valid. Try: name@example.com"
+"Title is required"
+"Description is too long. Keep it under 500 characters."
+"That email is already registered. Sign in instead?"
 
-❌ **Bad**:
-```
+❌ Avoid:
 "Invalid input"
 "Error"
-"Field is required"
+"Field required"
+"Validation failed"
 ```
-
----
-
-### Empty States
-
-**Format**: [What's missing] + [Why it matters] + [Action]
-
-✅ **Good**:
-```
-"No content yet
-Upload videos to start earning
-
-[Upload Content]
-```
-
-❌ **Bad**:
-```
-"Nothing here"
-```
-
----
-
-## Naming Conventions
-
-### Features
-
-**Pattern**: Noun or verb phrase (clear, specific)
-
-✅ **Good**:
-- "Content Library"
-- "Revenue Dashboard"
-- "Upload Manager"
-
-❌ **Bad**:
-- "Stuff"
-- "My Things"
-- "Creator Portal" (too vague)
-
----
-
-### Actions
-
-**Pattern**: Verb + object
-
-✅ **Good**:
-- "Edit Settings"
-- "View Analytics"
-- "Download Report"
-
-❌ **Bad**:
-- "Manage" (vague)
-- "Go"     (meaningless)
-
----
-
-### Navigation
-
-**Pattern**: Plural nouns or "My [thing]"
-
-✅ **Good**:
-- "Dashboard"
-- "Content"
-- "Analytics"
-- "Settings"
-
-❌ **Bad**:
-- "Home" (ambiguous)
-- "Stuff"
 
 ---
 
@@ -265,86 +371,149 @@ Upload videos to start earning
 
 ### Capitalization
 
-**Title Case**: Page titles, headings, buttons
-
+**Sentence case** for almost everything:
 ```
-"Upload Your Content"
-"Revenue Dashboard"
-```
-
-**Sentence case**: Body text, labels, descriptions
-
-```
-"Choose a title for your content"
-"This will be visible to customers"
+"Save your changes"
+"Create a new offering"
+"Your library"
 ```
 
-**ALL CAPS**: Never (accessibility issue, feels aggressive)
+**Title Case** only for:
+- Page titles
+- Product name (Codex)
+- Proper nouns
+
+**NEVER ALL CAPS:**
+- Feels aggressive
+- Harder to read
+- Accessibility issue
 
 ---
 
 ### Punctuation
 
-**Periods**: Complete sentences only
-
+**Periods:** Complete sentences only
 ```
-✅ "Your content has been published."
-❌ "Publish Content."  (button label, not a sentence)
-```
-
-**Exclamation marks**: Never (wrong tone)
-
-```
-❌ "Success!"
-✅ "Content published"
+✅ "Your changes have been saved."
+❌ "Save Changes." (not a sentence)
 ```
 
-**Question marks**: Yes, when asking questions
-
+**Exclamation marks:** Sparingly, for genuine celebration
 ```
-✅ "Delete this content?"
+✅ "Welcome to Mindful Movement!"
+❌ "Error!" (not a celebration)
+❌ "Save Changes!" (not exciting)
+```
+
+**Question marks:** When actually asking
+```
+✅ "Delete this offering?"
 ✅ "What's your email?"
+❌ "Enter email?" (not a question)
 ```
 
 ---
 
 ### Numbers
 
-**Format**:
-- **< 10**: Spell out ("three videos")
-- **≥ 10**: Numerals ("12 videos")
-- **Large**: Abbreviate ("1.2K views", "$2.5M revenue")
-
-**Currency**: Always prefix with symbol
-
 ```
-✅ "$29.99"
-❌ "29.99 USD"
-```
-
-**Percentages**: No space before %
-
-```
-✅ "10% platform fee"
-❌ "10 %"
+Under 10:     Spell out ("three offerings")
+10 and over:  Numerals ("12 offerings")
+Large:        Abbreviate ("1.2K members")
+Money:        Symbol prefix ("$29", not "29 USD")
+Percentages:  No space ("10%", not "10 %")
 ```
 
 ---
 
-## Content Length Constraints
+## Community-Focused Copy Examples
 
-**Guideline**:
+### Welcome Message (After Joining)
 
 ```
-Page title:        40 characters max
-Button label:      25 characters max
-Toast message:     60 characters max
-Error message:     120 characters max
-Empty state:       200 characters max
-Help text:         No limit (but keep concise)
+❌ Transaction-focused:
+"Thank you for your purchase!
+Order #12345
+Receipt has been sent to your email."
+
+✅ Community-focused:
+"Welcome to Mindful Movement
+
+You're now part of Sarah's community of practitioners.
+
+Here's what to explore first:
+• Start with "Foundations of Breath"
+• Join the community discussion
+• Set your practice reminder
+
+[Begin your journey]"
 ```
 
-**Why?** Mobile screens, internationalization (text expands 30-40%)
+---
+
+### Creator Dashboard
+
+```
+❌ Transaction-focused:
+"Total Sales: $2,340
+12 orders this month
+Your top selling product: Course A"
+
+✅ Community-focused:
+"Your Community
+
+23 members joined this month
+$2,340 in community earnings
+
+Recent moments:
+• 5 members completed their first session
+• "Foundations of Breath" is resonating—8 new members this week
+• Sarah left a testimonial on "Advanced Practice"
+
+[See community activity]"
+```
+
+---
+
+### Content Card
+
+```
+❌ Transaction-focused:
+"Introduction to Breathing
+$29
+⭐ 4.8 (124 reviews)
+[Buy Now]"
+
+✅ Community-focused:
+"Introduction to Breathing
+45 min · Beginner
+
+Learn the foundations of breath awareness
+with guided exercises.
+
+By Sarah Chen · Mindful Movement
+
+[Join for $29]" or "[Get access]"
+```
+
+---
+
+## Length Constraints
+
+Brevity aids clarity. Mobile screens and translations need room.
+
+```
+Element              Max Characters    Notes
+───────────────────────────────────────────────
+Button label         25                Verb + object
+Page title           40                Clear and specific
+Toast message        80                One glance readable
+Error message        120               Problem + solution
+Empty state          200               Context + action
+Modal body           300               Essential info only
+```
+
+**Why?** Text expands 30-40% in translation. Mobile screens are small.
 
 ---
 
@@ -352,16 +521,18 @@ Help text:         No limit (but keep concise)
 
 ### Avoid
 
-- Idioms ("piece of cake")
-- Slang ("awesome", "cool")
-- Cultural references (US-centric)
-- Humor (doesn't translate)
+- **Idioms:** "Piece of cake" doesn't translate
+- **Slang:** "Awesome," "cool" vary by region
+- **Cultural refs:** US-centric assumptions
+- **Humor:** Rarely translates well
+- **Wordplay:** Puns don't work across languages
 
 ### Use
 
-- Simple words (international English)
-- Active voice (easier to translate)
-- Complete sentences (context for translators)
+- **Simple vocabulary:** Common words
+- **Active voice:** Easier to translate
+- **Complete sentences:** Context for translators
+- **Consistent terms:** Same word for same concept
 
 ---
 
@@ -369,77 +540,83 @@ Help text:         No limit (but keep concise)
 
 Every piece of copy must pass:
 
-- [ ] **Clear**: Can user understand without explanation?
-- [ ] **Professional**: Appropriate tone for context?
-- [ ] **Direct**: No unnecessary words?
-- [ ] **Active**: Subject does the action?
-- [ ] **Actionable**: Does user know what to do next?
-- [ ] **Accessible**: Simple language, no jargon?
+```
+□ Community language?  (Members, not customers)
+□ Clear?               (Understood without explanation)
+□ Warm?                (Welcoming, not cold)
+□ Direct?              (No unnecessary words)
+□ Active?              (Subject does action)
+□ Actionable?          (User knows what to do)
+□ Appropriate tone?    (Matches the context)
+```
 
 ---
 
-## Examples
+## Anti-Patterns
 
-### Good: Upload Success
-
-```
-Title:  "Upload Complete"
-Body:   "Your video is processing. You'll be notified when it's ready."
-Action: "View Content"
-```
-
-**Why it works**:
-- Clear state (complete)
-- Sets expectation (processing, notification)
-- Next action obvious
+| Anti-Pattern | Why It's Wrong | What Instead |
+|--------------|----------------|--------------|
+| "Customer" | Transactional | "Member" |
+| "Purchase" / "Buy" | Shopping language | "Join" / "Get access" |
+| "Oops!" | Too casual, deflects | State the issue clearly |
+| "Error" | Useless | Explain what happened |
+| "Click here" | Redundant, inaccessible | Describe the action |
+| ALL CAPS | Aggressive, hard to read | Sentence case |
+| Exclamation overuse | Unprofessional | Reserve for genuine celebration |
+| Passive voice | Unclear, wordy | Active voice |
 
 ---
 
-### Bad: Generic Error
+## The Warmth Test
 
-```
-Title:  "Error"
-Body:   "Something went wrong"
-Action: "OK"
-```
+Before shipping any copy:
 
-**Why it fails**:
-- No information (what error?)
-- No guidance (how to fix?)
-- Unhelpful action (OK doesn't solve anything)
+1. **Does it use community language?** Members, not customers
+2. **Does it feel welcoming?** Like a good host
+3. **Is it clear?** No confusion possible
+4. **Is it helpful?** Shows the path forward
+5. **Is it warm but professional?** Not cold, not too casual
 
----
-
-### Good: Destructive Confirmation
-
-```
-Title:  "Delete This Content?"
-Body:   "This will permanently delete 'Course Title' and revoke customer access. This cannot be undone."
-Action: "Cancel" / "Delete Content"
-```
-
-**Why it works**:
-- Clear consequence
-- Specific (shows title)
-- Escape hatch (cancel)
-- Action label matches consequence
+If any answer is no → rewrite.
 
 ---
 
 ## Living Document
 
-Voice evolves with brand. Changes require:
+Voice evolves with the community. Changes require:
 
-1. Examples of new tone
-2. User testing (comprehension)
-3. Update to this guide
-
-**Change log**:
+1. Examples demonstrating the change
+2. Alignment check with mission
+3. Review for consistency
+4. Update all affected copy
 
 | Date | Change | Reasoning |
 |------|--------|-----------|
 | 2026-01-01 | Initial voice guide | Foundation |
+| 2026-01-03 | Complete rewrite | Alignment with Mission. Added community language guide, transformed all examples from transactional to community-focused. |
 
 ---
 
-Next: [09. Accessibility & Inclusion →](../09-accessibility/README.md)
+## Summary
+
+**Codex voice in one breath:**
+
+> Every word welcomes. We speak of members, not customers. We invite people to join, not buy. Our language creates belonging—warm, clear, professional. Words are the first handshake with our community.
+
+**The test:**
+
+> Does this copy make someone feel like they're joining a beloved yoga studio, or shopping on Amazon?
+
+If yoga studio → ship it.
+If Amazon → rewrite with community language.
+
+---
+
+**Upstream**: [07. Interaction & Motion](../07-interaction-motion/README.md)
+**Downstream**: [09. Accessibility](../09-accessibility/README.md)
+
+---
+
+*Last updated: 2026-01-03*
+*Version: 2.0*
+*Status: Foundation document — words that welcome*
