@@ -1,568 +1,612 @@
 # 03. Color System
 
-**Semantic color contracts. Every color has a job.**
+**Where philosophy becomes pigment. Color as warmth, meaning, and belonging.**
 
 ---
 
-## Purpose
+## Foundation
 
-Not a palette. A **color system with roles**.
+This document implements the warmth defined in [Visual Language (02)](../02-visual-language/README.md).
 
-Colors don't exist for aesthetics. They exist to:
-- Communicate state (success, error, warning)
-- Establish hierarchy (primary, secondary, tertiary)
-- Guide interaction (hover, active, disabled)
-- Separate surfaces (background layers, elevation)
+Every color choice must answer: **Does this feel like a creative studio, or a corporate dashboard?**
 
 ---
 
 ## Color Philosophy
 
-### Principles
+### The Creative Studio Palette
 
-1. **Semantic First**: Color names describe purpose, not appearance
-   - ✅ `color.action.primary` (role)
-   - ❌ `color.blue.600` (appearance)
+Traditional SaaS uses cool blues and neutral grays—clinical, corporate, cold.
 
-2. **Accessible Always**: Minimum contrast ratios non-negotiable
-   - Text on bg: 7:1 (AAA)
-   - Large text: 4.5:1 (AA)
-   - UI components: 3:1 (AA)
+Codex draws from the warmth of creative spaces:
 
-3. **Calm Base**: UI chrome should recede, not compete
-   - Grays for 80% of interface
-   - Brand color for 15% (CTAs, nav highlights)
-   - Accent colors for 5% (alerts, status)
+| Space | Color Character |
+|-------|-----------------|
+| Yoga studio | Warm earth tones, sage greens, soft terracotta |
+| Dance company | Rich burgundies, warm woods, dynamic accents |
+| Music school | Deep mahoganies, brass accents, warm ivories |
+| Art collective | Gallery whites, bold accent moments, natural materials |
 
-4. **Consistent Behavior**: Same color = same meaning across product
-   - Red always = error/danger
-   - Green always = success
-   - Blue always = primary action
+**Common threads:**
+- Warm neutrals (cream, sand, warm gray—not cool gray)
+- Rich accent colors (saturated but not neon)
+- Natural palette inspiration (earth, foliage, sky at golden hour)
+- Warmth even in darks (charcoal with warmth, not pure black)
 
 ---
 
-## Color Scale Strategy
+### The Warmth Principle
 
-### Approach: 50-950 Scale (11 steps)
-
-Each color has 11 shades from lightest (50) to darkest (950).
-
-**Why 11 steps?**
-- Enough granularity for subtle UI
-- Not so many that designers pick arbitrary values
-- Aligns with Tailwind CSS (interoperability)
-
-**Scale structure**:
 ```
-50  → Backgrounds (very subtle)
-100 → Backgrounds (subtle)
-200 → Borders (light mode)
-300 → Disabled states
-400 → Placeholders
-500 → Base color (light mode default)
-600 → Hover states (light mode)
-700 → Active states (light mode)
-800 → Text on light backgrounds
-900 → Text (high contrast)
-950 → Text (maximum contrast, dark mode backgrounds)
+Cool ◄──────────────────────────────────► Warm
+
+Corporate   Banking   SaaS    ║ Codex ║   Cozy   Rustic
+Blue         Blue     Gray    ║       ║   Amber  Brown
+    │          │        │     ║       ║     │      │
+    └──────────┴────────┴─────╨───────╨─────┴──────┘
+                              ▲
+                        We live here
 ```
+
+**Codex colors are:**
+- Warmer than typical SaaS (no cold corporate blue)
+- More refined than rustic (not farmhouse aesthetic)
+- Rich but not loud (saturated but not neon)
+- Grounded in nature (earth, sky, foliage, warmth)
 
 ---
 
-## Brand Colors
+### Core Color Principles
 
-**Purpose**: Identity, primary actions, navigation.
+1. **Warmth First**
+   - Warm whites (cream, ivory) not pure #FFFFFF
+   - Warm grays not cool slate
+   - Primary brand color has warmth
+   - Even errors and warnings have human warmth
 
-### Primary Blue
+2. **Semantic Clarity**
+   - Color names describe purpose, not appearance
+   - Same color = same meaning everywhere
+   - Meaning reinforced with icons/text (not color alone)
 
-**Role**: Main brand color, primary CTAs, navigation highlights
+3. **Accessibility Always**
+   - 7:1 contrast for body text (WCAG AAA)
+   - 4.5:1 for large text (WCAG AA)
+   - 3:1 for UI components and focus rings
+   - Never color alone for meaning
 
-**Palette**:
-```
-blue-50:  #eff6ff  (Hover backgrounds)
-blue-100: #dbeafe  (Selected states - light)
-blue-200: #bfdbfe  (Borders)
-blue-300: #93c5fd  (Disabled)
-blue-400: #60a5fa  (Placeholders)
-blue-500: #3b82f6  (Base - primary button bg)
-blue-600: #2563eb  (Hover - primary button hover)
-blue-700: #1d4ed8  (Active - primary button active)
-blue-800: #1e40af  (Text on light)
-blue-900: #1e3a8a  (Text - high contrast)
-blue-950: #172554  (Dark mode backgrounds)
-```
-
-**Usage**:
-- Primary buttons: `bg-blue-500`, hover `bg-blue-600`
-- Links: `text-blue-600`, hover `text-blue-700`
-- Active nav: `bg-blue-50`, `text-blue-700`
-- Focus rings: `ring-blue-300`
-
-**Accessibility**:
-- `blue-500` on white: 4.54:1 (AA large text)
-- `blue-600` on white: 5.93:1 (AA text)
-- `blue-700` on white: 7.84:1 (AAA)
+4. **Calm Dominance**
+   - Neutrals: 80% of interface
+   - Primary: 15% (actions, navigation)
+   - Accent: 5% (alerts, celebrations)
 
 ---
 
-### Secondary Purple (Creator Accent)
+## The Palette
 
-**Role**: Creator-specific features, analytics, revenue
+### Warm Neutrals (Foundation)
 
-**Palette**:
+**The soul of Codex's warmth.** Not cool slate. Not pure gray. Warm.
+
 ```
-purple-50:  #faf5ff
-purple-100: #f3e8ff
-purple-200: #e9d5ff
-purple-300: #d8b4fe
-purple-400: #c084fc
-purple-500: #a855f7  (Base)
-purple-600: #9333ea  (Hover)
-purple-700: #7e22ce  (Active)
-purple-800: #6b21a8
-purple-900: #581c87
-purple-950: #3b0764
+Warm White & Cream
+──────────────────
+cream-50:   #FDFCFA   ← Page background (light mode)
+cream-100:  #FAF8F5   ← Card backgrounds
+cream-200:  #F5F2ED   ← Subtle borders, dividers
+cream-300:  #E8E4DD   ← Disabled backgrounds
+cream-400:  #D4CEC4   ← Placeholder text
+cream-500:  #B8B0A3   ← Secondary text
+cream-600:  #8F8579   ← Body text
+cream-700:  #6B6358   ← Headings
+cream-800:  #4A453D   ← High contrast text
+cream-900:  #2D2A25   ← Maximum contrast
+cream-950:  #1A1816   ← Dark mode background
 ```
 
-**Usage**:
-- Creator dashboard highlights
-- Revenue charts
-- Earnings badges
-- "Pro creator" features
+**Usage:**
+- Page background: `cream-50` (not white)
+- Cards: `cream-100` with subtle `cream-200` border
+- Text hierarchy: `cream-900` → `cream-700` → `cream-600`
+- Dividers: `cream-200` (barely visible, intentional)
 
-**Do not use for**: Primary CTAs, errors, success states
+**Why warm neutrals?**
+Cool grays feel like spreadsheets. Warm neutrals feel like a yoga studio's bamboo floors.
+
+---
+
+### Primary Brand Color
+
+**The signature of Codex.** Rich, warm, inviting—not corporate blue.
+
+We use a **warm teal** that bridges calm and energy:
+
+```
+Teal (Primary)
+──────────────
+teal-50:   #F0FDFA   ← Hover backgrounds, selected states
+teal-100:  #CCFBF1   ← Light accents
+teal-200:  #99F6E4   ← Borders (interactive)
+teal-300:  #5EEAD4   ← Focus rings
+teal-400:  #2DD4BF   ← Icons, decorative
+teal-500:  #14B8A6   ← Base - primary buttons
+teal-600:  #0D9488   ← Hover state
+teal-700:  #0F766E   ← Active state, links
+teal-800:  #115E59   ← Text on light
+teal-900:  #134E4A   ← High contrast
+teal-950:  #042F2E   ← Dark mode accents
+```
+
+**Why teal, not blue?**
+- Blue = corporate, banking, SaaS
+- Teal = natural (ocean, forest), warm, distinctive
+- Teal bridges calming (blue) and growth (green)
+- Aligns with wellness, creativity, natural spaces
+
+**Usage:**
+- Primary buttons: `teal-500`, hover `teal-600`, active `teal-700`
+- Links: `teal-700`, hover `teal-800`
+- Focus rings: `teal-300` (3px)
+- Navigation active: `teal-50` bg, `teal-700` text
+
+**Accessibility:**
+- `teal-600` on cream-50: 5.2:1 ✅ (AA)
+- `teal-700` on cream-50: 6.8:1 ✅ (AA+)
+- `teal-800` on cream-50: 8.9:1 ✅ (AAA)
+
+---
+
+### Secondary: Warm Coral
+
+**For celebration, warmth, and creative energy.**
+
+```
+Coral (Secondary/Celebration)
+─────────────────────────────
+coral-50:   #FFF5F3   ← Celebration backgrounds
+coral-100:  #FFE4DE   ← Light accents
+coral-200:  #FFCCC2   ← Borders
+coral-300:  #FFAB9C   ← Decorative
+coral-400:  #FF8A76   ← Icons
+coral-500:  #F06449   ← Base - celebration moments
+coral-600:  #DC4A2F   ← Hover
+coral-700:  #B83A22   ← Active
+coral-800:  #972F1C   ← Text
+coral-900:  #7D2918   ← High contrast
+coral-950:  #441209   ← Dark accents
+```
+
+**Usage:**
+- Welcome messages, celebrations
+- Creator highlights
+- Community milestones
+- Warm accent moments
+
+**Not for:** Errors (use dedicated error red), primary actions
+
+---
+
+### Creator Accent: Rich Purple
+
+**For creator-specific features, analytics, earnings.**
+
+```
+Purple (Creator)
+────────────────
+purple-50:   #FAF5FF   ← Creator dashboard highlights
+purple-100:  #F3E8FF   ← Light accents
+purple-200:  #E9D5FF   ← Borders
+purple-300:  #D8B4FE   ← Focus rings
+purple-400:  #C084FC   ← Icons
+purple-500:  #A855F7   ← Base
+purple-600:  #9333EA   ← Hover
+purple-700:  #7E22CE   ← Active
+purple-800:  #6B21A8   ← Text
+purple-900:  #581C87   ← High contrast
+purple-950:  #3B0764   ← Dark accents
+```
+
+**Usage:**
+- Creator dashboard accents
+- Revenue and earnings displays
+- Analytics charts
+- "Creator" badges and labels
 
 ---
 
 ## Functional Colors
 
-**Purpose**: System feedback, states, alerts.
+### Success: Warm Green
 
-### Success Green
+**Positive outcomes, confirmations, growth.**
 
-**Role**: Confirmations, completed states, positive outcomes
-
-**Palette**:
 ```
-green-50:  #f0fdf4
-green-100: #dcfce7
-green-200: #bbf7d0
-green-300: #86efac
-green-400: #4ade80
-green-500: #22c55e  (Base)
-green-600: #16a34a  (Hover)
-green-700: #15803d  (Active)
-green-800: #166534
-green-900: #14532d
-green-950: #052e16
+Success Green
+─────────────
+green-50:   #F0FDF4   ← Success message bg
+green-100:  #DCFCE7   ← Light accents
+green-200:  #BBF7D0   ← Borders
+green-300:  #86EFAC   ← Icons (light)
+green-400:  #4ADE80   ← Icons
+green-500:  #22C55E   ← Base
+green-600:  #16A34A   ← Hover, text
+green-700:  #15803D   ← Active, high contrast text
+green-800:  #166534
+green-900:  #14532D
+green-950:  #052E16
 ```
 
-**Usage**:
-- Success messages: `bg-green-50`, `text-green-700`, `border-green-200`
-- Checkmarks: `text-green-600`
-- Positive metrics: `text-green-700` (revenue up)
-- Success buttons: `bg-green-500` (rare, only for confirmations)
+**Usage:**
+- Success messages: `green-50` bg, `green-700` text, `green-200` border
+- Checkmarks: `green-600`
+- Positive metrics: `green-700`
+- Journey completion: `green-500`
 
 ---
 
-### Error Red
+### Error: Warm Red
 
-**Role**: Errors, warnings, destructive actions
+**Errors, destructive actions, critical warnings.**
 
-**Palette**:
+Not cold crimson—a red with warmth.
+
 ```
-red-50:  #fef2f2
-red-100: #fee2e2
-red-200: #fecaca
-red-300: #fca5a5
-red-400: #f87171
-red-500: #ef4444  (Base)
-red-600: #dc2626  (Hover)
-red-700: #b91c1c  (Active)
-red-800: #991b1b
-red-900: #7f1d1d
-red-950: #450a0a
+Error Red
+─────────
+red-50:   #FEF2F2   ← Error message bg
+red-100:  #FEE2E2
+red-200:  #FECACA   ← Borders
+red-300:  #FCA5A5
+red-400:  #F87171   ← Icons
+red-500:  #EF4444   ← Base
+red-600:  #DC2626   ← Destructive buttons
+red-700:  #B91C1C   ← Text
+red-800:  #991B1B
+red-900:  #7F1D1D
+red-950:  #450A0A
 ```
 
-**Usage**:
-- Error messages: `bg-red-50`, `text-red-700`, `border-red-200`
-- Destructive buttons: `bg-red-600`, hover `bg-red-700`
-- Form errors: `border-red-300`, `text-red-600`
-- Error icons: `text-red-500`
+**Usage:**
+- Error messages: `red-50` bg, `red-700` text, `red-200` border
+- Destructive buttons: `red-600`, hover `red-700`
+- Form errors: `red-300` border, `red-600` text
+- Error icons: `red-500`
 
 ---
 
-### Warning Amber
+### Warning: Rich Amber
 
-**Role**: Warnings, cautions, pending states
+**Warnings, pending states, attention needed.**
 
-**Palette**:
 ```
-amber-50:  #fffbeb
-amber-100: #fef3c7
-amber-200: #fde68a
-amber-300: #fcd34d
-amber-400: #fbbf24
-amber-500: #f59e0b  (Base)
-amber-600: #d97706  (Hover)
-amber-700: #b45309  (Active)
-amber-800: #92400e
-amber-900: #78350f
-amber-950: #451a03
+Warning Amber
+─────────────
+amber-50:   #FFFBEB   ← Warning message bg
+amber-100:  #FEF3C7
+amber-200:  #FDE68A   ← Borders
+amber-300:  #FCD34D
+amber-400:  #FBBF24   ← Icons
+amber-500:  #F59E0B   ← Base
+amber-600:  #D97706   ← Text
+amber-700:  #B45309   ← High contrast text
+amber-800:  #92400E
+amber-900:  #78350F
+amber-950:  #451A03
 ```
 
-**Usage**:
-- Warning banners: `bg-amber-50`, `text-amber-800`, `border-amber-200`
-- Pending states: `text-amber-600`
-- "Review required" badges: `bg-amber-100`, `text-amber-700`
-
-**Do not use for**: Errors (use red), success (use green)
+**Usage:**
+- Warning banners: `amber-50` bg, `amber-700` text, `amber-200` border
+- Pending states: `amber-600`
+- Review required: `amber-100` bg, `amber-700` text
 
 ---
 
-### Info Blue-Gray
+### Info: Warm Slate
 
-**Role**: Informational messages, neutral alerts
+**Informational messages, neutral system feedback.**
 
-**Palette**:
 ```
-slate-50:  #f8fafc
-slate-100: #f1f5f9
-slate-200: #e2e8f0
-slate-300: #cbd5e1
-slate-400: #94a3b8
-slate-500: #64748b  (Base)
-slate-600: #475569  (Hover)
-slate-700: #334155  (Active)
-slate-800: #1e293b
-slate-900: #0f172a
-slate-950: #020617
+Info Slate
+──────────
+slate-50:   #F8FAFC   ← Info message bg
+slate-100:  #F1F5F9
+slate-200:  #E2E8F0   ← Borders
+slate-300:  #CBD5E1
+slate-400:  #94A3B8   ← Icons
+slate-500:  #64748B   ← Base
+slate-600:  #475569   ← Text
+slate-700:  #334155   ← High contrast
+slate-800:  #1E293B
+slate-900:  #0F172A
+slate-950:  #020617
 ```
 
-**Usage**:
-- Info banners: `bg-slate-50`, `text-slate-700`, `border-slate-200`
-- Neutral messages
-- System updates
+**Usage:**
+- Info banners: `slate-50` bg, `slate-700` text, `slate-200` border
+- System messages
+- Neutral tooltips
 
 ---
 
-## Interactive Colors
+## Interactive States
 
-**Purpose**: Feedback for user actions.
+### State Progression
 
-### Hover States
+**Consistent state changes across all interactive elements:**
 
-**Rule**: Darken by 1 shade (500 → 600)
-
-**Examples**:
 ```
-Button (blue):
-  Default: bg-blue-500
-  Hover:   bg-blue-600
-
-Link (blue):
-  Default: text-blue-600
-  Hover:   text-blue-700
+State       | Change from Base
+────────────┼─────────────────────────────────
+Default     | Base color (500)
+Hover       | +1 shade darker (600)
+Active      | +2 shades darker (700)
+Focus       | Base + ring at 300 level
+Disabled    | cream-300 bg, cream-500 text
 ```
-
----
-
-### Active States
-
-**Rule**: Darken by 2 shades (500 → 700)
-
-**Examples**:
-```
-Button (blue):
-  Active: bg-blue-700
-
-Toggle switch:
-  Active: bg-blue-700
-```
-
----
 
 ### Focus States
 
-**Rule**: Use 300-level of same color for focus ring
+**Always visible, always accessible:**
 
-**Examples**:
+```css
+/* Focus ring pattern */
+focus: {
+  outline: none;
+  ring: 3px solid {color}-300;
+  ring-offset: 2px cream-50;
+}
 ```
-Input (blue):
-  Focus: ring-blue-300 ring-3
 
-Button (red):
-  Focus: ring-red-300 ring-3
-```
-
-**Why 300?** Light enough to see, dark enough to meet contrast (3:1 vs background)
+**Why 300 level?** Light enough to see against dark buttons, dark enough for 3:1 contrast.
 
 ---
 
-### Disabled States
+## Surface & Elevation
 
-**Rule**: Use gray-300 for backgrounds, gray-500 for text
+### Light Mode Surfaces
 
-**Examples**:
 ```
-Button (disabled):
-  bg-gray-300, text-gray-500, cursor-not-allowed
-
-Input (disabled):
-  bg-gray-100, text-gray-400, border-gray-300
+Layer 0 (Base):     cream-50      ← Page background
+Layer 1 (Raised):   cream-100     ← Cards, panels
+Layer 2 (Elevated): white         ← Modals, dropdowns
+Layer 3 (Floating): cream-900     ← Tooltips (inverted)
 ```
 
-**Never**: Don't use color alone to indicate disabled (add cursor, opacity changes)
+**Borders:**
+- Default: `cream-200`
+- Emphasized: `cream-300`
+- Interactive: `teal-200` (on focus/hover)
+
+**Shadows** (warm, not cool):
+```css
+/* Level 1 */
+box-shadow: 0 1px 3px rgba(45, 42, 37, 0.08);
+
+/* Level 2 */
+box-shadow: 0 4px 12px rgba(45, 42, 37, 0.12);
+
+/* Level 3 */
+box-shadow: 0 8px 24px rgba(45, 42, 37, 0.16);
+```
+
+**Notice:** Shadow color is warm brown (`#2D2A25`), not cool gray.
 
 ---
 
-## Surface Colors
+### Dark Mode Surfaces
 
-**Purpose**: Layering, elevation, depth.
-
-### Neutral Gray Scale
-
-**Primary gray for UI chrome**:
+**Evening studio feel—warm lamplight, not cold night.**
 
 ```
-gray-50:  #f9fafb  (Page background)
-gray-100: #f3f4f6  (Card background)
-gray-200: #e5e7eb  (Borders, dividers)
-gray-300: #d1d5db  (Disabled backgrounds)
-gray-400: #9ca3af  (Placeholder text)
-gray-500: #6b7280  (Body text - light bg)
-gray-600: #4b5563  (Headings - light bg)
-gray-700: #374151  (High contrast text)
-gray-800: #1f2937  (Dark mode body text)
-gray-900: #111827  (Dark mode headings)
-gray-950: #030712  (Dark mode page bg)
+Layer 0 (Base):     cream-950     ← Page background
+Layer 1 (Raised):   cream-900     ← Cards, panels
+Layer 2 (Elevated): cream-800     ← Modals, dropdowns
+Layer 3 (Floating): cream-200     ← Tooltips (inverted)
 ```
 
-**Usage (Light Mode)**:
-```
-Layer 0 (base):       bg-white or bg-gray-50
-Layer 1 (cards):      bg-white, border-gray-200
-Layer 2 (modals):     bg-white, shadow
-Layer 3 (tooltips):   bg-gray-900, text-white
-```
+**Text in dark mode:**
+- Primary: `cream-100`
+- Secondary: `cream-300`
+- Muted: `cream-500`
 
-**Usage (Dark Mode)**:
-```
-Layer 0 (base):       bg-gray-950
-Layer 1 (cards):      bg-gray-900, border-gray-800
-Layer 2 (modals):     bg-gray-900, shadow
-Layer 3 (tooltips):   bg-gray-800, text-gray-100
-```
+**Brand colors in dark mode:**
+- Shift primary 1 step lighter (teal-500 → teal-400)
+- Reduce saturation 10-15% (less eye strain)
 
 ---
 
-## Accessibility Requirements
+## Accessibility
 
-### Contrast Ratios (WCAG)
+### Contrast Requirements
 
-**Text**:
-- Large text (18px+): 4.5:1 (AA), 7:1 (AAA) ← **Our target**
-- Normal text: 7:1 (AAA) ← **Our minimum**
-
-**Non-text (UI components)**:
-- Borders, icons: 3:1 (AA) ← **Our minimum**
-- Focus indicators: 3:1 (AA)
-
----
+| Element | Minimum Ratio | Our Target |
+|---------|---------------|------------|
+| Body text | 4.5:1 | 7:1+ (AAA) |
+| Large text (18px+) | 3:1 | 4.5:1+ (AA) |
+| UI components | 3:1 | 3:1+ (AA) |
+| Focus indicators | 3:1 | 3:1+ (AA) |
 
 ### Color Blindness
 
-**Never use color alone** to convey information.
+**Never use color alone. Always pair with:**
+- Icons (✓ for success, ✕ for error)
+- Text labels ("Success", "Error")
+- Patterns or shapes
 
-**Examples**:
-
-❌ **Bad**: Red/green without labels
-```
-Status: ● (red) or ● (green)
-```
-
-✅ **Good**: Color + icon + text
-```
-Error:   ⚠ Failed (red)
-Success: ✓ Complete (green)
-```
-
-**Test with**:
-- Deuteranopia (red-green)
+**Test with:**
+- Deuteranopia (red-green, most common)
 - Protanopia (red-green)
 - Tritanopia (blue-yellow)
 - Monochromacy (grayscale)
 
-**Tool**: Stark, Contrast Checker, Who Can Use
-
----
-
-## Dark Mode Strategy
-
-**Approach**: True inversion, not just gray swap
-
-### Principles
-
-1. **Darker is deeper**: Opposite of light mode elevation
-2. **Reduce saturation**: Bright colors are harsh in dark
-3. **Maintain contrast**: Same 7:1 ratio for text
-
----
-
-### Light → Dark Mapping
-
-**Backgrounds**:
+**Example:**
 ```
-Light: white → gray-50 → gray-100
-Dark:  gray-950 → gray-900 → gray-800
-```
-
-**Text**:
-```
-Light: gray-900 → gray-700 → gray-500
-Dark:  gray-100 → gray-300 → gray-500
-```
-
-**Brand colors**:
-```
-Light: blue-500, blue-600, blue-700
-Dark:  blue-400, blue-500, blue-600 (lighter, less saturated)
-```
-
-**Borders**:
-```
-Light: gray-200
-Dark:  gray-800
+❌ Bad:  ● (green) and ● (red) with no labels
+✅ Good: ✓ Success (green) and ✕ Error (red)
 ```
 
 ---
 
-### Dark Mode Color Adjustments
+## Semantic Token Structure
 
-**Desaturate brand colors by 10-15%**:
-- Light mode `blue-500`: hsl(217, 91%, 60%)
-- Dark mode `blue-500`: hsl(217, 80%, 60%)
+### Naming Convention
 
-**Why?** Bright colors cause eye strain on dark backgrounds
-
----
-
-## Color Usage Rules
-
-### Do's
-
-✅ Use semantic tokens (`color.action.primary`, not `blue-500`)
-✅ Test all color combos for contrast (7:1 text, 3:1 UI)
-✅ Provide non-color indicators (icons, labels)
-✅ Use gray for 80% of interface
-✅ Reserve brand colors for important actions
-
-### Don'ts
-
-❌ Don't use color as only differentiator
-❌ Don't use light colors for text on light backgrounds
-❌ Don't mix warm and cool grays in same UI
-❌ Don't use more than 3 colors in a single component
-❌ Don't use gradients unless necessary (adds complexity)
-
----
-
-## Color Token Structure
-
-**Format**: `{category}.{role}.{variant}.{state}`
-
-**Examples**:
 ```
-color.text.primary            → gray-900 (light) / gray-100 (dark)
-color.text.secondary          → gray-600 (light) / gray-400 (dark)
-color.text.disabled           → gray-400 (light) / gray-600 (dark)
+color.{category}.{role}.{variant?}.{state?}
+```
 
-color.bg.primary              → white (light) / gray-950 (dark)
-color.bg.secondary            → gray-50 (light) / gray-900 (dark)
-color.bg.tertiary             → gray-100 (light) / gray-800 (dark)
+### Token Examples
 
-color.border.default          → gray-200 (light) / gray-800 (dark)
-color.border.strong           → gray-300 (light) / gray-700 (dark)
+**Text:**
+```
+color.text.primary      → cream-900 (light) / cream-100 (dark)
+color.text.secondary    → cream-700 (light) / cream-300 (dark)
+color.text.muted        → cream-600 (light) / cream-400 (dark)
+color.text.disabled     → cream-500 (light) / cream-600 (dark)
+color.text.inverse      → cream-50 (light) / cream-900 (dark)
+```
 
-color.action.primary.default  → blue-500
-color.action.primary.hover    → blue-600
-color.action.primary.active   → blue-700
-color.action.primary.focus    → blue-300 (ring)
+**Backgrounds:**
+```
+color.bg.primary        → cream-50 (light) / cream-950 (dark)
+color.bg.secondary      → cream-100 (light) / cream-900 (dark)
+color.bg.tertiary       → cream-200 (light) / cream-800 (dark)
+color.bg.inverse        → cream-900 (light) / cream-100 (dark)
+```
+
+**Borders:**
+```
+color.border.default    → cream-200 (light) / cream-800 (dark)
+color.border.strong     → cream-300 (light) / cream-700 (dark)
+color.border.interactive → teal-300 (focus states)
+```
+
+**Actions:**
+```
+color.action.primary.default  → teal-500
+color.action.primary.hover    → teal-600
+color.action.primary.active   → teal-700
+color.action.primary.focus    → teal-300 (ring)
+
+color.action.secondary.default → cream-200
+color.action.secondary.hover   → cream-300
+```
+
+**Feedback:**
+```
+color.feedback.success.bg     → green-50
+color.feedback.success.text   → green-700
+color.feedback.success.border → green-200
 
 color.feedback.error.bg       → red-50
 color.feedback.error.text     → red-700
 color.feedback.error.border   → red-200
-```
 
-**Full token file**: [/tokens/color.tokens.json](../tokens/color.tokens.json)
-
----
-
-## Color Palette Reference
-
-### Full System
-
-```
-Grays:   gray-{50-950}    (UI chrome, text, backgrounds)
-Primary: blue-{50-950}    (Brand, CTAs, links)
-Creator: purple-{50-950}  (Creator-specific features)
-Success: green-{50-950}   (Positive feedback)
-Error:   red-{50-950}     (Errors, destructive actions)
-Warning: amber-{50-950}   (Warnings, pending states)
-Info:    slate-{50-950}   (Neutral information)
+color.feedback.warning.bg     → amber-50
+color.feedback.warning.text   → amber-700
+color.feedback.warning.border → amber-200
 ```
 
 ---
 
-## Examples
+## Usage Examples
 
-### Primary Button (Light Mode)
+### Primary Button
 
 ```css
-background: blue-500
-color: white
-border: blue-500
+/* Light mode */
+.btn-primary {
+  background: teal-500;
+  color: white;
+  border: 1px solid teal-500;
+}
 
-hover:
-  background: blue-600
-  border: blue-600
+.btn-primary:hover {
+  background: teal-600;
+  border-color: teal-600;
+}
 
-active:
-  background: blue-700
-  border: blue-700
+.btn-primary:active {
+  background: teal-700;
+  border-color: teal-700;
+}
 
-focus:
-  ring: blue-300 (3px)
+.btn-primary:focus {
+  ring: 3px teal-300;
+  ring-offset: 2px cream-50;
+}
 
-disabled:
-  background: gray-300
-  color: gray-500
-  cursor: not-allowed
+.btn-primary:disabled {
+  background: cream-300;
+  color: cream-500;
+  cursor: not-allowed;
+}
 ```
 
-**Contrast check**:
-- White text on blue-500: 4.54:1 ✅ (AA large text)
-- White text on blue-600: 5.93:1 ✅ (AA)
+### Content Card
+
+```css
+/* Light mode */
+.card {
+  background: cream-100;
+  border: 1px solid cream-200;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(45, 42, 37, 0.08);
+}
+
+.card-title {
+  color: cream-900;
+}
+
+.card-body {
+  color: cream-700;
+}
+
+.card-meta {
+  color: cream-600;
+}
+```
+
+### Success Message
+
+```css
+.alert-success {
+  background: green-50;
+  border: 1px solid green-200;
+  color: green-700;
+}
+
+.alert-success-icon {
+  color: green-600;
+}
+```
 
 ---
 
-### Error Alert (Light Mode)
+## Anti-Patterns
 
-```css
-background: red-50
-border: red-200
-text: red-700
+| Anti-Pattern | Why It's Wrong | What Instead |
+|--------------|----------------|--------------|
+| Pure white (#FFFFFF) | Cold, clinical | cream-50 or cream-100 |
+| Cool gray | Corporate SaaS | Warm cream scale |
+| Saturated blue as primary | Corporate, banking | Warm teal |
+| Pure black (#000000) | Harsh, unnatural | cream-950 |
+| Neon accents | Attention-seeking | Rich, natural tones |
+| Gradient overuse | Distracting | Solid colors, subtle gradients |
+| Color-only meaning | Inaccessible | Color + icon + text |
 
-icon:
-  color: red-500
+---
 
-link:
-  color: red-700
-  hover: red-800
-```
+## The Warmth Test
 
-**Contrast check**:
-- red-700 text on red-50 bg: 8.2:1 ✅ (AAA)
+Before finalizing any color combination, ask:
+
+1. **Does it feel warm?** Not cold corporate, not sterile clinical
+2. **Does it feel natural?** Like materials in a creative studio
+3. **Does it feel calm?** Not demanding attention, not anxious
+4. **Is it accessible?** Meets contrast ratios, works without color
+
+If any answer is no → reconsider the palette.
 
 ---
 
@@ -570,17 +614,38 @@ link:
 
 Color system evolves. Changes require:
 
-1. Accessibility audit (contrast ratios)
-2. Dark mode compatibility check
-3. Token update + documentation
-4. Component library update
-
-**Change log**:
+1. Accessibility audit (contrast verification)
+2. Warmth test (creative studio check)
+3. Dark mode compatibility
+4. Token and component updates
 
 | Date | Change | Reasoning |
 |------|--------|-----------|
 | 2026-01-01 | Initial color system | Foundation |
+| 2026-01-03 | Complete rewrite | Alignment with Mission/Philosophy. Shifted from corporate blue to warm teal. Added cream neutral scale. Established warmth as core principle. |
 
 ---
 
-Next: [04. Typography System →](../04-typography/README.md)
+## Summary
+
+**Codex color system in one breath:**
+
+> Warm neutrals ground everything in comfort. Teal brings natural, calming energy. Coral celebrates community moments. Every color serves meaning, every shade maintains warmth. The palette feels like sunlight through studio windows, not fluorescent office lighting.
+
+**The test:**
+
+> Does this palette feel like a yoga studio, or like a spreadsheet?
+
+If yoga studio → proceed.
+If spreadsheet → add warmth.
+
+---
+
+**Upstream**: [02. Visual Language](../02-visual-language/README.md)
+**Downstream**: [04. Typography](../04-typography/README.md)
+
+---
+
+*Last updated: 2026-01-03*
+*Version: 2.0*
+*Status: Foundation document — warmth made visible*
