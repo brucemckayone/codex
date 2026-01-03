@@ -1,18 +1,85 @@
 # 04. Typography System
 
-**Structure, hierarchy, voice. Meaning before decoration.**
+**The voice made visible. How type conveys warmth, clarity, and belonging.**
 
 ---
 
-## Purpose
+## Foundation
 
-Typography is not decoration. It's **information architecture made visible**.
+This document extends the warmth of [Visual Language (02)](../02-visual-language/README.md) into letterforms.
 
-Good typography:
-- Encodes meaning through scale, weight, spacing
-- Guides the eye through content hierarchically
-- Communicates tone (professional, approachable, serious)
-- Works across devices, screen sizes, languages
+Every type choice must answer: **Does this feel welcoming and human, or cold and corporate?**
+
+---
+
+## Typography Philosophy
+
+### Type as Character
+
+Typography is not decoration. It's **the voice of the community**.
+
+Consider how different spaces feel through their typography:
+
+| Space | Type Character |
+|-------|----------------|
+| Yoga studio | Soft, readable, calming—like handwritten schedules on warm wood |
+| Dance company | Elegant, dynamic, expressive—movement in letterforms |
+| Music school | Rich, classical, authoritative yet approachable |
+| Art collective | Clean, intentional, gallery-like—type that recedes for art |
+
+**Common threads:**
+- Human, not mechanical
+- Readable, not decorative
+- Warm, not cold
+- Clear, not clever
+
+---
+
+### The Warmth Spectrum
+
+```
+Cold ◄──────────────────────────────────────────► Warm
+
+Geometric    Grotesque    Neo-Grotesk  ║ Humanist ║  Script
+Sans         Sans         Sans         ║   Sans   ║
+  │            │             │         ║          ║    │
+  └────────────┴─────────────┴─────────╨──────────╨────┘
+                                       ▲
+                                 We live here
+```
+
+**Codex uses humanist sans-serif** because:
+- Humanist = based on human handwriting (calligraphic origins)
+- Feels warmer than geometric (which feels cold, mechanical)
+- More approachable than grotesque (which feels stark)
+- Professional but not corporate
+
+---
+
+### Core Typography Principles
+
+1. **Warmth Through Form**
+   - Humanist typefaces with pen-stroke influences
+   - Generous x-height (readable, friendly)
+   - Open apertures (inviting, not closed off)
+   - Slightly rounded terminals (soft, not sharp)
+
+2. **Clarity Over Cleverness**
+   - Readable at all sizes
+   - Clear hierarchy through weight and size
+   - No decorative fonts for UI
+   - Function before style
+
+3. **Breathing Room**
+   - Generous line height (text needs space)
+   - Comfortable letter spacing
+   - Optimal line length (not too long, not too short)
+
+4. **Accessible Always**
+   - 16px minimum for body text
+   - 7:1 contrast ratio (WCAG AAA)
+   - Works for dyslexic readers
+   - Scales for vision impairments
 
 ---
 
@@ -20,459 +87,491 @@ Good typography:
 
 ### Primary: Inter
 
-**Role**: UI text, body copy, data display
+**Role**: All UI text, body copy, headings
 
-**Why Inter?**
+**Why Inter for a warm design system?**
+
+Despite being a "tech" font, Inter has humanist qualities:
+- Based on traditional letterforms (not purely geometric)
+- Tall x-height (readable, friendly)
+- Open apertures (welcoming)
 - Designed for screens (clarity at small sizes)
-- Open-source (no licensing issues)
-- Variable font (performance, flexibility)
-- Excellent international character support
-- Professional but warm (aligns with brand tone)
+- Variable font (performance + flexibility)
+- Excellent international support
+- Open-source (no licensing friction)
 
-**Weights used**:
+**The alternative consideration:**
+
+If we wanted even more warmth, we'd use:
+- **Source Sans Pro** (very humanist, Adobe)
+- **Nunito** (softer, rounded)
+- **Lato** (warm, semi-rounded)
+
+But Inter's balance of warmth and professionalism aligns with "warm professionalism."
+
+**Weights we use:**
 ```
-300 Light       → Captions, de-emphasized content
-400 Regular     → Body text, descriptions
-500 Medium      → Button text, labels, navigation
-600 Semibold    → Subheadings, card titles
-700 Bold        → Page headings, emphasis
+400 Regular    → Body text, descriptions, content
+500 Medium     → Labels, buttons, navigation, emphasis
+600 Semibold   → Subheadings, card titles, strong emphasis
+700 Bold       → Page headings, primary emphasis
 ```
 
-**Do not use**: 100 (Thin), 200 (ExtraLight), 800+ (too heavy for UI)
+**Weights we avoid:**
+- 100-300 (too light, accessibility issues)
+- 800-900 (too heavy, aggressive)
 
 ---
 
-### Secondary: JetBrains Mono
+### Monospace: JetBrains Mono
 
-**Role**: Code, API responses, logs, technical data
+**Role**: Code, technical content, data
 
 **Why JetBrains Mono?**
-- Monospace (character alignment)
-- High legibility (distinct characters: l vs I, 0 vs O)
+- Designed for readability (distinct l/I/1, 0/O)
+- Comfortable for extended reading
+- Slightly softer than Fira Code or Menlo
 - Open-source
-- Designed for developers (our creator audience)
 
-**Weights used**:
+**Weights:**
 ```
-400 Regular     → Code blocks
-500 Medium      → Emphasized code
-700 Bold        → Highlighted syntax (rare)
+400 Regular    → Code blocks, inline code
+500 Medium     → Emphasized code
 ```
 
-**Usage**:
-- Code snippets in docs
-- API keys, webhook URLs
-- Log output
-- JSON responses
-
----
-
-### Display (Optional): Inter Display
-
-**Role**: Hero text, marketing headlines (>48px)
-
-**Why Inter Display?**
-- Optimized for large sizes (tighter spacing)
-- Same family as UI font (consistency)
-- Slightly more personality at scale
-
-**Fallback**: Regular Inter works fine; this is enhancement
+**Usage:**
+- Code snippets
+- API keys, URLs
+- Technical data displays
+- JSON/logs
 
 ---
 
 ## Type Scale
 
-**Approach**: Modular scale (1.250 ratio — "Major Third")
+### Philosophy: Musical Harmony
 
-**Why modular scale?**
-- Mathematical harmony (ratios feel "right")
-- Predictable sizing (no arbitrary px values)
-- Scales proportionally across breakpoints
+Our scale is based on the **Major Third (1.250)** ratio.
+
+Like musical intervals, typographic scales create harmony when proportional.
+
+```
+Scale:  1.0   1.25   1.563   1.953   2.441   3.052   3.815
+        │      │       │       │       │       │       │
+        16    20      25      31      39      49      61
+        │      │       │       │       │       │       │
+       base   lg     2xl     3xl     4xl     5xl     6xl
+```
 
 ---
 
-### Desktop Scale (Base: 16px)
+### The Scale (Desktop)
 
 ```
-xs:   12px / 0.75rem   → Captions, meta info, timestamps
-sm:   14px / 0.875rem  → Small labels, secondary text
-base: 16px / 1rem      → Body text (default)
-lg:   18px / 1.125rem  → Emphasized body, intros
-xl:   20px / 1.25rem   → Small headings (h5, h6)
-2xl:  24px / 1.5rem    → Subheadings (h4)
-3xl:  30px / 1.875rem  → Section headings (h3)
-4xl:  36px / 2.25rem   → Page headings (h2)
-5xl:  48px / 3rem      → Hero headings (h1)
-6xl:  60px / 3.75rem   → Display (marketing, rare)
+Token     Size      Rem       Use Case
+──────────────────────────────────────────────────
+xs        12px     0.75rem   Captions, timestamps, legal
+sm        14px     0.875rem  Secondary text, labels, meta
+base      16px     1rem      Body text (default)
+lg        18px     1.125rem  Emphasized body, intro text
+xl        20px     1.25rem   Small headings (h5, h6)
+2xl       24px     1.5rem    Subheadings (h4)
+3xl       30px     1.875rem  Section headings (h3)
+4xl       36px     2.25rem   Page headings (h2)
+5xl       48px     3rem      Major headings (h1)
+6xl       60px     3.75rem   Display/hero (marketing)
 ```
 
-**Default body**: 16px (1rem)
+**Base size: 16px** — Comfortable for extended reading
 
 ---
 
-### Mobile Scale (Base: 16px, adjusted at breakpoints)
+### Mobile Adjustments
 
-**Same sizes**, but reduce large headings for smaller screens:
+Large type overwhelms small screens. Scale down gracefully:
 
 ```
-Breakpoint: < 768px (mobile)
-
-3xl: 24px (was 30px)  → h3
-4xl: 30px (was 36px)  → h2
-5xl: 36px (was 48px)  → h1
-6xl: 48px (was 60px)  → Display
+              Desktop    Mobile (<768px)
+──────────────────────────────────────────
+6xl (Display)    60px        48px
+5xl (h1)         48px        36px
+4xl (h2)         36px        30px
+3xl (h3)         30px        24px
+2xl (h4)         24px        20px
+base (body)      16px        16px (unchanged)
 ```
-
-**Why?** Smaller screens = less vertical space. Big type overwhelms.
 
 ---
 
 ## Line Height
 
-**Purpose**: Vertical spacing between lines.
+### Philosophy: Room to Breathe
+
+Text needs vertical space. Cramped lines feel stressed. Generous lines feel calm.
+
+**Like a yoga studio has space between mats.**
 
 ### Body Text
 
 ```
-Tight:       1.25  → Large headings (h1, h2) — reduce space
-Normal:      1.5   → Body text (default)
-Relaxed:     1.6   → Long-form content (blog posts, docs)
-Loose:       1.75  → Very relaxed reading (accessibility)
+Tight:      1.25    → Only for large headings (48px+)
+Snug:       1.375   → Headings, titles
+Normal:     1.5     → Default for UI text
+Relaxed:    1.625   → Long-form content (articles, docs)
+Loose:      1.75    → Maximum accessibility, very relaxed
 ```
 
-**Default**: 1.5 (normal) for UI text
-
-**Rule**: Longer lines = more line height (helps eye track to next line)
-
----
+**Default: 1.5** (Normal) — Comfortable for most UI
 
 ### Headings
 
+Larger text needs less line height (the letters themselves are big enough):
+
 ```
-h1: line-height 1.1  (tight, big text doesn't need space)
-h2: line-height 1.2
-h3: line-height 1.25
-h4-h6: line-height 1.3
+h1 (48px+):   line-height: 1.1
+h2 (36px):    line-height: 1.2
+h3 (30px):    line-height: 1.25
+h4-h6:        line-height: 1.3
 ```
 
 ---
 
-## Letter Spacing (Tracking)
+## Letter Spacing
 
-**Default**: 0 (Inter is designed with optimal spacing)
+### Philosophy: Let Letters Breathe
 
-**Adjustments**:
+**Default: 0** — Inter is designed with optimal spacing
+
+**Adjustments:**
 ```
-Tight:     -0.025em  → Large headings (48px+)
-Normal:     0em      → Body text, UI (default)
-Wide:      +0.05em   → All-caps text, small labels
-Wider:     +0.1em    → Buttons (optional, subtle)
+Tighter:   -0.025em   → Large display text (48px+)
+Normal:     0em       → Body, UI (default)
+Wide:      +0.025em   → Small caps, labels
+Wider:     +0.05em    → All-caps text
 ```
 
-**Rule**: Larger text = tighter tracking (optical balance)
+**Rule:** Large text → tighter spacing. Small caps → wider spacing.
 
 ---
 
 ## Text Roles
 
-**Semantic text styles (not just size/weight).**
+Semantic styles that combine size, weight, and spacing.
 
 ### Display
 
-**Usage**: Hero sections, marketing headlines
+**For:** Hero sections, marketing headlines, welcome messages
 
 ```
-font-size: 48px (5xl)
-font-weight: 700 (Bold)
-line-height: 1.1
-letter-spacing: -0.025em
-color: gray-900
+font-size:       48-60px (5xl-6xl)
+font-weight:     700 (Bold)
+line-height:     1.1
+letter-spacing:  -0.025em
+color:           cream-900
 ```
 
-**Mobile**: Reduce to 36px (4xl)
+**Example:** "Welcome to the Collective"
 
 ---
 
-### Heading 1 (Page Title)
+### Page Title (h1)
 
-**Usage**: Main page heading (Dashboard, Settings, Profile)
+**For:** Main page heading
 
 ```
-font-size: 36px (4xl)
-font-weight: 700 (Bold)
-line-height: 1.2
-color: gray-900
-margin-bottom: 16px
+font-size:       36-48px (4xl-5xl)
+font-weight:     700 (Bold)
+line-height:     1.2
+color:           cream-900
+margin-bottom:   16px
 ```
 
-**Mobile**: Reduce to 30px (3xl)
+**Example:** "Your Dashboard", "Content Library"
 
 ---
 
-### Heading 2 (Section)
+### Section Heading (h2)
 
-**Usage**: Major section within page
+**For:** Major sections within a page
 
 ```
-font-size: 30px (3xl)
-font-weight: 700 (Bold)
-line-height: 1.25
-color: gray-900
-margin-bottom: 12px
+font-size:       30px (3xl)
+font-weight:     700 (Bold)
+line-height:     1.25
+color:           cream-900
+margin-bottom:   12px
 ```
 
-**Mobile**: Reduce to 24px (2xl)
+**Example:** "Your Journey So Far", "Community Highlights"
 
 ---
 
-### Heading 3 (Subsection)
+### Subsection (h3)
 
-**Usage**: Subsection, card group titles
+**For:** Card groups, subsections
 
 ```
-font-size: 24px (2xl)
-font-weight: 600 (Semibold)
-line-height: 1.3
-color: gray-800
-margin-bottom: 8px
+font-size:       24px (2xl)
+font-weight:     600 (Semibold)
+line-height:     1.3
+color:           cream-800
+margin-bottom:   8px
+```
+
+**Example:** "Recent Offerings", "Member Progress"
+
+---
+
+### Card Title (h4)
+
+**For:** Individual cards, list headers
+
+```
+font-size:       20px (xl)
+font-weight:     600 (Semibold)
+line-height:     1.3
+color:           cream-800
 ```
 
 ---
 
-### Heading 4-6 (Small Headings)
+### Small Heading (h5, h6)
 
-**Usage**: Card titles, list headers
+**For:** Minor sections, grouped labels
 
 ```
-H4:
-  font-size: 20px (xl)
-  font-weight: 600 (Semibold)
-
 H5:
-  font-size: 18px (lg)
-  font-weight: 600 (Semibold)
+  font-size:     18px (lg)
+  font-weight:   600 (Semibold)
+  color:         cream-800
 
 H6:
-  font-size: 16px (base)
-  font-weight: 600 (Semibold)
+  font-size:     14px (sm)
+  font-weight:   600 (Semibold)
   text-transform: uppercase
   letter-spacing: 0.05em
+  color:         cream-700
 ```
 
 ---
 
 ### Body
 
-**Usage**: Default text (paragraphs, descriptions)
+**For:** Paragraphs, descriptions, content
 
 ```
-font-size: 16px (base)
-font-weight: 400 (Regular)
-line-height: 1.5
-color: gray-700
+font-size:       16px (base)
+font-weight:     400 (Regular)
+line-height:     1.5
+color:           cream-700
 ```
 
-**Long-form variant**:
+**Long-form variant:**
 ```
-line-height: 1.6 (more space for readability)
-max-width: 65ch (optimal line length)
+line-height:     1.625 (relaxed)
+max-width:       65ch
 ```
 
 ---
 
 ### Body Large
 
-**Usage**: Intro paragraphs, emphasized content
+**For:** Intro text, emphasized content, pull quotes
 
 ```
-font-size: 18px (lg)
-font-weight: 400 (Regular)
-line-height: 1.6
-color: gray-700
+font-size:       18px (lg)
+font-weight:     400 (Regular)
+line-height:     1.6
+color:           cream-700
 ```
+
+**Example:** Opening paragraph of a course description
 
 ---
 
 ### Body Small
 
-**Usage**: Secondary information, helper text
+**For:** Secondary information, helper text
 
 ```
-font-size: 14px (sm)
-font-weight: 400 (Regular)
-line-height: 1.5
-color: gray-600
+font-size:       14px (sm)
+font-weight:     400 (Regular)
+line-height:     1.5
+color:           cream-600
 ```
 
 ---
 
 ### Caption
 
-**Usage**: Meta info, timestamps, footnotes
+**For:** Timestamps, meta info, footnotes, legal
 
 ```
-font-size: 12px (xs)
-font-weight: 400 (Regular)
-line-height: 1.4
-color: gray-500
+font-size:       12px (xs)
+font-weight:     400 (Regular)
+line-height:     1.4
+color:           cream-500
 ```
 
 ---
 
 ### Label
 
-**Usage**: Form labels, button text, navigation
+**For:** Form labels, button text, navigation items
 
 ```
-font-size: 14px (sm)
-font-weight: 500 (Medium)
-line-height: 1.4
-color: gray-700
-```
-
----
-
-### Code
-
-**Usage**: Inline code, technical references
-
-```
-font-family: 'JetBrains Mono', monospace
-font-size: 14px (sm)
-font-weight: 400 (Regular)
-background: gray-100
-padding: 2px 6px
-border-radius: 4px
-color: gray-800
-```
-
-**Block variant**:
-```
-font-size: 14px
-padding: 16px
-background: gray-900
-color: gray-100
-border-radius: 8px
-overflow-x: auto
+font-size:       14px (sm)
+font-weight:     500 (Medium)
+line-height:     1.4
+color:           cream-700
 ```
 
 ---
 
-## Responsive Typography
+### Code (Inline)
 
-**Strategy**: Fluid type (viewport-based scaling) + breakpoint adjustments
+**For:** Inline code references, technical terms
 
-### Fluid Type (Optional Enhancement)
-
-**Formula**: `clamp(min, preferred, max)`
-
-**Example (h1)**:
-```css
-font-size: clamp(30px, 5vw, 48px);
 ```
-
-**Breakdown**:
-- **min**: 30px (mobile minimum)
-- **preferred**: 5vw (scales with viewport width)
-- **max**: 48px (desktop maximum)
-
-**Result**: Smooth scaling between 30-48px based on screen size
+font-family:     'JetBrains Mono', monospace
+font-size:       14px (0.875em relative)
+font-weight:     400
+background:      cream-200
+padding:         2px 6px
+border-radius:   4px
+color:           cream-800
+```
 
 ---
 
-### Breakpoint Adjustments
+### Code Block
 
-**Mobile (< 768px)**:
-```
-Display: 36px (was 48px)
-H1:      30px (was 36px)
-H2:      24px (was 30px)
-Body:    16px (unchanged)
-```
+**For:** Multi-line code, examples
 
-**Tablet (768px - 1024px)**:
 ```
-Display: 42px
-H1:      33px
-H2:      27px
-```
-
-**Desktop (> 1024px)**:
-```
-Full scale (as defined)
+font-family:     'JetBrains Mono', monospace
+font-size:       14px
+line-height:     1.6
+background:      cream-900
+padding:         16px 20px
+border-radius:   8px
+color:           cream-100
+overflow-x:      auto
 ```
 
 ---
 
 ## Line Length
 
-**Optimal reading**: 45-75 characters per line (65 is ideal)
+### The Comfort Zone
+
+Optimal reading: **45-75 characters per line** (65 is ideal)
+
+Too short → choppy, constant line breaks
+Too long → eyes lose track returning to start
 
 ### Implementation
 
-**Long-form content**:
+**Long-form content (articles, descriptions):**
 ```css
-max-width: 65ch;  /* 65 characters */
+max-width: 65ch;
 ```
 
-**UI text** (not long-form):
+**UI text:**
 ```
-No max-width (fills container)
+No max-width (fills container naturally)
 ```
 
-**Sidebar/narrow columns**:
+**Narrow contexts (sidebars, cards):**
 ```css
 max-width: 45ch;
 ```
 
-**Wide layouts** (data tables):
+---
+
+## Hierarchy
+
+### The Squint Test
+
+When you squint at a page, you should clearly see:
+1. **One primary element** (biggest, boldest)
+2. **2-3 secondary elements** (medium weight)
+3. **Supporting details** (smaller, lighter)
+
+If everything looks the same → hierarchy failed.
+
+### Weight > Size for Subtle Hierarchy
+
+**Prefer weight differences over size differences:**
+
 ```
-No max-width (data needs space)
+❌ Subtle size difference (hard to distinguish):
+   Title:     20px Regular
+   Subtitle:  18px Regular
+   Body:      16px Regular
+
+✅ Clear weight difference:
+   Title:     20px Bold
+   Subtitle:  18px Medium
+   Body:      16px Regular
 ```
 
 ---
 
-## Text Hierarchy Rules
+## Community-Focused Examples
 
-### Visual Weight Progression
+### Welcome Message (After Joining)
 
 ```
-1. Page title (h1)      → Largest, boldest
-   ↓
-2. Section heading (h2) → Large, bold
-   ↓
-3. Subsection (h3)      → Medium, semibold
-   ↓
-4. Body text            → Base size, regular
-   ↓
-5. Secondary text       → Small, regular
-   ↓
-6. Meta text            → Smallest, light color
+Display:    "Welcome to Mindful Movement"
+            48px Bold, cream-900
+
+Body Large: "You're now part of our community. Here's how to begin
+            your journey."
+            18px Regular, cream-700
+
+Body:       "Explore offerings from our creators, track your
+            progress, and connect with fellow members."
+            16px Regular, cream-600
 ```
 
-**Test**: Can user scan page and understand structure instantly?
+**Note:** Warm, inviting language matches warm typography.
 
 ---
 
-### Contrast Through Weight
+### Creator Dashboard Card
 
-**Prefer weight over size for hierarchy** (where possible):
+```
+H4 (Title):     "Your Offerings"
+                20px Semibold, cream-800
 
-❌ **Bad** (size only):
-```
-Title:       24px Regular
-Subtitle:    20px Regular
-Body:        16px Regular
-```
+Body Small:     "3 published, 2 drafts"
+                14px Regular, cream-600
 
-✅ **Good** (weight + size):
-```
-Title:       24px Bold
-Subtitle:    20px Semibold
-Body:        16px Regular
+Caption:        "Last updated 2 hours ago"
+                12px Regular, cream-500
 ```
 
-**Why?** Weight creates contrast without scaling issues
+**Hierarchy:** Clear primary → secondary → meta
+
+---
+
+### Content Card
+
+```
+H4:             "Introduction to Mindful Breathing"
+                20px Semibold, cream-800
+
+Body:           "Learn the foundations of breath awareness
+                with guided exercises."
+                16px Regular, cream-700
+
+Label:          "45 min • Beginner"
+                14px Medium, cream-600
+
+Caption:        "By Sarah Chen"
+                12px Regular, cream-500
+```
 
 ---
 
@@ -480,32 +579,30 @@ Body:        16px Regular
 
 ### Minimum Sizes
 
-**Body text**: 16px minimum (18px preferred)
-**Small text**: 14px minimum (only for labels, not paragraphs)
-**Never**: < 12px (except in rare cases like dense data tables)
-
----
+| Context | Minimum | Preferred |
+|---------|---------|-----------|
+| Body text | 16px | 16-18px |
+| Small text | 14px | 14px |
+| Captions | 12px | 12px |
+| Never | <12px | — |
 
 ### Contrast
 
-See [03-color/README.md](../03-color/README.md) for full requirements.
+All text must meet WCAG AAA (7:1 ratio):
+- `cream-900` on `cream-50`: ✅ 12.5:1
+- `cream-700` on `cream-50`: ✅ 7.8:1
+- `cream-600` on `cream-50`: ✅ 5.2:1 (AA for 14px+)
 
-**Minimum**:
-- Large text (18px+): 4.5:1
-- Normal text: 7:1 (our standard)
+See [03. Color](../03-color/README.md) for full contrast requirements.
 
----
+### Dyslexia Considerations
 
-### Font Rendering
-
-**Use font-smoothing** for better rendering:
-
-```css
--webkit-font-smoothing: antialiased;
--moz-osx-font-smoothing: grayscale;
-```
-
-**Why?** Improves legibility on macOS/iOS
+Our choices support dyslexic readers:
+- ✅ Sans-serif (easier than serif)
+- ✅ Good letter spacing (not cramped)
+- ✅ Generous line height (1.5+)
+- ✅ Left-aligned text (not justified)
+- ✅ Distinct letterforms in Inter (b/d, p/q are distinguishable)
 
 ---
 
@@ -513,158 +610,96 @@ See [03-color/README.md](../03-color/README.md) for full requirements.
 
 ### Character Support
 
-**Inter supports**:
-- Latin Extended
-- Cyrillic
+Inter supports:
+- Latin Extended (Western European, Vietnamese)
+- Cyrillic (Russian, Ukrainian)
 - Greek
-- Vietnamese
-- Common symbols
+- Common symbols and punctuation
 
-**Test with**: Lorem ipsum, Cyrillic, Arabic (RTL), Japanese (long strings)
+### RTL Languages
 
----
-
-### RTL (Right-to-Left) Support
-
-**Languages**: Arabic, Hebrew
-
-**Implementation**:
+For Arabic, Hebrew:
 ```css
 [dir="rtl"] {
   text-align: right;
-  /* Flip margins, padding as needed */
+  direction: rtl;
 }
 ```
 
-**Test**: All UI components work in RTL mode
+### CJK Considerations
+
+For Chinese, Japanese, Korean:
+- Consider system fonts or dedicated CJK typeface
+- Line height may need adjustment (1.7+)
+- No letter-spacing adjustments
 
 ---
 
 ## Typography Tokens
 
-**Format**: `{category}.{role}.{property}`
+### Token Structure
 
-**Examples**:
 ```
-typography.display.fontSize: 48px
-typography.display.fontWeight: 700
-typography.display.lineHeight: 1.1
-
-typography.h1.fontSize: 36px
-typography.h1.fontWeight: 700
-typography.h1.lineHeight: 1.2
-
-typography.body.fontSize: 16px
-typography.body.fontWeight: 400
-typography.body.lineHeight: 1.5
-
-typography.caption.fontSize: 12px
-typography.caption.fontWeight: 400
-typography.caption.lineHeight: 1.4
+typography.{role}.{property}
 ```
 
-**Full token file**: [/tokens/typography.tokens.json](../tokens/typography.tokens.json)
+### Examples
 
----
-
-## Usage Examples
-
-### Creator Dashboard Card
-
-```html
-<div class="card">
-  <h3 class="text-2xl font-semibold text-gray-800 mb-2">
-    Your Content
-  </h3>
-  <p class="text-sm text-gray-600 mb-4">
-    Manage your courses and videos
-  </p>
-  <div class="text-xs text-gray-500">
-    Last updated: 2 hours ago
-  </div>
-</div>
+```json
+{
+  "typography": {
+    "display": {
+      "fontSize": "48px",
+      "fontWeight": "700",
+      "lineHeight": "1.1",
+      "letterSpacing": "-0.025em"
+    },
+    "h1": {
+      "fontSize": "36px",
+      "fontWeight": "700",
+      "lineHeight": "1.2"
+    },
+    "body": {
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "lineHeight": "1.5"
+    },
+    "caption": {
+      "fontSize": "12px",
+      "fontWeight": "400",
+      "lineHeight": "1.4"
+    }
+  }
+}
 ```
-
-**Hierarchy**:
-- h3: 24px semibold (primary focus)
-- p: 14px regular (supporting info)
-- timestamp: 12px light color (meta)
-
----
-
-### Form Label + Input
-
-```html
-<label class="text-sm font-medium text-gray-700 mb-1">
-  Content Title
-</label>
-<input
-  type="text"
-  class="text-base font-regular text-gray-900"
-  placeholder="Enter a descriptive title"
-/>
-<p class="text-xs text-gray-500 mt-1">
-  This will be visible to customers
-</p>
-```
-
-**Hierarchy**:
-- Label: 14px medium (instruction)
-- Input: 16px regular (user content)
-- Help text: 12px lighter (guidance)
 
 ---
 
 ## Anti-Patterns
 
-### ❌ Don't: Mix too many sizes
-
-```
-h1: 48px
-h2: 42px  ← Too close to h1
-h3: 38px  ← Arbitrary
-p: 16px
-```
-
-**Why?** No clear hierarchy
-
-✅ **Do**: Use modular scale
-```
-h1: 48px
-h2: 36px  (1.333x smaller)
-h3: 30px  (1.2x smaller)
-p: 16px
-```
+| Anti-Pattern | Why It's Wrong | What Instead |
+|--------------|----------------|--------------|
+| Geometric sans (Futura, Avenir) | Cold, mechanical | Humanist (Inter) |
+| Light weights for body | Accessibility issues | Regular (400) minimum |
+| All bold text | No hierarchy, fatiguing | Weight variation |
+| Justified text | Uneven spacing, harder to read | Left-aligned |
+| Long lines (100+ chars) | Eyes lose track | max-width: 65ch |
+| Tight line height (1.2) for body | Cramped, stressful | 1.5 minimum |
+| Decorative fonts for UI | Unclear, dated | Clean sans-serif |
+| Size-only hierarchy | Subtle, unclear | Weight + size |
 
 ---
 
-### ❌ Don't: All bold or all light
+## The Warmth Test
 
-```
-<h1 class="font-bold">Title</h1>
-<p class="font-bold">Everything is shouting</p>
-```
+Before finalizing typography:
 
-✅ **Do**: Use weight for hierarchy
-```
-<h1 class="font-bold">Title</h1>
-<p class="font-normal">Regular body text</p>
-```
+1. **Does it feel warm?** Humanist, not geometric or grotesque
+2. **Does it feel readable?** Comfortable sizes, generous spacing
+3. **Does it feel welcoming?** Like a yoga studio schedule, not a spreadsheet
+4. **Is it accessible?** Meets contrast, size, spacing requirements
 
----
-
-### ❌ Don't: Tiny, long lines
-
-```
-font-size: 12px;
-max-width: 100%; /* 150+ characters per line */
-```
-
-✅ **Do**: Appropriate size + line length
-```
-font-size: 16px;
-max-width: 65ch; /* ~65 characters */
-```
+If any answer is no → reconsider the choices.
 
 ---
 
@@ -672,17 +707,39 @@ max-width: 65ch; /* ~65 characters */
 
 Typography evolves. Changes require:
 
-1. Accessibility audit (size, contrast)
-2. Responsive testing (mobile → desktop)
-3. Internationalization check (RTL, long strings)
-4. Token update + documentation
-
-**Change log**:
+1. Accessibility audit (size, contrast, spacing)
+2. Warmth test (creative studio check)
+3. Responsive testing (mobile → desktop)
+4. Internationalization verification
+5. Token and component updates
 
 | Date | Change | Reasoning |
 |------|--------|-----------|
-| 2026-01-01 | Initial typography system | Foundation |
+| 2026-01-01 | Initial typography | Foundation |
+| 2026-01-03 | Complete rewrite | Alignment with Mission/Philosophy. Added warmth philosophy, humanist type reasoning, community-focused examples, cream color integration. |
 
 ---
 
-Next: [05. Spacing & Layout →](../05-spacing-layout/README.md)
+## Summary
+
+**Codex typography in one breath:**
+
+> Humanist letterforms that feel written by humans, not machines. Generous spacing that lets words breathe like a yoga studio lets bodies stretch. Clear hierarchy that guides without shouting. Every glyph serves readability, warmth, and belonging.
+
+**The test:**
+
+> Does this type feel like a welcome note, or like a terms of service?
+
+If welcome note → proceed.
+If terms of service → add warmth.
+
+---
+
+**Upstream**: [03. Color](../03-color/README.md)
+**Downstream**: [05. Spacing & Layout](../05-spacing-layout/README.md)
+
+---
+
+*Last updated: 2026-01-03*
+*Version: 2.0*
+*Status: Foundation document — voice made visible*
