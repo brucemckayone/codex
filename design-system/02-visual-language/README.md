@@ -1,507 +1,832 @@
 # 02. Visual Language
 
-**Aesthetic grammar. How philosophy becomes visual.**
+**Where philosophy becomes visible. How belonging looks.**
 
 ---
 
-## Purpose
+## Foundation
 
-Visual language defines **how things feel**, not just how they look.
+This document translates [Philosophy (01)](../01-philosophy/README.md) into visual form.
 
-This is the bridge between philosophy (calm confidence, professional warmth) and implementation (borders, shadows, motion).
+Every visual choice must answer: **Does this feel like walking into a beloved creative studio?**
+
+---
+
+## The Visual North Star
+
+### What We're Evoking
+
+**Physical spaces that inspire us:**
+
+| Space | Visual Character |
+|-------|------------------|
+| Yoga studio | Natural light, warm wood, plants, soft textures, breathing room |
+| Dance company | Open floors, mirrors, movement, grace, dynamic energy |
+| Music school | Rich woods, crafted instruments, acoustic warmth, intimate and grand |
+| Art collective | Gallery white, work on display, creative energy, collaboration visible |
+
+**Common threads:**
+- Natural materials (wood, stone, fabric)
+- Warm light (golden hour, not fluorescent)
+- Generous space (room to breathe, room to grow)
+- Content is the star (chrome recedes)
+- Human presence (community visible)
+- Craft and intentionality (every detail considered)
+- Organic moments (not rigidly mechanical)
+
+**This is what Codex should feel like visually.**
+
+---
+
+### The Aesthetic Spectrum
+
+```
+Cold ◄────────────────────────────────────────────► Hot
+
+Banking  Corporate  SaaS   ║ Codex ║  Casual  Playful  Chaotic
+   │         │        │    ║       ║     │        │        │
+   └─────────┴────────┴────╨───────╨─────┴────────┴────────┘
+                           ▲
+                     We live here
+```
+
+**We are:**
+- Warmer than typical SaaS (not cold dashboards)
+- More refined than casual (not sloppy)
+- More human than corporate (not sterile)
+- More intentional than playful (not chaotic)
+
+**Visual expression of warmth:**
+- Warm color temperature (cream > pure white, warm grays > cool grays)
+- Rounded shapes (approachable, not aggressive)
+- Natural-feeling textures (not plastic flat)
+- Generous spacing (breathing room)
+- Soft shadows (natural light, not harsh drop shadows)
+
+---
+
+## Light Philosophy
+
+**Light is the foundation of visual warmth.**
+
+### Natural Light Metaphor
+
+Codex should feel like a creative studio with large windows on a clear morning.
+
+**Light mode** (primary):
+- Warm off-white backgrounds (not pure #FFFFFF)
+- Subtle warmth in shadows (not cool blue shadows)
+- Gentle gradients that feel like natural light falloff
+- Depth through subtle elevation, not harsh shadows
+
+**Dark mode** (secondary):
+- Evening studio feel (warm lamplight, not cold night)
+- Rich dark backgrounds (not pure #000000)
+- Preserved warmth in accent colors
+- Soft glows instead of harsh contrasts
+
+### Light Levels (Elevation System)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  LEVEL 0: Ground                                        │
+│  Base surface. The floor of the studio.                 │
+│  Background: primary canvas                             │
+│  Shadow: none                                           │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  LEVEL 1: Raised                                  │  │
+│  │  Content cards, panels. Furniture on the floor.   │  │
+│  │  Shadow: 0 1px 3px rgba(0,0,0,0.08)               │  │
+│  │                                                   │  │
+│  │  ┌─────────────────────────────────────────────┐  │  │
+│  │  │  LEVEL 2: Elevated                          │  │  │
+│  │  │  Dropdowns, popovers. Items being handled.  │  │  │
+│  │  │  Shadow: 0 4px 12px rgba(0,0,0,0.12)        │  │  │
+│  │  │                                             │  │  │
+│  │  │  ┌───────────────────────────────────────┐  │  │  │
+│  │  │  │  LEVEL 3: Floating                    │  │  │  │
+│  │  │  │  Modals, dialogs. Above everything.   │  │  │  │
+│  │  │  │  Shadow: 0 8px 24px rgba(0,0,0,0.16)  │  │  │  │
+│  │  │  └───────────────────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Principles:**
+- Shadows are soft, not harsh (natural light diffuses)
+- Shadows have slight warmth (not cool blue)
+- Elevation is subtle (we're not building skyscrapers)
+- Most content lives at Level 1 (grounded, stable)
+
+---
+
+## Texture Philosophy
+
+**Digital surfaces can have soul.**
+
+### The Problem with Flat Design
+
+Pure flat design feels:
+- Plastic
+- Cold
+- Mechanical
+- Lifeless
+
+Creative studios have texture:
+- Wood grain
+- Fabric weave
+- Paper fiber
+- Stone variation
+
+### Texture in Codex
+
+**Not literal** (no wood background images), but **suggested**:
+
+1. **Subtle noise** — Barely perceptible grain on backgrounds
+2. **Soft gradients** — Natural light variation, not flat fills
+3. **Border variation** — Slight opacity variation on edges
+4. **Shadow warmth** — Shadows with slight color, not pure black
+
+**Implementation:**
+```css
+/* Subtle background texture */
+background: linear-gradient(
+  135deg,
+  var(--surface-warm) 0%,
+  var(--surface-warmAlt) 100%
+);
+
+/* Optional: very subtle noise overlay */
+background-image: url('noise.svg');
+background-blend-mode: soft-light;
+opacity: 0.03;
+```
+
+**The goal**: When a user looks at Codex, they feel warmth and craft without consciously noticing textures.
 
 ---
 
 ## Shape Language
 
-### Primary Shape: Rounded Rectangles
+**Shapes communicate personality.**
 
-**Radius**: Consistent corner rounding across elements
+### Primary: Rounded Rectangles
 
-**Philosophy alignment**:
-- Rounds = approachable, professional warmth
-- Not sharp = not aggressive, not corporate cold
-- Consistent = reliable, trustworthy
+Rounded corners = approachable, warm, professional.
 
-**Scale**:
+**Radius Scale:**
 ```
-xs:  2px  → Small elements (badges, tags)
-sm:  4px  → Buttons, inputs, cards (small)
-md:  8px  → Cards, panels, modals
-lg:  12px → Feature cards, sections
-xl:  16px → Major containers, overlays
-2xl: 24px → Hero elements, branding
+xs:   2px   → Micro elements (badges, tiny indicators)
+sm:   4px   → Small interactive (buttons, chips, tags)
+md:   8px   → Standard containers (cards, inputs, panels)
+lg:   12px  → Emphasized containers (feature cards, modals)
+xl:   16px  → Major containers (page sections, overlays)
+2xl:  24px  → Hero elements (onboarding, marketing)
+full: 9999px → Circles (avatars, pips)
 ```
 
-**Usage rules**:
-- Interactive elements: `sm` (4px) minimum for touch targets
-- Content containers: `md` (8px) standard
-- Modals/overlays: `lg` (12px) for emphasis
-- Never mix radii on same component (pick one, stick to it)
+**Philosophy alignment:**
+| Radius | Feeling |
+|--------|---------|
+| 0px (sharp) | Aggressive, corporate, cold ❌ |
+| 2-4px | Professional, refined ✅ |
+| 8-12px | Approachable, warm ✅ |
+| 16-24px | Friendly, welcoming ✅ |
+| 9999px (pill) | Trendy, unstable, childish ❌ |
 
-**Anti-pattern**:
-- ❌ No sharp corners (feels aggressive)
-- ❌ No pill shapes (button.radius = 999px) — feels trendy, not timeless
-- ❌ No inconsistent radii (4px top, 8px bottom)
+**Rules:**
+- Interactive elements: minimum `sm` (4px)
+- Content containers: default `md` (8px)
+- Modals/overlays: `lg` (12px)
+- Never mix radii on the same component
+- Avoid pills (feel trendy, will date quickly)
+- Avoid sharp corners (feel aggressive)
 
----
+### Secondary: Circles
 
-### Secondary Shapes: Circles
-
-**Use for**:
-- Avatars (user identity)
+**Use for:**
+- Avatars (identity, humanity)
+- Status indicators (online/offline pips)
 - Icon containers (small, decorative)
-- Loading indicators (spinners)
+- Loading spinners
 
-**Don't use for**:
-- Buttons (circles are harder to scan)
+**Don't use for:**
+- Buttons (harder to read labels)
 - Large containers (wasted space)
-
----
+- Navigation items (breaks scanning)
 
 ### Tertiary: Organic Shapes
 
-**Use for**:
+**Use for (sparingly):**
 - Illustrations (empty states, onboarding)
-- Background decorations (subtle)
+- Background decorations (very subtle)
+- Brand moments (logo elements)
 
-**Don't use for**:
-- UI chrome (buttons, inputs, cards)
+**Don't use for:**
+- UI chrome
 - Interactive elements
+- Content containers
 
-**Philosophy alignment**: Organic = human, but contained to non-critical areas
-
----
-
-## Density
-
-**Spatial breathing room.**
-
-### Standard Density (Default)
-
-**Spacing ratio**: 1.5x between elements
-**Padding**: Generous (16-24px)
-**Line height**: 1.6 for body text
-
-**Use for**:
-- Creator dashboard (decision-making requires focus)
-- Settings pages (avoid errors from cramming)
-- Content editing (precision work)
-
-**Example (card)**:
-```
-Card padding: 24px
-Element spacing: 16px
-Title margin-bottom: 12px
-```
+**Philosophy**: Organic shapes evoke natural, human spaces—but they're decoration, not structure.
 
 ---
 
-### Comfortable Density (Customer-facing)
+## Space Philosophy
 
-**Spacing ratio**: 1.3x between elements
-**Padding**: Moderate (12-16px)
-**Line height**: 1.5 for body text
+**Space is not emptiness. It's intention.**
 
-**Use for**:
-- Content browsing (customer portal)
-- Course catalogs (see more options)
-- Mobile views (screen real estate limited)
+### The Creative Studio Principle
 
-**Example (card)**:
+In a yoga studio, there's room to breathe, stretch, move.
+In a gallery, art has room to exist, to be contemplated.
+In a music school, sound has room to resonate.
+
+**Codex content deserves the same respect.**
+
+### Spacing Scale
+
 ```
-Card padding: 16px
-Element spacing: 12px
-Title margin-bottom: 8px
+0:    0px    → Collapsed (rarely used)
+1:    4px    → Hairline (inline elements)
+2:    8px    → Tight (related items)
+3:    12px   → Cozy (form elements)
+4:    16px   → Comfortable (default)
+5:    20px   → Relaxed
+6:    24px   → Generous (section padding)
+8:    32px   → Spacious (between sections)
+10:   40px   → Expansive
+12:   48px   → Grand (page margins)
+16:   64px   → Monumental (hero sections)
 ```
+
+**Default spacing: 16px** (comfortable, like a well-designed room)
+
+### Density Modes
+
+Different contexts need different breathing room:
+
+**Standard Density** — Creator workspace
+```
+Padding: 24px
+Gap: 16px
+Line-height: 1.6
+```
+For: Dashboard, settings, content editing, decision-making
+Why: Focus requires space. Mistakes happen when cramped.
+
+**Comfortable Density** — Member experience
+```
+Padding: 16px
+Gap: 12px
+Line-height: 1.5
+```
+For: Content browsing, library, journey view
+Why: See more content, but still breathe.
+
+**Compact Density** — Data views
+```
+Padding: 12px
+Gap: 8px
+Line-height: 1.4
+```
+For: Analytics tables, admin views, bulk operations
+Why: Information density when scanning large datasets.
+
+**Warning**: Never use compact for forms or error-prone tasks.
+
+### White Space Budget
+
+**Screen allocation:**
+```
+Content:    60-70%   → The actual information
+Spacing:    20-30%   → Margins, padding, gaps
+Chrome:     10-15%   → Navigation, borders, decoration
+```
+
+**Anti-patterns:**
+- ❌ Content > 80% — cramped, hard to scan
+- ❌ Spacing < 15% — claustrophobic
+- ❌ Chrome > 20% — noisy, distracting
 
 ---
 
-### Compact Density (Data-heavy)
+## Motion Philosophy
 
-**Spacing ratio**: 1.2x between elements
-**Padding**: Tight (8-12px)
-**Line height**: 1.4 for data
+**Motion reveals character.**
 
-**Use for**:
-- Analytics tables (see more data)
-- Admin dashboards (platform owner views)
-- Bulk operations (multi-select lists)
+### The Studio Metaphor
 
-**Example (table row)**:
+Think about movement in physical creative spaces:
+
+- A yoga instructor moving between poses: **deliberate, smooth, intentional**
+- A dancer demonstrating technique: **graceful, purposeful, controlled**
+- A musician's hands on keys: **precise, flowing, natural**
+
+**Not:**
+- Bouncy (wrong tone—we're not a game)
+- Robotic (wrong tone—we're not a machine)
+- Sluggish (broken experience—something's wrong)
+- Frantic (wrong tone—we're not urgent)
+
+### Motion Personality
+
+**Codex motion is: Deliberate, Smooth, Confident**
+
 ```
-Row padding: 8px 12px
-Cell spacing: 8px
+Principle          Expression
+─────────────      ─────────────────────────────────────
+Deliberate         Every animation has purpose
+Smooth             Natural easing, no sharp changes
+Confident          Quick but not rushed
+Respectful         Never blocks user action
 ```
-
-**Warning**: Never use compact for forms or error-prone tasks
-
----
-
-## Weight
-
-**Visual heaviness and hierarchy.**
-
-### Principle: Heavy = Important
-
-**Weight hierarchy**:
-```
-Feather (100-200): Captions, metadata, disabled states
-Light (300):        Body text, secondary labels
-Regular (400):      Primary text, descriptions
-Medium (500):       Buttons, input labels, navigation
-Semibold (600):     Subheadings, emphasis, card titles
-Bold (700):         Page headings, primary CTAs
-Heavy (800-900):    Hero text, branding (rare)
-```
-
-**Usage rules**:
-1. **Text**: Use weight, not size, for hierarchy where possible
-2. **Buttons**: Medium (500) for secondary, Semibold (600) for primary
-3. **Headings**: Bold (700) for h1/h2, Semibold (600) for h3-h6
-
-**Anti-pattern**:
-- ❌ All text bold (no hierarchy)
-- ❌ Light text on light backgrounds (contrast failure)
-- ❌ Heavy weights in long-form content (fatigue)
-
----
-
-### Stroke Weight
-
-**Borders and dividers**:
-```
-Hairline: 1px  → Subtle dividers, card borders
-Thin:     2px  → Input borders, focus states
-Regular:  3px  → Emphasized borders, active states
-Bold:     4px  → Rare, used for critical emphasis
-```
-
-**Default**: 1px for most UI chrome
-**Interactive**: 2px on hover/focus
-
----
-
-## Motion Character
-
-**How things move = how they feel.**
-
-### Personality: Deliberate & Smooth
-
-**Not**:
-- ❌ Bouncy (feels playful, wrong tone)
-- ❌ Robotic (feels cold, wrong tone)
-- ❌ Sluggish (feels broken)
-
-**Yes**:
-- ✅ Smooth (professional)
-- ✅ Purposeful (calm confidence)
-- ✅ Quick but not rushed
-
----
 
 ### Easing Curves
 
 ```javascript
-// Entering elements (fade in, slide in)
+// Elements entering (fade in, slide in, expand)
 easeOut: cubic-bezier(0.0, 0.0, 0.2, 1)
-// Quick start, smooth deceleration
+// Quick start, gentle landing—like setting something down carefully
 
-// Exiting elements (fade out, slide out)
+// Elements exiting (fade out, slide out, collapse)
 easeIn: cubic-bezier(0.4, 0.0, 1, 1)
-// Smooth acceleration, quick end
+// Gentle start, quick departure—like picking something up
 
-// State changes (hover, active, focus)
+// State changes (hover, focus, toggle)
 easeInOut: cubic-bezier(0.4, 0.0, 0.2, 1)
-// Balanced, symmetric
+// Balanced, symmetric—like a breathing cycle
 
-// Snappy interactions (dropdowns, tooltips)
+// Snappy feedback (dropdown open, tooltip)
 sharp: cubic-bezier(0.4, 0.0, 0.6, 1)
-// More pronounced, still smooth
+// More pronounced, still smooth—like a confident gesture
 ```
 
-**Default**: `easeInOut` for most interactions
-**Never**: `linear` (feels robotic), `ease` (browser default, inconsistent)
-
----
+**Default**: `easeInOut`
+**Never**: `linear` (robotic), `ease` (browser default, inconsistent)
 
 ### Duration Scale
 
 ```
-Instant:   0ms     → Immediate feedback (focus rings)
-Snap:      100ms   → Micro-interactions (hover states)
-Quick:     200ms   → Standard interactions (buttons, toggles)
-Smooth:    300ms   → Moderate complexity (dropdowns, tooltips)
-Deliberate: 400ms  → Page transitions, modal open/close
-Slow:      600ms   → Large state changes (expanding panels)
+Instant:      0ms     → Immediate (focus rings, color changes)
+Snap:         100ms   → Micro-feedback (hover states)
+Quick:        200ms   → Standard interactions (buttons, toggles)
+Smooth:       300ms   → Moderate complexity (dropdowns)
+Deliberate:   400ms   → Significant transitions (modals, panels)
+Slow:         500ms   → Large changes (page transitions)
 ```
 
-**Default**: 200ms (quick) for most UI
-**Rule**: Larger movements = longer duration, but cap at 600ms
+**Default**: 200ms
+**Maximum**: 500ms (anything longer feels broken)
 
-**Anti-pattern**:
-- ❌ Everything at 300ms (monotonous)
-- ❌ Durations > 600ms (feels broken)
-- ❌ Different durations for enter/exit (asymmetric, confusing)
+**Rules:**
+- Larger movements = longer duration
+- Enter and exit should have matching durations
+- User-initiated actions should feel instant (< 100ms feedback)
+- System-initiated changes can be more deliberate
+
+### Motion Accessibility
+
+**Respect `prefers-reduced-motion`:**
+```css
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+```
+
+**Essential motion** (can play even with reduced motion):
+- Loading indicators
+- Progress bars
+- Critical state changes
+
+**Decorative motion** (should be disabled):
+- Hover effects
+- Page transitions
+- Micro-interactions
 
 ---
 
 ## Contrast Philosophy
 
-**How elements separate from each other.**
+**Contrast is hierarchy made visible.**
 
-### High Contrast Where It Matters
+### The Gallery Principle
 
-**Critical UI**:
-- ✅ Text on backgrounds: 7:1 ratio minimum (AAA)
-- ✅ Primary buttons: Strong background color
-- ✅ Errors/warnings: High visibility
-- ✅ Focus indicators: 3:1 ratio minimum
+In an art gallery:
+- The walls are neutral (they recede)
+- The art is vivid (it commands attention)
+- Lighting guides the eye (what matters is illuminated)
 
-**Supporting UI**:
-- 🟡 Borders, dividers: 3:1 ratio (AA)
-- 🟡 Disabled states: 2:1 ratio (legible but clearly inactive)
+**Codex works the same way:**
+- UI chrome is subtle (it recedes)
+- Content is clear (it commands attention)
+- Visual hierarchy guides the eye (important things are emphasized)
 
----
+### Contrast Hierarchy
 
-### Subtle Contrast for Calm
+```
+Level        Ratio      Use For
+────────     ─────      ─────────────────────────────────
+Maximum      7:1+       Body text, critical UI
+High         4.5:1+     Secondary text, important elements
+Medium       3:1+       Borders, focus rings, icons
+Subtle       2:1+       Disabled states, decorative
+Minimal      1.5:1+     Surface layering, hover states
+```
 
-**UI chrome** (non-critical elements):
-- Card borders: Subtle (1-2 steps from background)
-- Section dividers: Barely visible until needed
-- Hover states: Gentle shift (10-15% opacity change)
-
-**Philosophy alignment**: High contrast for signal, low contrast for noise
-
----
+**Non-negotiable:**
+- Body text: 7:1 minimum (WCAG AAA)
+- Interactive elements: 4.5:1 minimum (WCAG AA)
+- Focus indicators: 3:1 minimum
 
 ### Contrast Strategy
 
-1. **Surface layers**: Use subtle background shifts (gray-50 → gray-100 → gray-200)
-2. **Text hierarchy**: Use weight + size, not color alone
-3. **Interactive states**: Use border weight + background, not just color
+**For critical elements** (text, buttons, errors):
+- High contrast
+- Multiple visual cues (not color alone)
+- Clear boundaries
 
-**Example (button states)**:
+**For supporting elements** (dividers, borders, backgrounds):
+- Subtle contrast
+- Barely visible until needed
+- Create depth without distraction
+
+**Example: Button states**
 ```
-Default:  bg-blue-600, border-blue-600, text-white
-Hover:    bg-blue-700, border-blue-700, text-white
-Active:   bg-blue-800, border-blue-800, text-white
-Focus:    bg-blue-600, border-blue-600, ring-blue-300 (3px)
-Disabled: bg-gray-300, border-gray-300, text-gray-500
+State       Background    Border         Text       Ring
+─────       ──────────    ──────         ────       ────
+Default     primary       primary        white      none
+Hover       primary+10%   primary+10%    white      none
+Active      primary+20%   primary+20%    white      none
+Focus       primary       primary        white      3px ring
+Disabled    gray-200      gray-200       gray-500   none
 ```
 
-**Notice**: State changes use multiple properties, not just color (accessibility)
+**Notice**: State changes use multiple properties, not just color (accessibility requirement).
 
 ---
 
-## Use of Negative Space
+## Typography Expression
 
-**What's NOT there is as important as what is.**
+**Type is the voice made visible.**
 
-### Principle: Space = Clarity
+Full typography system in [04. Typography](../04-typography/README.md).
 
-**Breathing room scale**:
+### Visual Language Summary
+
+**Warmth through type:**
+- Humanist sans-serif (not geometric, not grotesque)
+- Generous x-height (readable, approachable)
+- Open apertures (friendly, welcoming)
+- Comfortable line-height (breathing room)
+
+**Hierarchy through weight:**
 ```
-Cramped:      8px   → Inline elements (icon + text)
-Cozy:         12px  → Related items (form label + input)
-Comfortable:  16px  → Default spacing
-Generous:     24px  → Section padding, card internal spacing
-Spacious:     32px  → Between major sections
-Expansive:    48px  → Page margins, hero spacing
-Luxurious:    64px+ → Major section breaks (rare)
+Weight      Number    Use
+──────      ──────    ─────────────────────────────
+Regular     400       Body text, descriptions
+Medium      500       Labels, navigation, emphasis
+Semibold    600       Subheadings, card titles
+Bold        700       Headings, primary actions
 ```
 
-**Default**: 16px between unrelated elements
+**Avoid:**
+- Light weights (< 400) for body text
+- Heavy weights (> 700) for long content
+- All-caps for more than 2-3 words
 
 ---
 
-### When to Use More Space
+## Color Expression
 
-- ✅ Around CTAs (make them easy to hit)
-- ✅ Between sections (clear separation)
-- ✅ In error states (reduce cognitive load)
-- ✅ On mobile (larger touch targets)
+**Color is emotion made visible.**
 
-### When to Use Less Space
+Full color system in [03. Color](../03-color/README.md).
 
-- ✅ Inline elements (icon + label)
-- ✅ Tightly coupled data (price + currency symbol)
-- ✅ Dense tables (data analysis)
+### Visual Language Summary
 
----
+**Warmth through color:**
+- Warm neutrals (cream, sand, warm gray)
+- Rich accent colors (not neon, not pastel)
+- Natural palette inspiration (earth, sky, foliage)
+- Sufficient saturation (not washed out)
 
-### White Space Budget
-
-**Screen allocation**:
-```
-Content:      60-70%  → Actual information
-Spacing:      20-30%  → Margins, padding, gaps
-Chrome:       10-15%  → Nav, borders, decorations
-```
-
-**Anti-pattern**:
-- ❌ Content > 80% (cramped, hard to scan)
-- ❌ Spacing < 15% (claustrophobic)
-- ❌ Chrome > 20% (distracting)
+**Calm through restraint:**
+- Limited palette (don't use every color)
+- Semantic colors for meaning (red = error, green = success)
+- Neutral dominance (color is accent, not overwhelming)
 
 ---
 
-## Visual Hierarchy
+## Composition Principles
 
-**How users scan the page.**
+**How elements relate to each other.**
 
-### F-Pattern (Western readers)
+### The Ensemble Principle
 
-1. **Top left**: Logo, navigation
-2. **Top horizontal**: Primary actions, search
-3. **Left vertical**: Navigation, filters
-4. **Center**: Primary content
+In a Collective, creators work together. They don't compete for attention.
+The interface should reflect this: **elements in harmony, not competition**.
 
-**Alignment**: Left-align text, center-align marketing/heroes
+### Visual Hierarchy
 
----
-
-### Z-Pattern (Landing pages)
-
-1. **Top left**: Logo
-2. **Top right**: CTA or login
-3. **Diagonal**: Value prop, features
-4. **Bottom right**: Final CTA
-
-**Use for**: Marketing pages, onboarding flows
-
----
-
-### Visual Weight Hierarchy
+Every screen has a story. Users should read it in order:
 
 ```
-1. Primary CTA (bold color, large, high contrast)
-   ↓
-2. Page title (large text, bold weight)
-   ↓
-3. Section headings (medium text, semibold)
-   ↓
-4. Body content (regular text, medium contrast)
-   ↓
-5. Metadata/captions (small text, light weight, low contrast)
+1. Primary Action / Page Purpose
+   └── What am I here to do?
+
+2. Main Content
+   └── The actual information
+
+3. Supporting Information
+   └── Context, metadata, navigation
+
+4. Secondary Actions
+   └── Other things I could do
 ```
 
-**Test**: Squint at design. What do you see first? That's your hierarchy.
+**Weight hierarchy (squint test):**
+When you squint at a design, you should see:
+1. One primary element (boldest)
+2. 2-3 secondary elements (medium)
+3. Supporting elements (lightest)
 
----
+If everything is equally prominent, there's no hierarchy.
 
-## Composition Rules
+### Grid Philosophy
 
-### Rule of Thirds
+**Not rigid, but intentional.**
 
-- Important elements at 1/3 and 2/3 marks
-- Avoid dead-center unless intentional symmetry
+Base: 8px grid (all spacing divisible by 8)
+Layout: 12-column for flexibility
+Gutter: 24px (generous)
+
+**When to break the grid:**
+- Organic illustrations
+- Brand moments
+- Full-bleed imagery
+
+**When to follow strictly:**
+- Text content
+- Forms
+- Data tables
+- Cards
 
 ### Alignment
 
-- **Left-align text**: Easier to scan (Western readers)
-- **Center-align headers**: Emphasis, symmetry
-- **Right-align numbers**: Easier to compare (decimals line up)
+**The invisible structure:**
+- Left-align body text (easier to scan)
+- Center-align headings (emphasis, symmetry)
+- Right-align numbers (decimals line up)
+- Consistent edge alignment (everything lines up)
 
 ### Proximity
 
-- **Related items closer together** (low spacing)
-- **Unrelated items farther apart** (high spacing)
+**Related things are close. Unrelated things are far.**
 
-**Example**:
 ```
-[Label]
-[Input]       ← 4px apart (related)
+[Form Label]
+[Input Field]     ← 4px gap (tightly coupled)
+[Helper Text]
 
-[Button]      ← 24px apart (unrelated)
+                  ← 24px gap (separate elements)
+
+[Submit Button]
 ```
 
 ---
 
-## Consistency Rules
+## Imagery Philosophy
 
-### Same Element, Same Appearance
+**Images show community, not products.**
 
-- All primary buttons look identical (color, padding, radius, weight)
-- All cards have same border, shadow, radius
-- All inputs have same height, border, focus state
+### Subject Matter
 
-**Exception**: Context-specific variations (danger button = red, but same shape/size)
+**Show:**
+- Real people in community (creators together, members engaged)
+- Creative work in progress (the craft, the practice)
+- Transformation moments (growth, achievement)
+- Authentic settings (real studios, real spaces)
+
+**Don't show:**
+- Stock photography (feels fake)
+- Solo influencer poses (solo operator aesthetic)
+- Product shots (transactional)
+- Office/corporate settings (wrong vibe)
+
+### Image Treatment
+
+**Warm:**
+- Color grade toward warmth
+- Natural lighting preferred
+- Avoid cool blue casts
+
+**Human:**
+- Show faces (connection)
+- Capture genuine moments (not posed)
+- Diversity in representation
+
+**Contextual:**
+- Images should reinforce belonging
+- Show the community context
+- Avoid isolated subjects
 
 ---
 
-### Repetition = Recognition
+## Three Contexts
 
-- Repeat spacing values (8, 16, 24, 32, 48)
-- Repeat radii (4, 8, 12)
-- Repeat weights (400, 500, 600, 700)
+The visual language adapts slightly for different users:
 
-**Anti-pattern**:
-- ❌ Arbitrary values (13px, 19px, 37px)
-- ❌ One-off styles
+### Creator Context
+
+**Dashboard, content management, analytics**
+
+- Standard density (room for decisions)
+- Full feature access visible
+- Data-rich but organized
+- Focus on creation and community health
+
+### Member Context
+
+**Library, content viewing, journey**
+
+- Comfortable density (content-focused)
+- Content is the star
+- Navigation recedes
+- Transformation journey visible
+
+### Collective Context
+
+**Public presence, marketing, community**
+
+- More expressive spacing
+- Brand personality comes through
+- Community visible
+- Purpose prominent
+
+---
+
+## Case Studies
+
+### Case Study: Content Card
+
+**❌ Generic SaaS approach:**
+```
+- Sharp corners (aggressive)
+- Cool gray background (cold)
+- Tight padding (cramped)
+- Blue accent color (corporate)
+- Stock photo thumbnail (fake)
+- "Price: $49" label (transactional)
+```
+
+**✅ Codex approach:**
+```
+- 8px radius (approachable)
+- Warm off-white background (inviting)
+- 24px padding (breathing room)
+- Rich accent color from palette (warm)
+- Real creator photo or artwork (authentic)
+- "Join for access" or just price in context (community-framed)
+- Creator avatar visible (human)
+- Collective branding subtle (belonging)
+```
+
+**The difference**: One feels like shopping on Amazon. The other feels like discovering something at a creative studio.
+
+### Case Study: Empty State
+
+**❌ Generic approach:**
+```
+- Sad robot illustration
+- "No content yet"
+- "Create your first course"
+- Blue CTA button
+```
+
+**✅ Codex approach:**
+```
+- Warm, organic illustration (growth metaphor)
+- "Your creative space awaits"
+- "What will you share with your community?"
+- Primary action: "Create your first offering"
+- Secondary: "See how other creators started"
+- Warm, inviting CTA color
+```
+
+**The difference**: One feels like an error. The other feels like an invitation.
+
+### Case Study: Success State
+
+**❌ Transactional approach:**
+```
+- Confetti animation 🎊
+- "Payment successful!"
+- "Order #12345"
+- "Download receipt"
+```
+
+**✅ Community approach:**
+```
+- Subtle, warm glow animation
+- "Welcome to [Collective Name]"
+- Personal message from creator(s)
+- "Here's what to explore first..."
+- "Start your journey"
+```
+
+**The difference**: One feels like checkout. The other feels like belonging.
 
 ---
 
 ## Visual Language Checklist
 
-Every design must answer:
+Every design must pass:
 
-- [ ] **Shape**: Radii consistent? (4, 8, 12)
-- [ ] **Density**: Appropriate for task? (standard/comfortable/compact)
-- [ ] **Weight**: Hierarchy clear? (bold = important)
-- [ ] **Motion**: Smooth and purposeful? (200-400ms, easeInOut)
-- [ ] **Contrast**: High where it matters? (text 7:1, borders 3:1)
-- [ ] **Space**: Enough breathing room? (16px minimum)
+### Does it evoke the creative studio?
 
----
+- [ ] Warm, not cold?
+- [ ] Spacious, not cramped?
+- [ ] Natural, not mechanical?
+- [ ] Human, not sterile?
 
-## Examples
+### Does it follow the principles?
 
-### Good: Creator Dashboard Card
+- [ ] Light: Warm, natural, subtle elevation?
+- [ ] Shape: Consistent radii, rounded not sharp?
+- [ ] Space: Generous, intentional, breathing room?
+- [ ] Motion: Smooth, deliberate, purposeful?
+- [ ] Contrast: High where it matters, subtle where it doesn't?
 
-```
-Shape:     8px radius (md), consistent all corners
-Density:   24px padding, 16px spacing (standard)
-Weight:    Semibold title (600), regular body (400)
-Motion:    Hover lifts card (200ms easeOut)
-Contrast:  White card on gray-50 bg (subtle separation)
-Space:     24px between cards, 16px internal spacing
-```
+### Does it align with philosophy?
 
-**Result**: Calm, professional, easy to scan
+- [ ] Belonging over buying?
+- [ ] Collaboration visible?
+- [ ] Warmth present?
+- [ ] Community feeling?
 
 ---
 
-### Bad: Overly Trendy Card
+## Anti-Patterns
 
-```
-Shape:     999px radius (pill), inconsistent
-Density:   8px padding (cramped)
-Weight:    All text bold (no hierarchy)
-Motion:    Bouncy spring animation (playful, wrong tone)
-Contrast:  Glassmorphism blur (low contrast, accessibility fail)
-Space:     4px everywhere (claustrophobic)
-```
+**Visual choices that violate our language:**
 
-**Result**: Trendy, inaccessible, exhausting
+| Anti-Pattern | Why It's Wrong | What Instead |
+|--------------|----------------|--------------|
+| Sharp corners | Aggressive, corporate | 4-12px radius |
+| Pure white (#FFF) | Cold, clinical | Warm off-white |
+| Cool gray | SaaS aesthetic | Warm gray |
+| Pill buttons | Trendy, will date | Rounded rectangle |
+| Heavy drop shadows | Harsh, unnatural | Soft, warm shadows |
+| Neon colors | Attention-seeking | Rich, natural tones |
+| Cramped spacing | Stressful, cheap | Generous padding |
+| Bouncy animations | Playful, wrong tone | Smooth, deliberate |
+| Stock photography | Fake, corporate | Real community photos |
+| Glassmorphism | Low contrast, inaccessible | Solid surfaces with subtle depth |
 
 ---
 
 ## Living Document
 
-Visual language evolves with design system maturity. Changes require:
+Visual language evolves with the design system. Changes require:
 
-1. Proposal with visual examples
-2. Accessibility audit (contrast, motion sensitivity)
-3. Engineering feasibility review
-4. Update to tokens + components
-
-**Change log**:
+1. Written proposal with visual examples
+2. Alignment check against Philosophy (01)
+3. Accessibility audit (contrast, motion)
+4. Engineering feasibility review
+5. Update to tokens and components
 
 | Date | Change | Reasoning |
 |------|--------|-----------|
 | 2026-01-01 | Initial visual language | Foundation |
+| 2026-01-02 | Complete rewrite | Alignment with Mission/Philosophy. Added creative studio metaphor, light philosophy, texture philosophy, composition principles, imagery guidelines, case studies. |
 
 ---
 
-Next: [03. Color System →](../03-color/README.md)
+## Summary
+
+**Codex visual language in one breath:**
+
+> We create digital spaces that feel like beloved creative studios—warm, spacious, intentional, human. Light is natural, shapes are approachable, space is generous, motion is smooth. Content is the star, chrome recedes, community is visible. Every pixel reflects belonging.
+
+**The test:**
+
+> Does this feel like walking into a yoga studio, a dance company, a music school, an art collective?
+
+If yes → proceed.
+If no → reconsider.
+
+---
+
+**Upstream**: [01. Philosophy](../01-philosophy/README.md)
+**Downstream**: [03. Color](../03-color/README.md), [04. Typography](../04-typography/README.md)
+
+---
+
+*Last updated: 2026-01-02*
+*Version: 2.0*
+*Status: Foundation document — visual expression of philosophy*
