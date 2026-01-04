@@ -1,35 +1,69 @@
 # Design Tokens
 
-**Design decisions as data. Single source of truth.**
+**Warmth encoded as data. The foundation of belonging.**
 
 ---
 
-## Purpose
+## Foundation
 
-Tokens are **design decisions encoded as structured data** that can be consumed by:
-- Design tools (Figma variables)
-- Code (CSS, JS, TypeScript)
-- Documentation (automated)
-- Multiple platforms (web, iOS, Android)
+Tokens connect [00. Mission](../00-mission/README.md) to implementation.
 
-**Not**: Random values in code
-**Yes**: Centralized, semantic, versioned design data
+Every token asks: **Does this value express warmth and welcome?**
+
+---
+
+## What Tokens Are
+
+Tokens are **design philosophy as structured data**:
+
+```
+Mission (belonging over buying)
+        ↓
+Philosophy (warmth, community)
+        ↓
+Tokens (cream-50, teal-400, 8px radius)
+        ↓
+Code (CSS, JS, Figma variables)
+```
+
+**Not**: Random values that "look nice"
+**Yes**: Philosophy translated into numbers
+
+---
+
+## The Warmth Palette
+
+### Colors
+
+| Token | Value | Purpose |
+|-------|-------|---------|
+| `color.primary` | Teal (#14B8A6) | Welcoming, not corporate |
+| `color.surface.default` | Cream-50 (#FEFDFB) | Warm light, not cold white |
+| `color.surface.elevated` | Cream-100 (#FAF8F5) | Subtle lift |
+| `color.text.primary` | Cream-900 (#1C1917) | Warm dark, not pure black |
+| `color.accent` | Coral (#F97316) | Celebration moments |
+
+### The Warmth Test
+
+```
+Cool Gray #9CA3AF → ❌ Spreadsheet feeling
+Warm Cream #FAF8F5 → ✅ Studio feeling
+```
 
 ---
 
 ## Token Structure
 
-**Format**: JSON (W3C Design Tokens Community Group format)
+**Format**: W3C Design Tokens Community Group (JSON)
 
-**Example**:
 ```json
 {
   "color": {
-    "text": {
-      "primary": {
-        "value": "#111827",
+    "surface": {
+      "default": {
+        "value": "#FEFDFB",
         "type": "color",
-        "description": "Default text color for body content"
+        "description": "Primary background - warm cream, welcoming"
       }
     }
   }
@@ -40,44 +74,79 @@ Tokens are **design decisions encoded as structured data** that can be consumed 
 
 ## Token Categories
 
-| File | Purpose | Exports |
-|------|---------|---------|
-| [color.tokens.json](./color.tokens.json) | All colors (text, bg, borders, states) | 200+ tokens |
-| [typography.tokens.json](./typography.tokens.json) | Font sizes, weights, line heights | 50+ tokens |
-| [spacing.tokens.json](./spacing.tokens.json) | Margins, padding, gaps | 20+ tokens |
-| [shadow.tokens.json](./shadow.tokens.json) | Box shadows, elevations | 10+ tokens |
-| [radius.tokens.json](./radius.tokens.json) | Border radii | 8 tokens |
-| [motion.tokens.json](./motion.tokens.json) | Durations, easing curves | 10+ tokens |
-| [z-index.tokens.json](./z-index.tokens.json) | Stacking order | 6 tokens |
+| File | Purpose | Philosophy |
+|------|---------|------------|
+| [color.tokens.json](./color.tokens.json) | All colors | Warmth first (teal/cream) |
+| [typography.tokens.json](./typography.tokens.json) | Type system | Humanist, readable |
+| [spacing.tokens.json](./spacing.tokens.json) | Rhythm | Room to breathe |
+| [shadow.tokens.json](./shadow.tokens.json) | Elevation | Warm shadows (brown-tinted) |
+| [radius.tokens.json](./radius.tokens.json) | Corners | Human touch (8px default) |
+| [motion.tokens.json](./motion.tokens.json) | Animation | Smooth, confident |
+| [z-index.tokens.json](./z-index.tokens.json) | Stacking | Predictable layers |
+
+---
+
+## Naming Convention
+
+**Format**: `{category}.{semantic}.{variant}.{state}`
+
+**Examples**:
+```
+color.surface.default           → Warm cream background
+color.surface.elevated          → Lifted surface
+color.action.primary            → Teal CTA
+color.action.primary.hover      → Darker teal on hover
+color.text.primary              → Warm dark text
+color.text.secondary            → Muted warm text
+spacing.component.padding       → Internal component space
+shadow.elevation.1              → Subtle warm lift
+```
+
+**Rules**:
+1. Semantic names (not `gray-100`, but `surface.default`)
+2. Intent-based (describes job, not appearance)
+3. Consistent hierarchy
 
 ---
 
 ## Usage
 
-### In Code (TypeScript/JavaScript)
+### CSS Variables
+
+```css
+:root {
+  /* Colors - Warmth First */
+  --color-surface-default: #FEFDFB;  /* cream-50 */
+  --color-surface-elevated: #FAF8F5; /* cream-100 */
+  --color-text-primary: #1C1917;     /* cream-900 */
+  --color-action-primary: #14B8A6;   /* teal-500 */
+
+  /* Shadows - Warm, not cool */
+  --shadow-sm: 0 1px 2px rgba(45, 42, 37, 0.06);
+  --shadow-md: 0 4px 6px rgba(45, 42, 37, 0.08);
+
+  /* Radii - Human touch */
+  --radius-default: 8px;
+  --radius-full: 9999px;
+}
+
+.card {
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-default);
+  box-shadow: var(--shadow-md);
+}
+```
+
+### TypeScript
 
 ```typescript
 import { tokens } from '@codex/design-tokens';
 
-const primaryColor = tokens.color.action.primary.default;
-const spacing = tokens.spacing.default;
+const warmBackground = tokens.color.surface.default;
+const primaryAction = tokens.color.action.primary;
 ```
 
-### In CSS (CSS Variables)
-
-```css
-:root {
-  --color-text-primary: #111827;
-  --spacing-default: 1rem;
-}
-
-.button {
-  color: var(--color-text-primary);
-  padding: var(--spacing-default);
-}
-```
-
-### In Tailwind Config
+### Tailwind Config
 
 ```javascript
 // tailwind.config.js
@@ -85,11 +154,70 @@ const tokens = require('@codex/design-tokens');
 
 module.exports = {
   theme: {
-    colors: tokens.color,
-    spacing: tokens.spacing,
+    colors: {
+      cream: tokens.color.cream,
+      teal: tokens.color.teal,
+      coral: tokens.color.coral,
+    },
+    borderRadius: tokens.radius,
+    boxShadow: tokens.shadow,
   },
 };
 ```
+
+---
+
+## Three-Layer Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  GLOBAL TOKENS (Raw Values)                             │
+│  teal-500: #14B8A6                                      │
+│  cream-50: #FEFDFB                                      │
+│  spacing-4: 16px                                        │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│  SEMANTIC TOKENS (Meaning)                              │
+│  color-action-primary: {teal-500}                       │
+│  color-surface-default: {cream-50}                      │
+│  spacing-component-padding: {spacing-4}                 │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│  COMPONENT TOKENS (Usage)                               │
+│  button-bg-primary: {color-action-primary}              │
+│  card-bg: {color-surface-elevated}                      │
+│  card-padding: {spacing-component-padding}              │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Why three layers?**
+- Global → Change once, update everywhere
+- Semantic → Communicate intent
+- Component → Enable theming without breaking
+
+---
+
+## Collective Customization
+
+Collectives can override brand colors while maintaining warmth:
+
+```json
+{
+  "collective": {
+    "brand": {
+      "primary": {
+        "value": "#8B5CF6",
+        "type": "color",
+        "description": "Collective's primary brand color"
+      }
+    }
+  }
+}
+```
+
+**Validation**: See [10-theming](../10-theming/README.md) for brand color accessibility requirements.
 
 ---
 
@@ -97,102 +225,70 @@ module.exports = {
 
 **Tool**: Style Dictionary
 
-**Input**: `*.tokens.json` (design decisions)
-**Output**: Platform-specific files (CSS, JS, iOS, Android)
-
-**Example**:
 ```bash
-npm run build:tokens
+pnpm run build:tokens
 
-# Generates:
-# - dist/tokens.css (CSS variables)
-# - dist/tokens.js (JavaScript object)
-# - dist/tokens.d.ts (TypeScript types)
-# - dist/tokens.scss (SCSS variables)
+# Outputs:
+# dist/tokens.css     → CSS custom properties
+# dist/tokens.js      → JavaScript/TypeScript
+# dist/tokens.d.ts    → Type definitions
+# dist/tokens.scss    → SCSS variables
+# dist/figma.json     → Figma variables format
 ```
-
----
-
-## Naming Convention
-
-**Format**: `{category}.{role}.{variant}.{state}`
-
-**Examples**:
-```
-color.text.primary                    (category.role.variant)
-color.action.primary.hover            (category.role.variant.state)
-spacing.section.default               (category.role.variant)
-typography.heading.h1.fontSize        (category.role.variant.property)
-```
-
-**Rules**:
-1. Semantic (not appearance-based)
-2. Hierarchical (dot-separated)
-3. Consistent (same structure across categories)
 
 ---
 
 ## Versioning
 
 Tokens follow semantic versioning:
-- **Patch**: Value adjustments (color shift, spacing tweak)
-- **Minor**: New tokens added
-- **Major**: Token names changed/removed (breaking)
 
-**Current version**: `1.0.0`
+| Change | Version | Breaking? |
+|--------|---------|-----------|
+| Value adjustment (color tweak) | Patch | No |
+| New token added | Minor | No |
+| Token renamed/removed | Major | Yes |
 
----
-
-## Extending Tokens
-
-**Organization-specific overrides**:
-```json
-{
-  "color": {
-    "brand": {
-      "primary": {
-        "value": "#8B5CF6",
-        "type": "color",
-        "override": true
-      }
-    }
-  }
-}
-```
-
-**Merge with base tokens** → organization-specific theme
-
----
-
-## Token Files
-
-All token files are in this directory:
-
-- [color.tokens.json](./color.tokens.json)
-- [typography.tokens.json](./typography.tokens.json)
-- [spacing.tokens.json](./spacing.tokens.json)
-- [shadow.tokens.json](./shadow.tokens.json)
-- [radius.tokens.json](./radius.tokens.json)
-- [motion.tokens.json](./motion.tokens.json)
-- [z-index.tokens.json](./z-index.tokens.json)
+**Current version**: `2.0.0`
 
 ---
 
 ## Contributing
 
-**To add tokens**:
-1. Edit relevant `*.tokens.json` file
-2. Run `npm run build:tokens` (validate)
-3. Create PR (document why new tokens needed)
-4. Review by Design System Team
-5. Merge → automated publish
+See [12-governance](../12-governance/README.md) for contribution process.
 
-**To change tokens**:
-- **Value change**: Patch version (safe)
-- **Name change**: Major version (breaking, requires migration guide)
+**Adding tokens**:
+1. Check philosophy alignment (warmth, belonging)
+2. Add to appropriate `*.tokens.json`
+3. Run `pnpm build:tokens`
+4. Submit PR with reasoning
+5. Core team review
 
 ---
 
-## Documentation
+## Anti-Patterns
 
-Full token reference: [Design System → Tokens](../README.md#tokens)
+| Anti-Pattern | Why It's Wrong | What Instead |
+|--------------|----------------|--------------|
+| `gray-100` naming | Appearance-based, not semantic | `surface.default` |
+| `#FFFFFF` pure white | Cold, clinical | `cream-50` warm white |
+| `#000000` pure black | Harsh, unwelcoming | `cream-900` warm dark |
+| Cool blue shadows | Corporate, cold | Brown-tinted shadows |
+| Hardcoded values in CSS | Bypasses system | Use token variables |
+
+---
+
+## The Token Test
+
+Before adding or changing any token:
+
+1. **Does it express warmth?** Cream over gray, teal over blue
+2. **Is it semantic?** Describes job, not appearance
+3. **Does it enable belonging?** Accessible, welcoming
+
+If any answer is no → reconsider the value.
+
+---
+
+*Last updated: 2026-01-04*
+*Version: 2.0*
+*Status: Foundation document — warmth as data*

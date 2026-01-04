@@ -1,129 +1,140 @@
 # Codex Design System
 
-**Version**: 1.0.0
-**Status**: Foundation Phase
-**Last Updated**: 2026-01-01
+**Building belonging. Every pixel, every interaction, every word.**
 
----
-
-## Purpose
-
-World-class design system for Codex — a serverless content streaming platform where creators sell courses, videos, and digital content.
-
-This is not a component library. This is a **contract** between product, design, engineering, and the future.
+**Version**: 2.0.0
+**Status**: Foundation Complete
+**Last Updated**: 2026-01-04
 
 ---
 
 ## What This Is
 
-A **philosophy encoded into tokens, components, and rules** that defines:
+This is not a component library. This is a **philosophy for building community**.
 
-- How decisions are made
-- Why things look and feel the way they do
-- What we will never compromise on
-- How to maintain quality under pressure
+Every design decision answers one question: **Does this help someone feel like they belong?**
+
+---
+
+## The Creative Studio Metaphor
+
+Codex is a platform for creative Collectives—yoga studios, dance companies, music schools, art collectives. Our design system should feel like walking into a beloved creative studio:
+
+- **Warm light** (cream backgrounds, not cold gray)
+- **Human touch** (rounded corners, soft shadows)
+- **Welcoming atmosphere** (accessible to everyone)
+- **Collaborative spirit** (members, not customers)
+
+```
+What We're Building:
+
+Not a SaaS dashboard → A creative studio space
+Not transactions      → Belonging
+Not customers         → Members
+Not products          → Transformation journeys
+Not corporate blue    → Warm teal
+Not cool gray         → Soft cream
+```
 
 ---
 
 ## System Architecture
 
 ```
-Philosophy (why we exist)
-    ↓
-Visual Language (how we express)
-    ↓
-Design Tokens (design decisions as data)
-    ↓
-Primitives (atomic components)
-    ↓
-Compounds (composed patterns)
-    ↓
-Templates (product experiences)
+Mission & Purpose (why we exist)
+        ↓
+Philosophy (belonging over buying)
+        ↓
+Visual Language (creative studio aesthetic)
+        ↓
+Foundations (color, type, space, motion)
+        ↓
+Components (primitives → compounds → patterns)
+        ↓
+Experiences (creator studio, member portal, Collective home)
 ```
 
 ---
 
 ## The 14 Pillars
 
-Every world-class design system must nail these. Miss one and the system rots.
+Every pillar protects what makes Codex welcoming.
 
 ### 0. [Mission & Purpose](./00-mission/README.md) ⭐ START HERE
-The why behind everything. Community, collaboration, Collectives. This drives all decisions.
+**Community, collaboration, Collectives.** The why behind every decision. Members belong to something meaningful.
 
 ### 1. [Design Philosophy](./01-philosophy/README.md)
-Non-negotiable principles. The root of everything.
+**Belonging over buying.** Six principles that transform SaaS into community.
 
 ### 2. [Visual Language](./02-visual-language/README.md)
-Aesthetic grammar. Shape, density, weight, motion, contrast, space.
+**Creative studio aesthetic.** Feels like walking into a beloved yoga studio, not a spreadsheet.
 
 ### 3. [Color System](./03-color/README.md)
-Semantic color contracts. Every color has a job.
+**Warmth first.** Teal primary, cream neutrals, coral for celebration. Never cold.
 
 ### 4. [Typography System](./04-typography/README.md)
-Structure, hierarchy, voice. Meaning before decoration.
+**Voice made visible.** Humanist fonts with room to breathe.
 
 ### 5. [Spacing & Layout](./05-spacing-layout/README.md)
-Hidden backbone of quality. Grid, rhythm, alignment.
+**Room to breathe.** Like a yoga studio—calm, organized, spacious.
 
 ### 6. [Component Architecture](./06-components/README.md)
-Products, not drawings. States, variants, composition rules.
+**Components as welcome committee.** Every button, card, and modal expresses belonging.
 
 ### 7. [Interaction & Motion](./07-interaction-motion/README.md)
-Motion is meaning. Feedback, duration, easing, state changes.
+**Motion as personality.** Smooth and confident, like a skilled instructor.
 
 ### 8. [Content & Voice](./08-content-voice/README.md)
-Words are UI. Tone, microcopy, naming, formatting.
+**Words are welcome.** Community language: member, join, library—never customer or buy.
 
 ### 9. [Accessibility & Inclusion](./09-accessibility/README.md)
-Foundational, not a checklist. Contrast, keyboard, screen readers, cognitive load.
+**Everyone belongs.** Accessibility is love, not compliance.
 
 ### 10. [Theming & Extensibility](./10-theming/README.md)
-Future-proofing. Tokens, skins, customization boundaries.
+**Your Collective, your colors.** Warm dark mode, Collective customization.
 
 ### 11. [Engineering Contract](./11-engineering/README.md)
-Design ≠ implementation unless this is explicit.
+**Code as craft.** Performance is respect. Accessibility is non-negotiable.
 
 ### 12. [Governance & Evolution](./12-governance/README.md)
-Contribution, review, deprecation, decision ownership.
+**Stewarding belonging.** Stewards, not gatekeepers. Values over preferences.
 
 ### 13. [Documentation & Education](./13-documentation/README.md)
-If it's not taught, it doesn't exist.
+**Teaching belonging.** Documentation welcomes newcomers into our craft.
 
 ---
 
-## Platform Context
+## The Community We Serve
 
-**Codex** is a platform for creative Collectives — communities of creators who collaborate to share knowledge and serve their members.
+**Codex** is a platform for creative Collectives—communities of creators who collaborate to share knowledge and transform lives.
 
 **The Core Idea**: Creators don't compete. They complete each other.
 
-**What makes Codex different**:
-- **Collectives** — groups of creators with shared purpose (yoga studios, coaching academies, dance collectives)
-- **Multi-membership** — creators can belong to multiple Collectives
-- **Community-first** — members belong to something, they don't just buy products
-- **Collaboration** — revenue shared, rising tide lifts all boats
-- **Ownership** — creators own their content forever, Collectives enable distribution
+### What Makes Codex Different
 
-**Architecture**: Cloudflare Workers (serverless edge compute)
-**Stack**: Hono (API), Drizzle ORM (database), R2 (storage), Stripe (payments)
-**Database**: Neon PostgreSQL
-**Auth**: BetterAuth (session-based)
+| Traditional Platform | Codex |
+|---------------------|-------|
+| Individual creators compete | Creators collaborate in Collectives |
+| Customers buy products | Members join communities |
+| Transactions and churn | Belonging and transformation |
+| Platform takes from creators | Platform enables creators |
+| Content is consumed | Knowledge transforms lives |
 
 ### The People
 
-- **Creators**: Individuals who own their knowledge/media, collaborate with Collectives
-- **Collectives**: Communities of creators with shared purpose (not "organizations")
-- **Members**: People who belong to a Collective's community (not "customers")
-- **Platform Owner**: The developer who maintains Codex infrastructure
+- **Creators**: Individuals who share knowledge, collaborate within Collectives
+- **Collectives**: Communities with shared purpose (yoga studios, dance companies, coaching academies)
+- **Members**: People who belong to a Collective's community (never "customers")
+- **Platform Owner**: The developer who stewards the infrastructure
 
-### Key Experiences to Design For
+### Key Experiences
 
-1. **Creator Dashboard** (content management, upload flows, analytics)
-2. **Customer Portal** (browse, purchase, watch, library)
-3. **Content Player** (video/audio streaming with progress tracking)
-4. **Checkout Flow** (Stripe integration, one-time purchases)
-5. **Admin Dashboard** (platform-wide analytics, manual access grants)
-6. **Organization Settings** (branding, team management)
+1. **Creator Studio** — Content creation, upload flows, transformation insights
+2. **Member Portal** — Browse, join, watch, library, progress tracking
+3. **Content Player** — Video/audio streaming with journey tracking
+4. **Join Flow** — Becoming part of a community (not "checkout")
+5. **Collective Home** — Community hub, member directory, shared resources
+6. **Collective Settings** — Branding, warmth customization, team collaboration
 
 ---
 
@@ -131,52 +142,55 @@ If it's not taught, it doesn't exist.
 
 ### Technical
 
-- **Serverless architecture**: No long-running processes, instant cold starts
-- **Edge-first**: Global CDN, sub-50ms response times
-- **Mobile-first**: 60%+ traffic from mobile devices
-- **Bandwidth awareness**: Video streaming = data costs matter
-- **Offline-capable**: Progressive Web App with service workers
+- **Serverless architecture**: Instant cold starts, global edge
+- **Mobile-first**: 60%+ traffic from mobile—warmth works everywhere
+- **Performance as respect**: Fast is welcoming, slow is rude
+- **Accessibility non-negotiable**: Everyone belongs, technically enforced
+- **Offline-capable**: Community continues without connectivity
 
-### Business
+### Community
 
-- **Creator-centric**: Tools must empower, not overwhelm
-- **Revenue-driven**: Minimize friction in purchase flows
-- **Trust-critical**: Money changes hands, security is sacred
-- **Self-serve**: No sales team, UI must teach itself
-- **Scale-ready**: 1 creator or 10,000 creators, same experience quality
+- **Creator-centric**: Tools empower, never overwhelm
+- **Trust-sacred**: Money flows, security is belonging's foundation
+- **Self-serve**: UI teaches itself, documentation welcomes
+- **Scale-kind**: 1 member or 1 million, same warmth
 
-### Brand
+### Visual Identity
 
-- **Professional but approachable**: Not corporate, not playful
-- **Clarity over cleverness**: Creators are busy, respect their time
-- **Calm confidence**: Platform should feel stable, reliable, secure
-- **Creator tools, not toys**: Serious professionals use this daily
+- **Warm, not corporate**: Cream over gray, teal over blue
+- **Approachable, not playful**: Professional welcome, not whimsy
+- **Calm confidence**: Stability builds trust, reliability builds belonging
+- **Human touch**: Rounded corners, soft shadows, real photography
 
 ---
 
-## Anti-Principles
+## Anti-Patterns
 
 What we **will not** do:
 
-❌ Follow trends for trend's sake
-❌ Add features without removing complexity
-❌ Sacrifice clarity for aesthetics
-❌ Design for awards, not users
-❌ Use motion as decoration
-❌ Hide information to "simplify"
-❌ Copy competitors without understanding why
-❌ Let marketing override usability
+| Anti-Pattern | Why It's Wrong |
+|--------------|----------------|
+| Cool gray backgrounds | Cold, corporate, unwelcoming |
+| "Customer" language | Transactional, not belonging |
+| "Buy now" CTAs | Pushy, not inviting |
+| Corporate blue primary | Generic, not distinctive |
+| Motion for decoration | Distracting, not meaningful |
+| Hiding complexity | Dishonest, not simple |
+| Copying competitors | Following, not leading |
+| Accessibility as afterthought | Exclusion, not belonging |
 
 ---
 
 ## Source of Truth
 
-1. **Design Tokens** → `/tokens` (design decisions as data)
-2. **Component API** → `/components` (implementation contracts)
-3. **Documentation** → This system (the why behind everything)
+**Precedence**: Philosophy > Documentation > Tokens > Code
 
-**Precedence**: Documentation > Tokens > Code
-If code contradicts docs, code is wrong.
+1. **Philosophy** → [00-mission](./00-mission) + [01-philosophy](./01-philosophy) (the why)
+2. **Documentation** → The 14 pillars (the how)
+3. **Design Tokens** → [/tokens](./tokens) (decisions as data)
+4. **Components** → Implementation (the what)
+
+If code contradicts philosophy, code is wrong.
 
 ---
 
@@ -184,45 +198,56 @@ If code contradicts docs, code is wrong.
 
 ### For Designers
 
-1. Read [01-philosophy](./01-philosophy/README.md)
-2. Understand [02-visual-language](./02-visual-language/README.md)
-3. Use tokens from [tokens/](./tokens/)
-4. Build with [06-components](./06-components/README.md)
+**Day 1**: Philosophy
+1. Read [00-mission](./00-mission/README.md) — Why we exist
+2. Read [01-philosophy](./01-philosophy/README.md) — Belonging over buying
+3. Browse Storybook (30 minutes)
+
+**Day 2**: Visual Language
+4. Read [02-visual-language](./02-visual-language/README.md) — Creative studio aesthetic
+5. Read [03-color](./03-color/README.md) — Warmth first
+6. Use tokens from [/tokens](./tokens/)
 
 ### For Engineers
 
-1. Read [11-engineering](./11-engineering/README.md)
-2. Import tokens from `@codex/design-tokens`
-3. Use components from `@codex/ui`
-4. Follow [12-governance](./12-governance/README.md) for contributions
+**Day 1**: Philosophy + Setup
+1. Read [00-mission](./00-mission/README.md) — Our values
+2. Read [11-engineering](./11-engineering/README.md) — Code as craft
+3. Import `@codex/design-tokens`
+
+**Day 2**: Build
+4. Read [06-components](./06-components/README.md) — Component patterns
+5. Use `@codex/ui` components
+6. Follow [12-governance](./12-governance/README.md) — Contribution process
 
 ### For Product
 
-1. Read [01-philosophy](./01-philosophy/README.md)
-2. Understand [08-content-voice](./08-content-voice/README.md)
-3. Reference [06-components](./06-components/README.md) for capabilities
-4. Respect [09-accessibility](./09-accessibility/README.md) requirements
+1. Read [00-mission](./00-mission/README.md) — Community values
+2. Read [08-content-voice](./08-content-voice/README.md) — Community language
+3. Reference [09-accessibility](./09-accessibility/README.md) — Everyone belongs
 
 ---
 
 ## Status
 
-| Pillar | Status | Completion |
-|--------|--------|------------|
-| 00. Mission & Purpose | ✅ Complete | 100% |
-| 01. Philosophy | 🟡 Needs Update | 20% |
-| 02. Visual Language | 🔴 Not Started | 0% |
-| 03. Color System | 🔴 Not Started | 0% |
-| 04. Typography | 🔴 Not Started | 0% |
-| 05. Spacing & Layout | 🔴 Not Started | 0% |
-| 06. Components | 🔴 Not Started | 0% |
-| 07. Interaction & Motion | 🔴 Not Started | 0% |
-| 08. Content & Voice | 🔴 Not Started | 0% |
-| 09. Accessibility | 🔴 Not Started | 0% |
-| 10. Theming | 🔴 Not Started | 0% |
-| 11. Engineering | 🔴 Not Started | 0% |
-| 12. Governance | 🔴 Not Started | 0% |
-| 13. Documentation | 🔴 Not Started | 0% |
+| Pillar | Status | Version |
+|--------|--------|---------|
+| 00. Mission & Purpose | ✅ Complete | 2.0 |
+| 01. Philosophy | ✅ Complete | 2.0 |
+| 02. Visual Language | ✅ Complete | 2.0 |
+| 03. Color System | ✅ Complete | 2.0 |
+| 04. Typography | ✅ Complete | 2.0 |
+| 05. Spacing & Layout | ✅ Complete | 2.0 |
+| 06. Components | ✅ Complete | 2.0 |
+| 07. Interaction & Motion | ✅ Complete | 2.0 |
+| 08. Content & Voice | ✅ Complete | 2.0 |
+| 09. Accessibility | ✅ Complete | 2.0 |
+| 10. Theming | ✅ Complete | 2.0 |
+| 11. Engineering | ✅ Complete | 2.0 |
+| 12. Governance | ✅ Complete | 2.0 |
+| 13. Documentation | ✅ Complete | 2.0 |
+
+**All pillars aligned with Mission. Foundation complete.**
 
 ---
 
@@ -230,113 +255,26 @@ If code contradicts docs, code is wrong.
 
 ```
 design-system/
-├── README.md (this file)
+├── README.md                 (this file)
 │
-├── 00-mission/              ⭐ START HERE
-│   └── README.md            (The why - community, collaboration, Collectives)
+├── 00-mission/               ⭐ START HERE
+│   └── README.md             (Community, collaboration, Collectives)
 │
-├── 01-philosophy/
-│   ├── README.md
-│   ├── purpose.md
-│   ├── principles.md
-│   ├── anti-principles.md
-│   └── emotional-tone.md
+├── 01-philosophy/            (Belonging over buying)
+├── 02-visual-language/       (Creative studio aesthetic)
+├── 03-color/                 (Warmth first: teal + cream)
+├── 04-typography/            (Voice made visible)
+├── 05-spacing-layout/        (Room to breathe)
+├── 06-components/            (Welcome committee)
+├── 07-interaction-motion/    (Motion as personality)
+├── 08-content-voice/         (Words are welcome)
+├── 09-accessibility/         (Everyone belongs)
+├── 10-theming/               (Your Collective, your colors)
+├── 11-engineering/           (Code as craft)
+├── 12-governance/            (Stewarding belonging)
+├── 13-documentation/         (Teaching belonging)
 │
-├── 02-visual-language/
-│   ├── README.md
-│   ├── shape-language.md
-│   ├── density.md
-│   ├── weight.md
-│   ├── motion-character.md
-│   ├── contrast.md
-│   └── negative-space.md
-│
-├── 03-color/
-│   ├── README.md
-│   ├── brand-colors.md
-│   ├── functional-colors.md
-│   ├── interactive-states.md
-│   ├── surfaces.md
-│   ├── accessibility.md
-│   └── dark-mode.md
-│
-├── 04-typography/
-│   ├── README.md
-│   ├── typeface-selection.md
-│   ├── scale.md
-│   ├── hierarchy.md
-│   ├── line-length.md
-│   └── responsive-type.md
-│
-├── 05-spacing-layout/
-│   ├── README.md
-│   ├── spacing-scale.md
-│   ├── grid-system.md
-│   ├── breakpoints.md
-│   ├── containers.md
-│   └── vertical-rhythm.md
-│
-├── 06-components/
-│   ├── README.md
-│   ├── taxonomy.md
-│   ├── primitives/
-│   ├── compounds/
-│   ├── patterns/
-│   └── templates/
-│
-├── 07-interaction-motion/
-│   ├── README.md
-│   ├── feedback-rules.md
-│   ├── duration-easing.md
-│   ├── transitions.md
-│   └── reduced-motion.md
-│
-├── 08-content-voice/
-│   ├── README.md
-│   ├── voice-principles.md
-│   ├── tone-variations.md
-│   ├── microcopy.md
-│   └── naming-conventions.md
-│
-├── 09-accessibility/
-│   ├── README.md
-│   ├── contrast-rules.md
-│   ├── keyboard-interaction.md
-│   ├── focus-management.md
-│   ├── screen-readers.md
-│   └── cognitive-load.md
-│
-├── 10-theming/
-│   ├── README.md
-│   ├── token-strategy.md
-│   ├── theming-model.md
-│   ├── customization.md
-│   └── versioning.md
-│
-├── 11-engineering/
-│   ├── README.md
-│   ├── source-of-truth.md
-│   ├── token-naming.md
-│   ├── component-api.md
-│   ├── performance.md
-│   └── testing.md
-│
-├── 12-governance/
-│   ├── README.md
-│   ├── contribution.md
-│   ├── review-standards.md
-│   ├── deprecation.md
-│   └── decision-ownership.md
-│
-├── 13-documentation/
-│   ├── README.md
-│   ├── narrative.md
-│   ├── usage-examples.md
-│   ├── do-dont.md
-│   └── anti-patterns.md
-│
-└── tokens/
-    ├── README.md
+└── tokens/                   (Design decisions as data)
     ├── color.tokens.json
     ├── typography.tokens.json
     ├── spacing.tokens.json
@@ -348,30 +286,36 @@ design-system/
 
 ## Next Steps
 
-1. ✅ Create directory structure
-2. 🟡 Define design philosophy (current)
-3. ⬜ Establish visual language
-4. ⬜ Build color system
-5. ⬜ Define typography scale
-6. ⬜ Create spacing tokens
-7. ⬜ Document component taxonomy
-8. ⬜ Define motion system
-9. ⬜ Write content guidelines
-10. ⬜ Establish accessibility standards
-11. ⬜ Define theming architecture
-12. ⬜ Write engineering contracts
-13. ⬜ Establish governance model
+Foundation is complete. Next phases:
+
+1. **Token Implementation** — Export tokens to CSS/JS/Figma
+2. **Component Library** — Build primitives and compounds
+3. **Storybook** — Interactive documentation
+4. **Integration** — Connect to production codebase
 
 ---
 
-## Maintainers
+## Stewards
 
-**Design System Lead**: TBD
+**Design System Steward**: TBD
 **Engineering Lead**: TBD
-**Accessibility Lead**: TBD
+**Accessibility Champion**: TBD
 
-**Questions?** Open an issue with `[design-system]` prefix.
+**Questions?** Slack: #design-system | Office Hours: Thursdays 2pm
 
 ---
 
-**Remember**: A design system is not a project. It's a product that serves products.
+## The Warmth Test
+
+Before publishing any design work, ask:
+
+> Does this feel like walking into a beloved creative studio, or a spreadsheet?
+
+If studio → ship it.
+If spreadsheet → warm it up.
+
+---
+
+*Last updated: 2026-01-04*
+*Version: 2.0*
+*Status: Foundation complete — building belonging*
