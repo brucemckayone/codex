@@ -1958,6 +1958,89 @@ B2_REGION=us-west-004
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2025-12-31
+## Part 10: Beads Issue Tracking
+
+This implementation is tracked in beads with a full epic and dependency chain. Each phase is scoped to complete in a focused session (2-5 hours) without context overflow.
+
+### Epic Structure
+
+**Epic:** `Codex-boc` - P1-TRANSCODE-001: Media Transcoding System
+
+| ID | Phase | Title | Est. | Blocked By |
+|----|-------|-------|------|------------|
+| `Codex-01i` | 1 | Database Schema & Validation | 2-3h | - |
+| `Codex-7tu` | 2 | @codex/transcoding Package | 3-4h | Phase 1 |
+| `Codex-phu` | 3 | media-api Worker | 4-5h | Phase 2 |
+| `Codex-7sp` | 4 | RunPod Python Worker | 5-6h | Phase 3 |
+| `Codex-bjc` | 5 | Content-API Integration | 2h | Phase 3 |
+| `Codex-fjd` | 6 | Unit Tests | 3-4h | Phase 2 |
+| `Codex-ztf` | 7 | Integration & E2E Tests | 4-5h | Phase 5 |
+| `Codex-dmb` | 8 | CI/CD & Deployment | 2-3h | Phase 7 |
+
+### Dependency Graph
+
+```
+Phase 1 (Database)          ← START HERE
+    ↓
+Phase 2 (Package)
+    ↓
+Phase 3 (media-api)
+    ↓
+    ├── Phase 4 (RunPod)
+    └── Phase 5 (Integration)
+            ↓
+        Phase 7 (E2E Tests)
+            ↓
+        Phase 8 (Deploy)
+
+Phase 6 (Unit Tests) ← can start after Phase 2
+```
+
+### Session Workflow
+
+**Starting a session:**
+```bash
+bd ready                              # See unblocked tasks
+bd show <issue-id>                    # Review task details & acceptance criteria
+bd update <issue-id> --status=in_progress  # Claim the task
+```
+
+**During implementation:**
+- Each task description contains:
+  - Files to create/modify
+  - Acceptance criteria (checklist)
+  - Dependencies
+  - Time estimate
+- Stay focused on the single task
+- Reference this implementation plan for technical details
+
+**Completing a session:**
+```bash
+bd close <issue-id>                   # Mark complete (unblocks dependents)
+bd sync                               # Push to remote
+git add . && git commit -m "..."      # Commit code changes
+git push                              # Push code
+```
+
+### Quick Reference Commands
+
+```bash
+bd ready                    # What can I work on?
+bd blocked                  # What's waiting on dependencies?
+bd show <id>                # Full task details
+bd stats                    # Project overview
+bd list --status=open       # All open issues
+```
+
+### Handoff Between Sessions
+
+When ending a session mid-task:
+1. Update beads with progress notes: `bd comments add <id> "Completed X, Y remaining"`
+2. Commit any work-in-progress to a branch
+3. Next session: `bd show <id>` to restore context
+
+---
+
+**Document Version**: 2.1
+**Last Updated**: 2026-01-05
 **Status**: Ready for Implementation
