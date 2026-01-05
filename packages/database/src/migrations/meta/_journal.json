@@ -120,6 +120,13 @@
       "when": 1767203123763,
       "tag": "0016_parallel_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1767638617924,
+      "tag": "0017_typical_mantis",
+      "breakpoints": true
     }
   ]
 }

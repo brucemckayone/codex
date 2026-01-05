@@ -17,5 +17,7 @@ export * from './schemas/file-upload';
 export * from './schemas/purchase';
 // Settings schemas
 export * from './schemas/settings';
+// Transcoding schemas (RunPod webhooks, transcoding API)
+export * from './schemas/transcoding';
 // Shared schemas (pagination, etc)
 export * from './shared/pagination-schema';

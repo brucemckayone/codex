@@ -113,6 +113,32 @@ export type Bindings = {
    * Stripe webhook signing secret for dispute events
    */
   STRIPE_WEBHOOK_SECRET_DISPUTE?: string;
+
+  // ==========================================================================
+  // RunPod Transcoding Service
+  // ==========================================================================
+
+  /**
+   * RunPod API key for authentication
+   */
+  RUNPOD_API_KEY?: string;
+
+  /**
+   * RunPod serverless endpoint ID
+   */
+  RUNPOD_ENDPOINT_ID?: string;
+
+  /**
+   * RunPod webhook signing secret (HMAC-SHA256)
+   * Used to verify incoming webhook callbacks from RunPod
+   */
+  RUNPOD_WEBHOOK_SECRET?: string;
+
+  /**
+   * Base URL for RunPod webhook callbacks
+   * e.g., https://api.example.com - used to construct webhook URLs
+   */
+  RUNPOD_WEBHOOK_BASE_URL?: string;
 };
 
 /**

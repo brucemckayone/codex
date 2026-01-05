@@ -145,7 +145,30 @@ export const mediaItems = pgTable(
 
     // HLS Transcoding (Phase 1+)
     hlsMasterPlaylistKey: varchar('hls_master_playlist_key', { length: 500 }), // "hls/{media_id}/master.m3u8"
+    hlsPreviewKey: varchar('hls_preview_key', { length: 500 }), // "hls/{media_id}/preview/preview.m3u8" - 30s preview
     thumbnailKey: varchar('thumbnail_key', { length: 500 }), // "thumbnails/{media_id}/thumb.jpg"
+
+    // Audio Waveform (audio only)
+    waveformKey: varchar('waveform_key', { length: 500 }), // "waveforms/{media_id}/waveform.json"
+    waveformImageKey: varchar('waveform_image_key', { length: 500 }), // "waveforms/{media_id}/waveform.png"
+
+    // Transcoding Job Tracking
+    runpodJobId: varchar('runpod_job_id', { length: 255 }), // RunPod job ID for tracking
+    transcodingError: text('transcoding_error'), // Error message if transcoding fails
+    transcodingAttempts: integer('transcoding_attempts').default(0).notNull(), // Retry count (max 1)
+    transcodingPriority: integer('transcoding_priority').default(2).notNull(), // 0=urgent, 2=normal, 4=backlog
+
+    // Mezzanine/Archive (extensibility)
+    mezzanineKey: varchar('mezzanine_key', { length: 500 }), // Archive-quality intermediate
+    mezzanineStatus: varchar('mezzanine_status', { length: 50 }), // pending|processing|ready|failed
+
+    // HLS Variants Tracking
+    readyVariants: jsonb('ready_variants').$type<string[]>(), // ["1080p", "720p", "480p", "360p"]
+
+    // Audio Loudness (stored as integer × 100 for precision)
+    loudnessIntegrated: integer('loudness_integrated'), // LUFS × 100 (e.g., -14.0 LUFS = -1400)
+    loudnessPeak: integer('loudness_peak'), // dBTP × 100 (e.g., -1.0 dBTP = -100)
+    loudnessRange: integer('loudness_range'), // LRA × 100 (e.g., 7.0 LU = 700)
 
     // Timestamps
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
@@ -169,11 +192,28 @@ export const mediaItems = pgTable(
       sql`${table.status} IN ('uploading', 'uploaded', 'transcoding', 'ready', 'failed')`
     ),
     check('check_media_type', sql`${table.mediaType} IN ('video', 'audio')`),
+    check(
+      'check_mezzanine_status',
+      sql`${table.mezzanineStatus} IS NULL OR ${table.mezzanineStatus} IN ('pending', 'processing', 'ready', 'failed')`
+    ),
+    check(
+      'check_transcoding_priority',
+      sql`${table.transcodingPriority} >= 0 AND ${table.transcodingPriority} <= 4`
+    ),
 
     // Media lifecycle constraint: status='ready' requires transcoding outputs
+    // Video: needs HLS + thumbnail + duration
+    // Audio: needs HLS + waveform + duration
     check(
       'status_ready_requires_keys',
-      sql`${table.status} != 'ready' OR (${table.hlsMasterPlaylistKey} IS NOT NULL AND ${table.thumbnailKey} IS NOT NULL AND ${table.durationSeconds} IS NOT NULL)`
+      sql`${table.status} != 'ready' OR (
+        ${table.hlsMasterPlaylistKey} IS NOT NULL
+        AND ${table.durationSeconds} IS NOT NULL
+        AND (
+          (${table.mediaType} = 'video' AND ${table.thumbnailKey} IS NOT NULL)
+          OR (${table.mediaType} = 'audio' AND ${table.waveformKey} IS NOT NULL)
+        )
+      )`
     ),
   ]
 );
