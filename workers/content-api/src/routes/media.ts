@@ -12,34 +12,25 @@
  * - DELETE /api/media/:id    - Soft delete
  */
 
+import type {
+  CreateMediaResponse,
+  DeleteMediaResponse,
+  MediaListResponse,
+  MediaResponse,
+  UpdateMediaResponse,
+} from '@codex/content';
 import {
   createMediaItemSchema,
-  MediaItemService,
   MediaNotFoundError,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
-import { createPerRequestDbClient, dbHttp } from '@codex/database';
-import type {
-  CreateMediaResponse,
-  DeleteMediaResponse,
-  HonoEnv,
-  MediaListResponse,
-  MediaResponse,
-  UpdateMediaResponse,
-} from '@codex/shared-types';
+import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
-import {
-  createAuthenticatedHandler,
-  POLICY_PRESETS,
-  withPolicy,
-} from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
-
-// Note: Route-level security policies applied via withPolicy()
-// Each route declares its own authentication and authorization requirements
 
 /**
  * POST /api/media
@@ -52,20 +43,13 @@ const app = new Hono<HonoEnv>();
  */
 app.post(
   '/',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
-      body: createMediaItemSchema,
-    },
-    handler: async (_c, ctx): Promise<CreateMediaResponse> => {
-      const service = new MediaItemService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-      const media = await service.create(ctx.validated.body, ctx.user.id);
-      return { data: media };
-    },
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: { body: createMediaItemSchema },
     successStatus: 201,
+    handler: async (ctx): Promise<CreateMediaResponse['data']> => {
+      return await ctx.services.media.create(ctx.input.body, ctx.user.id);
+    },
   })
 );
 
@@ -79,22 +63,18 @@ app.post(
  */
 app.get(
   '/:id',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
-    },
-    handler: async (_c, ctx): Promise<MediaResponse> => {
-      const service = new MediaItemService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-      const media = await service.get(ctx.validated.params.id, ctx.user.id);
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<MediaResponse['data']> => {
+      const media = await ctx.services.media.get(
+        ctx.input.params.id,
+        ctx.user.id
+      );
       if (!media) {
-        throw new MediaNotFoundError(ctx.validated.params.id);
+        throw new MediaNotFoundError(ctx.input.params.id);
       }
-
-      return { data: media };
+      return media;
     },
   })
 );
@@ -110,36 +90,18 @@ app.get(
  */
 app.patch(
   '/:id',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: {
       params: createIdParamsSchema(),
       body: updateMediaItemSchema,
     },
-    handler: async (c, ctx): Promise<UpdateMediaResponse> => {
-      // Create per-request database client with transaction support
-      const { db, cleanup } = createPerRequestDbClient(ctx.env);
-
-      try {
-        const service = new MediaItemService({
-          db,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        });
-        const media = await service.update(
-          ctx.validated.params.id,
-          ctx.validated.body,
-          ctx.user.id
-        );
-
-        // Schedule cleanup after response is sent
-        c.executionCtx.waitUntil(cleanup());
-
-        return { data: media };
-      } catch (error) {
-        // Ensure cleanup happens even on error
-        await cleanup();
-        throw error;
-      }
+    handler: async (ctx): Promise<UpdateMediaResponse['data']> => {
+      return await ctx.services.media.update(
+        ctx.input.params.id,
+        ctx.input.body,
+        ctx.user.id
+      );
     },
   })
 );
@@ -155,21 +117,11 @@ app.patch(
  */
 app.get(
   '/',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      query: mediaQuerySchema,
-    },
-    handler: async (_c, ctx): Promise<MediaListResponse> => {
-      const service = new MediaItemService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const result = await service.list(ctx.user.id, ctx.validated.query);
-
-      // Service returns PaginatedResponse<T> which already matches our response type
-      return result;
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: mediaQuerySchema },
+    handler: async (ctx): Promise<MediaListResponse> => {
+      return await ctx.services.media.list(ctx.user.id, ctx.input.query);
     },
   })
 );
@@ -184,25 +136,18 @@ app.get(
  */
 app.delete(
   '/:id',
-  withPolicy({
-    auth: 'required',
-    roles: ['creator', 'admin'],
-    rateLimit: 'auth', // Stricter rate limit for deletion
-  }),
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: ['creator', 'admin'],
+      rateLimit: 'auth', // Stricter rate limit for deletion
     },
-    handler: async (_c, ctx): Promise<DeleteMediaResponse> => {
-      const service = new MediaItemService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      await service.delete(ctx.validated.params.id, ctx.user.id);
+    input: { params: createIdParamsSchema() },
+    successStatus: 204,
+    handler: async (ctx): Promise<DeleteMediaResponse> => {
+      await ctx.services.media.delete(ctx.input.params.id, ctx.user.id);
       return null;
     },
-    successStatus: 204,
   })
 );
 

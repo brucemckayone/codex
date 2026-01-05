@@ -46,7 +46,7 @@ export function createWebhookHandler(
     const event = c.get('stripeEvent');
     const stripe = c.get('stripe');
 
-    obs.info(`${eventType} webhook received`, {
+    obs?.info(`${eventType} webhook received`, {
       type: event.type,
       id: event.id,
     });
@@ -60,7 +60,7 @@ export function createWebhookHandler(
       return c.json({ received: true });
     } catch (error) {
       const err = error as Error;
-      obs.error(`${eventType} webhook handler error`, {
+      obs?.error(`${eventType} webhook handler error`, {
         error: err.message,
         eventType: event.type,
         eventId: event.id,

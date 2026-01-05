@@ -1145,7 +1145,7 @@ Packages/workers that import from `@codex/content`:
 ```
 HTTP Request to content-api worker
     ↓
-Route Handler (withPolicy authentication applies)
+Route Handler (procedure() policy applies)
     ↓
 Create ServiceInstance (ContentService or MediaItemService)
     ├─ config: { db: dbHttp, environment: ctx.env.ENVIRONMENT }
@@ -1168,22 +1168,25 @@ HTTP Response with standardized envelope
 Example route handler:
 
 ```typescript
-app.post('/api/content', withPolicy(...), createAuthenticatedHandler({
-  schema: { body: createContentSchema },
-  handler: async (_c, ctx) => {
-    // Service created per request
-    const service = new ContentService({
-      db: dbHttp,
-      environment: ctx.env.ENVIRONMENT,
-    });
+app.post('/api/content',
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: { body: createContentSchema },
+    handler: async (ctx) => {
+      // Service created per request
+      const service = new ContentService({
+        db: dbHttp,
+        environment: ctx.env.ENVIRONMENT,
+      });
 
-    // Service method called with validated input
-    const content = await service.create(ctx.validated.body, ctx.user.id);
+      // Service method called with validated input
+      const content = await service.create(ctx.input.body, ctx.user.id);
 
-    // Result returned to client in standardized envelope
-    return { data: content };
-  },
-}));
+      // Result returned to client in standardized envelope
+      return { data: content };
+    },
+  })
+);
 ```
 
 ---

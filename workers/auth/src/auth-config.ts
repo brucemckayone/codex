@@ -7,7 +7,8 @@
  */
 
 import { createDbClient, schema } from '@codex/database';
-import { betterAuth, type User } from 'better-auth';
+import { createKVSecondaryStorage } from '@codex/security';
+import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { AuthBindings } from './types';
 
@@ -40,10 +41,15 @@ export function createAuthInstance(options: AuthConfigOptions) {
       },
     }),
 
+    // KV-backed secondary storage for session caching
+    // This enables unified session caching across all workers
+    secondaryStorage: createKVSecondaryStorage(env.AUTH_SESSION_KV),
+
     session: {
       expiresIn: 60 * 60 * 24, // 24 hours
       updateAge: 60 * 60 * 24, // Update session every 24 hours
       cookieName: 'codex-session',
+      storeSessionInDatabase: true,
       cookieCache: {
         enabled: true,
         maxAge: 60 * 5, // 5 minutes (short-lived)
@@ -51,65 +57,28 @@ export function createAuthInstance(options: AuthConfigOptions) {
     },
     logger: {
       level: 'debug',
-      logger: (level: string, message: string, ...args: unknown[]) => {
-        console.log(`[${level.toUpperCase()}]`, message, ...args);
-      },
-      disabled: false,
+      disabled: true,
     },
     emailVerification: {
-      sendVerificationEmail: async (
-        {
-          user,
-          url,
-          token,
-        }: {
-          user: User;
-          url: string;
-          token: string;
-        },
-        _request
-      ) => {
-        console.log(
-          `Sending verification email to ${user.email} with url: ${url} and token: ${token}`
-        );
-
+      sendVerificationEmail: async ({ user, token }, _request) => {
         // Store token in KV for E2E tests (development/test only)
         // Use env from closure, not from request object
         if (
           env.AUTH_SESSION_KV &&
           (env.ENVIRONMENT === 'development' || env.ENVIRONMENT === 'test')
         ) {
-          try {
-            // Store with email as key, auto-expire after 5 minutes
-            await env.AUTH_SESSION_KV.put(
-              `verification:${user.email}`,
-              token,
-              { expirationTtl: 300 } // 5 minutes
-            );
-            console.log(
-              `[TEST] Stored verification token for ${user.email} in KV`
-            );
-          } catch (_error) {
-            console.error(
-              '[TEST] Failed to store verification token in KV:',
-              _error
-            );
-          }
+          // Store with email as key, auto-expire after 5 minutes
+          await env.AUTH_SESSION_KV.put(`verification:${user.email}`, token, {
+            expirationTtl: 300, // 5 minutes
+          });
         }
       },
       autoSignInAfterVerification: true,
       sendOnSignUp: true,
-      async onEmailVerification(user, _request) {
-        console.log(`Email verified for user ${user.email}`);
-      },
     },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
-      async sendResetPassword(data, _request) {
-        // TODO: Implement email sending via notification service
-        console.log(`Sending reset password email to ${data.user.email}`);
-      },
       autoSignIn: true,
     },
     user: {

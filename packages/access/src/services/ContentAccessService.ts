@@ -21,6 +21,7 @@ import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   AccessDeniedError,
   ContentNotFoundError,
+  MediaNotReadyForStreamingError,
   R2SigningError,
 } from '../errors';
 
@@ -249,19 +250,35 @@ export class ContentAccessService {
             });
           }
 
-          // Extract R2 key for streaming (prefer HLS master playlist for adaptive streaming)
-          const r2Key =
-            contentRecord.mediaItem.hlsMasterPlaylistKey ||
-            contentRecord.mediaItem.r2Key;
+          // Verify media is ready for streaming (status='ready' with transcoding outputs)
+          const mediaStatus = contentRecord.mediaItem.status;
+          if (mediaStatus !== 'ready') {
+            obs.warn('Media not ready for streaming', {
+              contentId: input.contentId,
+              mediaItemId: contentRecord.mediaItem.id,
+              status: mediaStatus,
+            });
+            throw new MediaNotReadyForStreamingError(
+              contentRecord.mediaItem.id,
+              mediaStatus
+            );
+          }
+
+          // Extract HLS master playlist key for streaming
+          // Database constraint ensures this exists when status='ready'
+          const r2Key = contentRecord.mediaItem.hlsMasterPlaylistKey;
 
           if (!r2Key) {
-            obs.error('Media item missing R2 key and HLS key', {
+            // This should never happen due to database constraint, but defensive check
+            obs.error('Media marked ready but missing HLS key', {
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
             });
             throw new R2SigningError(
-              'missing_r2_key',
-              new Error('Neither R2 key nor HLS master playlist key is set')
+              'missing_hls_key',
+              new Error(
+                'Media marked as ready but HLS master playlist key is missing'
+              )
             );
           }
 

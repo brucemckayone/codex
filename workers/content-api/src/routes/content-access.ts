@@ -1,4 +1,3 @@
-import { createContentAccessService } from '@codex/access';
 import type {
   PlaybackProgressResponse,
   StreamingUrlResponse,
@@ -11,7 +10,7 @@ import {
   listUserLibrarySchema,
   savePlaybackProgressSchema,
 } from '@codex/validation';
-import { createAuthenticatedHandler, withPolicy } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono();
@@ -31,36 +30,29 @@ const app = new Hono();
  */
 app.get(
   '/content/:id/stream',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'streaming', // 60 req/min - allows HLS segment refreshes
-  }),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'streaming', // 60 req/min - allows HLS segment refreshes
+    },
+    input: {
       params: createIdParamsSchema(),
       query: getStreamingUrlSchema.pick({ expirySeconds: true }),
     },
-    handler: async (c, ctx): Promise<StreamingUrlResponse> => {
-      const { params, query } = ctx.validated;
-      const user = ctx.user;
+    handler: async (ctx): Promise<StreamingUrlResponse> => {
+      const { params, query } = ctx.input;
 
-      const { service, cleanup } = createContentAccessService(ctx.env);
-      try {
-        // Service fetches content's organizationId and verifies access
-        const result = await service.getStreamingUrl(user.id, {
-          contentId: params.id,
-          expirySeconds: query?.expirySeconds,
-        });
+      // Service fetches content's organizationId and verifies access
+      const result = await ctx.services.access.getStreamingUrl(ctx.user.id, {
+        contentId: params.id,
+        expirySeconds: query?.expirySeconds,
+      });
 
-        return {
-          streamingUrl: result.streamingUrl,
-          expiresAt: result.expiresAt.toISOString(),
-          contentType: result.contentType,
-        };
-      } finally {
-        // Cleanup database connection after request
-        c.executionCtx.waitUntil(cleanup());
-      }
+      return {
+        streamingUrl: result.streamingUrl,
+        expiresAt: result.expiresAt.toISOString(),
+        contentType: result.contentType,
+      };
     },
   })
 );
@@ -75,31 +67,25 @@ app.get(
  */
 app.post(
   '/content/:id/progress',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'api', // 100 req/min - standard for API updates
-  }),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api', // 100 req/min - standard for API updates
+    },
+    input: {
       params: createIdParamsSchema(),
       body: savePlaybackProgressSchema.omit({ contentId: true }),
     },
     successStatus: 204, // No Content - update successful, no response body
-    handler: async (c, ctx): Promise<UpdatePlaybackProgressResponse> => {
-      const { params, body } = ctx.validated;
-      const user = ctx.user;
+    handler: async (ctx): Promise<UpdatePlaybackProgressResponse> => {
+      const { params, body } = ctx.input;
 
-      const { service, cleanup } = createContentAccessService(ctx.env);
-      try {
-        await service.savePlaybackProgress(user.id, {
-          contentId: params.id,
-          ...body,
-        });
+      await ctx.services.access.savePlaybackProgress(ctx.user.id, {
+        contentId: params.id,
+        ...body,
+      });
 
-        return null; // 204 returns no body
-      } finally {
-        c.executionCtx.waitUntil(cleanup());
-      }
+      return null; // 204 returns no body
     },
   })
 );
@@ -113,37 +99,34 @@ app.post(
  */
 app.get(
   '/content/:id/progress',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'api', // 100 req/min - standard for API reads
-  }),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api', // 100 req/min - standard for API reads
+    },
+    input: {
       params: createIdParamsSchema(),
     },
-    handler: async (c, ctx): Promise<PlaybackProgressResponse> => {
-      const { params } = ctx.validated;
-      const user = ctx.user;
+    handler: async (ctx): Promise<PlaybackProgressResponse> => {
+      const { params } = ctx.input;
 
-      const { service, cleanup } = createContentAccessService(ctx.env);
-      try {
-        const progress = await service.getPlaybackProgress(user.id, {
+      const progress = await ctx.services.access.getPlaybackProgress(
+        ctx.user.id,
+        {
           contentId: params.id,
-        });
-
-        if (!progress) {
-          return { progress: null };
         }
+      );
 
-        return {
-          progress: {
-            ...progress,
-            updatedAt: progress.updatedAt.toISOString(),
-          },
-        };
-      } finally {
-        c.executionCtx.waitUntil(cleanup());
+      if (!progress) {
+        return { progress: null };
       }
+
+      return {
+        progress: {
+          ...progress,
+          updatedAt: progress.updatedAt.toISOString(),
+        },
+      };
     },
   })
 );
@@ -158,26 +141,19 @@ app.get(
  */
 app.get(
   '/user/library',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'api', // 100 req/min - prevents pagination abuse
-  }),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api', // 100 req/min - prevents pagination abuse
+    },
+    input: {
       query: listUserLibrarySchema,
     },
-    handler: async (c, ctx): Promise<UserLibraryResponse> => {
-      const { query } = ctx.validated;
-      const user = ctx.user;
-
-      const { service, cleanup } = createContentAccessService(ctx.env);
-      try {
-        const result = await service.listUserLibrary(user.id, query);
-
-        return result;
-      } finally {
-        c.executionCtx.waitUntil(cleanup());
-      }
+    handler: async (ctx): Promise<UserLibraryResponse> => {
+      return await ctx.services.access.listUserLibrary(
+        ctx.user.id,
+        ctx.input.query
+      );
     },
   })
 );

@@ -14,40 +14,33 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { dbHttp } from '@codex/database';
-import {
-  createOrganizationSchema,
-  OrganizationService,
-  updateOrganizationSchema,
-} from '@codex/identity';
-import { NotFoundError } from '@codex/service-errors';
 import type {
-  CheckSlugResponse,
   CreateOrganizationResponse,
-  DeleteOrganizationResponse,
-  HonoEnv,
   OrganizationBySlugResponse,
   OrganizationListResponse,
   OrganizationResponse,
   UpdateOrganizationResponse,
+} from '@codex/organization';
+import {
+  createOrganizationSchema,
+  updateOrganizationSchema,
+} from '@codex/organization';
+import { NotFoundError } from '@codex/service-errors';
+import type {
+  CheckSlugResponse,
+  DeleteOrganizationResponse,
+  HonoEnv,
 } from '@codex/shared-types';
 import {
   createSlugSchema,
   organizationQuerySchema,
   uuidSchema,
 } from '@codex/validation';
-import {
-  createAuthenticatedHandler,
-  POLICY_PRESETS,
-  withPolicy,
-} from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
 const app = new Hono<HonoEnv>();
-
-// Note: Route-level security policies applied via withPolicy()
-// Each route declares its own authentication and authorization requirements
 
 /**
  * POST /api/organizations
@@ -60,20 +53,13 @@ const app = new Hono<HonoEnv>();
  */
 app.post(
   '/',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      body: createOrganizationSchema,
-    },
-    handler: async (_c, ctx): Promise<CreateOrganizationResponse> => {
-      const service = new OrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-      const organization = await service.create(ctx.validated.body);
-      return { data: organization };
-    },
+  procedure({
+    policy: { auth: 'required' },
+    input: { body: createOrganizationSchema },
     successStatus: 201,
+    handler: async (ctx): Promise<CreateOrganizationResponse['data']> => {
+      return await ctx.services.organization.create(ctx.input.body);
+    },
   })
 );
 
@@ -87,21 +73,13 @@ app.post(
  */
 app.get(
   '/check-slug/:slug',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      params: z.object({ slug: createSlugSchema(255) }),
-    },
-    handler: async (_c, ctx): Promise<CheckSlugResponse> => {
-      const service = new OrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const available = await service.isSlugAvailable(
-        ctx.validated.params.slug
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    handler: async (ctx): Promise<CheckSlugResponse> => {
+      const available = await ctx.services.organization.isSlugAvailable(
+        ctx.input.params.slug
       );
-
       return { available };
     },
   })
@@ -117,26 +95,21 @@ app.get(
  */
 app.get(
   '/slug/:slug',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      params: z.object({ slug: createSlugSchema(255) }),
-    },
-    handler: async (_c, ctx): Promise<OrganizationBySlugResponse> => {
-      const service = new OrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const organization = await service.getBySlug(ctx.validated.params.slug);
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    handler: async (ctx): Promise<OrganizationBySlugResponse['data']> => {
+      const organization = await ctx.services.organization.getBySlug(
+        ctx.input.params.slug
+      );
 
       if (!organization) {
         throw new NotFoundError('Organization not found', {
-          slug: ctx.validated.params.slug,
+          slug: ctx.input.params.slug,
         });
       }
 
-      return { data: organization };
+      return organization;
     },
   })
 );
@@ -151,26 +124,21 @@ app.get(
  */
 app.get(
   '/:id',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      params: z.object({ id: uuidSchema }),
-    },
-    handler: async (_c, ctx): Promise<OrganizationResponse> => {
-      const service = new OrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const organization = await service.get(ctx.validated.params.id);
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: z.object({ id: uuidSchema }) },
+    handler: async (ctx): Promise<OrganizationResponse['data']> => {
+      const organization = await ctx.services.organization.get(
+        ctx.input.params.id
+      );
 
       if (!organization) {
         throw new NotFoundError('Organization not found', {
-          organizationId: ctx.validated.params.id,
+          organizationId: ctx.input.params.id,
         });
       }
 
-      return { data: organization };
+      return organization;
     },
   })
 );
@@ -186,22 +154,17 @@ app.get(
  */
 app.patch(
   '/:id',
-  withPolicy(POLICY_PRESETS.orgManagement()),
-  createAuthenticatedHandler({
-    schema: {
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
       params: z.object({ id: uuidSchema }),
       body: updateOrganizationSchema,
     },
-    handler: async (_c, ctx): Promise<UpdateOrganizationResponse> => {
-      const service = new OrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-      const organization = await service.update(
-        ctx.validated.params.id,
-        ctx.validated.body
+    handler: async (ctx): Promise<UpdateOrganizationResponse['data']> => {
+      return await ctx.services.organization.update(
+        ctx.input.params.id,
+        ctx.input.body
       );
-      return { data: organization };
     },
   })
 );
@@ -217,33 +180,16 @@ app.patch(
  */
 app.get(
   '/',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: {
-      query: organizationQuerySchema,
-    },
-    handler: async (_c, ctx): Promise<OrganizationListResponse> => {
-      const { search, sortBy, sortOrder, page, limit } = ctx.validated.query;
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: organizationQuerySchema },
+    handler: async (ctx): Promise<OrganizationListResponse> => {
+      const { search, sortBy, sortOrder, page, limit } = ctx.input.query;
 
-      const service = new OrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const result = await service.list(
-        {
-          search,
-          sortBy,
-          sortOrder,
-        },
-        {
-          page,
-          limit,
-        }
+      return await ctx.services.organization.list(
+        { search, sortBy, sortOrder },
+        { page, limit }
       );
-
-      // Service returns PaginatedResponse<T> which already matches our response type
-      return result;
     },
   })
 );
@@ -258,22 +204,15 @@ app.get(
  */
 app.delete(
   '/:id',
-  withPolicy({
-    ...POLICY_PRESETS.orgManagement(),
-    rateLimit: 'auth', // Stricter rate limit for deletion
-  }),
-  createAuthenticatedHandler({
-    schema: {
-      params: z.object({ id: uuidSchema }),
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'auth', // Stricter rate limit for deletion
     },
-    handler: async (_c, ctx): Promise<DeleteOrganizationResponse> => {
-      const service = new OrganizationService({
-        db: dbHttp,
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      await service.delete(ctx.validated.params.id);
-
+    input: { params: z.object({ id: uuidSchema }) },
+    handler: async (ctx): Promise<DeleteOrganizationResponse> => {
+      await ctx.services.organization.delete(ctx.input.params.id);
       return {
         success: true,
         message: 'Organization deleted successfully',

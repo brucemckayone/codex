@@ -40,6 +40,7 @@
     "@codex/observability": "workspace:*",
     "@codex/purchase": "workspace:*",
     "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7"
   },

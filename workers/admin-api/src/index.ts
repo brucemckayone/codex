@@ -10,26 +10,16 @@
  * - Request tracking (UUID request IDs, IP tracking, user agent)
  * - Security headers (CSP, XFO, etc.)
  * - Rate limiting for all endpoints
- * - Session-based authentication via requireAuth
- * - Platform owner role verification via requirePlatformOwner
+ * - Session-based authentication with platform owner role verification
  *
  * All endpoints require:
  * 1. Valid session (authenticated user)
  * 2. User role = 'platform_owner'
+ *
+ * Uses the procedure() pattern for unified policy, validation, and error handling.
  */
 
-import {
-  AdminAnalyticsService,
-  AdminContentManagementService,
-  AdminCustomerManagementService,
-  mapErrorToResponse,
-} from '@codex/admin';
-import { createPerRequestDbClient, dbHttp, schema } from '@codex/database';
-import {
-  RATE_LIMIT_PRESETS,
-  rateLimit,
-  requirePlatformOwner,
-} from '@codex/security';
+import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
   adminContentIdParamsSchema,
   adminContentListQuerySchema,
@@ -40,39 +30,37 @@ import {
   adminTopContentQuerySchema,
 } from '@codex/validation';
 import {
-  createHealthCheckHandler,
   createKvCheck,
-  createNotFoundHandler,
-  createObservabilityErrorHandler,
-  createStandardMiddlewareChain,
+  createWorker,
+  procedure,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
-import { eq } from 'drizzle-orm';
-import { Hono } from 'hono';
 import type { AdminApiEnv } from './types';
 
 // ============================================================================
 // Application Setup
 // ============================================================================
 
-const app = new Hono<AdminApiEnv>();
-
-// ============================================================================
-// Global Middleware
-// ============================================================================
-
 /**
- * Global middleware chain
- * Applies request tracking, logging, security headers, and observability to all routes
+ * Create worker with standard middleware
+ *
+ * Configuration:
+ * - enableGlobalAuth: false (admin routes use platform_owner policy)
+ * - healthCheck: database and KV checks
  */
-const globalMiddleware = createStandardMiddlewareChain({
+const app = createWorker<AdminApiEnv>({
   serviceName: 'admin-api',
-  enableObservability: true,
+  version: '1.0.0',
+  enableGlobalAuth: false,
+  healthCheck: {
+    checkDatabase: standardDatabaseCheck,
+    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+  },
 });
 
-for (const middleware of globalMiddleware) {
-  app.use('*', middleware);
-}
+// ============================================================================
+// Custom Middleware
+// ============================================================================
 
 // Rate limiting for all API endpoints
 app.use('/api/*', (c, next) => {
@@ -83,77 +71,6 @@ app.use('/api/*', (c, next) => {
 });
 
 // ============================================================================
-// Error Handling
-// ============================================================================
-
-app.onError(createObservabilityErrorHandler('admin-api'));
-app.notFound(createNotFoundHandler());
-
-// ============================================================================
-// Health Check Endpoints
-// ============================================================================
-
-app.get('/', (c) => {
-  return c.json({ status: 'ok', service: 'admin-api' });
-});
-
-app.get(
-  '/health',
-  createHealthCheckHandler('admin-api', '1.0.0', {
-    checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV']),
-  })
-);
-
-// ============================================================================
-// Admin API Routes (Protected)
-// ============================================================================
-
-/**
- * All admin routes require:
- * 1. Authentication (valid session)
- * 2. Platform owner role
- * 3. Organization ID cached in context
- */
-app.use(
-  '/api/admin/*',
-  requirePlatformOwner({
-    cookieName: 'better-auth.session_token',
-  }),
-  // Cache organization ID to avoid N+1 query on every request
-  async (c, next) => {
-    const user = c.get('user');
-    if (!user) {
-      // Should never happen - requirePlatformOwner ensures user exists
-      return c.json(
-        { error: { code: 'UNAUTHORIZED', message: 'User not found' } },
-        401
-      );
-    }
-
-    const membership = await dbHttp.query.organizationMemberships.findFirst({
-      where: eq(schema.organizationMemberships.userId, user.id),
-      columns: { organizationId: true },
-    });
-
-    if (!membership) {
-      return c.json(
-        {
-          error: {
-            code: 'FORBIDDEN',
-            message: 'Platform owner has no organization',
-          },
-        },
-        403
-      );
-    }
-
-    c.set('organizationId', membership.organizationId);
-    return next();
-  }
-);
-
-// ============================================================================
 // Analytics Endpoints
 // ============================================================================
 
@@ -161,80 +78,53 @@ app.use(
  * GET /api/admin/analytics/revenue
  * Get revenue statistics for the platform owner's organization
  */
-app.get('/api/admin/analytics/revenue', async (c) => {
-  try {
-    const organizationId = c.get('organizationId');
-
-    // Parse and validate query params
-    const query = c.req.query();
-    const validated = adminRevenueQuerySchema.parse({
-      startDate: query.startDate,
-      endDate: query.endDate,
-    });
-
-    const service = new AdminAnalyticsService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const stats = await service.getRevenueStats(organizationId, validated);
-    return c.json({ data: stats });
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  }
-});
+app.get(
+  '/api/admin/analytics/revenue',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { query: adminRevenueQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getRevenueStats(
+        ctx.organizationId,
+        ctx.input.query
+      );
+    },
+  })
+);
 
 /**
  * GET /api/admin/analytics/customers
  * Get customer statistics for the platform owner's organization
  */
-app.get('/api/admin/analytics/customers', async (c) => {
-  try {
-    const organizationId = c.get('organizationId');
-
-    const service = new AdminAnalyticsService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const stats = await service.getCustomerStats(organizationId);
-    return c.json({ data: stats });
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  }
-});
+app.get(
+  '/api/admin/analytics/customers',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getCustomerStats(
+        ctx.organizationId
+      );
+    },
+  })
+);
 
 /**
  * GET /api/admin/analytics/top-content
  * Get top content by revenue for the platform owner's organization
  */
-app.get('/api/admin/analytics/top-content', async (c) => {
-  try {
-    const organizationId = c.get('organizationId');
-
-    // Parse and validate query params
-    const query = c.req.query();
-    const validated = adminTopContentQuerySchema.parse({
-      limit: query.limit,
-    });
-
-    const service = new AdminAnalyticsService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const topContent = await service.getTopContent(
-      organizationId,
-      validated.limit
-    );
-    return c.json({ data: topContent });
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  }
-});
+app.get(
+  '/api/admin/analytics/top-content',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { query: adminTopContentQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getTopContent(
+        ctx.organizationId,
+        ctx.input.query.limit
+      );
+    },
+  })
+);
 
 // ============================================================================
 // Content Management Endpoints
@@ -244,123 +134,87 @@ app.get('/api/admin/analytics/top-content', async (c) => {
  * GET /api/admin/content
  * List all content in the platform owner's organization
  */
-app.get('/api/admin/content', async (c) => {
-  try {
-    const organizationId = c.get('organizationId');
+app.get(
+  '/api/admin/content',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { query: adminContentListQuerySchema },
+    handler: async (ctx) => {
+      // Map 'all' status to undefined for service layer
+      const statusFilter =
+        ctx.input.query.status === 'all' ? undefined : ctx.input.query.status;
 
-    // Parse and validate query params
-    const query = c.req.query();
-    const validated = adminContentListQuerySchema.parse({
-      page: query.page,
-      limit: query.limit,
-      status: query.status,
-    });
-
-    const service = new AdminContentManagementService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    // Map 'all' status to undefined for service layer
-    const statusFilter =
-      validated.status === 'all' ? undefined : validated.status;
-
-    const result = await service.listAllContent(organizationId, {
-      page: validated.page,
-      limit: validated.limit,
-      status: statusFilter as 'draft' | 'published' | 'archived' | undefined,
-    });
-
-    return c.json(result);
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  }
-});
+      return await ctx.services.adminContent.listAllContent(
+        ctx.organizationId,
+        {
+          page: ctx.input.query.page,
+          limit: ctx.input.query.limit,
+          status: statusFilter as
+            | 'draft'
+            | 'published'
+            | 'archived'
+            | undefined,
+        }
+      );
+    },
+  })
+);
 
 /**
  * POST /api/admin/content/:id/publish
  * Publish content (admin override)
  */
-app.post('/api/admin/content/:id/publish', async (c) => {
-  const { db, cleanup } = createPerRequestDbClient(c.env);
-
-  try {
-    const organizationId = c.get('organizationId');
-
-    // Validate path params
-    const params = adminContentIdParamsSchema.parse({ id: c.req.param('id') });
-
-    const service = new AdminContentManagementService({
-      db,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const content = await service.publishContent(organizationId, params.id);
-    return c.json({ data: content });
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  } finally {
-    await cleanup();
-  }
-});
+app.post(
+  '/api/admin/content/:id/publish',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: adminContentIdParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminContent.publishContent(
+        ctx.organizationId,
+        ctx.input.params.id
+      );
+    },
+  })
+);
 
 /**
  * POST /api/admin/content/:id/unpublish
  * Unpublish content (admin override)
  */
-app.post('/api/admin/content/:id/unpublish', async (c) => {
-  const { db, cleanup } = createPerRequestDbClient(c.env);
-
-  try {
-    const organizationId = c.get('organizationId');
-
-    // Validate path params
-    const params = adminContentIdParamsSchema.parse({ id: c.req.param('id') });
-
-    const service = new AdminContentManagementService({
-      db,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const content = await service.unpublishContent(organizationId, params.id);
-    return c.json({ data: content });
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  } finally {
-    await cleanup();
-  }
-});
+app.post(
+  '/api/admin/content/:id/unpublish',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: adminContentIdParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminContent.unpublishContent(
+        ctx.organizationId,
+        ctx.input.params.id
+      );
+    },
+  })
+);
 
 /**
  * DELETE /api/admin/content/:id
  * Soft delete content (admin override)
  */
-app.delete('/api/admin/content/:id', async (c) => {
-  const { db, cleanup } = createPerRequestDbClient(c.env);
-
-  try {
-    const organizationId = c.get('organizationId');
-
-    // Validate path params
-    const params = adminContentIdParamsSchema.parse({ id: c.req.param('id') });
-
-    const service = new AdminContentManagementService({
-      db,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    await service.deleteContent(organizationId, params.id);
-    return c.body(null, 204);
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  } finally {
-    await cleanup();
-  }
-});
+app.delete(
+  '/api/admin/content/:id',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: adminContentIdParamsSchema },
+    successStatus: 204,
+    handler: async (ctx) => {
+      await ctx.services.adminContent.deleteContent(
+        ctx.organizationId,
+        ctx.input.params.id
+      );
+      return null;
+    },
+  })
+);
 
 // ============================================================================
 // Customer Management Endpoints
@@ -370,53 +224,37 @@ app.delete('/api/admin/content/:id', async (c) => {
  * GET /api/admin/customers
  * List customers who have purchased from the organization
  */
-app.get('/api/admin/customers', async (c) => {
-  try {
-    const organizationId = c.get('organizationId');
-
-    // Parse and validate query params
-    const query = c.req.query();
-    const validated = adminCustomerListQuerySchema.parse({
-      page: query.page,
-      limit: query.limit,
-    });
-
-    const service = new AdminCustomerManagementService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const result = await service.listCustomers(organizationId, validated);
-    return c.json(result);
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  }
-});
+app.get(
+  '/api/admin/customers',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { query: adminCustomerListQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminCustomer.listCustomers(
+        ctx.organizationId,
+        ctx.input.query
+      );
+    },
+  })
+);
 
 /**
  * GET /api/admin/customers/:id
  * Get customer details with purchase history
  */
-app.get('/api/admin/customers/:id', async (c) => {
-  try {
-    const organizationId = c.get('organizationId');
-
-    // Validate path params
-    const params = adminCustomerIdParamsSchema.parse({ id: c.req.param('id') });
-
-    const service = new AdminCustomerManagementService({
-      db: dbHttp,
-      environment: c.env.ENVIRONMENT || 'development',
-    });
-
-    const details = await service.getCustomerDetails(organizationId, params.id);
-    return c.json({ data: details });
-  } catch (error) {
-    const mapped = mapErrorToResponse(error);
-    return c.json(mapped.response, mapped.statusCode);
-  }
-});
+app.get(
+  '/api/admin/customers/:id',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: adminCustomerIdParamsSchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminCustomer.getCustomerDetails(
+        ctx.organizationId,
+        ctx.input.params.id
+      );
+    },
+  })
+);
 
 /**
  * POST /api/admin/customers/:customerId/grant-access/:contentId
@@ -424,53 +262,39 @@ app.get('/api/admin/customers/:id', async (c) => {
  */
 app.post(
   '/api/admin/customers/:customerId/grant-access/:contentId',
-  async (c) => {
-    const { db, cleanup } = createPerRequestDbClient(c.env);
-
-    try {
-      const organizationId = c.get('organizationId');
-
-      // Validate path params
-      const params = adminGrantAccessParamsSchema.parse({
-        customerId: c.req.param('customerId'),
-        contentId: c.req.param('contentId'),
-      });
-
-      const service = new AdminCustomerManagementService({
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-      });
-
-      await service.grantContentAccess(
-        organizationId,
-        params.customerId,
-        params.contentId
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: adminGrantAccessParamsSchema },
+    handler: async (ctx) => {
+      await ctx.services.adminCustomer.grantContentAccess(
+        ctx.organizationId,
+        ctx.input.params.customerId,
+        ctx.input.params.contentId
       );
-
-      return c.json({ success: true });
-    } catch (error) {
-      const mapped = mapErrorToResponse(error);
-      return c.json(mapped.response, mapped.statusCode);
-    } finally {
-      await cleanup();
-    }
-  }
+      return { success: true };
+    },
+  })
 );
 
 // ============================================================================
 // Status Endpoint (for debugging)
 // ============================================================================
 
-app.get('/api/admin/status', (c) => {
-  const user = c.get('user');
-  return c.json({
-    status: 'ok',
-    message: 'Admin API is operational',
-    user: {
-      id: user?.id,
-      role: user?.role,
+app.get(
+  '/api/admin/status',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    handler: async (ctx) => {
+      return {
+        status: 'ok',
+        message: 'Admin API is operational',
+        user: {
+          id: ctx.user.id,
+          role: ctx.user.role,
+        },
+      };
     },
-  });
-});
+  })
+);
 
 export default app;

@@ -34,6 +34,13 @@ if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = 'test';
 }
 
+// Polyfill 'self' for isomorphic-dompurify (expects browser/Worker globals)
+// Required by @codex/validation which imports isomorphic-dompurify for SVG sanitization
+if (typeof self === 'undefined') {
+  // @ts-expect-error - Polyfilling browser global for Node.js test environment
+  global.self = global;
+}
+
 // Log environment for debugging (only in verbose mode)
 if (process.env.VITEST_VERBOSE) {
   console.log('[vitest.setup] Environment loaded:');

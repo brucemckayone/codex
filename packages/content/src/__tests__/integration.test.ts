@@ -16,7 +16,7 @@
  * - No cleanup needed - fresh database for this file
  */
 
-import { OrganizationService } from '@codex/identity';
+import { OrganizationService } from '@codex/organization';
 import {
   createUniqueSlug,
   type Database,
@@ -139,7 +139,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       // Create personal content (no organizationId)
       const content = await contentService.create(
@@ -278,7 +286,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media1.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media1.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media1.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media1.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       const content1 = await contentService.create(
         {
@@ -305,7 +321,15 @@ describe('Integration Tests', () => {
         otherCreatorId
       );
 
-      await mediaService.updateStatus(media2.id, 'ready', otherCreatorId);
+      await mediaService.markAsReady(
+        media2.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media2.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media2.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        otherCreatorId
+      );
 
       const content2 = await contentService.create(
         {
@@ -368,7 +392,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       // Create content with same slug in both orgs
       const content1 = await contentService.create(
@@ -421,7 +453,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       const slug = createUniqueSlug('unique-in-org');
 
@@ -541,7 +581,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       // Create multiple content items for org
       for (let i = 0; i < 3; i++) {
@@ -588,7 +636,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       // Create org content
       const orgContentCreated = await contentService.create(
@@ -666,7 +722,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       const content = await contentService.create(
         {
@@ -715,7 +779,15 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media1.id, 'ready', creatorId);
+      await mediaService.markAsReady(
+        media1.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media1.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media1.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        creatorId
+      );
 
       const content1 = await contentService.create(
         {
@@ -743,7 +815,15 @@ describe('Integration Tests', () => {
         otherCreatorId
       );
 
-      await mediaService.updateStatus(media2.id, 'ready', otherCreatorId);
+      await mediaService.markAsReady(
+        media2.id,
+        {
+          hlsMasterPlaylistKey: `hls/${media2.id}/master.m3u8`,
+          thumbnailKey: `thumbnails/${media2.id}/thumb.jpg`,
+          durationSeconds: 120,
+        },
+        otherCreatorId
+      );
 
       const content2 = await contentService.create(
         {

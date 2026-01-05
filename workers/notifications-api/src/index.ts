@@ -19,12 +19,11 @@
  */
 
 import {
+  createEnvValidationMiddleware,
   createKvCheck,
   createWorker,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
-
-import { createEnvValidationMiddleware } from './utils/validate-env';
 
 // ============================================================================
 // Application Setup
@@ -40,7 +39,7 @@ const app = createWorker({
   enableGlobalAuth: false,
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV']),
+    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
   },
 });
 
@@ -49,7 +48,13 @@ const app = createWorker({
  * Validates required environment variables on first request
  * Runs once per worker instance (not per request)
  */
-app.use('*', createEnvValidationMiddleware());
+app.use(
+  '*',
+  createEnvValidationMiddleware({
+    required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
+    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+  })
+);
 
 // ============================================================================
 // Export

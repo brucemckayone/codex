@@ -15,6 +15,19 @@
     {
       "binding": "RATE_LIMIT_KV",
       "id": "cea7153364974737b16870df08f31083"
+    },
+    {
+      "binding": "AUTH_SESSION_KV",
+      "id": "82d04a4236df4aac8e9d87793344f0ed"
+    }
+  ],
+
+  // R2 Buckets (for logo uploads in organization settings)
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "codex-media-production",
+      "preview_bucket_name": "codex-media-test"
     }
   ],
 
@@ -23,7 +36,8 @@
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
     "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "API_URL": "http://localhost:8787",
+    "R2_PUBLIC_URL_BASE": "https://pub-codex-media-test.r2.dev"
   },
 
   // Environment configurations
@@ -35,12 +49,24 @@
       "vars": {
         "ENVIRONMENT": "test",
         "WEB_APP_URL": "http://localhost:3000",
-        "API_URL": "http://localhost:8787"
+        "API_URL": "http://localhost:8787",
+        "R2_PUBLIC_URL_BASE": "https://pub-codex-media-test.r2.dev"
       },
       "kv_namespaces": [
         {
           "binding": "RATE_LIMIT_KV",
           "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production",
+          "preview_bucket_name": "codex-media-test"
         }
       ]
     },
@@ -52,12 +78,23 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://codex.revelations.studio",
-        "API_URL": "https://api.revelations.studio"
+        "API_URL": "https://api.revelations.studio",
+        "R2_PUBLIC_URL_BASE": "https://pub-codex-media-production.r2.dev"
       },
       "kv_namespaces": [
         {
           "binding": "RATE_LIMIT_KV",
           "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production"
         }
       ],
       "routes": [
@@ -75,7 +112,8 @@
         "ENVIRONMENT": "staging",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://codex-staging.revelations.studio",
-        "API_URL": "https://api-staging.revelations.studio"
+        "API_URL": "https://api-staging.revelations.studio",
+        "R2_PUBLIC_URL_BASE": "https://pub-codex-media-staging.r2.dev"
       },
       "routes": [
         {
@@ -98,8 +136,16 @@
   //
   // Production Secrets (set via wrangler CLI):
   //   wrangler secret put DATABASE_URL --env production
+  //   wrangler secret put R2_ACCOUNT_ID --env production
+  //   wrangler secret put R2_ACCESS_KEY_ID --env production
+  //   wrangler secret put R2_SECRET_ACCESS_KEY --env production
+  //   wrangler secret put R2_BUCKET_MEDIA --env production
   //
   // Required Variables:
   //   - DATABASE_URL: PostgreSQL connection string
   //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
+  //   - R2_ACCOUNT_ID: Cloudflare R2 account ID (for logo uploads)
+  //   - R2_ACCESS_KEY_ID: R2 access key ID
+  //   - R2_SECRET_ACCESS_KEY: R2 secret access key
+  //   - R2_BUCKET_MEDIA: R2 bucket name for media storage
 }

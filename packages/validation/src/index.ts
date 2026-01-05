@@ -11,7 +11,11 @@ export * from './identity/user-schema';
 export * from './primitives';
 // Access schemas
 export * from './schemas/access';
+// File upload schemas
+export * from './schemas/file-upload';
 // Purchase schemas
 export * from './schemas/purchase';
+// Settings schemas
+export * from './schemas/settings';
 // Shared schemas (pagination, etc)
 export * from './shared/pagination-schema';

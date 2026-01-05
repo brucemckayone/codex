@@ -51,7 +51,7 @@ export async function handleCheckoutCompleted(
   const obs = c.get('obs');
   const session = event.data.object as Stripe.Checkout.Session;
 
-  obs.info('Processing checkout.session.completed', {
+  obs?.info('Processing checkout.session.completed', {
     sessionId: session.id,
     paymentIntentId: session.payment_intent,
     customerId: session.customer,
@@ -71,7 +71,7 @@ export async function handleCheckoutCompleted(
         : session.payment_intent?.id;
 
     if (!paymentIntentId) {
-      obs.error('Missing payment intent ID', { sessionId: session.id });
+      obs?.error('Missing payment intent ID', { sessionId: session.id });
       return;
     }
 
@@ -80,7 +80,7 @@ export async function handleCheckoutCompleted(
     try {
       validatedMetadata = checkoutSessionMetadataSchema.parse(metadata);
     } catch (validationError) {
-      obs.error('Invalid checkout session metadata', {
+      obs?.error('Invalid checkout session metadata', {
         sessionId: session.id,
         error:
           validationError instanceof Error
@@ -94,7 +94,7 @@ export async function handleCheckoutCompleted(
     // Extract amount paid (in cents)
     amountTotal = session.amount_total; // Already in cents from Stripe
     if (typeof amountTotal !== 'number') {
-      obs.error('Invalid amount_total', {
+      obs?.error('Invalid amount_total', {
         sessionId: session.id,
         amountTotal,
       });
@@ -130,7 +130,7 @@ export async function handleCheckoutCompleted(
         currency: 'usd',
       });
 
-      obs.info('Purchase completed successfully', {
+      obs?.info('Purchase completed successfully', {
         purchaseId: purchase.id,
         customerId: validatedMetadata.customerId,
         contentId: validatedMetadata.contentId,
@@ -143,7 +143,7 @@ export async function handleCheckoutCompleted(
     const err = error as Error;
 
     // Provide detailed error context for debugging
-    obs.error('Failed to complete purchase from Stripe webhook', {
+    obs?.error('Failed to complete purchase from Stripe webhook', {
       sessionId: session.id,
       customerId: validatedMetadata?.customerId,
       contentId: validatedMetadata?.contentId,

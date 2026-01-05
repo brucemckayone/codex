@@ -14,7 +14,10 @@ export {
   type SecurityHeadersOptions,
   securityHeaders,
 } from './headers';
-export { requirePlatformOwner } from './platform-owner-auth';
+export {
+  createKVSecondaryStorage,
+  type SecondaryStorage,
+} from './kv-secondary-storage';
 export {
   RATE_LIMIT_PRESETS,
   type RateLimitOptions,

@@ -200,6 +200,8 @@ export class MediaItemService extends BaseService {
       if (error instanceof MediaNotFoundError) {
         throw error;
       }
+      // Debug: Log actual error before wrapping
+      console.error('[MediaItemService.update] Error:', error);
       throw wrapError(error, { mediaItemId: id, creatorId, input: validated });
     }
   }

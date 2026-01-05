@@ -26,6 +26,7 @@
  */
 
 import {
+  createEnvValidationMiddleware,
   createKvCheck,
   createR2Check,
   createWorker,
@@ -35,7 +36,6 @@ import {
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
 import mediaRoutes from './routes/media';
-import { createEnvValidationMiddleware } from './utils/validate-env';
 
 // ============================================================================
 // Application Setup
@@ -48,10 +48,10 @@ const app = createWorker({
   enableLogging: true,
   enableCors: true,
   enableSecurityHeaders: true,
-  enableGlobalAuth: false, // Using route-level withPolicy() instead
+  enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV']),
+    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
     checkR2: createR2Check(['MEDIA_BUCKET']),
   },
 });
@@ -61,13 +61,26 @@ const app = createWorker({
  * Validates required environment variables on first request
  * Runs once per worker instance (not per request)
  */
-app.use('*', createEnvValidationMiddleware());
+app.use(
+  '*',
+  createEnvValidationMiddleware({
+    required: [
+      'DATABASE_URL',
+      'R2_ACCOUNT_ID',
+      'R2_ACCESS_KEY_ID',
+      'R2_SECRET_ACCESS_KEY',
+      'R2_BUCKET_MEDIA',
+      'RATE_LIMIT_KV',
+    ],
+    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+  })
+);
 
 // ============================================================================
 // Rate Limiting
 // ============================================================================
 
-// Note: Rate limiting is now applied at the route level via withPolicy()
+// Note: Rate limiting is now applied at the route level via procedure()
 // Each route declares its own rate limit preset (api, auth, etc.)
 
 // ============================================================================

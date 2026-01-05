@@ -384,21 +384,24 @@ type MyInput = z.infer<typeof createContentSchema>;
 ### 2. Route Parameter Validation
 
 ```typescript
+import { procedure } from '@codex/worker-utils';
 import { createIdParamsSchema, createSlugParamsSchema } from '@codex/validation';
 
 // GET /content/:id
-app.get('/:id', createAuthenticatedHandler({
-  schema: { params: createIdParamsSchema() },
-  handler: async (c, ctx) => {
-    const { id } = ctx.validated.params; // UUID
+app.get('/:id', procedure({
+  policy: { auth: 'required' },
+  input: { params: createIdParamsSchema() },
+  handler: async (ctx) => {
+    const { id } = ctx.input.params; // UUID
   },
 }));
 
 // GET /org/:slug
-app.get('/:slug', createAuthenticatedHandler({
-  schema: { params: createSlugParamsSchema(255) },
-  handler: async (c, ctx) => {
-    const { slug } = ctx.validated.params; // lowercase a-z0-9-
+app.get('/:slug', procedure({
+  policy: { auth: 'required' },
+  input: { params: createSlugParamsSchema(255) },
+  handler: async (ctx) => {
+    const { slug } = ctx.input.params; // lowercase a-z0-9-
   },
 }));
 ```
@@ -408,14 +411,16 @@ app.get('/:slug', createAuthenticatedHandler({
 Query string parameters are always strings in URLs. Use `z.coerce` to convert:
 
 ```typescript
+import { procedure } from '@codex/worker-utils';
 import { contentQuerySchema } from '@codex/validation';
 
 // URL: ?page=2&limit=50&status=published
-app.get('/content', createAuthenticatedHandler({
-  schema: { query: contentQuerySchema },
-  handler: async (c, ctx) => {
-    // ctx.validated.query has page/limit coerced to numbers
-    const { page, limit, status } = ctx.validated.query;
+app.get('/content', procedure({
+  policy: { auth: 'required' },
+  input: { query: contentQuerySchema },
+  handler: async (ctx) => {
+    // ctx.input.query has page/limit coerced to numbers
+    const { page, limit, status } = ctx.input.query;
   },
 }));
 ```
@@ -566,25 +571,28 @@ This ensures that:
 ### Example 1: Create Endpoint with Full Validation
 
 ```typescript
+import { procedure } from '@codex/worker-utils';
 import { createContentSchema, createIdParamsSchema } from '@codex/validation';
 import { ContentService } from '@codex/content';
 
 // POST /api/content
-app.post('/api/content', createAuthenticatedHandler({
-  schema: { body: createContentSchema },
-  handler: async (c, ctx) => {
+app.post('/api/content', procedure({
+  policy: { auth: 'required' },
+  input: { body: createContentSchema },
+  handler: async (ctx) => {
     const service = new ContentService({ db: dbHttp });
-    const content = await service.create(ctx.validated.body, ctx.user.id);
+    const content = await service.create(ctx.input.body, ctx.user.id);
     return { data: content };
   },
 }));
 
 // GET /api/content/:id
-app.get('/api/content/:id', createAuthenticatedHandler({
-  schema: { params: createIdParamsSchema() },
-  handler: async (c, ctx) => {
+app.get('/api/content/:id', procedure({
+  policy: { auth: 'required' },
+  input: { params: createIdParamsSchema() },
+  handler: async (ctx) => {
     const service = new ContentService({ db: dbHttp });
-    const content = await service.get(ctx.validated.params.id, ctx.user.id);
+    const content = await service.get(ctx.input.params.id, ctx.user.id);
     return { data: content };
   },
 }));
@@ -593,15 +601,17 @@ app.get('/api/content/:id', createAuthenticatedHandler({
 ### Example 2: List Endpoint with Pagination & Filters
 
 ```typescript
+import { procedure } from '@codex/worker-utils';
 import { contentQuerySchema } from '@codex/validation';
 
 // GET /api/content?page=1&limit=20&status=published
-app.get('/api/content', createAuthenticatedHandler({
-  schema: { query: contentQuerySchema },
-  handler: async (c, ctx) => {
+app.get('/api/content', procedure({
+  policy: { auth: 'required' },
+  input: { query: contentQuerySchema },
+  handler: async (ctx) => {
     const service = new ContentService({ db: dbHttp });
     const { items, total } = await service.list(
-      ctx.validated.query,
+      ctx.input.query,
       ctx.user.id
     );
     return { data: items, total };
@@ -663,16 +673,17 @@ const validated = result.data;
 
 ### Dependent Workers
 
-All workers use validation schemas in route handlers via `createAuthenticatedHandler()`:
+All workers use validation schemas in route handlers via `procedure()`:
 
 ```typescript
-import { createAuthenticatedHandler } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 import { createContentSchema } from '@codex/validation';
 
-app.post('/api/content', createAuthenticatedHandler({
-  schema: { body: createContentSchema },
-  handler: async (c, ctx) => {
-    // ctx.validated is fully validated and typed
+app.post('/api/content', procedure({
+  policy: { auth: 'required' },
+  input: { body: createContentSchema },
+  handler: async (ctx) => {
+    // ctx.input is fully validated and typed
   },
 }));
 ```

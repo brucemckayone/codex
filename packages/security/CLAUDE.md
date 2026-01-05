@@ -688,16 +688,19 @@ Status: `401 Unauthorized`
 1. Extract session cookie from Cookie header
    ├─ If missing → proceed without auth
    │
-2. Try cache (if KV available)
+2. Create database client with c.env
+   └─ Uses createDbClient(env) for request-scoped connection
+   │
+3. Try cache (if KV available)
    ├─ Cache hit with valid session → set context, proceed
    ├─ Cache hit but expired → clear cache, query DB
    │
-3. Query database
+4. Query database (using request-scoped client)
    ├─ Valid session found → set context, cache for next time, proceed
    ├─ Invalid or expired → log if enabled, proceed without auth
    ├─ Database error → log, proceed without auth
    │
-4. Always proceed to next middleware
+5. Always proceed to next middleware
 ```
 
 **requireAuth Flow:**
@@ -708,6 +711,18 @@ Status: `401 Unauthorized`
    ├─ User exists → proceed to handler
    ├─ User missing → return 401
 ```
+
+**Database Client Creation:**
+
+The session auth middleware creates a request-scoped database client using `createDbClient(env)`:
+
+```typescript
+// Inside session auth middleware
+const db = createDbClient(env);  // Uses environment from request context
+const result = await db.query.sessions.findFirst({...});
+```
+
+This ensures each request uses the correct environment configuration and prevents connection pool exhaustion.
 
 ---
 
@@ -962,41 +977,56 @@ const app = createWorker({
   serviceName: 'my-worker',
   enableSecurityHeaders: true,   // Automatically applies securityHeaders()
   enableGlobalAuth: true,        // Automatically applies optionalAuth()
-  // Rate limiting is applied at route level via withPolicy()
+  // Rate limiting is applied at route level via procedure()
 });
 ```
 
 ### Security Policy Pattern
 
-Routes use `withPolicy()` from `@codex/worker-utils` to declare security requirements:
+Routes use `procedure()` from `@codex/worker-utils` to declare security requirements. The policy is enforced internally by the procedure:
 
 ```typescript
-import { withPolicy, POLICY_PRESETS } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 
-// Public endpoint
+// Public endpoint (no auth required)
 app.get('/api/content/:id',
-  withPolicy(POLICY_PRESETS.public()),
-  getContentHandler
+  procedure({
+    policy: { auth: 'none' },
+    handler: async (ctx) => {
+      return await ctx.services.content.getById(ctx.input.params.id);
+    },
+  })
 );
 
 // Authenticated API endpoint with standard rate limiting
 app.get('/api/profile',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  getProfileHandler
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx) => {
+      return await ctx.services.profile.get(ctx.user.id);
+    },
+  })
 );
 
 // Creator-only with strict rate limiting
 app.post('/api/content',
-  withPolicy(POLICY_PRESETS.creator()),
-  createContentHandler
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    handler: async (ctx) => {
+      return await ctx.services.content.create(ctx.input.body);
+    },
+  })
 );
 
 // Internal worker-to-worker endpoint
 app.post('/internal/webhook',
-  withPolicy(POLICY_PRESETS.internal()),
-  webhookHandler
+  procedure({
+    policy: { auth: 'worker' },
+    handler: async (ctx) => {
+      return await ctx.services.webhook.process(ctx.input.body);
+    },
+  })
 );
-```
 
 ---
 
@@ -1046,31 +1076,32 @@ The security package provides multiple overlapping defense mechanisms that work 
 ### Combined Example
 
 ```typescript
-import { securityHeaders, rateLimit, requireAuth, workerAuth } from '@codex/security';
-import { withPolicy } from '@codex/worker-utils';
+import { securityHeaders, rateLimit, optionalAuth, workerAuth, RATE_LIMIT_PRESETS } from '@codex/security';
+import { procedure } from '@codex/worker-utils';
 
 app.use('*', securityHeaders({
   environment: c.env.ENVIRONMENT,
 }));
 
-// Layer 3: Rate limiting
+// Layer 3: Rate limiting (global)
 app.use('/api/*', rateLimit({
   kv: c.env.RATE_LIMIT_KV,
   ...RATE_LIMIT_PRESETS.api,
 }));
 
-// Layer 4: User authentication
+// Layer 4: User authentication (global optional)
 app.use('/api/*', optionalAuth({
   kv: c.env.AUTH_SESSION_KV,
 }));
 
-// Protected endpoint with policy
+// Protected endpoint with policy (procedure enforces auth + rate limit)
 app.post('/api/content',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'strict',
-  }),
-  createContentHandler
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    handler: async (ctx) => {
+      return await ctx.services.content.create(ctx.input.body);
+    },
+  })
 );
 
 // Internal endpoint with worker auth
@@ -1079,7 +1110,14 @@ app.use('/internal/*', workerAuth({
   allowedOrigins: ['https://auth.revelations.studio'],
 }));
 
-app.post('/internal/webhook', webhookHandler);
+app.post('/internal/webhook',
+  procedure({
+    policy: { auth: 'worker' },
+    handler: async (ctx) => {
+      return await ctx.services.webhook.process(ctx.input.body);
+    },
+  })
+);
 ```
 
 ---
@@ -1089,44 +1127,46 @@ app.post('/internal/webhook', webhookHandler);
 ### Protecting Routes with Different Security Levels
 
 ```typescript
-import { withPolicy } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 
 // Public content endpoint
 app.get('/api/content/public/:id',
-  withPolicy({
-    auth: 'none',
-    rateLimit: 'web',
-  }),
-  getPublicContent
+  procedure({
+    policy: { auth: 'none', rateLimit: 'web' },
+    handler: async (ctx) => {
+      return await ctx.services.content.getPublic(ctx.input.params.id);
+    },
+  })
 );
 
 // User content (requires auth)
 app.get('/api/content/:id',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'api',
-  }),
-  getContent
+  procedure({
+    policy: { auth: 'required', rateLimit: 'api' },
+    handler: async (ctx) => {
+      return await ctx.services.content.getById(ctx.input.params.id);
+    },
+  })
 );
 
 // Creator only
 app.post('/api/content',
-  withPolicy({
-    auth: 'required',
-    roles: ['creator'],
-    rateLimit: 'api',
-  }),
-  createContent
+  procedure({
+    policy: { auth: 'required', roles: ['creator'], rateLimit: 'api' },
+    handler: async (ctx) => {
+      return await ctx.services.content.create(ctx.input.body);
+    },
+  })
 );
 
 // Admin only with strict rate limiting
 app.delete('/api/users/:id',
-  withPolicy({
-    auth: 'required',
-    roles: ['admin'],
-    rateLimit: 'auth',
-  }),
-  deleteUser
+  procedure({
+    policy: { auth: 'required', roles: ['admin'], rateLimit: 'auth' },
+    handler: async (ctx) => {
+      return await ctx.services.users.delete(ctx.input.params.id);
+    },
+  })
 );
 ```
 
@@ -1153,22 +1193,25 @@ app.post('/api/auth/forgot-password', sensitiveLimiter, forgotPassword);
 
 ```typescript
 import { workerAuth } from '@codex/security';
-import { withPolicy } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
+
+// Apply worker auth middleware to internal routes
+app.use('/internal/*', workerAuth({
+  secret: c.env.WORKER_SHARED_SECRET,
+  allowedOrigins: [
+    'https://auth.revelations.studio',
+    'https://stripe-webhook.revelations.studio',
+  ],
+}));
 
 // Internal webhook endpoints
 app.post('/internal/webhook/:type',
-  workerAuth({
-    secret: c.env.WORKER_SHARED_SECRET,
-    allowedOrigins: [
-      'https://auth.revelations.studio',
-      'https://stripe-webhook.revelations.studio',
-    ],
-  }),
-  withPolicy({
-    auth: 'worker',
-    rateLimit: 'webhook',
-  }),
-  handleWebhook
+  procedure({
+    policy: { auth: 'worker', rateLimit: 'webhook' },
+    handler: async (ctx) => {
+      return await ctx.services.webhook.handle(ctx.input.params.type, ctx.input.body);
+    },
+  })
 );
 ```
 

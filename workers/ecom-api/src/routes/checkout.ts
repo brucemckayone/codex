@@ -17,15 +17,9 @@
  * - Access control - Prevents duplicate purchases
  */
 
-import { dbHttp } from '@codex/database';
-import {
-  createStripeClient,
-  PaymentProcessingError,
-  PurchaseService,
-} from '@codex/purchase';
-import type { HonoEnv, SingleItemResponse } from '@codex/shared-types';
+import type { HonoEnv } from '@codex/shared-types';
 import { createCheckoutSchema } from '@codex/validation';
-import { createAuthenticatedHandler, withPolicy } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 // ============================================================================
@@ -88,37 +82,18 @@ const checkout = new Hono<HonoEnv>();
  */
 checkout.post(
   '/create',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'auth', // 10 req/min - stricter than default api (100 req/min)
-  }),
-  createAuthenticatedHandler({
-    schema: {
-      body: createCheckoutSchema,
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'auth', // 10 req/min - stricter than default api (100 req/min)
     },
-    handler: async (_c, ctx) => {
-      // Initialize Stripe client
-      const stripeSecretKey = ctx.env.STRIPE_SECRET_KEY;
-      if (!stripeSecretKey) {
-        throw new PaymentProcessingError('STRIPE_SECRET_KEY not configured');
-      }
-
-      const stripe = createStripeClient(stripeSecretKey);
-
-      // Initialize purchase service
-      const purchaseService = new PurchaseService(
-        {
-          db: dbHttp,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        },
-        stripe
-      );
-
+    input: { body: createCheckoutSchema },
+    handler: async (ctx): Promise<CheckoutSessionResponse> => {
       // Extract validated input
-      const { contentId, successUrl, cancelUrl } = ctx.validated.body;
+      const { contentId, successUrl, cancelUrl } = ctx.input.body;
 
       // Create checkout session (uses authenticated user's ID as customerId)
-      const session = await purchaseService.createCheckoutSession(
+      const session = await ctx.services.purchase.createCheckoutSession(
         {
           contentId,
           successUrl,
@@ -128,14 +103,10 @@ checkout.post(
       );
 
       // Return checkout session URL and ID
-      const response: SingleItemResponse<CheckoutSessionResponse> = {
-        data: {
-          sessionUrl: session.sessionUrl,
-          sessionId: session.sessionId,
-        },
+      return {
+        sessionUrl: session.sessionUrl,
+        sessionId: session.sessionId,
       };
-
-      return response;
     },
   })
 );

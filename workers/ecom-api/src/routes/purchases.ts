@@ -16,38 +16,11 @@
  * - PurchaseService - Queries purchases from database
  */
 
-import { dbHttp } from '@codex/database';
-import {
-  createStripeClient,
-  type Purchase,
-  PurchaseService,
-  type PurchaseWithContent,
-} from '@codex/purchase';
-import type {
-  Bindings,
-  HonoEnv,
-  PaginatedListResponse,
-  SingleItemResponse,
-} from '@codex/shared-types';
+import type { Purchase, PurchaseWithContent } from '@codex/purchase';
+import type { HonoEnv, PaginatedListResponse } from '@codex/shared-types';
 import { createIdParamsSchema, purchaseQuerySchema } from '@codex/validation';
-import { createAuthenticatedHandler, withPolicy } from '@codex/worker-utils';
+import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-/**
- * Get Stripe API key from environment with type safety.
- * STRIPE_SECRET_KEY is validated at worker startup via createEnvValidationMiddleware.
- * This helper provides type-safe access after validation.
- */
-function getStripeKey(env: Bindings): string {
-  if (!env.STRIPE_SECRET_KEY) {
-    throw new Error('STRIPE_SECRET_KEY not configured');
-  }
-  return env.STRIPE_SECRET_KEY;
-}
 
 // ============================================================================
 // Routes
@@ -68,7 +41,7 @@ const purchases = new Hono<HonoEnv>();
  *
  * Response (200):
  * {
- *   "data": [...purchases with content],
+ *   "items": [...purchases with content],
  *   "pagination": { "page": 1, "limit": 20, "total": 42, "totalPages": 3 }
  * }
  *
@@ -81,33 +54,18 @@ const purchases = new Hono<HonoEnv>();
  */
 purchases.get(
   '/',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'api', // 100 req/min
-  }),
-  createAuthenticatedHandler({
-    schema: {
-      query: purchaseQuerySchema,
-    },
-    handler: async (_c, ctx) => {
-      const stripe = createStripeClient(getStripeKey(ctx.env));
-
-      const purchaseService = new PurchaseService(
-        {
-          db: dbHttp,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        },
-        stripe
-      );
-
-      // Get purchase history for authenticated user
-      const result = await purchaseService.getPurchaseHistory(
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: purchaseQuerySchema },
+    handler: async (
+      ctx
+    ): Promise<PaginatedListResponse<PurchaseWithContent>> => {
+      const result = await ctx.services.purchase.getPurchaseHistory(
         ctx.user.id,
-        ctx.validated.query
+        ctx.input.query
       );
 
-      // Return paginated response
-      const response: PaginatedListResponse<PurchaseWithContent> = {
+      return {
         items: result.items,
         pagination: {
           page: result.page,
@@ -116,8 +74,6 @@ purchases.get(
           totalPages: Math.ceil(result.total / result.limit),
         },
       };
-
-      return response;
     },
   })
 );
@@ -149,37 +105,14 @@ purchases.get(
  */
 purchases.get(
   '/:id',
-  withPolicy({
-    auth: 'required',
-    rateLimit: 'api', // 100 req/min
-  }),
-  createAuthenticatedHandler({
-    schema: {
-      params: createIdParamsSchema(),
-    },
-    handler: async (_c, ctx) => {
-      const stripe = createStripeClient(getStripeKey(ctx.env));
-
-      const purchaseService = new PurchaseService(
-        {
-          db: dbHttp,
-          environment: ctx.env.ENVIRONMENT || 'development',
-        },
-        stripe
-      );
-
-      // Get purchase (throws 404 if not found, 403 if not owner)
-      const purchase = await purchaseService.getPurchase(
-        ctx.validated.params.id,
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<Purchase> => {
+      return await ctx.services.purchase.getPurchase(
+        ctx.input.params.id,
         ctx.user.id
       );
-
-      // Return single item response
-      const response: SingleItemResponse<Purchase> = {
-        data: purchase,
-      };
-
-      return response;
     },
   })
 );

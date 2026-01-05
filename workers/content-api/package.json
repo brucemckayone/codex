@@ -22,6 +22,7 @@
     "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/security": "workspace:*",
+    "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",

@@ -56,6 +56,16 @@ export abstract class ServiceError extends Error {
 }
 
 /**
+ * Authentication error (401)
+ * Thrown when user is not authenticated or session is invalid
+ */
+export class UnauthorizedError extends ServiceError {
+  constructor(message: string, context?: Record<string, unknown>) {
+    super(message, 'UNAUTHORIZED', 401, context);
+  }
+}
+
+/**
  * Resource not found error (404)
  * Thrown when querying for a resource that doesn't exist
  */

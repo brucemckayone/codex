@@ -1294,7 +1294,9 @@ jobs:
         if: always()
         with:
           name: e2e-api-test-results-${{ github.run_id }}
-          path: e2e/**/coverage/**
+          path: |
+            e2e/test-results.json
+            e2e/test-results/**
           retention-days: 7
 
       - name: Fail if E2E API tests failed

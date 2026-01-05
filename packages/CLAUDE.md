@@ -292,10 +292,9 @@ Utility packages provide cross-cutting concerns, helpers, and infrastructure. Us
 
 **Key exports**:
 - `createWorker()` - Create fully configured Hono app with standard middleware
-- `createAuthenticatedHandler()` - Unified handler with schema validation, auth, error mapping
+- `procedure()` - tRPC-style handler with policy, validation, services, and error handling
+- `createServiceRegistry()` - Service registry factory for lazy-loaded services
 - Middleware factories: `createRequestTrackingMiddleware()`, `createCorsMiddleware()`, `createSecurityHeadersMiddleware()`
-- `withPolicy()` - Route-level security policy (auth level, roles, rate limits)
-- `POLICY_PRESETS` - public, authenticated, creator, admin, internal, sensitive
 - Test utilities: `createTestUser()`, `createAuthenticatedRequest()`
 
 **Middleware chain** (in order):
@@ -404,7 +403,7 @@ Foundation ← Service ← Utility ← Workers
 
 Example: Content creation flow
 1. User makes request to workers/content-api
-2. Route handler uses @codex/worker-utils (createAuthenticatedHandler)
+2. Route handler uses @codex/worker-utils (procedure)
 3. Calls @codex/content (ContentService.create)
 4. Service extends @codex/service-errors (BaseService)
 5. Service uses @codex/validation (createContentSchema)
@@ -466,12 +465,11 @@ class ContentAccessService extends BaseService {
 
 // 3. Create route handler
 app.get('/api/user/library',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: { query: listUserLibrarySchema },
-    handler: async (c, ctx) => {
-      const service = new ContentAccessService({ db, r2, obs });
-      return await service.listUserLibrary(ctx.user.id, ctx.validated.query);
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: listUserLibrarySchema },
+    handler: async (ctx) => {
+      return await ctx.services.contentAccess.listUserLibrary(ctx.user.id, ctx.input.query);
     },
   })
 );
@@ -483,7 +481,7 @@ app.get('/api/user/library',
 - @codex/database - Read purchases, content, progress
 - @codex/validation - Validate query parameters
 - @codex/service-errors - Handle errors (inherits from BaseService)
-- @codex/worker-utils - createAuthenticatedHandler, withPolicy
+- @codex/worker-utils - procedure
 - @codex/shared-types - Type-safe response shape
 
 ---
@@ -656,7 +654,7 @@ describe('User Library', () => {
 | Manage organizations | @codex/identity | OrganizationService |
 | Control access to content | @codex/access | ContentAccessService |
 | Handle purchases & Stripe | @codex/purchase | PurchaseService, createStripeClient, verifyWebhookSignature |
-| Build an API worker | @codex/worker-utils | createWorker, createAuthenticatedHandler |
+| Build an API worker | @codex/worker-utils | createWorker, procedure |
 | Upload media to R2 | @codex/cloudflare-clients | R2Service, R2SigningClient |
 | Generate streaming URLs | @codex/cloudflare-clients | R2Service.generateSignedUrl() |
 | Add authentication | @codex/security | requireAuth, optionalAuth |
@@ -684,19 +682,19 @@ export class MyService extends BaseService {
 
 **Building a worker route**:
 ```typescript
-import { createWorker, createAuthenticatedHandler, withPolicy, POLICY_PRESETS } from '@codex/worker-utils';
+import { createWorker, procedure } from '@codex/worker-utils';
 import { myServiceSchema } from '@codex/validation';
 import type { HonoEnv } from '@codex/shared-types';
 
 const app = createWorker({ serviceName: 'my-api' });
 
 app.post('/api/my-resource',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({
-    schema: { body: myServiceSchema },
-    handler: async (c, ctx) => {
-      const service = new MyService({ db, environment: ctx.env.ENVIRONMENT });
-      return await service.create(ctx.validated.body, ctx.user.id);
+  procedure({
+    policy: { auth: 'required' },
+    input: { body: myServiceSchema },
+    successStatus: 201,
+    handler: async (ctx) => {
+      return await ctx.services.myService.create(ctx.input.body, ctx.user.id);
     },
   })
 );
