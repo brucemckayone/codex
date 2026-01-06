@@ -151,6 +151,9 @@ export class TranscodingService extends BaseService {
     // with a job ID while the transcoding runs in the background. Completion
     // is reported via webhook callback to this.webhookUrl.
     let runpodJobId: string;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
     try {
       const response = await fetch(this.runpodApiUrl, {
         method: 'POST',
@@ -159,6 +162,7 @@ export class TranscodingService extends BaseService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(jobRequest),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -179,9 +183,17 @@ export class TranscodingService extends BaseService {
       if (error instanceof RunPodApiError) {
         throw error;
       }
+      // Check for timeout/abort errors
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new RunPodApiError('triggerJob', undefined, {
+          originalError: 'Request timed out after 30 seconds',
+        });
+      }
       throw new RunPodApiError('triggerJob', undefined, {
         originalError: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     // Step 4: Update media status to 'transcoding'
@@ -236,6 +248,16 @@ export class TranscodingService extends BaseService {
       throw new TranscodingJobNotFoundError(jobId);
     }
 
+    // Ignore stale webhooks - only process if media is in 'transcoding' state
+    if (media.status !== 'transcoding') {
+      this.obs.warn('Webhook received for non-transcoding media, ignoring', {
+        jobId,
+        mediaId: media.id,
+        currentStatus: media.status,
+      });
+      return;
+    }
+
     if (status === 'completed' && output) {
       // Success: Update with all transcoding outputs
       await this.db
@@ -255,7 +277,6 @@ export class TranscodingService extends BaseService {
           loudnessPeak: output.loudnessPeak,
           loudnessRange: output.loudnessRange,
           transcodingError: null, // Clear any previous error
-          uploadedAt: new Date(),
           updatedAt: new Date(),
         })
         .where(eq(mediaItems.id, media.id));
