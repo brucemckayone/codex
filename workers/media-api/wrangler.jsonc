@@ -1,0 +1,146 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "media-api",
+  "main": "dist/index.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Observability configuration
+  "observability": {
+    "enabled": true
+  },
+
+  // KV Namespaces
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT_KV",
+      "id": "cea7153364974737b16870df08f31083"
+    },
+    {
+      "binding": "AUTH_SESSION_KV",
+      "id": "82d04a4236df4aac8e9d87793344f0ed"
+    }
+  ],
+
+  // R2 Buckets
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "codex-media-production",
+      "preview_bucket_name": "codex-media-test"
+    }
+  ],
+
+  // Default environment variables (local development)
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DB_METHOD": "LOCAL_PROXY",
+    "WEB_APP_URL": "http://localhost:3000",
+    "API_URL": "http://localhost:8787"
+  },
+
+  // Environment configurations
+  "env": {
+    // Test environment (E2E tests)
+    "test": {
+      "name": "media-api-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "WEB_APP_URL": "http://localhost:3000",
+        "API_URL": "http://localhost:8787"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production",
+          "preview_bucket_name": "codex-media-test"
+        }
+      ]
+    },
+
+    // Production environment
+    "production": {
+      "name": "media-api-production",
+      "vars": {
+        "ENVIRONMENT": "production",
+        "DB_METHOD": "PRODUCTION",
+        "WEB_APP_URL": "https://codex.revelations.studio",
+        "API_URL": "https://api.revelations.studio"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production"
+        }
+      ],
+      "routes": [
+        {
+          "pattern": "media-api.revelations.studio",
+          "custom_domain": true
+        }
+      ]
+    },
+
+    // Staging environment
+    "staging": {
+      "name": "media-api-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "DB_METHOD": "PRODUCTION",
+        "WEB_APP_URL": "https://codex-staging.revelations.studio",
+        "API_URL": "https://api-staging.revelations.studio"
+      },
+      "routes": [
+        {
+          "pattern": "media-api-staging.revelations.studio/*",
+          "custom_domain": true
+        }
+      ]
+    }
+  }
+
+  // ==========================================================================
+  // Environment Variables & Secrets
+  // ==========================================================================
+  //
+  // Local Development:
+  //   Create .dev.vars file with required secrets (see .dev.vars.example)
+  //
+  // Test Environment:
+  //   Uses .dev.vars.test (already configured with test values)
+  //
+  // Production Secrets (set via wrangler CLI):
+  //   wrangler secret put DATABASE_URL --env production
+  //   wrangler secret put RUNPOD_API_KEY --env production
+  //   wrangler secret put RUNPOD_ENDPOINT_ID --env production
+  //   wrangler secret put RUNPOD_WEBHOOK_SECRET --env production
+  //   wrangler secret put WORKER_SHARED_SECRET --env production
+  //
+  // Required Variables:
+  //   - DATABASE_URL: PostgreSQL connection string
+  //   - RUNPOD_API_KEY: RunPod API key for transcoding jobs
+  //   - RUNPOD_ENDPOINT_ID: RunPod serverless endpoint ID
+  //   - RUNPOD_WEBHOOK_SECRET: Shared secret for webhook signature verification
+  //   - WORKER_SHARED_SECRET: Shared secret for worker-to-worker auth
+  //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
+}

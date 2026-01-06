@@ -688,6 +688,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/transcoding':
+        specifier: workspace:*
+        version: link:../transcoding
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -991,6 +994,73 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250102.0
         version: 4.20251121.0
+      '@vitest/runner':
+        specifier: ~3.2.4
+        version: 3.2.4
+      '@vitest/snapshot':
+        specifier: ~3.2.4
+        version: 3.2.4
+      '@vitest/ui':
+        specifier: ~3.2.4
+        version: 3.2.4(vitest@3.2.4)
+      cloudflare:
+        specifier: ^4.0.0
+        version: 4.5.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.4.11
+        version: 5.4.21(@types/node@22.13.0)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@22.13.0)(@vitest/ui@3.2.4)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
+      wrangler:
+        specifier: ^4.47.0
+        version: 4.50.0(@cloudflare/workers-types@4.20251121.0)
+
+  workers/media-api:
+    dependencies:
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@codex/security':
+        specifier: workspace:*
+        version: link:../../packages/security
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../../packages/service-errors
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      '@codex/transcoding':
+        specifier: workspace:*
+        version: link:../../packages/transcoding
+      '@codex/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
+      '@codex/worker-utils':
+        specifier: workspace:*
+        version: link:../../packages/worker-utils
+      hono:
+        specifier: ^4.7.8
+        version: 4.10.6
+      vite-plugin-dts:
+        specifier: ^4.5.4
+        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@5.4.21(@types/node@22.13.0))
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: ^0.10.0
+        version: 0.10.10(@cloudflare/workers-types@4.20251121.0)(@vitest/runner@3.2.4)(@vitest/snapshot@3.2.4)(vitest@3.2.4)
+      '@cloudflare/workers-types':
+        specifier: ^4.20250102.0
+        version: 4.20251121.0
+      '@types/node':
+        specifier: ^22.13.0
+        version: 22.13.0
       '@vitest/runner':
         specifier: ~3.2.4
         version: 3.2.4

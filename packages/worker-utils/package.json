@@ -40,6 +40,7 @@
     "@codex/security": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
+    "@codex/transcoding": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7",
     "hono": "^4.7.8",

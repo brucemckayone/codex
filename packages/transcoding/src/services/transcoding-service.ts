@@ -20,7 +20,7 @@ import { scopedNotDeleted } from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type { RunPodWebhookPayload } from '@codex/validation';
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 
 import {
   InvalidMediaStateError,
@@ -470,5 +470,141 @@ export class TranscodingService extends BaseService {
       }
       throw wrapError(error, { mediaId, creatorId });
     }
+  }
+
+  /**
+   * Get media item for transcoding without authorization check
+   *
+   * INTERNAL USE ONLY: Used by triggerJobInternal for worker-to-worker calls
+   * where authentication is done via HMAC instead of user session.
+   */
+  private async getMediaForTranscodingInternal(
+    mediaId: string
+  ): Promise<TranscodingMediaItem> {
+    const media = await this.db.query.mediaItems.findFirst({
+      where: and(eq(mediaItems.id, mediaId), isNull(mediaItems.deletedAt)),
+      columns: {
+        id: true,
+        creatorId: true,
+        mediaType: true,
+        status: true,
+        r2Key: true,
+        transcodingAttempts: true,
+        runpodJobId: true,
+        transcodingError: true,
+        transcodingPriority: true,
+        hlsMasterPlaylistKey: true,
+        hlsPreviewKey: true,
+        thumbnailKey: true,
+        waveformKey: true,
+        waveformImageKey: true,
+        durationSeconds: true,
+        width: true,
+        height: true,
+        readyVariants: true,
+      },
+    });
+
+    if (!media) {
+      throw new TranscodingMediaNotFoundError(mediaId);
+    }
+
+    return media as TranscodingMediaItem;
+  }
+
+  /**
+   * Trigger transcoding job for internal worker-to-worker calls
+   *
+   * INTERNAL USE ONLY: Called by media-api internal route after content-api
+   * triggers transcoding post-upload. Authentication is via HMAC workerAuth,
+   * not user session, so no creatorId authorization check is needed.
+   *
+   * @param mediaId - Media item UUID
+   * @param priority - Optional job priority (1-100, higher = more urgent)
+   */
+  async triggerJobInternal(mediaId: string, priority?: number): Promise<void> {
+    this.obs.info('Triggering transcoding job (internal)', {
+      mediaId,
+      priority,
+    });
+
+    // Fetch media without authorization check (workerAuth is the auth layer)
+    const media = await this.getMediaForTranscodingInternal(mediaId);
+
+    // Verify media is in correct state
+    if (media.status !== 'uploaded') {
+      throw new InvalidMediaStateError(mediaId, media.status, 'uploaded', {
+        operation: 'triggerJobInternal',
+      });
+    }
+
+    // Construct job request using media's creatorId
+    const jobRequest: RunPodJobRequest = {
+      input: {
+        mediaId: media.id,
+        type: media.mediaType,
+        creatorId: media.creatorId,
+        inputKey: media.r2Key,
+        webhookUrl: this.webhookUrl,
+        priority: priority ?? media.transcodingPriority,
+      },
+    };
+
+    // Call RunPod /run API
+    let runpodJobId: string;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    try {
+      const response = await fetch(this.runpodApiUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.runpodApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(jobRequest),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new RunPodApiError('triggerJobInternal', response.status, {
+          responseBody: errorText,
+        });
+      }
+
+      const result = (await response.json()) as RunPodJobResponse;
+      runpodJobId = result.id;
+    } catch (error) {
+      if (error instanceof RunPodApiError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new RunPodApiError('triggerJobInternal', undefined, {
+          originalError: 'Request timed out after 30 seconds',
+        });
+      }
+      throw new RunPodApiError('triggerJobInternal', undefined, {
+        originalError: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    // Update media status to 'transcoding'
+    await this.db
+      .update(mediaItems)
+      .set({
+        status: 'transcoding',
+        runpodJobId,
+        transcodingPriority: priority ?? media.transcodingPriority,
+        updatedAt: new Date(),
+      })
+      .where(eq(mediaItems.id, mediaId));
+
+    this.obs.info('Transcoding job triggered (internal)', {
+      mediaId,
+      runpodJobId,
+    });
   }
 }

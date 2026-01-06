@@ -25,6 +25,7 @@ import { OrganizationService } from '@codex/organization';
 import { PlatformSettingsFacade } from '@codex/platform-settings';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
+import { TranscodingService } from '@codex/transcoding';
 import type { ServiceRegistry } from './types';
 
 /**
@@ -73,6 +74,7 @@ export function createServiceRegistry(
   let _organization: OrganizationService | undefined;
   let _settings: PlatformSettingsFacade | undefined;
   let _purchase: PurchaseService | undefined;
+  let _transcoding: TranscodingService | undefined;
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
@@ -197,6 +199,31 @@ export function createServiceRegistry(
         );
       }
       return _purchase;
+    },
+
+    // ========================================================================
+    // Media Domain
+    // ========================================================================
+
+    get transcoding() {
+      if (!_transcoding) {
+        const runpodApiKey = env.RUNPOD_API_KEY;
+        const runpodEndpointId = env.RUNPOD_ENDPOINT_ID;
+        if (!runpodApiKey || !runpodEndpointId) {
+          throw new Error(
+            'RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID not configured. ' +
+              'Add secrets to worker environment for transcoding operations.'
+          );
+        }
+        _transcoding = new TranscodingService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          runpodApiKey,
+          runpodEndpointId,
+          webhookBaseUrl: env.API_URL || 'http://localhost:4002',
+        });
+      }
+      return _transcoding;
     },
 
     // ========================================================================

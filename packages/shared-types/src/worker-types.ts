@@ -139,6 +139,11 @@ export type Bindings = {
    * e.g., https://api.example.com - used to construct webhook URLs
    */
   RUNPOD_WEBHOOK_BASE_URL?: string;
+
+  /**
+   * Shared secret for worker-to-worker HMAC authentication
+   */
+  WORKER_SHARED_SECRET?: string;
 };
 
 /**
@@ -214,6 +219,13 @@ export interface Variables {
     status: string;
     joinedAt: Date;
   };
+
+  /**
+   * Raw request body stored by middleware
+   * Used by webhook handlers that need to verify signatures before parsing JSON
+   * Set by signature verification middleware (e.g., verifyRunpodSignature)
+   */
+  rawBody?: string;
 }
 
 /**
