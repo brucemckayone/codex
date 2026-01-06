@@ -95,6 +95,13 @@ export type RunPodWebhookOutput = z.infer<typeof runpodWebhookOutputSchema>;
 /**
  * RunPod webhook payload
  * Received when transcoding job completes (success or failure)
+ *
+ * @security HMAC-SHA256 signature verification REQUIRED before processing.
+ * The webhook handler must verify the `x-runpod-signature` header using
+ * RUNPOD_WEBHOOK_SECRET before trusting this payload. Never process
+ * webhook data without signature verification.
+ *
+ * @see packages/security for HMAC verification utilities
  */
 export const runpodWebhookSchema = z.object({
   // Job identification
@@ -104,8 +111,8 @@ export const runpodWebhookSchema = z.object({
   // Output data (present on success)
   output: runpodWebhookOutputSchema.optional(),
 
-  // Error message (present on failure)
-  error: z.string().optional(),
+  // Error message (present on failure, max 2KB to match DB constraint)
+  error: z.string().max(2000).optional(),
 });
 
 export type RunPodWebhookPayload = z.infer<typeof runpodWebhookSchema>;

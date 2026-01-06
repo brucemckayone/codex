@@ -133,7 +133,11 @@ export const mediaItems = pgTable(
     status: varchar('status', { length: 50 }).default('uploading').notNull(),
     // 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed'
 
-    // R2 Storage (in creator's bucket: codex-media-{creator_id}) // TODO: double check this is correct becuase it should be that we are 4 buckets and each has its own creator id subfolder within
+    // R2 Storage - Single MEDIA_BUCKET with creator subfolder structure:
+    // {creatorId}/originals/{mediaId}/video.mp4 (uploads)
+    // {creatorId}/hls/{mediaId}/master.m3u8 (transcoded)
+    // {creatorId}/thumbnails/{mediaId}/thumb.jpg
+    // {creatorId}/waveforms/{mediaId}/waveform.json
     r2Key: varchar('r2_key', { length: 500 }).notNull(), // "originals/{media_id}/video.mp4"
     fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
     mimeType: varchar('mime_type', { length: 100 }),
@@ -154,7 +158,7 @@ export const mediaItems = pgTable(
 
     // Transcoding Job Tracking
     runpodJobId: varchar('runpod_job_id', { length: 255 }), // RunPod job ID for tracking
-    transcodingError: text('transcoding_error'), // Error message if transcoding fails
+    transcodingError: varchar('transcoding_error', { length: 2000 }), // Error message (max 2KB to prevent DoS)
     transcodingAttempts: integer('transcoding_attempts').default(0).notNull(), // Retry count (max 1)
     transcodingPriority: integer('transcoding_priority').default(2).notNull(), // 0=urgent, 2=normal, 4=backlog
 
@@ -185,6 +189,7 @@ export const mediaItems = pgTable(
     index('idx_media_items_creator_id').on(table.creatorId),
     index('idx_media_items_status').on(table.creatorId, table.status),
     index('idx_media_items_type').on(table.creatorId, table.mediaType),
+    index('idx_media_items_runpod_job_id').on(table.runpodJobId), // For webhook callback queries
 
     // CHECK constraints
     check(
@@ -199,6 +204,10 @@ export const mediaItems = pgTable(
     check(
       'check_transcoding_priority',
       sql`${table.transcodingPriority} >= 0 AND ${table.transcodingPriority} <= 4`
+    ),
+    check(
+      'check_max_transcoding_attempts',
+      sql`${table.transcodingAttempts} >= 0 AND ${table.transcodingAttempts} <= 1`
     ),
 
     // Media lifecycle constraint: status='ready' requires transcoding outputs
