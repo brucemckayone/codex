@@ -55,12 +55,17 @@ export {
   ValidationError,
   wrapError,
 } from './errors';
-// Path utilities (SINGLE SOURCE OF TRUTH for R2 keys)
+// Path utilities (SINGLE SOURCE OF TRUTH for R2/B2 keys)
 export {
+  // B2 paths (mezzanine archival)
+  B2_PATH_CONFIG,
+  // R2 paths (delivery assets)
   getHlsMasterKey,
   getHlsPrefix,
   getHlsPreviewKey,
   getHlsVariantKey,
+  getMezzanineKey,
+  getMezzaninePrefix,
   getOriginalKey,
   getThumbnailKey,
   getTranscodingOutputKeys,
@@ -85,6 +90,7 @@ export {
   type MediaStatus,
   // Package-specific types
   type MediaType,
+  type MezzanineStatus,
   mezzanineStatusEnum,
   type RetryTranscodingInput,
   type RunPodJobRequest,

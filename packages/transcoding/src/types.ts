@@ -80,6 +80,11 @@ export interface TranscodingServiceConfig {
 }
 
 /**
+ * Mezzanine processing status
+ */
+export type MezzanineStatus = 'pending' | 'processing' | 'ready' | 'failed';
+
+/**
  * Media item data required for transcoding operations
  */
 export interface TranscodingMediaItem {
@@ -101,4 +106,8 @@ export interface TranscodingMediaItem {
   width: number | null;
   height: number | null;
   readyVariants: string[] | null;
+  /** B2 archival mezzanine key (high-quality CRF 18 intermediate) */
+  mezzanineKey: string | null;
+  /** Mezzanine processing status */
+  mezzanineStatus: MezzanineStatus | null;
 }

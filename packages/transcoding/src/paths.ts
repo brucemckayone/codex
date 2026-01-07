@@ -39,6 +39,55 @@ export const PATH_CONFIG = {
 } as const;
 
 /**
+ * B2 Path configuration constants (archival mezzanine storage)
+ *
+ * Bucket names by environment:
+ * - Production: codex-mezzanine-production
+ * - Dev: codex-mezzanine-dev
+ * - Test: codex-mezzanine-test
+ */
+export const B2_PATH_CONFIG = {
+  /** Folder for mezzanine archive files */
+  MEZZANINE_FOLDER: 'mezzanine',
+  /** Default mezzanine filename (high-quality CRF 18 intermediate) */
+  MEZZANINE_FILENAME: 'mezzanine.mp4',
+} as const;
+
+/**
+ * Generate B2 key for mezzanine archive file
+ *
+ * Mezzanine files are high-quality intermediates (CRF 18) stored in B2
+ * for archival purposes and potential future re-transcoding.
+ *
+ * @param creatorId - Creator's user ID
+ * @param mediaId - Media item UUID
+ * @returns B2 key path to mezzanine file
+ *
+ * @example
+ * getMezzanineKey('user-123', 'media-456')
+ * // Returns: 'user-123/mezzanine/media-456/mezzanine.mp4'
+ */
+export function getMezzanineKey(creatorId: string, mediaId: string): string {
+  return `${creatorId}/${B2_PATH_CONFIG.MEZZANINE_FOLDER}/${mediaId}/${B2_PATH_CONFIG.MEZZANINE_FILENAME}`;
+}
+
+/**
+ * Generate B2 key prefix for mezzanine folder
+ * Useful for listing or deleting mezzanine files for a media item
+ *
+ * @param creatorId - Creator's user ID
+ * @param mediaId - Media item UUID
+ * @returns B2 key prefix
+ *
+ * @example
+ * getMezzaninePrefix('user-123', 'media-456')
+ * // Returns: 'user-123/mezzanine/media-456/'
+ */
+export function getMezzaninePrefix(creatorId: string, mediaId: string): string {
+  return `${creatorId}/${B2_PATH_CONFIG.MEZZANINE_FOLDER}/${mediaId}/`;
+}
+
+/**
  * Generate R2 key for original uploaded file
  *
  * @param creatorId - Creator's user ID
