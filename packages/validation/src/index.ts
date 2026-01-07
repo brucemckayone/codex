@@ -13,6 +13,8 @@ export * from './primitives';
 export * from './schemas/access';
 // File upload schemas
 export * from './schemas/file-upload';
+// Notification schemas
+export * from './schemas/notifications';
 // Purchase schemas
 export * from './schemas/purchase';
 // Settings schemas

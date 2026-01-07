@@ -3,8 +3,8 @@
 **Status**: Draft (reviewed)
 **Work Packet**: P1-NOTIFY-001
 **Created**: 2025-12-18
-**Last Updated**: 2025-12-19
-**Reviewed**: 2025-12-19 (codebase alignment review)
+**Last Updated**: 2026-01-05
+**Reviewed**: 2026-01-05 (dependency and implementation state review)
 **Owner**: TBD
 
 ---
@@ -54,33 +54,37 @@
 
 ## Dependencies and Preconditions
 
-- Platform settings schema and data source for branding.
-  - Reference: `design/roadmap/work-packets/P1-SETTINGS-001-platform-settings.md`
+- ✅ **Platform settings schema and data source for branding** - COMPLETE
+  - Package: `packages/platform-settings` (BrandingSettingsService, ContactSettingsService, FeatureSettingsService)
+  - Schema: `packages/database/src/schema/settings.ts` (platformSettings, brandingSettings, contactSettings, featureSettings)
+  - Validation: `packages/validation/src/schemas/settings.ts`
+  - E2E tests: `e2e/tests/07-platform-settings.test.ts`
 - Organization membership for creator access rules.
-  - Reference: `packages/database/src/schema/content.ts`
+  - Reference: `packages/database/src/schema/content.ts` (organizationMemberships table)
 - Observability redaction capabilities.
   - Reference: `packages/observability/src/index.ts`
   - Reference: `packages/observability/src/redact.ts`
-- Security and policy middleware for auth/role checks.
+- Security and procedure middleware for auth/role checks.
   - Reference: `packages/security/CLAUDE.md`
-  - Reference: `packages/worker-utils/src/security-policy.ts`
+  - Reference: `packages/worker-utils/src/procedure/` (new procedure-based routing)
+  - Reference: `packages/worker-utils/src/auth-middleware.ts`
 - Worker scaffolding in `workers/notifications-api`.
   - Reference: `workers/notifications-api/src/index.ts`
-  - Reference: `workers/notifications-api/src/utils/validate-env.ts`
 
 ---
 
 ## Research Inputs and Gaps
 
 **Local context reviewed (deep dive)**:
-- `packages/database/CLAUDE.md` (dbHttp vs dbWs, query utilities, schema exports).
-- `packages/worker-utils/CLAUDE.md` and `packages/worker-utils/src/security-policy.ts` (createWorker, withPolicy, org checks).
-- `packages/worker-utils/src/route-helpers.ts` (createAuthenticatedHandler pattern).
-- `packages/security/CLAUDE.md` and `packages/security/src/platform-owner-auth.ts` (requirePlatformOwner).
+- `packages/database/CLAUDE.md` (createDbClient, query utilities, schema exports).
+- `packages/worker-utils/CLAUDE.md` and `packages/worker-utils/src/procedure/` (createWorker, procedure(), service registry).
+- `packages/worker-utils/src/auth-middleware.ts` (authentication middleware).
+- `packages/security/CLAUDE.md` (auth middleware patterns).
 - `packages/validation/CLAUDE.md` and `packages/validation/src/primitives.ts` (Zod patterns, email schema).
 - `packages/observability/CLAUDE.md` and `packages/observability/src/redact.ts` (PII redaction behavior).
 - `packages/shared-types/CLAUDE.md` and `packages/shared-types/src/worker-types.ts` (Bindings/Variables).
 - `packages/service-errors/CLAUDE.md` (error mapping and BaseService patterns).
+- `packages/platform-settings/CLAUDE.md` (branding integration for email templates).
 - `workers/notifications-api/CLAUDE.md` (worker setup and constraints).
 
 **Context-7 map**:
@@ -103,11 +107,12 @@
 - Membership rules: `packages/database/src/schema/content.ts`
 
 **Notifications library**
-- New: `packages/notifications/src/index.ts`
-- New: `packages/notifications/src/service.ts`
-- New: `packages/notifications/src/repositories/`
-- New: `packages/notifications/src/templates/`
-- New: `packages/notifications/src/providers/`
+- ⚠️ Exists but broken: `packages/notifications/src/index.ts` (exports non-existent code)
+- ⚠️ Exists but broken: `packages/notifications/src/types.ts` (imports non-existent schema)
+- ✅ Implemented: `packages/notifications/src/errors.ts` (domain errors)
+- New: `packages/notifications/src/services/notifications-service.ts`
+- New: `packages/notifications/src/templates/renderer.ts`
+- New: `packages/notifications/src/providers/` (ResendProvider, ConsoleProvider)
 - New: `packages/notifications/CLAUDE.md`
 
 **Validation**
@@ -123,19 +128,18 @@
 **Worker**
 - Update: `workers/notifications-api/src/index.ts`
 - New: `workers/notifications-api/src/routes/templates.ts`
-- New: `workers/notifications-api/src/routes/preview.ts` (optional but recommended)
-- Update: `workers/notifications-api/src/utils/validate-env.ts`
+- New: `workers/notifications-api/src/routes/preview.ts` (mandatory for Phase 1)
 - Update: `workers/notifications-api/wrangler.jsonc`
 
-**Security and policies**
-- Platform owner auth: `packages/security/src/platform-owner-auth.ts`
-- Policy logic: `packages/worker-utils/src/security-policy.ts`
-- Authenticated handler: `packages/worker-utils/src/route-helpers.ts`
+**Security and routing (updated patterns)**
+- Auth middleware: `packages/worker-utils/src/auth-middleware.ts`
+- Procedure handlers: `packages/worker-utils/src/procedure/procedure.ts`
+- Service registry: `packages/worker-utils/src/procedure/service-registry.ts`
 
 **Patterns to mirror**
-- Route structure and policy usage: `workers/content-api/src/routes/content.ts`
-- Handler utilities: `@codex/worker-utils` usage in workers
-- Service layer style: `packages/content/src/services/content-service.ts`
+- Route structure with procedure(): `workers/organization-api/src/routes/settings.ts`
+- Handler utilities: `@codex/worker-utils` procedure() usage
+- Service layer style: `packages/platform-settings/src/services/`
 
 ---
 
@@ -148,16 +152,14 @@
 
 **@codex/worker-utils**
 - `createWorker` builds standard middleware stack and health checks.
-- `createAuthenticatedHandler` handles JSON parsing, validation, auth checks, and error formatting.
-- `withPolicy` enforces rate limits and auth; `requireOrgMembership` uses org subdomain; `requireOrgManagement` uses route params (`:id` or `:organizationId`).
-- `POLICY_PRESETS` provide common policies (public, authenticated, creator, orgManagement).
+- `procedure()` is the new tRPC-style handler pattern - handles auth, validation, services, and error formatting.
+- `createServiceRegistry()` provides lazy-loaded services with proper cleanup.
+- Policies defined inline: `{ auth: 'required' | 'optional' | 'none', roles?: string[] }`.
 
 **@codex/security**
 - Core middleware: `requireAuth`, `optionalAuth`, `rateLimit`, `securityHeaders`.
-- `requirePlatformOwner` is a **standalone middleware** (not a policy preset) that enforces `user.role === 'platform_owner'`.
-- Located at: `packages/security/src/platform-owner-auth.ts`.
-- Must be applied **before** `withPolicy()` in route chain, not via `POLICY_PRESETS`.
-- Usage: `app.post('/global', requirePlatformOwner(), withPolicy(...), handler)`.
+- Platform owner check is now done via procedure policy: `{ auth: 'required', roles: ['platform_owner'] }`.
+- Session auth with KV secondary storage for fast lookups.
 
 **@codex/validation**
 - Central Zod schemas and primitives.
@@ -180,8 +182,14 @@
 - Standard error classes and `mapErrorToResponse`.
 - Even if NotificationService is stateless, workers should map errors consistently.
 
-**@codex/identity**
-- Organization metadata (name, logoUrl, websiteUrl) can be used as branding fallbacks if platform settings are missing.
+**@codex/organization** (renamed from @codex/identity)
+- Organization metadata (name, logoUrl, websiteUrl) can be used as branding fallbacks.
+
+**@codex/platform-settings** ✅ AVAILABLE
+- `BrandingSettingsService` - logo, colors, platform name.
+- `ContactSettingsService` - support email, contact URL.
+- Use for email template branding tokens.
+- Import: `import { BrandingSettingsService } from '@codex/platform-settings';`
 
 ---
 
@@ -383,33 +391,56 @@ Template bodies should use simple `{{token}}` placeholders with a whitelisted to
 
 ## Branding and Defaults (English)
 
-**Primary source**
-- Platform settings (brand table) as defined in `design/roadmap/work-packets/P1-SETTINGS-001-platform-settings.md`.
-- Ensure platform settings schema aligns with `organizations.id` type when implemented.
+**Primary source** ✅ IMPLEMENTED
+- Platform settings via `@codex/platform-settings` package.
+- Schema: `packages/database/src/schema/settings.ts` (brandingSettings, contactSettings tables).
+- Service: `BrandingSettingsService.getSettings(organizationId)`.
 
 **Fallback order**
-- Platform settings -> organization profile -> global defaults.
+- Platform settings (brandingSettings table) -> organization profile -> global defaults.
 
-**Brand tokens to inject**
-- Platform name
-- Logo URL
-- Primary color
-- Secondary color
-- Support email
-- Contact URL
+**Brand tokens to inject** (from brandingSettings)
+- Platform name (`platformName`)
+- Logo URL (`logoUrl`)
+- Primary color (`primaryColor`)
+- Secondary color (`secondaryColor`)
+- Support email (from contactSettings: `supportEmail`)
+- Contact URL (from contactSettings: `websiteUrl`)
 
-Decide whether creator templates can override brand tokens or only supply content data. Default assumption is that brand tokens come from org settings and cannot be overridden by template data.
+**Integration pattern:**
+```typescript
+import { BrandingSettingsService, ContactSettingsService } from '@codex/platform-settings';
+
+// In NotificationService
+const brandingService = new BrandingSettingsService({ db, r2Service });
+const contactService = new ContactSettingsService({ db });
+
+const branding = await brandingService.getSettings(organizationId);
+const contact = await contactService.getSettings(organizationId);
+
+const brandTokens = {
+  platformName: branding.platformName ?? 'Codex',
+  logoUrl: branding.logoUrl ?? DEFAULT_LOGO,
+  primaryColor: branding.primaryColor ?? '#000000',
+  secondaryColor: branding.secondaryColor ?? '#ffffff',
+  supportEmail: contact.supportEmail ?? 'support@codex.io',
+  contactUrl: contact.websiteUrl ?? 'https://codex.io',
+};
+```
+
+Creator templates cannot override brand tokens - they only supply content data.
 
 ---
 
 ## Data Access Strategy (Workers)
 
-**When to use each client** (following `workers/content-api/src/routes/content.ts` pattern):
+**When to use each client** (following current worker patterns):
 
-- **`dbHttp`**: Use for all simple CRUD operations (single-table reads/writes).
+- **`createDbClient(c.env)`**: Use for all simple CRUD operations (single-table reads/writes).
   - GET endpoints (list, get by ID, preview)
   - Simple POST/PATCH/DELETE that don't need transactions
   - Most template operations fall here
+  - **Recommended approach** - ensures proper environment scoping per request
 
 - **`createPerRequestDbClient`**: Use ONLY when you need **transactions**.
   - Multi-table atomic writes (e.g., create template + audit log)
@@ -497,33 +528,57 @@ POST   /api/templates/:id/preview               # Render with test data, return 
 POST   /api/templates/:id/test-send             # Send test email to specified address
 ```
 
-**Middleware composition per route type:**
+**Middleware composition per route type (using procedure()):**
 
 ```typescript
-// Global template routes
+import { procedure } from '@codex/worker-utils';
+
+// Global template routes - platform owner only
 app.post('/api/templates/global',
-  requirePlatformOwner(),                    // Standalone middleware from @codex/security
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedHandler({ ... })
+  procedure({
+    policy: { auth: 'required', roles: ['platform_owner'] },
+    input: { body: createGlobalTemplateSchema },
+    handler: async (ctx) => {
+      return await ctx.services.notifications.createGlobalTemplate(ctx.input.body);
+    },
+  })
 );
 
-// Org template routes
+// Org template routes - org admin required
 app.post('/api/organizations/:organizationId/templates',
-  withPolicy(POLICY_PRESETS.orgManagement()), // Extracts :organizationId from params
-  createAuthenticatedHandler({ ... })
+  procedure({
+    policy: { auth: 'required', roles: ['admin', 'owner'] },
+    input: { body: createOrgTemplateSchema, params: orgIdParamSchema },
+    handler: async (ctx) => {
+      // Verify org membership in handler or service
+      return await ctx.services.notifications.createOrgTemplate(
+        ctx.input.params.organizationId,
+        ctx.input.body
+      );
+    },
+  })
 );
 
-// Creator template routes
+// Creator template routes - creator role required
 app.post('/api/templates/creator',
-  withPolicy(POLICY_PRESETS.creator()),       // Requires creator role
-  createAuthenticatedHandler({ ... })
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: { body: createCreatorTemplateSchema },
+    handler: async (ctx) => {
+      return await ctx.services.notifications.createCreatorTemplate(
+        ctx.user.id,
+        ctx.input.body
+      );
+    },
+  })
 );
 ```
 
 **Key implementation notes:**
-- `requirePlatformOwner()` is separate middleware, not a policy preset.
-- `POLICY_PRESETS.orgManagement()` requires `:id` or `:organizationId` in route params.
-- Membership checks for read/list use `checkOrganizationMembership()` in service layer.
+- Use `procedure()` pattern with inline policy definitions.
+- Roles checked via `policy.roles` array.
+- Membership checks for read/list done in service layer.
+- Service registry provides lazy-loaded services via `ctx.services`.
 
 ---
 
@@ -537,6 +592,20 @@ app.post('/api/templates/creator',
 - [x] Library package for core logic.
 - [x] Brand defaults from platform settings.
 
+### Phase 0.5: Fix Broken Package Skeleton ⚠️ BLOCKING
+
+The existing `packages/notifications` skeleton exports non-existent code. Must fix before proceeding:
+
+- [ ] Remove or comment out non-existent exports in `packages/notifications/src/index.ts`:
+  - `NotificationsService` export (file doesn't exist)
+  - Provider exports (directory doesn't exist)
+  - `renderTemplate` export (file doesn't exist)
+  - Re-exported validation schemas (don't exist yet in @codex/validation)
+- [ ] Fix `packages/notifications/src/types.ts` - remove import of `EmailTemplate` from non-existent schema.
+- [ ] Fix `packages/notifications/src/services/index.ts` - remove export of non-existent file.
+- [ ] Keep `packages/notifications/src/errors.ts` - this is correctly implemented.
+- [ ] Verify package compiles with `pnpm build` in packages/notifications.
+
 ### Phase 1: Database Schema and Migrations
 
 - [ ] Create `packages/database/src/schema/notifications.ts`.
@@ -547,6 +616,49 @@ app.post('/api/templates/creator',
 - [ ] Export schema from `packages/database/src/schema/index.ts`.
 - [ ] Add migration via existing DB workflow.
 - [ ] Decide on soft-delete vs hard-delete (deletedAt column) and document.
+
+### Phase 1.5: Seed Data Strategy
+
+Global templates need to be seeded for the system to work. Strategy:
+
+- [ ] Create seed script: `packages/database/scripts/seed-email-templates.ts`
+- [ ] Add npm script: `pnpm db:seed:templates`
+- [ ] Include default templates for:
+  - `email-verification` - Email verification link
+  - `password-reset` - Password reset link
+  - `password-changed` - Password change confirmation
+  - `purchase-receipt` - Purchase confirmation receipt
+- [ ] Make seed script idempotent (check if template exists before inserting).
+- [ ] Document seed command in database CLAUDE.md.
+
+**Seed script pattern:**
+```typescript
+import { dbWs, schema } from '@codex/database';
+
+const globalTemplates = [
+  {
+    name: 'email-verification',
+    scope: 'global',
+    subject: 'Verify your email address',
+    htmlBody: '...', // HTML with {{userName}}, {{verificationUrl}}, {{expiryHours}}
+    textBody: '...', // Plain text version
+    status: 'active',
+  },
+  // ... more templates
+];
+
+async function seedTemplates() {
+  for (const template of globalTemplates) {
+    const existing = await dbWs.query.emailTemplates.findFirst({
+      where: (t) => and(eq(t.name, template.name), eq(t.scope, 'global')),
+    });
+    if (!existing) {
+      await dbWs.insert(schema.emailTemplates).values(template);
+      console.log(`Seeded: ${template.name}`);
+    }
+  }
+}
+```
 
 ### Phase 2: Notifications Library Package
 
@@ -586,12 +698,18 @@ app.post('/api/templates/creator',
 - [ ] Use `POLICY_PRESETS.orgManagement()` for org template writes (requires `:organizationId` in route path).
 - [ ] Add explicit membership checks via `checkOrganizationMembership()` for read/list (subdomain not available).
 
-### Phase 5: Branding Integration
+### Phase 5: Branding Integration ✅ Settings Available
 
-- [ ] Define brand token sourcing rules in `packages/notifications`.
-- [ ] Read platform settings data once available.
-- [ ] Ensure renderer merges brand tokens with template data safely.
-- [ ] Document expected brand fields and fallbacks.
+- [ ] Add `@codex/platform-settings` dependency to `packages/notifications`.
+- [ ] Inject `BrandingSettingsService` and `ContactSettingsService` into `NotificationService`.
+- [ ] Implement brand token sourcing in renderer:
+  ```typescript
+  const branding = await brandingService.getSettings(organizationId);
+  const contact = await contactService.getSettings(organizationId);
+  const brandTokens = { platformName, logoUrl, primaryColor, secondaryColor, supportEmail, contactUrl };
+  ```
+- [ ] Ensure renderer merges brand tokens with template data safely (brand tokens cannot be overridden).
+- [ ] Document expected brand fields and fallbacks in CLAUDE.md.
 
 ### Phase 6: Tests
 
@@ -700,9 +818,10 @@ function renderTemplate(
 - **Template resolution confusion**: Log which scope was selected for debugging.
 - **Deliverability issues**: Verify sender domain early and test in staging before production.
 - **Scope creep**: Keep Phase 1 limited to transactional templates only.
-- **Org membership checks**: `requireOrgMembership` relies on subdomain; use `checkOrganizationMembership()` directly in service layer.
+- **Org membership checks**: Use explicit membership queries in service layer.
 - **Local dev email testing**: Nodemailer incompatible with Workers; use console mock or MailHog HTTP API.
-- **Platform settings dependency**: If P1-SETTINGS-001 not complete, use org profile data as fallback for branding.
+- ~~**Platform settings dependency**: If P1-SETTINGS-001 not complete, use org profile data as fallback for branding.~~ ✅ RESOLVED - `@codex/platform-settings` is available.
+- **Broken package skeleton**: Existing `packages/notifications` exports non-existent code - must fix before implementing (see Phase 0.5).
 
 ---
 
@@ -732,3 +851,12 @@ function renderTemplate(
   - Added Template Rendering Strategy section with escaping and token handling.
   - Updated Testing Strategy to reference existing vitest.config.ts.
   - Made preview endpoint mandatory for Phase 1.
+- 2026-01-05: **Dependency and implementation state review**:
+  - ✅ Marked P1-SETTINGS-001 as COMPLETE - `@codex/platform-settings` fully implemented.
+  - Updated branding integration to reference actual `BrandingSettingsService` and `ContactSettingsService`.
+  - Added Phase 0.5: Fix broken package skeleton (critical blocking issue).
+  - Added Phase 1.5: Seed data strategy with `pnpm db:seed:templates` command.
+  - Updated middleware patterns from `withPolicy()`/`createAuthenticatedHandler()` to `procedure()`.
+  - Updated file references to reflect renamed packages (`@codex/identity` → `@codex/organization`).
+  - Updated data access pattern to recommend `createDbClient(c.env)` over global `dbHttp`.
+  - Added integration code example for platform-settings branding tokens.
