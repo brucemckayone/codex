@@ -27,7 +27,10 @@
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
     "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "API_URL": "http://localhost:8787",
+    "FROM_EMAIL": "noreply@codex.local",
+    "FROM_NAME": "Codex",
+    "USE_MOCK_EMAIL": "true"
   },
 
   // Environment configurations
