@@ -1,0 +1,12 @@
+# RunPod Transcoding Worker Dependencies
+#
+# Core:
+# - runpod: RunPod serverless SDK
+# - boto3: S3-compatible storage (R2/B2)
+# - requests: HTTP client for webhooks
+#
+# Note: FFmpeg and audiowaveform are system packages installed in Dockerfile
+
+runpod>=1.6.0
+boto3>=1.34.0
+requests>=2.31.0
