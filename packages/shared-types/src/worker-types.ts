@@ -144,6 +144,16 @@ export type Bindings = {
    * Shared secret for worker-to-worker HMAC authentication
    */
   WORKER_SHARED_SECRET?: string;
+
+  // ==========================================================================
+  // Worker-to-Worker Communication
+  // ==========================================================================
+
+  /**
+   * Media API worker URL for triggering transcoding
+   * Used by content-api to call media-api internal endpoints
+   */
+  MEDIA_API_URL?: string;
 };
 
 /**
