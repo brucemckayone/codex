@@ -40,7 +40,7 @@ export interface ServiceConfig {
  * Configuration for NotificationsService initialization
  */
 export interface NotificationsServiceConfig extends ServiceConfig {
-  emailProvider?: EmailProvider;
+  emailProvider: EmailProvider;
   fromEmail?: string;
   fromName?: string;
   replyToEmail?: string;

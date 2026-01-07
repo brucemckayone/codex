@@ -1,4 +1,5 @@
 export { ConsoleProvider } from './console-provider';
+export { InMemoryEmailProvider } from './in-memory-provider';
 export { MailHogHttpProvider } from './mailhog-provider';
 export { ResendProvider } from './resend-provider';
 export * from './types';

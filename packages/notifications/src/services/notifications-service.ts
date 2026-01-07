@@ -11,41 +11,36 @@ import type {
 } from '../providers/types';
 import { TemplateRepository } from '../repositories/template-repository';
 import { getAllowedTokens, renderTemplate } from '../templates/renderer';
-import type { NotificationsServiceConfig } from '../types';
+import type { NotificationsServiceConfig, TemplateData } from '../types';
 
 interface SendEmailParams {
   to: string;
-  toName?: string; // Supported by EmailMessage
+  toName?: string;
   templateName: string;
-  data: Record<string, any>;
+  data: TemplateData;
   organizationId?: string | null;
   creatorId?: string | null;
   locale?: string;
   replyTo?: string;
 }
 
+/** Default brand tokens when no org-specific branding is available */
+const DEFAULT_BRAND_TOKENS = {
+  platformName: 'Codex',
+  primaryColor: '#000000',
+  secondaryColor: '#ffffff',
+  supportEmail: 'support@codex.io',
+  logoUrl: '',
+} as const;
+
 export class NotificationsService extends BaseService {
-  // this.db is inherited from BaseService
   private readonly emailProvider: EmailProvider;
   private readonly templateRepository: TemplateRepository;
-  private readonly brandingService: BrandingSettingsService;
-  private readonly contactService: ContactSettingsService;
   private readonly defaultFrom: { email: string; name?: string };
 
   constructor(config: NotificationsServiceConfig) {
     super(config);
-
-    // Services
     this.templateRepository = new TemplateRepository(this.db);
-
-    // Initialize settings services
-    // Note: We use type assertion for R2Service if needed, but for read-only it shouldn't be touched.
-    this.brandingService = new BrandingSettingsService({
-      ...config,
-      r2: {} as any, // Mock R2, not used for reading settings
-      r2PublicUrlBase: '', // Not used for reading settings
-    });
-    this.contactService = new ContactSettingsService(config);
 
     if (!config.emailProvider) {
       throw new Error('EmailProvider is required');
@@ -56,6 +51,50 @@ export class NotificationsService extends BaseService {
       email: config.fromEmail || 'noreply@codex.io',
       name: config.fromName || 'Codex',
     };
+  }
+
+  /**
+   * Resolve brand tokens for an organization.
+   * Instantiates settings services per-request since they're org-scoped.
+   */
+  private async resolveBrandTokens(
+    organizationId: string
+  ): Promise<Record<string, string>> {
+    try {
+      // Services require organizationId in constructor (org-scoped design)
+      const brandingService = new BrandingSettingsService({
+        db: this.db,
+        environment: this.environment,
+        organizationId,
+      });
+      const contactService = new ContactSettingsService({
+        db: this.db,
+        environment: this.environment,
+        organizationId,
+      });
+
+      const [branding, contact] = await Promise.all([
+        brandingService.get(),
+        contactService.get(),
+      ]);
+
+      const primaryColor: string =
+        branding.primaryColorHex ?? DEFAULT_BRAND_TOKENS.primaryColor;
+      const logoUrl: string = branding.logoUrl ?? DEFAULT_BRAND_TOKENS.logoUrl;
+      const supportEmail: string =
+        contact.supportEmail ?? DEFAULT_BRAND_TOKENS.supportEmail;
+
+      return {
+        platformName: DEFAULT_BRAND_TOKENS.platformName,
+        primaryColor,
+        secondaryColor: DEFAULT_BRAND_TOKENS.secondaryColor,
+        logoUrl,
+        supportEmail,
+      };
+    } catch (e) {
+      this.obs.warn('Failed to load branding', { organizationId, error: e });
+      return { ...DEFAULT_BRAND_TOKENS };
+    }
   }
 
   /**
@@ -73,35 +112,13 @@ export class NotificationsService extends BaseService {
     );
 
     if (!template) {
-      throw new TemplateNotFoundError(`Template '${templateName}' not found`);
+      throw new TemplateNotFoundError(templateName);
     }
 
     // 2. Resolve Branding (if organization context exists)
-    let brandTokens: Record<string, string> = {
-      platformName: 'Codex',
-      primaryColor: '#000000',
-      secondaryColor: '#ffffff',
-      supportEmail: 'support@codex.io',
-      logoUrl: '',
-    };
-
-    if (organizationId) {
-      try {
-        const branding = await this.brandingService.getSettings(organizationId);
-        const contact = await this.contactService.getSettings(organizationId);
-
-        brandTokens = {
-          platformName: branding?.platformName ?? brandTokens.platformName,
-          primaryColor: branding?.primaryColor ?? brandTokens.primaryColor,
-          secondaryColor:
-            branding?.secondaryColor ?? brandTokens.secondaryColor,
-          logoUrl: branding?.logoUrl ?? brandTokens.logoUrl,
-          supportEmail: contact?.supportEmail ?? brandTokens.supportEmail,
-        };
-      } catch (e) {
-        this.obs.warn('Failed to load branding', { organizationId, error: e });
-      }
-    }
+    const brandTokens = organizationId
+      ? await this.resolveBrandTokens(organizationId)
+      : { ...DEFAULT_BRAND_TOKENS };
 
     // 3. Render Template
     const mergedData = { ...brandTokens, ...data };
@@ -137,16 +154,13 @@ export class NotificationsService extends BaseService {
       text: textResult.content,
     };
 
-    // Note: replyTo is not yet in EmailMessage interface in this phase implementation
-    // if (params.replyTo) { ... }
-
     try {
-      const result = await this.emailProvider.send(message, this.defaultFrom);
-      return result;
-    } catch (error) {
-      // Retry logic
+      return await this.emailProvider.send(message, this.defaultFrom);
+    } catch (_error) {
+      // Retry with delay (1 second)
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      this.obs.info('Retrying email send after delay', { templateName, to });
       try {
-        this.obs.info('Retrying email send', { templateName, to });
         return await this.emailProvider.send(message, this.defaultFrom);
       } catch (retryError) {
         this.obs.error('Failed to send email after retry', {
@@ -168,7 +182,7 @@ export class NotificationsService extends BaseService {
    */
   async previewTemplate(
     templateName: string,
-    data: Record<string, any>,
+    data: TemplateData,
     organizationId?: string,
     creatorId?: string
   ) {
@@ -177,27 +191,15 @@ export class NotificationsService extends BaseService {
       organizationId,
       creatorId
     );
+
     if (!template) {
-      throw new TemplateNotFoundError(`Template '${templateName}' not found`);
+      throw new TemplateNotFoundError(templateName);
     }
 
-    // Mock branding logic same as sendEmail or reuse private method
-    // duplicating for now for simplicity of this artifact
-    const brandTokens: Record<string, string> = {
-      platformName: 'Codex',
-      primaryColor: '#000000',
-      secondaryColor: '#ffffff',
-      supportEmail: 'support@codex.io',
-      logoUrl: '',
-    };
-
-    if (organizationId) {
-      try {
-        // ... same as above
-      } catch (e) {
-        // ignore
-      }
-    }
+    // Resolve branding
+    const brandTokens = organizationId
+      ? await this.resolveBrandTokens(organizationId)
+      : { ...DEFAULT_BRAND_TOKENS };
 
     const mergedData = { ...brandTokens, ...data };
     const allowedTokens = getAllowedTokens(template.name);

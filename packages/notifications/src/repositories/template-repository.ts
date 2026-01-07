@@ -1,6 +1,5 @@
 import { type EmailTemplate, emailTemplates } from '@codex/database/schema';
-import { and, eq, isNull, sql } from 'drizzle-orm';
-import { TemplateNotFoundError } from '../errors';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../types';
 
 export class TemplateRepository {

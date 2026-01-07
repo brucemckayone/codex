@@ -109,7 +109,9 @@ export type ListTemplatesQuery = z.infer<typeof listTemplatesQuerySchema>;
 
 export const previewTemplateSchema = z.object({
   // Test data to render template with
-  data: z.record(z.string(), z.string()).default({}),
+  data: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .default({}),
 });
 export type PreviewTemplateInput = z.infer<typeof previewTemplateSchema>;
 
@@ -117,7 +119,9 @@ export const testSendTemplateSchema = z.object({
   // Email address to send test to
   recipientEmail: z.string().email('Invalid email address'),
   // Optional test data
-  data: z.record(z.string(), z.string()).default({}),
+  data: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .default({}),
 });
 export type TestSendTemplateInput = z.infer<typeof testSendTemplateSchema>;
 
@@ -129,7 +133,7 @@ export const sendEmailSchema = z.object({
   templateName: templateNameSchema,
   recipientEmail: z.string().email(),
   recipientName: z.string().optional(),
-  data: z.record(z.string(), z.string()),
+  data: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   organizationId: uuidSchema.optional(),
   creatorId: z.string().optional(),
 });

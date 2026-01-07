@@ -6,11 +6,20 @@ import type {
 } from './types';
 
 /**
- * MailHog HTTP provider for integration tests.
- * Uses MailHog's HTTP API (not SMTP) since Workers don't support TCP.
+ * MailHog HTTP provider stub for integration tests.
  *
- * Note: MailHog must be running with HTTP API enabled.
- * Default: http://localhost:8025
+ * **IMPORTANT**: This provider does NOT actually send emails.
+ * MailHog requires SMTP to receive emails, and Cloudflare Workers
+ * do not support TCP/SMTP connections.
+ *
+ * This provider is useful for:
+ * - Verifying MailHog connectivity during integration test setup
+ * - Logging email intent for debugging
+ *
+ * For actual testing, use `InMemoryEmailProvider` which stores
+ * emails in memory for assertion.
+ *
+ * @see InMemoryEmailProvider for a functional test double
  */
 export class MailHogHttpProvider implements EmailProvider {
   readonly name = 'mailhog';
@@ -20,7 +29,7 @@ export class MailHogHttpProvider implements EmailProvider {
     this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
   }
 
-  async send(message: EmailMessage, from: EmailFrom): Promise<SendResult> {
+  async send(message: EmailMessage, _from: EmailFrom): Promise<SendResult> {
     const messageId = `mailhog-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     try {

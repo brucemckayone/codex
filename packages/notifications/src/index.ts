@@ -64,6 +64,7 @@ export { NotificationsService } from './services/notifications-service';
 export {
   ConsoleProvider,
   createEmailProvider,
+  InMemoryEmailProvider,
   MailHogHttpProvider,
   type ProviderConfig,
   ResendProvider,

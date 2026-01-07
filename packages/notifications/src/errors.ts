@@ -28,8 +28,8 @@ export {
  * Notification-specific errors
  */
 export class TemplateNotFoundError extends NotFoundError {
-  constructor(templateId: string) {
-    super('Email template not found', { templateId });
+  constructor(templateId: string, message?: string) {
+    super(message ?? 'Email template not found', { templateId });
   }
 }
 
