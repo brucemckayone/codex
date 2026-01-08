@@ -127,6 +127,13 @@
       "when": 1767800448247,
       "tag": "0017_living_gabe_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1767867524794,
+      "tag": "0018_typical_sentry",
+      "breakpoints": true
     }
   ]
 }
