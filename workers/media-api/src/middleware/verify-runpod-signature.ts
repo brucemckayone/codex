@@ -45,17 +45,21 @@ function hexToBytes(hex: string): Uint8Array {
  *
  * Uses constant-time XOR comparison to prevent timing attacks.
  * The comparison always takes the same amount of time regardless
- * of where the first difference occurs.
+ * of where the first difference occurs or if lengths differ.
+ *
+ * SECURITY: Length comparison is included in the XOR result to prevent
+ * length oracle attacks. We compare up to the minimum length to ensure
+ * constant iteration time relative to the shorter input.
  */
 function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
+  const minLength = Math.min(a.length, b.length);
+  // XOR lengths - any difference here will make result non-zero
+  let result = a.length ^ b.length;
 
-  // Constant-time comparison using XOR
-  // Result accumulates differences but timing is constant
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
+  // Constant-time comparison using XOR up to minimum length
+  // This ensures we always iterate the same number of times
+  // regardless of where differences occur
+  for (let i = 0; i < minLength; i++) {
     result |= a[i] ^ b[i];
   }
   return result === 0;
@@ -196,50 +200,61 @@ export function verifyRunpodSignature(
     let timestamp: number | undefined;
     if (validateTimestamp) {
       const timestampStr = c.req.header(TIMESTAMP_HEADER);
-      if (timestampStr) {
-        timestamp = parseInt(timestampStr, 10);
-        if (Number.isNaN(timestamp)) {
-          return c.json(
-            {
-              error: {
-                code: 'INVALID_TIMESTAMP',
-                message: 'Invalid timestamp format',
-              },
+      if (!timestampStr) {
+        return c.json(
+          {
+            error: {
+              code: 'MISSING_TIMESTAMP',
+              message: 'Missing timestamp header',
+              required: TIMESTAMP_HEADER,
             },
-            401
-          );
-        }
+          },
+          401
+        );
+      }
 
-        // Check for replay attacks
-        const now = Math.floor(Date.now() / 1000);
-        const age = now - timestamp;
-
-        if (age > maxAge) {
-          return c.json(
-            {
-              error: {
-                code: 'TIMESTAMP_EXPIRED',
-                message: 'Request timestamp expired',
-                maxAge,
-                age,
-              },
+      timestamp = parseInt(timestampStr, 10);
+      if (Number.isNaN(timestamp)) {
+        return c.json(
+          {
+            error: {
+              code: 'INVALID_TIMESTAMP',
+              message: 'Invalid timestamp format',
             },
-            401
-          );
-        }
+          },
+          401
+        );
+      }
 
-        // Prevent future timestamps (clock skew attack)
-        if (age < -60) {
-          return c.json(
-            {
-              error: {
-                code: 'TIMESTAMP_FUTURE',
-                message: 'Request timestamp in future',
-              },
+      // Check for replay attacks
+      const now = Math.floor(Date.now() / 1000);
+      const age = now - timestamp;
+
+      if (age > maxAge) {
+        return c.json(
+          {
+            error: {
+              code: 'TIMESTAMP_EXPIRED',
+              message: 'Request timestamp expired',
+              maxAge,
+              age,
             },
-            401
-          );
-        }
+          },
+          401
+        );
+      }
+
+      // Prevent future timestamps (clock skew attack)
+      if (age < -60) {
+        return c.json(
+          {
+            error: {
+              code: 'TIMESTAMP_FUTURE',
+              message: 'Request timestamp in future',
+            },
+          },
+          401
+        );
       }
     }
 

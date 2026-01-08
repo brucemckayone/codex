@@ -223,12 +223,59 @@ export async function enforcePolicyInline(
   }
 
   // ========================================================================
-  // Auth: worker - Check worker auth flag
+  // Auth: worker - Check worker auth flag or apply workerAuth inline
   // ========================================================================
   if (mergedPolicy.auth === 'worker') {
-    if (!c.get('workerAuth')) {
-      throw new UnauthorizedError('Worker authentication required');
+    // If workerAuth flag is already set (by earlier middleware), we're authenticated
+    if (c.get('workerAuth')) {
+      return;
     }
+
+    // Apply workerAuth middleware inline
+    // Requires WORKER_SHARED_SECRET in environment
+    const secret = c.env.WORKER_SHARED_SECRET;
+    if (!secret) {
+      throw new UnauthorizedError('Worker authentication not configured');
+    }
+
+    // Import workerAuth dynamically to avoid circular deps
+    const { workerAuth } = await import('@codex/security');
+
+    // Execute workerAuth middleware inline
+    let authFailed = false;
+    let authError: string | undefined;
+
+    await new Promise<void>((resolve) => {
+      const middleware = workerAuth({ secret });
+      middleware(c, async () => {
+        // workerAuth succeeded - flag should now be set
+        resolve();
+      })
+        .then((response) => {
+          // If middleware returned a Response (401/403), auth failed
+          if (response) {
+            authFailed = true;
+            response
+              .json()
+              .then((body) => {
+                authError = (body as { error?: string }).error;
+                resolve();
+              })
+              .catch(() => resolve());
+          } else {
+            resolve();
+          }
+        })
+        .catch(() => {
+          authFailed = true;
+          resolve();
+        });
+    });
+
+    if (authFailed) {
+      throw new UnauthorizedError(authError || 'Worker authentication failed');
+    }
+
     return;
   }
 

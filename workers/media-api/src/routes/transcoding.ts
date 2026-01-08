@@ -7,7 +7,6 @@
  * - GET /api/transcoding/status/:id - Get transcoding status (authenticated)
  */
 
-import { workerAuth } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import { transcodingPrioritySchema } from '@codex/transcoding';
 import { uuidSchema } from '@codex/validation';
@@ -34,28 +33,11 @@ const app = new Hono<HonoEnv>();
  * Called by content-api after media upload completes.
  *
  * Security: workerAuth (HMAC signature from calling worker)
+ *           - procedure() applies workerAuth inline when policy.auth is 'worker'
  * Rate Limit: N/A (internal only)
  */
 app.post(
   '/internal/media/:id/transcode',
-  async (c, next) => {
-    // Apply workerAuth middleware
-    const secret = c.env.WORKER_SHARED_SECRET;
-    if (!secret) {
-      return c.json(
-        {
-          error: {
-            code: 'CONFIGURATION_ERROR',
-            message: 'Worker authentication not configured',
-          },
-        },
-        500
-      );
-    }
-
-    const middleware = workerAuth({ secret });
-    return middleware(c, next);
-  },
   procedure({
     policy: { auth: 'worker' },
     input: {

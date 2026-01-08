@@ -85,9 +85,32 @@ export const runpodWebhookOutputSchema = z.object({
   readyVariants: z.array(hlsVariantSchema).optional(),
 
   // Audio loudness (×100 for precision)
-  loudnessIntegrated: z.number().int().optional(), // LUFS × 100
-  loudnessPeak: z.number().int().optional(), // dBTP × 100
-  loudnessRange: z.number().int().optional(), // LRA × 100
+  // Integrated Loudness (LUFS × 100): Range -10000 to 0 (-100.00 to 0.00 LUFS)
+  loudnessIntegrated: z
+    .number()
+    .int()
+    .min(-10000)
+    .max(0)
+    .optional()
+    .describe('Integrated loudness in LUFS * 100 (e.g. -1400 = -14.0 LUFS)'),
+
+  // True Peak (dBTP × 100): Range -10000 to 200 (-100.00 to +2.00 dBTP)
+  loudnessPeak: z
+    .number()
+    .int()
+    .min(-10000)
+    .max(200)
+    .optional()
+    .describe('True peak in dBTP * 100 (e.g. -100 = -1.0 dBTP)'),
+
+  // Loudness Range (LU × 100): Range 0 to 10000 (0.00 to 100.00 LU)
+  loudnessRange: z
+    .number()
+    .int()
+    .min(0)
+    .max(10000)
+    .optional()
+    .describe('Loudness range in LU * 100 (e.g. 700 = 7.0 LU)'),
 });
 
 export type RunPodWebhookOutput = z.infer<typeof runpodWebhookOutputSchema>;

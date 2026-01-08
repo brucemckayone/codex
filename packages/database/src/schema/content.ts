@@ -190,6 +190,10 @@ export const mediaItems = pgTable(
     index('idx_media_items_status').on(table.creatorId, table.status),
     index('idx_media_items_type').on(table.creatorId, table.mediaType),
     index('idx_media_items_runpod_job_id').on(table.runpodJobId), // For webhook callback queries
+    index('idx_media_items_transcoding_status').on(
+      table.status,
+      table.transcodingAttempts
+    ), // For efficient polling/retry queries
 
     // CHECK constraints
     check(
@@ -207,7 +211,7 @@ export const mediaItems = pgTable(
     ),
     check(
       'check_max_transcoding_attempts',
-      sql`${table.transcodingAttempts} >= 0 AND ${table.transcodingAttempts} <= 1`
+      sql`${table.transcodingAttempts} >= 0 AND ${table.transcodingAttempts} <= 3`
     ),
 
     // Media lifecycle constraint: status='ready' requires transcoding outputs

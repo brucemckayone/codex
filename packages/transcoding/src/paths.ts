@@ -301,13 +301,19 @@ export function parseR2Key(r2Key: string): {
  * @returns true if valid, false otherwise
  */
 export function isValidR2Key(r2Key: string): boolean {
-  // Check for path traversal attempts
-  if (r2Key.includes('..') || r2Key.includes('//')) {
+  // Check for path traversal attempts (including URL-encoded variants)
+  if (
+    r2Key.includes('..') ||
+    r2Key.includes('//') ||
+    r2Key.includes('%2e') ||
+    r2Key.includes('%2E') ||
+    r2Key.includes('\\')
+  ) {
     return false;
   }
 
-  // Check for null bytes
-  if (r2Key.includes('\0')) {
+  // Check for null bytes (including URL-encoded)
+  if (r2Key.includes('\0') || r2Key.includes('%00')) {
     return false;
   }
 

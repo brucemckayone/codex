@@ -66,12 +66,15 @@ app.post(
       // Validate against schema
       const result = runpodWebhookSchema.safeParse(payload);
       if (!result.success) {
-        throw new ValidationError('Invalid webhook payload', {
-          details: result.error.errors.map((e) => ({
+        // Log detailed errors server-side for debugging
+        console.error(
+          '[webhook] Validation failed:',
+          result.error.errors.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
-          })),
-        });
+          }))
+        );
+        throw new ValidationError('Invalid webhook payload');
       }
 
       // Validate required environment variables
@@ -79,12 +82,12 @@ app.post(
       const runpodEndpointId = c.env.RUNPOD_ENDPOINT_ID;
 
       if (!runpodApiKey || !runpodEndpointId) {
-        throw new ValidationError('RunPod configuration missing', {
-          details: {
-            runpodApiKey: !runpodApiKey ? 'missing' : 'ok',
-            runpodEndpointId: !runpodEndpointId ? 'missing' : 'ok',
-          },
+        // Log detailed config status server-side only
+        console.error('[webhook] RunPod configuration missing:', {
+          runpodApiKey: !runpodApiKey ? 'missing' : 'ok',
+          runpodEndpointId: !runpodEndpointId ? 'missing' : 'ok',
         });
+        throw new ValidationError('Service configuration error');
       }
 
       // Create database client and TranscodingService

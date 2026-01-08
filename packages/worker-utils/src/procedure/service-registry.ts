@@ -215,12 +215,21 @@ export function createServiceRegistry(
               'Add secrets to worker environment for transcoding operations.'
           );
         }
+
+        // API_URL is required in production for webhook callbacks
+        const webhookBaseUrl = env.API_URL;
+        if (!webhookBaseUrl && getEnvironment() !== 'development') {
+          throw new Error(
+            'API_URL not configured. Required for transcoding webhook callbacks.'
+          );
+        }
+
         _transcoding = new TranscodingService({
           db: getSharedDb(),
           environment: getEnvironment(),
           runpodApiKey,
           runpodEndpointId,
-          webhookBaseUrl: env.API_URL || 'http://localhost:4002',
+          webhookBaseUrl: webhookBaseUrl || 'http://localhost:4002',
         });
       }
       return _transcoding;

@@ -6,7 +6,7 @@
  * Key Responsibilities:
  * - Trigger transcoding jobs on RunPod
  * - Handle webhook callbacks from RunPod
- * - Manage retry logic (max 1 retry)
+ * - Manage retry logic (max 3 retries)
  * - Update media item status and metadata
  *
  * Key Principles:
@@ -17,10 +17,15 @@
  */
 
 import { scopedNotDeleted } from '@codex/database';
+
 import { mediaItems } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  type ServiceConfig,
+  wrapError,
+} from '@codex/service-errors';
 import type { RunPodWebhookPayload } from '@codex/validation';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 
 import {
   InvalidMediaStateError,
@@ -29,23 +34,27 @@ import {
   RunPodApiError,
   TranscodingJobNotFoundError,
   TranscodingMediaNotFoundError,
-  wrapError,
 } from '../errors';
 import { getTranscodingOutputKeys } from '../paths';
 import type {
   HlsVariant,
-  MediaStatus,
   MediaType,
   RunPodJobRequest,
   RunPodJobResponse,
   TranscodingMediaItem,
-  TranscodingServiceConfig,
   TranscodingStatusResponse,
 } from '../types';
 
 /**
  * Extended service config for TranscodingService
  */
+export interface TranscodingServiceConfig {
+  runpodApiKey: string;
+  runpodEndpointId: string;
+  webhookBaseUrl: string; // Required for callbacks
+  runpodTimeout?: number; // Configurable timeout, defaults to 30000ms
+}
+
 export interface TranscodingServiceFullConfig
   extends ServiceConfig,
     TranscodingServiceConfig {}
@@ -72,6 +81,7 @@ export class TranscodingService extends BaseService {
   private readonly runpodEndpointId: string;
   private readonly runpodApiUrl: string;
   private readonly webhookUrl: string;
+  private readonly runpodTimeout: number;
 
   /**
    * Initialize TranscodingService with RunPod credentials
@@ -94,6 +104,7 @@ export class TranscodingService extends BaseService {
 
     this.runpodApiKey = config.runpodApiKey;
     this.runpodEndpointId = config.runpodEndpointId;
+    this.runpodTimeout = config.runpodTimeout ?? 30000;
 
     // Pre-construct URLs (won't change during service lifetime)
     this.runpodApiUrl = `https://api.runpod.ai/v2/${config.runpodEndpointId}/run`;
@@ -134,7 +145,6 @@ export class TranscodingService extends BaseService {
     }
 
     // Step 2: Construct job request
-    // Note: webhookUrl is pre-constructed in constructor for consistency
     const jobRequest: RunPodJobRequest = {
       input: {
         mediaId: media.id,
@@ -147,22 +157,18 @@ export class TranscodingService extends BaseService {
     };
 
     // Step 3: Call RunPod /run API (async)
-    // IMPORTANT: RunPod /run is fire-and-forget. The API returns immediately
-    // with a job ID while the transcoding runs in the background. Completion
-    // is reported via webhook callback to this.webhookUrl.
     let runpodJobId: string;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
     try {
+      // Call RunPod API with configurable timeout
       const response = await fetch(this.runpodApiUrl, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.runpodApiKey}`,
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.runpodApiKey}`,
         },
         body: JSON.stringify(jobRequest),
-        signal: controller.signal,
+        signal: AbortSignal.timeout(this.runpodTimeout),
       });
 
       if (!response.ok) {
@@ -184,16 +190,9 @@ export class TranscodingService extends BaseService {
         throw error;
       }
       // Check for timeout/abort errors
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new RunPodApiError('triggerJob', undefined, {
-          originalError: 'Request timed out after 30 seconds',
-        });
-      }
       throw new RunPodApiError('triggerJob', undefined, {
         originalError: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      clearTimeout(timeoutId);
     }
 
     // Step 4: Update media status to 'transcoding'
@@ -237,9 +236,12 @@ export class TranscodingService extends BaseService {
 
     // Find media by job ID or mediaId from output
     const media = await this.db.query.mediaItems.findFirst({
-      where: or(
-        eq(mediaItems.runpodJobId, jobId),
-        output?.mediaId ? eq(mediaItems.id, output.mediaId) : undefined
+      where: and(
+        or(
+          eq(mediaItems.runpodJobId, jobId),
+          output?.mediaId ? eq(mediaItems.id, output.mediaId) : undefined
+        ),
+        isNull(mediaItems.deletedAt)
       ),
     });
 
@@ -259,8 +261,9 @@ export class TranscodingService extends BaseService {
     }
 
     if (status === 'completed' && output) {
-      // Success: Update with all transcoding outputs
-      await this.db
+      // Success: Update atomically with all transcoding outputs
+      // Only updates if status='transcoding' to prevent race conditions
+      const result = await this.db
         .update(mediaItems)
         .set({
           status: 'ready',
@@ -279,7 +282,21 @@ export class TranscodingService extends BaseService {
           transcodingError: null, // Clear any previous error
           updatedAt: new Date(),
         })
-        .where(eq(mediaItems.id, media.id));
+        .where(
+          and(eq(mediaItems.id, media.id), eq(mediaItems.status, 'transcoding'))
+        )
+        .returning();
+
+      if (result.length === 0) {
+        this.obs.warn(
+          'Media no longer in transcoding state (concurrent update)',
+          {
+            jobId,
+            mediaId: media.id,
+          }
+        );
+        return;
+      }
 
       this.obs.info('Transcoding completed successfully', {
         mediaId: media.id,
@@ -287,15 +304,29 @@ export class TranscodingService extends BaseService {
         durationSeconds: output.durationSeconds,
       });
     } else {
-      // Failure: Store error message
-      await this.db
+      // Failure: Store error message atomically
+      const result = await this.db
         .update(mediaItems)
         .set({
           status: 'failed',
           transcodingError: errorMessage || 'Unknown transcoding error',
           updatedAt: new Date(),
         })
-        .where(eq(mediaItems.id, media.id));
+        .where(
+          and(eq(mediaItems.id, media.id), eq(mediaItems.status, 'transcoding'))
+        )
+        .returning();
+
+      if (result.length === 0) {
+        this.obs.warn(
+          'Media no longer in transcoding state (concurrent update)',
+          {
+            jobId,
+            mediaId: media.id,
+          }
+        );
+        return;
+      }
 
       this.obs.error('Transcoding failed', {
         mediaId: media.id,
@@ -308,48 +339,56 @@ export class TranscodingService extends BaseService {
   /**
    * Retry a failed transcoding job
    *
-   * Only 1 retry is allowed per media item.
-   * Resets status to 'uploaded' and triggers a new job.
+   * Only 3 retries are allowed per media item.
+   * Uses atomic conditional update to prevent race conditions.
    *
    * @param mediaId - Media item UUID
    * @param creatorId - Creator ID for authorization
    * @returns void
    *
    * @throws {TranscodingMediaNotFoundError} If media doesn't exist
+   * @throws {MediaOwnershipError} If creator doesn't own the media
    * @throws {InvalidMediaStateError} If media is not in 'failed' status
-   * @throws {MaxRetriesExceededError} If retry limit (1) reached
+   * @throws {MaxRetriesExceededError} If retry limit (3) reached
    */
   async retryTranscoding(mediaId: string, creatorId: string): Promise<void> {
     this.obs.info('Retrying transcoding', { mediaId, creatorId });
 
-    // Step 1: Fetch and validate media
+    // Step 1: Verify ownership first (separate from atomic update for clear error messages)
     const media = await this.getMediaForTranscoding(mediaId, creatorId);
 
-    // Verify media is in failed state
-    if (media.status !== 'failed') {
-      throw new InvalidMediaStateError(mediaId, media.status, 'failed', {
-        operation: 'retryTranscoding',
-      });
-    }
-
-    // Step 2: Check retry limit
-    if (media.transcodingAttempts >= 1) {
-      throw new MaxRetriesExceededError(mediaId, media.transcodingAttempts);
-    }
-
-    // Step 3: Reset status and increment attempts
-    await this.db
+    // Step 2: Atomic conditional update - prevents TOCTOU race
+    // Only updates if status='failed' AND attempts < 3
+    const result = await this.db
       .update(mediaItems)
       .set({
         status: 'uploaded',
         transcodingAttempts: media.transcodingAttempts + 1,
-        transcodingError: null, // Clear previous error
-        runpodJobId: null, // Clear old job ID
+        transcodingError: null,
+        runpodJobId: null,
         updatedAt: new Date(),
       })
-      .where(eq(mediaItems.id, mediaId));
+      .where(
+        and(
+          eq(mediaItems.id, mediaId),
+          eq(mediaItems.status, 'failed'),
+          lt(mediaItems.transcodingAttempts, 3) // Allow up to 3 retries
+        )
+      )
+      .returning();
 
-    // Step 4: Trigger new job
+    if (result.length === 0) {
+      // Determine which condition failed for appropriate error
+      if (media.status !== 'failed') {
+        throw new InvalidMediaStateError(mediaId, media.status, 'failed', {
+          operation: 'retryTranscoding',
+        });
+      }
+      // Must be max retries exceeded
+      throw new MaxRetriesExceededError(mediaId, media.transcodingAttempts);
+    }
+
+    // Step 3: Trigger new job
     await this.triggerJob(mediaId, creatorId);
 
     this.obs.info('Transcoding retry triggered', {
@@ -550,20 +589,17 @@ export class TranscodingService extends BaseService {
       },
     };
 
-    // Call RunPod /run API
     let runpodJobId: string;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     try {
       const response = await fetch(this.runpodApiUrl, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.runpodApiKey}`,
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.runpodApiKey}`,
         },
         body: JSON.stringify(jobRequest),
-        signal: controller.signal,
+        signal: AbortSignal.timeout(this.runpodTimeout),
       });
 
       if (!response.ok) {
@@ -579,16 +615,10 @@ export class TranscodingService extends BaseService {
       if (error instanceof RunPodApiError) {
         throw error;
       }
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new RunPodApiError('triggerJobInternal', undefined, {
-          originalError: 'Request timed out after 30 seconds',
-        });
-      }
+      // Handle timeout errors
       throw new RunPodApiError('triggerJobInternal', undefined, {
         originalError: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      clearTimeout(timeoutId);
     }
 
     // Update media status to 'transcoding'
