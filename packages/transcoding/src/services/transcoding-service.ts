@@ -144,6 +144,11 @@ export class TranscodingService extends BaseService {
       });
     }
 
+    // Verify input file exists
+    if (!media.r2Key) {
+      throw new Error('Input file not uploaded (r2Key missing)');
+    }
+
     // Step 2: Construct job request
     const jobRequest: RunPodJobRequest = {
       input: {

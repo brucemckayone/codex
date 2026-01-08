@@ -13,8 +13,12 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": [
+      "@cloudflare/workers-types",
+      "node",
+      "@cloudflare/vitest-pool-workers"
+    ]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../../config/vitest/cloudflare-test-env.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

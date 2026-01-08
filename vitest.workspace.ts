@@ -17,9 +17,11 @@ export default defineConfig({
       'packages/content/vitest.config.content.ts',
       'packages/identity/vitest.config.identity.ts',
       'packages/worker-utils/vitest.config.worker-utils.ts',
+      'packages/transcoding/vitest.config.transcoding.ts',
 
       // Workers
       'workers/auth',
+      'workers/media-api',
       'workers/ecom-api',
       'workers/content-api',
       'workers/identity-api',
