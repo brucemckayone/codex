@@ -20,6 +20,7 @@ import { R2Service } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
+import { TemplateService } from '@codex/notifications';
 import type { ObservabilityClient } from '@codex/observability';
 import { OrganizationService } from '@codex/organization';
 import { PlatformSettingsFacade } from '@codex/platform-settings';
@@ -76,6 +77,7 @@ export function createServiceRegistry(
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
+  let _templates: TemplateService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -232,6 +234,20 @@ export function createServiceRegistry(
         });
       }
       return _adminCustomer;
+    },
+
+    // ========================================================================
+    // Notification Domain
+    // ========================================================================
+
+    get templates() {
+      if (!_templates) {
+        _templates = new TemplateService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _templates;
     },
   };
 

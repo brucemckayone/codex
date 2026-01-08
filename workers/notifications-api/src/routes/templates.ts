@@ -10,8 +10,6 @@
  * Business logic is delegated to TemplateService in @codex/notifications.
  */
 
-import { createDbClient } from '@codex/database';
-import { TemplateService } from '@codex/notifications';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createCreatorTemplateSchema,
@@ -28,15 +26,6 @@ import { z } from 'zod';
 
 const app = new Hono<HonoEnv>();
 
-// Helper to create TemplateService from context
-function getTemplateService(env: HonoEnv['Bindings']) {
-  const db = createDbClient(env);
-  return new TemplateService({
-    db,
-    environment: env.ENVIRONMENT ?? 'development',
-  });
-}
-
 // ============================================================================
 // Global Template Routes (Platform Owner Only)
 // ============================================================================
@@ -51,8 +40,7 @@ app.get(
     policy: { auth: 'platform_owner' },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.listGlobalTemplates(ctx.input.query);
+      return ctx.services.templates.listGlobalTemplates(ctx.input.query);
     },
   })
 );
@@ -68,8 +56,10 @@ app.post(
     input: { body: createGlobalTemplateSchema },
     successStatus: 201,
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.createGlobalTemplate(ctx.input.body, ctx.user.id);
+      return ctx.services.templates.createGlobalTemplate(
+        ctx.input.body,
+        ctx.user.id
+      );
     },
   })
 );
@@ -84,8 +74,7 @@ app.get(
     policy: { auth: 'platform_owner' },
     input: { params: createIdParamsSchema() },
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.getGlobalTemplate(ctx.input.params.id);
+      return ctx.services.templates.getGlobalTemplate(ctx.input.params.id);
     },
   })
 );
@@ -103,8 +92,10 @@ app.patch(
       body: updateTemplateSchema,
     },
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.updateGlobalTemplate(ctx.input.params.id, ctx.input.body);
+      return ctx.services.templates.updateGlobalTemplate(
+        ctx.input.params.id,
+        ctx.input.body
+      );
     },
   })
 );
@@ -120,8 +111,7 @@ app.delete(
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      await service.deleteGlobalTemplate(ctx.input.params.id);
+      await ctx.services.templates.deleteGlobalTemplate(ctx.input.params.id);
       return null;
     },
   })
@@ -155,8 +145,7 @@ app.get(
       query: listTemplatesQuerySchema,
     },
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.listOrgTemplates(
+      return ctx.services.templates.listOrgTemplates(
         ctx.input.params.orgId,
         ctx.user.id,
         ctx.input.query
@@ -179,8 +168,7 @@ app.post(
     },
     successStatus: 201,
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.createOrgTemplate(
+      return ctx.services.templates.createOrgTemplate(
         ctx.input.params.orgId,
         ctx.user.id,
         ctx.input.body
@@ -202,8 +190,7 @@ app.patch(
       body: updateTemplateSchema,
     },
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.updateOrgTemplate(
+      return ctx.services.templates.updateOrgTemplate(
         ctx.input.params.orgId,
         ctx.input.params.id,
         ctx.user.id,
@@ -224,8 +211,7 @@ app.delete(
     input: { params: orgTemplateIdParamSchema },
     successStatus: 204,
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      await service.deleteOrgTemplate(
+      await ctx.services.templates.deleteOrgTemplate(
         ctx.input.params.orgId,
         ctx.input.params.id,
         ctx.user.id
@@ -249,8 +235,10 @@ app.get(
     policy: { auth: 'required', roles: ['creator'] },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.listCreatorTemplates(ctx.user.id, ctx.input.query);
+      return ctx.services.templates.listCreatorTemplates(
+        ctx.user.id,
+        ctx.input.query
+      );
     },
   })
 );
@@ -266,8 +254,10 @@ app.post(
     input: { body: createCreatorTemplateSchema },
     successStatus: 201,
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.createCreatorTemplate(ctx.user.id, ctx.input.body);
+      return ctx.services.templates.createCreatorTemplate(
+        ctx.user.id,
+        ctx.input.body
+      );
     },
   })
 );
@@ -285,8 +275,7 @@ app.patch(
       body: updateTemplateSchema,
     },
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      return service.updateCreatorTemplate(
+      return ctx.services.templates.updateCreatorTemplate(
         ctx.user.id,
         ctx.input.params.id,
         ctx.input.body
@@ -306,8 +295,10 @@ app.delete(
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx) => {
-      const service = getTemplateService(ctx.env);
-      await service.deleteCreatorTemplate(ctx.user.id, ctx.input.params.id);
+      await ctx.services.templates.deleteCreatorTemplate(
+        ctx.user.id,
+        ctx.input.params.id
+      );
       return null;
     },
   })

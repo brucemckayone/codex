@@ -16,6 +16,7 @@ import type {
 } from '@codex/admin';
 // Service type imports (for typing only)
 import type { ContentService, MediaItemService } from '@codex/content';
+import type { TemplateService } from '@codex/notifications';
 import type { ObservabilityClient } from '@codex/observability';
 import type { OrganizationService } from '@codex/organization';
 import type { PlatformSettingsFacade } from '@codex/platform-settings';
@@ -118,6 +119,9 @@ export interface ServiceRegistry {
   adminAnalytics: AdminAnalyticsService;
   adminContent: AdminContentManagementService;
   adminCustomer: AdminCustomerManagementService;
+
+  // Notification domain
+  templates: TemplateService;
 }
 
 // ============================================================================
