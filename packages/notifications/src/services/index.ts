@@ -1,7 +1,8 @@
 /**
  * Services Index
- *
- * Service exports will be added after Phase 5 implementation.
  */
 
-// NotificationsService will be exported here after implementation
+export type { NotificationsServiceConfig } from '../types';
+export { NotificationsService } from './notifications-service';
+export type { TemplateServiceConfig } from './template-service';
+export { TemplateService } from './template-service';

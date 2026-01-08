@@ -56,6 +56,10 @@ export {
 // ============================================================================
 
 export { NotificationsService } from './services/notifications-service';
+export {
+  TemplateService,
+  type TemplateServiceConfig,
+} from './services/template-service';
 
 // ============================================================================
 // Providers

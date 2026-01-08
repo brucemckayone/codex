@@ -7,13 +7,11 @@
  * - Creator templates (individual creators)
  *
  * All routes use procedure() for auth, validation, and rate limiting.
+ * Business logic is delegated to TemplateService in @codex/notifications.
  */
 
-import { createDbClient, schema } from '@codex/database';
-import {
-  TemplateAccessDeniedError,
-  TemplateNotFoundError,
-} from '@codex/notifications';
+import { createDbClient } from '@codex/database';
+import { TemplateService } from '@codex/notifications';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createCreatorTemplateSchema,
@@ -25,11 +23,19 @@ import {
   uuidSchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
-import { and, desc, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
 const app = new Hono<HonoEnv>();
+
+// Helper to create TemplateService from context
+function getTemplateService(env: HonoEnv['Bindings']) {
+  const db = createDbClient(env);
+  return new TemplateService({
+    db,
+    environment: env.ENVIRONMENT ?? 'development',
+  });
+}
 
 // ============================================================================
 // Global Template Routes (Platform Owner Only)
@@ -45,29 +51,15 @@ app.get(
     policy: { auth: 'platform_owner' },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-      const { page, limit, status } = ctx.input.query;
-      const offset = (page - 1) * limit;
-
-      const templates = await db.query.emailTemplates.findMany({
-        where: and(
-          eq(schema.emailTemplates.scope, 'global'),
-          isNull(schema.emailTemplates.deletedAt),
-          status ? eq(schema.emailTemplates.status, status) : undefined
-        ),
-        limit,
-        offset,
-        orderBy: [desc(schema.emailTemplates.createdAt)],
-      });
-
-      return { data: templates };
+      const service = getTemplateService(ctx.env);
+      return service.listGlobalTemplates(ctx.input.query);
     },
   })
 );
 
 /**
  * POST /global
- * Create a global template
+ * Create a new global template
  */
 app.post(
   '/global',
@@ -76,27 +68,15 @@ app.post(
     input: { body: createGlobalTemplateSchema },
     successStatus: 201,
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      const [template] = await db
-        .insert(schema.emailTemplates)
-        .values({
-          ...ctx.input.body,
-          scope: 'global',
-          organizationId: null,
-          creatorId: null,
-          createdBy: ctx.user.id,
-        })
-        .returning();
-
-      return { data: template };
+      const service = getTemplateService(ctx.env);
+      return service.createGlobalTemplate(ctx.input.body, ctx.user.id);
     },
   })
 );
 
 /**
  * GET /global/:id
- * Get a global template by ID
+ * Get a specific global template
  */
 app.get(
   '/global/:id',
@@ -104,21 +84,8 @@ app.get(
     policy: { auth: 'platform_owner' },
     input: { params: createIdParamsSchema() },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      const template = await db.query.emailTemplates.findFirst({
-        where: and(
-          eq(schema.emailTemplates.id, ctx.input.params.id),
-          eq(schema.emailTemplates.scope, 'global'),
-          isNull(schema.emailTemplates.deletedAt)
-        ),
-      });
-
-      if (!template) {
-        throw new TemplateNotFoundError(ctx.input.params.id);
-      }
-
-      return { data: template };
+      const service = getTemplateService(ctx.env);
+      return service.getGlobalTemplate(ctx.input.params.id);
     },
   })
 );
@@ -136,28 +103,8 @@ app.patch(
       body: updateTemplateSchema,
     },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      const [updated] = await db
-        .update(schema.emailTemplates)
-        .set({
-          ...ctx.input.body,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(schema.emailTemplates.id, ctx.input.params.id),
-            eq(schema.emailTemplates.scope, 'global'),
-            isNull(schema.emailTemplates.deletedAt)
-          )
-        )
-        .returning();
-
-      if (!updated) {
-        throw new TemplateNotFoundError(ctx.input.params.id);
-      }
-
-      return { data: updated };
+      const service = getTemplateService(ctx.env);
+      return service.updateGlobalTemplate(ctx.input.params.id, ctx.input.body);
     },
   })
 );
@@ -173,24 +120,8 @@ app.delete(
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      const [deleted] = await db
-        .update(schema.emailTemplates)
-        .set({ deletedAt: new Date() })
-        .where(
-          and(
-            eq(schema.emailTemplates.id, ctx.input.params.id),
-            eq(schema.emailTemplates.scope, 'global'),
-            isNull(schema.emailTemplates.deletedAt)
-          )
-        )
-        .returning();
-
-      if (!deleted) {
-        throw new TemplateNotFoundError(ctx.input.params.id);
-      }
-
+      const service = getTemplateService(ctx.env);
+      await service.deleteGlobalTemplate(ctx.input.params.id);
       return null;
     },
   })
@@ -200,8 +131,15 @@ app.delete(
 // Organization Template Routes
 // ============================================================================
 
+// Schema for org routes with orgId param
 const orgIdParamSchema = z.object({
   orgId: uuidSchema,
+});
+
+// Combined params schema for org template with ID
+const orgTemplateIdParamSchema = z.object({
+  orgId: uuidSchema,
+  id: uuidSchema,
 });
 
 /**
@@ -217,37 +155,12 @@ app.get(
       query: listTemplatesQuerySchema,
     },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-      const { orgId } = ctx.input.params;
-      const { page, limit, status } = ctx.input.query;
-      const offset = (page - 1) * limit;
-
-      // Check membership
-      const membership = await db.query.organizationMemberships.findFirst({
-        where: and(
-          eq(schema.organizationMemberships.userId, ctx.user.id),
-          eq(schema.organizationMemberships.organizationId, orgId),
-          eq(schema.organizationMemberships.status, 'active')
-        ),
-      });
-
-      if (!membership) {
-        throw new TemplateAccessDeniedError(orgId);
-      }
-
-      const templates = await db.query.emailTemplates.findMany({
-        where: and(
-          eq(schema.emailTemplates.scope, 'organization'),
-          eq(schema.emailTemplates.organizationId, orgId),
-          isNull(schema.emailTemplates.deletedAt),
-          status ? eq(schema.emailTemplates.status, status) : undefined
-        ),
-        limit,
-        offset,
-        orderBy: [desc(schema.emailTemplates.createdAt)],
-      });
-
-      return { data: templates };
+      const service = getTemplateService(ctx.env);
+      return service.listOrgTemplates(
+        ctx.input.params.orgId,
+        ctx.user.id,
+        ctx.input.query
+      );
     },
   })
 );
@@ -266,43 +179,15 @@ app.post(
     },
     successStatus: 201,
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-      const { orgId } = ctx.input.params;
-
-      // Check admin/owner role
-      const membership = await db.query.organizationMemberships.findFirst({
-        where: and(
-          eq(schema.organizationMemberships.userId, ctx.user.id),
-          eq(schema.organizationMemberships.organizationId, orgId),
-          eq(schema.organizationMemberships.status, 'active')
-        ),
-      });
-
-      if (!membership || !['owner', 'admin'].includes(membership.role)) {
-        throw new TemplateAccessDeniedError(orgId);
-      }
-
-      const [template] = await db
-        .insert(schema.emailTemplates)
-        .values({
-          ...ctx.input.body,
-          scope: 'organization',
-          organizationId: orgId,
-          creatorId: null,
-          createdBy: ctx.user.id,
-        })
-        .returning();
-
-      return { data: template };
+      const service = getTemplateService(ctx.env);
+      return service.createOrgTemplate(
+        ctx.input.params.orgId,
+        ctx.user.id,
+        ctx.input.body
+      );
     },
   })
 );
-
-// Combined params schema for org template with ID
-const orgTemplateIdParamSchema = z.object({
-  orgId: uuidSchema,
-  id: uuidSchema,
-});
 
 /**
  * PATCH /organizations/:orgId/:id
@@ -317,43 +202,13 @@ app.patch(
       body: updateTemplateSchema,
     },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-      const { orgId, id } = ctx.input.params;
-
-      // Check admin/owner role
-      const membership = await db.query.organizationMemberships.findFirst({
-        where: and(
-          eq(schema.organizationMemberships.userId, ctx.user.id),
-          eq(schema.organizationMemberships.organizationId, orgId),
-          eq(schema.organizationMemberships.status, 'active')
-        ),
-      });
-
-      if (!membership || !['owner', 'admin'].includes(membership.role)) {
-        throw new TemplateAccessDeniedError(orgId);
-      }
-
-      const [updated] = await db
-        .update(schema.emailTemplates)
-        .set({
-          ...ctx.input.body,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(schema.emailTemplates.id, id),
-            eq(schema.emailTemplates.scope, 'organization'),
-            eq(schema.emailTemplates.organizationId, orgId),
-            isNull(schema.emailTemplates.deletedAt)
-          )
-        )
-        .returning();
-
-      if (!updated) {
-        throw new TemplateNotFoundError(id);
-      }
-
-      return { data: updated };
+      const service = getTemplateService(ctx.env);
+      return service.updateOrgTemplate(
+        ctx.input.params.orgId,
+        ctx.input.params.id,
+        ctx.user.id,
+        ctx.input.body
+      );
     },
   })
 );
@@ -369,39 +224,12 @@ app.delete(
     input: { params: orgTemplateIdParamSchema },
     successStatus: 204,
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-      const { orgId, id } = ctx.input.params;
-
-      // Check admin/owner role
-      const membership = await db.query.organizationMemberships.findFirst({
-        where: and(
-          eq(schema.organizationMemberships.userId, ctx.user.id),
-          eq(schema.organizationMemberships.organizationId, orgId),
-          eq(schema.organizationMemberships.status, 'active')
-        ),
-      });
-
-      if (!membership || !['owner', 'admin'].includes(membership.role)) {
-        throw new TemplateAccessDeniedError(orgId);
-      }
-
-      const [deleted] = await db
-        .update(schema.emailTemplates)
-        .set({ deletedAt: new Date() })
-        .where(
-          and(
-            eq(schema.emailTemplates.id, id),
-            eq(schema.emailTemplates.scope, 'organization'),
-            eq(schema.emailTemplates.organizationId, orgId),
-            isNull(schema.emailTemplates.deletedAt)
-          )
-        )
-        .returning();
-
-      if (!deleted) {
-        throw new TemplateNotFoundError(id);
-      }
-
+      const service = getTemplateService(ctx.env);
+      await service.deleteOrgTemplate(
+        ctx.input.params.orgId,
+        ctx.input.params.id,
+        ctx.user.id
+      );
       return null;
     },
   })
@@ -421,23 +249,8 @@ app.get(
     policy: { auth: 'required', roles: ['creator'] },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-      const { page, limit, status } = ctx.input.query;
-      const offset = (page - 1) * limit;
-
-      const templates = await db.query.emailTemplates.findMany({
-        where: and(
-          eq(schema.emailTemplates.scope, 'creator'),
-          eq(schema.emailTemplates.creatorId, ctx.user.id),
-          isNull(schema.emailTemplates.deletedAt),
-          status ? eq(schema.emailTemplates.status, status) : undefined
-        ),
-        limit,
-        offset,
-        orderBy: [desc(schema.emailTemplates.createdAt)],
-      });
-
-      return { data: templates };
+      const service = getTemplateService(ctx.env);
+      return service.listCreatorTemplates(ctx.user.id, ctx.input.query);
     },
   })
 );
@@ -453,20 +266,8 @@ app.post(
     input: { body: createCreatorTemplateSchema },
     successStatus: 201,
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      const [template] = await db
-        .insert(schema.emailTemplates)
-        .values({
-          ...ctx.input.body,
-          scope: 'creator',
-          organizationId: ctx.input.body.organizationId ?? null,
-          creatorId: ctx.user.id,
-          createdBy: ctx.user.id,
-        })
-        .returning();
-
-      return { data: template };
+      const service = getTemplateService(ctx.env);
+      return service.createCreatorTemplate(ctx.user.id, ctx.input.body);
     },
   })
 );
@@ -484,29 +285,12 @@ app.patch(
       body: updateTemplateSchema,
     },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      const [updated] = await db
-        .update(schema.emailTemplates)
-        .set({
-          ...ctx.input.body,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(schema.emailTemplates.id, ctx.input.params.id),
-            eq(schema.emailTemplates.scope, 'creator'),
-            eq(schema.emailTemplates.creatorId, ctx.user.id),
-            isNull(schema.emailTemplates.deletedAt)
-          )
-        )
-        .returning();
-
-      if (!updated) {
-        throw new TemplateNotFoundError(ctx.input.params.id);
-      }
-
-      return { data: updated };
+      const service = getTemplateService(ctx.env);
+      return service.updateCreatorTemplate(
+        ctx.user.id,
+        ctx.input.params.id,
+        ctx.input.body
+      );
     },
   })
 );
@@ -522,25 +306,8 @@ app.delete(
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      const [deleted] = await db
-        .update(schema.emailTemplates)
-        .set({ deletedAt: new Date() })
-        .where(
-          and(
-            eq(schema.emailTemplates.id, ctx.input.params.id),
-            eq(schema.emailTemplates.scope, 'creator'),
-            eq(schema.emailTemplates.creatorId, ctx.user.id),
-            isNull(schema.emailTemplates.deletedAt)
-          )
-        )
-        .returning();
-
-      if (!deleted) {
-        throw new TemplateNotFoundError(ctx.input.params.id);
-      }
-
+      const service = getTemplateService(ctx.env);
+      await service.deleteCreatorTemplate(ctx.user.id, ctx.input.params.id);
       return null;
     },
   })
