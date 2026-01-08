@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EmailMessage, SendResult } from '../../providers/types';
 import type { Database, EmailProvider } from '../../types';
 import { NotificationsService } from '../notifications-service';
 

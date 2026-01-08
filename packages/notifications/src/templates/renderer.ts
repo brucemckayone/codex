@@ -32,7 +32,7 @@ export interface RenderOptions {
   /** Template string with {{token}} placeholders */
   template: string;
   /** Data to inject (values will be HTML-escaped) */
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   /** Allowed token names (for security - unknown tokens become empty) */
   allowedTokens: string[];
   /** Whether to escape HTML in values (default: true) */
@@ -65,7 +65,7 @@ export function renderTemplate(options: RenderOptions): RenderResult {
 
   const content = template.replace(
     TOKEN_PATTERN,
-    (match, tokenName: string) => {
+    (_match, tokenName: string) => {
       // Check if token is allowed
       if (!allowedTokens.includes(tokenName)) {
         unknownTokens.push(tokenName);
@@ -93,7 +93,7 @@ export function renderTemplate(options: RenderOptions): RenderResult {
 export function renderEmailTemplate(options: {
   htmlTemplate: string;
   textTemplate: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   allowedTokens: string[];
 }): {
   html: RenderResult;

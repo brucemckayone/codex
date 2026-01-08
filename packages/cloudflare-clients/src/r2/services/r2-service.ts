@@ -5,6 +5,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type {
   R2Bucket,
   R2HTTPMetadata,
+  R2ListOptions,
   R2MultipartOptions,
 } from '@cloudflare/workers-types';
 

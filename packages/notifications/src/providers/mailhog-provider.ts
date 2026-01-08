@@ -74,7 +74,6 @@ export class MailHogHttpProvider implements EmailProvider {
       throw new Error(`MailHog API error: ${response.status}`);
     }
     const data = await response.json();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (data as { items: unknown[] }).items || [];
   }
 

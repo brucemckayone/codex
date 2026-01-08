@@ -34,10 +34,6 @@ type EmailTemplate = typeof schema.emailTemplates.$inferSelect;
  * All business logic for template CRUD is encapsulated here.
  */
 export class TemplateService extends BaseService {
-  constructor(config: TemplateServiceConfig) {
-    super(config);
-  }
-
   // ===========================================================================
   // Global Template Operations (Platform Owner Only)
   // ===========================================================================

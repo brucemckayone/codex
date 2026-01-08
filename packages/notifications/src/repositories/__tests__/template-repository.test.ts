@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Database, NewEmailTemplate } from '../../types';
 import { TemplateRepository } from '../template-repository';
 
 // Mock database with query builder
@@ -33,7 +34,7 @@ describe('TemplateRepository', () => {
 
   beforeEach(() => {
     mockDb = createMockDb();
-    repo = new TemplateRepository(mockDb as any);
+    repo = new TemplateRepository(mockDb as unknown as Database);
   });
 
   describe('findTemplate', () => {
@@ -184,7 +185,7 @@ describe('TemplateRepository', () => {
         htmlBody: '<p>Test</p>',
         textBody: 'Test',
         status: 'active',
-      } as any);
+      } as NewEmailTemplate);
 
       expect(result).toEqual(newTemplate);
     });
