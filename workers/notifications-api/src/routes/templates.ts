@@ -298,6 +298,115 @@ app.post(
   })
 );
 
+// Combined params schema for org template with ID
+const orgTemplateIdParamSchema = z.object({
+  orgId: uuidSchema,
+  id: uuidSchema,
+});
+
+/**
+ * PATCH /organizations/:orgId/:id
+ * Update an organization template
+ */
+app.patch(
+  '/organizations/:orgId/:id',
+  procedure({
+    policy: { auth: 'required' },
+    input: {
+      params: orgTemplateIdParamSchema,
+      body: updateTemplateSchema,
+    },
+    handler: async (ctx) => {
+      const db = createDbClient(ctx.env);
+      const { orgId, id } = ctx.input.params;
+
+      // Check admin/owner role
+      const membership = await db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(schema.organizationMemberships.userId, ctx.user.id),
+          eq(schema.organizationMemberships.organizationId, orgId),
+          eq(schema.organizationMemberships.status, 'active')
+        ),
+      });
+
+      if (!membership || !['owner', 'admin'].includes(membership.role)) {
+        throw new TemplateAccessDeniedError(orgId);
+      }
+
+      const [updated] = await db
+        .update(schema.emailTemplates)
+        .set({
+          ...ctx.input.body,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, id),
+            eq(schema.emailTemplates.scope, 'organization'),
+            eq(schema.emailTemplates.organizationId, orgId),
+            isNull(schema.emailTemplates.deletedAt)
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        throw new TemplateNotFoundError(id);
+      }
+
+      return { data: updated };
+    },
+  })
+);
+
+/**
+ * DELETE /organizations/:orgId/:id
+ * Soft delete an organization template
+ */
+app.delete(
+  '/organizations/:orgId/:id',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: orgTemplateIdParamSchema },
+    successStatus: 204,
+    handler: async (ctx) => {
+      const db = createDbClient(ctx.env);
+      const { orgId, id } = ctx.input.params;
+
+      // Check admin/owner role
+      const membership = await db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(schema.organizationMemberships.userId, ctx.user.id),
+          eq(schema.organizationMemberships.organizationId, orgId),
+          eq(schema.organizationMemberships.status, 'active')
+        ),
+      });
+
+      if (!membership || !['owner', 'admin'].includes(membership.role)) {
+        throw new TemplateAccessDeniedError(orgId);
+      }
+
+      const [deleted] = await db
+        .update(schema.emailTemplates)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, id),
+            eq(schema.emailTemplates.scope, 'organization'),
+            eq(schema.emailTemplates.organizationId, orgId),
+            isNull(schema.emailTemplates.deletedAt)
+          )
+        )
+        .returning();
+
+      if (!deleted) {
+        throw new TemplateNotFoundError(id);
+      }
+
+      return null;
+    },
+  })
+);
+
 // ============================================================================
 // Creator Template Routes
 // ============================================================================
@@ -358,6 +467,81 @@ app.post(
         .returning();
 
       return { data: template };
+    },
+  })
+);
+
+/**
+ * PATCH /creator/:id
+ * Update a creator template
+ */
+app.patch(
+  '/creator/:id',
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: {
+      params: createIdParamsSchema(),
+      body: updateTemplateSchema,
+    },
+    handler: async (ctx) => {
+      const db = createDbClient(ctx.env);
+
+      const [updated] = await db
+        .update(schema.emailTemplates)
+        .set({
+          ...ctx.input.body,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, ctx.input.params.id),
+            eq(schema.emailTemplates.scope, 'creator'),
+            eq(schema.emailTemplates.creatorId, ctx.user.id),
+            isNull(schema.emailTemplates.deletedAt)
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        throw new TemplateNotFoundError(ctx.input.params.id);
+      }
+
+      return { data: updated };
+    },
+  })
+);
+
+/**
+ * DELETE /creator/:id
+ * Soft delete a creator template
+ */
+app.delete(
+  '/creator/:id',
+  procedure({
+    policy: { auth: 'required', roles: ['creator'] },
+    input: { params: createIdParamsSchema() },
+    successStatus: 204,
+    handler: async (ctx) => {
+      const db = createDbClient(ctx.env);
+
+      const [deleted] = await db
+        .update(schema.emailTemplates)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, ctx.input.params.id),
+            eq(schema.emailTemplates.scope, 'creator'),
+            eq(schema.emailTemplates.creatorId, ctx.user.id),
+            isNull(schema.emailTemplates.deletedAt)
+          )
+        )
+        .returning();
+
+      if (!deleted) {
+        throw new TemplateNotFoundError(ctx.input.params.id);
+      }
+
+      return null;
     },
   })
 );

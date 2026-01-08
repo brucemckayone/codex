@@ -157,9 +157,8 @@ export class NotificationsService extends BaseService {
     try {
       return await this.emailProvider.send(message, this.defaultFrom);
     } catch (_error) {
-      // Retry with delay (1 second)
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      this.obs.info('Retrying email send after delay', { templateName, to });
+      // Immediate retry (Workers can terminate during setTimeout delays)
+      this.obs.info('Retrying email send', { templateName });
       try {
         return await this.emailProvider.send(message, this.defaultFrom);
       } catch (retryError) {

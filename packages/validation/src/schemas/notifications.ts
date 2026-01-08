@@ -175,3 +175,6 @@ export const templateDataSchemas = {
   'password-changed': passwordChangedDataSchema,
   'purchase-receipt': purchaseReceiptDataSchema,
 } as const;
+
+// Type for template data keys (enables compile-time checking)
+export type TemplateDataKey = keyof typeof templateDataSchemas;
