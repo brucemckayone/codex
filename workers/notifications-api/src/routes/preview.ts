@@ -40,7 +40,7 @@ async function checkTemplateAccess(
   userRole: string
 ): Promise<boolean> {
   if (template.scope === 'global') {
-    return userRole === 'admin'; // Admin has global template access
+    return userRole === 'platform_owner'; // Only platform owner has global template access
   }
 
   if (template.scope === 'organization' && template.organizationId) {

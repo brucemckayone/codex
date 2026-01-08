@@ -42,7 +42,7 @@ const app = new Hono<HonoEnv>();
 app.get(
   '/global',
   procedure({
-    policy: { auth: 'required', roles: ['admin'] },
+    policy: { auth: 'platform_owner' },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
       const db = createDbClient(ctx.env);
@@ -72,7 +72,7 @@ app.get(
 app.post(
   '/global',
   procedure({
-    policy: { auth: 'required', roles: ['admin'] },
+    policy: { auth: 'platform_owner' },
     input: { body: createGlobalTemplateSchema },
     successStatus: 201,
     handler: async (ctx) => {
@@ -101,7 +101,7 @@ app.post(
 app.get(
   '/global/:id',
   procedure({
-    policy: { auth: 'required', roles: ['admin'] },
+    policy: { auth: 'platform_owner' },
     input: { params: createIdParamsSchema() },
     handler: async (ctx) => {
       const db = createDbClient(ctx.env);
@@ -130,7 +130,7 @@ app.get(
 app.patch(
   '/global/:id',
   procedure({
-    policy: { auth: 'required', roles: ['admin'] },
+    policy: { auth: 'platform_owner' },
     input: {
       params: createIdParamsSchema(),
       body: updateTemplateSchema,
@@ -169,7 +169,7 @@ app.patch(
 app.delete(
   '/global/:id',
   procedure({
-    policy: { auth: 'required', roles: ['admin'] },
+    policy: { auth: 'platform_owner' },
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx) => {
