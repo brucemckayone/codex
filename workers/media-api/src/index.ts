@@ -29,7 +29,6 @@ import {
   createEnvValidationMiddleware,
   createKvCheck,
   createWorker,
-  standardDatabaseCheck,
 } from '@codex/worker-utils';
 // Import route modules
 import transcodingRoutes from './routes/transcoding';
@@ -48,7 +47,6 @@ const app = createWorker({
   enableSecurityHeaders: true,
   enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
-    checkDatabase: standardDatabaseCheck,
     checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
   },
 });

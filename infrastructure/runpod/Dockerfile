@@ -14,7 +14,11 @@ FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:chris-needham/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
     # FFmpeg with all codecs
     ffmpeg \
     # Python runtime

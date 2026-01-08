@@ -52,7 +52,9 @@
         "RUNPOD_API_KEY": "test-key",
         "RUNPOD_ENDPOINT_ID": "test-endpoint",
         "RUNPOD_WEBHOOK_SECRET": "test-secret",
-        "WORKER_SHARED_SECRET": "test-shared-secret"
+        "WORKER_SHARED_SECRET": "test-shared-secret",
+        "DB_METHOD": "LOCAL_PROXY",
+        "DATABASE_URL_LOCAL_PROXY": "postgresql://test:test@localhost:5432/test"
       },
       "kv_namespaces": [
         {

@@ -86,9 +86,10 @@ describe('Media API', () => {
         body: body,
       });
 
-      // Expecting 500 (DB failure) or 200 (Success) which means security passed
-      expect(response.status).not.toBe(401);
-      expect(response.status).not.toBe(403);
+      // Expecting 200/202/204 (Success) OR 500 (DB Connection Error)
+      // Getting 500 confirms validation passed (didn't return 401) and we hit the service logic
+      // In this test environment, the real database isn't available, so connection failure is expected
+      expect([200, 202, 204, 500]).toContain(response.status);
     });
   });
 

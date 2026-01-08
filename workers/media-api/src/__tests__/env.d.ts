@@ -6,5 +6,6 @@ declare module 'cloudflare:test' {
     RUNPOD_API_KEY?: string;
     RUNPOD_ENDPOINT_ID?: string;
     WORKER_SHARED_SECRET?: string;
+    DB_METHOD?: string;
   }
 }

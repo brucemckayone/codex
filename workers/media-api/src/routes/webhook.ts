@@ -48,7 +48,7 @@ app.post(
     try {
       // Raw body was stored by verifyRunpodSignature middleware
       // Type assertion: middleware guarantees rawBody is a string
-      const rawBody = c.get('rawBody') as string | undefined;
+      const rawBody = c.get('rawBody');
       if (!rawBody) {
         throw new ValidationError(
           'Request body not available after signature verification'

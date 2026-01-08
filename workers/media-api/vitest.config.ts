@@ -1,6 +1,7 @@
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
 
 export default defineWorkersConfig({
+  // Cache buster: 1
   test: {
     globals: true,
     // Use Workers pool to run tests in workerd runtime (not Node.js)

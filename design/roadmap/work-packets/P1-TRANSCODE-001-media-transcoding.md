@@ -35,7 +35,7 @@ Key capabilities:
 - **Thumbnail Extraction**: Auto-generated thumbnails at 10% mark
 - **Audio Waveforms**: Visual waveform data for audio playback UI
 - **Webhook Integration**: Asynchronous job completion via RunPod callbacks
-- **Retry Logic**: One manual retry allowed for failed jobs
+- **Retry Logic**: Max 3 manual retries allowed for failed jobs
 
 This service is consumed by:
 - **Content Service** (P1-CONTENT-001): Triggers transcoding after upload completion
@@ -148,7 +148,7 @@ Access Service can generate streaming URLs
   - Stored for debugging and user-facing error messages
 
 - `transcodingAttempts` (integer, default 0): Retry count
-  - Maximum 1 retry allowed
+  - Maximum 3 retries allowed
   - Prevents infinite retry loops
 
 - `runpodJobId` (text, nullable): RunPod job identifier
@@ -169,7 +169,7 @@ Access Service can generate streaming URLs
 
 **Database Constraints**:
 - `hlsMasterPlaylistKey` required when `status = 'ready'`
-- `transcodingAttempts` max value = 1 (enforced in service logic)
+- `transcodingAttempts` max value = 3 (enforced in service logic)
 
 ---
 
@@ -182,7 +182,7 @@ Access Service can generate streaming URLs
 - **Key Operations**:
   - `triggerJob(mediaId)`: Start transcoding job on RunPod
   - `handleWebhook(payload)`: Process RunPod completion webhook
-  - `retryTranscoding(mediaId)`: Manually retry failed job (1 attempt max)
+  - `retryTranscoding(mediaId)`: Manually retry failed job (3 attempts max)
   - `getTranscodingStatus(mediaId)`: Query current job status
   - `cancelJob(mediaId)`: Cancel in-progress job (admin only)
 
@@ -205,10 +205,10 @@ Access Service can generate streaming URLs
    - Verify webhook signature (HMAC from RunPod)
    - Extract job ID, status, output keys
    - Update media_items atomically (status + keys)
-   - If failed: Store error message, allow retry (max 1)
+   - If failed: Store error message, allow retry (max 3)
 
 4. **Retry Logic**:
-   - Only 1 retry allowed (`transcodingAttempts < 1`)
+   - Only 3 retries allowed (`transcodingAttempts < 3`)
    - Reset status to 'uploaded' before retrying
    - Increment transcodingAttempts counter
    - Manual trigger only (no automatic retries)
@@ -385,8 +385,8 @@ async retryTranscoding(mediaId: string, userId: string): Promise<void> {
   }
 
   // Step 2: Check retry limit
-  if (media.transcodingAttempts >= 1) {
-    throw new ValidationError('Maximum retry attempts reached (1)');
+  if (media.transcodingAttempts >= 3) {
+    throw new ValidationError('Maximum retry attempts reached (3)');
   }
 
   // Step 3: Reset status and increment attempts
@@ -557,7 +557,7 @@ FUNCTION retryTranscoding(mediaId, userId):
   END IF
 
   // Step 2: Check retry limit
-  IF media.transcodingAttempts >= 1:
+  IF media.transcodingAttempts >= 3:
     THROW ValidationError("Maximum retry attempts reached")
   END IF
 
@@ -588,7 +588,7 @@ END FUNCTION
 
 | Method | Path | Purpose | Security Policy |
 |--------|------|---------|-----------------|
-| POST | `/api/transcoding/webhook` | Receive RunPod completion webhook | `auth: 'none'` + HMAC signature verification |
+| POST | `/api/transcoding/webhook` | Receive RunPod completion webhook | `auth: 'none'` + HMAC signature verification (Raw Handler) |
 | POST | `/api/media/:id/retry-transcoding` | Manually retry failed job | `auth: 'required'`, `roles: ['creator', 'admin']` |
 | GET | `/api/media/:id/transcoding-status` | Get current transcoding status | `auth: 'required'` |
 
@@ -599,38 +599,27 @@ import { procedure } from '@codex/worker-utils';
 import { runpodWebhookSchema } from '@codex/validation';
 
 // Webhook endpoint - no auth (uses HMAC verification instead)
+// NOTE: Must be a raw handler (not procedure) to access raw body for HMAC verification
 app.post('/api/transcoding/webhook',
-  procedure({
-    policy: {
-      auth: 'none',           // No session auth - HMAC verified separately
-      rateLimit: 'webhook',   // Webhook-specific rate limiting
-    },
-    input: { body: runpodWebhookSchema },
-    handler: async (ctx): Promise<{ received: true }> => {
-      // Extract and verify HMAC signature
-      const signature = ctx.env.req?.header('x-runpod-signature');
-      const webhookSecret = ctx.env.RUNPOD_WEBHOOK_SECRET;
+  verifyRunpodSignature({ validateTimestamp: true }),
+  async (c) => {
+    // rawBody is guaranteed by middleware
+    const rawBody = c.get('rawBody');
+    const payload = JSON.parse(rawBody);
 
-      if (!signature || !webhookSecret) {
-        throw new UnauthorizedError('Missing webhook signature');
-      }
+    // Validate payload
+    const result = runpodWebhookSchema.safeParse(payload);
+    if (!result.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
+    }
 
-      // Verify HMAC signature
-      const computedSignature = await computeHmacSha256(
-        webhookSecret,
-        JSON.stringify(ctx.input.body)
-      );
+    // Process webhook using service from registry
+    // Note: Creating service manually as we don't have procedure context
+    const service = new TranscodingService(c.env);
+    await service.handleWebhook(result.data);
 
-      if (computedSignature !== signature) {
-        throw new ForbiddenError('Invalid webhook signature');
-      }
-
-      // Process webhook using service from registry
-      await ctx.services.transcoding.handleWebhook(ctx.input.body);
-
-      return { received: true };
-    },
-  })
+    return c.json({ received: true });
+  }
 );
 ```
 
