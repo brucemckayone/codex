@@ -10,6 +10,16 @@ export class TemplateRepository {
    * 1. Organization (if orgId provided)
    * 2. Creator (if creatorId provided)
    * 3. Global
+   *
+   * Optimization Strategy:
+   * - Single query fetches up to 3 candidates (Organization, Creator, Global)
+   * - In-memory priority resolution avoids N+1 queries
+   * - Fetch limit of 3 ensures minimal data transfer
+   *
+   * Query Pattern:
+   * - Uses or() with conditional logic that may return undefined
+   * - Drizzle automatically filters out undefined conditions
+   * - This is a documented Drizzle feature for dynamic query building
    */
   async findTemplate(
     name: string,
@@ -22,6 +32,8 @@ export class TemplateRepository {
       where: and(
         eq(emailTemplates.name, name),
         isNull(emailTemplates.deletedAt),
+        // Drizzle filters out undefined values from or() automatically
+        // This allows us to conditionally include scope filters based on parameters
         or(
           // 1. Organization Scope
           organizationId

@@ -29,8 +29,10 @@ export type {
   TemplateData,
   TemplateDataValue,
   TemplateFilters,
+  TemplatePreviewResponse,
   TemplateScope,
   TemplateStatus,
+  TestSendResponse,
 } from './types';
 
 // ============================================================================
@@ -55,11 +57,12 @@ export {
 // Services
 // ============================================================================
 
-export { NotificationsService } from './services/notifications-service';
 export {
+  BrandingCache,
+  NotificationsService,
   TemplateService,
   type TemplateServiceConfig,
-} from './services/template-service';
+} from './services';
 
 // ============================================================================
 // Providers

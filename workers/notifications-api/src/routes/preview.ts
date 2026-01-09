@@ -11,10 +11,10 @@
 
 import { createDbClient, schema } from '@codex/database';
 import {
-  createEmailProvider,
-  NotificationsService,
   TemplateAccessDeniedError,
   TemplateNotFoundError,
+  type TemplatePreviewResponse,
+  type TestSendResponse,
 } from '@codex/notifications';
 import type { HonoEnv } from '@codex/shared-types';
 import {
@@ -23,46 +23,10 @@ import {
   testSendTemplateSchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
-
-/**
- * Helper to check if user can access a template
- */
-async function checkTemplateAccess(
-  db: ReturnType<typeof createDbClient>,
-  template: NonNullable<
-    Awaited<ReturnType<typeof db.query.emailTemplates.findFirst>>
-  >,
-  userId: string,
-  userRole: string
-): Promise<boolean> {
-  if (template.scope === 'global') {
-    return userRole === 'platform_owner'; // Only platform owner has global template access
-  }
-
-  if (template.scope === 'organization' && template.organizationId) {
-    const membership = await db.query.organizationMemberships.findFirst({
-      where: and(
-        eq(schema.organizationMemberships.userId, userId),
-        eq(
-          schema.organizationMemberships.organizationId,
-          template.organizationId
-        ),
-        eq(schema.organizationMemberships.status, 'active')
-      ),
-    });
-    return !!membership;
-  }
-
-  if (template.scope === 'creator') {
-    return template.creatorId === userId;
-  }
-
-  return false;
-}
 
 /**
  * POST /:id/preview
@@ -79,48 +43,14 @@ app.post(
       params: createIdParamsSchema(),
       body: previewTemplateSchema,
     },
-    handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      // Get template
-      const template = await db.query.emailTemplates.findFirst({
-        where: eq(schema.emailTemplates.id, ctx.input.params.id),
-      });
-
-      if (!template) {
-        throw new TemplateNotFoundError(ctx.input.params.id);
-      }
-
-      // Check access
-      const hasAccess = await checkTemplateAccess(
-        db,
-        template,
+    handler: async (ctx): Promise<TemplatePreviewResponse> => {
+      // Delegate to TemplateService for access control + rendering
+      const preview = await ctx.services.templates.previewTemplateById(
+        ctx.input.params.id,
         ctx.user.id,
-        ctx.user.role
-      );
-
-      if (!hasAccess) {
-        throw new TemplateAccessDeniedError(ctx.input.params.id);
-      }
-
-      // Create service for preview
-      const emailProvider = createEmailProvider({ useMock: true });
-
-      const notificationService = new NotificationsService({
-        db,
-        emailProvider,
-        fromEmail:
-          (ctx.env as Record<string, string>).FROM_EMAIL ||
-          'noreply@example.com',
-        fromName: (ctx.env as Record<string, string>).FROM_NAME || 'Codex',
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const preview = await notificationService.previewTemplate(
-        template.name,
+        ctx.user.role,
         ctx.input.body.data,
-        template.organizationId ?? undefined,
-        template.creatorId ?? undefined
+        ctx.services.notifications
       );
 
       return { data: preview };
@@ -143,10 +73,10 @@ app.post(
       params: createIdParamsSchema(),
       body: testSendTemplateSchema,
     },
-    handler: async (ctx) => {
+    handler: async (ctx): Promise<TestSendResponse> => {
       const db = createDbClient(ctx.env);
 
-      // Get template
+      // Get template (we need the name for sending)
       const template = await db.query.emailTemplates.findFirst({
         where: eq(schema.emailTemplates.id, ctx.input.params.id),
       });
@@ -155,9 +85,8 @@ app.post(
         throw new TemplateNotFoundError(ctx.input.params.id);
       }
 
-      // Check access
-      const hasAccess = await checkTemplateAccess(
-        db,
+      // Check access using template service
+      const hasAccess = await ctx.services.templates.checkTemplateAccess(
         template,
         ctx.user.id,
         ctx.user.role
@@ -167,24 +96,8 @@ app.post(
         throw new TemplateAccessDeniedError(ctx.input.params.id);
       }
 
-      // Create provider based on environment
-      const emailProvider = createEmailProvider({
-        useMock: (ctx.env as Record<string, string>).USE_MOCK_EMAIL === 'true',
-        resendApiKey: (ctx.env as Record<string, string>).RESEND_API_KEY,
-        mailhogUrl: (ctx.env as Record<string, string>).MAILHOG_URL,
-      });
-
-      const notificationService = new NotificationsService({
-        db,
-        emailProvider,
-        fromEmail:
-          (ctx.env as Record<string, string>).FROM_EMAIL ||
-          'noreply@example.com',
-        fromName: (ctx.env as Record<string, string>).FROM_NAME || 'Codex',
-        environment: ctx.env.ENVIRONMENT || 'development',
-      });
-
-      const result = await notificationService.sendEmail({
+      // Use notification service to send email
+      const result = await ctx.services.notifications.sendEmail({
         to: ctx.input.body.recipientEmail,
         templateName: template.name,
         data: ctx.input.body.data,

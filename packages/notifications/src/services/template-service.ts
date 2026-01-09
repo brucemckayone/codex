@@ -17,6 +17,7 @@ import type {
 } from '@codex/validation';
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { TemplateAccessDeniedError, TemplateNotFoundError } from '../errors';
+import type { NotificationsService } from './notifications-service';
 
 /**
  * Configuration for TemplateService
@@ -48,7 +49,7 @@ export class TemplateService extends BaseService {
     const { page, limit, status } = query;
     const offset = (page - 1) * limit;
 
-    const whereClause = and(
+    const whereGlobalTemplates = and(
       eq(schema.emailTemplates.scope, 'global'),
       isNull(schema.emailTemplates.deletedAt),
       status ? eq(schema.emailTemplates.status, status) : undefined
@@ -56,7 +57,7 @@ export class TemplateService extends BaseService {
 
     const [templates, countResult] = await Promise.all([
       this.db.query.emailTemplates.findMany({
-        where: whereClause,
+        where: whereGlobalTemplates,
         limit,
         offset,
         orderBy: [desc(schema.emailTemplates.createdAt)],
@@ -64,7 +65,7 @@ export class TemplateService extends BaseService {
       this.db
         .select({ count: count(schema.emailTemplates.id) })
         .from(schema.emailTemplates)
-        .where(whereClause),
+        .where(whereGlobalTemplates),
     ]);
 
     const total = countResult[0]?.count ?? 0;
@@ -87,27 +88,33 @@ export class TemplateService extends BaseService {
     input: CreateGlobalTemplateInput,
     createdBy: string
   ): Promise<EmailTemplate> {
-    const [template] = await this.db
-      .insert(schema.emailTemplates)
-      .values({
-        ...input,
-        scope: 'global',
-        organizationId: null,
-        creatorId: null,
-        createdBy,
-      })
-      .returning();
+    try {
+      const [template] = await this.db
+        .insert(schema.emailTemplates)
+        .values({
+          ...input,
+          scope: 'global',
+          organizationId: null,
+          creatorId: null,
+          createdBy,
+        })
+        .returning();
 
-    if (!template) {
-      throw new Error('Failed to create global template');
+      if (!template) {
+        throw new Error('Failed to create global template');
+      }
+
+      // Log after successful DB operation
+      this.obs.info('Global template created', {
+        templateId: template.id,
+        name: template.name,
+      });
+
+      return template;
+    } catch (error) {
+      this.obs.error('Error creating global template', { error, input });
+      throw error;
     }
-
-    this.obs.info('Global template created', {
-      templateId: template.id,
-      name: template.name,
-    });
-
-    return template;
   }
 
   /**
@@ -245,24 +252,34 @@ export class TemplateService extends BaseService {
     // Verify admin/owner role
     await this.requireOrgAdminRole(orgId, userId);
 
-    const [template] = await this.db
-      .insert(schema.emailTemplates)
-      .values({
-        ...input,
-        scope: 'organization',
-        organizationId: orgId,
-        creatorId: null,
-        createdBy: userId,
-      })
-      .returning();
+    try {
+      const [template] = await this.db
+        .insert(schema.emailTemplates)
+        .values({
+          ...input,
+          scope: 'organization',
+          organizationId: orgId,
+          creatorId: null,
+          createdBy: userId,
+        })
+        .returning();
 
-    if (!template) {
-      throw new Error('Failed to create organization template');
+      if (!template) {
+        throw new Error('Failed to create organization template');
+      }
+
+      // Log after successful DB operation
+      this.obs.info('Org template created', { templateId: template.id, orgId });
+
+      return template;
+    } catch (error) {
+      this.obs.error('Error creating organization template', {
+        error,
+        orgId,
+        input,
+      });
+      throw error;
     }
-
-    this.obs.info('Org template created', { templateId: template.id, orgId });
-
-    return template;
   }
 
   /**
@@ -387,27 +404,37 @@ export class TemplateService extends BaseService {
     creatorId: string,
     input: CreateCreatorTemplateInput
   ): Promise<EmailTemplate> {
-    const [template] = await this.db
-      .insert(schema.emailTemplates)
-      .values({
-        ...input,
-        scope: 'creator',
-        organizationId: input.organizationId ?? null,
+    try {
+      const [template] = await this.db
+        .insert(schema.emailTemplates)
+        .values({
+          ...input,
+          scope: 'creator',
+          organizationId: input.organizationId ?? null,
+          creatorId,
+          createdBy: creatorId,
+        })
+        .returning();
+
+      if (!template) {
+        throw new Error('Failed to create creator template');
+      }
+
+      // Log after successful DB operation
+      this.obs.info('Creator template created', {
+        templateId: template.id,
         creatorId,
-        createdBy: creatorId,
-      })
-      .returning();
+      });
 
-    if (!template) {
-      throw new Error('Failed to create creator template');
+      return template;
+    } catch (error) {
+      this.obs.error('Error creating creator template', {
+        error,
+        creatorId,
+        input,
+      });
+      throw error;
     }
-
-    this.obs.info('Creator template created', {
-      templateId: template.id,
-      creatorId,
-    });
-
-    return template;
   }
 
   /**
@@ -468,6 +495,91 @@ export class TemplateService extends BaseService {
     }
 
     this.obs.info('Creator template deleted', { templateId, creatorId });
+  }
+
+  // ===========================================================================
+  // Template Preview Operations
+  // ===========================================================================
+
+  /**
+   * Preview a template by ID with access control
+   * Used by worker routes to delegate preview logic with proper access checks
+   */
+  async previewTemplateById(
+    templateId: string,
+    userId: string,
+    userRole: string,
+    data: Record<string, string | number | boolean | null>,
+    notificationsService: NotificationsService
+  ): Promise<{
+    subject: string;
+    html: string;
+    text: string;
+  }> {
+    // Get template
+    const template = await this.db.query.emailTemplates.findFirst({
+      where: and(
+        eq(schema.emailTemplates.id, templateId),
+        isNull(schema.emailTemplates.deletedAt)
+      ),
+    });
+
+    if (!template) {
+      throw new TemplateNotFoundError(templateId);
+    }
+
+    // Check access based on scope
+    const hasAccess = await this.checkTemplateAccess(
+      template,
+      userId,
+      userRole
+    );
+
+    if (!hasAccess) {
+      throw new TemplateAccessDeniedError(templateId);
+    }
+
+    // Delegate to NotificationsService for rendering
+    return notificationsService.previewTemplate(
+      template.name,
+      data,
+      template.organizationId ?? undefined,
+      template.creatorId ?? undefined
+    );
+  }
+
+  /**
+   * Check if a user has access to a template based on scope
+   * Public for use in worker routes that need access checks separate from preview
+   */
+  async checkTemplateAccess(
+    template: EmailTemplate,
+    userId: string,
+    userRole: string
+  ): Promise<boolean> {
+    if (template.scope === 'global') {
+      return userRole === 'platform_owner'; // Only platform owner has global template access
+    }
+
+    if (template.scope === 'organization' && template.organizationId) {
+      const membership = await this.db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(schema.organizationMemberships.userId, userId),
+          eq(
+            schema.organizationMemberships.organizationId,
+            template.organizationId
+          ),
+          eq(schema.organizationMemberships.status, 'active')
+        ),
+      });
+      return !!membership;
+    }
+
+    if (template.scope === 'creator') {
+      return template.creatorId === userId;
+    }
+
+    return false;
   }
 
   // ===========================================================================

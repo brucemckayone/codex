@@ -382,6 +382,9 @@ importers:
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation

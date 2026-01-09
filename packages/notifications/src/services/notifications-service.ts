@@ -3,7 +3,8 @@ import {
   ContactSettingsService,
 } from '@codex/platform-settings';
 import { BaseService } from '@codex/service-errors';
-import { TemplateNotFoundError } from '../errors';
+import { z } from '@codex/validation';
+import { TemplateNotFoundError, ValidationError } from '../errors';
 import type {
   EmailMessage,
   EmailProvider,
@@ -118,6 +119,20 @@ export class NotificationsService extends BaseService {
   async sendEmail(params: SendEmailParams): Promise<SendResult> {
     const { to, toName, templateName, data, organizationId, creatorId } =
       params;
+
+    // Defensive email validation (API layer also validates, but services should be defensive)
+    const emailSchema = z.string().email();
+    const validEmail = emailSchema.safeParse(to);
+    if (!validEmail.success) {
+      this.obs.warn('Invalid email address provided', {
+        email: to,
+        templateName,
+      });
+      throw new ValidationError('Invalid email address', {
+        email: to,
+        errors: validEmail.error.issues,
+      });
+    }
 
     // 1. Resolve Template
     const template = await this.templateRepository.findTemplate(

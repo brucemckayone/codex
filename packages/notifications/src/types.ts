@@ -12,12 +12,27 @@ import type {
   TemplateScope,
   TemplateStatus,
 } from '@codex/database/schema';
-import type { EmailProvider } from './providers/types';
+import type {
+  PaginatedListResponse,
+  PaginationMetadata as SharedPaginationMetadata,
+  SingleItemResponse,
+} from '@codex/shared-types';
+import type { EmailProvider, SendResult } from './providers/types';
+
+// ============================================================================
+// API Response Types
+// ============================================================================
 
 /**
- * Database client type (properly typed from Drizzle)
- * Supports both HTTP (production) and WebSocket (tests) clients
+ * Response for template preview endpoint
  */
+export type TemplatePreviewResponse = SingleItemResponse<RenderedTemplate>;
+
+/**
+ * Response for test send endpoint
+ */
+export type TestSendResponse = SingleItemResponse<SendResult>;
+
 export type Database = typeof dbHttp | typeof dbWs;
 
 /**

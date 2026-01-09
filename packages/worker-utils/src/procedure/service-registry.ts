@@ -20,7 +20,11 @@ import { R2Service } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
-import { TemplateService } from '@codex/notifications';
+import {
+  createEmailProvider,
+  NotificationsService,
+  TemplateService,
+} from '@codex/notifications';
 import type { ObservabilityClient } from '@codex/observability';
 import { OrganizationService } from '@codex/organization';
 import { PlatformSettingsFacade } from '@codex/platform-settings';
@@ -78,6 +82,7 @@ export function createServiceRegistry(
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
   let _templates: TemplateService | undefined;
+  let _notifications: NotificationsService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -248,6 +253,25 @@ export function createServiceRegistry(
         });
       }
       return _templates;
+    },
+
+    get notifications() {
+      if (!_notifications) {
+        const emailProvider = createEmailProvider({
+          useMock: env.USE_MOCK_EMAIL === 'true',
+          resendApiKey: env.RESEND_API_KEY,
+          mailhogUrl: env.MAILHOG_URL,
+        });
+
+        _notifications = new NotificationsService({
+          db: getSharedDb(),
+          emailProvider,
+          fromEmail: env.FROM_EMAIL || 'noreply@example.com',
+          fromName: env.FROM_NAME || 'Codex',
+          environment: getEnvironment(),
+        });
+      }
+      return _notifications;
     },
   };
 

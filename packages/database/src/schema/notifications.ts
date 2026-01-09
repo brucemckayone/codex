@@ -112,6 +112,12 @@ export const emailTemplates = pgTable(
     index('idx_templates_active')
       .on(table.id, table.status)
       .where(sql`${table.deletedAt} IS NULL`),
+
+    // Template resolution optimization (Migration 0022)
+    // Composite index for TemplateRepository.findTemplate() query
+    index('idx_template_lookup')
+      .on(table.name, table.scope, table.organizationId, table.creatorId)
+      .where(sql`${table.deletedAt} IS NULL`),
   ]
 );
 
