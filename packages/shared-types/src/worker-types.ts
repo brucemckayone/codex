@@ -80,6 +80,26 @@ export type Bindings = {
   R2_PUBLIC_URL_BASE?: string;
 
   /**
+   * Backblaze B2 Endpoint
+   */
+  B2_ENDPOINT?: string;
+
+  /**
+   * Backblaze B2 Key ID
+   */
+  B2_KEY_ID?: string;
+
+  /**
+   * Backblaze B2 Application Key
+   */
+  B2_APP_KEY?: string;
+
+  /**
+   * Backblaze B2 Bucket Name
+   */
+  B2_BUCKET?: string;
+
+  /**
    * Stripe API secret key
    */
   STRIPE_SECRET_KEY?: string;

@@ -66,38 +66,22 @@ app.post(
       // Validate against schema
       const result = runpodWebhookSchema.safeParse(payload);
       if (!result.success) {
-        // Log detailed errors server-side for debugging
-        console.error(
-          '[webhook] Validation failed:',
-          result.error.errors.map((e) => ({
-            path: e.path.join('.'),
-            message: e.message,
-          }))
-        );
         throw new ValidationError('Invalid webhook payload');
       }
 
-      // Validate required environment variables
-      const runpodApiKey = c.env.RUNPOD_API_KEY;
-      const runpodEndpointId = c.env.RUNPOD_ENDPOINT_ID;
-
-      if (!runpodApiKey || !runpodEndpointId) {
-        // Log detailed config status server-side only
-        console.error('[webhook] RunPod configuration missing:', {
-          runpodApiKey: !runpodApiKey ? 'missing' : 'ok',
-          runpodEndpointId: !runpodEndpointId ? 'missing' : 'ok',
-        });
-        throw new ValidationError('Service configuration error');
-      }
-
       // Create database client and TranscodingService
+      // Note: Env vars are validated by global middleware in index.ts
       const db = createDbClient(c.env);
       const service = new TranscodingService({
         db,
         environment: c.env.ENVIRONMENT || 'development',
-        runpodApiKey,
-        runpodEndpointId,
+        runpodApiKey: c.env.RUNPOD_API_KEY!,
+        runpodEndpointId: c.env.RUNPOD_ENDPOINT_ID!,
         webhookBaseUrl: c.env.API_URL || 'http://localhost:4002',
+        b2Endpoint: c.env.B2_ENDPOINT!,
+        b2AccessKeyId: c.env.B2_KEY_ID!,
+        b2SecretAccessKey: c.env.B2_APP_KEY!,
+        b2BucketName: c.env.B2_BUCKET!,
       });
 
       // Process the webhook

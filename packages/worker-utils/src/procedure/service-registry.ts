@@ -209,10 +209,22 @@ export function createServiceRegistry(
       if (!_transcoding) {
         const runpodApiKey = env.RUNPOD_API_KEY;
         const runpodEndpointId = env.RUNPOD_ENDPOINT_ID;
-        if (!runpodApiKey || !runpodEndpointId) {
+        const b2Endpoint = env.B2_ENDPOINT;
+        const b2AccessKeyId = env.B2_KEY_ID;
+        const b2SecretAccessKey = env.B2_APP_KEY;
+        const b2BucketName = env.B2_BUCKET;
+
+        if (
+          !runpodApiKey ||
+          !runpodEndpointId ||
+          !b2Endpoint ||
+          !b2AccessKeyId ||
+          !b2SecretAccessKey ||
+          !b2BucketName
+        ) {
           throw new Error(
-            'RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID not configured. ' +
-              'Add secrets to worker environment for transcoding operations.'
+            'Incomplete transcoding configuration. ' +
+              'Ensure RUNPOD_* and B2_* secrets are set in the worker environment.'
           );
         }
 
@@ -230,6 +242,10 @@ export function createServiceRegistry(
           runpodApiKey,
           runpodEndpointId,
           webhookBaseUrl: webhookBaseUrl || 'http://localhost:4002',
+          b2Endpoint,
+          b2AccessKeyId,
+          b2SecretAccessKey,
+          b2BucketName,
         });
       }
       return _transcoding;

@@ -59,6 +59,11 @@ export interface RunPodJobRequest {
     inputKey: string;
     webhookUrl: string;
     priority?: number;
+    // B2 Configuration for Mezzanine Archival
+    b2Endpoint: string;
+    b2AccessKeyId: string;
+    b2SecretAccessKey: string;
+    b2BucketName: string;
   };
 }
 
@@ -77,6 +82,11 @@ export interface TranscodingServiceConfig {
   runpodApiKey: string;
   runpodEndpointId: string;
   webhookBaseUrl: string;
+  // B2 Credentials
+  b2Endpoint: string;
+  b2AccessKeyId: string;
+  b2SecretAccessKey: string;
+  b2BucketName: string;
 }
 
 /**

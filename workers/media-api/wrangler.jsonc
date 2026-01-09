@@ -36,7 +36,11 @@
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
     "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "API_URL": "http://localhost:8787",
+    "B2_ENDPOINT": "https://s3.us-west-002.backblazeb2.com",
+    "B2_KEY_ID": "test-b2-key",
+    "B2_APP_KEY": "test-b2-app-key",
+    "B2_BUCKET": "codex-media-archive-test"
   },
 
   // Environment configurations
@@ -54,7 +58,11 @@
         "RUNPOD_WEBHOOK_SECRET": "test-secret",
         "WORKER_SHARED_SECRET": "test-shared-secret",
         "DB_METHOD": "LOCAL_PROXY",
-        "DATABASE_URL_LOCAL_PROXY": "postgresql://test:test@localhost:5432/test"
+        "DATABASE_URL_LOCAL_PROXY": "postgresql://test:test@localhost:5432/test",
+        "B2_ENDPOINT": "https://s3.us-west-002.backblazeb2.com",
+        "B2_KEY_ID": "test-b2-key",
+        "B2_APP_KEY": "test-b2-app-key",
+        "B2_BUCKET": "codex-media-archive-test"
       },
       "kv_namespaces": [
         {

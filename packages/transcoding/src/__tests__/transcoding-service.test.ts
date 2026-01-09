@@ -22,6 +22,11 @@ const mockConfig = {
   runpodEndpointId: 'mock-endpoint-id',
   webhookBaseUrl: 'https://api.example.com',
   hmacSecret: 'mock-secret',
+  // B2 Config
+  b2Endpoint: 'https://b2.mock',
+  b2AccessKeyId: 'mock-b2-key',
+  b2SecretAccessKey: 'mock-b2-secret',
+  b2BucketName: 'mock-bucket',
 } as TranscodingServiceFullConfig;
 
 describe('TranscodingService', () => {
@@ -81,6 +86,15 @@ describe('TranscodingService', () => {
           body: expect.stringContaining(mediaId),
         })
       );
+      // Verify B2 fields in body
+      const call = (global.fetch as any).mock.calls[0];
+      const body = JSON.parse(call[1].body);
+      expect(body.input).toMatchObject({
+        b2Endpoint: mockConfig.b2Endpoint,
+        b2AccessKeyId: mockConfig.b2AccessKeyId,
+        b2SecretAccessKey: mockConfig.b2SecretAccessKey,
+        b2BucketName: mockConfig.b2BucketName,
+      });
 
       // Verify DB update status='transcoding'
       expect(mockDb.update).toHaveBeenCalled();

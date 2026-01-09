@@ -66,6 +66,10 @@ app.use(
       'RUNPOD_WEBHOOK_SECRET',
       'WORKER_SHARED_SECRET',
       'RATE_LIMIT_KV',
+      'B2_ENDPOINT',
+      'B2_KEY_ID',
+      'B2_APP_KEY',
+      'B2_BUCKET',
     ],
     optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
   })

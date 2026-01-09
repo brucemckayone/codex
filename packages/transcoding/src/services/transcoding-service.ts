@@ -53,6 +53,11 @@ export interface TranscodingServiceConfig {
   runpodEndpointId: string;
   webhookBaseUrl: string; // Required for callbacks
   runpodTimeout?: number; // Configurable timeout, defaults to 30000ms
+  // B2 Credentials
+  b2Endpoint: string;
+  b2AccessKeyId: string;
+  b2SecretAccessKey: string;
+  b2BucketName: string;
 }
 
 export interface TranscodingServiceFullConfig
@@ -82,6 +87,11 @@ export class TranscodingService extends BaseService {
   private readonly runpodApiUrl: string;
   private readonly webhookUrl: string;
   private readonly runpodTimeout: number;
+  // B2 Config
+  private readonly b2Endpoint: string;
+  private readonly b2AccessKeyId: string;
+  private readonly b2SecretAccessKey: string;
+  private readonly b2BucketName: string;
 
   /**
    * Initialize TranscodingService with RunPod credentials
@@ -101,10 +111,25 @@ export class TranscodingService extends BaseService {
     if (!config.webhookBaseUrl) {
       throw new Error('TranscodingService: webhookBaseUrl is required');
     }
+    // Validate B2 config
+    if (
+      !config.b2Endpoint ||
+      !config.b2AccessKeyId ||
+      !config.b2SecretAccessKey ||
+      !config.b2BucketName
+    ) {
+      throw new Error('TranscodingService: B2 credentials are incomplete');
+    }
 
     this.runpodApiKey = config.runpodApiKey;
     this.runpodEndpointId = config.runpodEndpointId;
     this.runpodTimeout = config.runpodTimeout ?? 30000;
+
+    // Store B2 config
+    this.b2Endpoint = config.b2Endpoint;
+    this.b2AccessKeyId = config.b2AccessKeyId;
+    this.b2SecretAccessKey = config.b2SecretAccessKey;
+    this.b2BucketName = config.b2BucketName;
 
     // Pre-construct URLs (won't change during service lifetime)
     this.runpodApiUrl = `https://api.runpod.ai/v2/${config.runpodEndpointId}/run`;
@@ -158,6 +183,11 @@ export class TranscodingService extends BaseService {
         inputKey: media.r2Key,
         webhookUrl: this.webhookUrl,
         priority: priority ?? media.transcodingPriority,
+        // B2 Credentials for Worker
+        b2Endpoint: this.b2Endpoint,
+        b2AccessKeyId: this.b2AccessKeyId,
+        b2SecretAccessKey: this.b2SecretAccessKey,
+        b2BucketName: this.b2BucketName,
       },
     };
 
@@ -591,6 +621,11 @@ export class TranscodingService extends BaseService {
         inputKey: media.r2Key,
         webhookUrl: this.webhookUrl,
         priority: priority ?? media.transcodingPriority,
+        // B2 Credentials for Worker
+        b2Endpoint: this.b2Endpoint,
+        b2AccessKeyId: this.b2AccessKeyId,
+        b2SecretAccessKey: this.b2SecretAccessKey,
+        b2BucketName: this.b2BucketName,
       },
     };
 
