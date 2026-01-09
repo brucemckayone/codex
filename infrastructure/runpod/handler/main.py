@@ -29,7 +29,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
 from typing import Any, TypedDict
 
 import boto3
@@ -128,13 +127,17 @@ def download_file(client: Any, bucket: str, key: str, local_path: str) -> None:
     client.download_file(bucket, key, local_path)
 
 
-def upload_file(client: Any, bucket: str, key: str, local_path: str, content_type: str | None = None) -> None:
+def upload_file(
+    client: Any, bucket: str, key: str, local_path: str, content_type: str | None = None
+) -> None:
     """Upload file to S3-compatible storage."""
     print(f"Uploading {local_path} → s3://{bucket}/{key}")
     extra_args = {}
     if content_type:
         extra_args["ContentType"] = content_type
-    client.upload_file(local_path, bucket, key, ExtraArgs=extra_args if extra_args else None)
+    client.upload_file(
+        local_path, bucket, key, ExtraArgs=extra_args if extra_args else None
+    )
 
 
 def upload_directory(client: Any, bucket: str, key_prefix: str, local_dir: str) -> None:
@@ -170,8 +173,10 @@ def probe_media(input_path: str) -> dict[str, Any]:
     """Get media metadata using ffprobe."""
     cmd = [
         "ffprobe",
-        "-v", "quiet",
-        "-print_format", "json",
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
         "-show_format",
         "-show_streams",
         input_path,
@@ -221,26 +226,41 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
     if use_gpu:
         # GPU encoding
         cmd = [
-            "ffmpeg", "-y",
-            "-hwaccel", "cuda",
-            "-i", input_path,
-            "-c:v", "h264_nvenc",
-            "-preset", "p4",
-            "-cq", "18",
-            "-c:a", "aac",
-            "-b:a", "256k",
+            "ffmpeg",
+            "-y",
+            "-hwaccel",
+            "cuda",
+            "-i",
+            input_path,
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p4",
+            "-cq",
+            "18",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
             output_path,
         ]
     else:
         # CPU encoding
         cmd = [
-            "ffmpeg", "-y",
-            "-i", input_path,
-            "-c:v", "libx264",
-            "-preset", "slow",
-            "-crf", "18",
-            "-c:a", "aac",
-            "-b:a", "256k",
+            "ffmpeg",
+            "-y",
+            "-i",
+            input_path,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-crf",
+            "18",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
             output_path,
         ]
 
@@ -253,9 +273,12 @@ def analyze_loudness(input_path: str) -> dict[str, float]:
 
     cmd = [
         "ffmpeg",
-        "-i", input_path,
-        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
-        "-f", "null",
+        "-i",
+        input_path,
+        "-af",
+        "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
+        "-f",
+        "null",
         "-",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -294,7 +317,9 @@ def transcode_video_hls(
     for variant_name, settings in HLS_VARIANTS.items():
         # Skip variants higher than source resolution
         if source_height and settings["height"] > source_height:
-            print(f"Skipping {variant_name} (source height {source_height} < {settings['height']})")
+            print(
+                f"Skipping {variant_name} (source height {source_height} < {settings['height']})"
+            )
             continue
 
         variant_dir = os.path.join(output_dir, variant_name)
@@ -305,43 +330,76 @@ def transcode_video_hls(
 
         if use_gpu:
             cmd = [
-                "ffmpeg", "-y",
-                "-hwaccel", "cuda",
-                "-i", input_path,
-                "-vf", f"scale=-2:{settings['height']}",
-                "-c:v", "h264_nvenc",
-                "-preset", "p4",
-                "-cq", "23",
-                "-b:v", settings["video_bitrate"],
-                "-maxrate", settings["video_bitrate"],
-                "-bufsize", f"{int(settings['video_bitrate'][:-1]) * 2}k",
-                "-c:a", "aac",
-                "-b:a", settings["audio_bitrate"],
-                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-                "-f", "hls",
-                "-hls_time", str(HLS_SEGMENT_DURATION),
-                "-hls_playlist_type", "vod",
-                "-hls_segment_filename", os.path.join(variant_dir, "segment_%03d.ts"),
+                "ffmpeg",
+                "-y",
+                "-hwaccel",
+                "cuda",
+                "-i",
+                input_path,
+                "-vf",
+                f"scale=-2:{settings['height']}",
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                "p4",
+                "-cq",
+                "23",
+                "-b:v",
+                settings["video_bitrate"],
+                "-maxrate",
+                settings["video_bitrate"],
+                "-bufsize",
+                f"{int(settings['video_bitrate'][:-1]) * 2}k",
+                "-c:a",
+                "aac",
+                "-b:a",
+                settings["audio_bitrate"],
+                "-af",
+                "loudnorm=I=-16:TP=-1.5:LRA=11",
+                "-f",
+                "hls",
+                "-hls_time",
+                str(HLS_SEGMENT_DURATION),
+                "-hls_playlist_type",
+                "vod",
+                "-hls_segment_filename",
+                os.path.join(variant_dir, "segment_%03d.ts"),
                 playlist_path,
             ]
         else:
             cmd = [
-                "ffmpeg", "-y",
-                "-i", input_path,
-                "-vf", f"scale=-2:{settings['height']}",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "23",
-                "-b:v", settings["video_bitrate"],
-                "-maxrate", settings["video_bitrate"],
-                "-bufsize", f"{int(settings['video_bitrate'][:-1]) * 2}k",
-                "-c:a", "aac",
-                "-b:a", settings["audio_bitrate"],
-                "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-                "-f", "hls",
-                "-hls_time", str(HLS_SEGMENT_DURATION),
-                "-hls_playlist_type", "vod",
-                "-hls_segment_filename", os.path.join(variant_dir, "segment_%03d.ts"),
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-vf",
+                f"scale=-2:{settings['height']}",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-b:v",
+                settings["video_bitrate"],
+                "-maxrate",
+                settings["video_bitrate"],
+                "-bufsize",
+                f"{int(settings['video_bitrate'][:-1]) * 2}k",
+                "-c:a",
+                "aac",
+                "-b:a",
+                settings["audio_bitrate"],
+                "-af",
+                "loudnorm=I=-16:TP=-1.5:LRA=11",
+                "-f",
+                "hls",
+                "-hls_time",
+                str(HLS_SEGMENT_DURATION),
+                "-hls_playlist_type",
+                "vod",
+                "-hls_segment_filename",
+                os.path.join(variant_dir, "segment_%03d.ts"),
                 playlist_path,
             ]
 
@@ -357,7 +415,9 @@ def transcode_video_hls(
         for variant_name, settings in variant_playlists:
             bandwidth = int(settings["video_bitrate"][:-1]) * 1000
             resolution = f"{int(settings['height'] * 16 / 9)}x{settings['height']}"
-            f.write(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution}\n")
+            f.write(
+                f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution}\n"
+            )
             f.write(f"{variant_name}/index.m3u8\n")
 
     return ready_variants
@@ -378,16 +438,25 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
         print(f"Encoding audio {variant_name}...")
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", input_path,
+            "ffmpeg",
+            "-y",
+            "-i",
+            input_path,
             "-vn",  # No video
-            "-c:a", "aac",
-            "-b:a", settings["audio_bitrate"],
-            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-            "-f", "hls",
-            "-hls_time", str(HLS_SEGMENT_DURATION),
-            "-hls_playlist_type", "vod",
-            "-hls_segment_filename", os.path.join(variant_dir, "segment_%03d.ts"),
+            "-c:a",
+            "aac",
+            "-b:a",
+            settings["audio_bitrate"],
+            "-af",
+            "loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-f",
+            "hls",
+            "-hls_time",
+            str(HLS_SEGMENT_DURATION),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_filename",
+            os.path.join(variant_dir, "segment_%03d.ts"),
             playlist_path,
         ]
 
@@ -408,7 +477,9 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
     return ready_variants
 
 
-def create_preview(input_path: str, output_dir: str, duration: int, use_gpu: bool) -> None:
+def create_preview(
+    input_path: str, output_dir: str, duration: int, use_gpu: bool
+) -> None:
     """Create 30-second preview clip at 720p."""
     print("Creating preview clip...")
 
@@ -421,39 +492,68 @@ def create_preview(input_path: str, output_dir: str, duration: int, use_gpu: boo
 
     if use_gpu:
         cmd = [
-            "ffmpeg", "-y",
-            "-hwaccel", "cuda",
-            "-ss", str(start_time),
-            "-i", input_path,
-            "-t", str(preview_duration),
-            "-vf", f"scale=-2:{PREVIEW_HEIGHT}",
-            "-c:v", "h264_nvenc",
-            "-preset", "p4",
-            "-cq", "23",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-f", "hls",
-            "-hls_time", str(HLS_SEGMENT_DURATION),
-            "-hls_playlist_type", "vod",
-            "-hls_segment_filename", os.path.join(preview_dir, "segment_%03d.ts"),
+            "ffmpeg",
+            "-y",
+            "-hwaccel",
+            "cuda",
+            "-ss",
+            str(start_time),
+            "-i",
+            input_path,
+            "-t",
+            str(preview_duration),
+            "-vf",
+            f"scale=-2:{PREVIEW_HEIGHT}",
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p4",
+            "-cq",
+            "23",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-f",
+            "hls",
+            "-hls_time",
+            str(HLS_SEGMENT_DURATION),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_filename",
+            os.path.join(preview_dir, "segment_%03d.ts"),
             os.path.join(preview_dir, "preview.m3u8"),
         ]
     else:
         cmd = [
-            "ffmpeg", "-y",
-            "-ss", str(start_time),
-            "-i", input_path,
-            "-t", str(preview_duration),
-            "-vf", f"scale=-2:{PREVIEW_HEIGHT}",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-f", "hls",
-            "-hls_time", str(HLS_SEGMENT_DURATION),
-            "-hls_playlist_type", "vod",
-            "-hls_segment_filename", os.path.join(preview_dir, "segment_%03d.ts"),
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(start_time),
+            "-i",
+            input_path,
+            "-t",
+            str(preview_duration),
+            "-vf",
+            f"scale=-2:{PREVIEW_HEIGHT}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-f",
+            "hls",
+            "-hls_time",
+            str(HLS_SEGMENT_DURATION),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_filename",
+            os.path.join(preview_dir, "segment_%03d.ts"),
             os.path.join(preview_dir, "preview.m3u8"),
         ]
 
@@ -467,11 +567,16 @@ def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
     timestamp = max(1, int(duration * 0.1))
 
     cmd = [
-        "ffmpeg", "-y",
-        "-ss", str(timestamp),
-        "-i", input_path,
-        "-vframes", "1",
-        "-q:v", "2",
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(timestamp),
+        "-i",
+        input_path,
+        "-vframes",
+        "1",
+        "-q:v",
+        "2",
         output_path,
     ]
 
@@ -485,21 +590,30 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
     # Generate JSON waveform data
     cmd_json = [
         "audiowaveform",
-        "-i", input_path,
-        "-o", json_path,
-        "--pixels-per-second", "10",
-        "-b", "8",
+        "-i",
+        input_path,
+        "-o",
+        json_path,
+        "--pixels-per-second",
+        "10",
+        "-b",
+        "8",
     ]
     subprocess.run(cmd_json, check=True)
 
     # Generate PNG waveform image
     cmd_png = [
         "audiowaveform",
-        "-i", input_path,
-        "-o", image_path,
-        "--width", "1800",
-        "--height", "140",
-        "--colors", "audition",
+        "-i",
+        input_path,
+        "-o",
+        image_path,
+        "--width",
+        "1800",
+        "--height",
+        "140",
+        "--colors",
+        "audition",
     ]
     subprocess.run(cmd_png, check=True)
 
@@ -591,7 +705,13 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
         if media_type == "video":
             create_mezzanine(input_path, mezzanine_path, use_gpu)
-            upload_file(b2_client, job_input["b2BucketName"], mezzanine_key, mezzanine_path, "video/mp4")
+            upload_file(
+                b2_client,
+                job_input["b2BucketName"],
+                mezzanine_key,
+                mezzanine_path,
+                "video/mp4",
+            )
         else:
             mezzanine_key = None  # No mezzanine for audio-only
 
@@ -612,7 +732,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         hls_prefix = f"{creator_id}/hls/{media_id}/"
         upload_directory(r2_client, job_input["r2BucketName"], hls_prefix, hls_dir)
         hls_master_key = f"{hls_prefix}master.m3u8"
-        hls_preview_key = f"{hls_prefix}preview/preview.m3u8" if media_type == "video" else None
+        hls_preview_key = (
+            f"{hls_prefix}preview/preview.m3u8" if media_type == "video" else None
+        )
 
         # Step 6: Create preview (video only)
         if media_type == "video" and duration > 0:
@@ -625,7 +747,13 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             thumbnail_path = os.path.join(work_dir, "thumbnail.jpg")
             extract_thumbnail(input_path, thumbnail_path, duration)
             thumbnail_key = f"{creator_id}/thumbnails/{media_id}/auto-generated.jpg"
-            upload_file(r2_client, job_input["r2BucketName"], thumbnail_key, thumbnail_path, "image/jpeg")
+            upload_file(
+                r2_client,
+                job_input["r2BucketName"],
+                thumbnail_key,
+                thumbnail_path,
+                "image/jpeg",
+            )
 
         # Step 8: Generate waveform (audio only)
         waveform_key = None
@@ -637,8 +765,20 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
             waveform_key = f"{creator_id}/waveforms/{media_id}/waveform.json"
             waveform_image_key = f"{creator_id}/waveforms/{media_id}/waveform.png"
-            upload_file(r2_client, job_input["r2BucketName"], waveform_key, waveform_json_path, "application/json")
-            upload_file(r2_client, job_input["r2BucketName"], waveform_image_key, waveform_png_path, "image/png")
+            upload_file(
+                r2_client,
+                job_input["r2BucketName"],
+                waveform_key,
+                waveform_json_path,
+                "application/json",
+            )
+            upload_file(
+                r2_client,
+                job_input["r2BucketName"],
+                waveform_image_key,
+                waveform_png_path,
+                "image/png",
+            )
 
         # Build result
         result: TranscodingResult = {

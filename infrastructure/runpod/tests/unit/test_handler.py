@@ -1,12 +1,13 @@
 import os
 import json
 import pytest
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 
 # Set env vars before importing handler if needed, or patch them
 os.environ["RUNPOD_DEBUG"] = "true"
 
 from handler import main as handler_module
+
 
 @pytest.fixture
 def mock_s3_client():
@@ -15,20 +16,24 @@ def mock_s3_client():
         mock.return_value = client
         yield client
 
+
 @pytest.fixture
 def mock_upload_file():
     with patch("handler.main.upload_file") as mock:
         yield mock
+
 
 @pytest.fixture
 def mock_upload_directory():
     with patch("handler.main.upload_directory") as mock:
         yield mock
 
+
 @pytest.fixture
 def mock_download_file():
     with patch("handler.main.download_file") as mock:
         yield mock
+
 
 @pytest.fixture
 def mock_subprocess():
@@ -38,16 +43,19 @@ def mock_subprocess():
         mock.return_value.stdout = ""
         yield mock
 
+
 @pytest.fixture
 def mock_requests():
     with patch("requests.post") as mock:
         mock.return_value.status_code = 200
         yield mock
 
+
 @pytest.fixture
 def mock_check_gpu():
     with patch("handler.main.check_gpu_available", return_value=False) as mock:
         yield mock
+
 
 @pytest.fixture
 def basic_job_input():
@@ -68,6 +76,7 @@ def basic_job_input():
         "b2BucketName": "archive-bucket",
     }
 
+
 def test_handler_video_flow_cpu(
     mock_s3_client,
     mock_download_file,
@@ -76,15 +85,17 @@ def test_handler_video_flow_cpu(
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
-    basic_job_input
+    basic_job_input,
 ):
     """Test full video transcoding flow in CPU mode (mocked)."""
 
     # Mock probe response
-    probe_data = json.dumps({
-        "format": {"duration": "100.0"},
-        "streams": [{"codec_type": "video", "width": 1920, "height": 1080}]
-    })
+    probe_data = json.dumps(
+        {
+            "format": {"duration": "100.0"},
+            "streams": [{"codec_type": "video", "width": 1920, "height": 1080}],
+        }
+    )
 
     # Mock ffmpeg/ffprobe calls
     def subprocess_side_effect(cmd, **kwargs):
@@ -96,7 +107,9 @@ def test_handler_video_flow_cpu(
             mock_res.stdout = probe_data
         elif "loudnorm" in cmd and "-f null" in cmd_str:
             # Mock loudness analysis stderr output
-            mock_res.stderr = '{"input_i": "-14.0", "input_tp": "-0.5", "input_lra": "5.0"}'
+            mock_res.stderr = (
+                '{"input_i": "-14.0", "input_tp": "-0.5", "input_lra": "5.0"}'
+            )
         else:
             mock_res.stdout = ""
 
@@ -132,6 +145,7 @@ def test_handler_video_flow_cpu(
     headers = call_args[1]["headers"]
     assert "X-Runpod-Signature" in headers
 
+
 def test_handler_audio_flow(
     mock_s3_client,
     mock_download_file,
@@ -140,17 +154,16 @@ def test_handler_audio_flow(
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
-    basic_job_input
+    basic_job_input,
 ):
     """Test full audio transcoding flow."""
     basic_job_input["type"] = "audio"
     basic_job_input["inputKey"] = "originals/test/audio.mp3"
 
     # Mock probe response (audio only)
-    probe_data = json.dumps({
-        "format": {"duration": "300.0"},
-        "streams": [{"codec_type": "audio"}]
-    })
+    probe_data = json.dumps(
+        {"format": {"duration": "300.0"}, "streams": [{"codec_type": "audio"}]}
+    )
 
     def subprocess_side_effect(cmd, **kwargs):
         mock_res = MagicMock()
@@ -178,12 +191,9 @@ def test_handler_audio_flow(
             break
     assert waveform_called
 
+
 def test_handler_failure_reporting(
-    mock_s3_client,
-    mock_download_file,
-    mock_subprocess,
-    mock_requests,
-    basic_job_input
+    mock_s3_client, mock_download_file, mock_subprocess, mock_requests, basic_job_input
 ):
     """Test that exceptions are caught and reported via webhook."""
 
@@ -200,6 +210,7 @@ def test_handler_failure_reporting(
     payload = json.loads(mock_requests.call_args[1]["data"])
     assert payload["status"] == "failed"
     assert payload["error"] == "S3 Download Error"
+
 
 def test_sign_payload():
     """Test HMAC signature generation."""

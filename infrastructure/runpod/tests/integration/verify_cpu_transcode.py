@@ -1,8 +1,6 @@
 import os
 import sys
-import shutil
 import subprocess
-import time
 
 # Add /app to python path (Docker workdir)
 sys.path.append("/app")
@@ -12,6 +10,7 @@ from handler import main as handler_module
 TEST_ASSETS_DIR = "/app/tests/assets"
 OUTPUT_DIR = "/app/tests/output"
 
+
 def verify_ffmpeg():
     print("Verifying FFmpeg...")
     result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
@@ -19,6 +18,7 @@ def verify_ffmpeg():
         print("❌ FFmpeg not found or error")
         sys.exit(1)
     print("✅ FFmpeg found")
+
 
 def verify_audiowaveform():
     print("Verifying audiowaveform...")
@@ -28,17 +28,29 @@ def verify_audiowaveform():
         sys.exit(1)
     print("✅ audiowaveform found")
 
+
 def create_dummy_video(path):
     print(f"Creating dummy video at {path}...")
     # Generate 1s test video with lavfi
     cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "testsrc=duration=1:size=1280x720:rate=30",
-        "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
-        "-c:v", "libx264", "-c:a", "aac",
-        path
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=duration=1:size=1280x720:rate=30",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=1000:duration=1",
+        "-c:v",
+        "libx264",
+        "-c:a",
+        "aac",
+        path,
     ]
     subprocess.run(cmd, check=True)
+
 
 def test_transcode_function():
     print("Testing internal transcode logic (CPU)...")
@@ -69,18 +81,22 @@ def test_transcode_function():
         print("Running transcode_video_hls...")
         hls_dir = os.path.join(OUTPUT_DIR, "hls")
         os.makedirs(hls_dir, exist_ok=True)
-        handler_module.transcode_video_hls(input_path, hls_dir, source_height=720, use_gpu=False)
+        handler_module.transcode_video_hls(
+            input_path, hls_dir, source_height=720, use_gpu=False
+        )
 
         if not os.path.exists(os.path.join(hls_dir, "master.m3u8")):
-             raise Exception("Master playlist not created")
+            raise Exception("Master playlist not created")
 
         print("✅ CPU Transcode successful")
 
     except Exception as e:
         print(f"❌ Transcode failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     print("=== Starting Container Verification ===")
