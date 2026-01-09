@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 # Ensure handler is in python path
 import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 # Mock runpod before importing handler to prevent side-effects (like auto-starting worker)
@@ -218,11 +219,7 @@ def test_handler_failure_reporting(
 
 
 def test_handler_timeout_protection(
-    mock_s3_client,
-    mock_download_file,
-    mock_subprocess,
-    mock_requests,
-    basic_job_input
+    mock_s3_client, mock_download_file, mock_subprocess, mock_requests, basic_job_input
 ):
     """Test that handler catches subprocess timeouts and reports failure."""
     import subprocess
@@ -246,4 +243,3 @@ def test_handler_timeout_protection(
     assert result["status"] == "error"
     assert "Command" in result["error"]
     assert "timed out" in result["error"]
-
