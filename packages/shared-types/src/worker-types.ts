@@ -80,6 +80,26 @@ export type Bindings = {
   R2_PUBLIC_URL_BASE?: string;
 
   /**
+   * Backblaze B2 Endpoint
+   */
+  B2_ENDPOINT?: string;
+
+  /**
+   * Backblaze B2 Key ID
+   */
+  B2_KEY_ID?: string;
+
+  /**
+   * Backblaze B2 Application Key
+   */
+  B2_APP_KEY?: string;
+
+  /**
+   * Backblaze B2 Bucket Name
+   */
+  B2_BUCKET?: string;
+
+  /**
    * Stripe API secret key
    */
   STRIPE_SECRET_KEY?: string;
@@ -114,6 +134,10 @@ export type Bindings = {
    */
   STRIPE_WEBHOOK_SECRET_DISPUTE?: string;
 
+  // ==========================================================================
+  // Email / Notifications
+  // ==========================================================================
+
   /**
    * Email sender address for notifications
    */
@@ -138,6 +162,47 @@ export type Bindings = {
    * Use mock email provider (console logging)
    */
   USE_MOCK_EMAIL?: string;
+
+  // ==========================================================================
+  // RunPod Transcoding Service
+  // ==========================================================================
+
+  /**
+   * RunPod API key for authentication
+   */
+  RUNPOD_API_KEY?: string;
+
+  /**
+   * RunPod serverless endpoint ID
+   */
+  RUNPOD_ENDPOINT_ID?: string;
+
+  /**
+   * RunPod webhook signing secret (HMAC-SHA256)
+   * Used to verify incoming webhook callbacks from RunPod
+   */
+  RUNPOD_WEBHOOK_SECRET?: string;
+
+  /**
+   * Base URL for RunPod webhook callbacks
+   * e.g., https://api.example.com - used to construct webhook URLs
+   */
+  RUNPOD_WEBHOOK_BASE_URL?: string;
+
+  /**
+   * Shared secret for worker-to-worker HMAC authentication
+   */
+  WORKER_SHARED_SECRET?: string;
+
+  // ==========================================================================
+  // Worker-to-Worker Communication
+  // ==========================================================================
+
+  /**
+   * Media API worker URL for triggering transcoding
+   * Used by content-api to call media-api internal endpoints
+   */
+  MEDIA_API_URL?: string;
 };
 
 /**
@@ -213,6 +278,13 @@ export interface Variables {
     status: string;
     joinedAt: Date;
   };
+
+  /**
+   * Raw request body stored by middleware
+   * Used by webhook handlers that need to verify signatures before parsing JSON
+   * Set by signature verification middleware (e.g., verifyRunpodSignature)
+   */
+  rawBody?: string;
 }
 
 /**

@@ -1,0 +1,5 @@
+[flake8]
+max-line-length = 120
+extend-ignore = E203, E402
+exclude = .git,__pycache__,docs/source/conf.py,old,build,dist,.venv,venv,.venv_setup
+# E402 ignored because we use sys.path.append hack in tests

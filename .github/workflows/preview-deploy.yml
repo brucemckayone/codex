@@ -57,6 +57,7 @@ jobs:
         continue-on-error: true
         run: |
           wrangler delete --name ecom-api-preview-${{ env.PR_NUMBER }} || true
+          wrangler delete --name media-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name content-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name identity-api-preview-${{ env.PR_NUMBER }} || true
           wrangler delete --name organization-api-preview-${{ env.PR_NUMBER }} || true
@@ -312,6 +313,48 @@ jobs:
           echo "url=$API_URL" >> $GITHUB_OUTPUT
           echo "API_URL=$API_URL" >> $GITHUB_ENV
 
+      # Deploy media-api worker
+      - name: Deploy media-api (preview)
+        id: deploy-media-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/media-api
+          command: >
+            deploy --name media-api-preview-${{ env.PR_NUMBER }}
+            --var ENVIRONMENT:preview
+            --var DB_METHOD:NEON_BRANCH
+            --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --route "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+
+      - name: Upload media-api secrets
+        run: .github/scripts/upload-worker-secrets.sh preview media-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
+
+      - name: Set Media API URL
+        id: media-api-url
+        run: |
+          MEDIA_API_URL="https://media-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          echo "url=$MEDIA_API_URL" >> $GITHUB_OUTPUT
+          echo "MEDIA_API_URL=$MEDIA_API_URL" >> $GITHUB_ENV
+
       # Deploy content-api worker
       - name: Deploy content-api (preview)
         id: deploy-content-api
@@ -560,6 +603,7 @@ jobs:
 
             ### 🌐 Preview URLs
             - **Web App:** https://codex-preview-${prNumber}.revelations.studio
+            - **Media API:** https://media-api-preview-${prNumber}.revelations.studio
             - **Stripe API:** https://api-preview-${prNumber}.revelations.studio
             - **Content API:** https://content-api-preview-${prNumber}.revelations.studio
             - **Identity API:** https://identity-api-preview-${prNumber}.revelations.studio

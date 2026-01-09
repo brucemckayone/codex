@@ -30,6 +30,7 @@ import { OrganizationService } from '@codex/organization';
 import { PlatformSettingsFacade } from '@codex/platform-settings';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
+import { TranscodingService } from '@codex/transcoding';
 import type { ServiceRegistry } from './types';
 
 /**
@@ -78,6 +79,7 @@ export function createServiceRegistry(
   let _organization: OrganizationService | undefined;
   let _settings: PlatformSettingsFacade | undefined;
   let _purchase: PurchaseService | undefined;
+  let _transcoding: TranscodingService | undefined;
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
@@ -204,6 +206,43 @@ export function createServiceRegistry(
         );
       }
       return _purchase;
+    },
+
+    // ========================================================================
+    // Media Domain
+    // ========================================================================
+
+    get transcoding() {
+      if (!_transcoding) {
+        const runpodApiKey = env.RUNPOD_API_KEY;
+        const runpodEndpointId = env.RUNPOD_ENDPOINT_ID;
+
+        if (!runpodApiKey || !runpodEndpointId) {
+          throw new Error(
+            'Incomplete transcoding configuration. ' +
+              'Ensure RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID secrets are set in the worker environment.'
+          );
+        }
+
+        // API_URL is required in production for webhook callbacks
+        const webhookBaseUrl = env.API_URL;
+        if (!webhookBaseUrl && getEnvironment() !== 'development') {
+          throw new Error(
+            'API_URL not configured. Required for transcoding webhook callbacks.'
+          );
+        }
+
+        // NOTE: B2 credentials are configured in RunPod's secret manager,
+        // not passed via service config (security: avoids credential sprawl)
+        _transcoding = new TranscodingService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          runpodApiKey,
+          runpodEndpointId,
+          webhookBaseUrl: webhookBaseUrl || 'http://localhost:4002',
+        });
+      }
+      return _transcoding;
     },
 
     // ========================================================================

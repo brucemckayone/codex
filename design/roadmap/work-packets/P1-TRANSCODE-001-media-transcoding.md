@@ -35,7 +35,7 @@ Key capabilities:
 - **Thumbnail Extraction**: Auto-generated thumbnails at 10% mark
 - **Audio Waveforms**: Visual waveform data for audio playback UI
 - **Webhook Integration**: Asynchronous job completion via RunPod callbacks
-- **Retry Logic**: One manual retry allowed for failed jobs
+- **Retry Logic**: Max 3 manual retries allowed for failed jobs
 
 This service is consumed by:
 - **Content Service** (P1-CONTENT-001): Triggers transcoding after upload completion
@@ -148,7 +148,7 @@ Access Service can generate streaming URLs
   - Stored for debugging and user-facing error messages
 
 - `transcodingAttempts` (integer, default 0): Retry count
-  - Maximum 1 retry allowed
+  - Maximum 3 retries allowed
   - Prevents infinite retry loops
 
 - `runpodJobId` (text, nullable): RunPod job identifier
@@ -169,7 +169,7 @@ Access Service can generate streaming URLs
 
 **Database Constraints**:
 - `hlsMasterPlaylistKey` required when `status = 'ready'`
-- `transcodingAttempts` max value = 1 (enforced in service logic)
+- `transcodingAttempts` max value = 3 (enforced in service logic)
 
 ---
 
@@ -182,7 +182,7 @@ Access Service can generate streaming URLs
 - **Key Operations**:
   - `triggerJob(mediaId)`: Start transcoding job on RunPod
   - `handleWebhook(payload)`: Process RunPod completion webhook
-  - `retryTranscoding(mediaId)`: Manually retry failed job (1 attempt max)
+  - `retryTranscoding(mediaId)`: Manually retry failed job (3 attempts max)
   - `getTranscodingStatus(mediaId)`: Query current job status
   - `cancelJob(mediaId)`: Cancel in-progress job (admin only)
 
@@ -205,10 +205,10 @@ Access Service can generate streaming URLs
    - Verify webhook signature (HMAC from RunPod)
    - Extract job ID, status, output keys
    - Update media_items atomically (status + keys)
-   - If failed: Store error message, allow retry (max 1)
+   - If failed: Store error message, allow retry (max 3)
 
 4. **Retry Logic**:
-   - Only 1 retry allowed (`transcodingAttempts < 1`)
+   - Only 3 retries allowed (`transcodingAttempts < 3`)
    - Reset status to 'uploaded' before retrying
    - Increment transcodingAttempts counter
    - Manual trigger only (no automatic retries)
@@ -385,8 +385,8 @@ async retryTranscoding(mediaId: string, userId: string): Promise<void> {
   }
 
   // Step 2: Check retry limit
-  if (media.transcodingAttempts >= 1) {
-    throw new ValidationError('Maximum retry attempts reached (1)');
+  if (media.transcodingAttempts >= 3) {
+    throw new ValidationError('Maximum retry attempts reached (3)');
   }
 
   // Step 3: Reset status and increment attempts
@@ -557,7 +557,7 @@ FUNCTION retryTranscoding(mediaId, userId):
   END IF
 
   // Step 2: Check retry limit
-  IF media.transcodingAttempts >= 1:
+  IF media.transcodingAttempts >= 3:
     THROW ValidationError("Maximum retry attempts reached")
   END IF
 
@@ -588,89 +588,115 @@ END FUNCTION
 
 | Method | Path | Purpose | Security Policy |
 |--------|------|---------|-----------------|
-| POST | `/api/transcoding/webhook` | Receive RunPod completion webhook | HMAC signature verification |
-| POST | `/api/media/:id/retry-transcoding` | Manually retry failed job | `POLICY_PRESETS.creator()` |
-| GET | `/api/media/:id/transcoding-status` | Get current transcoding status | `POLICY_PRESETS.authenticated()` |
+| POST | `/api/transcoding/webhook` | Receive RunPod completion webhook | `auth: 'none'` + HMAC signature verification (Raw Handler) |
+| POST | `/api/media/:id/retry-transcoding` | Manually retry failed job | `auth: 'required'`, `roles: ['creator', 'admin']` |
+| GET | `/api/media/:id/transcoding-status` | Get current transcoding status | `auth: 'required'` |
 
-### Webhook Handler
+### Webhook Handler (Using procedure() pattern)
 
 ```typescript
-// Webhook endpoint (no auth, uses HMAC verification)
+import { procedure } from '@codex/worker-utils';
+import { runpodWebhookSchema } from '@codex/validation';
+
+// Webhook endpoint - no auth (uses HMAC verification instead)
+// NOTE: Must be a raw handler (not procedure) to access raw body for HMAC verification
 app.post('/api/transcoding/webhook',
+  verifyRunpodSignature({ validateTimestamp: true }),
   async (c) => {
-    const signature = c.req.header('x-runpod-signature');
-    const webhookSecret = c.env.RUNPOD_WEBHOOK_SECRET;
+    // rawBody is guaranteed by middleware
+    const rawBody = c.get('rawBody');
+    const payload = JSON.parse(rawBody);
 
-    if (!signature || !webhookSecret) {
-      return c.json({ error: 'Missing signature' }, 401);
+    // Validate payload
+    const result = runpodWebhookSchema.safeParse(payload);
+    if (!result.success) {
+      return c.json({ error: 'Invalid payload' }, 400);
     }
 
-    const payload = await c.req.json() as RunPodWebhookPayload;
-
-    // Verify HMAC signature
-    const computedSignature = createHmac('sha256', webhookSecret)
-      .update(JSON.stringify(payload))
-      .digest('hex');
-
-    if (computedSignature !== signature) {
-      return c.json({ error: 'Invalid signature' }, 401);
-    }
-
-    // Process webhook
+    // Process webhook using service from registry
+    // Note: Creating service manually as we don't have procedure context
     const service = new TranscodingService(c.env);
-    await service.handleWebhook(payload);
+    await service.handleWebhook(result.data);
 
-    return c.json({ received: true }, 200);
+    return c.json({ received: true });
   }
 );
 ```
 
-### Retry Endpoint
+### Retry Endpoint (Using procedure() pattern)
 
 ```typescript
-// Manual retry endpoint (creator only)
-app.post('/api/media/:id/retry-transcoding',
-  withPolicy(POLICY_PRESETS.creator()),
-  createAuthenticatedHandler({
-    inputSchema: z.object({ id: z.string().uuid() }),
-    handler: async ({ input, context }) => {
-      const service = new TranscodingService(context.env);
+import { procedure } from '@codex/worker-utils';
+import { createIdParamsSchema } from '@codex/validation';
 
-      await service.retryTranscoding(input.id, context.user.id);
+// Manual retry endpoint - creator only
+app.post('/api/media/:id/retry-transcoding',
+  procedure({
+    policy: {
+      auth: 'required',              // Must be authenticated
+      roles: ['creator', 'admin'],   // Creator or admin role
+      rateLimit: 'auth',             // Stricter rate limit for mutations
+    },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<{ message: string }> => {
+      // ctx.user is guaranteed to exist (auth: 'required')
+      // ctx.services.transcoding is lazy-loaded from ServiceRegistry
+      await ctx.services.transcoding.retryTranscoding(
+        ctx.input.params.id,
+        ctx.user.id
+      );
 
       return { message: 'Transcoding retry triggered' };
-    }
+    },
   })
 );
 ```
 
-### Status Check Endpoint
+### Status Check Endpoint (Using procedure() pattern)
 
 ```typescript
+import { procedure } from '@codex/worker-utils';
+import { createIdParamsSchema } from '@codex/validation';
+
+// Transcoding status response type
+interface TranscodingStatusResponse {
+  status: string;
+  transcodingAttempts: number;
+  transcodingError: string | null;
+  runpodJobId: string | null;
+}
+
 // Get transcoding status
 app.get('/api/media/:id/transcoding-status',
-  withPolicy(POLICY_PRESETS.authenticated()),
-  createAuthenticatedGetHandler({
-    inputSchema: z.object({ id: z.string().uuid() }),
-    handler: async ({ input, context }) => {
-      const media = await db.query.mediaItems.findFirst({
-        where: eq(mediaItems.id, input.id),
-      });
+  procedure({
+    policy: {
+      auth: 'required',   // Must be authenticated
+      rateLimit: 'api',   // Standard API rate limit
+    },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<TranscodingStatusResponse> => {
+      // Use service registry - services are lazy-loaded
+      const status = await ctx.services.transcoding.getTranscodingStatus(
+        ctx.input.params.id,
+        ctx.user.id  // For ownership verification
+      );
 
-      if (!media) {
-        throw new NotFoundError('Media not found');
-      }
-
-      return {
-        status: media.status,
-        transcodingAttempts: media.transcodingAttempts,
-        transcodingError: media.transcodingError,
-        runpodJobId: media.runpodJobId,
-      };
-    }
+      return status;
+    },
   })
 );
 ```
+
+### Key Pattern Changes (Old → New)
+
+| Old Pattern | New Pattern |
+|-------------|-------------|
+| `withPolicy(POLICY_PRESETS.creator())` | `procedure({ policy: { auth: 'required', roles: ['creator'] } })` |
+| `createAuthenticatedHandler({ inputSchema, handler })` | `procedure({ input: { body: schema }, handler })` |
+| `context.user.id` | `ctx.user.id` (type-safe based on auth level) |
+| `new TranscodingService(context.env)` | `ctx.services.transcoding` (lazy-loaded) |
+| Manual error handling | Automatic via `mapErrorToResponse()` |
+| Manual response wrapping | Auto-wrapped in `{ data: T }` |
 
 ---
 
@@ -793,15 +819,77 @@ import { createWorker } from '@codex/worker-utils';
 
 const app = createWorker({
   serviceName: 'transcoding-api',
-  enableCors: true,
-  enableSecurityHeaders: true,
+  enableGlobalAuth: false,  // Using route-level procedure() instead
 });
 
 // Mount routes
 app.route('/api/transcoding', transcodingRoutes);
 ```
 
-**When to use**: Standard worker setup for transcoding API.
+**Procedure Pattern** (primary way to define routes):
+```typescript
+import { procedure } from '@codex/worker-utils';
+
+app.post('/api/media/:id/retry',
+  procedure({
+    // 1. Policy: Auth, roles, rate limiting, org membership
+    policy: {
+      auth: 'required',              // 'none' | 'optional' | 'required' | 'worker' | 'platform_owner'
+      roles: ['creator', 'admin'],   // RBAC check
+      rateLimit: 'auth',             // 'api' | 'auth' | 'strict' | 'public' | 'webhook' | 'streaming'
+    },
+    // 2. Input: Zod schemas for params, query, body
+    input: {
+      params: z.object({ id: uuidSchema }),
+      body: retryTranscodingSchema,  // Optional
+    },
+    // 3. Success status (default: 200)
+    successStatus: 200,
+    // 4. Handler: Fully typed context
+    handler: async (ctx) => {
+      // ctx.user - Guaranteed UserData when auth: 'required'
+      // ctx.input.params - Validated params
+      // ctx.input.body - Validated body
+      // ctx.services - Lazy-loaded ServiceRegistry
+      // ctx.env - Cloudflare bindings
+      // ctx.obs - ObservabilityClient
+
+      await ctx.services.transcoding.retryTranscoding(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+
+      return { success: true };  // Auto-wrapped as { data: { success: true } }
+    },
+  })
+);
+```
+
+**Auth Levels**:
+| Level | User Type | Description |
+|-------|-----------|-------------|
+| `none` | `undefined` | No auth required (webhooks with HMAC) |
+| `optional` | `UserData \| undefined` | Auth attempted but not required |
+| `required` | `UserData` | Must be authenticated |
+| `worker` | `undefined` | Worker-to-worker auth only |
+| `platform_owner` | `UserData` | Platform owner + auto org lookup |
+
+**Service Registry Access**:
+```typescript
+// Services are lazy-loaded (created on first access)
+ctx.services.transcoding    // TranscodingService
+ctx.services.content        // ContentService
+ctx.services.media          // MediaService
+ctx.services.access         // ContentAccessService
+ctx.services.purchase       // PurchaseService
+ctx.services.organization   // OrganizationService
+ctx.services.settings       // PlatformSettingsService
+
+// Services share a per-request DB client for transactions
+// Cleanup is automatic after handler completes
+```
+
+**When to use**: All route definitions should use `procedure()` for type-safe auth, validation, and service injection.
 
 ---
 
@@ -893,6 +981,8 @@ const result = await response.json();
 - ✅ R2 storage service
 - ✅ Error handling (@codex/service-errors)
 - ✅ Validation (@codex/validation)
+- ✅ Procedure pattern (`@codex/worker-utils` - procedure(), ServiceRegistry)
+- ✅ Session auth middleware (cookie-based auth with KV caching)
 
 ### RunPod Setup Required
 
@@ -935,17 +1025,23 @@ const result = await response.json();
   - [ ] Implement `getTranscodingStatus()` method
   - [ ] Add unit tests with mocked RunPod API
 
+- [ ] **ServiceRegistry Integration** (NEW - Required for procedure() pattern)
+  - [ ] Add `transcoding` getter to `ServiceRegistry` in `@codex/worker-utils/procedure/service-registry.ts`
+  - [ ] Add `TranscodingService` type to `ServiceRegistry` interface in `types.ts`
+  - [ ] Ensure lazy initialization with shared DB client
+  - [ ] Add cleanup function registration
+
 - [ ] **Validation**
   - [ ] Add `runpodWebhookSchema` to `@codex/validation`
   - [ ] Add `retryTranscodingSchema`
   - [ ] Add schema tests (100% coverage)
 
-- [ ] **Worker/API**
+- [ ] **Worker/API** (Using procedure() pattern)
   - [ ] Create transcoding routes or add to existing worker
-  - [ ] Implement `POST /api/transcoding/webhook` endpoint
-  - [ ] Implement `POST /api/media/:id/retry-transcoding` endpoint
-  - [ ] Implement `GET /api/media/:id/transcoding-status` endpoint
-  - [ ] Add HMAC signature verification for webhooks
+  - [ ] Implement `POST /api/transcoding/webhook` using `procedure({ policy: { auth: 'none' } })`
+  - [ ] Implement `POST /api/media/:id/retry-transcoding` using `procedure({ policy: { auth: 'required', roles: ['creator'] } })`
+  - [ ] Implement `GET /api/media/:id/transcoding-status` using `procedure({ policy: { auth: 'required' } })`
+  - [ ] Add HMAC signature verification in webhook handler
   - [ ] Add integration tests
 
 - [ ] **Integration**
@@ -1124,5 +1220,5 @@ CMD ["python", "/handler.py"]
 
 ---
 
-**Last Updated**: 2025-11-23
-**Version**: 2.0 (Enhanced with implementation patterns and RunPod integration details)
+**Last Updated**: 2026-01-05
+**Version**: 3.0 (Updated to use new procedure() pattern and ServiceRegistry from @codex/worker-utils)

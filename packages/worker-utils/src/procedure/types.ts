@@ -30,6 +30,7 @@ import type {
   SessionData,
   UserData,
 } from '@codex/shared-types';
+import type { TranscodingService } from '@codex/transcoding';
 import type { MiddlewareHandler } from 'hono';
 import type { ZodSchema, z } from 'zod';
 
@@ -117,6 +118,9 @@ export interface ServiceRegistry {
 
   // Commerce domain
   purchase: PurchaseService;
+
+  // Transcoding domain
+  transcoding: TranscodingService;
 
   // Admin domain
   adminAnalytics: AdminAnalyticsService;

@@ -181,7 +181,11 @@ export function workerAuth(options: WorkerAuthOptions) {
       return c.json({ error: 'Invalid signature' }, 401);
     }
 
-    // Signature valid, proceed
+    // Signature valid - set context flag for policy enforcement
+    // This allows enforcePolicyInline to recognize worker-authenticated requests
+    c.set('workerAuth' as never, true as never);
+
+    // Proceed to handler
     await next();
   };
 }
