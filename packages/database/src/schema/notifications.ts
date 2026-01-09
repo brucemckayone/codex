@@ -107,6 +107,11 @@ export const emailTemplates = pgTable(
     // Composite indexes for list filtering
     index('idx_templates_org_scope').on(table.organizationId, table.scope),
     index('idx_templates_creator_scope').on(table.creatorId, table.scope),
+    // Additional performance indexes
+    index('idx_templates_status_scope').on(table.status, table.scope),
+    index('idx_templates_active')
+      .on(table.id, table.status)
+      .where(sql`${table.deletedAt} IS NULL`),
   ]
 );
 

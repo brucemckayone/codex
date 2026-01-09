@@ -1,0 +1,2 @@
+CREATE INDEX "idx_templates_status_scope" ON "email_templates" USING btree ("status","scope");--> statement-breakpoint
+CREATE INDEX "idx_templates_active" ON "email_templates" USING btree ("id","status") WHERE "email_templates"."deleted_at" IS NULL;

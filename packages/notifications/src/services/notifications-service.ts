@@ -12,6 +12,8 @@ import type {
 import { TemplateRepository } from '../repositories/template-repository';
 import { getAllowedTokens, renderTemplate } from '../templates/renderer';
 import type { NotificationsServiceConfig, TemplateData } from '../types';
+import { validateTemplateData } from '../validation/template-validation';
+import { BrandingCache } from './branding-cache';
 
 interface SendEmailParams {
   to: string;
@@ -31,10 +33,12 @@ export class NotificationsService extends BaseService {
   private readonly brandDefaults: Required<
     NonNullable<NotificationsServiceConfig['defaults']>
   >;
+  private readonly brandingCache: BrandingCache;
 
   constructor(config: NotificationsServiceConfig) {
     super(config);
     this.templateRepository = new TemplateRepository(this.db);
+    this.brandingCache = new BrandingCache(); // 5 minute TTL by default
     this.brandDefaults = {
       platformName: config.defaults?.platformName || 'Codex',
       primaryColor: config.defaults?.primaryColor || '#000000',
@@ -56,11 +60,17 @@ export class NotificationsService extends BaseService {
 
   /**
    * Resolve brand tokens for an organization.
-   * Instantiates settings services per-request since they're org-scoped.
+   * Uses cache to avoid repeated service instantiation.
    */
   private async resolveBrandTokens(
     organizationId: string
   ): Promise<Record<string, string>> {
+    // Check cache first
+    const cached = this.brandingCache.get(organizationId);
+    if (cached) {
+      return cached;
+    }
+
     try {
       // Services require organizationId in constructor (org-scoped design)
       const brandingService = new BrandingSettingsService({
@@ -85,13 +95,17 @@ export class NotificationsService extends BaseService {
       const supportEmail: string =
         contact.supportEmail ?? this.brandDefaults.supportEmail;
 
-      return {
+      const tokens = {
         platformName: this.brandDefaults.platformName,
         primaryColor,
         secondaryColor: this.brandDefaults.secondaryColor,
         logoUrl,
         supportEmail,
       };
+
+      // Cache the result
+      this.brandingCache.set(organizationId, tokens);
+      return tokens;
     } catch (error) {
       this.obs.warn('Failed to load branding', { organizationId, error });
       return { ...this.brandDefaults };
@@ -116,13 +130,16 @@ export class NotificationsService extends BaseService {
       throw new TemplateNotFoundError(templateName);
     }
 
-    // 2. Resolve Branding (if organization context exists)
+    // 2. Validate template data
+    const validatedData = validateTemplateData(template.name, data);
+
+    // 3. Resolve Branding (if organization context exists)
     const brandTokens = organizationId
       ? await this.resolveBrandTokens(organizationId)
       : { ...this.brandDefaults };
 
-    // 3. Render Template
-    const mergedData = { ...brandTokens, ...data };
+    // 4. Render Template
+    const mergedData = { ...brandTokens, ...validatedData };
     const allowedTokens = getAllowedTokens(template.name);
 
     const subjectResult = renderTemplate({
@@ -147,7 +164,7 @@ export class NotificationsService extends BaseService {
       escapeValues: false,
     });
 
-    // 4. Send Email
+    // 5. Send Email
     const message: EmailMessage = {
       to,
       toName,
@@ -157,21 +174,43 @@ export class NotificationsService extends BaseService {
     };
 
     try {
-      return await this.emailProvider.send(message, this.defaultFrom);
+      const result = await this.emailProvider.send(message, this.defaultFrom);
+
+      // Track success metric
+      this.obs.info('Email sent successfully', {
+        templateName,
+        organizationId: organizationId || 'none',
+        success: true,
+      });
+
+      return result;
     } catch (error) {
       // Immediate retry (Workers can terminate during setTimeout delays)
       this.obs.info('Retrying email send', {
         templateName,
         organizationId: organizationId || 'none',
+        attempt: 2,
         errorType: error instanceof Error ? error.name : 'Unknown',
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       try {
-        return await this.emailProvider.send(message, this.defaultFrom);
+        const result = await this.emailProvider.send(message, this.defaultFrom);
+
+        // Track retry success
+        this.obs.info('Email sent successfully after retry', {
+          templateName,
+          organizationId: organizationId || 'none',
+          success: true,
+          retried: true,
+        });
+
+        return result;
       } catch (retryError) {
+        // Track failure metric
         this.obs.error('Failed to send email after retry', {
           templateName,
           organizationId: organizationId || 'none',
+          success: false,
           errorType: retryError instanceof Error ? retryError.name : 'Unknown',
           errorMessage:
             retryError instanceof Error
