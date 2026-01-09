@@ -123,7 +123,70 @@ jobs:
           echo "✅ Migrations completed successfully"
           echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
-      # Deploy ecom-api to production
+      # Deploy media-api to production
+      - name: Deploy media-api
+        id: deploy-media-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/media-api
+          command: deploy --env production
+
+      # Upload secrets to the media-api worker
+      - name: Upload media-api secrets
+        run: .github/scripts/upload-worker-secrets.sh production media-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
+
+      # Verify media-api worker is healthy
+      - name: Health check - Media API worker
+        timeout-minutes: 5
+        run: |
+          echo "🏥 Checking Media API worker health at https://media-api.revelations.studio/health..."
+
+          # Wait for custom domain SSL
+          echo "⏳ Waiting for SSL certificate..."
+          sleep 30
+
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://media-api.revelations.studio/health || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Media API worker is healthy (HTTP $HTTP_CODE)"
+              exit 0
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            else
+              echo "⏳ Media API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+            fi
+
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            RETRY_DELAY=$((RETRY_DELAY * 2))
+          done
+
+          echo "❌ Media API worker health check failed after $MAX_RETRIES attempts"
+          echo "Last HTTP code: $HTTP_CODE"
+          exit 1
       - name: Deploy ecom-api
         id: deploy-ecom
         uses: cloudflare/wrangler-action@v3
@@ -602,7 +665,17 @@ jobs:
           echo "## 🧪 Production Smoke Tests" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+
           FAILED=0
+
+          # Test 0: Media API
+          echo "Testing Media API..."
+          if curl -f -s https://media-api.revelations.studio/health > /dev/null 2>&1; then
+            echo "✅ Media API (media-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Media API (media-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
+            FAILED=1
+          fi
 
           # Test 1: Stripe Webhook Handler
           echo "Testing Stripe webhook handler..."
@@ -693,6 +766,7 @@ jobs:
         run: |
           echo "✅ Production deployment successful"
           echo "🌐 Web App: https://codex.revelations.studio - Health: OK"
+          echo "🎬 Media API: https://media-api.revelations.studio - Health: OK"
           echo "🔌 API (Stripe): https://api.revelations.studio - Health: OK"
           echo "📝 Content API: https://content-api.revelations.studio - Health: OK"
           echo "👤 Identity API: https://identity-api.revelations.studio - Health: OK"
@@ -711,6 +785,7 @@ jobs:
           echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
           echo "| Web App | [codex.revelations.studio](https://codex.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Media API | [media-api.revelations.studio](https://media-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Stripe API | [api.revelations.studio](https://api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Content API | [content-api.revelations.studio](https://content-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Identity API | [identity-api.revelations.studio](https://identity-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
@@ -726,7 +801,7 @@ jobs:
           echo "- **Trigger:** Merged to main" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Completed:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Workers deployed:** 8 (stripe, content, identity, organization, notifications, admin, auth, web)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workers deployed:** 9 (media, stripe, content, identity, organization, notifications, admin, auth, web)" >> $GITHUB_STEP_SUMMARY
           echo "- **Health checks:** All passed ✅" >> $GITHUB_STEP_SUMMARY
           echo "- **Smoke tests:** All passed ✅" >> $GITHUB_STEP_SUMMARY
 

@@ -127,6 +127,77 @@ app.get(
 );
 
 /**
+ * POST /api/media/:id/upload-complete
+ * Mark upload as complete and trigger transcoding
+ *
+ * Called by frontend after R2 upload completes.
+ * Transitions status: uploading → uploaded → transcoding
+ *
+ * Flow:
+ * 1. Verify creator owns media and status is 'uploading'
+ * 2. Update status to 'uploaded'
+ * 3. Call media-api to trigger transcoding
+ *
+ * Security: Creator/Admin only
+ * @returns {{ success: boolean, status: string }}
+ */
+app.post(
+  '/:id/upload-complete',
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<{ success: boolean; status: string }> => {
+      const mediaId = ctx.input.params.id;
+      const creatorId = ctx.user.id;
+
+      // 1. Verify ownership and get current media
+      const media = await ctx.services.media.get(mediaId, creatorId);
+      if (!media) {
+        throw new MediaNotFoundError(mediaId);
+      }
+
+      // 2. Ensure media is in 'uploading' state
+      if (media.status !== 'uploading') {
+        throw new Error(
+          `Cannot mark upload complete: media is already '${media.status}'`
+        );
+      }
+
+      // 3. Update status to 'uploaded'
+      await ctx.services.media.updateStatus(mediaId, 'uploaded', creatorId);
+
+      // 4. Trigger transcoding via media-api worker
+      const mediaApiUrl = ctx.env.MEDIA_API_URL;
+      if (!mediaApiUrl) {
+        throw new Error('MEDIA_API_URL not configured');
+      }
+
+      const response = await fetch(
+        `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Worker-Secret': ctx.env.WORKER_SHARED_SECRET || '',
+          },
+          body: JSON.stringify({ creatorId }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Failed to trigger transcoding: ${errorText}`);
+        // Don't fail the request - media is still marked as 'uploaded'
+        // Transcoding can be retried manually
+        return { success: true, status: 'uploaded' };
+      }
+
+      return { success: true, status: 'transcoding' };
+    },
+  })
+);
+
+/**
  * DELETE /api/media/:id
  * Soft delete media item (sets deleted_at)
  *
