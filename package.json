@@ -58,6 +58,7 @@
     "db:local:migrate": "pnpm --filter @codex/database db:migrate",
     "db:local:push": "pnpm --filter @codex/database db:push",
     "db:local:studio": "pnpm --filter @codex/database db:studio",
+    "db:seed:templates": "pnpm --filter @codex/database db:seed:templates",
     "db:neon:dry-run": "pnpm --filter @codex/database db:dry-run",
     "neon:create": "pnpm --filter @codex/database neon:create",
     "neon:list": "pnpm --filter @codex/database neon:list",

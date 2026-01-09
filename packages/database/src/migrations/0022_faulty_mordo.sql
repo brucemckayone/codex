@@ -1,0 +1,1 @@
+CREATE INDEX "idx_template_lookup" ON "email_templates" USING btree ("name","scope","organization_id","creator_id") WHERE "email_templates"."deleted_at" IS NULL;

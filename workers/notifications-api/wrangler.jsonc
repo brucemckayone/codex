@@ -27,7 +27,10 @@
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
     "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "API_URL": "http://localhost:8787",
+    "FROM_EMAIL": "noreply@codex.local",
+    "FROM_NAME": "Codex",
+    "USE_MOCK_EMAIL": "true"
   },
 
   // Environment configurations
@@ -106,8 +109,16 @@
   //
   // Production Secrets (set via wrangler CLI):
   //   wrangler secret put DATABASE_URL --env production
+  //   wrangler secret put RESEND_API_KEY --env production
+  //   wrangler secret put RESEND_API_KEY --env staging
   //
   // Required Variables:
   //   - DATABASE_URL: PostgreSQL connection string
   //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
+  //
+  // Email Provider Variables (set in env blocks or as secrets):
+  //   - RESEND_API_KEY: Resend API key for production email delivery
+  //   - FROM_EMAIL: Sender email address (e.g., "noreply@codex.io")
+  //   - FROM_NAME: Sender display name (e.g., "Codex Platform")
+  //   - REPLY_TO_EMAIL: Reply-to address (optional)
 }

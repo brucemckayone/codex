@@ -1,8 +1,7 @@
 /**
  * Notifications API Worker
  *
- * Minimal Cloudflare Worker placeholder for future notification endpoints.
- * Currently provides only health check endpoint.
+ * Cloudflare Worker for email template management and sending.
  *
  * Security Features:
  * - Rate limiting via KV namespace
@@ -12,10 +11,12 @@
  * Architecture:
  * - Hono framework for routing and middleware
  * - @codex/database for data persistence (HTTP client)
+ * - @codex/notifications for email sending
  * - @codex/worker-utils for standardized worker setup
  *
  * Routes:
  * - /health - Health check endpoint (public)
+ * - /api/templates/* - Template management endpoints
  */
 
 import {
@@ -24,6 +25,10 @@ import {
   createWorker,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
+
+// Import route modules
+import previewRoutes from './routes/preview';
+import templateRoutes from './routes/templates';
 
 // ============================================================================
 // Application Setup
@@ -36,7 +41,7 @@ const app = createWorker({
   enableLogging: true,
   enableCors: true,
   enableSecurityHeaders: true,
-  enableGlobalAuth: false,
+  enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
     checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
@@ -52,9 +57,30 @@ app.use(
   '*',
   createEnvValidationMiddleware({
     required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
-    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+    optional: [
+      'ENVIRONMENT',
+      'WEB_APP_URL',
+      'API_URL',
+      'FROM_EMAIL',
+      'FROM_NAME',
+      'USE_MOCK_EMAIL',
+      'RESEND_API_KEY',
+      'MAILHOG_URL',
+    ],
   })
 );
+
+// ============================================================================
+// API Routes
+// ============================================================================
+
+/**
+ * Mount API routes
+ * Template routes for CRUD operations
+ * Preview routes for template testing
+ */
+app.route('/api/templates', templateRoutes);
+app.route('/api/templates', previewRoutes);
 
 // ============================================================================
 // Export

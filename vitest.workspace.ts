@@ -17,6 +17,7 @@ export default defineConfig({
       'packages/content/vitest.config.content.ts',
       'packages/identity/vitest.config.identity.ts',
       'packages/worker-utils/vitest.config.worker-utils.ts',
+      'packages/notifications/vitest.config.notifications.ts',
 
       // Workers
       'workers/auth',

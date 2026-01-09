@@ -20,6 +20,11 @@ import { R2Service } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
+import {
+  createEmailProvider,
+  NotificationsService,
+  TemplateService,
+} from '@codex/notifications';
 import type { ObservabilityClient } from '@codex/observability';
 import { OrganizationService } from '@codex/organization';
 import { PlatformSettingsFacade } from '@codex/platform-settings';
@@ -76,6 +81,8 @@ export function createServiceRegistry(
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
+  let _templates: TemplateService | undefined;
+  let _notifications: NotificationsService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -232,6 +239,49 @@ export function createServiceRegistry(
         });
       }
       return _adminCustomer;
+    },
+
+    // ========================================================================
+    // Notification Domain
+    // ========================================================================
+
+    get templates() {
+      if (!_templates) {
+        _templates = new TemplateService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _templates;
+    },
+
+    get notifications() {
+      if (!_notifications) {
+        const useMock = env.USE_MOCK_EMAIL === 'true';
+
+        // Validate email provider credentials at startup
+        if (!useMock && !env.RESEND_API_KEY) {
+          throw new Error(
+            'RESEND_API_KEY is required when USE_MOCK_EMAIL is not enabled. ' +
+              'Set USE_MOCK_EMAIL=true for local development or provide RESEND_API_KEY.'
+          );
+        }
+
+        const emailProvider = createEmailProvider({
+          useMock,
+          resendApiKey: env.RESEND_API_KEY,
+          mailhogUrl: env.MAILHOG_URL,
+        });
+
+        _notifications = new NotificationsService({
+          db: getSharedDb(),
+          emailProvider,
+          fromEmail: env.FROM_EMAIL || 'noreply@example.com',
+          fromName: env.FROM_NAME || 'Codex',
+          environment: getEnvironment(),
+        });
+      }
+      return _notifications;
     },
   };
 

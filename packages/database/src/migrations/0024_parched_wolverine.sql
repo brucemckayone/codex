@@ -1,0 +1,2 @@
+CREATE INDEX "idx_templates_created_by_deleted_at" ON "email_templates" USING btree ("created_by","deleted_at");--> statement-breakpoint
+CREATE INDEX "idx_templates_status_scope_deleted_at" ON "email_templates" USING btree ("status","scope","deleted_at");

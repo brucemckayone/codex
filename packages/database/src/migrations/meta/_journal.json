@@ -120,6 +120,62 @@
       "when": 1767203123763,
       "tag": "0016_parallel_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1767800448247,
+      "tag": "0017_living_gabe_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1767867524794,
+      "tag": "0018_typical_sentry",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1767947461462,
+      "tag": "0019_zippy_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1767953022060,
+      "tag": "0020_gigantic_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1767955416680,
+      "tag": "0021_busy_kang",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1767962542929,
+      "tag": "0022_faulty_mordo",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1767968152088,
+      "tag": "0023_early_prodigy",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1767968456829,
+      "tag": "0024_parched_wolverine",
+      "breakpoints": true
     }
   ]
 }

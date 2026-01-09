@@ -113,6 +113,31 @@ export type Bindings = {
    * Stripe webhook signing secret for dispute events
    */
   STRIPE_WEBHOOK_SECRET_DISPUTE?: string;
+
+  /**
+   * Email sender address for notifications
+   */
+  FROM_EMAIL?: string;
+
+  /**
+   * Email sender name for notifications
+   */
+  FROM_NAME?: string;
+
+  /**
+   * Resend API key for email delivery (production)
+   */
+  RESEND_API_KEY?: string;
+
+  /**
+   * MailHog URL for email testing (development)
+   */
+  MAILHOG_URL?: string;
+
+  /**
+   * Use mock email provider (console logging)
+   */
+  USE_MOCK_EMAIL?: string;
 };
 
 /**

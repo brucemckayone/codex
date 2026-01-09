@@ -173,7 +173,7 @@ export const mediaItems = pgTable(
     // Media lifecycle constraint: status='ready' requires transcoding outputs
     check(
       'status_ready_requires_keys',
-      sql`${table.status} != 'ready' OR (${table.hlsMasterPlaylistKey} IS NOT NULL AND ${table.thumbnailKey} IS NOT NULL AND ${table.durationSeconds} IS NOT NULL)`
+      sql`${table.status} != 'ready' OR (${table.hlsMasterPlaylistKey} IS NOT NULL AND ${table.durationSeconds} IS NOT NULL)`
     ),
   ]
 );

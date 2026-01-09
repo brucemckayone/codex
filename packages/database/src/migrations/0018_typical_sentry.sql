@@ -1,0 +1,2 @@
+ALTER TABLE "media_items" DROP CONSTRAINT "status_ready_requires_keys";--> statement-breakpoint
+ALTER TABLE "media_items" ADD CONSTRAINT "status_ready_requires_keys" CHECK ("media_items"."status" != 'ready' OR ("media_items"."hls_master_playlist_key" IS NOT NULL AND "media_items"."duration_seconds" IS NOT NULL));

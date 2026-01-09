@@ -7,6 +7,7 @@
 export * from './auth';
 export * from './content';
 export * from './ecommerce';
+export * from './notifications';
 export * from './playback';
 export * from './settings';
 export * from './test';
