@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  check,
   index,
   pgEnum,
   pgTable,
@@ -88,6 +89,24 @@ export const emailTemplates = pgTable(
     uniqueIndex('idx_unique_template_creator')
       .on(table.name, table.creatorId)
       .where(sql`${table.scope} = 'creator' AND ${table.deletedAt} IS NULL`),
+
+    // Scope integrity constraints
+    check(
+      'global_scope_no_owners',
+      sql`${table.scope} != 'global' OR (${table.organizationId} IS NULL AND ${table.creatorId} IS NULL)`
+    ),
+    check(
+      'org_scope_requires_org',
+      sql`${table.scope} != 'organization' OR (${table.organizationId} IS NOT NULL AND ${table.creatorId} IS NULL)`
+    ),
+    check(
+      'creator_scope_requires_creator',
+      sql`${table.scope} != 'creator' OR ${table.creatorId} IS NOT NULL`
+    ),
+
+    // Composite indexes for list filtering
+    index('idx_templates_org_scope').on(table.organizationId, table.scope),
+    index('idx_templates_creator_scope').on(table.creatorId, table.scope),
   ]
 );
 

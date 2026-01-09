@@ -7,6 +7,7 @@ const mockDb = {
   query: {
     emailTemplates: {
       findFirst: vi.fn(),
+      findMany: vi.fn(),
     },
   },
   insert: vi.fn().mockReturnThis(),
@@ -55,15 +56,17 @@ describe('NotificationsService', () => {
   it('sends email successfully when template found', async () => {
     // Mock template
     (
-      mockDb.query.emailTemplates.findFirst as ReturnType<typeof vi.fn>
-    ).mockResolvedValue({
-      id: 'template-1',
-      name: 'test-template',
-      subject: 'Hello {{platformName}}',
-      htmlBody: '<p>Welcome to {{platformName}}</p>',
-      textBody: 'Welcome to {{platformName}}',
-      scope: 'global',
-    });
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        id: 'template-1',
+        name: 'test-template',
+        subject: 'Hello {{platformName}}',
+        htmlBody: '<p>Welcome to {{platformName}}</p>',
+        textBody: 'Welcome to {{platformName}}',
+        scope: 'global',
+      },
+    ]);
 
     // Mock send result
     (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -78,7 +81,7 @@ describe('NotificationsService', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(mockDb.query.emailTemplates.findFirst).toHaveBeenCalled();
+    expect(mockDb.query.emailTemplates.findMany).toHaveBeenCalled();
     // Without org context, uses default branding (Codex)
     expect(mockEmailProvider.send).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -92,8 +95,8 @@ describe('NotificationsService', () => {
 
   it('throws error if template not found', async () => {
     (
-      mockDb.query.emailTemplates.findFirst as ReturnType<typeof vi.fn>
-    ).mockResolvedValue(null);
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([]);
 
     // The error message is the base class message
     await expect(
@@ -107,13 +110,17 @@ describe('NotificationsService', () => {
 
   it('uses org branding when organizationId provided', async () => {
     (
-      mockDb.query.emailTemplates.findFirst as ReturnType<typeof vi.fn>
-    ).mockResolvedValue({
-      name: 'test',
-      subject: '{{primaryColor}}',
-      htmlBody: 'Body',
-      textBody: 'Body',
-    });
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        name: 'test',
+        subject: '{{primaryColor}}',
+        htmlBody: 'Body',
+        textBody: 'Body',
+        scope: 'organization',
+        organizationId: 'org-1',
+      },
+    ]);
     (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
       success: true,
     });
@@ -133,5 +140,106 @@ describe('NotificationsService', () => {
       }),
       expect.anything()
     );
+  });
+  it('uses configured branding defaults when no organizationId provided', async () => {
+    // Re-init service with custom config
+    const customService = new NotificationsService({
+      db: mockDb,
+      environment: 'test',
+      emailProvider: mockEmailProvider,
+      defaults: {
+        platformName: 'CustomPlatform',
+        primaryColor: '#123456',
+        supportEmail: 'custom@support.com',
+      },
+    });
+
+    (
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        name: 'test',
+        subject: 'Welcome to {{platformName}}',
+        htmlBody: '<p>Contact {{supportEmail}}</p>',
+        textBody: 'Body',
+        scope: 'global',
+      },
+    ]);
+    (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+    });
+
+    await customService.sendEmail({
+      to: 'test@example.com',
+      templateName: 'test',
+      data: {},
+    });
+
+    expect(mockEmailProvider.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: 'Welcome to CustomPlatform',
+        html: expect.stringContaining('Contact custom@support.com'),
+      }),
+      expect.anything()
+    );
+  });
+
+  // Verification tests for critical fixes
+
+  it('strips HTML tags from subject line (XSS prevention)', async () => {
+    (
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        id: 't1',
+        name: 'test',
+        subject: 'Subject: {{platformName}}',
+        htmlBody: 'Body',
+        textBody: 'Body',
+        scope: 'global',
+      },
+    ]);
+    (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+    });
+
+    await service.sendEmail({
+      to: 'test@example.com',
+      templateName: 'test',
+      data: { platformName: '<script>bad</script>Safe' },
+    });
+
+    expect(mockEmailProvider.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: 'Subject: badSafe', // Tags stripped
+      }),
+      expect.anything()
+    );
+  });
+
+  it('uses findMany with OR conditions to resolve templates in single query (N+1 fix)', async () => {
+    (
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([]);
+
+    try {
+      await service.sendEmail({
+        to: 'test@example.com',
+        templateName: 'test',
+        data: {},
+        organizationId: 'org-1',
+        creatorId: 'creator-1',
+      });
+    } catch (e) {
+      // Expected template not found
+    }
+
+    const calls = (
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mock.calls;
+    expect(calls.length).toBe(1); // Single query verification
+
+    // Verify limit constraint
+    expect(calls[0][0].limit).toBe(3);
   });
 });

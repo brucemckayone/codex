@@ -37,6 +37,8 @@ export interface RenderOptions {
   allowedTokens: string[];
   /** Whether to escape HTML in values (default: true) */
   escapeValues?: boolean;
+  /** Whether to strip HTML tags from values (default: false) */
+  stripTags?: boolean;
 }
 
 export interface RenderResult {
@@ -58,7 +60,13 @@ export interface RenderResult {
  * - Unknown tokens become empty strings (logged)
  */
 export function renderTemplate(options: RenderOptions): RenderResult {
-  const { template, data, allowedTokens, escapeValues = true } = options;
+  const {
+    template,
+    data,
+    allowedTokens,
+    escapeValues = true,
+    stripTags = false,
+  } = options;
 
   const missingTokens: string[] = [];
   const unknownTokens: string[] = [];
@@ -79,8 +87,15 @@ export function renderTemplate(options: RenderOptions): RenderResult {
         return ''; // Missing token becomes empty
       }
 
+      let stringValue = String(value);
+
+      // Strip tags if enabled (prevent XSS in plain text contexts)
+      if (stripTags) {
+        stringValue = stringValue.replace(/<[^>]*>?/gm, '');
+      }
+
       // Escape HTML if enabled
-      return escapeValues ? escapeHtml(String(value)) : String(value);
+      return escapeValues ? escapeHtml(stringValue) : stringValue;
     }
   );
 

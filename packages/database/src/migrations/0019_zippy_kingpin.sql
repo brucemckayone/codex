@@ -1,0 +1,3 @@
+ALTER TABLE "email_templates" ADD CONSTRAINT "global_scope_no_owners" CHECK ("email_templates"."scope" != 'global' OR ("email_templates"."organization_id" IS NULL AND "email_templates"."creator_id" IS NULL));--> statement-breakpoint
+ALTER TABLE "email_templates" ADD CONSTRAINT "org_scope_requires_org" CHECK ("email_templates"."scope" != 'organization' OR ("email_templates"."organization_id" IS NOT NULL AND "email_templates"."creator_id" IS NULL));--> statement-breakpoint
+ALTER TABLE "email_templates" ADD CONSTRAINT "creator_scope_requires_creator" CHECK ("email_templates"."scope" != 'creator' OR "email_templates"."creator_id" IS NOT NULL);

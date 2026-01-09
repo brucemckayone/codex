@@ -1,5 +1,5 @@
 import { type EmailTemplate, emailTemplates } from '@codex/database/schema';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import type { Database } from '../types';
 
 export class TemplateRepository {
@@ -16,42 +16,41 @@ export class TemplateRepository {
     organizationId?: string | null,
     creatorId?: string | null
   ): Promise<EmailTemplate | null> {
-    // 1. Try finding organization template
-    if (organizationId) {
-      const orgTemplate = await this.db.query.emailTemplates.findFirst({
-        where: and(
-          eq(emailTemplates.name, name),
-          eq(emailTemplates.scope, 'organization'),
-          eq(emailTemplates.organizationId, organizationId),
-          isNull(emailTemplates.deletedAt)
-        ),
-      });
-      if (orgTemplate) return orgTemplate;
-    }
-
-    // 2. Try finding creator template
-    if (creatorId) {
-      const creatorTemplate = await this.db.query.emailTemplates.findFirst({
-        where: and(
-          eq(emailTemplates.name, name),
-          eq(emailTemplates.scope, 'creator'),
-          eq(emailTemplates.creatorId, creatorId),
-          isNull(emailTemplates.deletedAt)
-        ),
-      });
-      if (creatorTemplate) return creatorTemplate;
-    }
-
-    // 3. Fallback to global template
-    const globalTemplate = await this.db.query.emailTemplates.findFirst({
+    // Single query to fetch all candidates (Organization, Creator, Global)
+    // We fetch up to 3 candidates and prioritize them in memory to avoid N+1 queries
+    const templates = await this.db.query.emailTemplates.findMany({
       where: and(
         eq(emailTemplates.name, name),
-        eq(emailTemplates.scope, 'global'),
-        isNull(emailTemplates.deletedAt)
+        isNull(emailTemplates.deletedAt),
+        or(
+          // 1. Organization Scope
+          organizationId
+            ? and(
+                eq(emailTemplates.scope, 'organization'),
+                eq(emailTemplates.organizationId, organizationId)
+              )
+            : undefined,
+          // 2. Creator Scope
+          creatorId
+            ? and(
+                eq(emailTemplates.scope, 'creator'),
+                eq(emailTemplates.creatorId, creatorId)
+              )
+            : undefined,
+          // 3. Global Scope
+          eq(emailTemplates.scope, 'global')
+        )
       ),
+      limit: 3,
     });
 
-    return globalTemplate ?? null;
+    // In-memory priority resolution: Organization > Creator > Global
+    return (
+      templates.find((t) => t.scope === 'organization') ??
+      templates.find((t) => t.scope === 'creator') ??
+      templates.find((t) => t.scope === 'global') ??
+      null
+    );
   }
 
   /**

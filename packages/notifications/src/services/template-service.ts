@@ -7,6 +7,7 @@
 
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
+import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CreateCreatorTemplateInput,
   CreateGlobalTemplateInput,
@@ -14,7 +15,7 @@ import type {
   ListTemplatesQuery,
   UpdateTemplateInput,
 } from '@codex/validation';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { TemplateAccessDeniedError, TemplateNotFoundError } from '../errors';
 
 /**
@@ -43,22 +44,40 @@ export class TemplateService extends BaseService {
    */
   async listGlobalTemplates(
     query: ListTemplatesQuery
-  ): Promise<{ data: EmailTemplate[] }> {
+  ): Promise<PaginatedListResponse<EmailTemplate>> {
     const { page, limit, status } = query;
     const offset = (page - 1) * limit;
 
-    const templates = await this.db.query.emailTemplates.findMany({
-      where: and(
-        eq(schema.emailTemplates.scope, 'global'),
-        isNull(schema.emailTemplates.deletedAt),
-        status ? eq(schema.emailTemplates.status, status) : undefined
-      ),
-      limit,
-      offset,
-      orderBy: [desc(schema.emailTemplates.createdAt)],
-    });
+    const whereClause = and(
+      eq(schema.emailTemplates.scope, 'global'),
+      isNull(schema.emailTemplates.deletedAt),
+      status ? eq(schema.emailTemplates.status, status) : undefined
+    );
 
-    return { data: templates };
+    const [templates, countResult] = await Promise.all([
+      this.db.query.emailTemplates.findMany({
+        where: whereClause,
+        limit,
+        offset,
+        orderBy: [desc(schema.emailTemplates.createdAt)],
+      }),
+      this.db
+        .select({ count: count(schema.emailTemplates.id) })
+        .from(schema.emailTemplates)
+        .where(whereClause),
+    ]);
+
+    const total = countResult[0]?.count ?? 0;
+
+    return {
+      items: templates,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   /**
@@ -67,7 +86,7 @@ export class TemplateService extends BaseService {
   async createGlobalTemplate(
     input: CreateGlobalTemplateInput,
     createdBy: string
-  ): Promise<{ data: EmailTemplate }> {
+  ): Promise<EmailTemplate> {
     const [template] = await this.db
       .insert(schema.emailTemplates)
       .values({
@@ -88,13 +107,13 @@ export class TemplateService extends BaseService {
       name: template.name,
     });
 
-    return { data: template };
+    return template;
   }
 
   /**
    * Get a global template by ID
    */
-  async getGlobalTemplate(id: string): Promise<{ data: EmailTemplate }> {
+  async getGlobalTemplate(id: string): Promise<EmailTemplate> {
     const template = await this.db.query.emailTemplates.findFirst({
       where: and(
         eq(schema.emailTemplates.id, id),
@@ -107,7 +126,7 @@ export class TemplateService extends BaseService {
       throw new TemplateNotFoundError(id);
     }
 
-    return { data: template };
+    return template;
   }
 
   /**
@@ -116,7 +135,7 @@ export class TemplateService extends BaseService {
   async updateGlobalTemplate(
     id: string,
     input: UpdateTemplateInput
-  ): Promise<{ data: EmailTemplate }> {
+  ): Promise<EmailTemplate> {
     const [updated] = await this.db
       .update(schema.emailTemplates)
       .set({
@@ -138,7 +157,7 @@ export class TemplateService extends BaseService {
 
     this.obs.info('Global template updated', { templateId: id });
 
-    return { data: updated };
+    return updated;
   }
 
   /**
@@ -175,26 +194,44 @@ export class TemplateService extends BaseService {
     orgId: string,
     userId: string,
     query: ListTemplatesQuery
-  ): Promise<{ data: EmailTemplate[] }> {
+  ): Promise<PaginatedListResponse<EmailTemplate>> {
     // Verify membership
     await this.requireOrgMembership(orgId, userId);
 
     const { page, limit, status } = query;
     const offset = (page - 1) * limit;
 
-    const templates = await this.db.query.emailTemplates.findMany({
-      where: and(
-        eq(schema.emailTemplates.scope, 'organization'),
-        eq(schema.emailTemplates.organizationId, orgId),
-        isNull(schema.emailTemplates.deletedAt),
-        status ? eq(schema.emailTemplates.status, status) : undefined
-      ),
-      limit,
-      offset,
-      orderBy: [desc(schema.emailTemplates.createdAt)],
-    });
+    const whereClause = and(
+      eq(schema.emailTemplates.scope, 'organization'),
+      eq(schema.emailTemplates.organizationId, orgId),
+      isNull(schema.emailTemplates.deletedAt),
+      status ? eq(schema.emailTemplates.status, status) : undefined
+    );
 
-    return { data: templates };
+    const [templates, countResult] = await Promise.all([
+      this.db.query.emailTemplates.findMany({
+        where: whereClause,
+        limit,
+        offset,
+        orderBy: [desc(schema.emailTemplates.createdAt)],
+      }),
+      this.db
+        .select({ count: count(schema.emailTemplates.id) })
+        .from(schema.emailTemplates)
+        .where(whereClause),
+    ]);
+
+    const total = countResult[0]?.count ?? 0;
+
+    return {
+      items: templates,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   /**
@@ -204,7 +241,7 @@ export class TemplateService extends BaseService {
     orgId: string,
     userId: string,
     input: CreateOrgTemplateInput
-  ): Promise<{ data: EmailTemplate }> {
+  ): Promise<EmailTemplate> {
     // Verify admin/owner role
     await this.requireOrgAdminRole(orgId, userId);
 
@@ -225,7 +262,7 @@ export class TemplateService extends BaseService {
 
     this.obs.info('Org template created', { templateId: template.id, orgId });
 
-    return { data: template };
+    return template;
   }
 
   /**
@@ -236,7 +273,7 @@ export class TemplateService extends BaseService {
     templateId: string,
     userId: string,
     input: UpdateTemplateInput
-  ): Promise<{ data: EmailTemplate }> {
+  ): Promise<EmailTemplate> {
     // Verify admin/owner role
     await this.requireOrgAdminRole(orgId, userId);
 
@@ -262,7 +299,7 @@ export class TemplateService extends BaseService {
 
     this.obs.info('Org template updated', { templateId, orgId });
 
-    return { data: updated };
+    return updated;
   }
 
   /**
@@ -306,23 +343,41 @@ export class TemplateService extends BaseService {
   async listCreatorTemplates(
     creatorId: string,
     query: ListTemplatesQuery
-  ): Promise<{ data: EmailTemplate[] }> {
+  ): Promise<PaginatedListResponse<EmailTemplate>> {
     const { page, limit, status } = query;
     const offset = (page - 1) * limit;
 
-    const templates = await this.db.query.emailTemplates.findMany({
-      where: and(
-        eq(schema.emailTemplates.scope, 'creator'),
-        eq(schema.emailTemplates.creatorId, creatorId),
-        isNull(schema.emailTemplates.deletedAt),
-        status ? eq(schema.emailTemplates.status, status) : undefined
-      ),
-      limit,
-      offset,
-      orderBy: [desc(schema.emailTemplates.createdAt)],
-    });
+    const whereClause = and(
+      eq(schema.emailTemplates.scope, 'creator'),
+      eq(schema.emailTemplates.creatorId, creatorId),
+      isNull(schema.emailTemplates.deletedAt),
+      status ? eq(schema.emailTemplates.status, status) : undefined
+    );
 
-    return { data: templates };
+    const [templates, countResult] = await Promise.all([
+      this.db.query.emailTemplates.findMany({
+        where: whereClause,
+        limit,
+        offset,
+        orderBy: [desc(schema.emailTemplates.createdAt)],
+      }),
+      this.db
+        .select({ count: count(schema.emailTemplates.id) })
+        .from(schema.emailTemplates)
+        .where(whereClause),
+    ]);
+
+    const total = countResult[0]?.count ?? 0;
+
+    return {
+      items: templates,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   /**
@@ -331,7 +386,7 @@ export class TemplateService extends BaseService {
   async createCreatorTemplate(
     creatorId: string,
     input: CreateCreatorTemplateInput
-  ): Promise<{ data: EmailTemplate }> {
+  ): Promise<EmailTemplate> {
     const [template] = await this.db
       .insert(schema.emailTemplates)
       .values({
@@ -352,7 +407,7 @@ export class TemplateService extends BaseService {
       creatorId,
     });
 
-    return { data: template };
+    return template;
   }
 
   /**
@@ -362,7 +417,7 @@ export class TemplateService extends BaseService {
     creatorId: string,
     templateId: string,
     input: UpdateTemplateInput
-  ): Promise<{ data: EmailTemplate }> {
+  ): Promise<EmailTemplate> {
     const [updated] = await this.db
       .update(schema.emailTemplates)
       .set({
@@ -385,7 +440,7 @@ export class TemplateService extends BaseService {
 
     this.obs.info('Creator template updated', { templateId, creatorId });
 
-    return { data: updated };
+    return updated;
   }
 
   /**

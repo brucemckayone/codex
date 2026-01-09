@@ -37,6 +37,7 @@
     "@codex/database": "workspace:*",
     "@codex/platform-settings": "workspace:*",
     "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7",
     "resend": "^6.6.0"

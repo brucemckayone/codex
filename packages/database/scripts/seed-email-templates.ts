@@ -214,31 +214,33 @@ async function seedTemplates() {
   console.log('🌱 Seeding email templates...');
 
   try {
-    for (const template of globalTemplates) {
-      const existing = await dbWs.query.emailTemplates.findFirst({
-        where: and(
-          eq(schema.emailTemplates.name, template.name),
-          eq(schema.emailTemplates.scope, 'global')
-        ),
-      });
+    await dbWs.transaction(async (tx) => {
+      for (const template of globalTemplates) {
+        const existing = await tx.query.emailTemplates.findFirst({
+          where: and(
+            eq(schema.emailTemplates.name, template.name),
+            eq(schema.emailTemplates.scope, 'global')
+          ),
+        });
 
-      if (existing) {
-        console.log(`  ⏭️  Skipping ${template.name} (already exists)`);
-        continue;
+        if (existing) {
+          console.log(`  ⏭️  Skipping ${template.name} (already exists)`);
+          continue;
+        }
+
+        await tx.insert(schema.emailTemplates).values({
+          ...template,
+          organizationId: null,
+          creatorId: null,
+        });
+        console.log(`  ✅ Created ${template.name}`);
       }
-
-      await dbWs.insert(schema.emailTemplates).values({
-        ...template,
-        organizationId: null,
-        creatorId: null,
-      });
-      console.log(`  ✅ Created ${template.name}`);
-    }
+    });
 
     console.log('✨ Seed complete!');
-  } catch (err) {
-    console.error('Seed failed during processing:', err);
-    throw err;
+  } catch (error) {
+    console.error('Seed failed during processing:', error);
+    throw error;
   }
 }
 

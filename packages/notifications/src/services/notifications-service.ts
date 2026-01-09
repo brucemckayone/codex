@@ -24,23 +24,24 @@ interface SendEmailParams {
   replyTo?: string;
 }
 
-/** Default brand tokens when no org-specific branding is available */
-const DEFAULT_BRAND_TOKENS = {
-  platformName: 'Codex',
-  primaryColor: '#000000',
-  secondaryColor: '#ffffff',
-  supportEmail: 'support@codex.io',
-  logoUrl: '',
-} as const;
-
 export class NotificationsService extends BaseService {
   private readonly emailProvider: EmailProvider;
   private readonly templateRepository: TemplateRepository;
   private readonly defaultFrom: { email: string; name?: string };
+  private readonly brandDefaults: Required<
+    NonNullable<NotificationsServiceConfig['defaults']>
+  >;
 
   constructor(config: NotificationsServiceConfig) {
     super(config);
     this.templateRepository = new TemplateRepository(this.db);
+    this.brandDefaults = {
+      platformName: config.defaults?.platformName || 'Codex',
+      primaryColor: config.defaults?.primaryColor || '#000000',
+      secondaryColor: config.defaults?.secondaryColor || '#ffffff',
+      supportEmail: config.defaults?.supportEmail || 'support@codex.io',
+      logoUrl: config.defaults?.logoUrl || '',
+    };
 
     if (!config.emailProvider) {
       throw new Error('EmailProvider is required');
@@ -79,21 +80,21 @@ export class NotificationsService extends BaseService {
       ]);
 
       const primaryColor: string =
-        branding.primaryColorHex ?? DEFAULT_BRAND_TOKENS.primaryColor;
-      const logoUrl: string = branding.logoUrl ?? DEFAULT_BRAND_TOKENS.logoUrl;
+        branding.primaryColorHex ?? this.brandDefaults.primaryColor;
+      const logoUrl: string = branding.logoUrl ?? this.brandDefaults.logoUrl;
       const supportEmail: string =
-        contact.supportEmail ?? DEFAULT_BRAND_TOKENS.supportEmail;
+        contact.supportEmail ?? this.brandDefaults.supportEmail;
 
       return {
-        platformName: DEFAULT_BRAND_TOKENS.platformName,
+        platformName: this.brandDefaults.platformName,
         primaryColor,
-        secondaryColor: DEFAULT_BRAND_TOKENS.secondaryColor,
+        secondaryColor: this.brandDefaults.secondaryColor,
         logoUrl,
         supportEmail,
       };
-    } catch (e) {
-      this.obs.warn('Failed to load branding', { organizationId, error: e });
-      return { ...DEFAULT_BRAND_TOKENS };
+    } catch (error) {
+      this.obs.warn('Failed to load branding', { organizationId, error });
+      return { ...this.brandDefaults };
     }
   }
 
@@ -118,7 +119,7 @@ export class NotificationsService extends BaseService {
     // 2. Resolve Branding (if organization context exists)
     const brandTokens = organizationId
       ? await this.resolveBrandTokens(organizationId)
-      : { ...DEFAULT_BRAND_TOKENS };
+      : { ...this.brandDefaults };
 
     // 3. Render Template
     const mergedData = { ...brandTokens, ...data };
@@ -129,6 +130,7 @@ export class NotificationsService extends BaseService {
       data: mergedData,
       allowedTokens,
       escapeValues: false,
+      stripTags: true, // Security: Strip HTML from subject lines
     });
 
     const htmlResult = renderTemplate({
@@ -156,9 +158,12 @@ export class NotificationsService extends BaseService {
 
     try {
       return await this.emailProvider.send(message, this.defaultFrom);
-    } catch (_error) {
+    } catch (error) {
       // Immediate retry (Workers can terminate during setTimeout delays)
-      this.obs.info('Retrying email send', { templateName });
+      this.obs.info('Retrying email send', {
+        templateName,
+        error: error instanceof Error ? error.message : String(error),
+      });
       try {
         return await this.emailProvider.send(message, this.defaultFrom);
       } catch (retryError) {
@@ -198,7 +203,7 @@ export class NotificationsService extends BaseService {
     // Resolve branding
     const brandTokens = organizationId
       ? await this.resolveBrandTokens(organizationId)
-      : { ...DEFAULT_BRAND_TOKENS };
+      : { ...this.brandDefaults };
 
     const mergedData = { ...brandTokens, ...data };
     const allowedTokens = getAllowedTokens(template.name);

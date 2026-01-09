@@ -74,6 +74,17 @@ describe('renderTemplate', () => {
     });
     expect(result.content).toBe('Hello Tom & Jerry!');
   });
+
+  it('can strip HTML tags from values', () => {
+    const result = renderTemplate({
+      template: 'Hello {{userName}}!',
+      data: { userName: '<script>alert("xss")</script>World' },
+      allowedTokens: ['userName'],
+      stripTags: true,
+      escapeValues: false,
+    });
+    expect(result.content).toBe('Hello alert("xss")World!');
+  });
 });
 
 describe('renderEmailTemplate', () => {

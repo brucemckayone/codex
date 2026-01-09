@@ -44,6 +44,16 @@ export interface NotificationsServiceConfig extends ServiceConfig {
   fromEmail?: string;
   fromName?: string;
   replyToEmail?: string;
+  /**
+   * Default branding and support configuration
+   */
+  defaults?: {
+    platformName?: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+    supportEmail?: string;
+    logoUrl?: string;
+  };
 }
 
 /**
