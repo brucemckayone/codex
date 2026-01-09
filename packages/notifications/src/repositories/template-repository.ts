@@ -16,45 +16,51 @@ export class TemplateRepository {
    * - In-memory priority resolution avoids N+1 queries
    * - Fetch limit of 3 ensures minimal data transfer
    *
-   * Query Pattern:
-   * - Uses or() with conditional logic that may return undefined
-   * - Drizzle automatically filters out undefined conditions
-   * - This is a documented Drizzle feature for dynamic query building
+   * Security Note:
+   * - Conditions are built explicitly to avoid relying on undocumented
+   *   Drizzle behavior with undefined values in or() clauses.
    */
   async findTemplate(
     name: string,
     organizationId?: string | null,
     creatorId?: string | null
   ): Promise<EmailTemplate | null> {
-    // Single query to fetch all candidates (Organization, Creator, Global)
-    // We fetch up to 3 candidates and prioritize them in memory to avoid N+1 queries
-    const templates = await this.db.query.emailTemplates.findMany({
-      where: and(
-        eq(emailTemplates.name, name),
-        isNull(emailTemplates.deletedAt),
-        // Drizzle filters out undefined values from or() automatically
-        // This allows us to conditionally include scope filters based on parameters
-        or(
-          // 1. Organization Scope
-          organizationId
-            ? and(
-                eq(emailTemplates.scope, 'organization'),
-                eq(emailTemplates.organizationId, organizationId)
-              )
-            : undefined,
-          // 2. Creator Scope
-          creatorId
-            ? and(
-                eq(emailTemplates.scope, 'creator'),
-                eq(emailTemplates.creatorId, creatorId)
-              )
-            : undefined,
-          // 3. Global Scope
-          eq(emailTemplates.scope, 'global')
+    // Build scope conditions explicitly (no undefined values)
+    // Global scope is always included as the fallback
+    const scopeConditions: ReturnType<typeof and>[] = [
+      eq(emailTemplates.scope, 'global'),
+    ];
+
+    // Add organization scope if orgId provided (highest priority)
+    if (organizationId) {
+      scopeConditions.unshift(
+        and(
+          eq(emailTemplates.scope, 'organization'),
+          eq(emailTemplates.organizationId, organizationId)
         )
-      ),
-      limit: 3,
-    });
+      );
+    }
+
+    // Add creator scope if creatorId provided
+    if (creatorId) {
+      scopeConditions.push(
+        and(
+          eq(emailTemplates.scope, 'creator'),
+          eq(emailTemplates.creatorId, creatorId)
+        )
+      );
+    }
+
+    // Single query to fetch all candidates
+    const templates =
+      (await this.db.query.emailTemplates.findMany({
+        where: and(
+          eq(emailTemplates.name, name),
+          isNull(emailTemplates.deletedAt),
+          or(...scopeConditions)
+        ),
+        limit: 3,
+      })) ?? [];
 
     // In-memory priority resolution: Organization > Creator > Global
     return (

@@ -45,12 +45,13 @@ describe('TemplateRepository', () => {
         scope: 'organization',
         organizationId: 'org-123',
       };
-      mockDb._mocks.findFirst.mockResolvedValueOnce(orgTemplate);
+      // findMany returns array of candidates
+      mockDb._mocks.findMany.mockResolvedValueOnce([orgTemplate]);
 
       const result = await repo.findTemplate('welcome', 'org-123', null);
 
       expect(result).toEqual(orgTemplate);
-      expect(mockDb._mocks.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockDb._mocks.findMany).toHaveBeenCalledTimes(1);
     });
 
     it('falls back to creator template when org template not found', async () => {
@@ -60,10 +61,8 @@ describe('TemplateRepository', () => {
         scope: 'creator',
         creatorId: 'creator-456',
       };
-      // First call (org) returns null, second call (creator) returns template
-      mockDb._mocks.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(creatorTemplate);
+      // Single query returns only creator template (no org match)
+      mockDb._mocks.findMany.mockResolvedValueOnce([creatorTemplate]);
 
       const result = await repo.findTemplate(
         'newsletter',
@@ -72,7 +71,7 @@ describe('TemplateRepository', () => {
       );
 
       expect(result).toEqual(creatorTemplate);
-      expect(mockDb._mocks.findFirst).toHaveBeenCalledTimes(2);
+      expect(mockDb._mocks.findMany).toHaveBeenCalledTimes(1);
     });
 
     it('falls back to global template when org and creator not found', async () => {
@@ -81,11 +80,8 @@ describe('TemplateRepository', () => {
         name: 'password-reset',
         scope: 'global',
       };
-      // Org and creator return null, global returns template
-      mockDb._mocks.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(globalTemplate);
+      // Single query returns only global template
+      mockDb._mocks.findMany.mockResolvedValueOnce([globalTemplate]);
 
       const result = await repo.findTemplate(
         'password-reset',
@@ -94,14 +90,12 @@ describe('TemplateRepository', () => {
       );
 
       expect(result).toEqual(globalTemplate);
-      expect(mockDb._mocks.findFirst).toHaveBeenCalledTimes(3);
+      expect(mockDb._mocks.findMany).toHaveBeenCalledTimes(1);
     });
 
     it('returns null when no template found at any scope', async () => {
-      mockDb._mocks.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null);
+      // Empty array - no templates found
+      mockDb._mocks.findMany.mockResolvedValueOnce([]);
 
       const result = await repo.findTemplate(
         'nonexistent',
@@ -112,38 +106,42 @@ describe('TemplateRepository', () => {
       expect(result).toBeNull();
     });
 
-    it('skips org lookup when organizationId is null', async () => {
+    it('prioritizes organization over creator template', async () => {
+      const orgTemplate = { id: 'ot', name: 'test', scope: 'organization' };
       const creatorTemplate = { id: 'ct', name: 'test', scope: 'creator' };
-      mockDb._mocks.findFirst.mockResolvedValueOnce(creatorTemplate);
+      // Both returned, org should be selected
+      mockDb._mocks.findMany.mockResolvedValueOnce([
+        creatorTemplate,
+        orgTemplate,
+      ]);
+
+      const result = await repo.findTemplate('test', 'org-123', 'creator-456');
+
+      expect(result).toEqual(orgTemplate);
+    });
+
+    it('prioritizes creator over global template', async () => {
+      const creatorTemplate = { id: 'ct', name: 'test', scope: 'creator' };
+      const globalTemplate = { id: 'gt', name: 'test', scope: 'global' };
+      // Both returned, creator should be selected
+      mockDb._mocks.findMany.mockResolvedValueOnce([
+        globalTemplate,
+        creatorTemplate,
+      ]);
 
       const result = await repo.findTemplate('test', null, 'creator-456');
 
       expect(result).toEqual(creatorTemplate);
-      // Only 1 call (creator), not 2 (org + creator)
-      expect(mockDb._mocks.findFirst).toHaveBeenCalledTimes(1);
     });
 
-    it('skips creator lookup when creatorId is null', async () => {
+    it('returns global when no org or creator provided', async () => {
       const globalTemplate = { id: 'gt', name: 'test', scope: 'global' };
-      mockDb._mocks.findFirst
-        .mockResolvedValueOnce(null) // org
-        .mockResolvedValueOnce(globalTemplate); // global
-
-      const result = await repo.findTemplate('test', 'org-123', null);
-
-      expect(result).toEqual(globalTemplate);
-      // 2 calls (org + global), not 3 (org + creator + global)
-      expect(mockDb._mocks.findFirst).toHaveBeenCalledTimes(2);
-    });
-
-    it('looks up only global when both org and creator are null', async () => {
-      const globalTemplate = { id: 'gt', name: 'test', scope: 'global' };
-      mockDb._mocks.findFirst.mockResolvedValueOnce(globalTemplate);
+      mockDb._mocks.findMany.mockResolvedValueOnce([globalTemplate]);
 
       const result = await repo.findTemplate('test', null, null);
 
       expect(result).toEqual(globalTemplate);
-      expect(mockDb._mocks.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockDb._mocks.findMany).toHaveBeenCalledTimes(1);
     });
   });
 

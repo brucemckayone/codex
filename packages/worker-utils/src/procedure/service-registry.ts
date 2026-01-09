@@ -257,8 +257,18 @@ export function createServiceRegistry(
 
     get notifications() {
       if (!_notifications) {
+        const useMock = env.USE_MOCK_EMAIL === 'true';
+
+        // Validate email provider credentials at startup
+        if (!useMock && !env.RESEND_API_KEY) {
+          throw new Error(
+            'RESEND_API_KEY is required when USE_MOCK_EMAIL is not enabled. ' +
+              'Set USE_MOCK_EMAIL=true for local development or provide RESEND_API_KEY.'
+          );
+        }
+
         const emailProvider = createEmailProvider({
-          useMock: env.USE_MOCK_EMAIL === 'true',
+          useMock,
           resendApiKey: env.RESEND_API_KEY,
           mailhogUrl: env.MAILHOG_URL,
         });

@@ -179,68 +179,78 @@ export class NotificationsService extends BaseService {
       escapeValues: false,
     });
 
-    // 5. Send Email
-    const message: EmailMessage = {
-      to,
-      toName,
-      subject: subjectResult.content,
-      html: htmlResult.content,
-      text: textResult.content,
-    };
+    // 5. Send Email with retry logic
+    return this.sendWithRetry(
+      {
+        to,
+        toName,
+        subject: subjectResult.content,
+        html: htmlResult.content,
+        text: textResult.content,
+      },
+      { templateName, organizationId: organizationId || 'none' }
+    );
+  }
 
-    try {
-      const result = await this.emailProvider.send(message, this.defaultFrom);
+  /**
+   * Send email with exponential backoff retry.
+   *
+   * Retry strategy:
+   * - Max 2 retries (3 total attempts)
+   * - Backoff delays: 100ms, 200ms (Workers-compatible short delays)
+   * - Throws on final failure for consistent error handling
+   */
+  private async sendWithRetry(
+    message: EmailMessage,
+    context: { templateName: string; organizationId: string }
+  ): Promise<SendResult> {
+    const maxRetries = 2;
+    let lastError: Error | undefined;
 
-      // Track success metric
-      this.obs.info('Email sent successfully', {
-        templateName,
-        organizationId: organizationId || 'none',
-        success: true,
-      });
-
-      return result;
-    } catch (error) {
-      // Immediate retry (Workers can terminate during setTimeout delays)
-      this.obs.info('Retrying email send', {
-        templateName,
-        organizationId: organizationId || 'none',
-        attempt: 2,
-        errorType: error instanceof Error ? error.name : 'Unknown',
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        // Apply backoff delay on retries (100ms * attempt)
+        if (attempt > 0) {
+          const backoffMs = 100 * attempt;
+          this.obs.info('Retrying email send', {
+            ...context,
+            attempt: attempt + 1,
+            backoffMs,
+          });
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
+
         const result = await this.emailProvider.send(message, this.defaultFrom);
 
-        // Track retry success
-        this.obs.info('Email sent successfully after retry', {
-          templateName,
-          organizationId: organizationId || 'none',
+        // Track success metric
+        this.obs.info('Email sent successfully', {
+          ...context,
           success: true,
-          retried: true,
+          attempt: attempt + 1,
+          retried: attempt > 0,
         });
 
         return result;
-      } catch (retryError) {
-        // Track failure metric
-        this.obs.error('Failed to send email after retry', {
-          templateName,
-          organizationId: organizationId || 'none',
-          success: false,
-          errorType: retryError instanceof Error ? retryError.name : 'Unknown',
-          errorMessage:
-            retryError instanceof Error
-              ? retryError.message
-              : String(retryError),
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        this.obs.warn(`Email send attempt ${attempt + 1} failed`, {
+          ...context,
+          errorType: lastError.name,
+          errorMessage: lastError.message,
         });
-        return {
-          success: false,
-          error:
-            retryError instanceof Error
-              ? retryError.message
-              : 'Failed to send email after retry',
-        };
       }
     }
+
+    // Track final failure metric
+    this.obs.error('Failed to send email after all retries', {
+      ...context,
+      success: false,
+      totalAttempts: maxRetries + 1,
+      errorMessage: lastError?.message || 'Unknown error',
+    });
+
+    // Throw for consistent error handling (callers can catch if needed)
+    throw lastError || new Error('Failed to send email after retries');
   }
 
   /**

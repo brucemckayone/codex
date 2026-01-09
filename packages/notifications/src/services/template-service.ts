@@ -284,6 +284,10 @@ export class TemplateService extends BaseService {
 
   /**
    * Update an organization template (requires admin/owner role)
+   *
+   * Security Note: Org admin role is verified before update. The WHERE clause
+   * enforces organization scoping at the database level, mitigating TOCTOU risks
+   * by ensuring the update only affects templates in the verified organization.
    */
   async updateOrgTemplate(
     orgId: string,
@@ -291,7 +295,7 @@ export class TemplateService extends BaseService {
     userId: string,
     input: UpdateTemplateInput
   ): Promise<EmailTemplate> {
-    // Verify admin/owner role
+    // Verify admin/owner role - authorization check
     await this.requireOrgAdminRole(orgId, userId);
 
     const [updated] = await this.db

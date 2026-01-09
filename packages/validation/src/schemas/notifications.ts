@@ -109,8 +109,13 @@ export type ListTemplatesQuery = z.infer<typeof listTemplatesQuerySchema>;
 
 export const previewTemplateSchema = z.object({
   // Test data to render template with
+  // Limited to 50 keys to prevent DoS via large data objects
   data: z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .refine(
+      (obj) => Object.keys(obj).length <= 50,
+      'Maximum 50 data keys allowed'
+    )
     .default({}),
 });
 export type PreviewTemplateInput = z.infer<typeof previewTemplateSchema>;
@@ -118,9 +123,13 @@ export type PreviewTemplateInput = z.infer<typeof previewTemplateSchema>;
 export const testSendTemplateSchema = z.object({
   // Email address to send test to
   recipientEmail: z.string().email('Invalid email address'),
-  // Optional test data
+  // Optional test data (limited to 50 keys)
   data: z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .refine(
+      (obj) => Object.keys(obj).length <= 50,
+      'Maximum 50 data keys allowed'
+    )
     .default({}),
 });
 export type TestSendTemplateInput = z.infer<typeof testSendTemplateSchema>;
