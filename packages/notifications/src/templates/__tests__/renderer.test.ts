@@ -75,7 +75,7 @@ describe('renderTemplate', () => {
     expect(result.content).toBe('Hello Tom & Jerry!');
   });
 
-  it('can strip HTML tags from values', () => {
+  it('rejects HTML tags when stripTags is enabled', () => {
     const result = renderTemplate({
       template: 'Hello {{userName}}!',
       data: { userName: '<script>alert("xss")</script>World' },
@@ -83,7 +83,41 @@ describe('renderTemplate', () => {
       stripTags: true,
       escapeValues: false,
     });
-    expect(result.content).toBe('Hello alert("xss")World!');
+    // Strict approach: reject any content with < or >
+    expect(result.content).toBe('Hello !');
+  });
+
+  it('rejects malformed HTML without closing bracket', () => {
+    const result = renderTemplate({
+      template: 'Subject: {{subject}}',
+      data: { subject: '<script>alert("xss")' },
+      allowedTokens: ['subject'],
+      stripTags: true,
+      escapeValues: false,
+    });
+    expect(result.content).toBe('Subject: ');
+  });
+
+  it('rejects HTML event handlers', () => {
+    const result = renderTemplate({
+      template: 'Image: {{img}}',
+      data: { img: '<img src=x onerror=alert(1)>' },
+      allowedTokens: ['img'],
+      stripTags: true,
+      escapeValues: false,
+    });
+    expect(result.content).toBe('Image: ');
+  });
+
+  it('allows content without angle brackets', () => {
+    const result = renderTemplate({
+      template: 'Hello {{userName}}!',
+      data: { userName: 'John & Jane' },
+      allowedTokens: ['userName'],
+      stripTags: true,
+      escapeValues: false,
+    });
+    expect(result.content).toBe('Hello John & Jane!');
   });
 });
 

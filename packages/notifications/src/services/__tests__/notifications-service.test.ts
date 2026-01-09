@@ -211,7 +211,7 @@ describe('NotificationsService', () => {
 
     expect(mockEmailProvider.send).toHaveBeenCalledWith(
       expect.objectContaining({
-        subject: 'Subject: badSafe', // Tags stripped
+        subject: 'Subject: ', // HTML content rejected entirely (strict validation)
       }),
       expect.anything()
     );

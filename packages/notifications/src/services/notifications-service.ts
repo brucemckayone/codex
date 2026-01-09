@@ -162,13 +162,21 @@ export class NotificationsService extends BaseService {
       // Immediate retry (Workers can terminate during setTimeout delays)
       this.obs.info('Retrying email send', {
         templateName,
-        error: error instanceof Error ? error.message : String(error),
+        organizationId: organizationId || 'none',
+        errorType: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
       });
       try {
         return await this.emailProvider.send(message, this.defaultFrom);
       } catch (retryError) {
         this.obs.error('Failed to send email after retry', {
-          error: retryError,
+          templateName,
+          organizationId: organizationId || 'none',
+          errorType: retryError instanceof Error ? retryError.name : 'Unknown',
+          errorMessage:
+            retryError instanceof Error
+              ? retryError.message
+              : String(retryError),
         });
         return {
           success: false,

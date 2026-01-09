@@ -71,7 +71,10 @@ async function checkTemplateAccess(
 app.post(
   '/:id/preview',
   procedure({
-    policy: { auth: 'required' },
+    policy: {
+      auth: 'required',
+      rateLimit: 'strict', // Prevent abuse of template previews
+    },
     input: {
       params: createIdParamsSchema(),
       body: previewTemplateSchema,
@@ -132,7 +135,10 @@ app.post(
 app.post(
   '/:id/test-send',
   procedure({
-    policy: { auth: 'required' },
+    policy: {
+      auth: 'required',
+      rateLimit: 'strict', // Prevent email abuse and protect API quota
+    },
     input: {
       params: createIdParamsSchema(),
       body: testSendTemplateSchema,

@@ -90,8 +90,14 @@ export function renderTemplate(options: RenderOptions): RenderResult {
       let stringValue = String(value);
 
       // Strip tags if enabled (prevent XSS in plain text contexts)
+      // For subject lines, we use a strict approach: reject ANY HTML-like content
+      // This is more secure than attempting to parse/sanitize with regex
       if (stripTags) {
-        stringValue = stringValue.replace(/<[^>]*>?/gm, '');
+        if (stringValue.includes('<') || stringValue.includes('>')) {
+          // Reject any content that looks like HTML
+          // This prevents bypasses via malformed HTML, event handlers, etc.
+          stringValue = '';
+        }
       }
 
       // Escape HTML if enabled

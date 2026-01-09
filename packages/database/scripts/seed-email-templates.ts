@@ -239,7 +239,9 @@ async function seedTemplates() {
 
     console.log('✨ Seed complete!');
   } catch (error) {
-    console.error('Seed failed during processing:', error);
+    // Transaction will automatically rollback on error
+    // All template insertions will be reverted to maintain data consistency
+    console.error('Seed failed - rolling back transaction:', error);
     throw error;
   }
 }
