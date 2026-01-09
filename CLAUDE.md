@@ -149,6 +149,7 @@ All packages live in `packages/`. They're organized into three architectural lay
 | **@codex/identity** | Organization management | [identity/CLAUDE.md](packages/identity/CLAUDE.md) |
 | **@codex/access** | Content access control, streaming URLs, playback tracking | [access/CLAUDE.md](packages/access/CLAUDE.md) |
 | **@codex/purchase** | Stripe Checkout integration, purchase management, revenue splits | [purchase/CLAUDE.md](packages/purchase/CLAUDE.md) |
+| **@codex/notifications** | Email template management and sending, multi-scope templates | [notifications/CLAUDE.md](packages/notifications/CLAUDE.md) |
 
 **Key Concept**: Service layer implements domain business logic. Each service extends BaseService and throws domain-specific errors.
 

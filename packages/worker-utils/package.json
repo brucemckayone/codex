@@ -34,6 +34,7 @@
     "@codex/organization": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/notifications": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/platform-settings": "workspace:*",
     "@codex/purchase": "workspace:*",

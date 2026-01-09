@@ -1,0 +1,2 @@
+CREATE INDEX "idx_templates_org_scope" ON "email_templates" USING btree ("organization_id","scope");--> statement-breakpoint
+CREATE INDEX "idx_templates_creator_scope" ON "email_templates" USING btree ("creator_id","scope");
