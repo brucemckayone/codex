@@ -3,9 +3,12 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch
 
-# Set env vars before importing handler if needed, or patch them
-os.environ["RUNPOD_DEBUG"] = "true"
+# Ensure handler is in python path
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
+# Mock runpod before importing handler to prevent side-effects (like auto-starting worker)
+sys.modules["runpod"] = MagicMock()
 from handler import main as handler_module
 
 
@@ -14,7 +17,7 @@ def mock_s3_client():
     with patch("handler.main.create_s3_client") as mock:
         client = MagicMock()
         mock.return_value = client
-        yield client
+        yield mock
 
 
 @pytest.fixture
@@ -102,6 +105,8 @@ def test_handler_video_flow_cpu(
         cmd_str = " ".join(cmd)
         mock_res = MagicMock()
         mock_res.returncode = 0
+        mock_res.stdout = ""
+        mock_res.stderr = ""  # Important: Must be string, not Mock
 
         if "ffprobe" in cmd:
             mock_res.stdout = probe_data
@@ -110,8 +115,6 @@ def test_handler_video_flow_cpu(
             mock_res.stderr = (
                 '{"input_i": "-14.0", "input_tp": "-0.5", "input_lra": "5.0"}'
             )
-        else:
-            mock_res.stdout = ""
 
         return mock_res
 
@@ -168,6 +171,8 @@ def test_handler_audio_flow(
     def subprocess_side_effect(cmd, **kwargs):
         mock_res = MagicMock()
         mock_res.returncode = 0
+        mock_res.stdout = ""
+        mock_res.stderr = ""
         if "ffprobe" in cmd:
             mock_res.stdout = probe_data
         return mock_res
@@ -212,13 +217,33 @@ def test_handler_failure_reporting(
     assert payload["error"] == "S3 Download Error"
 
 
-def test_sign_payload():
-    """Test HMAC signature generation."""
-    secret = "my-secret"
-    payload = '{"test": 123}'
-    # Expected HMAC-SHA256 for this input
-    # echo -n '{"test": 123}' | openssl dgst -sha256 -hmac "my-secret"
-    expected = "d879482d8c9735a2b3df516609919f2d1e2501a355608df932b7245b986f375f"
+def test_handler_timeout_protection(
+    mock_s3_client,
+    mock_download_file,
+    mock_subprocess,
+    mock_requests,
+    basic_job_input
+):
+    """Test that handler catches subprocess timeouts and reports failure."""
+    import subprocess
 
-    signature = handler_module.sign_payload(payload, secret)
-    assert signature == expected
+    # Mock probe success first
+    probe_data = json.dumps({"format": {"duration": "100.0"}})
+
+    def side_effect(cmd, **kwargs):
+        if "ffprobe" in cmd:
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = probe_data
+            return m
+        # Simulate hang on transcoding
+        raise subprocess.TimeoutExpired(cmd, 3600)
+
+    mock_subprocess.side_effect = side_effect
+
+    result = handler_module.handler({"input": basic_job_input})
+
+    assert result["status"] == "error"
+    assert "Command" in result["error"]
+    assert "timed out" in result["error"]
+

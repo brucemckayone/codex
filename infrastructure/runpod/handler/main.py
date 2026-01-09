@@ -181,7 +181,7 @@ def probe_media(input_path: str) -> dict[str, Any]:
         "-show_streams",
         input_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
     return json.loads(result.stdout)
 
 
@@ -264,7 +264,7 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
             output_path,
         ]
 
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=3600)  # 1 hour timeout
 
 
 def analyze_loudness(input_path: str) -> dict[str, float]:
@@ -281,7 +281,7 @@ def analyze_loudness(input_path: str) -> dict[str, float]:
         "null",
         "-",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
     # Parse loudnorm output from stderr
     output = result.stderr
@@ -403,7 +403,7 @@ def transcode_video_hls(
                 playlist_path,
             ]
 
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, timeout=3600)  # 1 hour per variant
         ready_variants.append(variant_name)
         variant_playlists.append((variant_name, settings))
 
@@ -460,7 +460,7 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
             playlist_path,
         ]
 
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, timeout=600)
         ready_variants.append(variant_name)
         variant_playlists.append((variant_name, settings))
 
@@ -557,7 +557,7 @@ def create_preview(
             os.path.join(preview_dir, "preview.m3u8"),
         ]
 
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=120)
 
 
 def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
@@ -580,7 +580,7 @@ def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
         output_path,
     ]
 
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=60)
 
 
 def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
@@ -599,7 +599,7 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
         "-b",
         "8",
     ]
-    subprocess.run(cmd_json, check=True)
+    subprocess.run(cmd_json, check=True, timeout=120)
 
     # Generate PNG waveform image
     cmd_png = [
@@ -615,7 +615,7 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
         "--colors",
         "audition",
     ]
-    subprocess.run(cmd_png, check=True)
+    subprocess.run(cmd_png, check=True, timeout=120)
 
 
 # =============================================================================
