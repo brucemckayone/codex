@@ -1,11 +1,4 @@
 {
-<<<<<<< HEAD
-  "id": "1d92f27a-22c4-4011-83c6-91cad0342274",
-  "prevId": "22525cf2-94c9-4f68-a4c0-b6013676edd0",
-=======
-  "id": "0d342d42-09e3-40ca-9d8b-800e46e12256",
-  "prevId": "b44f4fa9-58b8-4e53-b898-e045756001f9",
->>>>>>> refs/remotes/origin/main
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -759,98 +752,12 @@
           "primaryKey": false,
           "notNull": false
         },
-<<<<<<< HEAD
-        "hls_preview_key": {
-          "name": "hls_preview_key",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false
-        },
-=======
->>>>>>> refs/remotes/origin/main
         "thumbnail_key": {
           "name": "thumbnail_key",
           "type": "varchar(500)",
           "primaryKey": false,
           "notNull": false
         },
-<<<<<<< HEAD
-        "waveform_key": {
-          "name": "waveform_key",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "waveform_image_key": {
-          "name": "waveform_image_key",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "runpod_job_id": {
-          "name": "runpod_job_id",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "transcoding_error": {
-          "name": "transcoding_error",
-          "type": "varchar(2000)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "transcoding_attempts": {
-          "name": "transcoding_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "transcoding_priority": {
-          "name": "transcoding_priority",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 2
-        },
-        "mezzanine_key": {
-          "name": "mezzanine_key",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "mezzanine_status": {
-          "name": "mezzanine_status",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ready_variants": {
-          "name": "ready_variants",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "loudness_integrated": {
-          "name": "loudness_integrated",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "loudness_peak": {
-          "name": "loudness_peak",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "loudness_range": {
-          "name": "loudness_range",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-=======
->>>>>>> refs/remotes/origin/main
         "uploaded_at": {
           "name": "uploaded_at",
           "type": "timestamp with time zone",
@@ -935,24 +842,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-<<<<<<< HEAD
-        },
-        "idx_media_items_runpod_job_id": {
-          "name": "idx_media_items_runpod_job_id",
-          "columns": [
-            {
-              "expression": "runpod_job_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-=======
->>>>>>> refs/remotes/origin/main
         }
       },
       "foreignKeys": {
@@ -978,27 +867,6 @@
           "name": "check_media_type",
           "value": "\"media_items\".\"media_type\" IN ('video', 'audio')"
         },
-<<<<<<< HEAD
-        "check_mezzanine_status": {
-          "name": "check_mezzanine_status",
-          "value": "\"media_items\".\"mezzanine_status\" IS NULL OR \"media_items\".\"mezzanine_status\" IN ('pending', 'processing', 'ready', 'failed')"
-        },
-        "check_transcoding_priority": {
-          "name": "check_transcoding_priority",
-          "value": "\"media_items\".\"transcoding_priority\" >= 0 AND \"media_items\".\"transcoding_priority\" <= 4"
-        },
-        "check_max_transcoding_attempts": {
-          "name": "check_max_transcoding_attempts",
-          "value": "\"media_items\".\"transcoding_attempts\" >= 0 AND \"media_items\".\"transcoding_attempts\" <= 1"
-        },
-        "status_ready_requires_keys": {
-          "name": "status_ready_requires_keys",
-          "value": "\"media_items\".\"status\" != 'ready' OR (\n        \"media_items\".\"hls_master_playlist_key\" IS NOT NULL\n        AND \"media_items\".\"duration_seconds\" IS NOT NULL\n        AND (\n          (\"media_items\".\"media_type\" = 'video' AND \"media_items\".\"thumbnail_key\" IS NOT NULL)\n          OR (\"media_items\".\"media_type\" = 'audio' AND \"media_items\".\"waveform_key\" IS NOT NULL)\n        )\n      )"
-=======
-        "status_ready_requires_keys": {
-          "name": "status_ready_requires_keys",
-          "value": "\"media_items\".\"status\" != 'ready' OR (\"media_items\".\"hls_master_playlist_key\" IS NOT NULL AND \"media_items\".\"duration_seconds\" IS NOT NULL)"
->>>>>>> refs/remotes/origin/main
         }
       },
       "isRLSEnabled": false
@@ -2171,261 +2039,6 @@
       },
       "isRLSEnabled": false
     },
-<<<<<<< HEAD
-=======
-    "public.email_templates": {
-      "name": "email_templates",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "name": {
-          "name": "name",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scope": {
-          "name": "scope",
-          "type": "template_scope",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "creator_id": {
-          "name": "creator_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "subject": {
-          "name": "subject",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "html_body": {
-          "name": "html_body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "text_body": {
-          "name": "text_body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "template_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "idx_email_templates_org_id": {
-          "name": "idx_email_templates_org_id",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_email_templates_creator_id": {
-          "name": "idx_email_templates_creator_id",
-          "columns": [
-            {
-              "expression": "creator_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_email_templates_scope": {
-          "name": "idx_email_templates_scope",
-          "columns": [
-            {
-              "expression": "scope",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_email_templates_status": {
-          "name": "idx_email_templates_status",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_unique_template_global": {
-          "name": "idx_unique_template_global",
-          "columns": [
-            {
-              "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"email_templates\".\"scope\" = 'global' AND \"email_templates\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_unique_template_org": {
-          "name": "idx_unique_template_org",
-          "columns": [
-            {
-              "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"email_templates\".\"scope\" = 'organization' AND \"email_templates\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_unique_template_creator": {
-          "name": "idx_unique_template_creator",
-          "columns": [
-            {
-              "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "creator_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"email_templates\".\"scope\" = 'creator' AND \"email_templates\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "email_templates_organization_id_organizations_id_fk": {
-          "name": "email_templates_organization_id_organizations_id_fk",
-          "tableFrom": "email_templates",
-          "tableTo": "organizations",
-          "columnsFrom": ["organization_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "email_templates_creator_id_users_id_fk": {
-          "name": "email_templates_creator_id_users_id_fk",
-          "tableFrom": "email_templates",
-          "tableTo": "users",
-          "columnsFrom": ["creator_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "email_templates_created_by_users_id_fk": {
-          "name": "email_templates_created_by_users_id_fk",
-          "tableFrom": "email_templates",
-          "tableTo": "users",
-          "columnsFrom": ["created_by"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
->>>>>>> refs/remotes/origin/main
     "public.video_playback": {
       "name": "video_playback",
       "schema": "",
@@ -2875,22 +2488,6 @@
       "isRLSEnabled": false
     }
   },
-<<<<<<< HEAD
-  "enums": {},
-=======
-  "enums": {
-    "public.template_scope": {
-      "name": "template_scope",
-      "schema": "public",
-      "values": ["global", "organization", "creator"]
-    },
-    "public.template_status": {
-      "name": "template_status",
-      "schema": "public",
-      "values": ["draft", "active", "archived"]
-    }
-  },
->>>>>>> refs/remotes/origin/main
   "schemas": {},
   "sequences": {},
   "roles": {},

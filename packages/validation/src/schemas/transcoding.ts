@@ -81,8 +81,8 @@ export const runpodWebhookOutputSchema = z.object({
   width: z.number().int().min(1).max(7680).optional(), // Max 8K
   height: z.number().int().min(1).max(4320).optional(), // Max 8K
 
-  // HLS variants that are ready
-  readyVariants: z.array(hlsVariantSchema).optional(),
+  // HLS variants that are ready (bounded to prevent DoS via unbounded array)
+  readyVariants: z.array(hlsVariantSchema).max(10).optional(),
 
   // Audio loudness (×100 for precision)
   // Integrated Loudness (LUFS × 100): Range -10000 to 0 (-100.00 to 0.00 LUFS)

@@ -47,17 +47,15 @@ import type {
 
 /**
  * Extended service config for TranscodingService
+ *
+ * NOTE: B2 credentials are no longer passed here - they are configured
+ * in RunPod's secret manager and injected as environment variables on workers.
  */
 export interface TranscodingServiceConfig {
   runpodApiKey: string;
   runpodEndpointId: string;
   webhookBaseUrl: string; // Required for callbacks
   runpodTimeout?: number; // Configurable timeout, defaults to 30000ms
-  // B2 Credentials
-  b2Endpoint: string;
-  b2AccessKeyId: string;
-  b2SecretAccessKey: string;
-  b2BucketName: string;
 }
 
 export interface TranscodingServiceFullConfig
@@ -87,11 +85,6 @@ export class TranscodingService extends BaseService {
   private readonly runpodApiUrl: string;
   private readonly webhookUrl: string;
   private readonly runpodTimeout: number;
-  // B2 Config
-  private readonly b2Endpoint: string;
-  private readonly b2AccessKeyId: string;
-  private readonly b2SecretAccessKey: string;
-  private readonly b2BucketName: string;
 
   /**
    * Initialize TranscodingService with RunPod credentials
@@ -111,25 +104,10 @@ export class TranscodingService extends BaseService {
     if (!config.webhookBaseUrl) {
       throw new Error('TranscodingService: webhookBaseUrl is required');
     }
-    // Validate B2 config
-    if (
-      !config.b2Endpoint ||
-      !config.b2AccessKeyId ||
-      !config.b2SecretAccessKey ||
-      !config.b2BucketName
-    ) {
-      throw new Error('TranscodingService: B2 credentials are incomplete');
-    }
 
     this.runpodApiKey = config.runpodApiKey;
     this.runpodEndpointId = config.runpodEndpointId;
     this.runpodTimeout = config.runpodTimeout ?? 30000;
-
-    // Store B2 config
-    this.b2Endpoint = config.b2Endpoint;
-    this.b2AccessKeyId = config.b2AccessKeyId;
-    this.b2SecretAccessKey = config.b2SecretAccessKey;
-    this.b2BucketName = config.b2BucketName;
 
     // Pre-construct URLs (won't change during service lifetime)
     this.runpodApiUrl = `https://api.runpod.ai/v2/${config.runpodEndpointId}/run`;
@@ -175,6 +153,8 @@ export class TranscodingService extends BaseService {
     }
 
     // Step 2: Construct job request
+    // NOTE: B2 credentials are configured in RunPod's secret manager,
+    // not passed in job payload (security: avoids logging credentials)
     const jobRequest: RunPodJobRequest = {
       input: {
         mediaId: media.id,
@@ -183,11 +163,6 @@ export class TranscodingService extends BaseService {
         inputKey: media.r2Key,
         webhookUrl: this.webhookUrl,
         priority: priority ?? media.transcodingPriority,
-        // B2 Credentials for Worker
-        b2Endpoint: this.b2Endpoint,
-        b2AccessKeyId: this.b2AccessKeyId,
-        b2SecretAccessKey: this.b2SecretAccessKey,
-        b2BucketName: this.b2BucketName,
       },
     };
 
@@ -285,15 +260,13 @@ export class TranscodingService extends BaseService {
       throw new TranscodingJobNotFoundError(jobId);
     }
 
-    // Ignore stale webhooks - only process if media is in 'transcoding' state
-    if (media.status !== 'transcoding') {
-      this.obs.warn('Webhook received for non-transcoding media, ignoring', {
-        jobId,
-        mediaId: media.id,
-        currentStatus: media.status,
-      });
-      return;
-    }
+    // NOTE: We rely on the atomic WHERE clause (status='transcoding') to prevent
+    // race conditions. A previous early-return check was removed because it created
+    // a TOCTOU vulnerability where:
+    // 1. Check passes (status is 'transcoding')
+    // 2. Concurrent request updates status to 'ready'
+    // 3. This request continues and could overwrite with stale data
+    // The atomic WHERE check handles this correctly.
 
     if (status === 'completed' && output) {
       // Success: Update atomically with all transcoding outputs
@@ -344,7 +317,10 @@ export class TranscodingService extends BaseService {
         .update(mediaItems)
         .set({
           status: 'failed',
-          transcodingError: errorMessage || 'Unknown transcoding error',
+          // Truncate error message to fit varchar(2000) DB constraint
+          transcodingError: (
+            errorMessage || 'Unknown transcoding error'
+          ).substring(0, 2000),
           updatedAt: new Date(),
         })
         .where(
@@ -613,6 +589,8 @@ export class TranscodingService extends BaseService {
     }
 
     // Construct job request using media's creatorId
+    // NOTE: B2 credentials are configured in RunPod's secret manager,
+    // not passed in job payload (security: avoids logging credentials)
     const jobRequest: RunPodJobRequest = {
       input: {
         mediaId: media.id,
@@ -621,11 +599,6 @@ export class TranscodingService extends BaseService {
         inputKey: media.r2Key,
         webhookUrl: this.webhookUrl,
         priority: priority ?? media.transcodingPriority,
-        // B2 Credentials for Worker
-        b2Endpoint: this.b2Endpoint,
-        b2AccessKeyId: this.b2AccessKeyId,
-        b2SecretAccessKey: this.b2SecretAccessKey,
-        b2BucketName: this.b2BucketName,
       },
     };
 

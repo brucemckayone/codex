@@ -83,7 +83,14 @@ def save_template(api_key, registry_auth_id=None):
         "containerDiskInGb": 20,
         "volumeInGb": 0,
         "dockerArgs": "python3 -u handler/main.py",
-        "env": [{"key": "RUNPOD_DEBUG", "value": "true"}],
+        "env": [
+            {"key": "RUNPOD_DEBUG", "value": "true"},
+            # B2 credentials from RunPod secret manager (not in job payload)
+            {"key": "B2_ENDPOINT", "value": "{{ RUNPOD_SECRET_b2_endpoint }}"},
+            {"key": "B2_ACCESS_KEY_ID", "value": "{{ RUNPOD_SECRET_b2_access_key_id }}"},
+            {"key": "B2_SECRET_ACCESS_KEY", "value": "{{ RUNPOD_SECRET_b2_secret_access_key }}"},
+            {"key": "B2_BUCKET_NAME", "value": "{{ RUNPOD_SECRET_b2_bucket_name }}"},
+        ],
         "isServerless": True,
     }
 

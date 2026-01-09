@@ -50,6 +50,10 @@ export type HlsVariant = '1080p' | '720p' | '480p' | '360p' | 'audio';
 /**
  * RunPod job request payload
  * Sent when triggering a new transcoding job
+ *
+ * NOTE: B2 credentials are no longer passed in job payloads.
+ * They are configured in RunPod's secret manager and injected
+ * as environment variables on workers.
  */
 export interface RunPodJobRequest {
   input: {
@@ -59,11 +63,6 @@ export interface RunPodJobRequest {
     inputKey: string;
     webhookUrl: string;
     priority?: number;
-    // B2 Configuration for Mezzanine Archival
-    b2Endpoint: string;
-    b2AccessKeyId: string;
-    b2SecretAccessKey: string;
-    b2BucketName: string;
   };
 }
 
@@ -77,16 +76,14 @@ export interface RunPodJobResponse {
 
 /**
  * Service configuration for TranscodingService
+ *
+ * NOTE: B2 credentials are no longer passed here - they are configured
+ * in RunPod's secret manager and injected as environment variables on workers.
  */
 export interface TranscodingServiceConfig {
   runpodApiKey: string;
   runpodEndpointId: string;
   webhookBaseUrl: string;
-  // B2 Credentials
-  b2Endpoint: string;
-  b2AccessKeyId: string;
-  b2SecretAccessKey: string;
-  b2BucketName: string;
 }
 
 /**

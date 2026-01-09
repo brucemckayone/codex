@@ -86,14 +86,19 @@ describe('TranscodingService', () => {
           body: expect.stringContaining(mediaId),
         })
       );
-      // Verify B2 fields in body
+      // Verify B2 fields are NOT in body (security: credentials now come from RunPod env)
       const call = (global.fetch as any).mock.calls[0];
       const body = JSON.parse(call[1].body);
+      expect(body.input.b2Endpoint).toBeUndefined();
+      expect(body.input.b2AccessKeyId).toBeUndefined();
+      expect(body.input.b2SecretAccessKey).toBeUndefined();
+      expect(body.input.b2BucketName).toBeUndefined();
+      // Verify required fields ARE present
       expect(body.input).toMatchObject({
-        b2Endpoint: mockConfig.b2Endpoint,
-        b2AccessKeyId: mockConfig.b2AccessKeyId,
-        b2SecretAccessKey: mockConfig.b2SecretAccessKey,
-        b2BucketName: mockConfig.b2BucketName,
+        mediaId,
+        type: 'video',
+        creatorId,
+        webhookUrl: expect.stringContaining('/api/transcoding/webhook'),
       });
 
       // Verify DB update status='transcoding'

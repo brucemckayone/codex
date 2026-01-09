@@ -41,7 +41,11 @@ import runpod
 
 
 class JobInput(TypedDict):
-    """Input payload from RunPod job trigger."""
+    """Input payload from RunPod job trigger.
+
+    NOTE: B2 credentials are read from environment variables (via RunPod secrets)
+    instead of job payload to avoid logging credentials.
+    """
 
     mediaId: str
     creatorId: str
@@ -49,16 +53,12 @@ class JobInput(TypedDict):
     inputKey: str  # R2 key for original file
     webhookUrl: str
     webhookSecret: str
-    # R2 config (delivery assets)
+    # R2 config (delivery assets) - still passed in payload
     r2Endpoint: str
     r2AccessKeyId: str
     r2SecretAccessKey: str
     r2BucketName: str
-    # B2 config (mezzanine archival)
-    b2Endpoint: str
-    b2AccessKeyId: str
-    b2SecretAccessKey: str
-    b2BucketName: str
+    # NOTE: B2 config now comes from environment variables, not job payload
 
 
 class TranscodingResult(TypedDict):
@@ -669,6 +669,15 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
     print(f"Starting transcoding job for {media_type}: {media_id}")
 
+    # Read B2 credentials from environment (set via RunPod secret manager)
+    b2_endpoint = os.environ.get("B2_ENDPOINT")
+    b2_access_key_id = os.environ.get("B2_ACCESS_KEY_ID")
+    b2_secret_access_key = os.environ.get("B2_SECRET_ACCESS_KEY")
+    b2_bucket_name = os.environ.get("B2_BUCKET_NAME")
+
+    if not all([b2_endpoint, b2_access_key_id, b2_secret_access_key, b2_bucket_name]):
+        raise ValueError("B2 credentials not configured in environment. Add secrets in RunPod console.")
+
     # Initialize storage clients
     r2_client = create_s3_client(
         job_input["r2Endpoint"],
@@ -676,9 +685,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         job_input["r2SecretAccessKey"],
     )
     b2_client = create_s3_client(
-        job_input["b2Endpoint"],
-        job_input["b2AccessKeyId"],
-        job_input["b2SecretAccessKey"],
+        b2_endpoint,
+        b2_access_key_id,
+        b2_secret_access_key,
     )
 
     # Check GPU availability
@@ -707,7 +716,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             create_mezzanine(input_path, mezzanine_path, use_gpu)
             upload_file(
                 b2_client,
-                job_input["b2BucketName"],
+                b2_bucket_name,
                 mezzanine_key,
                 mezzanine_path,
                 "video/mp4",
