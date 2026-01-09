@@ -7,6 +7,7 @@ sys.path.append("/app")
 
 # Mock runpod to avoid import side-effects (checking for test_input.json)
 from unittest.mock import MagicMock
+
 sys.modules["runpod"] = MagicMock()
 
 from handler import main as handler_module
