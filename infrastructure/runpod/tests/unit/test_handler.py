@@ -1,0 +1,213 @@
+import os
+import json
+import pytest
+from unittest.mock import MagicMock, patch, ANY
+
+# Set env vars before importing handler if needed, or patch them
+os.environ["RUNPOD_DEBUG"] = "true"
+
+from handler import main as handler_module
+
+@pytest.fixture
+def mock_s3_client():
+    with patch("handler.main.create_s3_client") as mock:
+        client = MagicMock()
+        mock.return_value = client
+        yield client
+
+@pytest.fixture
+def mock_upload_file():
+    with patch("handler.main.upload_file") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_upload_directory():
+    with patch("handler.main.upload_directory") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_download_file():
+    with patch("handler.main.download_file") as mock:
+        yield mock
+
+@pytest.fixture
+def mock_subprocess():
+    with patch("subprocess.run") as mock:
+        # Default mock response for success
+        mock.return_value.returncode = 0
+        mock.return_value.stdout = ""
+        yield mock
+
+@pytest.fixture
+def mock_requests():
+    with patch("requests.post") as mock:
+        mock.return_value.status_code = 200
+        yield mock
+
+@pytest.fixture
+def mock_check_gpu():
+    with patch("handler.main.check_gpu_available", return_value=False) as mock:
+        yield mock
+
+@pytest.fixture
+def basic_job_input():
+    return {
+        "mediaId": "test-media-123",
+        "creatorId": "user-123",
+        "type": "video",
+        "inputKey": "originals/test/video.mp4",
+        "webhookUrl": "https://api.example.com/webhook",
+        "webhookSecret": "secret-123",
+        "r2Endpoint": "https://r2.example.com",
+        "r2AccessKeyId": "key",
+        "r2SecretAccessKey": "secret",
+        "r2BucketName": "media-bucket",
+        "b2Endpoint": "https://b2.example.com",
+        "b2AccessKeyId": "key",
+        "b2SecretAccessKey": "secret",
+        "b2BucketName": "archive-bucket",
+    }
+
+def test_handler_video_flow_cpu(
+    mock_s3_client,
+    mock_download_file,
+    mock_upload_file,
+    mock_upload_directory,
+    mock_subprocess,
+    mock_requests,
+    mock_check_gpu,
+    basic_job_input
+):
+    """Test full video transcoding flow in CPU mode (mocked)."""
+
+    # Mock probe response
+    probe_data = json.dumps({
+        "format": {"duration": "100.0"},
+        "streams": [{"codec_type": "video", "width": 1920, "height": 1080}]
+    })
+
+    # Mock ffmpeg/ffprobe calls
+    def subprocess_side_effect(cmd, **kwargs):
+        cmd_str = " ".join(cmd)
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+
+        if "ffprobe" in cmd:
+            mock_res.stdout = probe_data
+        elif "loudnorm" in cmd and "-f null" in cmd_str:
+            # Mock loudness analysis stderr output
+            mock_res.stderr = '{"input_i": "-14.0", "input_tp": "-0.5", "input_lra": "5.0"}'
+        else:
+            mock_res.stdout = ""
+
+        return mock_res
+
+    mock_subprocess.side_effect = subprocess_side_effect
+
+    # Execute handler
+    result = handler_module.handler({"input": basic_job_input})
+
+    # Verifications
+    assert result["status"] == "success"
+    assert result["mediaId"] == "test-media-123"
+
+    # Check S3 client creation (R2 and B2)
+    assert mock_s3_client.call_count >= 2
+
+    # Check steps
+    # 1. Download
+    mock_download_file.assert_called_once()
+
+    # 2. Transcode Mezzanine (uploaded to B2)
+    # 3. Transcode HLS (uploaded to R2)
+    # 4. Upload HLS directory
+    mock_upload_directory.assert_called()
+
+    # 5. Webhook sent
+    mock_requests.assert_called_once()
+    call_args = mock_requests.call_args
+    assert call_args[0][0] == basic_job_input["webhookUrl"]
+
+    # Verify signature header
+    headers = call_args[1]["headers"]
+    assert "X-Runpod-Signature" in headers
+
+def test_handler_audio_flow(
+    mock_s3_client,
+    mock_download_file,
+    mock_upload_file,
+    mock_upload_directory,
+    mock_subprocess,
+    mock_requests,
+    mock_check_gpu,
+    basic_job_input
+):
+    """Test full audio transcoding flow."""
+    basic_job_input["type"] = "audio"
+    basic_job_input["inputKey"] = "originals/test/audio.mp3"
+
+    # Mock probe response (audio only)
+    probe_data = json.dumps({
+        "format": {"duration": "300.0"},
+        "streams": [{"codec_type": "audio"}]
+    })
+
+    def subprocess_side_effect(cmd, **kwargs):
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        if "ffprobe" in cmd:
+            mock_res.stdout = probe_data
+        return mock_res
+
+    mock_subprocess.side_effect = subprocess_side_effect
+
+    result = handler_module.handler({"input": basic_job_input})
+
+    assert result["status"] == "success"
+
+    # Audio shouldn't trigger mezzanine video creation
+    # But currently the code calls create_mezzanine only if media_type == 'video'
+    # We can verify by checking what was uploaded
+
+    # Verify waveform generation (audio only)
+    # Check if audiowaveform command was called
+    waveform_called = False
+    for call in mock_subprocess.call_args_list:
+        if "audiowaveform" in call[0][0]:
+            waveform_called = True
+            break
+    assert waveform_called
+
+def test_handler_failure_reporting(
+    mock_s3_client,
+    mock_download_file,
+    mock_subprocess,
+    mock_requests,
+    basic_job_input
+):
+    """Test that exceptions are caught and reported via webhook."""
+
+    # Simulate download failure
+    mock_download_file.side_effect = Exception("S3 Download Error")
+
+    result = handler_module.handler({"input": basic_job_input})
+
+    assert result["status"] == "error"
+    assert "S3 Download Error" in result["error"]
+
+    # Verify error webhook sent
+    mock_requests.assert_called_once()
+    payload = json.loads(mock_requests.call_args[1]["data"])
+    assert payload["status"] == "failed"
+    assert payload["error"] == "S3 Download Error"
+
+def test_sign_payload():
+    """Test HMAC signature generation."""
+    secret = "my-secret"
+    payload = '{"test": 123}'
+    # Expected HMAC-SHA256 for this input
+    # echo -n '{"test": 123}' | openssl dgst -sha256 -hmac "my-secret"
+    expected = "d879482d8c9735a2b3df516609919f2d1e2501a355608df932b7245b986f375f"
+
+    signature = handler_module.sign_payload(payload, secret)
+    assert signature == expected

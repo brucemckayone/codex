@@ -37,33 +37,14 @@ This worker runs on RunPod's serverless GPU infrastructure to:
 | Waveforms | R2 | codex-media-{env} |
 | Mezzanine (archive) | B2 | codex-mezzanine-{env} |
 
-## FFmpeg Settings
+## Development
 
-### Video Encoding
-- **GPU**: `h264_nvenc`, preset p4, cq 23
-- **CPU fallback**: `libx264`, preset fast, crf 23
-- **Mezzanine**: CRF 18 (archive quality)
+### Directory Structure
 
-### HLS Variants (Video)
-| Quality | Resolution | Video Bitrate | Audio Bitrate |
-|---------|------------|---------------|---------------|
-| 1080p | 1920x1080 | 5000 kbps | 192 kbps |
-| 720p | 1280x720 | 3000 kbps | 128 kbps |
-| 480p | 854x480 | 1500 kbps | 96 kbps |
-| 360p | 640x360 | 800 kbps | 64 kbps |
-
-### HLS Variants (Audio)
-| Quality | Bitrate |
-|---------|---------|
-| 128k | 128 kbps |
-| 64k | 64 kbps |
-
-### Audio Normalization
-- **Target loudness**: -16 LUFS
-- **True peak**: -1.5 dBTP
-- **Loudness range**: 11 LU
-
-## Local Development
+- `handler/`: Main application logic (`main.py`).
+- `tests/unit/`: Pytest unit tests mocking external dependencies.
+- `tests/integration/`: Scripts for internal container verification.
+- `scripts/`: Deployment scripts.
 
 ### Build the Docker image
 
@@ -72,62 +53,69 @@ cd infrastructure/runpod
 docker build -t codex-transcoder:dev .
 ```
 
-### Test locally (without GPU)
+### Running Tests
+
+#### 1. Unit Tests (Fast, Local)
+Runs logic tests with mocked RunPod, S3, and FFmpeg calls.
 
 ```bash
+# Install test dependencies
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest tests/unit
+```
+
+#### 2. Container Integration Tests (Slow, Docker)
+Verifies that the Docker container builds correctly and has all required system dependencies (ffmpeg, audiowaveform, python paths) by running a real CPU-based transcode inside the container.
+
+```bash
+# Build image
+docker build -t test-worker:local .
+
+# Run verification script inside container
 docker run --rm \
-  -e RUNPOD_DEBUG=true \
-  codex-transcoder:dev \
-  python3 -c "from handler.main import handler; print('Handler loaded successfully')"
+  -v $(pwd)/tests/integration:/app/tests/integration \
+  -v $(pwd)/tests/assets:/app/tests/assets \
+  --entrypoint python3 \
+  test-worker:local \
+  tests/integration/verify_cpu_transcode.py
 ```
 
-### Test with GPU
+*Note: This generates a dummy video file in `tests/assets` if one doesn't exist.*
 
-```bash
-docker run --rm --gpus all \
-  codex-transcoder:dev \
-  ffmpeg -encoders | grep nvenc
-```
+## CI/CD Pipeline
 
-## Deployment
+The GitHub Actions workflow (`runpod-ci.yml`) automatically:
 
-### Push to Docker Hub
+1.  **Quality & Unit**: Lints (Black, Flake8) and runs unit tests.
+2.  **Container Verification**: Builds the Docker image and runs the integration script.
+3.  **Deployment** (Main branch only):
+    -   Pushes image to Docker Hub (`codex-transcoder`).
+    -   Updates the RunPod Serverless Endpoint via API.
 
-```bash
-docker tag codex-transcoder:dev yourusername/codex-transcoder:latest
-docker push yourusername/codex-transcoder:latest
-```
+### Required GitHub Secrets
 
-### Create RunPod Serverless Endpoint
+- `DOCKERHUB_USERNAME`: Docker Hub username.
+- `DOCKERHUB_TOKEN`: Docker Hub access token.
+- `RUNPOD_API_KEY`: RunPod API Key.
+- `RUNPOD_ENDPOINT_ID`: The ID of the serverless endpoint to update.
 
-1. Go to RunPod Console → Serverless
-2. Create new endpoint
-3. Use Docker image: `yourusername/codex-transcoder:latest`
-4. Configure GPU (RTX 3090 or better recommended)
-5. Set webhook URL in endpoint settings
+## FFmpeg Settings
 
-## Environment Variables
+### Video Encoding
+- **GPU**: `h264_nvenc`, preset p4, cq 23
+- **CPU fallback**: `libx264`, preset fast, crf 23
+- **Mezzanine**: CRF 18 (archive quality)
 
-The handler receives credentials via the job input payload:
-
-```json
-{
-  "mediaId": "uuid",
-  "creatorId": "user-id",
-  "type": "video",
-  "inputKey": "creator-id/originals/media-id/video.mp4",
-  "webhookUrl": "https://media-api.codex.com/api/transcoding/webhook",
-  "webhookSecret": "hmac-secret",
-  "r2Endpoint": "https://account-id.r2.cloudflarestorage.com",
-  "r2AccessKeyId": "...",
-  "r2SecretAccessKey": "...",
-  "r2BucketName": "codex-media-production",
-  "b2Endpoint": "https://s3.us-west-004.backblazeb2.com",
-  "b2AccessKeyId": "...",
-  "b2SecretAccessKey": "...",
-  "b2BucketName": "codex-mezzanine-production"
-}
-```
+### HLS Variants
+| Quality | Resolution | Video Bitrate | Audio Bitrate |
+|---------|------------|---------------|---------------|
+| 1080p | 1920x1080 | 5000 kbps | 192 kbps |
+| 720p | 1280x720 | 3000 kbps | 128 kbps |
+| 480p | 854x480 | 1500 kbps | 96 kbps |
+| 360p | 640x360 | 800 kbps | 64 kbps |
 
 ## Webhook Payload
 
@@ -144,20 +132,8 @@ The handler receives credentials via the job input payload:
   "waveformImageKey": null,
   "mezzanineKey": "creator-id/mezzanine/media-id/mezzanine.mp4",
   "durationSeconds": 600,
-  "width": 1920,
-  "height": 1080,
   "readyVariants": ["1080p", "720p", "480p", "360p"],
   "error": null
-}
-```
-
-### Failure
-
-```json
-{
-  "status": "failed",
-  "mediaId": "uuid",
-  "error": "Error message (max 2KB)"
 }
 ```
 
