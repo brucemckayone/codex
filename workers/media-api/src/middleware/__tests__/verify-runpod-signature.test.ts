@@ -7,7 +7,16 @@
 
 import type { HonoEnv } from '@codex/shared-types';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+// Response types for type-safe assertions
+interface ErrorResponse {
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
 import { verifyRunpodSignature } from '../verify-runpod-signature';
 
 // Helper to generate HMAC-SHA256 signature
@@ -83,7 +92,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(200);
-    const json = await response.json();
+    const json = (await response.json()) as { received: boolean; body: string };
     expect(json.received).toBe(true);
     expect(json.body).toBe(TEST_PAYLOAD);
   });
@@ -107,7 +116,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
+    const json = (await response.json()) as ErrorResponse;
     expect(json.error.code).toBe('MISSING_SIGNATURE');
   });
 
@@ -136,7 +145,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
+    const json = (await response.json()) as ErrorResponse;
     expect(json.error.code).toBe('MISSING_TIMESTAMP');
   });
 
@@ -161,7 +170,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
+    const json = (await response.json()) as { error: { code: string } };
     expect(json.error.code).toBe('INVALID_SIGNATURE');
   });
 
@@ -185,7 +194,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
+    const json = (await response.json()) as ErrorResponse;
     expect(json.error.code).toBe('INVALID_SIGNATURE');
   });
 
@@ -215,7 +224,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
+    const json = (await response.json()) as ErrorResponse;
     expect(json.error.code).toBe('TIMESTAMP_EXPIRED');
   });
 
@@ -245,7 +254,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
+    const json = (await response.json()) as ErrorResponse;
     expect(json.error.code).toBe('TIMESTAMP_FUTURE');
   });
 
@@ -280,7 +289,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
+    const json = (await response.json()) as ErrorResponse;
     expect(json.error.code).toBe('INVALID_SIGNATURE');
   });
 
@@ -309,7 +318,7 @@ describe('verifyRunpodSignature middleware', () => {
     );
 
     expect(response.status).toBe(500);
-    const json = await response.json();
+    const json = (await response.json()) as ErrorResponse;
     expect(json.error.code).toBe('CONFIGURATION_ERROR');
   });
 });

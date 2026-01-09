@@ -17,11 +17,8 @@ export default defineConfig({
       'packages/content/vitest.config.content.ts',
       'packages/identity/vitest.config.identity.ts',
       'packages/worker-utils/vitest.config.worker-utils.ts',
-<<<<<<< HEAD
       'packages/transcoding/vitest.config.transcoding.ts',
-=======
       'packages/notifications/vitest.config.notifications.ts',
->>>>>>> refs/remotes/origin/main
 
       // Workers
       'workers/auth',

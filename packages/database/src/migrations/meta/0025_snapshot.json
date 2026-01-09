@@ -867,7 +867,6 @@
         "check_media_type": {
           "name": "check_media_type",
           "value": "\"media_items\".\"media_type\" IN ('video', 'audio')"
-        },
         }
       },
       "isRLSEnabled": false

@@ -216,22 +216,11 @@ export function createServiceRegistry(
       if (!_transcoding) {
         const runpodApiKey = env.RUNPOD_API_KEY;
         const runpodEndpointId = env.RUNPOD_ENDPOINT_ID;
-        const b2Endpoint = env.B2_ENDPOINT;
-        const b2AccessKeyId = env.B2_KEY_ID;
-        const b2SecretAccessKey = env.B2_APP_KEY;
-        const b2BucketName = env.B2_BUCKET;
 
-        if (
-          !runpodApiKey ||
-          !runpodEndpointId ||
-          !b2Endpoint ||
-          !b2AccessKeyId ||
-          !b2SecretAccessKey ||
-          !b2BucketName
-        ) {
+        if (!runpodApiKey || !runpodEndpointId) {
           throw new Error(
             'Incomplete transcoding configuration. ' +
-              'Ensure RUNPOD_* and B2_* secrets are set in the worker environment.'
+              'Ensure RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID secrets are set in the worker environment.'
           );
         }
 
@@ -243,16 +232,14 @@ export function createServiceRegistry(
           );
         }
 
+        // NOTE: B2 credentials are configured in RunPod's secret manager,
+        // not passed via service config (security: avoids credential sprawl)
         _transcoding = new TranscodingService({
           db: getSharedDb(),
           environment: getEnvironment(),
           runpodApiKey,
           runpodEndpointId,
           webhookBaseUrl: webhookBaseUrl || 'http://localhost:4002',
-          b2Endpoint,
-          b2AccessKeyId,
-          b2SecretAccessKey,
-          b2BucketName,
         });
       }
       return _transcoding;

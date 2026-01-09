@@ -71,17 +71,24 @@ app.post(
 
       // Create database client and TranscodingService
       // Note: Env vars are validated by global middleware in index.ts
+      // B2 credentials are configured in RunPod's secret manager, not passed here
       const db = createDbClient(c.env);
+
+      // Guard against missing env vars (should be caught by global middleware)
+      const runpodApiKey = c.env.RUNPOD_API_KEY;
+      const runpodEndpointId = c.env.RUNPOD_ENDPOINT_ID;
+      if (!runpodApiKey || !runpodEndpointId) {
+        throw new ValidationError(
+          'Missing required environment variables: RUNPOD_API_KEY or RUNPOD_ENDPOINT_ID'
+        );
+      }
+
       const service = new TranscodingService({
         db,
         environment: c.env.ENVIRONMENT || 'development',
-        runpodApiKey: c.env.RUNPOD_API_KEY!,
-        runpodEndpointId: c.env.RUNPOD_ENDPOINT_ID!,
+        runpodApiKey,
+        runpodEndpointId,
         webhookBaseUrl: c.env.API_URL || 'http://localhost:4002',
-        b2Endpoint: c.env.B2_ENDPOINT!,
-        b2AccessKeyId: c.env.B2_KEY_ID!,
-        b2SecretAccessKey: c.env.B2_APP_KEY!,
-        b2BucketName: c.env.B2_BUCKET!,
       });
 
       // Process the webhook

@@ -137,7 +137,7 @@ jobs:
 
       - name: Update RunPod Endpoint
         # Skip on initial setup before endpoint is created
-        if: ${{ secrets.RUNPOD_ENDPOINT_ID != '' }}
+        if: secrets.RUNPOD_ENDPOINT_ID != ''
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
@@ -147,7 +147,7 @@ jobs:
         run: python ${{ env.WORKING_DIR }}/scripts/update_runpod_endpoint.py
 
       - name: Initial Setup Notice
-        if: ${{ secrets.RUNPOD_ENDPOINT_ID == '' }}
+        if: secrets.RUNPOD_ENDPOINT_ID == ''
         run: |
           echo "⚠️ RUNPOD_ENDPOINT_ID not set - skipping endpoint update"
           echo "Image pushed to: ghcr.io/${{ github.repository_owner }}/codex-transcoder:sha-${{ github.sha }}"

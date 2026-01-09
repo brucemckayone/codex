@@ -1,9 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from 'vitest';
 import {
   TranscodingService,
   type TranscodingServiceFullConfig,
 } from '../services/transcoding-service';
-import type { MediaStatus, MediaType, RunPodWebhookPayload } from '../types';
+import type {
+  MediaStatus,
+  MediaType,
+  RunPodWebhookOutput,
+  RunPodWebhookPayload,
+} from '../types';
 
 // Mock Dependencies
 const mockDb = {
@@ -61,7 +74,7 @@ describe('TranscodingService', () => {
       mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
 
       // Mock RunPod API response
-      (global.fetch as any).mockResolvedValue({
+      (global.fetch as Mock).mockResolvedValue({
         ok: true,
         json: async () => ({ id: 'runpod-job-123' }),
       });
@@ -87,8 +100,11 @@ describe('TranscodingService', () => {
         })
       );
       // Verify B2 fields are NOT in body (security: credentials now come from RunPod env)
-      const call = (global.fetch as any).mock.calls[0];
-      const body = JSON.parse(call[1].body);
+      const call = (global.fetch as Mock).mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      const body = JSON.parse(call[1].body as string);
       expect(body.input.b2Endpoint).toBeUndefined();
       expect(body.input.b2AccessKeyId).toBeUndefined();
       expect(body.input.b2SecretAccessKey).toBeUndefined();
@@ -130,7 +146,7 @@ describe('TranscodingService', () => {
     it('should throw Error if RunPod API fails', async () => {
       mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
 
-      (global.fetch as any).mockResolvedValue({
+      (global.fetch as Mock).mockResolvedValue({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
@@ -157,13 +173,11 @@ describe('TranscodingService', () => {
           hlsMasterKey: 'path/to/master.m3u8',
           hlsPreviewKey: 'path/to/preview.m3u8',
           thumbnailKey: 'path/to/thumb.jpg',
-          waveformKey: null,
-          waveformImageKey: null,
           durationSeconds: 120,
           width: 1920,
           height: 1080,
           readyVariants: ['1080p', '720p'],
-        } as any, // Cast as any because mezzanineKey is missing from type definition in some versions
+        },
       };
 
       // Mock DB to return media in 'transcoding' state
@@ -196,7 +210,7 @@ describe('TranscodingService', () => {
         jobId: jobId,
         status: 'failed',
         error: 'Transcoding failed due to GPU error',
-        output: { mediaId } as any,
+        output: { mediaId } as RunPodWebhookOutput,
       };
 
       // Mock DB to return media in 'transcoding' state

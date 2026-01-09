@@ -6,7 +6,10 @@ describe('Media API', () => {
     it('should return healthy status', async () => {
       const response = await SELF.fetch('http://localhost/health');
       expect([200, 503]).toContain(response.status);
-      const json = (await response.json()) as any;
+      const json = (await response.json()) as {
+        status: string;
+        service: string;
+      };
       expect(json.status).toBeDefined();
       expect(json.service).toBe('media-api');
     });
