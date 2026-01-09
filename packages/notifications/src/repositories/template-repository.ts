@@ -19,6 +19,8 @@ export class TemplateRepository {
    * Security Note:
    * - Conditions are built explicitly to avoid relying on undocumented
    *   Drizzle behavior with undefined values in or() clauses.
+   * - Finds are executed using Drizzle's query builder which automatically
+   *   parameterizes inputs, preventing SQL injection. Checked: 2026-01-09.
    */
   async findTemplate(
     name: string,

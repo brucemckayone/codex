@@ -25,6 +25,38 @@ export const templateStatusEnum = pgEnum('template_status', [
   'archived',
 ]);
 
+export const emailSendStatusEnum = pgEnum('email_send_status', [
+  'pending',
+  'success',
+  'failed',
+]);
+
+/**
+ * Email audit logs table
+ * Tracks all email send attempts, successes, and failures
+ */
+export const emailAuditLogs = pgTable('email_audit_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id, {
+    onDelete: 'set null',
+  }),
+  creatorId: text('creator_id').references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  templateName: varchar('template_name', { length: 100 }).notNull(),
+  recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
+  status: emailSendStatusEnum('status').default('pending').notNull(),
+  error: text('error'),
+  metadata: text('metadata'), // Using text for simplicity/compatibility if jsonb missing from imports, can upgrade later
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+});
+
 /**
  * Email templates table
  * Supports global, organization, and creator scopes with name-uniqueness per scope
@@ -107,6 +139,18 @@ export const emailTemplates = pgTable(
     // Composite indexes for list filtering
     index('idx_templates_org_scope').on(table.organizationId, table.scope),
     index('idx_templates_creator_scope').on(table.creatorId, table.scope),
+
+    // Performance indexes (Issue #8)
+    index('idx_templates_created_by_deleted_at').on(
+      table.createdBy,
+      table.deletedAt
+    ),
+    index('idx_templates_status_scope_deleted_at').on(
+      table.status,
+      table.scope,
+      table.deletedAt
+    ),
+
     // Additional performance indexes
     index('idx_templates_status_scope').on(table.status, table.scope),
     index('idx_templates_active')

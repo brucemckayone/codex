@@ -5,6 +5,8 @@
  * NO third-party template libraries (Handlebars, etc.) for security.
  */
 
+import { ValidationError } from '../errors';
+
 // HTML entity map for escaping
 const HTML_ENTITIES: Record<string, string> = {
   '&': '&amp;',
@@ -87,16 +89,17 @@ export function renderTemplate(options: RenderOptions): RenderResult {
         return ''; // Missing token becomes empty
       }
 
-      let stringValue = String(value);
+      const stringValue = String(value);
 
       // Strip tags if enabled (prevent XSS in plain text contexts)
       // For subject lines, we use a strict approach: reject ANY HTML-like content
       // This is more secure than attempting to parse/sanitize with regex
       if (stripTags) {
         if (stringValue.includes('<') || stringValue.includes('>')) {
-          // Reject any content that looks like HTML
-          // This prevents bypasses via malformed HTML, event handlers, etc.
-          stringValue = '';
+          throw new ValidationError('HTML tags not allowed in subject lines', {
+            token: tokenName,
+            value: stringValue,
+          });
         }
       }
 

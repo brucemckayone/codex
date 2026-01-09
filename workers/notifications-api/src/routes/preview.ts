@@ -37,7 +37,7 @@ app.post(
   procedure({
     policy: {
       auth: 'required',
-      rateLimit: 'strict', // Prevent abuse of template previews
+      rateLimit: 'strict', // 20 requests per minute (defined in @codex/security)
     },
     input: {
       params: createIdParamsSchema(),
@@ -67,7 +67,7 @@ app.post(
   procedure({
     policy: {
       auth: 'required',
-      rateLimit: 'strict', // Prevent email abuse and protect API quota
+      rateLimit: 'strict', // 20 requests per minute (defined in @codex/security)
     },
     input: {
       params: createIdParamsSchema(),

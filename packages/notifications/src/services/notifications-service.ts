@@ -1,9 +1,11 @@
+import { schema } from '@codex/database';
 import {
   BrandingSettingsService,
   ContactSettingsService,
 } from '@codex/platform-settings';
 import { BaseService } from '@codex/service-errors';
 import { z } from '@codex/validation';
+import { eq } from 'drizzle-orm';
 import { TemplateNotFoundError, ValidationError } from '../errors';
 import type {
   EmailMessage,
@@ -15,6 +17,16 @@ import { getAllowedTokens, renderTemplate } from '../templates/renderer';
 import type { NotificationsServiceConfig, TemplateData } from '../types';
 import { validateTemplateData } from '../validation/template-validation';
 import { BrandingCache } from './branding-cache';
+
+export interface RetryConfig {
+  maxRetries: number;
+  initialBackoffMs: number;
+}
+
+export const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 2,
+  initialBackoffMs: 1000,
+};
 
 interface SendEmailParams {
   to: string;
@@ -115,6 +127,17 @@ export class NotificationsService extends BaseService {
 
   /**
    * Send an email using a template
+   *
+   * Orchestrates the entire email sending process:
+   * 1. Validates input (including checking for valid email format)
+   * 2. Resolves and validates the template
+   * 3. Resolves branding (with caching)
+   * 4. Renders content (subject, html, text) with XSS protection
+   * 5. Sends email with retry logic and audit logging in a transaction
+   *
+   * @throws {ValidationError} If input is invalid
+   * @throws {TemplateNotFoundError} If template doesn't exist
+   * @throws {Error} If sending fails after retries
    */
   async sendEmail(params: SendEmailParams): Promise<SendResult> {
     const { to, toName, templateName, data, organizationId, creatorId } =
@@ -125,7 +148,7 @@ export class NotificationsService extends BaseService {
     const validEmail = emailSchema.safeParse(to);
     if (!validEmail.success) {
       this.obs.warn('Invalid email address provided', {
-        email: to,
+        email: '[REDACTED]', // Security: Do not log invalid emails as they might be malicious payloads
         templateName,
       });
       throw new ValidationError('Invalid email address', {
@@ -179,39 +202,84 @@ export class NotificationsService extends BaseService {
       escapeValues: false,
     });
 
-    // 5. Send Email with retry logic
-    return this.sendWithRetry(
-      {
-        to,
-        toName,
-        subject: subjectResult.content,
-        html: htmlResult.content,
-        text: textResult.content,
-      },
-      { templateName, organizationId: organizationId || 'none' }
-    );
+    // 5. Send Email with retry logic wrapped in transaction and audit logging
+    return this.db.transaction(async (tx) => {
+      // Create audit log entry
+      const [auditLog] = await tx
+        .insert(schema.emailAuditLogs)
+        .values({
+          templateName: template.name,
+          recipientEmail: to,
+          organizationId: organizationId || null,
+          creatorId: creatorId || null,
+          status: 'pending',
+          metadata: JSON.stringify(data), // basic metadata storage
+        })
+        .returning();
+
+      if (!auditLog) {
+        throw new Error('Failed to create audit log');
+      }
+
+      try {
+        const result = await this.sendWithRetry(
+          {
+            to,
+            toName,
+            subject: subjectResult.content,
+            html: htmlResult.content,
+            text: textResult.content,
+          },
+          { templateName, organizationId: organizationId || 'none' }
+        );
+
+        // Update audit log on success
+        await tx
+          .update(schema.emailAuditLogs)
+          .set({
+            status: 'success',
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.emailAuditLogs.id, auditLog.id));
+
+        return result;
+      } catch (error) {
+        // Update audit log on failure
+        await tx
+          .update(schema.emailAuditLogs)
+          .set({
+            status: 'failed',
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.emailAuditLogs.id, auditLog.id));
+
+        throw error;
+      }
+    });
   }
 
   /**
    * Send email with exponential backoff retry.
    *
    * Retry strategy:
-   * - Max 2 retries (3 total attempts)
-   * - Backoff delays: 100ms, 200ms (Workers-compatible short delays)
+   * - Uses DEFAULT_RETRY_CONFIG (default: 2 retries, 1000ms initial backoff)
+   * - Backoff: initialBackoffMs * 2^(attempt-1)
    * - Throws on final failure for consistent error handling
    */
   private async sendWithRetry(
     message: EmailMessage,
     context: { templateName: string; organizationId: string }
   ): Promise<SendResult> {
-    const maxRetries = 2;
+    const { maxRetries, initialBackoffMs } = DEFAULT_RETRY_CONFIG;
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        // Apply backoff delay on retries (100ms * attempt)
+        // Apply exponential backoff delay on retries
         if (attempt > 0) {
-          const backoffMs = 100 * attempt;
+          // 2^n * initialBackoffMs
+          const backoffMs = 2 ** (attempt - 1) * initialBackoffMs;
           this.obs.info('Retrying email send', {
             ...context,
             attempt: attempt + 1,
@@ -233,6 +301,15 @@ export class NotificationsService extends BaseService {
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Skip retry for known non-transient errors
+        if (
+          lastError instanceof ValidationError ||
+          lastError instanceof TemplateNotFoundError
+        ) {
+          throw lastError;
+        }
+
         this.obs.warn(`Email send attempt ${attempt + 1} failed`, {
           ...context,
           errorType: lastError.name,

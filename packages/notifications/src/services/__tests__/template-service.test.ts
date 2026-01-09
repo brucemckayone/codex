@@ -15,12 +15,15 @@ const mockDb = {
   },
   insert: vi.fn().mockReturnThis(),
   values: vi.fn().mockReturnThis(),
-  returning: vi.fn(),
+  returning: vi
+    .fn()
+    .mockResolvedValue([{ id: '1', name: 'template', scope: 'global' }]),
   select: vi.fn().mockReturnThis(),
   from: vi.fn().mockReturnThis(),
   where: vi.fn().mockReturnThis(),
   update: vi.fn().mockReturnThis(),
   set: vi.fn().mockReturnThis(),
+  transaction: vi.fn().mockImplementation((cb) => cb(mockDb)),
 } as unknown as Database;
 
 describe('TemplateService API Format', () => {

@@ -76,37 +76,39 @@ describe('renderTemplate', () => {
   });
 
   it('rejects HTML tags when stripTags is enabled', () => {
-    const result = renderTemplate({
-      template: 'Hello {{userName}}!',
-      data: { userName: '<script>alert("xss")</script>World' },
-      allowedTokens: ['userName'],
-      stripTags: true,
-      escapeValues: false,
-    });
-    // Strict approach: reject any content with < or >
-    expect(result.content).toBe('Hello !');
+    expect(() =>
+      renderTemplate({
+        template: 'Hello {{userName}}!',
+        data: { userName: '<script>alert("xss")</script>World' },
+        allowedTokens: ['userName'],
+        stripTags: true,
+        escapeValues: false,
+      })
+    ).toThrow('HTML tags not allowed in subject lines');
   });
 
   it('rejects malformed HTML without closing bracket', () => {
-    const result = renderTemplate({
-      template: 'Subject: {{subject}}',
-      data: { subject: '<script>alert("xss")' },
-      allowedTokens: ['subject'],
-      stripTags: true,
-      escapeValues: false,
-    });
-    expect(result.content).toBe('Subject: ');
+    expect(() =>
+      renderTemplate({
+        template: 'Subject: {{subject}}',
+        data: { subject: '<script>alert("xss")' },
+        allowedTokens: ['subject'],
+        stripTags: true,
+        escapeValues: false,
+      })
+    ).toThrow('HTML tags not allowed in subject lines');
   });
 
   it('rejects HTML event handlers', () => {
-    const result = renderTemplate({
-      template: 'Image: {{img}}',
-      data: { img: '<img src=x onerror=alert(1)>' },
-      allowedTokens: ['img'],
-      stripTags: true,
-      escapeValues: false,
-    });
-    expect(result.content).toBe('Image: ');
+    expect(() =>
+      renderTemplate({
+        template: 'Image: {{img}}',
+        data: { img: '<img src=x onerror=alert(1)>' },
+        allowedTokens: ['img'],
+        stripTags: true,
+        escapeValues: false,
+      })
+    ).toThrow('HTML tags not allowed in subject lines');
   });
 
   it('allows content without angle brackets', () => {

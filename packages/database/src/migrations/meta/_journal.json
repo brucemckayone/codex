@@ -162,6 +162,20 @@
       "when": 1767962542929,
       "tag": "0022_faulty_mordo",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1767968152088,
+      "tag": "0023_early_prodigy",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1767968456829,
+      "tag": "0024_parched_wolverine",
+      "breakpoints": true
     }
   ]
 }

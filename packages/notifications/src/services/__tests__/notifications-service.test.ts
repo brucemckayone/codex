@@ -12,7 +12,13 @@ const mockDb = {
   },
   insert: vi.fn().mockReturnThis(),
   values: vi.fn().mockReturnThis(),
-  returning: vi.fn(),
+  returning: vi
+    .fn()
+    .mockResolvedValue([{ id: 'audit-log-1', status: 'pending' }]),
+  update: vi.fn().mockReturnThis(),
+  set: vi.fn().mockReturnThis(),
+  where: vi.fn().mockResolvedValue([{ id: 'audit-log-1' }]),
+  transaction: vi.fn().mockImplementation((cb) => cb(mockDb)),
 } as unknown as Database;
 
 const mockEmailProvider = {
@@ -203,18 +209,13 @@ describe('NotificationsService', () => {
       success: true,
     });
 
-    await service.sendEmail({
-      to: 'test@example.com',
-      templateName: 'test',
-      data: { platformName: '<script>bad</script>Safe' },
-    });
-
-    expect(mockEmailProvider.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        subject: 'Subject: ', // HTML content rejected entirely (strict validation)
-      }),
-      expect.anything()
-    );
+    await expect(
+      service.sendEmail({
+        to: 'test@example.com',
+        templateName: 'test',
+        data: { platformName: '<script>bad</script>Safe' },
+      })
+    ).rejects.toThrow('HTML tags not allowed in subject lines');
   });
 
   it('uses findMany with OR conditions to resolve templates in single query (N+1 fix)', async () => {
@@ -230,7 +231,7 @@ describe('NotificationsService', () => {
         organizationId: 'org-1',
         creatorId: 'creator-1',
       });
-    } catch (e) {
+    } catch (_e) {
       // Expected template not found
     }
 

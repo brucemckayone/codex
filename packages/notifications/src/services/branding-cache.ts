@@ -22,7 +22,8 @@ export class BrandingCache {
    * @returns Cached data or null if not found/expired
    */
   get(organizationId: string): Record<string, string> | null {
-    const entry = this.cache.get(organizationId);
+    const key = `branding:${organizationId}`;
+    const entry = this.cache.get(key);
     if (!entry) {
       return null;
     }
@@ -40,7 +41,8 @@ export class BrandingCache {
    * Cache branding data for an organization
    */
   set(organizationId: string, data: Record<string, string>): void {
-    this.cache.set(organizationId, {
+    const key = `branding:${organizationId}`;
+    this.cache.set(key, {
       data,
       expiresAt: Date.now() + this.ttl,
     });
@@ -57,6 +59,7 @@ export class BrandingCache {
    * Remove a specific organization's cached data
    */
   delete(organizationId: string): void {
-    this.cache.delete(organizationId);
+    const key = `branding:${organizationId}`;
+    this.cache.delete(key);
   }
 }

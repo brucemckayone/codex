@@ -12,11 +12,7 @@ import type {
   TemplateScope,
   TemplateStatus,
 } from '@codex/database/schema';
-import type {
-  PaginatedListResponse,
-  PaginationMetadata as SharedPaginationMetadata,
-  SingleItemResponse,
-} from '@codex/shared-types';
+import type { SingleItemResponse } from '@codex/shared-types';
 import type { EmailProvider, SendResult } from './providers/types';
 
 // ============================================================================

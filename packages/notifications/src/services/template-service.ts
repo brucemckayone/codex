@@ -6,7 +6,7 @@
  */
 
 import { type dbHttp, type dbWs, schema } from '@codex/database';
-import { BaseService } from '@codex/service-errors';
+import { BaseService, InternalServiceError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CreateCreatorTemplateInput,
@@ -42,6 +42,9 @@ export class TemplateService extends BaseService {
 
   /**
    * List all global templates
+   *
+   * @param query - Pagination and filter criteria
+   * @returns Paginated list of global templates
    */
   async listGlobalTemplates(
     query: ListTemplatesQuery
@@ -113,7 +116,10 @@ export class TemplateService extends BaseService {
       return template;
     } catch (error) {
       this.obs.error('Error creating global template', { error, input });
-      throw error;
+      if (error instanceof BaseService) throw error; // Re-throw specialized errors
+      throw new InternalServiceError('Failed to create global template', {
+        originalError: error,
+      });
     }
   }
 
@@ -243,6 +249,12 @@ export class TemplateService extends BaseService {
 
   /**
    * Create an organization template (requires admin/owner role)
+   *
+   * @param orgId - Organization ID
+   * @param userId - User ID (must be admin/owner)
+   * @param input - Template creation data
+   * @throws {TemplateAccessDeniedError} If user is not admin/owner
+   * @returns Created template
    */
   async createOrgTemplate(
     orgId: string,
@@ -295,32 +307,34 @@ export class TemplateService extends BaseService {
     userId: string,
     input: UpdateTemplateInput
   ): Promise<EmailTemplate> {
-    // Verify admin/owner role - authorization check
-    await this.requireOrgAdminRole(orgId, userId);
+    return this.db.transaction(async (tx) => {
+      // Verify admin/owner role - authorization check (within transaction)
+      await this.requireOrgAdminRole(orgId, userId, tx);
 
-    const [updated] = await this.db
-      .update(schema.emailTemplates)
-      .set({
-        ...input,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(schema.emailTemplates.id, templateId),
-          eq(schema.emailTemplates.scope, 'organization'),
-          eq(schema.emailTemplates.organizationId, orgId),
-          isNull(schema.emailTemplates.deletedAt)
+      const [updated] = await tx
+        .update(schema.emailTemplates)
+        .set({
+          ...input,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.emailTemplates.id, templateId),
+            eq(schema.emailTemplates.scope, 'organization'),
+            eq(schema.emailTemplates.organizationId, orgId),
+            isNull(schema.emailTemplates.deletedAt)
+          )
         )
-      )
-      .returning();
+        .returning();
 
-    if (!updated) {
-      throw new TemplateNotFoundError(templateId);
-    }
+      if (!updated) {
+        throw new TemplateNotFoundError(templateId);
+      }
 
-    this.obs.info('Org template updated', { templateId, orgId });
+      this.obs.info('Org template updated', { templateId, orgId });
 
-    return updated;
+      return updated;
+    });
   }
 
   /**
@@ -615,9 +629,12 @@ export class TemplateService extends BaseService {
    */
   private async requireOrgAdminRole(
     orgId: string,
-    userId: string
+    userId: string,
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle transaction type is complex to extract
+    tx?: any
   ): Promise<void> {
-    const membership = await this.db.query.organizationMemberships.findFirst({
+    const db = tx ?? this.db;
+    const membership = await db.query.organizationMemberships.findFirst({
       where: and(
         eq(schema.organizationMemberships.userId, userId),
         eq(schema.organizationMemberships.organizationId, orgId),
