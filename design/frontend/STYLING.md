@@ -61,6 +61,40 @@ graph TD
 
 ---
 
+## Token Inheritance
+
+Org tokens override platform defaults with automatic fallback.
+
+```mermaid
+graph TD
+    subgraph "Platform Defaults"
+        PD[Base token values]
+    end
+
+    subgraph "Org Overrides"
+        OO[Brand-specific values]
+    end
+
+    subgraph "Final Applied"
+        FA[Merged result]
+    end
+
+    PD --> FA
+    OO -->|Override| FA
+```
+
+### Fallback Behavior
+
+| Scenario | Result |
+|----------|--------|
+| Org sets `--brand-primary` | Org value used |
+| Org doesn't set `--color-warning` | Platform default used |
+| Org sets invalid value | Platform default used |
+
+All semantic tokens have platform defaults. Orgs can override any token, but missing overrides gracefully fall back.
+
+---
+
 ## Token Categories
 
 ### Colors
@@ -156,13 +190,13 @@ Dark mode is applied via a class on `<html>`:
 | 2 | System preference (`prefers-color-scheme`) |
 | 3 | Default (light) |
 
-Dark mode preference persists across sessions.
+Dark mode preference is **global** - applies across all subdomains and contexts.
 
 ---
 
 ## Organization Branding
 
-Organizations can customize their space appearance via brand tokens.
+Organizations customize their space appearance via brand tokens.
 
 ### Brand Token Flow
 
@@ -184,9 +218,9 @@ graph LR
 | `--brand-surface` | Background tint | White |
 | `--brand-logo` | Logo URL | None |
 
-### Mock Implementation
+### Mock Implementation (Phase 1)
 
-For Phase 1, brand tokens are mocked:
+For Phase 1, brand tokens are mocked since we have a single org:
 
 ```mermaid
 graph LR
@@ -195,6 +229,8 @@ graph LR
 ```
 
 The mock file exports token values that will later come from database.
+
+**File location**: `$lib/theme/mock-org-tokens.ts`
 
 ### SSR Compatibility
 
@@ -207,6 +243,83 @@ Brand tokens are applied during SSR:
 
 ---
 
+## Accessibility & Contrast
+
+Platform enforces accessibility standards for all brand colors.
+
+### Contrast Requirements (WCAG AA)
+
+| Text Type | Minimum Ratio |
+|-----------|---------------|
+| Normal text (<18px) | 4.5:1 |
+| Large text (18px+ or 14px+ bold) | 3:1 |
+| UI components & graphics | 3:1 |
+
+### Contrast Checking System
+
+When orgs configure brand colors, the system validates contrast:
+
+```mermaid
+graph TD
+    Input[Org sets brand color] --> Check{Meets contrast?}
+
+    Check -->|Pass| Save[Save color]
+    Check -->|Fail| Warn[Show warning]
+
+    Warn --> Options{User choice}
+    Options -->|Keep anyway| SaveAnyway[Save with warning]
+    Options -->|Auto-harmonize| Adjust[Adjust color]
+
+    Adjust --> Save
+```
+
+### Contrast Check Results
+
+| Result | UI Treatment |
+|--------|--------------|
+| Pass (4.5:1+) | Green checkmark, no message |
+| Warning (3:1 - 4.5:1) | Yellow warning, "May have readability issues" |
+| Fail (<3:1) | Red error, "Does not meet accessibility standards" |
+
+### Auto-Harmonize Feature
+
+When colors fail contrast, users can enable "Auto-harmonize" which adjusts the color to meet requirements:
+
+| Original Color | Background | Issue | Harmonized |
+|----------------|------------|-------|------------|
+| Light blue on white | #ffffff | 2.1:1 ratio | Darkened to 4.5:1 |
+| Dark gray on black | #0f172a | 1.8:1 ratio | Lightened to 4.5:1 |
+
+**How it works:**
+
+```mermaid
+graph LR
+    Color[Input color] --> Analyze[Analyze against backgrounds]
+    Analyze --> Ratio{Ratio < 4.5?}
+    Ratio -->|Yes| Adjust[Adjust luminance]
+    Ratio -->|No| Keep[Keep original]
+    Adjust --> Verify[Verify new ratio]
+    Verify --> Output[Output harmonized color]
+```
+
+The algorithm:
+1. Calculate contrast ratio against target backgrounds (surface, text)
+2. If below threshold, adjust luminance (darken or lighten)
+3. Preserve hue and saturation where possible
+4. Verify adjusted color meets requirements
+
+### Contrast Pairs to Check
+
+| Foreground Token | Background Token | Minimum |
+|------------------|------------------|---------|
+| `--brand-primary` | `--color-surface` | 4.5:1 |
+| `--color-text-primary` | `--color-surface` | 4.5:1 |
+| `--color-text-secondary` | `--color-surface` | 4.5:1 |
+| `--color-interactive` | `--color-surface` | 4.5:1 |
+| `--brand-primary` | `--color-surface-dark` | 4.5:1 (dark mode) |
+
+---
+
 ## CSS Organization
 
 ### File Structure
@@ -214,21 +327,24 @@ Brand tokens are applied during SSR:
 ```
 $lib/theme/
 ├── tokens/
-│   ├── colors.css
-│   ├── spacing.css
-│   ├── typography.css
-│   └── ...
-├── base.css           # Reset, defaults
-├── dark.css           # Dark mode overrides
-└── mock-org-tokens.ts # Mocked brand tokens
+│   ├── primitives.css     # Raw color, spacing values
+│   ├── semantic.css       # Meaning-based aliases
+│   ├── components.css     # Component-specific tokens
+│   └── dark.css           # Dark mode overrides
+├── base.css               # Reset, defaults
+├── utilities.css          # Common utility patterns
+├── contrast.ts            # Contrast checking utilities
+└── mock-org-tokens.ts     # Mocked brand tokens (Phase 1)
 ```
 
 ### Import Order
 
 1. **Reset**: Normalize browser defaults
-2. **Tokens**: Define CSS custom properties
-3. **Base**: Default element styles
-4. **Dark**: Dark mode token overrides
+2. **Primitives**: Raw token values
+3. **Semantic**: Meaning-based token aliases
+4. **Components**: Component-specific tokens
+5. **Dark**: Dark mode primitive overrides
+6. **Base**: Default element styles
 
 ### Component Styles
 
@@ -242,30 +358,27 @@ $lib/components/ContentCard/
 
 ---
 
-## Accessibility
-
-### Color Contrast
-
-| Text Type | Minimum Ratio |
-|-----------|---------------|
-| Normal text | 4.5:1 |
-| Large text (18px+) | 3:1 |
-| UI components | 3:1 |
-
-Token colors must meet these ratios in both light and dark modes.
-
-### Focus States
+## Focus States
 
 All interactive elements have visible focus:
 
 | State | Treatment |
 |-------|-----------|
 | Focus | Outline or ring |
-| Focus-visible | Only show for keyboard |
+| Focus-visible | Only show for keyboard navigation |
 
-Focus styles use `--color-focus` token.
+Focus styles use `--color-focus` token (typically brand primary or a high-contrast alternative).
 
-### Reduced Motion
+```css
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+```
+
+---
+
+## Reduced Motion
 
 Respect user preference:
 
@@ -273,6 +386,15 @@ Respect user preference:
 |------------|----------|
 | Normal | Animations enabled |
 | Reduced | Animations disabled/minimized |
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+```
 
 ---
 
@@ -310,7 +432,7 @@ Content has a max-width with horizontal padding:
 Components reference semantic tokens, not primitives:
 
 | Do | Don't |
-|----|----|
+|----|-------|
 | `var(--color-interactive)` | `var(--color-blue-500)` |
 | `var(--spacing-md)` | `var(--space-4)` |
 
@@ -328,13 +450,39 @@ This allows theming to work correctly.
 
 ### Variant Patterns
 
-Components with variants use data attributes or classes:
+Components with variants use data attributes:
 
 | Variant | Selector |
 |---------|----------|
 | Primary | `[data-variant="primary"]` |
 | Secondary | `[data-variant="secondary"]` |
 | Destructive | `[data-variant="destructive"]` |
+
+---
+
+## Context-Specific Styling
+
+### Platform Context
+
+Uses platform default tokens only. No org branding.
+
+### Organization Context
+
+Applies org brand tokens on top of platform defaults:
+
+```mermaid
+graph TD
+    Platform[Platform tokens] --> Base[Base styles]
+    Org[Org brand tokens] --> Override[Override brand tokens]
+    Base --> Final[Final appearance]
+    Override --> Final
+```
+
+### Creator Context
+
+Creator pages use platform tokens (no personal branding in Phase 1).
+
+Future: Creators may have limited branding options for their profile pages.
 
 ---
 
