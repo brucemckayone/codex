@@ -218,22 +218,65 @@ Split the monolithic `FRONTEND_SPEC.md` (1991 lines) into domain-focused documen
 
 ---
 
+## GAP ANALYSIS - SOLUTIONS PROVIDED
+
+See **[GAP_ANALYSIS.md](./GAP_ANALYSIS.md)** for code patterns and implementation details.
+
+### All Critical Gaps Resolved
+
+| Gap | Solution |
+|-----|----------|
+| Hooks implementation | `reroute` for subdomain URL rewriting, `handle` for session validation |
+| Public org pages | Handle 401 gracefully, show public content, recommend backend public endpoint |
+| API client | Server-side (`$lib/server/api.ts`) + client-side (`$lib/api/client.ts`) |
+| Video player | HLS.js detection pattern, Media Chrome integration documented |
+| Playback progress | Save on pause, 30s cache interval, visibilitychange, beforeunload |
+| SEO/meta tags | `<svelte:head>` with data from load functions |
+| Image optimization | `@sveltejs/enhanced-img` for static, Cloudflare Image Resizing for dynamic |
+
+### Backend Endpoints - VERIFIED
+
+All key endpoints exist and match spec:
+- Session: `GET /api/auth/session`
+- Org: `GET /api/organizations/slug/:slug` (auth required)
+- Content: CRUD, streaming URLs, playback progress
+- Library: `GET /api/access/user/library`
+- Checkout: `POST /checkout/create`
+
+### Backend Enhancements Recommended
+
+| Enhancement | Purpose |
+|-------------|---------|
+| `GET /api/organizations/public/:slug` | Public org info for marketing pages |
+| `visibility=public` filter on content list | Public explore pages without auth |
+
 ## NEXT STEPS
 
-All 8 specification documents are complete and consistent. Ready for implementation:
+All gaps resolved with code patterns. Ready for work packet creation.
 
-1. **Set up SvelteKit project** with Cloudflare Workers adapter
-2. **Implement hooks.server.ts** for session validation and org resolution
-3. **Create API client** based on DATA.md patterns
-4. **Build auth flows** following AUTH.md
-5. **Implement routing** per ROUTING.md
-6. **Create components** following COMPONENTS.md + Melt UI
+### Work Packets (14 total)
 
-### Implementation Order (Recommended)
+| WP | Name | Effort | Deps |
+|----|------|--------|------|
+| WP-1 | Project Setup | S | - |
+| WP-2 | Hooks (session, routing) | M | 1 |
+| WP-3 | API Clients | S | 1 |
+| WP-4 | Design System | M | 1 |
+| WP-5 | Auth Pages | M | 2,3 |
+| WP-6 | Layout Components | M | 4 |
+| WP-7 | Platform Routes | L | 5,6 |
+| WP-8 | Org Routes | L | 7 |
+| WP-9 | Video Player | L | 1 |
+| WP-10 | Library Page | M | 7 |
+| WP-11 | Checkout Flow | M | 8 |
+| WP-12 | SEO Implementation | S | 7,8 |
+| WP-13 | Image Optimization | S | 7 |
+| WP-14 | Error Pages & Feedback | S | 6 |
 
-1. Project scaffolding + config
-2. Auth flows (login, register, session)
-3. Platform routes (landing, library)
-4. Org routes (subdomain handling, org pages)
-5. Content detail + player
-6. Purchase flow (Stripe Checkout)
+**Critical Path**: WP-1 → WP-2 → WP-5 → WP-7 → WP-8
+
+### Immediate Actions
+
+1. **Create detailed work packets** with acceptance criteria for each
+2. **Backend**: Request public org endpoint (optional but recommended)
+3. **Start**: WP-1 (Project Setup) - scaffold SvelteKit with Cloudflare adapter
