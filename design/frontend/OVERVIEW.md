@@ -80,11 +80,18 @@ graph TB
         FE[SvelteKit Frontend]
     end
 
-    subgraph "Backend Workers"
+    subgraph "Backend Workers (Frontend-Facing)"
         Auth[Auth Worker<br/>:42069]
         Content[Content-API<br/>:4001]
-        Identity[Identity-API<br/>:42071]
+        Org[Organization-API<br/>:42071]
         Ecom[Ecom-API<br/>:42072]
+    end
+
+    subgraph "Backend Workers (Internal)"
+        Media[Media-API]
+        Notify[Notifications-API]
+        Admin[Admin-API]
+        Identity[Identity-API<br/>:42074]
     end
 
     subgraph "Data"
@@ -96,17 +103,19 @@ graph TB
     Browser --> FE
     FE --> Auth
     FE --> Content
-    FE --> Identity
+    FE --> Org
     FE --> Ecom
     Auth --> DB
     Auth --> KV
     Content --> DB
     Content --> R2
-    Identity --> DB
+    Org --> DB
     Ecom --> DB
 ```
 
 **Frontend responsibility**: Presentation layer only. All business logic lives in backend workers.
+
+See [DATA.md](./DATA.md) for complete worker documentation and API endpoints.
 
 ---
 

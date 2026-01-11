@@ -62,9 +62,9 @@ graph TD
 
     Root --> APIs[API Subdomains]
     APIs --> Auth[auth.revelations.studio]
-    APIs --> Content[api.revelations.studio]
-    APIs --> Identity[identity.revelations.studio]
-    APIs --> Ecom[ecom.revelations.studio]
+    APIs --> Content[content-api.revelations.studio]
+    APIs --> OrgAPI[organization-api.revelations.studio]
+    APIs --> Ecom[ecom-api.revelations.studio]
 ```
 
 ### Subdomain Purposes
@@ -76,9 +76,9 @@ graph TD
 | `{org-slug}.*` | Organization space | `yoga-studio.revelations.studio` |
 | `creators.*` | Creator personal pages | `creators.revelations.studio/alice` |
 | `auth.*` | Auth Worker | Session management |
-| `api.*` | Content-API Worker | Content operations |
-| `identity.*` | Identity-API Worker | Org management |
-| `ecom.*` | Ecom-API Worker | Payments |
+| `content-api.*` | Content-API Worker | Content operations |
+| `organization-api.*` | Organization-API Worker | Org management |
+| `ecom-api.*` | Ecom-API Worker | Payments |
 
 ---
 
@@ -104,8 +104,8 @@ Two approaches for org subdomains:
 
 These subdomains are reserved and cannot be used as org slugs:
 
-- `www`, `api`, `auth`, `identity`, `ecom`
-- `creators`, `admin`, `platform`
+- `www`, `auth`, `content-api`, `organization-api`, `ecom-api`
+- `creators`, `admin`, `platform`, `identity-api`
 - `staging`, `dev`, `test`
 
 Org slug validation must reject these.
@@ -126,11 +126,13 @@ Org slug validation must reject these.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `AUTH_WORKER_URL` | Auth Worker base URL | `https://auth.revelations.studio` |
-| `CONTENT_API_URL` | Content-API base URL | `https://api.revelations.studio` |
-| `IDENTITY_API_URL` | Identity-API base URL | `https://identity.revelations.studio` |
-| `ECOM_API_URL` | Ecom-API base URL | `https://ecom.revelations.studio` |
+| `PUBLIC_AUTH_URL` | Auth Worker base URL | `https://auth.revelations.studio` |
+| `PUBLIC_CONTENT_API_URL` | Content-API base URL | `https://content-api.revelations.studio` |
+| `PUBLIC_ORG_API_URL` | Organization-API base URL | `https://organization-api.revelations.studio` |
+| `PUBLIC_ECOM_API_URL` | Ecom-API base URL | `https://ecom-api.revelations.studio` |
 | `PUBLIC_DOMAIN` | Base domain | `revelations.studio` |
+
+> **Note**: `PUBLIC_*` prefix makes variables available to client-side code in SvelteKit.
 
 ### Local Development
 

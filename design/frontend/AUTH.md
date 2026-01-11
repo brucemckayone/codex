@@ -16,8 +16,8 @@ graph LR
         Hook[hooks.server.ts]
     end
 
-    subgraph "Auth Worker"
-        AW[BetterAuth<br/>:42069]
+    subgraph "Auth Worker :42069"
+        BA[BetterAuth]
     end
 
     subgraph "Storage"
@@ -26,9 +26,9 @@ graph LR
     end
 
     SK --> Hook
-    Hook -->|Validate Session| AW
-    AW --> DB
-    AW --> KV
+    Hook -->|Validate Session| BA
+    BA --> DB
+    BA --> KV
 ```
 
 **Key principle**: Frontend reads the session cookie and calls Auth Worker to validate. It never decodes or validates tokens itself.
@@ -70,16 +70,21 @@ sequenceDiagram
     participant AuthWorker
 
     Browser->>SvelteKit: Request with cookie
-    SvelteKit->>SvelteKit: Extract session cookie
+    SvelteKit->>SvelteKit: Extract codex-session cookie
 
     alt Has cookie
         SvelteKit->>AuthWorker: GET /api/auth/session
-        AuthWorker->>AuthWorker: Validate session
-        alt Valid
+        AuthWorker->>AuthWorker: Check KV cache (5min TTL)
+        alt Cache hit
             AuthWorker->>SvelteKit: {user, session}
-            SvelteKit->>SvelteKit: Set locals.user
+        else Cache miss
+            AuthWorker->>AuthWorker: Query PostgreSQL
+            AuthWorker->>AuthWorker: Cache in KV
+            AuthWorker->>SvelteKit: {user, session}
+        end
+        alt Valid
+            SvelteKit->>SvelteKit: Set locals.user, locals.session
         else Invalid/Expired
-            AuthWorker->>SvelteKit: 401
             SvelteKit->>SvelteKit: Clear locals
         end
     end
@@ -94,14 +99,37 @@ After session resolution, `event.locals` contains:
 | Property | Type | Description |
 |----------|------|-------------|
 | `userId` | `string \| null` | Authenticated user ID |
-| `user` | `User \| null` | User object with profile |
-| `session` | `Session \| null` | Session metadata |
+| `user` | `UserData \| null` | User object with profile |
+| `session` | `SessionData \| null` | Session metadata |
+
+### UserData Shape
+
+```typescript
+interface UserData {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;           // 'customer', 'creator', 'admin'
+  emailVerified: boolean;
+  createdAt: string;      // ISO 8601
+}
+```
+
+### SessionData Shape
+
+```typescript
+interface SessionData {
+  id: string;
+  userId: string;
+  expiresAt: string;      // ISO 8601
+}
+```
 
 ---
 
 ## Auth Flows
 
-### Login
+### Login (Phase 1)
 
 ```mermaid
 sequenceDiagram
@@ -112,17 +140,20 @@ sequenceDiagram
     User->>Frontend: Submit login form
     Frontend->>AuthWorker: POST /api/auth/email/login
     AuthWorker->>AuthWorker: Validate credentials
+    AuthWorker->>AuthWorker: Check rate limit (10/15min)
 
     alt Success
+        AuthWorker->>AuthWorker: Create session
+        AuthWorker->>AuthWorker: Cache in KV
         AuthWorker->>Frontend: 200 + Set-Cookie
-        Frontend->>Frontend: Redirect to /library
+        Frontend->>Frontend: Redirect to /library or ?redirect
     else Failure
-        AuthWorker->>Frontend: 401 {error}
+        AuthWorker->>Frontend: 400/401 {error}
         Frontend->>User: Show error message
     end
 ```
 
-### Registration
+### Registration (Phase 1)
 
 ```mermaid
 sequenceDiagram
@@ -132,13 +163,31 @@ sequenceDiagram
 
     User->>Frontend: Submit registration form
     Frontend->>AuthWorker: POST /api/auth/email/register
-    AuthWorker->>AuthWorker: Create user
+    AuthWorker->>AuthWorker: Create user (emailVerified=false)
+    AuthWorker->>AuthWorker: Generate verification token
     AuthWorker->>AuthWorker: Send verification email
-    AuthWorker->>Frontend: 200 + Set-Cookie
+    AuthWorker->>Frontend: 200 + Set-Cookie (auto sign-in)
     Frontend->>User: Redirect to verification notice
 ```
 
-### Logout
+### Email Verification (Phase 1)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant AuthWorker
+
+    User->>Frontend: Click email link (?token=...)
+    Frontend->>AuthWorker: POST /api/auth/verify-email
+    AuthWorker->>AuthWorker: Validate token
+    AuthWorker->>AuthWorker: Set emailVerified=true
+    AuthWorker->>AuthWorker: Auto sign-in (new session)
+    AuthWorker->>Frontend: 200 + Set-Cookie
+    Frontend->>User: Redirect to /library
+```
+
+### Logout (Phase 1)
 
 ```mermaid
 sequenceDiagram
@@ -148,12 +197,13 @@ sequenceDiagram
 
     User->>Frontend: Click logout
     Frontend->>AuthWorker: POST /api/auth/signout
-    AuthWorker->>AuthWorker: Invalidate session
+    AuthWorker->>AuthWorker: Invalidate session in DB
+    AuthWorker->>AuthWorker: Remove from KV cache
     AuthWorker->>Frontend: Clear cookie
     Frontend->>User: Redirect to home
 ```
 
-### Password Reset
+### Password Reset (Phase 1)
 
 ```mermaid
 sequenceDiagram
@@ -162,29 +212,86 @@ sequenceDiagram
     participant AuthWorker
 
     User->>Frontend: Request password reset
-    Frontend->>AuthWorker: POST /api/auth/forgot-password
+    Frontend->>AuthWorker: POST /api/auth/email/send-reset-password-email
+    AuthWorker->>AuthWorker: Generate reset token
     AuthWorker->>User: Send reset email
     User->>Frontend: Click email link
     Frontend->>User: Show reset form
     User->>Frontend: Submit new password
-    Frontend->>AuthWorker: POST /api/auth/reset-password
-    AuthWorker->>Frontend: Success
-    Frontend->>User: Redirect to login
+    Frontend->>AuthWorker: POST /api/auth/email/reset-password
+    AuthWorker->>AuthWorker: Validate token, update password
+    AuthWorker->>AuthWorker: Create new session
+    AuthWorker->>Frontend: 200 + Set-Cookie
+    Frontend->>User: Redirect to /library
 ```
 
 ---
 
 ## Auth Worker Endpoints
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/auth/session` | GET | Validate current session |
-| `/api/auth/email/login` | POST | Email/password login |
-| `/api/auth/email/register` | POST | Create new account |
-| `/api/auth/signout` | POST | End session |
-| `/api/auth/forgot-password` | POST | Request password reset |
-| `/api/auth/reset-password` | POST | Set new password |
-| `/api/auth/verify-email` | GET | Verify email address |
+### Phase 1 Endpoints
+
+| Endpoint | Method | Purpose | Rate Limit |
+|----------|--------|---------|------------|
+| `/api/auth/session` | GET | Validate current session | None |
+| `/api/auth/email/login` | POST | Email/password login | 10/15min |
+| `/api/auth/email/register` | POST | Create new account | 10/15min |
+| `/api/auth/signout` | POST | End session | None |
+| `/api/auth/verify-email` | GET/POST | Verify email address | 10/15min |
+| `/api/auth/email/send-reset-password-email` | POST | Request password reset | 10/15min |
+| `/api/auth/email/reset-password` | POST | Set new password | 10/15min |
+
+### Request/Response Examples
+
+**Login Request**:
+```typescript
+POST /api/auth/email/login
+{
+  "email": "user@example.com",
+  "password": "SecurePass123!"
+}
+```
+
+**Login Response** (200):
+```typescript
+{
+  "user": {
+    "id": "user_123",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "role": "customer",
+    "emailVerified": true,
+    "createdAt": "2025-01-15T10:00:00Z"
+  },
+  "session": {
+    "id": "session_456",
+    "userId": "user_123",
+    "expiresAt": "2025-01-24T10:00:00Z"
+  }
+}
+// + Set-Cookie: codex-session=<token>; HttpOnly; Secure; SameSite=Lax
+```
+
+**Session Check Response** (200):
+```typescript
+GET /api/auth/session
+// Cookie: codex-session=<token>
+
+{
+  "user": { ... },
+  "session": { ... }
+}
+```
+
+**Error Response** (401):
+```typescript
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid credentials"
+  }
+}
+```
 
 ---
 
@@ -202,16 +309,137 @@ sequenceDiagram
 
 Login and register pages accept a `redirect` query parameter. After successful auth, user is redirected to this URL (validated to be same-origin).
 
+```typescript
+// +page.server.ts
+export async function load({ url, locals }) {
+  // Already logged in? Redirect away
+  if (locals.user) {
+    const redirect = url.searchParams.get('redirect') || '/library';
+    throw redirect(302, validateRedirect(redirect));
+  }
+  return {};
+}
+
+function validateRedirect(url: string): string {
+  // Only allow same-origin redirects
+  if (url.startsWith('/') && !url.startsWith('//')) {
+    return url;
+  }
+  return '/library';
+}
+```
+
 ---
 
-## Form Implementation
+## Frontend Implementation
+
+### Server Hook (hooks.server.ts)
+
+```typescript
+import type { Handle } from '@sveltejs/kit';
+import { PUBLIC_AUTH_URL } from '$env/static/public';
+
+export const handle: Handle = async ({ event, resolve }) => {
+  const sessionCookie = event.cookies.get('codex-session');
+
+  if (sessionCookie) {
+    try {
+      const response = await fetch(`${PUBLIC_AUTH_URL}/api/auth/session`, {
+        headers: {
+          Cookie: `codex-session=${sessionCookie}`
+        }
+      });
+
+      if (response.ok) {
+        const { user, session } = await response.json();
+        event.locals.user = user;
+        event.locals.session = session;
+        event.locals.userId = user.id;
+      }
+    } catch (error) {
+      // Auth worker unavailable - treat as not authenticated
+      console.error('Session validation failed:', error);
+    }
+  }
+
+  return resolve(event);
+};
+```
+
+### Form Implementation
 
 Auth forms use SvelteKit form actions with progressive enhancement:
 
-1. **Without JavaScript**: Standard form POST, full page reload
-2. **With JavaScript**: Enhanced with loading states, inline validation
+```svelte
+<!-- routes/login/+page.svelte -->
+<script>
+  import { enhance } from '$app/forms';
+  let loading = $state(false);
+</script>
 
-Forms submit to SvelteKit form actions, which forward to Auth Worker. This keeps Auth Worker URLs internal and allows server-side response handling.
+<form
+  method="POST"
+  use:enhance={() => {
+    loading = true;
+    return async ({ update }) => {
+      loading = false;
+      await update();
+    };
+  }}
+>
+  <label>
+    Email
+    <input type="email" name="email" required />
+  </label>
+
+  <label>
+    Password
+    <input type="password" name="password" required />
+  </label>
+
+  <button type="submit" disabled={loading}>
+    {loading ? 'Signing in...' : 'Sign in'}
+  </button>
+</form>
+```
+
+```typescript
+// routes/login/+page.server.ts
+import { fail, redirect } from '@sveltejs/kit';
+import { PUBLIC_AUTH_URL } from '$env/static/public';
+
+export const actions = {
+  default: async ({ request, url, cookies }) => {
+    const formData = await request.formData();
+    const email = formData.get('email');
+    const password = formData.get('password');
+
+    const response = await fetch(`${PUBLIC_AUTH_URL}/api/auth/email/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return fail(response.status, {
+        email,
+        error: error.error?.message || 'Login failed'
+      });
+    }
+
+    // Forward the Set-Cookie header from auth worker
+    const setCookie = response.headers.get('set-cookie');
+    if (setCookie) {
+      // Parse and set cookie in SvelteKit
+      // (In practice, use a cookie parsing library)
+    }
+
+    const redirectTo = url.searchParams.get('redirect') || '/library';
+    throw redirect(302, redirectTo);
+  }
+};
+```
 
 ---
 
@@ -228,7 +456,11 @@ graph LR
     Cache --> Return
 ```
 
-KV cache TTL is shorter than session expiry to balance performance and security.
+| Setting | Value |
+|---------|-------|
+| KV Cache TTL | 5 minutes |
+| Session Expiry | 24 hours |
+| Session Renewal | Every 24 hours |
 
 ---
 
@@ -237,16 +469,63 @@ KV cache TTL is shorter than session expiry to balance performance and security.
 ### Cookie Security
 - **HttpOnly**: Prevents XSS from stealing session
 - **Secure**: Prevents transmission over HTTP
-- **SameSite=Lax**: Prevents CSRF from external sites
+- **SameSite=Lax**: Prevents CSRF from external sites while allowing navigation
 
 ### Session Validation
 - Every protected request validates session with Auth Worker
 - Session can be invalidated server-side (logout everywhere)
-- Session tied to user agent/IP for anomaly detection (future)
+- Session tied to user agent/IP for anomaly detection (Future)
 
 ### Rate Limiting
 - Auth Worker applies rate limits to login attempts
+- 10 requests per 15 minutes per IP
 - Prevents brute force attacks
+
+### Email Verification
+- New accounts require email verification
+- Users can sign in immediately but with `emailVerified=false`
+- Certain features may be gated on email verification
+
+---
+
+## Protected Routes
+
+Route protection implemented via layout load functions:
+
+```typescript
+// routes/(authenticated)/+layout.server.ts
+import { redirect } from '@sveltejs/kit';
+
+export async function load({ locals, url }) {
+  if (!locals.user) {
+    throw redirect(302, `/login?redirect=${encodeURIComponent(url.pathname)}`);
+  }
+
+  return {
+    user: locals.user
+  };
+}
+```
+
+### Route Groups
+
+| Group | Protection | Example Routes |
+|-------|------------|----------------|
+| `(public)` | None | `/`, `/explore` |
+| `(authenticated)` | Requires login | `/library`, `/account` |
+| `(studio)` | Requires login + creator role | `/studio/*` |
+
+---
+
+## Future Features
+
+| Feature | Notes |
+|---------|-------|
+| OAuth providers | Google, GitHub, etc. |
+| Two-factor auth | TOTP or SMS |
+| Session management UI | View/revoke active sessions |
+| Remember me | Extended session duration |
+| Login history | IP, device, location tracking |
 
 ---
 
@@ -254,3 +533,4 @@ KV cache TTL is shorter than session expiry to balance performance and security.
 
 - [AUTHORIZATION.md](./AUTHORIZATION.md) - Role-based access after authentication
 - [ROUTING.md](./ROUTING.md) - Protected routes and redirects
+- [DATA.md](./DATA.md) - API integration patterns
