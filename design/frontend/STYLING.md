@@ -1,7 +1,7 @@
 # Styling & Theming
 
-**Status**: Design
-**Last Updated**: 2026-01-10
+**Status**: Design (Pre-implementation - CSS token system design)
+**Last Updated**: 2026-01-11
 
 ---
 
@@ -186,11 +186,42 @@ Dark mode is applied via a class on `<html>`:
 
 | Priority | Source |
 |----------|--------|
-| 1 | User preference (localStorage) |
+| 1 | User preference (localStorage or cookie) |
 | 2 | System preference (`prefers-color-scheme`) |
 | 3 | Default (light) |
 
 Dark mode preference is **global** - applies across all subdomains and contexts.
+
+### FOUC Prevention
+
+To prevent flash of unstyled content (FOUC) during SSR, add this script to `app.html` **before** any content:
+
+```html
+<!-- app.html <head> section -->
+<script>
+  (function() {
+    // Check cookie first (for SSR consistency), then localStorage, then system preference
+    const theme = document.cookie.match(/theme=(dark|light)/)?.[1]
+      || localStorage.getItem('theme')
+      || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.classList.add(theme);
+  })();
+</script>
+```
+
+This inline script executes before the page renders, preventing the flash.
+
+**For SSR consistency**: Store theme in a cookie (not just localStorage) so the server can render with the correct theme class:
+
+```typescript
+// In theme toggle handler
+function setTheme(theme: 'light' | 'dark') {
+  document.documentElement.classList.remove('light', 'dark');
+  document.documentElement.classList.add(theme);
+  localStorage.setItem('theme', theme);
+  document.cookie = `theme=${theme}; path=/; max-age=31536000; SameSite=Lax`;
+}
+```
 
 ---
 

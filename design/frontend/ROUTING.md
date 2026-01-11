@@ -1,7 +1,7 @@
 # Routing
 
-**Status**: Design
-**Last Updated**: 2026-01-10
+**Status**: Design (Verified against implementation 2026-01-11)
+**Last Updated**: 2026-01-11
 
 ---
 
@@ -368,7 +368,7 @@ sequenceDiagram
     User->>OrgPage: Click "Sign In"
     OrgPage->>AuthPage: Redirect with ?redirect=yoga-studio.*/explore
     User->>AuthPage: Enter credentials
-    AuthPage->>AuthWorker: POST /api/auth/login
+    AuthPage->>AuthWorker: POST /api/auth/sign-in/email
     AuthWorker->>AuthPage: Session cookie (cross-subdomain)
     AuthPage->>OrgPage: Redirect to original URL
     User->>OrgPage: Now authenticated

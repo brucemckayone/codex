@@ -1,7 +1,7 @@
 # Infrastructure
 
-**Status**: Design
-**Last Updated**: 2026-01-10
+**Status**: Design (Verified against implementation 2026-01-11)
+**Last Updated**: 2026-01-11
 
 ---
 
@@ -98,7 +98,25 @@ Two approaches for org subdomains:
 - Per-org control and debugging
 - Slightly more operational overhead
 
-**Decision**: Start with **wildcard** for simplicity. The Worker validates org existence via Identity-API.
+**Decision**: Start with **wildcard** for simplicity. The Worker validates org existence via Organization-API (port 42071).
+
+### Wrangler Configuration for Wildcards
+
+> **Important**: Cloudflare Workers `custom_domain = true` doesn't support wildcards. Use Worker Routes instead:
+
+```toml
+# CORRECT: Worker Routes pattern (supports wildcards)
+[[env.production.routes]]
+pattern = "*.revelations.studio/*"
+zone_name = "revelations.studio"
+
+# WRONG: custom_domain doesn't support wildcards
+# [[env.production.routes]]
+# pattern = "*.revelations.studio"
+# custom_domain = true
+```
+
+> **Note**: Current `apps/web/wrangler.toml` uses `custom_domain = true` with staging wildcards. This may need to be updated to use `zone_name` pattern for proper wildcard subdomain support.
 
 ### Reserved Subdomains
 
@@ -124,15 +142,35 @@ Org slug validation must reject these.
 
 ### Required Environment Variables
 
+Configured via `wrangler.toml` bindings (not `.env` files):
+
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `PUBLIC_AUTH_URL` | Auth Worker base URL | `https://auth.revelations.studio` |
-| `PUBLIC_CONTENT_API_URL` | Content-API base URL | `https://content-api.revelations.studio` |
-| `PUBLIC_ORG_API_URL` | Organization-API base URL | `https://organization-api.revelations.studio` |
-| `PUBLIC_ECOM_API_URL` | Ecom-API base URL | `https://ecom-api.revelations.studio` |
-| `PUBLIC_DOMAIN` | Base domain | `revelations.studio` |
+| `AUTH_WORKER_URL` | Auth Worker base URL | `https://auth.revelations.studio` |
+| `API_URL` | Main API base URL | `https://api.revelations.studio` |
 
-> **Note**: `PUBLIC_*` prefix makes variables available to client-side code in SvelteKit.
+> **Important**: Cloudflare Workers use wrangler bindings accessed via `platform.env`, not the SvelteKit `$env/static/public` pattern. The `PUBLIC_*` prefix convention from Vite doesn't apply to Cloudflare Workers.
+
+```typescript
+// Accessing in load functions
+export async function load({ platform }) {
+  const authUrl = platform?.env?.AUTH_WORKER_URL ?? 'http://localhost:42069';
+  // ...
+}
+```
+
+### Local Development Fallbacks
+
+For local development without wrangler:
+
+```typescript
+const WORKER_URLS = {
+  auth: 'http://localhost:42069',
+  content: 'http://localhost:4001',
+  org: 'http://localhost:42071',
+  ecom: 'http://localhost:42072',
+} as const;
+```
 
 ### Local Development
 

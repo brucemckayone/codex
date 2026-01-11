@@ -1,13 +1,18 @@
 # Components
 
-**Status**: Design
-**Last Updated**: 2026-01-10
+**Status**: Design (Pre-implementation - no code to verify against)
+**Last Updated**: 2026-01-11
 
 ---
 
 ## Component Library
 
 The frontend uses **Melt UI Next-Gen** for accessible, headless component primitives.
+
+> **Verification Required**: Before implementation, verify Melt UI's Svelte 5 support status. If unstable, consider alternatives:
+> - **Bits UI** - Svelte 5 compatible, similar API
+> - **Shadcn-Svelte** - Pre-styled components based on Bits UI
+> - **Custom primitives** - Build with Svelte 5 runes directly
 
 ### Why Melt UI
 
@@ -65,6 +70,14 @@ Style components using these selectors in CSS.
 ---
 
 ## Component Organization
+
+> **Phase 1 MVP**: Not all 33 components are needed immediately. Start with ~12-15 core components:
+> - **Layout**: Header, Footer, PageContainer
+> - **Content**: ContentCard, ContentGrid, VideoPlayer (or PreviewPlayer)
+> - **Forms**: TextField, Button, basic inputs
+> - **Feedback**: Toast, Skeleton
+>
+> Build additional components incrementally as routes require them.
 
 ```
 $lib/components/

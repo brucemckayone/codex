@@ -1,7 +1,7 @@
 # Data Layer
 
-**Status**: Design
-**Last Updated**: 2026-01-10
+**Status**: Design (Verified against implementation 2026-01-11)
+**Last Updated**: 2026-01-11
 
 ---
 
@@ -58,21 +58,34 @@ graph TB
 
 ### Environment Configuration
 
-Worker URLs configured via environment variables:
+Worker URLs configured via wrangler bindings (Cloudflare Workers pattern):
+
+```toml
+# wrangler.toml
+[env.production.vars]
+AUTH_WORKER_URL = "https://auth.revelations.studio"
+API_URL = "https://api.revelations.studio"
+# Note: Additional worker URLs can be added as needed
+```
 
 ```typescript
-// .env.local (development)
-PUBLIC_AUTH_URL=http://localhost:42069
-PUBLIC_CONTENT_API_URL=http://localhost:4001
-PUBLIC_ORG_API_URL=http://localhost:42071
-PUBLIC_ECOM_API_URL=http://localhost:42072
+// Accessing in SvelteKit load functions (Cloudflare Workers)
+export async function load({ platform }) {
+  const authUrl = platform?.env?.AUTH_WORKER_URL ?? 'http://localhost:42069';
+  const apiUrl = platform?.env?.API_URL ?? 'http://localhost:4001';
+  // ...
+}
 
-// Production (injected at build)
-PUBLIC_AUTH_URL=https://auth.revelations.studio
-PUBLIC_CONTENT_API_URL=https://content-api.revelations.studio
-PUBLIC_ORG_API_URL=https://organization-api.revelations.studio
-PUBLIC_ECOM_API_URL=https://ecom-api.revelations.studio
+// Local development fallbacks (when platform.env unavailable)
+const WORKER_URLS = {
+  auth: 'http://localhost:42069',
+  content: 'http://localhost:4001',
+  org: 'http://localhost:42071',
+  ecom: 'http://localhost:42072',
+} as const;
 ```
+
+> **Important**: Cloudflare Workers use `platform.env` to access wrangler bindings, not `$env/static/public`. The `PUBLIC_*` prefix pattern from Vite `.env` files doesn't apply here.
 
 ---
 
@@ -119,14 +132,18 @@ Load functions can fetch from multiple workers in parallel:
 
 ```typescript
 // +page.server.ts
-export async function load({ fetch, cookies }) {
+export async function load({ fetch, cookies, platform }) {
   const sessionCookie = cookies.get('codex-session');
 
+  // Access worker URLs via platform.env (Cloudflare Workers pattern)
+  const apiUrl = platform?.env?.API_URL ?? 'http://localhost:4001';
+  const orgApiUrl = platform?.env?.ORG_API_URL ?? 'http://localhost:42071';
+
   const [content, org] = await Promise.all([
-    fetch(`${PUBLIC_CONTENT_API_URL}/api/content/${id}`, {
+    fetch(`${apiUrl}/api/content/${id}`, {
       headers: { Cookie: `codex-session=${sessionCookie}` }
     }),
-    fetch(`${PUBLIC_ORG_API_URL}/api/organizations/slug/${slug}`, {
+    fetch(`${orgApiUrl}/api/organizations/slug/${slug}`, {
       headers: { Cookie: `codex-session=${sessionCookie}` }
     })
   ]);
@@ -177,6 +194,8 @@ For interactive features that don't need SSR:
 
 ```typescript
 // Search with debouncing
+// API base URL passed from server-side load function to page data
+let { data } = $props(); // data.apiUrl from load function
 let searchQuery = $state('');
 let results = $state([]);
 
@@ -185,8 +204,10 @@ $effect(() => {
   if (query.length < 2) return;
 
   const timeout = setTimeout(async () => {
+    // Use API URL from page data (set by server load function)
     const res = await fetch(
-      `${PUBLIC_CONTENT_API_URL}/api/content?search=${encodeURIComponent(query)}`
+      `${data.apiUrl}/api/content?search=${encodeURIComponent(query)}`,
+      { credentials: 'include' } // Forward session cookie
     );
     results = await res.json();
   }, 300);
@@ -194,6 +215,8 @@ $effect(() => {
   return () => clearTimeout(timeout);
 });
 ```
+
+> **Note**: Client-side code cannot access `platform.env` directly. Pass required URLs from server load functions via page data, or use relative URLs if proxying through the same origin.
 
 ### Use Cases
 
@@ -251,29 +274,73 @@ export function getPlaybackState() {
 
 ## API Helper Design
 
-Centralized API helper for type-safe requests:
+### Server-Side API Client
+
+For use in `+page.server.ts` and `+server.ts` files:
+
+```typescript
+// lib/server/api.ts
+import type { Platform } from '@sveltejs/kit';
+
+const DEFAULT_URLS = {
+  auth: 'http://localhost:42069',
+  content: 'http://localhost:4001',
+  org: 'http://localhost:42071',
+  ecom: 'http://localhost:42072',
+} as const;
+
+type WorkerName = keyof typeof DEFAULT_URLS;
+
+export function createServerApi(platform: Platform | undefined) {
+  const authUrl = platform?.env?.AUTH_WORKER_URL ?? DEFAULT_URLS.auth;
+  const apiUrl = platform?.env?.API_URL ?? DEFAULT_URLS.content;
+
+  return {
+    getWorkerUrl(worker: WorkerName): string {
+      if (worker === 'auth') return authUrl;
+      return apiUrl; // Other workers use single API_URL or defaults
+    },
+
+    async fetch<T>(
+      worker: WorkerName,
+      path: string,
+      cookie?: string,
+      options: RequestInit = {}
+    ): Promise<T> {
+      const url = `${this.getWorkerUrl(worker)}${path}`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...options.headers as Record<string, string>,
+      };
+      if (cookie) headers.Cookie = cookie;
+
+      const response = await fetch(url, { ...options, headers });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new ApiError(response.status, error);
+      }
+
+      if (response.status === 204) return null as T;
+      return response.json();
+    }
+  };
+}
+```
+
+### Client-Side API Client
+
+For use in Svelte components (browser):
 
 ```typescript
 // lib/api/client.ts
-import { PUBLIC_AUTH_URL, PUBLIC_CONTENT_API_URL, PUBLIC_ORG_API_URL, PUBLIC_ECOM_API_URL } from '$env/static/public';
-
-const workers = {
-  auth: PUBLIC_AUTH_URL,
-  content: PUBLIC_CONTENT_API_URL,
-  org: PUBLIC_ORG_API_URL,
-  ecom: PUBLIC_ECOM_API_URL
-} as const;
-
-type WorkerName = keyof typeof workers;
+// Client-side uses relative URLs or configured base URLs
 
 export async function api<T>(
-  worker: WorkerName,
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `${workers[worker]}${path}`;
-
-  const response = await fetch(url, {
+  const response = await fetch(path, {
     ...options,
     credentials: 'include', // Forward cookies
     headers: {
@@ -287,12 +354,14 @@ export async function api<T>(
     throw new ApiError(response.status, error);
   }
 
-  // Handle 204 No Content
-  if (response.status === 204) {
-    return null as T;
-  }
-
+  if (response.status === 204) return null as T;
   return response.json();
+}
+
+class ApiError extends Error {
+  constructor(public status: number, public data: unknown) {
+    super(`API Error: ${status}`);
+  }
 }
 ```
 
@@ -357,13 +426,15 @@ interface ErrorResponse {
 
 ### Auth Worker (Phase 1)
 
+> **Note**: BetterAuth uses its own endpoint naming conventions. Verified against e2e tests.
+
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/auth/session` | GET | Get current session + user |
-| `/api/auth/email/login` | POST | Email/password login |
-| `/api/auth/email/register` | POST | Create account |
+| `/api/auth/get-session` | GET | Get current session + user |
+| `/api/auth/sign-in/email` | POST | Email/password login |
+| `/api/auth/sign-up/email` | POST | Create account |
 | `/api/auth/signout` | POST | End session |
-| `/api/auth/verify-email` | GET/POST | Email verification |
+| `/api/auth/verify-email` | GET | Email verification |
 | `/api/auth/email/send-reset-password-email` | POST | Request reset |
 | `/api/auth/email/reset-password` | POST | Complete reset |
 

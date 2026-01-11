@@ -1,7 +1,7 @@
 # Authentication
 
-**Status**: Design
-**Last Updated**: 2026-01-10
+**Status**: Design (Verified against implementation 2026-01-11)
+**Last Updated**: 2026-01-11
 
 ---
 
@@ -73,7 +73,7 @@ sequenceDiagram
     SvelteKit->>SvelteKit: Extract codex-session cookie
 
     alt Has cookie
-        SvelteKit->>AuthWorker: GET /api/auth/session
+        SvelteKit->>AuthWorker: GET /api/auth/get-session
         AuthWorker->>AuthWorker: Check KV cache (5min TTL)
         alt Cache hit
             AuthWorker->>SvelteKit: {user, session}
@@ -138,7 +138,7 @@ sequenceDiagram
     participant AuthWorker
 
     User->>Frontend: Submit login form
-    Frontend->>AuthWorker: POST /api/auth/email/login
+    Frontend->>AuthWorker: POST /api/auth/sign-in/email
     AuthWorker->>AuthWorker: Validate credentials
     AuthWorker->>AuthWorker: Check rate limit (10/15min)
 
@@ -162,7 +162,7 @@ sequenceDiagram
     participant AuthWorker
 
     User->>Frontend: Submit registration form
-    Frontend->>AuthWorker: POST /api/auth/email/register
+    Frontend->>AuthWorker: POST /api/auth/sign-up/email
     AuthWorker->>AuthWorker: Create user (emailVerified=false)
     AuthWorker->>AuthWorker: Generate verification token
     AuthWorker->>AuthWorker: Send verification email
@@ -231,13 +231,15 @@ sequenceDiagram
 
 ### Phase 1 Endpoints
 
+> **Note**: BetterAuth uses its own endpoint naming conventions. These are the actual paths verified against e2e tests.
+
 | Endpoint | Method | Purpose | Rate Limit |
 |----------|--------|---------|------------|
-| `/api/auth/session` | GET | Validate current session | None |
-| `/api/auth/email/login` | POST | Email/password login | 10/15min |
-| `/api/auth/email/register` | POST | Create new account | 10/15min |
+| `/api/auth/get-session` | GET | Validate current session | None |
+| `/api/auth/sign-in/email` | POST | Email/password login | 10/15min |
+| `/api/auth/sign-up/email` | POST | Create new account | 10/15min |
 | `/api/auth/signout` | POST | End session | None |
-| `/api/auth/verify-email` | GET/POST | Verify email address | 10/15min |
+| `/api/auth/verify-email` | GET | Verify email address | 10/15min |
 | `/api/auth/email/send-reset-password-email` | POST | Request password reset | 10/15min |
 | `/api/auth/email/reset-password` | POST | Set new password | 10/15min |
 
@@ -245,7 +247,7 @@ sequenceDiagram
 
 **Login Request**:
 ```typescript
-POST /api/auth/email/login
+POST /api/auth/sign-in/email
 {
   "email": "user@example.com",
   "password": "SecurePass123!"
@@ -274,7 +276,7 @@ POST /api/auth/email/login
 
 **Session Check Response** (200):
 ```typescript
-GET /api/auth/session
+GET /api/auth/get-session
 // Cookie: codex-session=<token>
 
 {
@@ -337,14 +339,15 @@ function validateRedirect(url: string): string {
 
 ```typescript
 import type { Handle } from '@sveltejs/kit';
-import { PUBLIC_AUTH_URL } from '$env/static/public';
 
-export const handle: Handle = async ({ event, resolve }) => {
+export const handle: Handle = async ({ event, resolve, platform }) => {
+  // Access worker URLs via platform.env (Cloudflare Workers pattern)
+  const authUrl = platform?.env?.AUTH_WORKER_URL ?? 'http://localhost:42069';
   const sessionCookie = event.cookies.get('codex-session');
 
   if (sessionCookie) {
     try {
-      const response = await fetch(`${PUBLIC_AUTH_URL}/api/auth/session`, {
+      const response = await fetch(`${authUrl}/api/auth/get-session`, {
         headers: {
           Cookie: `codex-session=${sessionCookie}`
         }
@@ -365,6 +368,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 ```
+
+> **Note**: Cloudflare Workers use `platform.env` to access bindings, not `$env/static/public`.
 
 ### Form Implementation
 
@@ -406,15 +411,17 @@ Auth forms use SvelteKit form actions with progressive enhancement:
 ```typescript
 // routes/login/+page.server.ts
 import { fail, redirect } from '@sveltejs/kit';
-import { PUBLIC_AUTH_URL } from '$env/static/public';
 
 export const actions = {
-  default: async ({ request, url, cookies }) => {
+  default: async ({ request, url, cookies, platform }) => {
+    // Access worker URL via platform.env (Cloudflare Workers pattern)
+    const authUrl = platform?.env?.AUTH_WORKER_URL ?? 'http://localhost:42069';
+
     const formData = await request.formData();
     const email = formData.get('email');
     const password = formData.get('password');
 
-    const response = await fetch(`${PUBLIC_AUTH_URL}/api/auth/email/login`, {
+    const response = await fetch(`${authUrl}/api/auth/sign-in/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })

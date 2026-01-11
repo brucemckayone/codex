@@ -1,7 +1,7 @@
 # Authorization
 
-**Status**: Design
-**Last Updated**: 2026-01-10
+**Status**: Design (Verified against implementation 2026-01-11)
+**Last Updated**: 2026-01-11
 
 ---
 
@@ -113,11 +113,17 @@ sequenceDiagram
 
 ### Organization-API Endpoints (Phase 1)
 
+> **Note**: Organization endpoints are served by `organization-api` worker on port 42071, not `identity-api`.
+
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/organizations/slug/:slug` | GET | Get org by slug |
 | `/api/organizations/:id` | GET | Get org by ID |
-| `/api/organizations/:id/settings` | GET | Get org branding/features |
+| `/api/organizations/check-slug/:slug` | GET | Check if slug is available |
+| `/api/organizations/:id/settings` | GET | Get org branding/contact/features |
+| `/api/organizations/:id/settings/branding` | GET/PUT | Logo and primary color |
+| `/api/organizations/:id/settings/contact` | GET/PUT | Support email, social links |
+| `/api/organizations/:id/settings/features` | GET/PUT | Feature toggles |
 
 ### Membership Resolution
 
@@ -184,17 +190,20 @@ graph TD
 ```typescript
 // routes/(org)/[orgSlug]/(studio)/+layout.server.ts
 import { error, redirect } from '@sveltejs/kit';
-import { PUBLIC_ORG_API_URL } from '$env/static/public';
 
-export async function load({ params, locals, url }) {
+export async function load({ params, locals, url, platform }) {
   // 1. Must be authenticated
   if (!locals.user) {
     throw redirect(302, `/login?redirect=${encodeURIComponent(url.pathname)}`);
   }
 
-  // 2. Org must exist
+  // 2. Access org API URL via platform.env (Cloudflare Workers pattern)
+  // Note: $env/static/public does NOT work on Cloudflare Pages - use platform.env
+  const orgApiUrl = platform?.env?.ORG_API_URL ?? 'http://localhost:42071';
+
+  // 3. Org must exist
   const orgResponse = await fetch(
-    `${PUBLIC_ORG_API_URL}/api/organizations/slug/${params.orgSlug}`,
+    `${orgApiUrl}/api/organizations/slug/${params.orgSlug}`,
     { headers: { Cookie: `codex-session=${locals.sessionCookie}` } }
   );
 
@@ -204,7 +213,7 @@ export async function load({ params, locals, url }) {
 
   const org = await orgResponse.json();
 
-  // 3. Role check happens on backend when accessing protected resources
+  // 4. Role check happens on backend when accessing protected resources
   // Frontend shows UI optimistically, backend enforces
 
   return {
@@ -213,6 +222,8 @@ export async function load({ params, locals, url }) {
   };
 }
 ```
+
+> **Important**: On Cloudflare Pages/Workers, use `platform.env.VARIABLE_NAME` to access environment bindings. The SvelteKit `$env/static/public` pattern does NOT work in this deployment target.
 
 ### Guard Hierarchy
 
