@@ -455,44 +455,61 @@ All requests flow through consistent middleware chain before Better-auth handlin
 2. Environment Validation Middleware (createEnvValidationMiddleware)
    Validates: BETTER_AUTH_SECRET, DATABASE_URL, AUTH_SESSION_KV, RATE_LIMIT_KV
    Runs once per worker instance (cached result)
+   Returns 500 CONFIGURATION_ERROR if any required var missing
    ↓
 3. Standard Middleware Chain (createStandardMiddlewareChain)
    Request ID tracking (x-request-id header)
    X-Forwarded-For header normalization
-   Service name: 'auth-worker'
+   Observability context initialization
+   Service name: 'auth-worker', version: '1.0.0'
    ↓
 4. /api/* Route Handler
    ↓
-5. Security Headers Middleware
-   Environment-specific headers (development vs staging vs production)
-   X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, CSP, etc.
+5. Security Headers Middleware (securityHeadersMiddleware)
+   Environment-aware headers
+   X-Content-Type-Options: nosniff
+   X-Frame-Options: SAMEORIGIN (dev) or DENY (staging/prod)
+   X-XSS-Protection, Referrer-Policy, CSP, HSTS (prod only)
    ↓
 6. Rate Limit Middleware (createAuthRateLimiter)
-   ONLY applies to: POST /api/auth/email/login
+   ONLY applies to: POST /api/auth/email/login (exact match)
    Key: cf-connecting-ip (client IP address)
    Threshold: 10 requests per 15 minutes (RATE_LIMIT_PRESETS.auth)
+   Storage: RATE_LIMIT_KV namespace
+   Returns 429 immediately if exceeded
    ↓
-7. Session Cache Middleware (createSessionCacheMiddleware)
-   Extracts codex-session cookie from request
-   Checks AUTH_SESSION_KV for cached session (5-min TTL)
-   If found: Sets c.set('session') and c.set('user')
-   If not found: Continues to BetterAuth
+7. Better-auth Handler (via Hono delegation)
+   Creates auth instance: createAuthInstance({ env: c.env })
+   BetterAuth session processing:
+     a) Extract codex-session cookie
+     b) Check BetterAuth internal cookie cache (5min TTL)
+     c) If miss: Check AUTH_SESSION_KV (secondaryStorage)
+     d) If miss: Query PostgreSQL sessions table
+     e) If found: Cache in both memory and KV
+   Routes to appropriate auth endpoint handler
+   (register, login, session, verify-email, reset-password, signout)
+   Handles request body parsing and validation
    ↓
-8. Better-auth Handler
-   Parses request, routes to appropriate auth endpoint
-   Handles registration, login, session, email verification, password reset
-   Returns HTTP response
+8. Better-auth Response
+   Returns JSON response with user/session data
+   Sets Set-Cookie header for codex-session cookie
+   (HttpOnly, Secure, SameSite=Strict)
    ↓
-9. Post-Response Session Caching
-   If session was set by BetterAuth, cache in AUTH_SESSION_KV
-   TTL = (expiresAt - now) in seconds
+9. Error Handler (app.onError)
+   Catches any unhandled errors from BetterAuth
+   Logs error with request ID and context
+   Returns standardized error response
    ↓
-10. Error Handler (app.onError)
-    Catches any unhandled errors
-    Returns standardized error response
-    ↓
-11. HTTP Response
+10. HTTP Response
+    Status codes: 200, 400, 401, 404, 429, 500, 503
+    Headers: Standard security headers, Set-Cookie (if applicable)
+    Body: JSON (user/session data, error, or plain response)
 ```
+
+**Session Caching Hierarchy** (Best to Worst Performance):
+1. BetterAuth internal memory cache (5-min TTL) - 1ms lookup
+2. AUTH_SESSION_KV (Cloudflare KV) - 10ms lookup
+3. PostgreSQL database - 50ms lookup
 
 ### Middleware Chain
 
@@ -561,9 +578,40 @@ Status: 500
 | Setting | Value | Source |
 |---------|-------|--------|
 | Key Strategy | cf-connecting-ip header | Client IP address |
-| Threshold | 10 requests per 15 minutes | RATE_LIMIT_PRESETS.auth |
+| Threshold | 10 requests per 15 minutes | RATE_LIMIT_PRESETS.auth from @codex/security |
 | Storage | RATE_LIMIT_KV namespace | Cloudflare KV |
-| Check Method | rateLimit() from @codex/security | Validates threshold |
+| Check Method | rateLimit() from @codex/security | KV-backed rate limiter |
+
+**Implementation**:
+```typescript
+// From src/middleware/rate-limiter.ts
+export function createAuthRateLimiter() {
+  return async (c: Context<AuthEnv>, next: Next) => {
+    // Only apply rate limiting to login endpoint
+    if (c.req.path === '/api/auth/email/login' && c.req.method === 'POST') {
+      const kv = c.env.RATE_LIMIT_KV;
+
+      if (kv) {
+        const success = await rateLimit({
+          kv,
+          keyGenerator: (c: Context) =>
+            c.req.header('cf-connecting-ip') || '127.0.0.1',
+          ...RATE_LIMIT_PRESETS.auth,
+        })(c, next);
+
+        if (!success) {
+          return c.json({ error: 'Too many requests' }, 429);
+        }
+
+        await next();
+        return undefined;
+      }
+    }
+    await next();
+    return undefined;
+  };
+}
+```
 
 **Behavior**:
 1. Check if request is POST /api/auth/email/login
@@ -585,60 +633,71 @@ Status: 429 Too Many Requests
 - Only login attempt tracking prevents brute force
 - Rate limit is per IP address (shared by all users from same IP in development)
 - Threshold applies across all auth worker instances (KV is global)
+- IP extracted via cf-connecting-ip header (set by Cloudflare)
 
-#### Session Caching (createSessionCacheMiddleware)
+#### Session Caching via BetterAuth secondaryStorage
 
-**Purpose**: Cache sessions in KV to reduce database load on hot path (GET /api/auth/session)
+**Purpose**: Cache sessions in Cloudflare KV to reduce database load on hot path (all authenticated requests)
 
-**Location**: `src/middleware/session-cache.ts` (80 lines)
+**Implementation**: Uses BetterAuth's built-in `secondaryStorage` feature with @codex/security's `createKVSecondaryStorage` adapter
 
-**Flow - Inbound (Before BetterAuth)**:
-```
-1. Extract codex-session cookie from request headers
-2. If no cookie: Skip caching, proceed to BetterAuth
-3. If cookie found: Look up session:<cookie-value> in AUTH_SESSION_KV
-4. If KV cache HIT: Set c.set('session', cached.session) and c.set('user', cached.user)
-                    Call next(), return (skip BetterAuth database lookup)
-5. If KV cache MISS: Call next() to invoke BetterAuth
-                     BetterAuth loads session from PostgreSQL
-```
+**Location**: Configured in `src/auth-config.ts` (lines 44-46)
 
-**Flow - Outbound (After BetterAuth)**:
-```
-1. Check if BetterAuth set c.get('session')
-2. If session exists: Calculate TTL = (expiresAt - now) in seconds
-3. Store in AUTH_SESSION_KV:
-   - Key: session:<cookie-value>
-   - Value: { session, user } (JSON serialized)
-   - TTL: Auto-calculated from expiry (max 24 hours)
-```
-
-**Cache Entry Structure**:
+**Configuration**:
 ```typescript
-interface CachedSessionData {
-  session: SessionData;  // { id, userId, expiresAt }
-  user: UserData;        // { id, email, name, role, emailVerified, createdAt }
-}
+// From src/auth-config.ts
+return betterAuth({
+  database: drizzleAdapter(db, { ... }),
+
+  // KV-backed secondary storage for session caching
+  // This enables unified session caching across all workers
+  secondaryStorage: createKVSecondaryStorage(env.AUTH_SESSION_KV),
+
+  session: {
+    expiresIn: 60 * 60 * 24,              // 24 hours
+    updateAge: 60 * 60 * 24,              // Update session every 24 hours
+    storeSessionInDatabase: true,         // Primary storage in PostgreSQL
+    cookieCache: {
+      enabled: true,
+      maxAge: 60 * 5,                     // 5 minute BetterAuth internal cache
+    },
+  },
+  // ... rest of config
+});
 ```
 
-**TTL Calculation**:
-```typescript
-const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
-// Example: Session expires in 86400 seconds (24 hours) from now
-// ttl = 86400 seconds
-// KV auto-deletes entry after 86400 seconds
-```
+**How It Works**:
+
+1. **Session Lookup**: When user makes authenticated request with codex-session cookie:
+   - BetterAuth checks its internal memory cache (5-minute TTL, enabled by cookieCache)
+   - If miss: BetterAuth checks AUTH_SESSION_KV (KV secondaryStorage)
+   - If miss: BetterAuth queries PostgreSQL sessions table
+   - If found: Result cached in both internal memory and KV
+
+2. **Cache Storage**: BetterAuth's secondaryStorage adapter stores:
+   - Key: session:<session-token>
+   - Value: Full session data structure (serialized)
+   - TTL: Auto-calculated from session.expiresAt
+   - Auto-expires when TTL reaches 0
+
+3. **Cache Invalidation**:
+   - Automatic: TTL-based expiry (max 24 hours)
+   - On Signout: BetterAuth removes from KV
+   - On Session Update: BetterAuth updates KV entry
 
 **Benefits**:
-- Cache hit rate on /api/auth/session: ~90% (within 5min window)
+- Cache hit rate: ~90% for authenticated requests (within session window)
 - Response time: 10ms (KV) vs 50ms (database)
-- Reduces database connection pool pressure
-- Scales to thousands of concurrent users
+- Reduces database connection pool pressure significantly
+- Scales to thousands of concurrent authenticated users
+- Transparent: Handled entirely by BetterAuth, no custom middleware needed
 
-**Cache Invalidation**:
-- Automatic: KV expires entry based on TTL
-- Manual: On /api/auth/signout (KV deletion would need to be added)
-- Implicit: Session expiry in database makes cache stale (not a problem - stale read ok)
+**Key Difference from Custom Caching**:
+- Old approach: Custom middleware with read-through cache pattern
+- New approach: BetterAuth's native secondaryStorage with KV adapter
+- Result: Simpler code, better integration, same performance benefits
+
+**Note**: The `/api/auth/session` endpoint returns fresh data directly from BetterAuth (not cached separately). Session caching reduces load on other workers calling this endpoint, not on the auth worker itself.
 
 ### Better-auth Configuration
 
@@ -649,91 +708,96 @@ const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
 **Core Configuration**:
 ```typescript
 betterAuth({
-  // Database Integration
+  // Database Integration via Drizzle ORM
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema: {
-      user: schema.users,
-      session: schema.sessions,
-      account: schema.accounts,
-      verification: schema.verification,
+      user: schema.users,              // User accounts with email/password
+      session: schema.sessions,        // Active sessions
+      account: schema.accounts,        // OAuth provider accounts (future)
+      verification: schema.verification, // Email verification tokens
     },
   }),
+
+  // KV-backed secondary storage for distributed session caching
+  // Enables unified session caching across all Codex workers
+  secondaryStorage: createKVSecondaryStorage(env.AUTH_SESSION_KV),
 
   // Session Management
   session: {
     expiresIn: 60 * 60 * 24,              // 24 hours
     updateAge: 60 * 60 * 24,              // Update session every 24 hours
-    cookieName: 'codex-session',           // Cookie name for session tracking
+    cookieName: 'codex-session',          // Session cookie name
+    storeSessionInDatabase: true,         // Primary storage in PostgreSQL
     cookieCache: {
       enabled: true,
-      maxAge: 60 * 5,                     // 5 min BetterAuth internal cache
+      maxAge: 60 * 5,                     // 5 min BetterAuth internal memory cache
+    },
+  },
+
+  // Email Verification Flow
+  emailVerification: {
+    sendVerificationEmail: async ({ user, token }, _request) => {
+      // Store token in KV for E2E tests (dev/test only)
+      if (env.AUTH_SESSION_KV &&
+          (env.ENVIRONMENT === 'development' || env.ENVIRONMENT === 'test')) {
+        // Auto-expire after 5 minutes
+        await env.AUTH_SESSION_KV.put(`verification:${user.email}`, token, {
+          expirationTtl: 300,
+        });
+      }
+      // TODO: Integrate with notification service for production
+    },
+    autoSignInAfterVerification: true,   // Auto login after email verified
+    sendOnSignUp: true,                  // Send verification email on registration
+  },
+
+  // Email & Password Authentication Plugin
+  emailAndPassword: {
+    enabled: true,
+    requireEmailVerification: true,      // Must verify email before login
+    autoSignIn: true,                    // Auto sign-in after registration
+  },
+
+  // Custom User Fields (beyond base schema)
+  user: {
+    additionalFields: {
+      role: {
+        type: 'string',
+        required: true,
+        defaultValue: 'customer',        // New users: customer, creator, admin
+      },
     },
   },
 
   // Logging Configuration
   logger: {
     level: 'debug',
-    logger: (level: string, message: string, ...args: unknown[]) => {
-      console.log(`[${level.toUpperCase()}]`, message, ...args);
-    },
-    disabled: false,
+    disabled: true,                      // Can enable for debugging
   },
 
-  // Email Verification
-  emailVerification: {
-    sendVerificationEmail: async ({ user, url, token }, _request) => {
-      console.log(`Sending verification email to ${user.email} with url: ${url}`);
-
-      // Store token in KV for E2E tests (dev/test only)
-      if (env.AUTH_SESSION_KV && env.ENVIRONMENT !== 'production') {
-        await env.AUTH_SESSION_KV.put(
-          `verification:${user.email}`,
-          token,
-          { expirationTtl: 300 }  // 5 minutes
-        );
-      }
-      // TODO: Integrate with actual email service for production
-    },
-    autoSignInAfterVerification: true,
-    sendOnSignUp: true,
-    onEmailVerification: async (user, _request) => {
-      console.log(`Email verified for user ${user.email}`);
-    },
-  },
-
-  // Email & Password Authentication
-  emailAndPassword: {
-    enabled: true,
-    requireEmailVerification: true,  // Must verify email before login
-    autoSignIn: true,               // Auto sign-in after registration
-    sendResetPassword: async (data, _request) => {
-      console.log(`Sending reset password email to ${data.user.email}`);
-      // TODO: Integrate with actual email service for production
-    },
-  },
-
-  // Custom User Fields
-  user: {
-    additionalFields: {
-      role: {
-        type: 'string',
-        required: true,
-        defaultValue: 'customer',  // All new users default to 'customer' role
-      },
-    },
-  },
-
-  // Security
-  secret: env.BETTER_AUTH_SECRET,         // 32+ char signing key
-  baseURL: env.WEB_APP_URL,               // Frontend URL for redirects
+  // Security Configuration
+  secret: env.BETTER_AUTH_SECRET,        // 32+ char signing key for session tokens
+  baseURL: env.WEB_APP_URL,              // Frontend URL for email links
   trustedOrigins: [
     env.WEB_APP_URL,
     env.API_URL,
-    'http://localhost:42069',             // Auth worker itself (E2E tests)
+    'http://localhost:42069',            // Auth worker itself (E2E tests)
   ].filter((url): url is string => Boolean(url)),
 })
 ```
+
+**Key Configuration Features**:
+
+| Feature | Setting | Purpose |
+|---------|---------|---------|
+| Database | drizzleAdapter with Postgres | Type-safe ORM for PostgreSQL |
+| Session Storage | Primary: PostgreSQL, Secondary: KV | Distributed caching |
+| Session Expiry | 24 hours | Auto-refresh sessions daily |
+| Cookie Security | HttpOnly, Secure, SameSite=Strict | CSRF protection |
+| Email Verification | Required before login | Confirms email ownership |
+| KV Cache | AUTH_SESSION_KV with BetterAuth adapter | Reduces database queries |
+| Trusted Origins | WEB_APP_URL, API_URL, localhost:42069 | CORS-like validation |
 
 **Schema Mapping** (Drizzle ORM):
 | Better-auth Name | Codex Table | Purpose | Key Fields |
@@ -937,39 +1001,72 @@ Auth Worker coordinates with:
 1. Client: POST /api/auth/email/login
    ↓
 2. Env Validation Middleware
-   Check BETTER_AUTH_SECRET, DATABASE_URL, KV namespaces
+   Check BETTER_AUTH_SECRET, DATABASE_URL, AUTH_SESSION_KV, RATE_LIMIT_KV
+   Return 500 if any required var missing
    ↓
 3. Standard Middleware
-   Generate request ID, set X-Forwarded headers
+   Generate x-request-id UUID for request tracking
+   Normalize X-Forwarded headers, initialize observability context
    ↓
 4. Security Headers Middleware
    Apply environment-specific security headers
+   (development vs staging vs production)
    ↓
 5. Rate Limit Middleware
    Check RATE_LIMIT_KV for IP request count
-   If >= threshold: Return 429
+   If >= 10 in 15min: Return 429 Too Many Requests
+   Otherwise: Continue
    ↓
-6. Session Cache Middleware
-   Extract codex-session cookie (none on login)
-   ↓
-7. Better-auth Handler
-   a) Parse JSON body
+6. Better-auth Handler
+   a) Parse JSON body { email, password }
    b) Query users table: SELECT * FROM users WHERE email = :email
-   c) Compare password with bcrypt hash
-   d) Create session: INSERT INTO sessions (...)
-   e) Cache session: AUTH_SESSION_KV.put(
-      key: "session:<session-token>",
-      value: {session, user},
-      ttl: 86400 (24 hours)
-   )
+   c) Verify password: bcrypt.compare(password, user.password_hash)
+   d) If password mismatch: Return 401 Unauthorized
+   e) If successful: Create session in PostgreSQL sessions table
+      INSERT INTO sessions (id, userId, expiresAt, token, ...)
+      expiresAt = now() + 24 hours
+   f) Cache in AUTH_SESSION_KV via secondaryStorage:
+      KEY: session:<token>
+      VALUE: { session, user } (serialized)
+      TTL: 86400 seconds (auto-calculated from expiresAt)
+   g) Generate codex-session cookie (HttpOnly, Secure, SameSite=Strict)
    ↓
-8. Response
-   Return user + session
-   Set-Cookie: codex-session=<session-token>; HttpOnly; Secure; SameSite=Strict
+7. Response
+   Return JSON:
+   {
+     "user": { id, email, name, role, emailVerified, createdAt },
+     "session": { id, userId, expiresAt }
+   }
+   Set-Cookie: codex-session=<token>; HttpOnly; Secure; SameSite=Strict; Path=/
    ↓
-9. Client
-   Store session cookie
-   Include in subsequent requests
+8. Client
+   Extract session cookie from Set-Cookie header
+   Store in cookie jar
+   Include Cookie header in subsequent authenticated requests
+```
+
+**Session Lifecycle After Login**:
+```
+Request 1 (within 5min of login):
+  - BetterAuth checks internal memory cache → HIT
+  - Return cached session immediately (1ms)
+
+Request 2 (5-30min after login):
+  - Internal cache expired (5min TTL)
+  - BetterAuth checks AUTH_SESSION_KV → HIT
+  - Load from KV (10ms), update memory cache
+  - Return session
+
+Request 3 (after KV expires, within 24 hours):
+  - Both caches expired
+  - BetterAuth queries PostgreSQL → HIT
+  - Load from DB (50ms), update both caches
+  - Return session
+
+Request 4 (after 24 hours):
+  - Session expiresAt < now
+  - Return 401 Unauthorized
+  - Client must re-login
 ```
 
 ## Data Models
