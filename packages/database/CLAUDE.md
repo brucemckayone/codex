@@ -829,6 +829,8 @@ async function safeInsertContent(content: NewContent) {
 
 ## Data Models
 
+Complete schema definitions with all tables, columns, constraints, and relationships.
+
 ### Identity Tables
 
 #### users
@@ -1276,6 +1278,215 @@ Video playback progress for resume functionality.
 ```typescript
 type VideoPlayback = typeof schema.videoPlayback.$inferSelect;
 type NewVideoPlayback = typeof schema.videoPlayback.$inferInsert;
+```
+
+---
+
+### Notification Tables
+
+#### emailTemplates
+
+Email template management with multi-scope support (global, organization, creator).
+
+**Columns**:
+- `id: uuid` - Primary key
+- `name: varchar[100]` - Template name (e.g., 'email-verification')
+- `scope: templateScopeEnum` - Scope level: global, organization, or creator (required)
+- `organizationId: uuid` - Organization owner (FK -> organizations, cascade delete) (optional)
+- `creatorId: text` - Creator owner (FK -> users, cascade delete) (optional)
+- `createdBy: text` - User who created template (FK -> users, set null) (optional)
+- `subject: varchar[500]` - Email subject line (required)
+- `htmlBody: text` - HTML email body (required)
+- `textBody: text` - Plain text email body (required)
+- `description: text` - Template description (optional)
+- `status: templateStatusEnum` - Status: draft, active, archived (default: draft)
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+- `deletedAt: timestamp` - Soft-delete marker (optional)
+
+**Enums**:
+- `template_scope`: global, organization, creator
+- `template_status`: draft, active, archived
+
+**Scoping Rules**:
+- `global` scope: No owner (organizationId and creatorId must be NULL)
+- `organization` scope: Requires organizationId, creatorId must be NULL
+- `creator` scope: Requires creatorId
+
+**Uniqueness**:
+- Global templates: Unique name (soft delete aware)
+- Organization templates: Unique (name, organizationId) per org
+- Creator templates: Unique (name, creatorId) per creator
+
+**Indexes**:
+- Index on organizationId
+- Index on creatorId
+- Index on scope
+- Index on status
+- Index on createdBy
+- Composite on (organizationId, scope)
+- Composite on (creatorId, scope)
+- Composite on (status, scope, deletedAt)
+- Template resolution optimization index: (name, scope, organizationId, creatorId)
+
+**Lifecycle**:
+1. `draft` - Editable, not sent
+2. `active` - Locked, ready for sending
+3. `archived` - Hidden, but not soft-deleted
+
+**Type Exports**:
+```typescript
+type EmailTemplate = typeof schema.emailTemplates.$inferSelect;
+type NewEmailTemplate = typeof schema.emailTemplates.$inferInsert;
+type TemplateScope = 'global' | 'organization' | 'creator';
+type TemplateStatus = 'draft' | 'active' | 'archived';
+```
+
+#### emailAuditLogs
+
+Email send attempt audit trail for compliance and debugging.
+
+**Columns**:
+- `id: uuid` - Primary key
+- `organizationId: uuid` - Organization context (FK -> organizations, set null) (optional)
+- `creatorId: text` - Creator context (FK -> users, set null) (optional)
+- `templateName: varchar[100]` - Template used (required)
+- `recipientEmail: varchar[255]` - Recipient email (required)
+- `status: emailSendStatusEnum` - Send result: pending, success, failed (default: pending)
+- `error: text` - Error message if failed (optional)
+- `metadata: text` - Additional context (JSON-encoded) (optional)
+- `createdAt: timestamp` - Send attempt time (auto)
+- `updatedAt: timestamp` - Last update time (auto)
+
+**Enums**:
+- `email_send_status`: pending, success, failed
+
+**Indexes**:
+- Index on organizationId
+- Index on creatorId
+- Index on status
+- Composite on (createdAt, status) for audit queries
+
+**Use Cases**:
+- Email compliance logging (PII: recipient email, template name)
+- Troubleshooting delivery failures
+- Analytics on email send rates
+- Audit trail for regulatory requirements
+
+**Type Exports**:
+```typescript
+type EmailAuditLog = typeof schema.emailAuditLogs.$inferSelect;
+type NewEmailAuditLog = typeof schema.emailAuditLogs.$inferInsert;
+```
+
+---
+
+### Settings Tables
+
+#### platformSettings
+
+Hub table for organization settings with CASCADE DELETE coordination.
+
+**Purpose**: Acts as parent for all organization-scoped settings (branding, contact, features). One row per organization, lazy-created on first settings access.
+
+**Columns**:
+- `organizationId: uuid` - Primary key, organization reference (FK -> organizations, cascade delete)
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+
+**Relationships**:
+- Has one BrandingSettings (via organizationId)
+- Has one ContactSettings (via organizationId)
+- Has one FeatureSettings (via organizationId)
+
+**Cascade Behavior**: When organization deleted, all related settings deleted automatically.
+
+**Type Exports**:
+```typescript
+type PlatformSettings = typeof schema.platformSettings.$inferSelect;
+type NewPlatformSettings = typeof schema.platformSettings.$inferInsert;
+```
+
+#### brandingSettings
+
+Visual identity and branding configuration per organization.
+
+**Columns**:
+- `organizationId: uuid` - Primary key, organization reference (FK -> platformSettings, cascade delete)
+- `logoUrl: text` - CDN URL for organization logo (optional)
+- `logoR2Path: text` - R2 storage path for deletion tracking (optional)
+- `primaryColorHex: varchar[7]` - Primary brand color (default: '#3B82F6')
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+
+**Indexes**:
+- Index on updatedAt
+
+**Use Cases**:
+- Organization branding (logo, colors) in frontend
+- Custom UI theming
+- White-label support
+
+**Type Exports**:
+```typescript
+type BrandingSettings = typeof schema.brandingSettings.$inferSelect;
+type NewBrandingSettings = typeof schema.brandingSettings.$inferInsert;
+```
+
+#### contactSettings
+
+Business information and contact details per organization.
+
+**Columns**:
+- `organizationId: uuid` - Primary key, organization reference (FK -> platformSettings, cascade delete)
+- `platformName: varchar[100]` - Display name for the platform (default: 'Codex Platform')
+- `supportEmail: varchar[255]` - Support contact email (default: 'support@example.com')
+- `contactUrl: text` - Contact/support form URL (optional)
+- `timezone: varchar[100]` - Organization timezone (default: 'UTC')
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+
+**Indexes**:
+- Index on updatedAt
+
+**Use Cases**:
+- Support contact information
+- Email signature/footer data
+- Localization timezone
+- Custom domain branding
+
+**Type Exports**:
+```typescript
+type ContactSettings = typeof schema.contactSettings.$inferSelect;
+type NewContactSettings = typeof schema.contactSettings.$inferInsert;
+```
+
+#### featureSettings
+
+Feature flags and capability toggles per organization.
+
+**Columns**:
+- `organizationId: uuid` - Primary key, organization reference (FK -> platformSettings, cascade delete)
+- `enableSignups: boolean` - Allow new user registrations (default: true)
+- `enablePurchases: boolean` - Allow content purchases (default: true)
+- `createdAt: timestamp` - Creation timestamp (auto)
+- `updatedAt: timestamp` - Last update timestamp (auto)
+
+**Indexes**:
+- Index on updatedAt
+
+**Use Cases**:
+- Feature toggles for gradual rollout
+- Organization-specific capabilities
+- Beta features per org
+- Platform locks (disable signups/purchases)
+
+**Extensibility**: New boolean flags can be added without migration - schema is designed for expansion.
+
+**Type Exports**:
+```typescript
+type FeatureSettings = typeof schema.featureSettings.$inferSelect;
+type NewFeatureSettings = typeof schema.featureSettings.$inferInsert;
 ```
 
 ---

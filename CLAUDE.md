@@ -21,7 +21,7 @@ Foundation Layer (Infrastructure)
 External Services (Neon PostgreSQL, R2, KV, Stripe)
 ```
 
-**4 Workers** → **12 Packages** → **Foundation Layer**
+**8 Workers** → **17 Packages** → **Foundation Layer**
 
 ---
 
@@ -45,7 +45,7 @@ External Services (Neon PostgreSQL, R2, KV, Stripe)
 
 ---
 
-## The 4 Workers
+## The 8 Workers
 
 All workers are Cloudflare Workers deployments that follow a consistent middleware pattern.
 
@@ -123,7 +123,47 @@ E-commerce API for Stripe Checkout integration and payment webhook processing. H
 
 ---
 
-## The 12 Packages
+### 5. Admin-API Worker (Port 42073)
+**File**: [workers/admin-api/CLAUDE.md](workers/admin-api/CLAUDE.md)
+
+Admin dashboard API for platform owners. Provides analytics, customer management, and cross-creator content administration.
+- Revenue metrics and customer statistics
+- Customer data access and support operations
+- Content management with publish controls
+
+---
+
+### 6. Notifications-API Worker (Port 42074)
+**File**: [workers/notifications-api/CLAUDE.md](workers/notifications-api/CLAUDE.md)
+
+Email notification service for Codex platform. Manages email templates and sending via Resend.
+- Email template management (global, organization, creator scopes)
+- Resend integration for delivery
+- MailHog support for local development
+
+---
+
+### 7. Organization-API Worker (Port 42075)
+**File**: [workers/organization-api/CLAUDE.md](workers/organization-api/CLAUDE.md)
+
+Organization and user identity management.
+- Organization CRUD with unique slugs
+- Multi-tenant scoping
+- User membership management
+
+---
+
+### 8. Media-API Worker (Port 42076)
+**File**: [workers/media-api/CLAUDE.md](workers/media-api/CLAUDE.md)
+
+Media transcoding and streaming API. Manages the complete transcoding pipeline via RunPod GPU workers.
+- Transcoding job submission and status tracking
+- HLS streaming playlist generation
+- Adaptive bitrate delivery for video and audio
+
+---
+
+## The 17 Packages
 
 All packages live in `packages/`. They're organized into three architectural layers:
 
@@ -146,10 +186,12 @@ All packages live in `packages/`. They're organized into three architectural lay
 | Package | Purpose | Docs |
 |---------|---------|------|
 | **@codex/content** | Content & media lifecycle management | [content/CLAUDE.md](packages/content/CLAUDE.md) |
-| **@codex/identity** | Organization management | [identity/CLAUDE.md](packages/identity/CLAUDE.md) |
+| **@codex/organization** | Organization management | [organization/CLAUDE.md](packages/organization/CLAUDE.md) |
 | **@codex/access** | Content access control, streaming URLs, playback tracking | [access/CLAUDE.md](packages/access/CLAUDE.md) |
 | **@codex/purchase** | Stripe Checkout integration, purchase management, revenue splits | [purchase/CLAUDE.md](packages/purchase/CLAUDE.md) |
 | **@codex/notifications** | Email template management and sending, multi-scope templates | [notifications/CLAUDE.md](packages/notifications/CLAUDE.md) |
+| **@codex/admin** | Admin dashboard services, analytics, customer management | [admin/CLAUDE.md](packages/admin/CLAUDE.md) |
+| **@codex/transcoding** | Media transcoding pipeline, RunPod integration, HLS generation | [transcoding/CLAUDE.md](packages/transcoding/CLAUDE.md) |
 
 **Key Concept**: Service layer implements domain business logic. Each service extends BaseService and throws domain-specific errors.
 
@@ -163,6 +205,7 @@ All packages live in `packages/`. They're organized into three architectural lay
 | **@codex/cloudflare-clients** | R2 storage service, presigned URLs | [cloudflare-clients/CLAUDE.md](packages/cloudflare-clients/CLAUDE.md) |
 | **@codex/observability** | Logging and monitoring | [observability/CLAUDE.md](packages/observability/CLAUDE.md) |
 | **@codex/test-utils** | Database setup, test helpers | [test-utils/CLAUDE.md](packages/test-utils/CLAUDE.md) |
+| **@codex/platform-settings** | Platform branding, feature toggles, organization settings | [platform-settings/CLAUDE.md](packages/platform-settings/CLAUDE.md) |
 
 **Key Concept**: Utilities provide helpers for workers, services, and tests without implementing business logic.
 
@@ -218,7 +261,7 @@ All packages live in `packages/`. They're organized into three architectural lay
 - Content lifecycle: draft → published → deleted (soft delete)
 - Media lifecycle: uploading → uploaded → transcoding → ready/failed
 
-**@codex/identity** [Read Full Docs](packages/identity/CLAUDE.md)
+**@codex/organization** [Read Full Docs](packages/organization/CLAUDE.md)
 - OrganizationService: create, get, update, delete organizations
 - Slug uniqueness validation
 - Organization metadata: name, description, logo, website
