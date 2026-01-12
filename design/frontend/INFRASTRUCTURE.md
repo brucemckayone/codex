@@ -102,21 +102,25 @@ Two approaches for org subdomains:
 
 ### Wrangler Configuration for Wildcards
 
-> **Important**: Cloudflare Workers `custom_domain = true` doesn't support wildcards. Use Worker Routes instead:
+> **Important**: Cloudflare Workers `custom_domain = true` doesn't support wildcards. Use Worker Routes with `zone_name` instead.
 
-```toml
-# CORRECT: Worker Routes pattern (supports wildcards)
-[[env.production.routes]]
-pattern = "*.revelations.studio/*"
-zone_name = "revelations.studio"
+```jsonc
+// apps/web/wrangler.jsonc
 
-# WRONG: custom_domain doesn't support wildcards
-# [[env.production.routes]]
-# pattern = "*.revelations.studio"
-# custom_domain = true
+// CORRECT: Worker Routes pattern (supports wildcards)
+"routes": [
+  {
+    "pattern": "*.revelations.studio/*",
+    "zone_name": "revelations.studio"
+  },
+  {
+    "pattern": "revelations.studio/*",
+    "zone_name": "revelations.studio"
+  }
+]
 ```
 
-> **Note**: Current `apps/web/wrangler.toml` uses `custom_domain = true` with staging wildcards. This may need to be updated to use `zone_name` pattern for proper wildcard subdomain support.
+> **Note**: Avoid `custom_domain: true` when using wildcards.
 
 ### Reserved Subdomains
 
@@ -142,21 +146,32 @@ Org slug validation must reject these.
 
 ### Required Environment Variables
 
-Configured via `wrangler.toml` bindings (not `.env` files):
+Configured via `wrangler.jsonc` (or `wrangler.toml`) bindings:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AUTH_WORKER_URL` | Auth Worker base URL | `https://auth.revelations.studio` |
 | `API_URL` | Main API base URL | `https://api.revelations.studio` |
 
-> **Important**: Cloudflare Workers use wrangler bindings accessed via `platform.env`, not the SvelteKit `$env/static/public` pattern. The `PUBLIC_*` prefix convention from Vite doesn't apply to Cloudflare Workers.
+> **Important**: Cloudflare Workers use wrangler bindings accessed via `platform.env`. If these need to be accessed on the client-side, they must be passed via `+page.server.ts` or set as build-time variables using `PUBLIC_` prefix in `.env` if using adapter-static (but we are using adapter-cloudflare).
+
+**Pattern for Client Access (Svelte 5)**:
 
 ```typescript
-// Accessing in load functions
+// +page.server.ts
 export async function load({ platform }) {
-  const authUrl = platform?.env?.AUTH_WORKER_URL ?? 'http://localhost:42069';
-  // ...
+  return {
+    authUrl: platform?.env?.AUTH_WORKER_URL ?? 'http://localhost:42069'
+  };
 }
+```
+
+```svelte
+<!-- +page.svelte -->
+<script lang="ts">
+  let { data } = $props();
+  // Use data.authUrl
+</script>
 ```
 
 ### Local Development Fallbacks

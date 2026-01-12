@@ -61,7 +61,7 @@ Handles user authentication, session management, email verification, and passwor
 - POST /api/auth/email/register
 - POST /api/auth/email/login
 - GET /api/auth/session
-- POST /api/auth/signout
+- POST /api/auth/sign-out
 
 ---
 
@@ -86,17 +86,9 @@ REST API for content lifecycle (create, publish, delete), media management, and 
 ### 3. Identity-API Worker (Port 42071)
 **File**: [workers/identity-api/CLAUDE.md](workers/identity-api/CLAUDE.md)
 
-Organization and user identity management.
-- Organization CRUD with unique slugs
-- Multi-tenant scoping
-- User membership management
-
-**Key Endpoints**:
-- POST /api/organizations
-- GET /api/organizations/:id
-- GET /api/organizations/slug/:slug
-- PATCH /api/organizations/:id
-- DELETE /api/organizations/:id
+Placeholder worker reserved for future user identity management (profiles, preferences, account settings). Currently provides only a health check endpoint.
+- **Status**: Placeholder / Maintenance Mode
+- **Current Endpoint**: GET /health
 
 ---
 
