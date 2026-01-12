@@ -5,14 +5,23 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
   preprocess: vitePreprocess(),
   kit: {
-    adapter: adapter(),
+    adapter: adapter({
+      // Cloudflare Workers adapter options
+      routes: {
+        include: ['/*'],
+        exclude: ['<all>'],
+      },
+    }),
     alias: {
       $lib: './src/lib',
+      $paraglide: './src/lib/paraglide',
       '@codex/database': '../../packages/database/src',
       '@codex/validation': '../../packages/validation/src',
       '@codex/cloudflare-clients': '../../packages/cloudflare-clients/src',
       '@codex/test-utils': '../../packages/test-utils/src',
     },
+    // NOTE: Remote Functions (experimental.remoteFunctions) available but not enabled yet
+    // Enable when stable for type-safe client-server communication
   },
 };
 

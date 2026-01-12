@@ -21,11 +21,16 @@
   "dependencies": {
     "@codex/database": "workspace:*",
     "@codex/test-utils": "workspace:*",
-    "happy-dom": "^20.0.8"
+    "@inlang/paraglide-sveltekit": "^0.15.0",
+    "happy-dom": "^20.0.8",
+    "nanoid": "^5.0.0",
+    "valibot": "^0.30.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251014.0",
+    "@inlang/paraglide-js": "^1.11.0",
     "@playwright/test": "^1.56.1",
+    "@rollup/rollup-darwin-arm64": "^4.55.1",
     "@sveltejs/adapter-cloudflare": "^7.2.4",
     "@sveltejs/kit": "^2.0.0",
     "svelte": "^5.0.0",

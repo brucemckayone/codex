@@ -1,39 +1,19 @@
 <script lang="ts">
+  /**
+   * Root layout - provides user context to all pages
+   */
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
+  import '../app.css';
 
-  // biome-ignore lint/correctness/noUnusedVariables: Svelte 5 $props() destructuring - children is used in template
-  const { data: _, children }: { data: LayoutData; children: Snippet } = $props();
+  const { data, children }: { data: LayoutData; children: Snippet } = $props();
+
+  // User is available to all child components via data
+  const _ = data;
 </script>
 
-<div class="app">
-  <main>
-    {@render children()}
-  </main>
-</div>
+<svelte:head>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</svelte:head>
 
-<style>
-  .app {
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-  }
-
-  main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 1rem;
-    width: 100%;
-    max-width: 1200px;
-    margin: 0 auto;
-    box-sizing: border-box;
-  }
-
-  :global(body) {
-    margin: 0;
-    font-family:
-      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
-      Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  }
-</style>
+{@render children()}

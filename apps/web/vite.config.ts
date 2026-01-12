@@ -1,11 +1,18 @@
+import { paraglide } from '@inlang/paraglide-sveltekit/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  // @ts-expect-error - sveltekit returns Promise<Plugin[]> but defineConfig expects PluginOption
-  plugins: [sveltekit()],
+  plugins: [
+    // Paraglide must come before SvelteKit
+    paraglide({
+      project: './project.inlang',
+      outdir: './src/lib/paraglide',
+    }),
+    sveltekit(),
+  ],
   test: {
-    include: ['src/**/*.{test,spec}.ts'], // Default include for now
+    include: ['src/**/*.{test,spec}.ts'],
     globals: true,
     environment: 'happy-dom',
   },

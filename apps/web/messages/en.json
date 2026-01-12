@@ -1,0 +1,37 @@
+{
+  "common_loading": "Loading...",
+  "common_error": "Something went wrong",
+  "common_retry": "Try again",
+  "common_cancel": "Cancel",
+  "common_save": "Save",
+  "common_delete": "Delete",
+  "common_edit": "Edit",
+  "common_back": "Back",
+  "common_next": "Next",
+  "common_submit": "Submit",
+
+  "nav_home": "Home",
+  "nav_library": "Library",
+  "nav_account": "Account",
+  "nav_login": "Sign In",
+  "nav_logout": "Sign Out",
+  "nav_explore": "Explore",
+  "nav_studio": "Studio",
+
+  "error_not_found": "Page not found",
+  "error_not_found_description": "The page you're looking for doesn't exist or has been moved.",
+  "error_unauthorized": "Please sign in to continue",
+  "error_forbidden": "You don't have access to this page",
+  "error_server": "Server error",
+  "error_server_description": "We're having trouble connecting. Please try again later.",
+
+  "auth_login_title": "Sign In",
+  "auth_login_description": "Sign in to your account to continue",
+  "auth_register_title": "Create Account",
+  "auth_register_description": "Join to access content and connect with creators",
+  "auth_forgot_password_title": "Reset Password",
+  "auth_forgot_password_description": "Enter your email to receive a password reset link",
+
+  "platform_welcome": "Welcome to Revelations",
+  "platform_tagline": "Discover transformative content from independent creators"
+}
