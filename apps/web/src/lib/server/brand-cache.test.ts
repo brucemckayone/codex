@@ -8,16 +8,22 @@ import {
 } from './brand-cache';
 
 describe('BrandCache Service', () => {
+  // Mock implementations
+  const mockGet = vi.fn();
+  const mockPut = vi.fn();
+  const mockDelete = vi.fn();
+  const mockWaitUntil = vi.fn();
+
   const mockPlatform = {
     env: {
       BRAND_KV: {
-        get: vi.fn(),
-        put: vi.fn(),
-        delete: vi.fn(),
+        get: mockGet,
+        put: mockPut,
+        delete: mockDelete,
       },
     },
     context: {
-      waitUntil: vi.fn(),
+      waitUntil: mockWaitUntil,
     },
   } as unknown as App.Platform;
 
@@ -38,21 +44,16 @@ describe('BrandCache Service', () => {
 
   describe('getBrandConfig', () => {
     it('should return cached data on hit', async () => {
-      vi.mocked(mockPlatform.env!.BRAND_KV!.get).mockResolvedValue(
-        mockCachedData as any
-      );
+      mockGet.mockResolvedValue(mockCachedData);
 
       const result = await getBrandConfig(mockPlatform, mockSlug);
 
       expect(result).toEqual(mockCachedData);
-      expect(mockPlatform.env!.BRAND_KV!.get).toHaveBeenCalledWith(
-        'brand:test-org',
-        'json'
-      );
+      expect(mockGet).toHaveBeenCalledWith('brand:test-org', 'json');
     });
 
     it('should return null on cache miss', async () => {
-      vi.mocked(mockPlatform.env!.BRAND_KV!.get).mockResolvedValue(null);
+      mockGet.mockResolvedValue(null);
 
       const result = await getBrandConfig(mockPlatform, mockSlug);
 
@@ -60,14 +61,14 @@ describe('BrandCache Service', () => {
     });
 
     it('should return null when KV is undefined', async () => {
-      const result = await getBrandConfig({} as App.Platform, mockSlug);
+      // Create incomplete platform override
+      const emptyPlatform = {} as App.Platform;
+      const result = await getBrandConfig(emptyPlatform, mockSlug);
       expect(result).toBeNull();
     });
 
     it('should return null on KV error', async () => {
-      vi.mocked(mockPlatform.env!.BRAND_KV!.get).mockRejectedValue(
-        new Error('KV Error')
-      );
+      mockGet.mockRejectedValue(new Error('KV Error'));
       const consoleSpy = vi
         .spyOn(console, 'error')
         .mockImplementation(() => {});
@@ -83,39 +84,33 @@ describe('BrandCache Service', () => {
     it('should write to KV and use waitUntil', () => {
       // Return a fake promise to verify it's passed to waitUntil
       const fakePromise = Promise.resolve();
-      vi.mocked(mockPlatform.env!.BRAND_KV!.put).mockReturnValue(
-        fakePromise as any
-      );
+      mockPut.mockReturnValue(fakePromise);
 
       setBrandConfig(mockPlatform, mockSlug, mockCachedData);
 
-      expect(mockPlatform.env!.BRAND_KV!.put).toHaveBeenCalledWith(
+      expect(mockPut).toHaveBeenCalledWith(
         'brand:test-org',
         JSON.stringify(mockCachedData),
         { expirationTtl: 604800 }
       );
-      expect(mockPlatform.context.waitUntil).toHaveBeenCalledWith(fakePromise);
+      expect(mockWaitUntil).toHaveBeenCalledWith(fakePromise);
     });
 
     it('should do nothing when platform is undefined', () => {
       setBrandConfig(undefined, mockSlug, mockCachedData);
-      expect(mockPlatform.env!.BRAND_KV!.put).not.toHaveBeenCalled();
+      expect(mockPut).not.toHaveBeenCalled();
     });
   });
 
   describe('deleteBrandConfig', () => {
     it('should delete from KV and use waitUntil', () => {
       const fakePromise = Promise.resolve();
-      vi.mocked(mockPlatform.env!.BRAND_KV!.delete).mockReturnValue(
-        fakePromise as any
-      );
+      mockDelete.mockReturnValue(fakePromise);
 
       deleteBrandConfig(mockPlatform, mockSlug);
 
-      expect(mockPlatform.env!.BRAND_KV!.delete).toHaveBeenCalledWith(
-        'brand:test-org'
-      );
-      expect(mockPlatform.context.waitUntil).toHaveBeenCalledWith(fakePromise);
+      expect(mockDelete).toHaveBeenCalledWith('brand:test-org');
+      expect(mockWaitUntil).toHaveBeenCalledWith(fakePromise);
     });
   });
 });
