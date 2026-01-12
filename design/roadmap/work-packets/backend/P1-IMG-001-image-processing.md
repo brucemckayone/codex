@@ -25,7 +25,7 @@
 
 The Image Processing Pipeline handles validation, processing, and storage of user-uploaded static images across the platform. Unlike video thumbnails (auto-extracted via RunPod), this covers custom images that users manually upload: content thumbnails, organization logos, and user avatars.
 
-This service bridges file upload validation in `@codex/validation` with image optimization (resize, format conversion) and R2 storage. Every uploaded image goes through magic byte validation (preventing MIME spoofing), size/dimension checks, and Sharp-based optimization to generate multiple sizes in WebP format.
+This service bridges file upload validation in `@codex/validation` with image optimization (resize, format conversion) and R2 storage. Every uploaded image goes through magic byte validation (preventing MIME spoofing), size/dimension checks, and **Wasm-based optimization using `@cf-wasm/photon`** to generate multiple sizes in WebP format.
 
 The pipeline supports three distinct image types with different requirements:
 - **Content Thumbnails**: Custom thumbnails that override auto-extracted video frames (up to 5MB, 1920×1080 max)
@@ -86,8 +86,12 @@ This service is consumed by:
 ### External Services
 
 **Cloudflare R2**: Object storage for processed images
-**Sharp**: Image processing library (resize, format conversion)
+**@cf-wasm/photon**: Rust-based Wasm image processing library (resize, format conversion)
 **DOMPurify**: SVG sanitization (already integrated)
+
+> [!NOTE]
+> **Why Photon over Sharp?**
+> Sharp requires native binaries or a heavy Wasm build that risks exceeding Cloudflare Worker memory limits (128MB). Photon is a lightweight Rust crate compiled to Wasm, specifically designed for edge environments. It supports resize, WebP encoding, and runs efficiently within Worker constraints.
 
 ### Integration Flow
 
@@ -96,7 +100,7 @@ User Upload (FormData)
     ↓
 Validation (magic bytes, size, dimensions)
     ↓
-Sharp Processing (resize to sm/md/lg, WebP conversion)
+Photon Wasm Processing (resize to sm/md/lg, WebP conversion)
     ↓
 R2 Upload (creator-scoped paths)
     ↓
@@ -344,17 +348,30 @@ getUserAvatarKey(userId, size): string
 
 ### External Libraries
 
-#### Sharp
+#### @cf-wasm/photon
 
-**Image Processing**:
+**Image Processing (Wasm)**:
 ```typescript
-await sharp(inputBuffer)
-  .resize(width, null, { withoutEnlargement: true })
-  .webp({ quality: 82, effort: 6 })
-  .toBuffer();
+import { PhotonImage, resize } from '@cf-wasm/photon';
+
+// Load image into Wasm memory
+const inputImage = PhotonImage.new_from_byteslice(new Uint8Array(buffer));
+
+// Resize (maintains aspect ratio)
+const resized = resize(inputImage, 400, 0, 1); // width=400, height=auto
+
+// Convert to WebP
+const webpBytes = resized.get_bytes_webp();
+
+// CRITICAL: Free Wasm memory to prevent leaks
+inputImage.free();
+resized.free();
 ```
 
-**When to use**: Process each uploaded image into multiple sizes.
+**When to use**: Process each uploaded image into multiple sizes directly in Cloudflare Workers.
+
+> [!CAUTION]
+> **Wasm Memory Management**: Always call `.free()` on PhotonImage objects after use. Wasm memory is not garbage collected. Failure to free will cause memory leaks and eventual OOM.
 
 ---
 
@@ -382,7 +399,7 @@ await sharp(inputBuffer)
 - ✅ CDN routing for R2 assets
 - ✅ Database schema tooling (Drizzle ORM)
 - ✅ Worker deployment pipeline
-- ✅ Sharp available in Cloudflare Workers (via wasm)
+- ✅ Wasm support in Wrangler/esbuild build pipeline
 
 ---
 
@@ -403,11 +420,12 @@ await sharp(inputBuffer)
 
 - [ ] **Service Layer**
   - [ ] Create `ImageProcessingService` (or add to existing service)
-  - [ ] Implement Sharp pipeline for resize + WebP conversion
-  - [ ] Implement multi-size generation (sm/md/lg)
+  - [ ] Create `@codex/image-processing` package with `@cf-wasm/photon` dependency
+  - [ ] Implement Wasm wrapper with proper `.free()` memory management
+  - [ ] Implement multi-size generation (sm/md/lg) with WebP output
   - [ ] Add R2 upload for all sizes
   - [ ] Add SVG passthrough for logos (sanitize only)
-  - [ ] Add unit tests with mocked Sharp and R2
+  - [ ] Add unit tests with mocked Photon and R2
 
 - [ ] **Database Updates**
   - [ ] Add `avatarUrl` column to users table (migration)
@@ -439,10 +457,11 @@ await sharp(inputBuffer)
 - Test SVG sanitization removes malicious content
 
 **Service Layer**:
-- Mock Sharp to test resize pipeline
+- Mock Photon to test resize pipeline
 - Mock R2 to test upload sequence
 - Test error handling (invalid format, upload failure)
 - Test multi-size generation produces all required sizes
+- Test `.free()` is called on all Wasm objects
 
 ### Integration Tests
 
@@ -462,7 +481,7 @@ await sharp(inputBuffer)
 **Content Thumbnail Upload**:
 1. Creator uploads JPEG for their content
 2. System validates magic bytes and size
-3. Sharp processes to sm/md/lg WebP
+3. Photon (Wasm) processes to sm/md/lg WebP
 4. R2 receives all three files
 5. Database `thumbnailUrl` updated with base path
 6. Frontend displays new thumbnail immediately
@@ -489,7 +508,9 @@ await sharp(inputBuffer)
 
 **WebP as Output Format**: Matches video thumbnail spec in IMAGE_PROCESSING_PIPELINE.md. 95%+ browser support, good compression.
 
-**Sharp in Workers**: Using Sharp's WebAssembly build for Cloudflare Workers. Avoids needing RunPod for static images.
+**Photon (Wasm) in Workers**: Using `@cf-wasm/photon`, a lightweight Rust library compiled to Wasm, for image processing directly in Cloudflare Workers. This avoids external dependencies (RunPod) and heavy binaries (Sharp).
+
+**Memory Constraints**: Cloudflare Workers have a 128MB memory limit. Strict file size limits (5MB) prevent OOM. All Wasm objects must be freed after use.
 
 **No Upscaling**: Preserve aspect ratio, only scale down. Prevents blurry upscaled images.
 
@@ -522,7 +543,7 @@ Frontend priority: `content.thumbnailUrl` > `mediaItem.thumbnailKey` > placehold
 
 - **AVIF Support**: Add AVIF as additional output format when browser support improves
 - **Image Cropping**: Allow user to specify crop area during upload
-- **Background Processing**: For very large images, queue processing instead of sync
+- **BlurHash**: Generate BlurHash during processing for skeleton loading states
 
 ---
 
