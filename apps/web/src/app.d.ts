@@ -16,6 +16,7 @@ declare global {
         API_URL?: string;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ASSETS?: any;
+        BRAND_KV?: KVNamespace;
       };
       context: {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

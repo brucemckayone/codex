@@ -38,6 +38,31 @@ import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
+/**
+ * Update the branding cache in KV
+ * Used to ensure zero-latency branding on the edge
+ */
+async function updateBrandCache(
+  kv: KVNamespace | undefined,
+  slug: string,
+  branding: BrandingSettingsResponse
+): Promise<void> {
+  if (!kv) return;
+  try {
+    const cacheData = {
+      version: Date.now(),
+      updatedAt: new Date().toISOString(),
+      branding,
+    };
+    // 7 days TTL
+    await kv.put(`brand:${slug}`, JSON.stringify(cacheData), {
+      expirationTtl: 604800,
+    });
+  } catch (err) {
+    console.warn(`Failed to update brand cache for ${slug}:`, err);
+  }
+}
+
 const app = new Hono<HonoEnv>();
 
 // Param schema for org ID validation
@@ -90,7 +115,19 @@ app.put(
       body: updateBrandingSchema,
     },
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
-      return await ctx.services.settings.updateBranding(ctx.input.body);
+      const result = await ctx.services.settings.updateBranding(ctx.input.body);
+
+      // Invalidate cache
+      const org = await ctx.services.organization.get(ctx.input.params.id);
+      if (org) {
+        // biome-ignore lint/suspicious/noExplicitAny: Workaround for missing types
+        const unsafeCtx = ctx as any;
+        unsafeCtx.executionCtx.waitUntil(
+          updateBrandCache(unsafeCtx.env.BRAND_KV, org.slug, result)
+        );
+      }
+
+      return result;
     },
   })
 );
@@ -210,6 +247,18 @@ app.post('/branding/logo', async (c) => {
         size: logoFile.size,
       });
 
+      // Invalidate cache
+      // We need to resolve the slug from the organization ID
+      const { OrganizationService } = await import('@codex/organization');
+      const orgService = new OrganizationService({ db, environment });
+      const org = await orgService.get(organizationId);
+
+      if (org) {
+        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV binding propagation delay
+        const kv = (c.env as any).BRAND_KV;
+        c.executionCtx.waitUntil(updateBrandCache(kv, org.slug, branding));
+      }
+
       return c.json({ data: branding });
     } finally {
       c.executionCtx.waitUntil(cleanup());
@@ -236,7 +285,19 @@ app.delete(
       if (!ctx.env.MEDIA_BUCKET) {
         throw new Error('Logo operations not configured');
       }
-      return await ctx.services.settings.deleteLogo();
+      const result = await ctx.services.settings.deleteLogo();
+
+      // Invalidate cache
+      const org = await ctx.services.organization.get(ctx.input.params.id);
+      if (org) {
+        // biome-ignore lint/suspicious/noExplicitAny: Workaround for missing types
+        const unsafeCtx = ctx as any;
+        unsafeCtx.executionCtx.waitUntil(
+          updateBrandCache(unsafeCtx.env.BRAND_KV, org.slug, result)
+        );
+      }
+
+      return result;
     },
   })
 );

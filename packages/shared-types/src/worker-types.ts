@@ -49,6 +49,12 @@ export type Bindings = {
   AUTH_SESSION_KV?: import('@cloudflare/workers-types').KVNamespace;
 
   /**
+   * Branding cache KV namespace
+   * Used for zero-latency organization branding
+   */
+  BRAND_KV?: import('@cloudflare/workers-types').KVNamespace;
+
+  /**
    * R2 bucket binding for media storage
    */
   MEDIA_BUCKET?: import('@cloudflare/workers-types').R2Bucket;
