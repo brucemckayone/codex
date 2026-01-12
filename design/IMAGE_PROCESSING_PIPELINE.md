@@ -1,14 +1,31 @@
 # Image Processing Pipeline
 
-**Status**: Design
+**Status**: In Progress (Phase 1 Complete)
 **Created**: 2026-01-12
+**Updated**: 2026-01-12
 **Purpose**: Define the complete image processing pipeline for thumbnails and media assets
+**Work Packet**: [P1-IMG-001](./roadmap/work-packets/backend/P1-IMG-001-image-processing.md)
 
 ---
 
 ## Overview
 
-This document specifies how images are processed, optimized, stored, and served across the Codex platform. The primary use case is content thumbnails, but the pipeline should support other image assets (org logos, user avatars, etc.).
+This document specifies how images are processed, optimized, stored, and served across the Codex platform. The pipeline handles **two distinct thumbnail types** plus other image assets:
+
+> [!IMPORTANT]
+> **Two Types of Thumbnails**
+>
+> | Type | Source | Database Field | Processing |
+> |------|--------|----------------|------------|
+> | **Media Thumbnail** | Auto-extracted from video at 10% mark | `media_items.thumbnailKey` | RunPod (FFmpeg) |
+> | **Content Thumbnail** | User-uploaded custom image | `content.thumbnailUrl` | API Worker (Sharp) |
+>
+> **Frontend Priority**: `content.thumbnailUrl` → `mediaItem.thumbnailKey` → placeholder
+
+### Current State
+
+- ✅ **Implemented**: Video frame extraction via RunPod (media thumbnails)
+- ❌ **Not Implemented**: Custom image upload pipeline (content thumbnails, logos, avatars)
 
 ---
 
@@ -236,32 +253,59 @@ await sharp(input)
 
 ### R2 Bucket Layout
 
-```
-content-bucket/
-├── thumbnails/
-│   ├── {contentId}-sm.webp
-│   ├── {contentId}-sm.jpg
-│   ├── {contentId}-md.webp
-│   ├── {contentId}-md.jpg
-│   ├── {contentId}-lg.webp
-│   └── {contentId}-lg.jpg
-├── media/
-│   └── {contentId}/
-│       ├── master.m3u8
-│       └── segments/
-└── uploads/
-    └── {uploadId}/
-        └── original.*
-```
-
-### Naming Convention
+> [!IMPORTANT]
+> All paths are **creator-scoped** for security and multi-tenancy. The `{creatorId}` prefix ensures proper isolation.
 
 ```
-{contentId}-{size}.{format}
-
-Example:
-550e8400-e29b-41d4-a716-446655440000-md.webp
+MEDIA_BUCKET/
+├── {creatorId}/
+│   ├── originals/
+│   │   └── {mediaId}/
+│   │       └── video.mp4           # Original upload
+│   ├── hls/
+│   │   └── {mediaId}/
+│   │       ├── master.m3u8         # HLS master playlist
+│   │       ├── 1080p/index.m3u8    # Quality variants
+│   │       ├── 720p/index.m3u8
+│   │       ├── 480p/index.m3u8
+│   │       ├── 360p/index.m3u8
+│   │       └── preview/
+│   │           └── preview.m3u8    # 30s preview clip
+│   ├── thumbnails/
+│   │   └── {mediaId}/
+│   │       └── auto-generated.jpg  # Auto-extracted thumbnail
+│   └── waveforms/
+│       └── {mediaId}/
+│           ├── waveform.json       # Audio waveform data
+│           └── waveform.png        # Audio waveform image
 ```
+
+### Path Generation (Single Source of Truth)
+
+All R2 paths are generated via `packages/transcoding/src/paths.ts`. Example functions:
+
+```typescript
+// Thumbnail path
+getThumbnailKey(creatorId, mediaId)
+// Returns: '{creatorId}/thumbnails/{mediaId}/auto-generated.jpg'
+
+// HLS master playlist
+getHlsMasterKey(creatorId, mediaId)
+// Returns: '{creatorId}/hls/{mediaId}/master.m3u8'
+
+// Original upload
+getOriginalKey(creatorId, mediaId, filename)
+// Returns: '{creatorId}/originals/{mediaId}/video.mp4'
+```
+
+### Current Implementation vs Future Multi-Size
+
+| Aspect | Current (Phase 1) | Future (Phase 2) |
+|--------|-------------------|------------------|
+| Sizes | Single auto-generated | sm (200px), md (400px), lg (800px) |
+| Formats | JPEG only | WebP primary, JPEG fallback |
+| Naming | `auto-generated.jpg` | `{size}.webp`, `{size}.jpg` |
+| Path | `{creatorId}/thumbnails/{mediaId}/` | Same structure, multiple files |
 
 ---
 
@@ -303,34 +347,69 @@ Frontend uses `<picture>` or srcset for format selection:
 
 ## Integration with Transcoding Pipeline
 
-### Current Flow (Video)
+### Transcoding Flow (Implemented)
 
-```
-1. User uploads video → R2 /uploads/
-2. Content-API creates media item (status: uploading)
-3. Upload complete → trigger RunPod job
-4. RunPod transcodes video → HLS segments → R2 /media/
-5. Webhook callback → update media item (status: ready)
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as Content-API
+    participant M as Media-API
+    participant R as RunPod
+    participant S as R2 Storage
+
+    U->>C: Upload video
+    C->>S: Store original in {creatorId}/originals/{mediaId}/
+    C->>C: Create media_item (status: uploading → uploaded)
+    C->>M: POST /api/transcoding/trigger (HMAC auth)
+    M->>R: POST /v2/{endpoint}/run
+    R-->>M: { id: "job-xxx", status: "IN_QUEUE" }
+    M->>M: Update status: transcoding
+
+    Note over R: Async processing on GPU
+    R->>S: Upload HLS to {creatorId}/hls/{mediaId}/
+    R->>S: Upload thumbnail to {creatorId}/thumbnails/{mediaId}/
+    R->>M: POST /api/transcoding/webhook (HMAC signed)
+
+    M->>M: Verify HMAC signature
+    M->>M: Update media_item atomically
+    M-->>R: 200 OK
 ```
 
-### Enhanced Flow (Video + Thumbnails)
+### Webhook Callback Payload
 
+RunPod sends an HMAC-signed callback to `/api/transcoding/webhook`:
+
+```typescript
+// Validated by runpodWebhookSchema in @codex/validation
+interface RunPodWebhookPayload {
+  jobId: string;                    // RunPod job ID
+  status: 'completed' | 'failed';
+  output?: {
+    mediaId: string;                // Links back to DB record
+    type: 'video' | 'audio';
+    hlsMasterKey?: string;          // '{creatorId}/hls/{mediaId}/master.m3u8'
+    hlsPreviewKey?: string;         // '{creatorId}/hls/{mediaId}/preview/preview.m3u8'
+    thumbnailKey?: string;          // '{creatorId}/thumbnails/{mediaId}/auto-generated.jpg'
+    waveformKey?: string;           // Audio only: '{creatorId}/waveforms/{mediaId}/waveform.json'
+    waveformImageKey?: string;      // Audio only: '{creatorId}/waveforms/{mediaId}/waveform.png'
+    durationSeconds?: number;       // Media duration
+    width?: number;                 // Video dimensions
+    height?: number;
+    readyVariants?: string[];       // ['1080p', '720p', '480p', '360p']
+    loudnessIntegrated?: number;    // LUFS × 100
+    loudnessPeak?: number;          // dBTP × 100
+    loudnessRange?: number;         // LU × 100
+  };
+  error?: string;                   // Present on failure (max 2000 chars)
+}
 ```
-1. User uploads video → R2 /uploads/
-2. Content-API creates media item (status: uploading)
-3. Upload complete → trigger RunPod job
-4. RunPod:
-   a. Extract thumbnail frame
-   b. Generate 3 sizes × 2 formats = 6 files
-   c. Upload thumbnails to R2 /thumbnails/
-   d. Transcode video → HLS
-   e. Upload HLS to R2 /media/
-5. Webhook callback includes:
-   - thumbnailUrls: { sm, md, lg }
-   - streamingUrl
-   - status: ready
-6. Content-API updates content with thumbnail URLs
-```
+
+### Webhook Security
+
+- **HMAC-SHA256 verification**: All webhooks verified via `x-runpod-signature` header
+- **Timestamp validation**: Max 5-minute clock skew allowed
+- **Atomic updates**: Uses conditional WHERE clause to prevent race conditions
+- **See**: `workers/media-api/src/middleware/verify-runpod-signature.ts`
 
 ---
 
@@ -452,21 +531,25 @@ CDN → User: Included in Cloudflare plan
 
 ## Implementation Phases
 
-### Phase 1: Basic Thumbnails
-- [ ] Add thumbnail extraction to RunPod worker
-- [ ] Generate 3 sizes in WebP only
-- [ ] Store in R2, update content record
-- [ ] Frontend displays thumbnails
+### Phase 1: Basic Thumbnails ✅ (Implemented)
+- [x] Add thumbnail extraction to RunPod worker
+- [x] Generate single auto-extracted JPEG thumbnail
+- [x] Store in R2 at `{creatorId}/thumbnails/{mediaId}/auto-generated.jpg`
+- [x] Webhook returns `thumbnailKey` in payload
+- [x] Database stores key in `media_items.thumbnail_key`
+- [ ] Frontend displays thumbnails (pending)
 
-### Phase 2: Optimization
-- [ ] Add JPEG fallback generation
-- [ ] Tune compression quality settings
+### Phase 2: Multi-Size + Format Optimization (Planned)
+- [ ] Generate 3 sizes: sm (200px), md (400px), lg (800px)
+- [ ] Primary format: WebP (quality 82, effort 6)
+- [ ] Fallback format: JPEG (quality 85, mozjpeg)
 - [ ] Implement scene detection for better frame selection
-- [ ] Add placeholder handling
+- [ ] Add quality scoring to reject poor thumbnails
+- [ ] Update path structure to support multiple files per thumbnail
 
-### Phase 3: Other Images
-- [ ] Org logo upload and processing
-- [ ] User avatar upload and processing
+### Phase 3: Other Images (Planned)
+- [ ] Org logo upload and processing (Sharp on API worker)
+- [ ] User avatar upload and processing (Sharp on API worker)
 - [ ] Generic image upload component
 
 ---

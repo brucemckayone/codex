@@ -959,6 +959,105 @@ Future: Creators may have limited branding options for their profile pages.
 
 ---
 
+## Typography & Layout Stability (CLS Prevention)
+
+Cumulative Layout Shift (CLS) is a Core Web Vital. We prevent layout shifts through font loading strategy and intrinsic sizing.
+
+### Font Loading Strategy
+
+| Strategy | Pros | Cons |
+|----------|------|------|
+| `font-display: swap` | Text visible immediately | Layout shift when font loads |
+| `font-display: optional` | No shift if font slow | May not show custom font |
+| **Size-adjusted fallback** | Best of both | More complex setup |
+
+**Decision**: Use `font-display: swap` with size-adjusted fallback fonts.
+
+```css
+/* Font declarations with fallback matching */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/inter-var.woff2') format('woff2');
+  font-display: swap;
+}
+
+/* Size-adjusted fallback to prevent layout shift */
+@font-face {
+  font-family: 'Inter-fallback';
+  src: local('Arial');
+  ascent-override: 90%;
+  descent-override: 22%;
+  line-gap-override: 0%;
+  size-adjust: 107%;
+}
+
+:root {
+  --font-sans: 'Inter', 'Inter-fallback', system-ui, sans-serif;
+}
+```
+
+**Why size-adjusted fallbacks?**
+- `Arial` metrics don't match `Inter` by default
+- Without adjustment, text reflows when font loads
+- Size overrides ensure same line breaks before/after font load
+
+### Intrinsic Sizing for Media
+
+All media containers must reserve space before content loads:
+
+```css
+/* Video containers */
+.video-container {
+  aspect-ratio: 16 / 9;
+  background: var(--color-surface-secondary);
+}
+
+/* Thumbnails */
+.thumbnail {
+  aspect-ratio: 16 / 9;
+  background: var(--color-surface-secondary);
+}
+
+/* Avatars */
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-secondary);
+}
+```
+
+### Image Elements
+
+Always specify dimensions or use CSS containment:
+
+```svelte
+<img
+  src={thumbnailUrl}
+  alt={title}
+  width="400"
+  height="225"
+  loading="lazy"
+  style="aspect-ratio: 16/9;"
+/>
+```
+
+### Skeleton Loading
+
+Skeletons must match final content dimensions exactly:
+
+```svelte
+{#if loading}
+  <div class="skeleton card-skeleton" style="height: 280px;"></div>
+{:else}
+  <ContentCard {content} />
+{/if}
+```
+
+See [COMPONENTS.md](./COMPONENTS.md) Skeleton component for shimmer animation.
+
+---
+
 ## Related Documents
 
 - [COMPONENTS.md](./COMPONENTS.md) - How components use tokens

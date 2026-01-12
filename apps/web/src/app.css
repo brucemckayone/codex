@@ -1,0 +1,80 @@
+/**
+ * Main CSS Entry Point
+ * Codex Design System - Vanilla CSS with Design Tokens
+ *
+ * Import Order (Critical for proper cascade):
+ * 1. Reset       → Normalize browser defaults
+ * 2. Primitives  → Raw token values (--color-blue-500)
+ * 3. Semantic    → Meaning-based aliases (--color-interactive)
+ * 4. Components  → Component-specific (--button-bg)
+ * 5. Dark        → Dark mode overrides (must come after primitives)
+ * 6. Base        → Default element styles
+ * 7. Utilities   → Optional utility classes
+ */
+
+/* 1. Reset - normalize browser defaults */
+@import './lib/theme/reset.css';
+
+/* 2. Primitives - raw values */
+@import './lib/theme/tokens/primitives.css';
+
+/* 3. Semantic - meaning-based aliases */
+@import './lib/theme/tokens/semantic.css';
+
+/* 4. Components - component-specific tokens */
+@import './lib/theme/tokens/components.css';
+
+/* 5. Dark mode - primitive overrides (must come after primitives) */
+@import './lib/theme/tokens/dark.css';
+
+/* 6. Base - default element styles */
+@import './lib/theme/base.css';
+
+/* 7. Utilities - optional helper classes */
+@import './lib/theme/utilities.css';
+
+/* ========================================
+ * GLOBAL CUSTOM STYLES
+ * Add any global styles below this line
+ * ======================================== */
+
+/* App-level root styles */
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Main content area */
+main {
+  flex: 1;
+}
+
+/* Skip link for accessibility */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-brand-primary);
+  color: var(--color-text-on-brand);
+  text-decoration: none;
+  z-index: var(--z-toast);
+  transition: top var(--duration-fast) var(--ease-out);
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* ========================================
+ * FONT LOADING
+ * Inter from Google Fonts (can be moved to app.html)
+ * ======================================== */
+
+/* Optional: Import Inter font
+ * Uncomment if not loading via <link> in app.html
+ *
+ * @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+ * @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+ */

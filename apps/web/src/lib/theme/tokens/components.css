@@ -1,0 +1,212 @@
+/**
+ * Component Tokens (Tier 3)
+ * Component-specific design tokens that reference semantic tokens.
+ * These enable component-level theming and customization.
+ */
+
+:root {
+  /* ========================================
+   * BUTTON COMPONENT
+   * ======================================== */
+
+  /* Primary Button */
+  --button-primary-bg: var(--color-brand-primary);
+  --button-primary-bg-hover: var(--color-brand-primary-hover);
+  --button-primary-bg-active: var(--color-brand-primary-active);
+  --button-primary-text: var(--color-text-on-brand);
+  --button-primary-border: transparent;
+
+  /* Secondary Button */
+  --button-secondary-bg: var(--color-surface);
+  --button-secondary-bg-hover: var(--color-surface-secondary);
+  --button-secondary-bg-active: var(--color-surface-tertiary);
+  --button-secondary-text: var(--color-text-primary);
+  --button-secondary-border: var(--color-border);
+
+  /* Ghost Button */
+  --button-ghost-bg: transparent;
+  --button-ghost-bg-hover: var(--color-interactive-subtle);
+  --button-ghost-bg-active: var(--color-brand-primary-subtle);
+  --button-ghost-text: var(--color-interactive);
+  --button-ghost-border: transparent;
+
+  /* Destructive Button */
+  --button-destructive-bg: var(--color-error);
+  --button-destructive-bg-hover: var(--color-error-hover);
+  --button-destructive-text: var(--color-white);
+  --button-destructive-border: transparent;
+
+  /* Button Sizing */
+  --button-padding-x-sm: var(--space-3);
+  --button-padding-y-sm: var(--space-1-5);
+  --button-padding-x-md: var(--space-4);
+  --button-padding-y-md: var(--space-2);
+  --button-padding-x-lg: var(--space-6);
+  --button-padding-y-lg: var(--space-3);
+
+  --button-font-size-sm: var(--text-sm);
+  --button-font-size-md: var(--text-base);
+  --button-font-size-lg: var(--text-lg);
+
+  --button-radius: var(--radius-button);
+  --button-font-weight: var(--font-medium);
+
+  /* ========================================
+   * INPUT COMPONENT
+   * ======================================== */
+  --input-bg: var(--color-surface);
+  --input-bg-disabled: var(--color-surface-secondary);
+  --input-text: var(--color-text-primary);
+  --input-text-placeholder: var(--color-text-muted);
+  --input-border: var(--color-border);
+  --input-border-hover: var(--color-border-strong);
+  --input-border-focus: var(--color-border-focus);
+  --input-radius: var(--radius-input);
+
+  --input-padding-x: var(--space-3);
+  --input-padding-y: var(--space-2);
+  --input-font-size: var(--text-base);
+
+  /* Input States */
+  --input-error-border: var(--color-error);
+  --input-error-bg: var(--color-error-subtle);
+  --input-success-border: var(--color-success);
+
+  /* ========================================
+   * CARD COMPONENT
+   * ======================================== */
+  --card-bg: var(--color-surface);
+  --card-bg-hover: var(--color-surface-secondary);
+  --card-border: var(--color-border);
+  --card-radius: var(--radius-card);
+  --card-shadow: var(--shadow-card);
+  --card-shadow-hover: var(--shadow-lg);
+  --card-padding: var(--space-6);
+
+  /* ========================================
+   * MODAL/DIALOG COMPONENT
+   * ======================================== */
+  --modal-bg: var(--color-surface);
+  --modal-border: var(--color-border);
+  --modal-radius: var(--radius-modal);
+  --modal-shadow: var(--shadow-modal);
+  --modal-padding: var(--space-6);
+  --modal-backdrop: var(--color-surface-overlay);
+
+  /* ========================================
+   * DROPDOWN/MENU COMPONENT
+   * ======================================== */
+  --dropdown-bg: var(--color-surface);
+  --dropdown-border: var(--color-border);
+  --dropdown-radius: var(--radius-md);
+  --dropdown-shadow: var(--shadow-dropdown);
+  --dropdown-item-padding: var(--space-2) var(--space-3);
+  --dropdown-item-bg-hover: var(--color-surface-secondary);
+  --dropdown-item-bg-active: var(--color-brand-primary-subtle);
+
+  /* ========================================
+   * BADGE/TAG COMPONENT
+   * ======================================== */
+  --badge-padding-x: var(--space-2);
+  --badge-padding-y: var(--space-0-5);
+  --badge-radius: var(--radius-full);
+  --badge-font-size: var(--text-xs);
+  --badge-font-weight: var(--font-medium);
+
+  /* Badge Variants */
+  --badge-default-bg: var(--color-surface-tertiary);
+  --badge-default-text: var(--color-text-secondary);
+  --badge-primary-bg: var(--color-brand-primary-subtle);
+  --badge-primary-text: var(--color-brand-primary);
+  --badge-success-bg: var(--color-success-subtle);
+  --badge-success-text: var(--color-success-text);
+  --badge-error-bg: var(--color-error-subtle);
+  --badge-error-text: var(--color-error-text);
+  --badge-warning-bg: var(--color-warning-subtle);
+  --badge-warning-text: var(--color-warning-text);
+
+  /* ========================================
+   * AVATAR COMPONENT
+   * ======================================== */
+  --avatar-bg: var(--color-surface-tertiary);
+  --avatar-text: var(--color-text-secondary);
+  --avatar-border: var(--color-border);
+
+  --avatar-size-xs: var(--space-6);
+  --avatar-size-sm: var(--space-8);
+  --avatar-size-md: var(--space-10);
+  --avatar-size-lg: var(--space-12);
+  --avatar-size-xl: var(--space-16);
+
+  /* ========================================
+   * TOAST/NOTIFICATION COMPONENT
+   * ======================================== */
+  --toast-bg: var(--color-surface);
+  --toast-border: var(--color-border);
+  --toast-radius: var(--radius-lg);
+  --toast-shadow: var(--shadow-lg);
+  --toast-padding: var(--space-4);
+
+  /* Toast Variants */
+  --toast-success-bg: var(--color-success-subtle);
+  --toast-success-border: var(--color-success);
+  --toast-error-bg: var(--color-error-subtle);
+  --toast-error-border: var(--color-error);
+  --toast-warning-bg: var(--color-warning-subtle);
+  --toast-warning-border: var(--color-warning);
+  --toast-info-bg: var(--color-info-subtle);
+  --toast-info-border: var(--color-info);
+
+  /* ========================================
+   * HEADER/NAVIGATION COMPONENT
+   * ======================================== */
+  --header-bg: var(--color-surface);
+  --header-border: var(--color-border);
+  --header-height: var(--space-16);
+  --header-padding: var(--space-4);
+
+  --nav-link-text: var(--color-text-secondary);
+  --nav-link-text-hover: var(--color-text-primary);
+  --nav-link-text-active: var(--color-brand-primary);
+  --nav-link-bg-hover: var(--color-surface-secondary);
+
+  /* ========================================
+   * SIDEBAR COMPONENT
+   * ======================================== */
+  --sidebar-bg: var(--color-surface);
+  --sidebar-border: var(--color-border);
+  --sidebar-width: 280px;
+  --sidebar-width-collapsed: 80px;
+  --sidebar-padding: var(--space-4);
+
+  /* ========================================
+   * TABLE COMPONENT
+   * ======================================== */
+  --table-header-bg: var(--color-surface-secondary);
+  --table-header-text: var(--color-text-secondary);
+  --table-row-bg: var(--color-surface);
+  --table-row-bg-hover: var(--color-surface-secondary);
+  --table-row-bg-striped: var(--color-surface-secondary);
+  --table-border: var(--color-border);
+  --table-cell-padding: var(--space-3) var(--space-4);
+
+  /* ========================================
+   * SKELETON/LOADING COMPONENT
+   * ======================================== */
+  --skeleton-bg: var(--color-neutral-200);
+  --skeleton-shimmer: linear-gradient(
+    90deg,
+    var(--color-neutral-200) 0%,
+    var(--color-neutral-100) 50%,
+    var(--color-neutral-200) 100%
+  );
+  --skeleton-radius: var(--radius-md);
+
+  /* ========================================
+   * FOCUS RING (Global Component Pattern)
+   * ======================================== */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--color-focus-ring);
+  --focus-ring: var(--focus-ring-width) solid var(--color-focus);
+}

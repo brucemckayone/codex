@@ -1201,6 +1201,146 @@ All components must meet WCAG 2.1 AA:
 
 Melt UI provides ARIA and keyboard handling. Custom components must maintain these standards.
 
+### Focus Management
+
+#### Modal Focus Trap & Restoration
+
+When modals open/close, focus must be managed correctly:
+
+```svelte
+<script lang="ts">
+  import { Dialog } from 'melt/builders';
+
+  let triggerRef: HTMLButtonElement;
+  const dialog = new Dialog({
+    onOpenChange: (open) => {
+      if (!open) {
+        // Return focus to trigger when closing
+        triggerRef?.focus();
+      }
+    }
+  });
+</script>
+
+<button bind:this={triggerRef} {...dialog.trigger}>
+  Open Settings
+</button>
+
+<div {...dialog.content}>
+  <!-- Modal content - focus trapped by Melt UI -->
+</div>
+```
+
+#### Skip Links
+
+Provide "Skip to content" link for keyboard users:
+
+```svelte
+<!-- +layout.svelte -->
+<a href="#main-content" class="skip-link">
+  Skip to content
+</a>
+
+<Header />
+
+<main id="main-content">
+  {@render children()}
+</main>
+```
+
+```css
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  z-index: var(--z-toast);
+}
+
+.skip-link:focus {
+  top: 0;
+}
+```
+
+### Reduced Motion
+
+Respect user preference via `prefers-reduced-motion`:
+
+```css
+/* In tokens/motion.css */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.01ms;
+    --duration-normal: 0.01ms;
+    --duration-slow: 0.01ms;
+  }
+
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+```
+
+For programmatic checks:
+
+```typescript
+const prefersReducedMotion = window.matchMedia(
+  '(prefers-reduced-motion: reduce)'
+).matches;
+
+if (!prefersReducedMotion) {
+  element.animate([...], { duration: 300 });
+}
+```
+
+### Automated Accessibility Testing
+
+Use axe-core with Playwright for CI:
+
+```typescript
+// tests/a11y/pages.spec.ts
+import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+
+test.describe('Accessibility', () => {
+  test('Homepage has no violations', async ({ page }) => {
+    await page.goto('/');
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+  });
+
+  test('Content page has no violations', async ({ page }) => {
+    await page.goto('/content/sample-video');
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+  });
+});
+```
+
+#### CI Configuration (Advisory)
+
+```yaml
+# Run a11y tests but don't block deployment initially
+a11y-tests:
+  runs-on: ubuntu-latest
+  continue-on-error: true  # Advisory, not blocking
+  steps:
+    - run: npx playwright test tests/a11y
+```
+
+#### Pages to Test
+
+| Page | Priority |
+|------|----------|
+| Homepage | High |
+| Login/Register | High |
+| Content detail | High |
+| Checkout | Critical |
+| Library | Medium |
+| Studio dashboard | Medium |
+
 ---
 
 ## Error States
