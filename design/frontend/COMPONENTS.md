@@ -568,12 +568,10 @@ Svelte 5 provides native error boundaries via `<svelte:boundary>`:
 ```svelte
 <!-- With error reporting -->
 <script lang="ts">
-  import * as Sentry from '@sentry/sveltekit';
+  import { reportError } from '$lib/observability';
 
   function handleError(error: Error, reset: () => void) {
-    Sentry.captureException(error, {
-      tags: { component: 'VideoPlayer' }
-    });
+    reportError(error, { component: 'VideoPlayer' });
   }
 </script>
 
@@ -799,7 +797,13 @@ export function createErrorHandler(componentName: string) {
 // ErrorBoundary.test.ts
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
+import * as Observability from '$lib/observability';
 import TestBoundary from './TestBoundary.svelte';
+
+// Mock reportError
+vi.mock('$lib/observability', () => ({
+  reportError: vi.fn()
+}));
 
 describe('ErrorBoundary', () => {
   it('renders children normally', () => {
@@ -822,14 +826,13 @@ describe('ErrorBoundary', () => {
     expect(component.resetCount).toBe(1);
   });
 
-  it('reports errors to Sentry', () => {
-    const sentrySpy = vi.spyOn(Sentry, 'captureException');
+  it('reports errors to observability service', () => {
     render(TestBoundary, { props: { shouldFail: true } });
 
-    expect(sentrySpy).toHaveBeenCalledWith(
+    expect(Observability.reportError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({
-        tags: { component: 'TestComponent' }
+        component: 'TestComponent'
       })
     );
   });

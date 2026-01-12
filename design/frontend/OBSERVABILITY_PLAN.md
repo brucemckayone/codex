@@ -9,16 +9,19 @@
 
 ## Executive Summary
 
-**Decision**: Hybrid approach using Sentry (sampled) + Cloudflare Analytics (free tier) to balance visibility with startup budget constraints.
+**Decision**: Cloudflare-native approach using free tier services only. Zero additional cost.
 
 | Layer | Tool | Cost |
 |-------|------|------|
-| Error Tracking | Sentry Cloud (Team plan) | ~$26/month |
+| Error Tracking | Cloudflare Workers Analytics + console.error | Free |
 | Logs | Cloudflare Workers Analytics | Free |
-| Metrics | Cloudflare Analytics + Sentry Performance | Free + included |
-| Alerting | Sentry + Slack webhook | Free |
+| Metrics | Cloudflare Analytics | Free |
+| Web Vitals | Cloudflare Analytics Engine | Free |
+| Alerting | Cloudflare Notifications + Slack webhook | Free |
 
-**Total estimated cost**: ~$26-50/month for Phase 1.
+**Total cost**: $0/month
+
+**Future**: Add Sentry when budget allows for better error grouping and stack traces.
 
 ---
 
@@ -38,229 +41,243 @@ graph TB
         BE_Metrics[Latency/Throughput]
     end
 
-    subgraph "Observability Stack"
-        Sentry[Sentry Cloud]
-        CF_Analytics[Cloudflare Analytics]
-        Slack[Slack Alerts]
+    subgraph "Cloudflare (Free)"
+        CF_Analytics[Workers Analytics]
+        CF_Engine[Analytics Engine]
+        CF_Dash[Dashboard]
+        Slack[Slack Webhook]
     end
 
-    FE_Errors --> Sentry
-    FE_Perf --> Sentry
-    BE_Errors --> Sentry
+    FE_Errors --> CF_Engine
+    FE_Perf --> CF_Engine
+    BE_Errors --> CF_Analytics
     BE_Logs --> CF_Analytics
     BE_Metrics --> CF_Analytics
-    Sentry --> Slack
+    CF_Analytics --> CF_Dash
+    CF_Engine --> CF_Dash
+    CF_Dash --> Slack
 ```
 
 ---
 
-## Decisions
+## Implementation
 
-### 1. Error Tracking: Sentry Cloud
+### 1. Error Tracking: Console + Analytics Engine
 
-**Decision**: Use Sentry Cloud (Team plan at $26/month for 50K events).
+Errors are logged via `console.error` (visible in Workers dashboard) and tracked in Analytics Engine for aggregation.
 
-**Why Sentry over alternatives**:
-
-| Alternative | Consideration | Decision |
-|-------------|---------------|----------|
-| **Self-hosted Sentry** | Requires infrastructure, maintenance | Reject - operational overhead |
-| **Cloudflare-only** | Limited error grouping, no stack traces | Reject - insufficient for debugging |
-| **Datadog** | Expensive ($15+/host/month) | Reject - overkill for startup |
-| **LogRocket** | Session replay focus, higher cost | Reject - not needed Phase 1 |
-| **Rollbar** | Similar to Sentry, less ecosystem | Consider if Sentry costs spike |
-
-**Sentry Configuration**:
-
-```typescript
-// src/hooks.server.ts
-import * as Sentry from '@sentry/sveltekit';
-
-Sentry.init({
-  dsn: 'https://xxx@xxx.ingest.sentry.io/xxx',
-  environment: import.meta.env.MODE,
-
-  // Sample 100% of errors in prod (low volume expected)
-  sampleRate: 1.0,
-
-  // Sample 10% of transactions for performance
-  tracesSampleRate: 0.1,
-
-  // Scrub PII
-  beforeSend(event) {
-    if (event.user) {
-      delete event.user.email;
-      delete event.user.ip_address;
-    }
-    return event;
-  },
-
-  // Ignore known non-actionable errors
-  ignoreErrors: [
-    'ResizeObserver loop',
-    'Network request failed',
-    'Load failed'
-  ]
-});
-
-export const handleError = Sentry.handleErrorWithSentry();
-```
+**Frontend Error Handler:**
 
 ```typescript
 // src/hooks.ts (client-side)
-import * as Sentry from '@sentry/sveltekit';
+import type { HandleClientError } from '@sveltejs/kit';
 
-Sentry.init({
-  dsn: 'https://xxx@xxx.ingest.sentry.io/xxx',
+export const handleError: HandleClientError = async ({ error, event, status, message }) => {
+  // Log to console (visible in browser dev tools)
+  console.error('[Client Error]', {
+    message,
+    status,
+    url: event.url.pathname,
+    error: error instanceof Error ? error.message : String(error)
+  });
 
-  // Browser-specific settings
-  integrations: [
-    Sentry.browserTracingIntegration(),
-    Sentry.replayIntegration({
-      maskAllText: true,
-      blockAllMedia: true
-    })
-  ],
+  // Report to Analytics Engine (if available)
+  if (typeof navigator !== 'undefined' && 'sendBeacon' in navigator) {
+    navigator.sendBeacon('/api/errors', JSON.stringify({
+      type: 'client',
+      message: error instanceof Error ? error.message : String(error),
+      url: event.url.pathname,
+      status,
+      timestamp: Date.now(),
+      userAgent: navigator.userAgent
+    }));
+  }
 
-  // Performance sampling
-  tracesSampleRate: 0.1,
-
-  // Session replay only on errors (saves quota)
-  replaysSessionSampleRate: 0,
-  replaysOnErrorSampleRate: 1.0
-});
-
-export const handleError = Sentry.handleErrorWithSentry();
+  return {
+    message: 'Something went wrong',
+    code: status.toString()
+  };
+};
 ```
 
-**Sampling Strategy**:
+```typescript
+// src/hooks.server.ts
+import type { HandleServerError } from '@sveltejs/kit';
 
-| Environment | Error Rate | Performance Rate | Replay |
-|-------------|------------|------------------|--------|
-| Production | 100% | 10% | Errors only |
-| Staging | 100% | 100% | All sessions |
-| Development | 0% | 0% | None |
+export const handleError: HandleServerError = async ({ error, event, status, message }) => {
+  const errorData = {
+    type: 'server',
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    url: event.url.pathname,
+    method: event.request.method,
+    status,
+    requestId: event.locals.requestId,
+    timestamp: Date.now()
+  };
 
-**PII Handling**:
+  // Log to Workers console (visible in Cloudflare dashboard)
+  console.error('[Server Error]', JSON.stringify(errorData));
 
-- Strip email addresses from user context
-- Never log passwords, tokens, or payment data
-- Use Sentry's data scrubbing for request bodies
-- Session replays mask all text by default
+  // Track in Analytics Engine
+  event.platform?.env?.ANALYTICS?.writeDataPoint({
+    blobs: ['error', errorData.message, event.url.pathname],
+    doubles: [status, Date.now()],
+    indexes: ['errors']
+  });
 
-### 2. Logging: Cloudflare Workers Analytics
+  return {
+    message: 'Something went wrong',
+    code: status.toString()
+  };
+};
+```
 
-**Decision**: Use Cloudflare's built-in analytics (free) for structured logging.
-
-**Why not external log aggregation**:
-
-| Option | Cost | Decision |
-|--------|------|----------|
-| Datadog Logs | ~$0.10/GB | Reject - expensive at scale |
-| Logtail | $0.25/GB | Consider for Phase 2 |
-| Self-hosted ELK | Infrastructure cost | Reject - operational burden |
-| Cloudflare Logpush | Free to R2 | Future option for retention |
-
-**Implementation**:
+**Error Ingestion Endpoint:**
 
 ```typescript
-// packages/observability/src/cloudflare-logger.ts
-export function createLogger(env: Env) {
-  return {
-    info(message: string, data?: Record<string, unknown>) {
-      console.log(JSON.stringify({
-        level: 'info',
-        message,
-        timestamp: Date.now(),
-        ...data
-      }));
-    },
+// src/routes/api/errors/+server.ts
+import type { RequestHandler } from './$types';
 
-    warn(message: string, data?: Record<string, unknown>) {
-      console.warn(JSON.stringify({
-        level: 'warn',
-        message,
-        timestamp: Date.now(),
-        ...data
-      }));
-    },
+export const POST: RequestHandler = async ({ request, platform }) => {
+  try {
+    const error = await request.json();
 
-    error(message: string, error?: Error, data?: Record<string, unknown>) {
-      console.error(JSON.stringify({
-        level: 'error',
-        message,
-        error: error?.message,
-        stack: error?.stack,
-        timestamp: Date.now(),
-        ...data
-      }));
+    // Write to Analytics Engine
+    platform?.env?.ANALYTICS?.writeDataPoint({
+      blobs: ['client_error', error.message, error.url],
+      doubles: [error.status || 0, error.timestamp],
+      indexes: ['errors']
+    });
 
-      // Also send to Sentry for aggregation
-      if (error) {
-        Sentry.captureException(error, { extra: data });
-      }
+    return new Response(null, { status: 204 });
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+};
+```
+
+### 2. Logging: Structured Console
+
+Workers console output is retained in Cloudflare dashboard for 24 hours (free tier).
+
+```typescript
+// lib/server/logger.ts
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+interface LogContext {
+  requestId?: string;
+  userId?: string;
+  orgId?: string;
+  [key: string]: unknown;
+}
+
+export function createLogger(context: LogContext = {}) {
+  const log = (level: LogLevel, message: string, data?: Record<string, unknown>) => {
+    const entry = {
+      level,
+      message,
+      timestamp: new Date().toISOString(),
+      ...context,
+      ...data
+    };
+
+    // Structured JSON for easy parsing
+    switch (level) {
+      case 'debug':
+        if (import.meta.env.DEV) console.debug(JSON.stringify(entry));
+        break;
+      case 'info':
+        console.log(JSON.stringify(entry));
+        break;
+      case 'warn':
+        console.warn(JSON.stringify(entry));
+        break;
+      case 'error':
+        console.error(JSON.stringify(entry));
+        break;
     }
+  };
+
+  return {
+    debug: (msg: string, data?: Record<string, unknown>) => log('debug', msg, data),
+    info: (msg: string, data?: Record<string, unknown>) => log('info', msg, data),
+    warn: (msg: string, data?: Record<string, unknown>) => log('warn', msg, data),
+    error: (msg: string, data?: Record<string, unknown>) => log('error', msg, data)
   };
 }
 ```
 
-**Log Levels by Environment**:
+**Usage:**
 
-| Environment | Default Level | Console Output |
-|-------------|---------------|----------------|
-| Production | `warn` | Structured JSON |
-| Staging | `info` | Structured JSON |
-| Development | `debug` | Pretty-printed |
+```typescript
+// In load function or API route
+export async function load({ locals, platform }) {
+  const logger = createLogger({ requestId: locals.requestId });
 
-### 3. Performance Monitoring: Web Vitals
+  logger.info('Loading content', { contentId: params.id });
 
-**Decision**: Report Web Vitals to Sentry Performance (included in plan).
+  try {
+    const content = await fetchContent(params.id);
+    return { content };
+  } catch (error) {
+    logger.error('Failed to load content', {
+      contentId: params.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
+}
+```
 
-**Tracked Metrics**:
+### 3. Web Vitals: Analytics Engine
 
-| Metric | Target | Alert Threshold |
-|--------|--------|-----------------|
-| LCP (Largest Contentful Paint) | < 2.5s | > 4.0s |
-| CLS (Cumulative Layout Shift) | < 0.1 | > 0.25 |
-| INP (Interaction to Next Paint) | < 200ms | > 500ms |
-| TTFB (Time to First Byte) | < 800ms | > 1.5s |
-
-**Implementation**:
+Track Core Web Vitals using Cloudflare Analytics Engine (free, included with Workers).
 
 ```typescript
 // src/lib/vitals.ts
-import { onCLS, onINP, onLCP, onTTFB } from 'web-vitals';
-import * as Sentry from '@sentry/sveltekit';
+import { onCLS, onINP, onLCP, onTTFB, onFCP } from 'web-vitals';
 
 export function initWebVitals() {
-  onCLS((metric) => {
-    Sentry.metrics.distribution('web_vitals.cls', metric.value, {
-      unit: 'none',
-      tags: { page: window.location.pathname }
-    });
-  });
+  const reportMetric = (name: string, value: number) => {
+    // Send to our Analytics Engine endpoint
+    if ('sendBeacon' in navigator) {
+      navigator.sendBeacon('/api/vitals', JSON.stringify({
+        name,
+        value,
+        page: window.location.pathname,
+        timestamp: Date.now()
+      }));
+    }
+  };
 
-  onINP((metric) => {
-    Sentry.metrics.distribution('web_vitals.inp', metric.value, {
-      unit: 'millisecond',
-      tags: { page: window.location.pathname }
-    });
-  });
-
-  onLCP((metric) => {
-    Sentry.metrics.distribution('web_vitals.lcp', metric.value, {
-      unit: 'millisecond',
-      tags: { page: window.location.pathname }
-    });
-  });
-
-  onTTFB((metric) => {
-    Sentry.metrics.distribution('web_vitals.ttfb', metric.value, {
-      unit: 'millisecond',
-      tags: { page: window.location.pathname }
-    });
-  });
+  onCLS((metric) => reportMetric('cls', metric.value));
+  onINP((metric) => reportMetric('inp', metric.value));
+  onLCP((metric) => reportMetric('lcp', metric.value));
+  onTTFB((metric) => reportMetric('ttfb', metric.value));
+  onFCP((metric) => reportMetric('fcp', metric.value));
 }
+```
+
+```typescript
+// src/routes/api/vitals/+server.ts
+import type { RequestHandler } from './$types';
+
+export const POST: RequestHandler = async ({ request, platform }) => {
+  try {
+    const vital = await request.json();
+
+    platform?.env?.ANALYTICS?.writeDataPoint({
+      blobs: [vital.name, vital.page],
+      doubles: [vital.value, vital.timestamp],
+      indexes: ['vitals']
+    });
+
+    return new Response(null, { status: 204 });
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+};
 ```
 
 ```svelte
@@ -279,49 +296,18 @@ export function initWebVitals() {
 </script>
 ```
 
-**Custom App Metrics**:
-
-| Metric | Purpose | Implementation |
-|--------|---------|----------------|
-| `video.load_time` | Time to first frame | Player component |
-| `checkout.completion_rate` | Funnel tracking | Ecom flow |
-| `search.latency` | Search responsiveness | Search component |
-
 ### 4. Request Tracing: Correlation IDs
 
-**Decision**: Use correlation IDs (not full distributed tracing). Full tracing (Jaeger, etc.) is overkill for Phase 1.
-
-**Pattern**:
-
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant SvelteKit
-    participant Worker
-
-    Browser->>SvelteKit: Request (generate X-Request-ID)
-    SvelteKit->>SvelteKit: Log with requestId
-    SvelteKit->>Worker: Forward X-Request-ID
-    Worker->>Worker: Log with requestId
-    Worker->>SvelteKit: Response
-    SvelteKit->>Browser: Response
-```
-
-**Implementation**:
+Simple correlation IDs for tracing requests across services.
 
 ```typescript
 // src/hooks.server.ts
 import { sequence } from '@sveltejs/kit/hooks';
-import * as Sentry from '@sentry/sveltekit';
 import { nanoid } from 'nanoid';
 
 const addRequestId: Handle = async ({ event, resolve }) => {
-  const requestId = event.request.headers.get('x-request-id') || nanoid();
-
+  const requestId = event.request.headers.get('x-request-id') || nanoid(12);
   event.locals.requestId = requestId;
-
-  // Attach to Sentry
-  Sentry.setTag('request_id', requestId);
 
   const response = await resolve(event);
   response.headers.set('x-request-id', requestId);
@@ -329,10 +315,7 @@ const addRequestId: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-export const handle = sequence(
-  addRequestId,
-  Sentry.sentryHandle()
-);
+export const handle = sequence(addRequestId);
 ```
 
 ```typescript
@@ -347,211 +330,251 @@ async function fetchFromWorker(path: string, event: RequestEvent) {
 }
 ```
 
-**Querying by Request ID**:
+### 5. Analytics Engine Setup
 
-- Sentry: Search by `request_id` tag
-- Cloudflare: Filter logs by `requestId` field
-- Support tickets: Users can provide request ID from response headers
+Add Analytics Engine binding to your wrangler config:
 
-### 5. Infrastructure Metrics: Cloudflare Dashboard
+```jsonc
+// wrangler.jsonc
+{
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "codex_metrics"
+    }
+  ]
+}
+```
 
-**Decision**: Use Cloudflare's built-in dashboards (free) for infrastructure metrics.
+**Query via GraphQL** (Cloudflare Dashboard or API):
 
-**Available Metrics**:
+```graphql
+# Example: Error count by URL in last 24h
+query {
+  viewer {
+    accounts(filter: { accountTag: "your-account" }) {
+      errors: analyticsEngineData(
+        filter: {
+          datetime_geq: "2026-01-11T00:00:00Z"
+          index1: "errors"
+        }
+        limit: 100
+      ) {
+        sum {
+          count
+        }
+        dimensions {
+          blob2  # URL
+        }
+      }
+    }
+  }
+}
+```
 
-| Metric | Source | Dashboard |
-|--------|--------|-----------|
-| Worker invocations | CF Analytics | Workers tab |
-| CPU time | CF Analytics | Workers tab |
-| Requests/errors | CF Analytics | Analytics tab |
-| Bandwidth | CF Analytics | Analytics tab |
-| Cache hit rate | CF Analytics | Caching tab |
+---
 
-**Custom Metrics** (via Workers Analytics Engine):
+## Monitoring Dashboard
+
+Use Cloudflare Dashboard for monitoring:
+
+| Metric | Location | Free Tier |
+|--------|----------|-----------|
+| Request volume | Workers > Analytics | Yes |
+| Error rate | Workers > Logs | 24h retention |
+| CPU time | Workers > Analytics | Yes |
+| Cache hit rate | Caching > Analytics | Yes |
+| Custom metrics | Analytics Engine | Yes (10M events/day) |
+
+### Creating Custom Dashboard
+
+Use Cloudflare's GraphQL API to build custom views:
 
 ```typescript
-// Track custom business metrics
-export async function trackMetric(
-  env: Env,
-  name: string,
-  value: number,
-  tags: Record<string, string>
-) {
-  env.ANALYTICS?.writeDataPoint({
-    blobs: [name, JSON.stringify(tags)],
-    doubles: [value, Date.now()]
+// scripts/query-metrics.ts
+async function queryMetrics(accountId: string, apiToken: string) {
+  const response = await fetch(
+    'https://api.cloudflare.com/client/v4/graphql',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query: `
+          query {
+            viewer {
+              accounts(filter: { accountTag: "${accountId}" }) {
+                vitals: analyticsEngineData(
+                  filter: { index1: "vitals" }
+                  limit: 1000
+                ) {
+                  avg { double1 }
+                  dimensions { blob1 }
+                }
+              }
+            }
+          }
+        `
+      })
+    }
+  );
+
+  return response.json();
+}
+```
+
+---
+
+## Alerting
+
+### Cloudflare Notifications (Free)
+
+Set up in Cloudflare Dashboard > Notifications:
+
+| Alert | Trigger | Channel |
+|-------|---------|---------|
+| Worker errors | Error rate > 1% | Email |
+| High CPU | CPU time > 10ms avg | Email |
+| Origin failure | Origin 5xx > 5/min | Email + Slack |
+
+### Slack Webhook Integration
+
+```typescript
+// lib/server/alerts.ts
+const SLACK_WEBHOOK = process.env.SLACK_WEBHOOK_URL;
+
+export async function sendAlert(message: string, severity: 'info' | 'warning' | 'critical') {
+  if (!SLACK_WEBHOOK) return;
+
+  const color = {
+    info: '#36a64f',
+    warning: '#ff9800',
+    critical: '#f44336'
+  }[severity];
+
+  await fetch(SLACK_WEBHOOK, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      attachments: [{
+        color,
+        text: message,
+        footer: `Codex ${severity.toUpperCase()}`,
+        ts: Math.floor(Date.now() / 1000)
+      }]
+    })
   });
 }
-
-// Usage
-trackMetric(env, 'purchase.amount', 2999, {
-  org: 'yoga-studio',
-  content_type: 'video'
-});
 ```
 
 ---
 
-## Alerting Strategy
+## Limitations & Trade-offs
 
-### Alert Channels
+| Aspect | Cloudflare-Only | With Sentry |
+|--------|-----------------|-------------|
+| Error grouping | Manual | Automatic |
+| Stack traces | Console only | Full + source maps |
+| Session replay | None | Available |
+| Log retention | 24h | 30+ days |
+| Alerting | Basic | Advanced rules |
+| Cost | $0 | $26+/month |
 
-| Severity | Channel | Response Time |
-|----------|---------|---------------|
-| Critical | Slack #alerts + Email | < 15 min |
-| Warning | Slack #alerts | < 1 hour |
-| Info | Dashboard only | Next business day |
+### Mitigation Strategies
 
-### Alert Rules (Sentry)
+**No automatic error grouping**: Use consistent error message prefixes:
 
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| Error spike | > 10 errors in 5 min | Critical |
-| New error type | First occurrence | Warning |
-| LCP degradation | p95 > 4s for 10 min | Warning |
-| Payment failure | Any checkout error | Critical |
+```typescript
+// Prefix errors by component/feature
+console.error('[VideoPlayer] HLS load failed:', error);
+console.error('[Checkout] Payment declined:', error);
+console.error('[Auth] Session expired:', error);
+```
 
-**Sentry Alert Configuration**:
+**24h log retention**: For critical issues, log to R2 bucket:
 
-```yaml
-# Managed via Sentry UI or Terraform
-alerts:
-  - name: Error Spike
-    conditions:
-      - type: event_frequency
-        value: 10
-        interval: 5m
-    actions:
-      - type: slack
-        channel: "#alerts"
-      - type: email
-        targetType: Team
-
-  - name: Payment Failure
-    conditions:
-      - type: event_frequency
-        value: 1
-        comparisonType: count
-    filters:
-      - type: tagged_event
-        key: transaction
-        value: "/checkout/*"
-    actions:
-      - type: slack
-        channel: "#alerts"
-        severity: critical
+```typescript
+// For important events that need longer retention
+async function persistLog(env: Env, event: LogEvent) {
+  const key = `logs/${new Date().toISOString().split('T')[0]}/${nanoid()}.json`;
+  await env.LOGS_BUCKET.put(key, JSON.stringify(event));
+}
 ```
 
 ---
 
-## Dashboard Design
+## Future: Sentry Migration Path
 
-### Key Dashboards
+When budget allows, Sentry can be added with minimal changes:
 
-**1. System Health** (Cloudflare + Sentry)
-- Request volume (last 24h)
-- Error rate (%)
-- p50/p95/p99 latency
-- Cache hit rate
+```typescript
+// Future: Add Sentry alongside existing logging
+import * as Sentry from '@sentry/sveltekit';
 
-**2. User Experience** (Sentry)
-- Web Vitals distribution
-- Error count by page
-- Session replay queue
+// Existing code continues to work
+console.error('[Error]', error);
 
-**3. Business Metrics** (Custom)
-- Active users
-- Purchases/day
-- Content views
-- Search queries
+// Add Sentry capture
+Sentry.captureException(error);
+```
+
+The structured logging and error tracking patterns we're using are Sentry-compatible.
 
 ---
 
-## Cost Projection
+## Implementation Checklist
 
-### Phase 1 (MVP, ~1K DAU)
+### Phase 1: Core Logging (Week 1)
 
-| Service | Plan | Monthly Cost |
-|---------|------|--------------|
-| Sentry | Team (50K events) | $26 |
-| Cloudflare Analytics | Free | $0 |
-| Slack | Free | $0 |
-| **Total** | | **~$26** |
-
-### Phase 2 (Growth, ~10K DAU)
-
-| Service | Plan | Monthly Cost |
-|---------|------|--------------|
-| Sentry | Team (100K events) | $52 |
-| Cloudflare Workers Analytics | Free | $0 |
-| Cloudflare Logpush to R2 | ~$0.015/GB | ~$5 |
-| **Total** | | **~$57** |
-
-### Cost Control Measures
-
-1. **Error sampling**: Sample non-critical errors if volume spikes
-2. **Session replay**: Only capture on errors (saves 90%+ quota)
-3. **Log retention**: 7 days in Cloudflare, 30 days in Sentry
-4. **Transaction sampling**: 10% in production
-
----
-
-## Implementation Phases
-
-### Phase 1: Core Observability (Week 1-2)
-
-- [ ] Install `@sentry/sveltekit` in frontend
-- [ ] Configure Sentry for frontend + backend
 - [ ] Add request ID middleware
-- [ ] Set up Slack integration
-- [ ] Create error alert rules
+- [ ] Set up structured logging utility
+- [ ] Configure error handlers in hooks
+- [ ] Add Analytics Engine binding to wrangler
 
-### Phase 2: Performance Monitoring (Week 3)
+### Phase 2: Metrics (Week 2)
 
 - [ ] Add Web Vitals reporting
-- [ ] Configure performance alerts
-- [ ] Set up custom metrics for video playback
-- [ ] Create system health dashboard
+- [ ] Create `/api/vitals` and `/api/errors` endpoints
+- [ ] Set up Cloudflare notifications
+- [ ] Add Slack webhook for critical alerts
 
-### Phase 3: Business Intelligence (Week 4+)
+### Phase 3: Dashboards (Week 3)
 
-- [ ] Add purchase/checkout tracking
-- [ ] Configure funnel analysis
-- [ ] Set up weekly report automation
-- [ ] Document runbooks for common alerts
+- [ ] Create GraphQL queries for key metrics
+- [ ] Document how to view logs in CF dashboard
+- [ ] Set up basic runbooks
 
 ---
 
 ## Runbooks
 
-### High Error Rate
+### Investigating Errors
 
-1. Check Sentry for error grouping
-2. Identify affected users/orgs
-3. Check recent deployments
-4. Roll back if deployment-related
-5. Create incident ticket
+1. Go to Cloudflare Dashboard > Workers > Logs
+2. Filter by time range and error level
+3. Search for `[Error]` prefix
+4. Use request ID to trace across services
 
-### LCP Degradation
+### Performance Issues
 
-1. Check Cloudflare cache hit rate
-2. Verify CDN status
-3. Check API worker latency
-4. Review recent frontend changes
-5. Optimize critical render path
+1. Check Workers > Analytics for CPU/latency spikes
+2. Query Analytics Engine for Web Vitals trends
+3. Check Caching > Analytics for cache hit rate
+4. Review recent deployments
 
-### Payment Failure Spike
+### Critical Incident
 
-1. Check Stripe dashboard status
-2. Verify webhook delivery
-3. Review Sentry for stack traces
-4. Notify on-call if systematic
-5. Communicate to affected users
+1. Check Cloudflare Status page
+2. Review Workers error logs
+3. Check origin worker health endpoints
+4. If widespread: send Slack alert manually
+5. Document in incident log
 
 ---
 
 ## Related Documents
 
 - [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) - Deployment and hosting
-- [packages/observability/CLAUDE.md](../../packages/observability/CLAUDE.md) - Backend observability package
 - [DATA.md](./DATA.md) - API error handling
