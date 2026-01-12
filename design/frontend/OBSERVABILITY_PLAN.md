@@ -181,6 +181,25 @@ export function getLogger(event: RequestEvent) {
 }
 ```
 
+**Proposed Package Enhancements**:
+To support multi-destination logging (e.g., Console + Cloudflare Analytics Engine), the `@codex/observability` package should be refactored to use an **Adapter Pattern**:
+
+1.  **Define `LoggerAdapter`**: An interface with a `log(entry: LogEntry): void` method.
+2.  **Implement `ConsoleAdapter`**: Default implementation for standard stdout/stderr logging.
+3.  **Implement `AnalyticsEngineAdapter`**: Sends specific metrics/events to Cloudflare's Analytics Engine.
+4.  **Multi-Adapter Support**: Update `ObservabilityClient` to accept an array of adapters, allowing it to broadcast events to multiple destinations simultaneously.
+
+**Usage with Proposed Enhancements**:
+```typescript
+const logger = new ObservabilityClient({
+  serviceName: 'frontend',
+  adapters: [
+    new ConsoleAdapter(),
+    new AnalyticsEngineAdapter(env.ANALYTICS)
+  ]
+});
+```
+
 **Usage:**
 
 ```typescript
