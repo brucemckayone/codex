@@ -283,6 +283,15 @@ export function validateBrandTokens(
 | `--ease-out` | cubic-bezier(0, 0, 0.2, 1) | Entering screen |
 | `--ease-in` | cubic-bezier(0.4, 0, 1, 1) | Exiting screen |
 
+### Materials & Textures
+
+| Token | Description | CSS Property |
+|-------|-------------|--------------|
+| `--surface-texture` | Pattern/Noise URL | `background-image` |
+| `--surface-blend` | Texture blend mode | `background-blend-mode` |
+| `--glass-blur` | Backdrop blur | `backdrop-filter: blur()` |
+| `--glass-saturation` | Vibrant glass effect | `backdrop-filter: saturate()` |
+
 ---
 
 ## View Transitions
@@ -435,7 +444,12 @@ graph LR
 | `--brand-radius-base` | Base border radius | 0.5rem |
 | `--brand-density-scale` | Spacing multiplier | 1 |
 | `--brand-font-body` | Body font family | Inter |
+| `--brand-font-body` | Body font family | Inter |
 | `--brand-font-heading` | Heading font family | Inter |
+| `--brand-glass-blur` | Glass blur amount | 0px |
+| `--brand-glass-opacity` | Glass opacity | 1 |
+| `--brand-texture-url` | Texture image URL | none |
+| `--brand-texture-opacity` | Texture visibility | 0 |
 
 ### Mock Implementation (Phase 1)
 
@@ -708,7 +722,8 @@ $lib/theme/
 │   ├── primitives.css     # Raw color, spacing values
 │   ├── semantic.css       # Meaning-based aliases
 │   ├── components.css     # Component-specific tokens
-│   └── dark.css           # Dark mode overrides
+│   ├── dark.css           # Dark mode overrides
+│   └── materials.css      # Texture and glass tokens
 ├── base.css               # Reset, defaults
 ├── utilities.css          # Common utility patterns
 ├── contrast.ts            # Contrast checking utilities

@@ -82,7 +82,8 @@ src/lib/styles/
 │   ├── radius.css         # Border radius values
 │   ├── shadows.css        # Elevation system
 │   ├── motion.css         # Transition durations & easings
-│   └── z-index.css        # Stacking context
+│   ├── z-index.css        # Stacking context
+│   └── materials.css      # Texture and glass tokens
 │
 ├── global.css             # Reset, base styles, imports all tokens
 ├── utilities.css          # Common utility classes
@@ -827,6 +828,7 @@ jobs:
   - [ ] Implement radius system with configurable base
   - [ ] Configure shadow, motion scales
   - [ ] Add z-index scale
+  - [ ] Implement material tokens (glass/texture support)
 
 - [ ] **Global Styles**
   - [ ] Create CSS reset/normalize
