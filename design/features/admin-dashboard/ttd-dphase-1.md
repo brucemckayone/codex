@@ -13,7 +13,9 @@ The Admin Dashboard provides the Platform Owner with a secure, server-rendered i
 
 **Architecture Diagram**:
 
-![Admin Dashboard Architecture](./assets/admin-dashboard-architecture.png)
+```d2
+@import "design/features/admin-dashboard/d2-diagrams/admin-dashboard-architecture.d2"
+```
 
 The diagram shows the complete flow from Platform Owner browser through SvelteKit SSR routes, service layer interaction, and database queries.
 

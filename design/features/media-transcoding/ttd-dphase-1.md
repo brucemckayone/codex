@@ -23,7 +23,9 @@ The media transcoding system asynchronously converts uploaded videos to HLS form
 
 **Architecture Diagram**:
 
-![Transcoding Architecture](./assets/transcoding-architecture.png)
+```d2
+@import "design/features/media-transcoding/d2-diagrams/transcoding-architecture.d2"
+```
 
 The diagram shows the complete transcoding pipeline: queue-based job management, Cloudflare Worker orchestration, Runpod GPU processing, and R2 storage integration.
 

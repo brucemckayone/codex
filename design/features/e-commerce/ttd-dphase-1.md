@@ -15,7 +15,9 @@ The e-commerce system facilitates one-time purchases of digital content using St
 
 **Architecture Diagram**:
 
-![Direct Purchase Checkout Flow](./assets/direct-checkout-flow.png)
+```d2
+@import "design/features/e-commerce/d2-diagrams/direct-checkout-flow.d2"
+```
 
 The diagram illustrates the complete e-commerce flow: creating a pending purchase, redirecting to Stripe Checkout, webhook-driven fulfillment, and PCI-compliant payment processing.
 

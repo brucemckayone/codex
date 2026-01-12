@@ -1,0 +1,343 @@
+/**
+ * Base Styles
+ * Default element styles using semantic tokens.
+ * Sets up typography, links, and common element defaults.
+ */
+
+/* ========================================
+ * ROOT & BODY
+ * ======================================== */
+html {
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: var(--leading-body);
+  color: var(--color-text-primary);
+  background-color: var(--color-surface);
+
+  /* Smooth scrolling for anchor links */
+  scroll-behavior: smooth;
+
+  /* Prevent content shift during scrollbar appearance */
+  scrollbar-gutter: stable;
+}
+
+body {
+  font-size: var(--text-body);
+  font-weight: var(--font-normal);
+  min-height: 100vh;
+}
+
+/* ========================================
+ * TYPOGRAPHY
+ * ======================================== */
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-heading);
+  color: var(--color-text-primary);
+}
+
+h1 {
+  font-size: var(--text-heading-1);
+  letter-spacing: var(--tracking-tight);
+}
+
+h2 {
+  font-size: var(--text-heading-2);
+  letter-spacing: var(--tracking-tight);
+}
+
+h3 {
+  font-size: var(--text-heading-3);
+}
+
+h4 {
+  font-size: var(--text-heading-4);
+}
+
+h5 {
+  font-size: var(--text-heading-5);
+}
+
+h6 {
+  font-size: var(--text-heading-6);
+  font-weight: var(--font-medium);
+}
+
+/* Body Text */
+p {
+  margin-bottom: var(--spacing-stack-md);
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+/* Small text */
+small {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* Strong/Bold */
+strong, b {
+  font-weight: var(--font-semibold);
+}
+
+/* Emphasized/Italic */
+em, i {
+  font-style: italic;
+}
+
+/* ========================================
+ * LINKS
+ * ======================================== */
+a {
+  color: var(--color-interactive);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: var(--transition-colors);
+}
+
+a:hover {
+  color: var(--color-interactive-hover);
+}
+
+a:active {
+  color: var(--color-interactive-active);
+}
+
+/* Links without underline (navigation, buttons) */
+a.no-underline {
+  text-decoration: none;
+}
+
+/* ========================================
+ * CODE
+ * ======================================== */
+code, kbd, samp {
+  font-family: var(--font-code);
+  font-size: 0.875em;
+  background-color: var(--color-surface-tertiary);
+  padding: var(--space-0-5) var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+pre {
+  font-family: var(--font-code);
+  font-size: var(--text-sm);
+  background-color: var(--color-surface-tertiary);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+/* ========================================
+ * LISTS
+ * ======================================== */
+ul, ol {
+  padding-left: var(--spacing-lg);
+}
+
+li {
+  margin-bottom: var(--spacing-xs);
+}
+
+li:last-child {
+  margin-bottom: 0;
+}
+
+/* ========================================
+ * BLOCKQUOTE
+ * ======================================== */
+blockquote {
+  border-left: 4px solid var(--color-brand-primary);
+  padding-left: var(--spacing-md);
+  margin-left: 0;
+  margin-right: 0;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* ========================================
+ * HORIZONTAL RULE
+ * ======================================== */
+hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: var(--spacing-xl) 0;
+}
+
+/* ========================================
+ * TABLES
+ * ======================================== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+th, td {
+  padding: var(--table-cell-padding);
+  text-align: left;
+  border-bottom: 1px solid var(--table-border);
+}
+
+th {
+  font-weight: var(--font-semibold);
+  color: var(--table-header-text);
+  background-color: var(--table-header-bg);
+}
+
+tbody tr:hover {
+  background-color: var(--table-row-bg-hover);
+}
+
+/* ========================================
+ * FORMS - BASE ELEMENTS
+ * ======================================== */
+label {
+  display: block;
+  font-size: var(--text-label);
+  font-weight: var(--font-medium);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-xs);
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="number"],
+input[type="tel"],
+input[type="url"],
+textarea,
+select {
+  display: block;
+  width: 100%;
+  padding: var(--input-padding-y) var(--input-padding-x);
+  font-size: var(--input-font-size);
+  line-height: var(--leading-normal);
+  color: var(--input-text);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  transition: var(--transition-colors), border-color var(--duration-fast) var(--ease-in-out);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--input-text-placeholder);
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: var(--input-border-hover);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--input-border-focus);
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  background-color: var(--input-bg-disabled);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+/* ========================================
+ * BUTTONS - BASE
+ * ======================================== */
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ========================================
+ * FOCUS STATES - GLOBAL
+ * ======================================== */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Remove focus ring for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ========================================
+ * SELECTION
+ * ======================================== */
+::selection {
+  background-color: var(--color-brand-primary);
+  color: var(--color-white);
+}
+
+/* ========================================
+ * IMAGES & MEDIA
+ * ======================================== */
+img {
+  height: auto;
+}
+
+figure {
+  margin: 0;
+}
+
+figcaption {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-xs);
+}
+
+/* ========================================
+ * UTILITY CLASSES FOR BASE ELEMENTS
+ * ======================================== */
+
+/* Screen reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Not screen reader only - reverses sr-only */
+.not-sr-only {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}

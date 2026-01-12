@@ -16,7 +16,9 @@ The notification system provides email delivery with provider abstraction, ensur
 
 **Architecture Diagram**:
 
-![Notification System Architecture](./assets/notification-architecture.png)
+```d2
+@import "design/features/notifications/d2-diagrams/notification-architecture.d2"
+```
 
 The diagram demonstrates the three-layer architecture: provider-agnostic service interface, email provider adapters (Resend), and template-based email rendering.
 
