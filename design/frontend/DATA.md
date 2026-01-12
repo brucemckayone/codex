@@ -416,7 +416,6 @@ graph TD
 // auth.remote.ts
 import { form, invalid } from '$app/server';
 import { loginSchema } from '@codex/validation';
-import * as Sentry from '@sentry/sveltekit';
 
 export const login = form(
   loginSchema,
@@ -443,7 +442,7 @@ export const login = form(
       }
 
       // Server errors (5xx) - log and show generic message
-      Sentry.captureException(error);
+      console.error('[Auth] Login error:', error);
       return invalid(500, { _form: ['Something went wrong. Please try again.'] });
     }
   }

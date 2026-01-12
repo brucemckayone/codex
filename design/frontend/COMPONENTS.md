@@ -636,20 +636,19 @@ Svelte 5 provides native error boundaries via `<svelte:boundary>`:
 
 #### Error Reporting Integration
 
-Report errors to Sentry while providing user-friendly fallbacks:
+Report errors to logging service while providing user-friendly fallbacks:
 
 ```typescript
 // lib/components/ErrorBoundary/error-handler.ts
-import * as Sentry from '@sentry/sveltekit';
+import { reportError } from '$lib/observability';
 
 export function createErrorHandler(componentName: string) {
   return (error: Error, reset: () => void) => {
-    // Report to Sentry
-    Sentry.captureException(error, {
-      tags: {
-        component: componentName,
-        errorType: 'boundary_caught'
-      },
+    // Report to observability service
+    reportError(error, {
+      component: componentName,
+      type: 'boundary_caught'
+    });
       extra: {
         timestamp: new Date().toISOString()
       }

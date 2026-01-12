@@ -247,25 +247,36 @@ This generates AVIF/WebP formats and responsive srcsets automatically.
 
 Professional frontend engineering requires visibility into how the app behaves for real users on varied networks and devices.
 
-### Error Monitoring (Sentry)
+### Observability Strategy
 
-We use **Sentry** for client and server-side exception tracking.
+We use a **Cloudflare-native** approach for zero-cost observability during Phase 1.
 
-| Category | Implementation |
-|----------|----------------|
-| **Client Errors** | Global error listener in `hooks.ts` |
-| **Server Errors** | `handleError` in `hooks.server.ts` |
-| **Context** | Attach `requestId`, `userId`, and `orgSlug` to events |
+| Category | Implementation | Storage |
+|----------|----------------|---------|
+| **Logs** | `console.error` (structured JSON) | Workers Dashboard (24h) |
+| **Metrics** | Custom `Analytics Engine` events | Cloudflare Analytics |
+| **Vitals** | Web Vitals reported to Analytics Engine | Cloudflare Analytics |
+| **Context** | Attach `requestId` to all logs | N/A |
 
 **Reporting Pattern**:
+
 ```typescript
 // src/hooks.server.ts
 export const handleError = ({ error, event }) => {
-  Sentry.captureException(error, {
-    extra: {
-      url: event.url.toString(),
-      user: event.locals.user?.id
-    }
+  const errorLog = {
+    message: error instanceof Error ? error.message : String(error),
+    url: event.url.toString(),
+    user: event.locals.user?.id,
+    requestId: event.locals.requestId
+  };
+
+  // Visible in Cloudflare Dashboard > Workers > Logs
+  console.error('[Error]', JSON.stringify(errorLog));
+
+  // Track metric
+  event.platform?.env?.ANALYTICS?.writeDataPoint({
+    indexes: ['errors'],
+    blobs: [event.url.pathname, error instanceof Error ? error.name : 'UnknownError']
   });
 };
 ```
@@ -274,7 +285,7 @@ export const handleError = ({ error, event }) => {
 
 Track Web Vitals (LCP, CLS, INP) to ensure high perceived performance across regions.
 
-- **Vitals Tracking**: Reported to Sentry or Google Analytics.
+- **Vitals Tracking**: Reported to Cloudflare Analytics Engine.
 - **Performance Budgets**: Enforce via CI/CD (LCP < 2.5s).
 
 ---
