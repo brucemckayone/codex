@@ -157,54 +157,27 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 };
 ```
 
-### 2. Logging: Structured Console
+### 2. Logging: Structured Console (via @codex/observability)
 
-Workers console output is retained in Cloudflare dashboard for 24 hours (free tier).
+We reuse the backend's `ObservabilityClient` for consistent structured logging and PII redaction.
+
+**Implementation**:
 
 ```typescript
-// lib/server/logger.ts
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+// src/lib/observability.ts
+import { ObservabilityClient } from '@codex/observability';
+import { dev } from '$app/environment';
 
-interface LogContext {
-  requestId?: string;
-  userId?: string;
-  orgId?: string;
-  [key: string]: unknown;
-}
+// Shared instance
+export const logger = new ObservabilityClient(
+  'frontend',
+  dev ? 'development' : 'production'
+);
 
-export function createLogger(context: LogContext = {}) {
-  const log = (level: LogLevel, message: string, data?: Record<string, unknown>) => {
-    const entry = {
-      level,
-      message,
-      timestamp: new Date().toISOString(),
-      ...context,
-      ...data
-    };
-
-    // Structured JSON for easy parsing
-    switch (level) {
-      case 'debug':
-        if (import.meta.env.DEV) console.debug(JSON.stringify(entry));
-        break;
-      case 'info':
-        console.log(JSON.stringify(entry));
-        break;
-      case 'warn':
-        console.warn(JSON.stringify(entry));
-        break;
-      case 'error':
-        console.error(JSON.stringify(entry));
-        break;
-    }
-  };
-
-  return {
-    debug: (msg: string, data?: Record<string, unknown>) => log('debug', msg, data),
-    info: (msg: string, data?: Record<string, unknown>) => log('info', msg, data),
-    warn: (msg: string, data?: Record<string, unknown>) => log('warn', msg, data),
-    error: (msg: string, data?: Record<string, unknown>) => log('error', msg, data)
-  };
+// Helper for server-side load functions
+export function getLogger(event: RequestEvent) {
+  // Can extend with request-specific context here if needed
+  return logger;
 }
 ```
 
@@ -212,18 +185,21 @@ export function createLogger(context: LogContext = {}) {
 
 ```typescript
 // In load function or API route
-export async function load({ locals, platform }) {
-  const logger = createLogger({ requestId: locals.requestId });
+import { logger } from '$lib/observability';
 
-  logger.info('Loading content', { contentId: params.id });
+export async function load({ locals, params }) {
+  logger.info('Loading content', { 
+    contentId: params.id,
+    requestId: locals.requestId 
+  });
 
   try {
     const content = await fetchContent(params.id);
     return { content };
   } catch (error) {
-    logger.error('Failed to load content', {
+    logger.trackError(error, {
       contentId: params.id,
-      error: error instanceof Error ? error.message : String(error)
+      requestId: locals.requestId
     });
     throw error;
   }

@@ -249,11 +249,11 @@ Professional frontend engineering requires visibility into how the app behaves f
 
 ### Observability Strategy
 
-We use a **Cloudflare-native** approach for zero-cost observability during Phase 1.
+We use a **Cloudflare-native** approach for zero-cost observability during Phase 1, leveraging the shared `@codex/observability` package.
 
 | Category | Implementation | Storage |
 |----------|----------------|---------|
-| **Logs** | `console.error` (structured JSON) | Workers Dashboard (24h) |
+| **Logs** | `@codex/observability` (structured JSON) | Workers Dashboard (24h) |
 | **Metrics** | Custom `Analytics Engine` events | Cloudflare Analytics |
 | **Vitals** | Web Vitals reported to Analytics Engine | Cloudflare Analytics |
 | **Context** | Attach `requestId` to all logs | N/A |
@@ -262,18 +262,17 @@ We use a **Cloudflare-native** approach for zero-cost observability during Phase
 
 ```typescript
 // src/hooks.server.ts
+import { logger } from '$lib/observability';
+
 export const handleError = ({ error, event }) => {
-  const errorLog = {
-    message: error instanceof Error ? error.message : String(error),
+  // 1. Log structured error via shared client
+  logger.trackError(error instanceof Error ? error : new Error(String(error)), {
     url: event.url.toString(),
     user: event.locals.user?.id,
     requestId: event.locals.requestId
-  };
+  });
 
-  // Visible in Cloudflare Dashboard > Workers > Logs
-  console.error('[Error]', JSON.stringify(errorLog));
-
-  // Track metric
+  // 2. Track metric in Analytics Engine
   event.platform?.env?.ANALYTICS?.writeDataPoint({
     indexes: ['errors'],
     blobs: [event.url.pathname, error instanceof Error ? error.name : 'UnknownError']

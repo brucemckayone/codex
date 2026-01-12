@@ -640,12 +640,12 @@ Report errors to logging service while providing user-friendly fallbacks:
 
 ```typescript
 // lib/components/ErrorBoundary/error-handler.ts
-import { reportError } from '$lib/observability';
+import { logger } from '$lib/observability';
 
 export function createErrorHandler(componentName: string) {
   return (error: Error, reset: () => void) => {
     // Report to observability service
-    reportError(error, {
+    logger.trackError(error, {
       component: componentName,
       type: 'boundary_caught'
     });
