@@ -829,6 +829,7 @@ jobs:
   - [ ] Configure shadow, motion scales
   - [ ] Add z-index scale
   - [ ] Implement material tokens (glass/texture support)
+  - [ ] Implement advanced personality tokens (icon stroke, border width, motion scale)
 
 - [ ] **Global Styles**
   - [ ] Create CSS reset/normalize

@@ -292,6 +292,15 @@ export function validateBrandTokens(
 | `--glass-blur` | Backdrop blur | `backdrop-filter: blur()` |
 | `--glass-saturation` | Vibrant glass effect | `backdrop-filter: saturate()` |
 
+### Brand Personality
+
+| Token | Description | CSS Property |
+|-------|-------------|--------------|
+| `--brand-icon-stroke` | Icon weight | `stroke-width` |
+| `--brand-border-width` | Structural weight | `border-width` |
+| `--brand-shadow-color` | Shadow tint | `box-shadow` color |
+| `--brand-motion-scale` | Speed multiplier | `calc(duration * scale)` |
+
 ---
 
 ## View Transitions
@@ -449,7 +458,12 @@ graph LR
 | `--brand-glass-blur` | Glass blur amount | 0px |
 | `--brand-glass-opacity` | Glass opacity | 1 |
 | `--brand-texture-url` | Texture image URL | none |
+| `--brand-texture-url` | Texture image URL | none |
 | `--brand-texture-opacity` | Texture visibility | 0 |
+| `--brand-icon-stroke` | Icon stroke width | 2px |
+| `--brand-border-width` | Base border width | 1px |
+| `--brand-shadow-color` | Shadow base color | #000000 |
+| `--brand-motion-scale` | Animation speed multiplier | 1 |
 
 ### Mock Implementation (Phase 1)
 

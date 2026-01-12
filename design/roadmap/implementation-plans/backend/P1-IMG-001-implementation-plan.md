@@ -20,193 +20,150 @@
 
 ## Executive Summary
 
-Implement a **comprehensive Image Processing Pipeline** to handle user-uploaded static assets: content thumbnails, organization logos, and user avatars. This system replaces the placeholder image handling with a robust, secure, and optimized pipeline.
+Implement a **Serverless Image Processing Pipeline** using **WebAssembly (Wasm)** directly within Cloudflare Workers. This system handles user-uploaded static assets (thumbnails, logos, avatars) without requiring external compute (RunPod) or heavy dependencies (Sharp).
 
 **Architecture Philosophy**:
-- **Validation-First**: Strict input validation (magic bytes, dimensions, aspect ratio) before any processing.
-- **Micro-Service Pattern**: Dedicated `@codex/image-processing` package encapsulates Sharp logic and R2 interactions.
-- **Optimized Delivery**: Always convert to WebP, generate multiple sizes (sm/md/lg), and use content-addressable storage paths where appropriate (or creator-scoped for overriding).
-- **Separation of Concerns**: Validation logic in `@codex/validation`, processing in `@codex/image-processing`, API orchestration in workers.
+- **Native Wasm Processing**: Use `@cf-wasm/photon` (Rust-based) for high-performance image manipulation within the Worker's 128MB memory limit.
+- **Zero-Infrastructure**: No external servers or containers to manage. Logic lives alongside the API.
+- **Strict Constraints**: Enforce strict file size limits (max 4MB for high-res inputs) to prevent OOM errors, utilizing streaming where possible.
+- **Optimized Delivery**: Convert to WebP, generate standard sizes (sm/md/lg), and store in R2.
 
 **Key Decisions**:
-- **Sharp on Workers**: Use Sharp (Wasm) within Cloudflare Workers for on-the-fly processing (no external queues for images < 5MB).
-- **WebP Standardization**: All raster inputs (JPEG, PNG) converted to WebP for 30%+ size reduction.
-- **SVG Passthrough**: SVGs (logos) are sanitized but not rasterized, ensuring crisp rendering at any size.
-- **Two Thumbnail Types**:
-    - `media_items.thumbnailKey`: Auto-extracted (backup)
-    - `content.thumbnailUrl`: User-uploaded (primary)
+- **Photon over Sharp**: `sharp` is too heavy for Workers. `photon` is a lightweight Rust crate compiled to Wasm, specifically designed for this environment.
+- **Validation-First**: strict "Gatekeeper" validation (magic bytes, strict size check) before loading the image into the Wasm heap.
+- **Fail-Fast**: Reject images > 5MB immediately to protect Worker stability.
 
 ---
 
 ## Architecture Overview
 
-### Service Layer - Encapsulated Processing
+### Service Layer - Wasm Integration
 
 ```typescript
 // @codex/image-processing/src/services/image-processing-service.ts
+import { PhotonImage, resize, sampling_artifact } from '@cf-wasm/photon';
+
 export class ImageProcessingService {
   constructor(private config: { r2: R2Bucket, db: Database }) {}
 
-  // Main entry points
-  async processContentThumbnail(contentId: string, file: ValidatedImage): Promise<ProcessedImageResult>;
-  async processOrgLogo(orgId: string, file: ValidatedImage): Promise<ProcessedImageResult>;
-  async processUserAvatar(userId: string, file: ValidatedImage): Promise<ProcessedImageResult>;
+  async processContentThumbnail(contentId: string, file: File): Promise<ProcessedImageResult> {
+    // 1. Validation (Size & Magic Bytes)
+    await this.validateInput(file);
 
-  // Internal pipeline steps
-  private async validateDimensions(buffer: Buffer, config: DimensionConfig): Promise<void>;
-  private async generateVariants(buffer: Buffer): Promise<Map<string, Buffer>>; // sm, md, lg
-  private async uploadVariants(basePath: string, variants: Map<string, Buffer>): Promise<void>;
+    // 2. Load into Wasm (Careful memory mgmt)
+    const arrayBuffer = await file.arrayBuffer();
+    const inputImage = PhotonImage.new_from_byteslice(new Uint8Array(arrayBuffer));
+
+    // 3. Generate Variants (In-Memory)
+    // Photon operations are synchronous and CPU-bound
+    const variants = new Map<string, Uint8Array>();
+
+    // Large (1920w)
+    const lg = resize(inputImage, 1920, 1080, 1);
+    variants.set('lg', lg.get_bytes_webp());
+
+    // Medium (800w) - Reuse 'lg' or 'input' depending on quality needs
+    // Small (400w)
+
+    // 4. Cleanup Wasm Memory immediately
+    inputImage.free();
+    lg.free();
+
+    // 5. Upload to R2 (Parallel)
+    await this.uploadVariants(basePath, variants);
+
+    return result;
+  }
 }
 ```
 
 ### Storage Structure (R2)
 
-Paths follow the creator-scoped pattern for multi-tenancy validation:
+*Unchanged from original plan.*
 
 ```
 MEDIA_BUCKET/
 ├── {creatorId}/
 │   ├── content-thumbnails/
 │   │   └── {contentId}/
-│   │       ├── sm.webp  (200w)
-│   │       ├── md.webp  (400w)
-│   │       └── lg.webp  (800w)
-│   └── branding/
-│       └── logo/
-│           ├── sm.webp
-│           ├── md.webp
-│           └── lg.webp
-└── avatars/
-    └── {userId}/
-        ├── sm.webp
-        ├── md.webp
-        └── lg.webp
+│   │       ├── sm.webp
+│   │       ├── md.webp
+│   │       └── lg.webp
+...
 ```
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Validation Package Enhancements (2 hours)
+### Phase 1: Validation & Safety Gates (1 day)
 
 Extend `@codex/validation` to support strict image constraints.
 
-#### 1.1 Add Magic Byte Constants
-**Modify**: `packages/validation/src/constants.ts` (create if needed or use `primitives.ts`)
-- Add `IMAGE_MAGIC_NUMBERS` for GIF (0x47 0x49 0x46 0x38).
-- Update `ALLOWED_MIME_TYPES`.
+#### 1.1 Strict Magic Byte Checks
+**Modify**: `packages/validation/src/image.ts`
+- Implement `validateImageSignature(buffer)`: checking hex signatures for JPEG, PNG, GIF, WebP.
+- **Crucial**: This must happen regarding the first few bytes *without* reading the whole file if possible, or immediately after buffering.
 
-#### 1.2 Create Image Validation Schema
-**Create**: `packages/validation/src/schemas/image.ts`
-
-```typescript
-export const imageUploadSchema = z.custom<File>((file) => {
-    // 1. MIME check
-    // 2. Size check
-    return true;
-});
-```
-
-#### 1.3 Create Image Validation Utility
-**Create**: `packages/validation/src/image-validation.ts`
-- Implement `validateImageUpload(formData, config)`
-- Supports config interfaces:
-    ```typescript
-    interface ImageConfig {
-        maxBytes: number;
-        maxWidth?: number;
-        maxHeight?: number;
-        allowedMimeTypes: string[];
-    }
-    ```
-
-#### 1.4 Test Validation Logic
-**Create**: `packages/validation/src/__tests__/image-validation.test.ts`
-- Test mime spoofing (rename .exe to .jpg)
-- Test dimension limits
-- Test SVG sanitization (confirm scripts are stripped)
+#### 1.2 Resource Guard
+**Create**: `packages/validation/src/limits.ts`
+- Define `MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;` (5MB).
+- Implementing this check at the `request.formData()` level is tricky (it buffers).
+- **Strategy**: Check `Content-Length` header first (weak), then check buffer size post-load.
 
 ---
 
-### Phase 2: Image Processing Core (4 hours)
+### Phase 2: Wasm Processing Core (2 days)
 
-Create the dedicated processing package.
+Create the dedicated processing package using Photon.
 
 #### 2.1 Scaffold Package
 **Create**: `packages/image-processing/`
-- `package.json` (deps: `sharp`, `@codex/cloudflare-clients`, `@codex/service-errors`)
-- `tsconfig.json`
-- `src/index.ts`
+- `package.json`:
+  - `dependencies`: `@cf-wasm/photon`, `@codex/cloudflare-clients`
+  - **Note**: Ensure `wrangler` build config supports Wasm modules correctly.
 
-#### 2.2 Implement Path Generators
-**Create**: `packages/image-processing/src/paths.ts`
-- Move/Extend logic from `packages/transcoding/src/paths.ts` if appropriate, or import it.
-- `getContentThumbnailPath(creatorId, contentId, size)`
-- `getAvatarPath(userId, size)`
+#### 2.2 Wasm Integration Wrapper
+**Create**: `packages/image-processing/src/photon-wrapper.ts`
+- Photon's API is low-level. Create a safe wrapper that handles:
+  - `Uint8Array` conversion.
+  - Calling `free()` on Rust structs (Manual Memory Management is required in Wasm!).
+  - Error handling (Wasm panics can crash the worker).
 
-#### 2.3 Implement Processing Logic
+#### 2.3 Processor Logic
 **Create**: `packages/image-processing/src/processor.ts`
-- Function `processImage(buffer, options)`
-- Uses `sharp(buffer).resize().webp().toBuffer()`
-- Returns `Map<Size, Buffer>`
+- `processImage(buffer: ArrayBuffer): Record<size, Uint8Array>`
+- Implement the resizing logic:
+    - Resize (Lanczos or Nearest Neighbor depending on perf).
+    - Output to WebP (Photon supports lightweight WebP encoding).
 
-#### 2.4 Create Service Class
+---
+
+### Phase 3: Service & API Integration (1 day)
+
+Connect the new package to the Workers.
+
+#### 3.1 Service Class
 **Create**: `packages/image-processing/src/service.ts`
-- `ImageProcessingService` class
-- Integrates `Validation` (re-check), `Processor`, and `R2Service`
-- Handles logic: verify owner -> process -> upload -> return URLs
+- `ImageProcessingService`: Orchestrates Validation -> Wasm Processing -> R2 Upload.
+
+#### 3.2 Worker Endpoints
+**Modify**: `workers/content-api` (and others)
+- Add endpoints.
+- Integration Test: Ensure the Wasm module loads correctly in the deployed Worker environment (often the trickiest part of Wasm).
 
 ---
 
-### Phase 3: Database & Migration (1 hour)
+### Phase 4: Verification (1 day)
 
-#### 3.1 Update User Schema
-**Modify**: `packages/database/src/schema/users.ts`
-- Add `avatarUrl: text('avatar_url')`
+#### 4.1 Memory Profiling
+- **Test**: Upload a 4.9MB complex PNG.
+- **Monitor**: Check Worker RAM usage. If it hits 128MB, we fail.
+- **Mitigation**: If 5MB is too high for Wasm overhead, lower limit to 3MB or 4MB.
 
-#### 3.2 Generate Migration
-- Run `pnpm db:gen:drizzle`
-- Name: `add_user_avatar_url`
-
----
-
-### Phase 4: API Integration (3 hours)
-
-Wire up the worker endpoints.
-
-#### 4.1 Content Thumbnail Endpoint
-**Modify**: `workers/content-api/src/routes/content.ts`
-- `POST /:id/thumbnail`
-- Middleware: `requireCreator`
-- Logic:
-    ```typescript
-    const file = await req.formData().get('thumbnail');
-    const service = new ImageProcessingService(env, db);
-    const result = await service.processContentThumbnail(contentId, file);
-    await db.update(content).set({ thumbnailUrl: result.basePath });
-    return result.urls;
-    ```
-
-#### 4.2 Organization Logo Endpoint
-**Modify**: `workers/organization-api/src/routes/settings.ts` (or branding)
-- `POST /:id/logo`
-- Middleware: `requireOrgAdmin`
-
-#### 4.3 User Avatar Endpoint
-**Modify**: `workers/user-api/src/routes/profile.ts` (create if needed)
-- `POST /avatar`
-- Middleware: `requireAuth`
-
----
-
-### Phase 5: Verification & Tests (2 hours)
-
-#### 5.1 Unit Tests
-- `packages/image-processing/src/__tests__/processor.test.ts`: Mock Sharp, verify output buffer types/sizes.
-- `packages/image-processing/src/__tests__/service.test.ts`: Mock R2, verify upload calls.
-
-#### 5.2 Integration Tests
-- `workers/content-api/src/__tests__/thumbnail.test.ts`: Full flow mock R2.
+#### 4.2 Quality Check
+- Compare Photon WebP output vs Sharp/Mac Preview.
+- Ensure colors aren't mangled (sRGB preservation).
 
 ---
 
@@ -218,39 +175,24 @@ packages/image-processing/
 ├── package.json
 ├── src/
 │   ├── index.ts
-│   ├── paths.ts         # R2 Key generators
-│   ├── processor.ts     # Sharp logic
-│   └── service.ts       # Orchestration
-└── test/
+│   ├── photon-wrapper.ts    # Safe Wasm wrapper
+│   ├── processor.ts         # Resizing logic
+│   └── service.ts           # Orchestration
 ```
-
-### Affected Workers
-- `workers/content-api`
-- `workers/organization-api`
-- `workers/user-api` (implied/new)
 
 ---
 
 ## Verification Checklist
 
-### Phase 1: Validation
-- [ ] Magic byte checks fail for renamed files
-- [ ] SVG sanitization removes `<script>` tags
-- [ ] Large files are rejected fast (before processing)
+### Wasm Stability
+- [ ] Large images (4MB+) do not cause OOM (Out of Memory).
+- [ ] Concurrent requests do not crash the Worker isolate.
+- [ ] manually calling `.free()` on all Wasm objects to prevent leaks.
 
-### Phase 2: Processing
-- [ ] Sharp installed correctly in Worker environment (Wasm check)
-- [ ] WebP conversion works for PNG/JPEG inputs
-- [ ] Multi-size generation (sm, md, lg) produces correct dimensions
+### Functionality
+- [ ] Magic byte validation rejects renamed .exe files.
+- [ ] SVG sanitization works (for logos).
+- [ ] WebP outputs are valid and viewable in browser.
 
-### Phase 3: Storage
-- [ ] R2 paths follow `{creatorId}/...` pattern
-- [ ] Cache-Control headers set (immutable for hashed/unique, revalidate for mutable)
-- [ ] Content-Type headers correct (`image/webp` vs `image/svg+xml`)
-
----
-
-## Future Enhancements
-- **AVIF Support**: Add as content negotiation option when browser support >98%.
-- **BlurHash**: Generate BlurHash during processing for skeleton loading states.
-- **Animated WebP**: Support simple animations for avatars.
+### Infrastructure
+- [ ] Wasm binary is correctly bundled by Wrangler/Esbuild.
