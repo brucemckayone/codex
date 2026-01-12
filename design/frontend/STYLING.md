@@ -250,9 +250,9 @@ export function validateBrandTokens(
 
 | Token | Value | Use |
 |-------|-------|-----|
-| `--radius-sm` | 0.25rem | Buttons, inputs |
-| `--radius-md` | 0.5rem | Cards |
-| `--radius-lg` | 1rem | Modals |
+| `--radius-sm` | 0.5x Base | Buttons, inputs |
+| `--radius-md` | 1x Base | Cards |
+| `--radius-lg` | 1.5x Base | Modals |
 | `--radius-full` | 9999px | Pills, avatars |
 | `--border-width` | 1px | Default borders |
 
@@ -432,6 +432,10 @@ graph LR
 | `--brand-accent` | Secondary accent | Platform default |
 | `--brand-surface` | Background tint | White |
 | `--brand-logo` | Logo URL | None |
+| `--brand-radius-base` | Base border radius | 0.5rem |
+| `--brand-density-scale` | Spacing multiplier | 1 |
+| `--brand-font-body` | Body font family | Inter |
+| `--brand-font-heading` | Heading font family | Inter |
 
 ### Mock Implementation (Phase 1)
 

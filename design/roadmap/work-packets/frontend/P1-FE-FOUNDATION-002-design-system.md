@@ -159,8 +159,19 @@ src/lib/styles/
 
 /* Organization Brand Override Pattern */
 [data-org-brand] {
+  /* Colors */
   --color-primary-500: var(--org-brand-primary, #e85a3f);
   --color-primary-600: var(--org-brand-primary-dark, #d54429);
+
+  /* Typography */
+  --brand-font-body: var(--org-brand-font-body, 'Inter');
+  --brand-font-heading: var(--org-brand-font-heading, 'Inter');
+
+  /* Shape */
+  --brand-radius-base: var(--org-brand-radius, 0.5rem);
+
+  /* Density (0.875 = compact, 1 = normal, 1.125 = spacious) */
+  --brand-density-scale: var(--org-brand-density, 1);
 }
 ```
 
@@ -169,8 +180,9 @@ src/lib/styles/
 ```css
 /* typography.css */
 :root {
-  /* Font Families */
-  --font-sans: 'Inter', 'Inter-fallback', system-ui, -apple-system, sans-serif;
+  /* Brand-Configurable Font Stacks */
+  --font-sans: var(--brand-font-body, 'Inter'), 'Inter-fallback', system-ui, -apple-system, sans-serif;
+  --font-heading: var(--brand-font-heading, 'Inter'), 'Inter-fallback', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
   /* Font Sizes (clamp for fluid typography) */
@@ -216,19 +228,39 @@ src/lib/styles/
 ```css
 /* spacing.css */
 :root {
+  /* Base Unit (multiplied by density scale) */
+  --space-unit: calc(0.25rem * var(--brand-density-scale, 1));
+
   --space-0: 0;
-  --space-1: 0.25rem;   /* 4px */
-  --space-2: 0.5rem;    /* 8px */
-  --space-3: 0.75rem;   /* 12px */
-  --space-4: 1rem;      /* 16px */
-  --space-5: 1.25rem;   /* 20px */
-  --space-6: 1.5rem;    /* 24px */
-  --space-8: 2rem;      /* 32px */
-  --space-10: 2.5rem;   /* 40px */
-  --space-12: 3rem;     /* 48px */
-  --space-16: 4rem;     /* 64px */
-  --space-20: 5rem;     /* 80px */
-  --space-24: 6rem;     /* 96px */
+  --space-1: var(--space-unit);         /* 4px * density */
+  --space-2: calc(var(--space-unit) * 2); /* 8px * density */
+  --space-3: calc(var(--space-unit) * 3); /* 12px * density */
+  --space-4: calc(var(--space-unit) * 4); /* 16px * density */
+  --space-5: calc(var(--space-unit) * 5); /* 20px * density */
+  --space-6: calc(var(--space-unit) * 6); /* 24px * density */
+  --space-8: calc(var(--space-unit) * 8); /* 32px * density */
+  --space-10: calc(var(--space-unit) * 10); /* 40px * density */
+  --space-12: calc(var(--space-unit) * 12); /* 48px * density */
+  --space-16: calc(var(--space-unit) * 16); /* 64px * density */
+  --space-20: calc(var(--space-unit) * 20); /* 80px * density */
+  --space-24: calc(var(--space-unit) * 24); /* 96px * density */
+}
+
+### Radius Tokens
+
+```css
+/* radius.css */
+:root {
+  /* Configurable base radius (0rem = sharp, 0.5rem = balanced, 1rem = playful) */
+  --radius-base: var(--brand-radius-base, 0.5rem);
+
+  --radius-none: 0;
+  --radius-xs: calc(var(--radius-base) * 0.25);
+  --radius-sm: calc(var(--radius-base) * 0.5);
+  --radius-md: var(--radius-base);
+  --radius-lg: calc(var(--radius-base) * 1.5);
+  --radius-xl: calc(var(--radius-base) * 2);
+  --radius-full: 9999px;
 }
 ```
 
@@ -790,8 +822,10 @@ jobs:
 - [ ] **Token System**
   - [ ] Create src/lib/styles/tokens/*.css files
   - [ ] Implement color system with semantic tokens
-  - [ ] Set up typography with size-adjusted fallbacks
-  - [ ] Configure spacing, radius, shadow, motion scales
+  - [ ] Set up typography with size-adjusted fallbacks AND brand font variables
+  - [ ] Configure spacing with density scale support
+  - [ ] Implement radius system with configurable base
+  - [ ] Configure shadow, motion scales
   - [ ] Add z-index scale
 
 - [ ] **Global Styles**
