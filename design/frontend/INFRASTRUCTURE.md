@@ -196,6 +196,328 @@ The frontend Worker may access Cloudflare bindings for specific needs:
 
 ---
 
+## Image & Media CDN
+
+### Thumbnail Delivery
+
+Thumbnails are pre-generated during transcoding and stored in R2. Served via Cloudflare CDN:
+
+```
+https://content.revelations.studio/thumbnails/{contentId}-{size}.webp
+```
+
+| Size | Dimensions | Use Case |
+|------|------------|----------|
+| `sm` | 200px wide | Mobile grids, small cards |
+| `md` | 400px wide | Tablet, standard cards |
+| `lg` | 800px wide | Desktop, featured content |
+
+### Generation Pipeline
+
+Thumbnails are generated during video transcoding by the RunPod worker:
+
+```mermaid
+graph LR
+    Upload[Video Upload] --> Transcode[RunPod Transcoding]
+    Transcode --> Thumbnails[Generate Thumbnails]
+    Thumbnails --> R2[Store in R2]
+    R2 --> CDN[Cloudflare CDN]
+    CDN --> Frontend[Frontend serves]
+```
+
+**Key Points**:
+- FFmpeg extracts key frame and generates WebP in 3 sizes
+- JPEG fallback for older browsers
+- No runtime image processing—all pre-generated
+- R2 storage cost: ~$0.015/GB/month (very cheap)
+- Cloudflare CDN caches at edge (no per-request cost)
+
+### Static Image Optimization
+
+For build-time static images (logos, icons, marketing):
+
+```typescript
+// vite.config.ts - enabled at build
+import { enhancedImages } from '@sveltejs/enhanced-img';
+```
+
+This generates AVIF/WebP formats and responsive srcsets automatically.
+
+## Observability & Error Tracking
+
+Professional frontend engineering requires visibility into how the app behaves for real users on varied networks and devices.
+
+### Error Monitoring (Sentry)
+
+We use **Sentry** for client and server-side exception tracking.
+
+| Category | Implementation |
+|----------|----------------|
+| **Client Errors** | Global error listener in `hooks.ts` |
+| **Server Errors** | `handleError` in `hooks.server.ts` |
+| **Context** | Attach `requestId`, `userId`, and `orgSlug` to events |
+
+**Reporting Pattern**:
+```typescript
+// src/hooks.server.ts
+export const handleError = ({ error, event }) => {
+  Sentry.captureException(error, {
+    extra: {
+      url: event.url.toString(),
+      user: event.locals.user?.id
+    }
+  });
+};
+```
+
+### Real User Monitoring (RUM)
+
+Track Web Vitals (LCP, CLS, INP) to ensure high perceived performance across regions.
+
+- **Vitals Tracking**: Reported to Sentry or Google Analytics.
+- **Performance Budgets**: Enforce via CI/CD (LCP < 2.5s).
+
+---
+
+## Edge Caching Strategy
+
+Public pages are cached at Cloudflare's edge for performance and cost reduction.
+
+### Cache Layers
+
+```mermaid
+graph LR
+    User --> Edge[Cloudflare Edge]
+    Edge -->|HIT| User
+    Edge -->|MISS| Worker[SvelteKit Worker]
+    Worker --> API[API Workers]
+    API --> DB[(Database)]
+```
+
+### Cache Key Composition
+
+Cache keys must account for multi-tenant context. Cloudflare automatically includes URL in cache key; we add variant headers.
+
+| Factor | Handling | Example |
+|--------|----------|---------|
+| Organization | URL path/subdomain | `yoga-studio.revelations.studio/explore` |
+| Content slug | URL path | `/content/intro-to-yoga` |
+| Locale | Vary header | `Vary: Accept-Language` |
+| Dark mode | Client-side only | Not cached (hydrated) |
+
+**Custom Cache Keys** (when needed):
+
+```typescript
+// For API responses that vary by org context
+const cacheKey = new Request(
+  `${request.url}?org=${orgSlug}`,
+  { method: 'GET', headers: request.headers }
+);
+const cached = await caches.default.match(cacheKey);
+```
+
+### Vary Headers
+
+**Critical**: Never use `Vary: *` (invalidates caching entirely).
+
+| Header | When to Use | Effect |
+|--------|-------------|--------|
+| `Vary: Accept-Language` | i18n content | Separate cache per locale |
+| `Vary: Accept-Encoding` | Always (automatic) | gzip/brotli variants |
+| `Vary: Cookie` | **Avoid** | Effectively disables caching |
+
+**Implementation**:
+
+```typescript
+// +page.server.ts
+export async function load({ setHeaders, request }) {
+  // Public page with locale variants
+  setHeaders({
+    'Cache-Control': 'public, max-age=300, s-maxage=300, stale-while-revalidate=60',
+    'Vary': 'Accept-Language'
+  });
+  // ...
+}
+```
+
+### Authenticated vs Unauthenticated Caching
+
+**Never** cache authenticated user data at edge. Strategy:
+
+```mermaid
+graph TD
+    Request --> HasSession{Has Session Cookie?}
+    HasSession -->|No| PublicCache[Serve from Edge Cache]
+    HasSession -->|Yes| PrivateBypass[Bypass Cache → Worker]
+    PublicCache --> StaticHTML[Static HTML Shell]
+    PrivateBypass --> PersonalizedData[User-Specific Data]
+    StaticHTML --> Hydrate[Client Hydrates Personal State]
+```
+
+| Content Type | Caching | Personalization |
+|--------------|---------|-----------------|
+| Public explore pages | Edge cached | Purchase status hydrated client-side |
+| Content detail (public) | Edge cached | Progress/purchase hydrated |
+| User library | Never cached | Fully server-rendered |
+| Studio pages | Never cached | Fully server-rendered |
+
+### Cache-Control by Route Type
+
+| Route Type | Example | Cache-Control | Notes |
+|------------|---------|---------------|-------|
+| Platform home | `/` | `public, max-age=3600, s-maxage=3600, stale-while-revalidate=300` | Longest TTL |
+| Org landing | `/[org]` | `public, max-age=300, s-maxage=300, stale-while-revalidate=60` | 5 min + SWR |
+| Public explore | `/[org]/explore` | `public, max-age=300, s-maxage=300, stale-while-revalidate=60` | 5 min + SWR |
+| Content detail | `/[org]/content/[slug]` | `public, max-age=300, s-maxage=300, stale-while-revalidate=60` | 5 min + SWR |
+| User library | `/library` | `private, no-store` | Never cache |
+| Studio pages | `/studio/*` | `private, no-store` | Never cache |
+| API proxied | `/api/*` | `no-store` | Backend handles caching |
+
+### Stale-While-Revalidate Pattern
+
+Use `stale-while-revalidate` for perceived performance:
+
+```typescript
+// Serve stale content immediately while fetching fresh in background
+setHeaders({
+  'Cache-Control': 'public, max-age=300, s-maxage=300, stale-while-revalidate=60'
+  // After 300s: serve stale for up to 60s while revalidating
+});
+```
+
+### Cache Warming Strategy
+
+For popular content, pre-warm edge caches after publish:
+
+```typescript
+// Called after content publish webhook
+async function warmCache(content: Content, org: Organization) {
+  const urls = [
+    `https://${org.slug}.revelations.studio/content/${content.slug}`,
+    `https://${org.slug}.revelations.studio/explore`
+  ];
+
+  // Hit each URL from multiple edge locations (via Cloudflare Workers)
+  // Or use external service like Cloudflare Cache Reserve
+  for (const url of urls) {
+    await fetch(url, {
+      cf: { cacheTtl: 300 }  // Force cache population
+    });
+  }
+}
+```
+
+**Phase 1**: Manual warming not required (low traffic). Implement when cache miss rate impacts UX.
+
+### i18n Interaction
+
+If content is localized:
+
+| Scenario | Cache Strategy |
+|----------|----------------|
+| UI text only (Paraglide) | Single cache, client hydrates locale |
+| Content translated | `Vary: Accept-Language`, separate cache per locale |
+| Mixed | Cache HTML shell, hydrate locale-specific text |
+
+**Recommendation for Phase 1**: UI-only i18n (Paraglide). Content translations are future phase. Use single cache with client-side locale detection.
+
+### Cache Metrics & Monitoring
+
+Track via Cloudflare Analytics + custom logging:
+
+| Metric | Source | Alert Threshold |
+|--------|--------|-----------------|
+| Cache hit ratio | Cloudflare Analytics | < 80% |
+| Origin response time | Worker timing | > 500ms p95 |
+| Cache purge frequency | Custom logging | > 100/hour |
+| Bandwidth saved | Cloudflare Analytics | Informational |
+
+**Implementation**:
+
+```typescript
+// Log cache status in worker
+export async function load({ request, setHeaders, platform }) {
+  const cacheStatus = request.headers.get('cf-cache-status');
+
+  platform?.env?.ANALYTICS?.writeDataPoint({
+    indexes: ['cache'],
+    blobs: [cacheStatus ?? 'UNKNOWN'],
+    doubles: [Date.now()]
+  });
+
+  // ...
+}
+```
+
+### Cache Invalidation
+
+On content publish/unpublish, purge via Cloudflare API:
+
+```typescript
+// lib/server/cache.ts
+const ZONE_ID = platform.env.CLOUDFLARE_ZONE_ID;
+const API_TOKEN = platform.env.CLOUDFLARE_API_TOKEN;
+
+export async function purgeContentCache(org: Organization, content: Content) {
+  const urls = [
+    `https://${org.slug}.revelations.studio/content/${content.slug}`,
+    `https://${org.slug}.revelations.studio/explore`,
+    `https://${org.slug}.revelations.studio/` // Org landing
+  ];
+
+  await fetch(`https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/purge_cache`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${API_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ files: urls })
+  });
+}
+
+// Purge by tag (requires Cache-Tag header on responses)
+export async function purgeByTag(tags: string[]) {
+  await fetch(`https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/purge_cache`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${API_TOKEN}` },
+    body: JSON.stringify({ tags })
+  });
+}
+```
+
+**Cache Tags** (for granular purging):
+
+```typescript
+setHeaders({
+  'Cache-Control': 'public, max-age=300',
+  'Cache-Tag': `org:${orgSlug}, content:${contentId}`
+});
+```
+
+### Client-Side Hydration
+
+Cached pages serve static HTML shell. User-specific state hydrates client-side:
+
+```mermaid
+graph LR
+    Edge[Cached HTML Shell] --> Browser
+    Browser --> Hydrate[Svelte Hydrates]
+    Hydrate --> API1[Fetch Purchase Status]
+    Hydrate --> API2[Fetch Playback Progress]
+    Hydrate --> API3[Fetch Wishlist State]
+    API1 & API2 & API3 --> PersonalUI[Update UI]
+```
+
+| Personalized Element | Hydration Pattern |
+|---------------------|-------------------|
+| Purchase status (Buy vs Play) | `onMount` → fetch `/api/access/check` |
+| Playback progress | `onMount` → fetch `/api/access/progress` |
+| Wishlist state | `onMount` → check local state + API |
+
+This separation ensures pages cache effectively while users see personalized state with minimal latency.
+
+---
+
 ## Deployment Pipeline
 
 ```mermaid

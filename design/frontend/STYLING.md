@@ -93,6 +93,124 @@ graph TD
 
 All semantic tokens have platform defaults. Orgs can override any token, but missing overrides gracefully fall back.
 
+### Implementation: Scoped CSS Variables
+
+CSS custom properties don't support multi-level fallback natively. We use **data attributes** to scope org overrides:
+
+```css
+/* Platform defaults (always applied) */
+:root {
+  --brand-primary: #3b82f6;
+  --brand-primary-hover: #2563eb;
+  --brand-accent: #8b5cf6;
+  --color-surface: #ffffff;
+  --color-text-primary: #1f2937;
+}
+
+/* Org overrides via data attribute */
+[data-org="yoga-studio"] {
+  --brand-primary: #10b981;
+  --brand-primary-hover: #059669;
+  --brand-accent: #f59e0b;
+}
+
+[data-org="cooking-school"] {
+  --brand-primary: #ef4444;
+  --brand-primary-hover: #dc2626;
+}
+```
+
+**Layout Application:**
+
+```svelte
+<!-- src/routes/+layout.svelte -->
+<script lang="ts">
+  let { data, children } = $props();
+</script>
+
+<div data-org={data.organization?.slug}>
+  {@render children()}
+</div>
+```
+
+### Runtime Token Injection (Dynamic Orgs)
+
+For orgs not known at build time, inject tokens via SSR:
+
+```typescript
+// +layout.server.ts
+export async function load({ locals, platform }) {
+  const org = locals.organization;
+
+  if (!org?.brandTokens) {
+    return { organization: org, brandStyles: null };
+  }
+
+  // Convert stored tokens to CSS
+  const brandStyles = Object.entries(org.brandTokens)
+    .map(([key, value]) => `--${key}: ${value};`)
+    .join(' ');
+
+  return {
+    organization: org,
+    brandStyles
+  };
+}
+```
+
+```svelte
+<!-- +layout.svelte -->
+<script lang="ts">
+  let { data, children } = $props();
+</script>
+
+<svelte:head>
+  {#if data.brandStyles}
+    <style>
+      :root { {data.brandStyles} }
+    </style>
+  {/if}
+</svelte:head>
+
+<div data-org={data.organization?.slug}>
+  {@render children()}
+</div>
+```
+
+### Token Validation
+
+Before saving org tokens, validate:
+
+```typescript
+// lib/theme/validate-tokens.ts
+const VALID_TOKEN_KEYS = [
+  'brand-primary',
+  'brand-primary-hover',
+  'brand-accent',
+  'brand-surface'
+] as const;
+
+const COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
+
+export function validateBrandTokens(
+  tokens: Record<string, string>
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  for (const [key, value] of Object.entries(tokens)) {
+    if (!VALID_TOKEN_KEYS.includes(key as any)) {
+      errors.push(`Unknown token: ${key}`);
+      continue;
+    }
+
+    if (!COLOR_REGEX.test(value)) {
+      errors.push(`Invalid color value for ${key}: ${value}`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
 ---
 
 ## Token Categories
@@ -153,6 +271,72 @@ All semantic tokens have platform defaults. Orgs can override any token, but mis
 | `--z-dropdown` | 1000 | Dropdowns |
 | `--z-modal` | 1100 | Modals |
 | `--z-toast` | 1200 | Toast notifications |
+
+### Motion Tokens
+
+| Token | Value | Use |
+|-------|-------|-----|
+| `--duration-fast` | 150ms | Hover, toggle, fade |
+| `--duration-normal` | 300ms | Modal, drawer, large moves |
+| `--duration-slow` | 500ms | Page transitions |
+| `--ease-in-out` | cubic-bezier(0.4, 0, 0.2, 1) | Standard movement |
+| `--ease-out` | cubic-bezier(0, 0, 0.2, 1) | Entering screen |
+| `--ease-in` | cubic-bezier(0.4, 0, 1, 1) | Exiting screen |
+
+---
+
+## View Transitions
+
+We use the **View Transitions API** (integrated via SvelteKit) for seamless page navigation.
+
+### Implementation
+
+Enable view transitions in `+layout.svelte` using the `onNavigate` lifecycle function:
+
+```svelte
+<script>
+  import { onNavigate } from '$app/navigation';
+
+  onNavigate((navigation) => {
+    if (!document.startViewTransition) return;
+
+    return new Promise((resolve) => {
+      document.startViewTransition(async () => {
+        resolve();
+        await navigation.complete;
+      });
+    });
+  });
+</script>
+```
+
+### Transition Names
+
+Use `view-transition-name` in CSS to morph elements between pages:
+
+```css
+/* Card Thumbnail */
+.card-thumbnail {
+  view-transition-name: media-player;
+}
+
+/* Video Player on destination page */
+.video-player {
+  view-transition-name: media-player;
+}
+```
+
+This causes the thumbnail to morph into the player when navigating from list to detail.
+
+### Transition Scoping
+
+To avoid collisions (e.g., multiple cards), use dynamic styles in the component:
+
+```svelte
+<div style="view-transition-name: media-{id}">
+  <!-- ... -->
+</div>
+```
 
 ---
 
@@ -333,21 +517,180 @@ graph LR
     Verify --> Output[Output harmonized color]
 ```
 
-The algorithm:
-1. Calculate contrast ratio against target backgrounds (surface, text)
-2. If below threshold, adjust luminance (darken or lighten)
-3. Preserve hue and saturation where possible
-4. Verify adjusted color meets requirements
+### Contrast Algorithm Implementation
+
+WCAG contrast ratio formula: `(L1 + 0.05) / (L2 + 0.05)` where L1 is lighter, L2 is darker.
+
+```typescript
+// lib/theme/contrast.ts
+
+/**
+ * Calculate relative luminance per WCAG 2.1
+ * @see https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
+ */
+export function getLuminance(hex: string): number {
+  const rgb = hexToRgb(hex);
+  const [r, g, b] = rgb.map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Calculate contrast ratio between two colors
+ * @returns Ratio between 1:1 and 21:1
+ */
+export function getContrastRatio(color1: string, color2: string): number {
+  const l1 = getLuminance(color1);
+  const l2 = getLuminance(color2);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/**
+ * Check if contrast meets WCAG AA requirements
+ */
+export function meetsContrastAA(
+  foreground: string,
+  background: string,
+  isLargeText = false
+): { passes: boolean; ratio: number; required: number } {
+  const ratio = getContrastRatio(foreground, background);
+  const required = isLargeText ? 3 : 4.5;
+  return {
+    passes: ratio >= required,
+    ratio: Math.round(ratio * 100) / 100,
+    required
+  };
+}
+
+/**
+ * Auto-harmonize: Adjust color to meet contrast requirements
+ * Preserves hue and saturation, adjusts lightness
+ */
+export function harmonizeColor(
+  color: string,
+  background: string,
+  targetRatio = 4.5
+): string {
+  const current = getContrastRatio(color, background);
+  if (current >= targetRatio) return color;
+
+  const hsl = hexToHsl(color);
+  const bgLuminance = getLuminance(background);
+  const isDarkBg = bgLuminance < 0.5;
+
+  // Binary search for optimal lightness
+  let low = isDarkBg ? hsl.l : 0;
+  let high = isDarkBg ? 100 : hsl.l;
+
+  for (let i = 0; i < 20; i++) {
+    const mid = (low + high) / 2;
+    const testColor = hslToHex({ ...hsl, l: mid });
+    const ratio = getContrastRatio(testColor, background);
+
+    if (ratio >= targetRatio && ratio < targetRatio + 0.5) {
+      return testColor; // Close enough
+    }
+
+    if (isDarkBg) {
+      if (ratio < targetRatio) low = mid;
+      else high = mid;
+    } else {
+      if (ratio < targetRatio) high = mid;
+      else low = mid;
+    }
+  }
+
+  return hslToHex({ ...hsl, l: (low + high) / 2 });
+}
+
+// Helper functions
+function hexToRgb(hex: string): [number, number, number] {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) throw new Error(`Invalid hex color: ${hex}`);
+  return [
+    parseInt(result[1], 16),
+    parseInt(result[2], 16),
+    parseInt(result[3], 16)
+  ];
+}
+
+function hexToHsl(hex: string): { h: number; s: number; l: number } {
+  const [r, g, b] = hexToRgb(hex).map(c => c / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      case b: h = ((r - g) / d + 4) / 6; break;
+    }
+  }
+
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+function hslToHex({ h, s, l }: { h: number; s: number; l: number }): string {
+  s /= 100;
+  l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+```
+
+**Usage in Brand Settings UI:**
+
+```svelte
+<script lang="ts">
+  import { meetsContrastAA, harmonizeColor } from '$lib/theme/contrast';
+
+  let brandPrimary = $state('#7dd3fc'); // Light blue
+  let surface = $state('#ffffff');
+
+  let contrastCheck = $derived(meetsContrastAA(brandPrimary, surface));
+  let suggestedColor = $derived(
+    contrastCheck.passes ? brandPrimary : harmonizeColor(brandPrimary, surface)
+  );
+</script>
+
+<input type="color" bind:value={brandPrimary} />
+
+{#if !contrastCheck.passes}
+  <div class="warning">
+    <p>Contrast ratio {contrastCheck.ratio}:1 (needs {contrastCheck.required}:1)</p>
+    <button onclick={() => brandPrimary = suggestedColor}>
+      Auto-fix to {suggestedColor}
+    </button>
+  </div>
+{:else}
+  <p class="success">Contrast OK: {contrastCheck.ratio}:1</p>
+{/if}
+```
 
 ### Contrast Pairs to Check
 
-| Foreground Token | Background Token | Minimum |
-|------------------|------------------|---------|
-| `--brand-primary` | `--color-surface` | 4.5:1 |
-| `--color-text-primary` | `--color-surface` | 4.5:1 |
-| `--color-text-secondary` | `--color-surface` | 4.5:1 |
-| `--color-interactive` | `--color-surface` | 4.5:1 |
-| `--brand-primary` | `--color-surface-dark` | 4.5:1 (dark mode) |
+| Foreground Token | Background Token | Minimum | Large Text |
+|------------------|------------------|---------|------------|
+| `--brand-primary` | `--color-surface` | 4.5:1 | 3:1 |
+| `--color-text-primary` | `--color-surface` | 4.5:1 | 3:1 |
+| `--color-text-secondary` | `--color-surface` | 4.5:1 | 3:1 |
+| `--color-interactive` | `--color-surface` | 4.5:1 | 3:1 |
+| `--brand-primary` | `--color-surface-dark` | 4.5:1 | 3:1 |
+
+**Large text** = 18px+ regular or 14px+ bold (WCAG definition)
 
 ---
 
@@ -370,12 +713,111 @@ $lib/theme/
 
 ### Import Order
 
-1. **Reset**: Normalize browser defaults
-2. **Primitives**: Raw token values
-3. **Semantic**: Meaning-based token aliases
-4. **Components**: Component-specific tokens
-5. **Dark**: Dark mode primitive overrides
-6. **Base**: Default element styles
+**Critical**: CSS must load in correct order to ensure proper cascade.
+
+```
+1. Reset       → Normalize browser defaults
+2. Primitives  → Raw token values (--color-blue-500)
+3. Semantic    → Meaning-based aliases (--color-interactive)
+4. Components  → Component-specific (--button-bg)
+5. Dark        → Dark mode overrides
+6. Base        → Default element styles
+7. Utilities   → Optional utility classes
+```
+
+**Implementation in `app.html`:**
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Anti-FOUC dark mode script (must be first) -->
+  <script>
+    (function() {
+      const theme = document.cookie.match(/theme=(dark|light)/)?.[1]
+        || localStorage.getItem('theme')
+        || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.classList.add(theme);
+    })();
+  </script>
+
+  <!-- CSS Import Order (bundled by Vite) -->
+  %sveltekit.head%
+</head>
+<body data-sveltekit-preload-data="hover">
+  <div id="app">%sveltekit.body%</div>
+</body>
+</html>
+```
+
+**Main CSS entry point (`src/app.css`):**
+
+```css
+/* 1. Reset - normalize browser defaults */
+@import './lib/theme/reset.css';
+
+/* 2. Primitives - raw values */
+@import './lib/theme/tokens/primitives.css';
+
+/* 3. Semantic - meaning-based aliases */
+@import './lib/theme/tokens/semantic.css';
+
+/* 4. Components - component-specific tokens */
+@import './lib/theme/tokens/components.css';
+
+/* 5. Dark mode - primitive overrides (must come after primitives) */
+@import './lib/theme/tokens/dark.css';
+
+/* 6. Base - default element styles */
+@import './lib/theme/base.css';
+
+/* 7. Utilities - optional helper classes */
+@import './lib/theme/utilities.css';
+```
+
+**Import in root layout (`+layout.svelte`):**
+
+```svelte
+<script>
+  import '../app.css';
+  let { children } = $props();
+</script>
+
+{@render children()}
+```
+
+**Vite handles CSS bundling** - imports are resolved at build time into a single optimized stylesheet.
+
+### Why This Order Matters
+
+| Step | Depends On | Overrides |
+|------|------------|-----------|
+| Reset | Nothing | Browser defaults |
+| Primitives | Nothing | Nothing |
+| Semantic | Primitives | Nothing |
+| Components | Semantic | Nothing |
+| Dark | Primitives | Primitives only |
+| Base | Semantic, Components | Reset |
+| Utilities | All tokens | Base (specificity) |
+
+**Dark mode** must come after primitives because it overrides primitive values:
+
+```css
+/* primitives.css */
+:root {
+  --color-surface: #ffffff;
+  --color-text-primary: #1f2937;
+}
+
+/* dark.css - must load after */
+.dark {
+  --color-surface: #0f172a;
+  --color-text-primary: #f8fafc;
+}
+```
 
 ### Component Styles
 
