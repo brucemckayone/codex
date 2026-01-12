@@ -238,6 +238,12 @@ ECOM_API_URL = "https://ecom-api-staging.revelations.studio"
 # Assets configuration (SvelteKit static assets)
 [assets]
 directory = ".svelte-kit/cloudflare"
+
+# KV Namespaces
+[[kv_namespaces]]
+binding = "BRAND_KV"
+id = "YOUR_KV_ID_HERE" # To be provisioned
+preview_id = "YOUR_PREVIEW_KV_ID_HERE"
 ```
 
 ### project.inlang/settings.json
