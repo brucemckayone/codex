@@ -6,14 +6,14 @@
     error?: string;
   }
 
-  const { class: className, error, value = $bindable(), ...rest }: Props = $props();
+  const { class: className, error, value, ...rest }: Props = $props();
 </script>
 
 <div class="input-wrapper">
   <input
     class:error={!!error}
     class={className}
-    bind:value
+    {value}
     {...rest}
   />
   {#if error}
