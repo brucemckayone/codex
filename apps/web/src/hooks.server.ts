@@ -91,6 +91,8 @@ const securityHook: Handle = async ({ event, resolve }) => {
   return response;
 };
 
+// import { i18n } from '$lib/i18n';
+
 /**
  * Combine hooks in sequence
  */

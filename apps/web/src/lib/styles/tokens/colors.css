@@ -1,0 +1,49 @@
+/* colors.css */
+:root {
+  /* Brand Palette - Warmth First */
+  --color-primary-50: #fef2f0;
+  --color-primary-100: #fde4df;
+  --color-primary-200: #fccac0;
+  --color-primary-300: #f9a997;
+  --color-primary-400: #f47d67;
+  --color-primary-500: #e85a3f;   /* Terracotta primary */
+  --color-primary-600: #d54429;
+  --color-primary-700: #b23720;
+  --color-primary-800: #932f1e;
+  --color-primary-900: #792b1e;
+
+  /* Neutral Palette */
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-600: #525252;
+  --color-neutral-700: #404040;
+  --color-neutral-800: #262626;
+  --color-neutral-900: #171717;
+
+  /* Semantic Colors */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+}
+
+/* Organization Brand Override Pattern */
+[data-org-brand] {
+  /* Colors */
+  --color-primary-500: var(--org-brand-primary, #e85a3f);
+  --color-primary-600: var(--org-brand-primary-dark, #d54429);
+
+  /* Typography */
+  --brand-font-body: var(--org-brand-font-body, 'Inter');
+  --brand-font-heading: var(--org-brand-font-heading, 'Inter');
+
+  /* Shape */
+  --brand-radius-base: var(--org-brand-radius, 0.5rem);
+
+  /* Density (0.875 = compact, 1 = normal, 1.125 = spacious) */
+  --brand-density-scale: var(--org-brand-density, 1);
+}

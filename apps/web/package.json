@@ -16,7 +16,9 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "lint": "biome lint --write .",
     "format": "biome format --write .",
-    "typecheck": "svelte-kit sync && tsc --noEmit"
+    "typecheck": "svelte-kit sync && tsc --noEmit",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@codex/database": "workspace:*",
@@ -24,15 +26,28 @@
     "@inlang/paraglide-sveltekit": "^0.15.0",
     "happy-dom": "^20.0.8",
     "nanoid": "^5.0.0",
-    "valibot": "^0.30.0"
+    "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
     "@cloudflare/workers-types": "^4.20251014.0",
-    "@inlang/paraglide-js": "^1.11.0",
+    "@inlang/paraglide-js": "^1.11.8",
+    "@melt-ui/svelte": "^0.86.6",
     "@playwright/test": "^1.56.1",
     "@rollup/rollup-darwin-arm64": "^4.55.1",
+    "@storybook/addon-a11y": "^8.6.15",
+    "@storybook/addon-essentials": "^8.6.15",
+    "@storybook/addon-interactions": "^8.6.15",
+    "@storybook/addon-links": "^8.6.15",
+    "@storybook/addon-svelte-csf": "^5.0.10",
+    "@storybook/blocks": "^8.6.15",
+    "@storybook/svelte": "^8.6.15",
+    "@storybook/sveltekit": "^8.6.15",
+    "@storybook/test": "^8.6.15",
+    "@storybook/types": "^8.6.15",
     "@sveltejs/adapter-cloudflare": "^7.2.4",
     "@sveltejs/kit": "^2.0.0",
+    "storybook": "^8.6.15",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.6.3",

@@ -52,13 +52,21 @@ export const reroute: Reroute = ({ url }) => {
   // Extract subdomain
   const subdomain = extractSubdomain(hostname);
 
-  // No subdomain or www → platform routes
+  console.log('[REROUTE]', { hostname, pathname, subdomain });
+
+  // No subdomain or www → platform routes (files in (platform) group)
+  // Route groups like (platform) are INVISIBLE to the router - they only affect layouts
+  // So we just return the original pathname and let SvelteKit match against (platform)/* files
   if (!subdomain || subdomain === 'www') {
-    // Auth routes are special (can be accessed from any domain)
+    // Auth routes need to route to (auth) group
     if (isAuthPath(pathname)) {
-      return `/(auth)${pathname}`;
+      console.log('[REROUTE] Auth route - passing through:', pathname);
+      // Route groups are transparent, so just return the pathname
+      return pathname;
     }
-    return `/(platform)${pathname}`;
+    console.log('[REROUTE] Platform route - passing through:', pathname);
+    // Just pass through - SvelteKit will match to (platform)/* files
+    return pathname;
   }
 
   // Creators subdomain

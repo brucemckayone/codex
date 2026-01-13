@@ -7,7 +7,7 @@ export default defineConfig({
     // Paraglide must come before SvelteKit
     paraglide({
       project: './project.inlang',
-      outdir: './src/lib/paraglide',
+      outdir: './src/paraglide',
     }),
     sveltekit(),
   ],

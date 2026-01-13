@@ -1,11 +1,13 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { page } from '$app/state';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import Input from '$lib/components/ui/Input/Input.svelte';
   import * as m from '$paraglide/messages';
 
   const { form } = $props();
   let loading = $state(false);
+  const token = $derived(page.url.searchParams.get('token'));
 
   function handleSubmit() {
     loading = true;
@@ -17,14 +19,19 @@
 </script>
 
 <svelte:head>
-  <title>{m.auth_forgot_password()} | Revelations</title>
+  <title>{m.auth_reset_password_title()} | Revelations</title>
 </svelte:head>
 
-<h1 class="title">{m.auth_forgot_password()}</h1>
+<h1 class="title">{m.auth_reset_password_title()}</h1>
 
-{#if form?.success}
+{#if !token && !form?.success}
+  <div class="form-error" role="alert">
+    <p>Invalid or missing reset token.</p>
+    <a href="/forgot-password" class="back-link">Request a new one</a>
+  </div>
+{:else if form?.success}
   <div class="success-message" role="alert">
-    <p>{m.auth_reset_email_sent()}</p>
+    <p>Password reset successfully!</p>
   </div>
   <div class="actions">
     <a href="/login" class="back-link">{m.auth_signin_link()}</a>
@@ -37,26 +44,34 @@
       </div>
     {/if}
 
+    <input type="hidden" name="token" value={token} />
+
     <div class="field">
-      <label for="email">{m.auth_email_label()}</label>
+      <label for="password">{m.auth_password_label()}</label>
       <Input
-        id="email"
-        name="email"
-        placeholder="you@example.com"
-        autocomplete="email"
-        value={form?.email ?? ''}
-        error={form?.errors?.email}
+        id="password"
+        name="password"
+        type="password"
+        autocomplete="new-password"
+        error={form?.errors?.password}
+      />
+      <p class="hint">At least 8 characters, one letter and one number.</p>
+    </div>
+
+    <div class="field">
+      <label for="confirmPassword">{m.auth_confirm_password_label()}</label>
+      <Input
+        id="confirmPassword"
+        name="confirmPassword"
+        type="password"
+        autocomplete="new-password"
+        error={form?.errors?.confirmPassword}
       />
     </div>
 
     <Button type="submit" {loading} class="submit-button">
-      Send Reset Link
-      <!-- TODO: Add i18n key for this button label -->
+      {m.auth_reset_password_button()}
     </Button>
-
-    <a href="/login" class="back-link">
-      Back to Sign In
-    </a>
   </form>
 {/if}
 
@@ -83,12 +98,19 @@
     color: var(--color-text);
   }
 
+  .hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    margin-top: var(--space-1);
+  }
+
   .form-error {
     background: var(--color-error);
     color: var(--color-text-inverse);
     padding: var(--space-3);
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
+    text-align: center;
   }
 
   .success-message {
@@ -116,6 +138,7 @@
     color: var(--color-text-secondary);
     font-size: var(--text-sm);
     margin-top: var(--space-4);
+    text-decoration: underline;
   }
 
   .back-link:hover {

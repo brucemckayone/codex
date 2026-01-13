@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * Platform landing page
+   * Platform landing page - revelations.studio
+   * Accessible via the root domain (no subdomain)
    */
 </script>
 
@@ -37,5 +38,4 @@
     </div>
   </section>
 </div>
-
 

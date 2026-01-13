@@ -9,12 +9,11 @@ const config = {
       // Cloudflare Workers adapter options
       routes: {
         include: ['/*'],
-        exclude: ['<all>'],
       },
     }),
     alias: {
       $lib: './src/lib',
-      $paraglide: './src/lib/paraglide',
+      $paraglide: './src/paraglide',
       '@codex/database': '../../packages/database/src',
       '@codex/validation': '../../packages/validation/src',
       '@codex/cloudflare-clients': '../../packages/cloudflare-clients/src',
