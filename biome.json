@@ -59,7 +59,8 @@
       "!**/.turbo",
       "!**/migrations/meta",
       "!**/.venv*",
-      "!**/test-media"
+      "!**/test-media",
+      "!**/src/paraglide"
     ]
   },
   "overrides": [

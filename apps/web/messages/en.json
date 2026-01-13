@@ -19,5 +19,11 @@
   "auth_verify_email_success": "Email verified successfully!",
   "auth_verify_email_error": "Invalid or expired verification link.",
   "common_loading": "Loading...",
-  "common_or": "or"
+  "common_or": "or",
+  "auth_validation_email_invalid": "Please enter a valid email address",
+  "auth_validation_password_min": "Password must be at least {min} characters",
+  "auth_validation_password_letter": "Password must contain at least one letter",
+  "auth_validation_password_number": "Password must contain at least one number",
+  "auth_validation_password_required": "Password is required",
+  "auth_validation_passwords_mismatch": "Passwords do not match"
 }
