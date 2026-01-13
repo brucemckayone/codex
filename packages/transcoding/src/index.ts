@@ -59,6 +59,7 @@ export {
 export {
   // B2 paths (mezzanine archival)
   B2_PATH_CONFIG,
+  getContentThumbnailKey,
   // R2 paths (delivery assets)
   getHlsMasterKey,
   getHlsPrefix,
@@ -66,9 +67,11 @@ export {
   getHlsVariantKey,
   getMezzanineKey,
   getMezzaninePrefix,
+  getOrgLogoKey,
   getOriginalKey,
   getThumbnailKey,
   getTranscodingOutputKeys,
+  getUserAvatarKey,
   getWaveformImageKey,
   getWaveformKey,
   isValidR2Key,

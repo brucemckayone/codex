@@ -16,6 +16,7 @@ import type {
 } from '@codex/admin';
 // Service type imports (for typing only)
 import type { ContentService, MediaItemService } from '@codex/content';
+import type { ImageProcessingService } from '@codex/image-processing';
 import type {
   NotificationsService,
   TemplateService,
@@ -119,8 +120,9 @@ export interface ServiceRegistry {
   // Commerce domain
   purchase: PurchaseService;
 
-  // Transcoding domain
+  // Media & Processing domain
   transcoding: TranscodingService;
+  images: ImageProcessingService;
 
   // Admin domain
   adminAnalytics: AdminAnalyticsService;

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   B2_PATH_CONFIG,
+  getContentThumbnailKey,
   getHlsMasterKey,
   getHlsPreviewKey,
   getMezzanineKey,
   getMezzaninePrefix,
+  getOrgLogoKey,
   getOriginalKey,
   getThumbnailKey,
+  getUserAvatarKey,
   getWaveformKey,
   isValidR2Key,
   parseR2Key,
@@ -40,6 +43,21 @@ describe('Path Helpers', () => {
     it('getWaveformKey should return correct format', () => {
       const key = getWaveformKey(creatorId, mediaId);
       expect(key).toBe(`${creatorId}/waveforms/${mediaId}/waveform.json`);
+    });
+
+    it('getContentThumbnailKey should return correct format', () => {
+      const key = getContentThumbnailKey(creatorId, 'content-123', 'md');
+      expect(key).toBe(`${creatorId}/content-thumbnails/content-123/md.webp`);
+    });
+
+    it('getOrgLogoKey should return correct format', () => {
+      const key = getOrgLogoKey(creatorId, 'lg');
+      expect(key).toBe(`${creatorId}/branding/logo/lg.webp`);
+    });
+
+    it('getUserAvatarKey should return correct format', () => {
+      const key = getUserAvatarKey('user-456', 'sm');
+      expect(key).toBe(`avatars/user-456/sm.webp`);
     });
   });
 

@@ -371,6 +371,43 @@ importers:
         specifier: ^4.0.2
         version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/image-processing:
+    dependencies:
+      '@cf-wasm/photon':
+        specifier: ^0.3.4
+        version: 0.3.4
+      '@codex/cloudflare-clients':
+        specifier: workspace:*
+        version: link:../cloudflare-clients
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../database
+      '@codex/transcoding':
+        specifier: workspace:*
+        version: link:../transcoding
+      '@codex/validation':
+        specifier: workspace:*
+        version: link:../validation
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.13.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vite:
+        specifier: ^6.4.1
+        version: 6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-dts:
+        specifier: ^4.5.4
+        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+      vitest:
+        specifier: ^4.0.13
+        version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
+
   packages/notifications:
     dependencies:
       '@codex/database':
@@ -1709,6 +1746,12 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@cf-wasm/internals@0.1.1':
+    resolution: {integrity: sha512-zyl5ThQx3XJhGXbBI6DVsw9dSb7edAHB71goURMg1grGeIso9d0V9oa6HtOd7/9ggYGqTmLvBS/EYJByCrs3Yw==}
+
+  '@cf-wasm/photon@0.3.4':
+    resolution: {integrity: sha512-yCYykIZKU+3Q1Vi/QlBOa7RRF2+w/qaHpjrRcnLJ0WHkkILJt71nDNCVb4hHRwZVGVpqOJX3gORWIQ4/XuzXPQ==}
 
   '@chevrotain/cst-dts-gen@10.5.0':
     resolution: {integrity: sha512-lhmC/FyqQ2o7pGK4Om+hzuDrm9rhFYIJ/AXoQBeongmn870Xeb0L6oGEiuR8nohFNL5sMaQEJWCxr1oIVIVXrw==}
@@ -6693,6 +6736,12 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.3.7':
     optional: true
+
+  '@cf-wasm/internals@0.1.1': {}
+
+  '@cf-wasm/photon@0.3.4':
+    dependencies:
+      '@cf-wasm/internals': 0.1.1
 
   '@chevrotain/cst-dts-gen@10.5.0':
     dependencies:

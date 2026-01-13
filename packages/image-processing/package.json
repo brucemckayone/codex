@@ -1,0 +1,38 @@
+{
+  "name": "@codex/image-processing",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.image-processing",
+    "dev": "vite build --config vite.config.image-processing --watch",
+    "test": "vitest run --config vitest.config.image-processing",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cf-wasm/photon": "^0.3.4",
+    "@codex/cloudflare-clients": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "@codex/transcoding": "workspace:*",
+    "@codex/database": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.4.1",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^4.0.13"
+  }
+}

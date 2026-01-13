@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { sanitizeSvgContent } from '../primitives';
+
 import {
   ALLOWED_LOGO_MIME_TYPES,
   type AllowedLogoMimeType,
@@ -16,61 +16,7 @@ import {
  * - SVG sanitization (XSS prevention)
  */
 
-// ============================================================================
-// Magic Numbers for File Type Validation
-// ============================================================================
-
-/**
- * Magic numbers (file signatures) for supported image formats
- * Used to prevent MIME type spoofing attacks
- */
-const MAGIC_NUMBERS = {
-  'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-  'image/jpeg': [0xff, 0xd8, 0xff],
-  'image/webp': [0x52, 0x49, 0x46, 0x46], // RIFF
-  'image/svg+xml': [0x3c, 0x3f, 0x78, 0x6d, 0x6c], // <?xml
-} as const;
-
-/**
- * Alternate SVG magic number (files starting with <svg)
- */
-const SVG_ALTERNATE = [0x3c, 0x73, 0x76, 0x67]; // <svg
-
-/**
- * Validates file header (magic numbers) matches claimed MIME type
- *
- * @param buffer - File content as Uint8Array
- * @param mimeType - Claimed MIME type from file.type
- * @returns True if magic numbers match, false otherwise
- */
-function isValidImageHeader(buffer: Uint8Array, mimeType: string): boolean {
-  const expectedMagicNumbers =
-    MAGIC_NUMBERS[mimeType as keyof typeof MAGIC_NUMBERS];
-  if (!expectedMagicNumbers) return false;
-
-  // Special handling for WebP (RIFF + WEBP marker)
-  if (mimeType === 'image/webp') {
-    if (buffer.length < 12) return false;
-    const matchesRiff = expectedMagicNumbers.every(
-      (byte, i) => buffer[i] === byte
-    );
-    if (!matchesRiff) return false;
-    const webpMarker = [0x57, 0x45, 0x42, 0x50]; // WEBP at offset 8
-    return webpMarker.every((byte, i) => buffer[8 + i] === byte);
-  }
-
-  // Special handling for SVG (can start with <?xml or <svg)
-  if (mimeType === 'image/svg+xml') {
-    if (buffer.length < 5) return false;
-    return (
-      expectedMagicNumbers.every((byte, i) => buffer[i] === byte) ||
-      SVG_ALTERNATE.every((byte, i) => buffer[i] === byte)
-    );
-  }
-
-  // Standard check for PNG, JPEG
-  return expectedMagicNumbers.every((byte, i) => buffer[i] === byte);
-}
+import { validateImageUpload } from '../image';
 
 // ============================================================================
 // Types
@@ -114,81 +60,44 @@ export interface ValidatedLogoFile {
  * }
  * ```
  */
+/**
+ * Parse and validate logo file from FormData
+ *
+ * Security checks:
+ * 1. File exists in FormData under 'logo' key
+ * 2. MIME type is in allowlist (PNG, JPEG, WebP, SVG)
+ * 3. File size within limit (5MB)
+ * 4. Magic numbers match claimed MIME type (prevents spoofing)
+ * 5. SVG content is sanitized via DOMPurify (XSS prevention)
+ *
+ * @param formData - FormData from multipart/form-data request
+ * @returns Validated file data ready for R2 upload
+ * @throws ZodError if validation fails
+ *
+ * @example
+ * ```typescript
+ * // In procedure() input validator
+ * input: {
+ *   formData: async (c) => {
+ *     const formData = await c.req.formData();
+ *     return validateLogoUpload(formData);
+ *   }
+ * }
+ * ```
+ */
 export async function validateLogoUpload(
   formData: FormData
 ): Promise<ValidatedLogoFile> {
-  // Check file exists
-  const file = formData.get('logo');
-  if (!file || !(file instanceof File)) {
-    throw new z.ZodError([
-      {
-        code: 'custom',
-        message: 'Logo file is required',
-        path: ['logo'],
-      },
-    ]);
-  }
-
-  // Validate MIME type (allowlist)
-  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type as AllowedLogoMimeType)) {
-    throw new z.ZodError([
-      {
-        code: 'custom',
-        message: `Invalid file type. Allowed: ${ALLOWED_LOGO_MIME_TYPES.join(', ')}`,
-        path: ['logo'],
-      },
-    ]);
-  }
-
-  if (file.size <= 0) {
-    throw new z.ZodError([
-      {
-        code: 'custom',
-        message: 'File size cannot be zero',
-        path: ['logo'],
-      },
-    ]);
-  }
-
-  // Validate file size
-  if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
-    throw new z.ZodError([
-      {
-        code: 'custom',
-        message: `File too large. Maximum size: ${MAX_LOGO_FILE_SIZE_BYTES / 1024 / 1024}MB`,
-        path: ['logo'],
-      },
-    ]);
-  }
-
-  // Read file buffer for magic number validation
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-
-  // Validate magic numbers (prevents MIME type spoofing)
-  if (!isValidImageHeader(bytes, file.type)) {
-    throw new z.ZodError([
-      {
-        code: 'custom',
-        message:
-          'File content does not match claimed MIME type (possible spoofing attempt)',
-        path: ['logo'],
-      },
-    ]);
-  }
-
-  // Sanitize SVG content (XSS prevention)
-  let finalBuffer = buffer;
-  if (file.type === 'image/svg+xml') {
-    const textDecoder = new TextDecoder();
-    const svgContent = textDecoder.decode(buffer);
-    const sanitized = sanitizeSvgContent(svgContent);
-    finalBuffer = new TextEncoder().encode(sanitized).buffer as ArrayBuffer;
-  }
+  const result = await validateImageUpload(formData, {
+    allowedMimeTypes: [...ALLOWED_LOGO_MIME_TYPES],
+    maxSizeBytes: MAX_LOGO_FILE_SIZE_BYTES,
+    fieldName: 'logo',
+    sanitizeSvg: true,
+  });
 
   return {
-    buffer: finalBuffer,
-    mimeType: file.type,
-    size: file.size,
+    buffer: result.buffer,
+    mimeType: result.mimeType,
+    size: result.size,
   };
 }

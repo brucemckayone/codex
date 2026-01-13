@@ -20,6 +20,7 @@ import { R2Service } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
+import { ImageProcessingService } from '@codex/image-processing';
 import {
   createEmailProvider,
   NotificationsService,
@@ -85,6 +86,7 @@ export function createServiceRegistry(
   let _adminCustomer: AdminCustomerManagementService | undefined;
   let _templates: TemplateService | undefined;
   let _notifications: NotificationsService | undefined;
+  let _images: ImageProcessingService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -243,6 +245,20 @@ export function createServiceRegistry(
         });
       }
       return _transcoding;
+    },
+
+    get images() {
+      if (!_images) {
+        if (!env.MEDIA_BUCKET) {
+          throw new Error(
+            'MEDIA_BUCKET not configured. Required for image processing.'
+          );
+        }
+        // Create R2Service for image bucket
+        const r2 = new R2Service(env.MEDIA_BUCKET);
+        _images = new ImageProcessingService(r2);
+      }
+      return _images;
     },
 
     // ========================================================================

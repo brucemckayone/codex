@@ -120,6 +120,7 @@ function getCurrentDbMethod(dbMethod?: string): DbMethod {
 function getDbUrl(env?: DbEnvVars): string {
   const envVars = env || (process.env as unknown as DbEnvVars);
   const method = getCurrentDbMethod(envVars.DB_METHOD);
+
   return DB_METHOD_CONFIGS[method].getUrl(envVars);
 }
 
