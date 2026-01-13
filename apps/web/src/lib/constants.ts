@@ -9,16 +9,6 @@ export const AUTH_PATHS = new Set([
   '/verify-email',
 ]);
 
-import { dev } from '$app/environment';
-
-/**
- * Default worker URLs
- * Used as fallback if platform environment variables are missing
- */
-export const DEFAULT_AUTH_URL = dev
-  ? 'http://localhost:42069'
-  : 'https://auth.revelations.studio';
-
 /**
  * Reserved subdomains that cannot be used as org slugs
  * These are infrastructure, API, or special-purpose subdomains

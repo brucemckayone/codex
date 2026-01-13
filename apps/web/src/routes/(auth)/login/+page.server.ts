@@ -1,11 +1,8 @@
 import { authLoginSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
+import { serverApiUrl } from '$lib/server/api';
 import type { Actions, PageServerLoad } from './$types';
-
-// TODO: These should ideally be imported from a shared config or env
-// Using default loopback for now as per api.ts
-const AUTH_WORKER_URL = 'http://localhost:42069';
 
 export const load: PageServerLoad = async ({ url, locals }) => {
   if (locals.user) {
@@ -39,7 +36,8 @@ export const actions: Actions = {
 
     try {
       // 2. Call Auth Worker
-      const authUrl = platform?.env?.AUTH_WORKER_URL ?? AUTH_WORKER_URL;
+      // We use raw fetch here because we need access to the Set-Cookie header
+      const authUrl = serverApiUrl(platform, 'auth');
       const res = await fetch(`${authUrl}/api/auth/sign-in/email`, {
         method: 'POST',
         headers: {
