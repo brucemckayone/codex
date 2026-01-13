@@ -4,31 +4,10 @@
  * Used by the reroute hook to map subdomains to route groups
  */
 
-/**
- * Reserved subdomains that cannot be used as org slugs
- * These are infrastructure, API, or special-purpose subdomains
- */
-export const RESERVED_SUBDOMAINS = new Set([
-  // Infrastructure
-  'www',
-  'auth',
-  'api',
-  'content-api',
-  'organization-api',
-  'ecom-api',
-  'identity-api',
-  'media-api',
-  'notifications-api',
-  // Special routes
-  'creators',
-  'admin',
-  'platform',
-  // Environments
-  'staging',
-  'dev',
-  'test',
-  'localhost',
-]);
+import { RESERVED_SUBDOMAINS } from '$lib/constants';
+
+// Re-export for potential legacy usage (or update callsites to use constants directly)
+export { RESERVED_SUBDOMAINS };
 
 /**
  * Extract subdomain from hostname
