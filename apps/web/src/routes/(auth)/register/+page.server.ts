@@ -1,5 +1,6 @@
 import { authRegisterSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { Actions, PageServerLoad } from './$types';
 
 const AUTH_WORKER_URL = 'http://localhost:42069';
@@ -100,7 +101,9 @@ export const actions: Actions = {
     } catch (err) {
       if (err instanceof Response) throw err;
 
-      console.error('Registration error:', err);
+      logger.error('Registration error', {
+        error: err instanceof Error ? err.message : String(err),
+      });
       return fail(500, {
         name,
         email,

@@ -11,12 +11,9 @@
 import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { nanoid } from 'nanoid';
+import { DEFAULT_AUTH_URL } from '$lib/constants';
+import { logger } from '$lib/observability';
 import type { SessionData, UserData } from '$lib/types';
-
-/**
- * Default worker URLs for local development
- */
-const DEFAULT_AUTH_URL = 'http://localhost:42069';
 
 /**
  * Session validation hook
@@ -58,10 +55,10 @@ const sessionHook: Handle = async ({ event, resolve }) => {
       }
     } catch (error) {
       // Auth worker unavailable - log and treat as unauthenticated
-      console.error(
-        `[${event.locals.requestId}] Session validation failed:`,
-        error
-      );
+      logger.error('Session validation failed', {
+        requestId: event.locals.requestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       event.locals.user = null;
       event.locals.session = null;
       event.locals.userId = null;
@@ -91,8 +88,6 @@ const securityHook: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-// import { i18n } from '$lib/i18n';
-
 /**
  * Combine hooks in sequence
  */
@@ -105,16 +100,11 @@ export const handle = sequence(sessionHook, securityHook);
 export const handleError: HandleServerError = async ({ error, event }) => {
   const errorId = event.locals.requestId;
 
-  console.error(`[${errorId}] Unhandled error:`, error);
-
-  // Track in analytics if available
-  event.platform?.env?.ANALYTICS?.writeDataPoint({
-    indexes: ['errors'],
-    blobs: [
-      event.url.pathname,
-      error instanceof Error ? error.name : 'UnknownError',
-      error instanceof Error ? error.message : String(error),
-    ],
+  // Use centralized logger
+  logger.trackError(error instanceof Error ? error : new Error(String(error)), {
+    requestId: errorId,
+    url: event.url.href,
+    method: event.url.search,
   });
 
   return {

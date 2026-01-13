@@ -25,6 +25,11 @@ declare global {
         API_URL?: string;
         ORG_API_URL?: string;
         ECOM_API_URL?: string;
+        ADMIN_API_URL?: string;
+        CONTENT_API_URL?: string;
+        IDENTITY_API_URL?: string;
+        MEDIA_API_URL?: string;
+        NOTIFICATIONS_API_URL?: string;
         /** Cloudflare Analytics Engine dataset for metrics */
         ANALYTICS?: AnalyticsEngineDataset;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

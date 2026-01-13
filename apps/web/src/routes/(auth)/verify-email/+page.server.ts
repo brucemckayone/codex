@@ -1,3 +1,4 @@
+import { logger } from '$lib/observability';
 import type { PageServerLoad } from './$types';
 
 const AUTH_WORKER_URL = 'http://localhost:42069';
@@ -54,7 +55,9 @@ export const load: PageServerLoad = async ({ url, platform, cookies }) => {
       success: true,
     };
   } catch (err) {
-    console.error('Verify email error:', err);
+    logger.error('Verify email error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return {
       success: false,
       error: 'An unexpected error occurred.',

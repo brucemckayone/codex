@@ -1,5 +1,6 @@
 import { authResetPasswordSchema } from '@codex/validation';
 import { fail } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { Actions } from './$types';
 
 const AUTH_WORKER_URL = 'http://localhost:42069';
@@ -57,7 +58,9 @@ export const actions: Actions = {
 
       return { success: true };
     } catch (err) {
-      console.error('Reset password error:', err);
+      logger.error('Reset password error', {
+        error: err instanceof Error ? err.message : String(err),
+      });
       return fail(500, {
         error: 'An unexpected error occurred. Please try again.',
       });

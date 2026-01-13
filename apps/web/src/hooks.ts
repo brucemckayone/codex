@@ -8,18 +8,8 @@
  */
 
 import type { Reroute } from '@sveltejs/kit';
+import { AUTH_PATHS } from '$lib/constants';
 import { extractSubdomain, isReservedSubdomain } from '$lib/utils/subdomain';
-
-/**
- * Auth routes that can be accessed from any domain
- */
-const AUTH_PATHS = new Set([
-  '/login',
-  '/register',
-  '/forgot-password',
-  '/reset-password',
-  '/verify-email',
-]);
 
 /**
  * Check if a pathname is an auth route
@@ -52,19 +42,16 @@ export const reroute: Reroute = ({ url }) => {
   // Extract subdomain
   const subdomain = extractSubdomain(hostname);
 
-  console.log('[REROUTE]', { hostname, pathname, subdomain });
+  // Auth routes are always global and strictly mapped to (auth) group
+  // This allows logging in from any subdomain (org specific or platform)
+  if (isAuthPath(pathname)) {
+    return pathname;
+  }
 
   // No subdomain or www → platform routes (files in (platform) group)
   // Route groups like (platform) are INVISIBLE to the router - they only affect layouts
   // So we just return the original pathname and let SvelteKit match against (platform)/* files
   if (!subdomain || subdomain === 'www') {
-    // Auth routes need to route to (auth) group
-    if (isAuthPath(pathname)) {
-      console.log('[REROUTE] Auth route - passing through:', pathname);
-      // Route groups are transparent, so just return the pathname
-      return pathname;
-    }
-    console.log('[REROUTE] Platform route - passing through:', pathname);
     // Just pass through - SvelteKit will match to (platform)/* files
     return pathname;
   }
@@ -73,7 +60,7 @@ export const reroute: Reroute = ({ url }) => {
   if (subdomain === 'creators') {
     if (pathname.startsWith('/studio')) {
       // /studio/* → /_creators/studio/*
-      return `/_creators/studio${pathname.slice(7)}`;
+      return `/_creators${pathname}`;
     }
     // /{username}/* → /_creators/[username]/*
     return `/_creators${pathname}`;
@@ -87,7 +74,7 @@ export const reroute: Reroute = ({ url }) => {
   // Organization subdomain
   if (pathname.startsWith('/studio')) {
     // /studio/* → /_org/[slug]/studio/*
-    return `/_org/${subdomain}/studio${pathname.slice(7)}`;
+    return `/_org/${subdomain}${pathname}`;
   }
 
   // Public org pages → /_org/[slug]/(space)/*

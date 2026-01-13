@@ -1,42 +1,70 @@
 import { describe, expect, it } from 'vitest';
+import { reroute } from './hooks';
 
-// We need to import the actual reroute function.
-// Since it relies on $lib alias, we might need to test the logic directly or setup alias mapping in vitest.
-// For unit testing here, we'll rely on the logic structure matching what we implemented.
+// Mock the reroute input object
+function createEvent(urlStr: string) {
+  return {
+    url: new URL(urlStr),
+    fetch: () => Promise.resolve(new Response()),
+  };
+}
 
-describe('Reroute Logic (Conceptual)', () => {
-  it('maps platform routes correctly', () => {
-    // revelations.studio/about -> /(platform)/about
-    const path = '/about';
-    const rewritten = `/(platform)${path}`;
-    expect(rewritten).toBe('/(platform)/about');
+describe('Reroute Logic', () => {
+  it('passes through platform routes (no subdomain)', () => {
+    // revelations.studio/about -> /about
+    // SvelteKit matches this to (platform)/about if it exists
+    const event = createEvent('https://revelations.studio/about');
+    expect(reroute(event)).toBe('/about');
   });
 
-  it('maps auth routes from any domain', () => {
-    // revelations.studio/login -> /(auth)/login
-    const path = '/login';
-    const rewritten = `/(auth)${path}`;
-    expect(rewritten).toBe('/(auth)/login');
+  it('passes through platform routes (www)', () => {
+    // www.revelations.studio/about -> /about
+    const event = createEvent('https://www.revelations.studio/about');
+    expect(reroute(event)).toBe('/about');
   });
 
-  it('maps org subdomain routes', () => {
-    // yoga-studio.revelations.studio/explore -> /_org/yoga-studio/(space)/explore
-    const slug = 'yoga-studio';
-    const path = '/explore';
-    const rewritten = `/_org/${slug}/(space)${path}`;
-    expect(rewritten).toEqual('/_org/yoga-studio/(space)/explore');
+  it('passes through auth routes on any domain', () => {
+    // login on platform
+    expect(reroute(createEvent('https://revelations.studio/login'))).toBe(
+      '/login'
+    );
+
+    // login on org domain (should stay /login, not become /_org/.../login)
+    expect(reroute(createEvent('https://yoga.revelations.studio/login'))).toBe(
+      '/login'
+    );
+
+    // login on creator domain
+    expect(
+      reroute(createEvent('https://creators.revelations.studio/login'))
+    ).toBe('/login');
   });
 
-  it('maps org studio routes', () => {
-    // yoga-studio.revelations.studio/studio -> /_org/yoga-studio/studio
-    const slug = 'yoga-studio';
-    expect(`/_org/${slug}/studio`).toEqual('/_org/yoga-studio/studio');
+  it('rewrites org subdomain routes', () => {
+    const event = createEvent('https://yoga-studio.revelations.studio/explore');
+    // Should map to /_org/[slug]/(space)/explore
+    expect(reroute(event)).toBe('/_org/yoga-studio/(space)/explore');
   });
 
-  it('maps creator routes', () => {
-    // creators.revelations.studio/alice -> /_creators/alice
-    const path = '/alice';
-    const rewritten = `/_creators${path}`;
-    expect(rewritten).toEqual('/_creators/alice');
+  it('rewrites org studio routes', () => {
+    const event = createEvent(
+      'https://yoga-studio.revelations.studio/studio/settings'
+    );
+    // Should map to /_org/[slug]/studio/settings
+    expect(reroute(event)).toBe('/_org/yoga-studio/studio/settings');
+  });
+
+  it('rewrites creator subdomain routes', () => {
+    const event = createEvent('https://creators.revelations.studio/alice');
+    // Should map to /_creators/alice
+    expect(reroute(event)).toBe('/_creators/alice');
+  });
+
+  it('rewrites creator studio routes', () => {
+    const event = createEvent(
+      'https://creators.revelations.studio/studio/analytics'
+    );
+    // Should map to /_creators/studio/analytics
+    expect(reroute(event)).toBe('/_creators/studio/analytics');
   });
 });

@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@codex/database": "workspace:*",
+    "@codex/observability": "workspace:*",
     "@codex/test-utils": "workspace:*",
     "@inlang/paraglide-sveltekit": "^0.15.0",
     "happy-dom": "^20.0.8",

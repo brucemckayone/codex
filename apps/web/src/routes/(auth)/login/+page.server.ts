@@ -1,5 +1,6 @@
 import { authLoginSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { Actions, PageServerLoad } from './$types';
 
 // TODO: These should ideally be imported from a shared config or env
@@ -102,7 +103,9 @@ export const actions: Actions = {
     } catch (err) {
       if (err instanceof Response) throw err; // Re-throw redirects
 
-      console.error('Login error:', err);
+      logger.error('Login error', {
+        error: err instanceof Error ? err.message : String(err),
+      });
       return fail(500, {
         email,
         error: 'An unexpected error occurred. Please try again.',
