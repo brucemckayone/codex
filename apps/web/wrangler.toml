@@ -12,7 +12,9 @@ directory = ".svelte-kit/cloudflare"
 [observability]
 enabled = true
 
+# ============================================================================
 # Production environment
+# ============================================================================
 [env.production]
 name = "codex-web-production"
 
@@ -20,15 +22,21 @@ name = "codex-web-production"
 ENVIRONMENT = "production"
 AUTH_WORKER_URL = "https://auth.revelations.studio"
 API_URL = "https://api.revelations.studio"
+ORG_API_URL = "https://organization-api.revelations.studio"
+ECOM_API_URL = "https://ecom-api.revelations.studio"
 
-# Custom domain for Codex tenant
-# Note: For multi-tenant, we'll need to add each tenant subdomain here
-# or use Workers Routes (not custom domains) with wildcard patterns
+# Worker Routes for wildcard subdomain support
 [[env.production.routes]]
-pattern = "codex.revelations.studio"
-custom_domain = true
+pattern = "*.revelations.studio/*"
+zone_name = "revelations.studio"
 
+[[env.production.routes]]
+pattern = "revelations.studio/*"
+zone_name = "revelations.studio"
+
+# ============================================================================
 # Staging environment
+# ============================================================================
 [env.staging]
 name = "codex-web-staging"
 
@@ -36,20 +44,23 @@ name = "codex-web-staging"
 ENVIRONMENT = "staging"
 AUTH_WORKER_URL = "https://auth-staging.revelations.studio"
 API_URL = "https://api-staging.revelations.studio"
+ORG_API_URL = "https://organization-api-staging.revelations.studio"
+ECOM_API_URL = "https://ecom-api-staging.revelations.studio"
 
 [[env.staging.routes]]
 pattern = "*-staging.revelations.studio/*"
-custom_domain = true
+zone_name = "revelations.studio"
 
-# Note: Secrets to be set via wrangler CLI or CI/CD:
-# - DATABASE_URL
-# - SESSION_SECRET
-# - PUBLIC_APP_URL (for OAuth callbacks, etc.)
-#
-# Set secrets with:
-#   wrangler secret put DATABASE_URL --env production
-#   wrangler secret put SESSION_SECRET --env production
-#
-# For preview deployments, environment-specific configs will be created dynamically:
-#   [env.preview-{PR_NUMBER}]
-#   name = "codex-web-preview-{PR_NUMBER}"
+# ============================================================================
+# KV Namespaces (Placeholder IDs - provision and update)
+# ============================================================================
+# [[kv_namespaces]]
+# binding = "BRAND_KV"
+# id = "YOUR_KV_ID_HERE"
+# preview_id = "YOUR_PREVIEW_KV_ID_HERE"
+
+# ============================================================================
+# Secrets (set via wrangler CLI or CI/CD):
+# - wrangler secret put DATABASE_URL --env production
+# - wrangler secret put SESSION_SECRET --env production
+# ============================================================================

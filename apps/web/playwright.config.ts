@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
  * See https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
-  testDir: './e2e',
+  testDir: '.',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -12,7 +12,7 @@ export default defineConfig({
   reporter: process.env.CI ? 'html' : 'list',
   use: {
     // Use environment variable in CI (wrangler dev on 8787), default to dev server locally
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
     trace: 'on-first-retry',
   },
 
@@ -29,7 +29,7 @@ export default defineConfig({
     ? undefined
     : {
         command: 'pnpm dev',
-        url: 'http://localhost:5173',
+        url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout: 120000,
       },

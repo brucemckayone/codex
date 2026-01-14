@@ -1,0 +1,30 @@
+/* shadows.css */
+:root {
+  --shadow-color: 220 3% 15%;
+  --shadow-strength: 1%;
+
+  --shadow-xs: 0 1px 2px -1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%));
+
+  --shadow-sm:
+    0 1px 2px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
+    0 1px 3px 1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+
+  --shadow-md:
+    0 1px 3px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
+    0 4px 6px -1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+
+  --shadow-lg:
+    0 1px 3px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
+    0 8px 14px -2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+
+  --shadow-xl:
+    0 1px 4px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
+    0 16px 30px -4px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+
+  --shadow-inner: inset 0 2px 4px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%));
+}
+
+[data-theme='dark'] {
+  --shadow-color: 220 40% 2%;
+  --shadow-strength: 25%;
+}

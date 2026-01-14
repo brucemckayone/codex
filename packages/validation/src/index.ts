@@ -6,6 +6,8 @@ export { z } from 'zod';
 
 // Admin schemas
 export * from './admin/admin-schemas';
+// Auth schemas
+export * from './auth';
 // Content management schemas
 export * from './content/content-schemas';
 // User schemas
