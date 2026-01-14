@@ -1,25 +1,35 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('Visual Regression', () => {
-  test('Button variants', async ({ page }) => {
-    // Visit storybook iframe for button
-    await page.goto(
-      'http://localhost:6006/iframe.html?id=ui-button--all-sizes&viewMode=story'
-    );
-    // Wait for button to be visible
-    await page.waitForSelector('.button');
-    // Take screenshot
-    await expect(page).toHaveScreenshot('button-sizes.png');
+test.describe('Design System Visual Regression', () => {
+  test('showcase page looks correct', async ({ page }) => {
+    await page.goto('/showcase');
+
+    // Wait for any animations to settle
+    await page.waitForTimeout(1000);
+
+    // Take a full page screenshot
+    await expect(page).toHaveScreenshot('showcase-full.png', {
+      fullPage: true,
+      maxDiffPixelRatio: 0.05,
+    });
   });
 
-  test('Switch states', async ({ page }) => {
-    await page.goto(
-      'http://localhost:6006/iframe.html?id=ui-switch--default&viewMode=story'
-    );
-    await page.waitForSelector('.switch');
-    await expect(page).toHaveScreenshot('switch-default.png');
+  test('dark mode showcase looks correct', async ({ page }) => {
+    await page.goto('/showcase');
 
-    await page.click('.switch');
-    await expect(page).toHaveScreenshot('switch-checked.png');
+    // Toggle dark mode if your app has a toggle,
+    // or just set the cookie/localStorage if that's how it's handled.
+    // Assuming local storage 'theme' = 'dark'
+    await page.evaluate(() => {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    });
+
+    await page.waitForTimeout(1000);
+
+    await expect(page).toHaveScreenshot('showcase-dark.png', {
+      fullPage: true,
+      maxDiffPixelRatio: 0.05,
+    });
   });
 });

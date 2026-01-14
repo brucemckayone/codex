@@ -1,61 +1,52 @@
-import { nanoid } from 'nanoid';
-import { writable } from 'svelte/store';
+import { createToaster } from '@melt-ui/svelte';
 
 export type ToastVariant = 'neutral' | 'success' | 'warning' | 'error';
 
-export interface Toast {
-  id: string;
+export interface ToastData {
   title?: string;
   description?: string;
   variant: ToastVariant;
-  duration?: number;
 }
 
-export type ToastOptions = Omit<Toast, 'id' | 'variant'> & {
-  variant?: ToastVariant;
+// Create the toaster
+const {
+  elements: { content, title, description, close },
+  helpers: { addToast, removeToast },
+  states: { toasts },
+} = createToaster<ToastData>();
+
+export const toaster = {
+  toasts,
+  elements: { content, title, description, close },
+  remove: removeToast,
 };
 
-function createToastStore() {
-  const { subscribe, update } = writable<Toast[]>([]);
+// Helper for easier usage
+export const toast = {
+  add: (data: ToastData, options?: { closeDelay?: number }) =>
+    addToast({ data, closeDelay: options?.closeDelay ?? 5000 }),
 
-  function add(options: ToastOptions) {
-    const id = nanoid();
-    const toast: Toast = {
-      id,
-      variant: options.variant ?? 'neutral',
-      duration: 3000,
-      ...options,
-    };
+  success: (title: string, description?: string) =>
+    addToast({
+      data: { title, description, variant: 'success' },
+      closeDelay: 5000,
+    }),
 
-    update((toasts) => [...toasts, toast]);
+  error: (title: string, description?: string) =>
+    addToast({
+      data: { title, description, variant: 'error' },
+      closeDelay: 5000,
+    }),
 
-    if (toast.duration !== 0) {
-      setTimeout(() => {
-        dismiss(id);
-      }, toast.duration);
-    }
+  warning: (title: string, description?: string) =>
+    addToast({
+      data: { title, description, variant: 'warning' },
+      closeDelay: 5000,
+    }),
 
-    return id;
-  }
-
-  function dismiss(id: string) {
-    update((toasts) => toasts.filter((t) => t.id !== id));
-  }
-
-  return {
-    subscribe,
-    add,
-    dismiss,
-    // Convenience methods
-    success: (options: Omit<ToastOptions, 'variant'>) =>
-      add({ ...options, variant: 'success' }),
-    error: (options: Omit<ToastOptions, 'variant'>) =>
-      add({ ...options, variant: 'error' }),
-    warning: (options: Omit<ToastOptions, 'variant'>) =>
-      add({ ...options, variant: 'warning' }),
-    info: (options: Omit<ToastOptions, 'variant'>) =>
-      add({ ...options, variant: 'neutral' }),
-  };
-}
-
-export const toast = createToastStore();
+  info: (title: string, description?: string) =>
+    addToast({
+      data: { title, description, variant: 'neutral' },
+      closeDelay: 5000,
+    }),
+};

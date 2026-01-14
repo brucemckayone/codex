@@ -1,31 +1,20 @@
 <script lang="ts">
+  import { type createAvatar, melt } from '@melt-ui/svelte';
+  import { getContext } from 'svelte';
   import type { HTMLImgAttributes } from 'svelte/elements';
 
-  interface Props extends HTMLImgAttributes {
-    src?: string;
-    alt?: string;
-  }
+  interface Props extends HTMLImgAttributes {}
 
-  const { src, alt = "", class: className, ...restProps }: Props = $props();
-  // Simple fallback logic: if image fails to load, we could hide it or let the fallback behind it show.
-  // Ideally we use a state to track loading error.
-
-  let hasError = $state(false);
-
-  function handleError() {
-    hasError = true;
-  }
+  const { class: className, ...restProps }: Props = $props();
+  const { elements: { image } } = getContext<ReturnType<typeof createAvatar>>('AVATAR');
 </script>
 
-{#if !hasError && src}
-  <img
-    {src}
-    {alt}
-    class="avatar-image {className}"
-    onerror={handleError}
-    {...restProps}
-  />
-{/if}
+<img
+  use:melt={$image}
+  class="avatar-image {className ?? ''}"
+  {...restProps}
+  alt={restProps.alt || ""}
+/>
 
 <style>
   .avatar-image {

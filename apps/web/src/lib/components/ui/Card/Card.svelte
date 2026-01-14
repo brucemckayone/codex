@@ -18,7 +18,7 @@
     background-color: var(--color-surface);
     color: var(--color-text);
     border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
+    border: var(--border-width) var(--border-style) var(--color-border);
     box-shadow: var(--shadow-sm); /* Assuming shadow token exists, need to verify */
     overflow: hidden;
   }

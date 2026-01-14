@@ -25,6 +25,7 @@
     "@codex/observability": "workspace:*",
     "@codex/test-utils": "workspace:*",
     "@inlang/paraglide-sveltekit": "^0.15.0",
+    "@melt-ui/svelte": "^0.86.6",
     "happy-dom": "^20.0.8",
     "nanoid": "^5.0.0",
     "zod": "^4.3.5"
@@ -33,7 +34,6 @@
     "@axe-core/playwright": "^4.11.0",
     "@cloudflare/workers-types": "^4.20251014.0",
     "@inlang/paraglide-js": "^1.11.8",
-    "@melt-ui/svelte": "^0.86.6",
     "@playwright/test": "^1.56.1",
     "@rollup/rollup-darwin-arm64": "^4.55.1",
     "@storybook/addon-a11y": "^8.6.15",

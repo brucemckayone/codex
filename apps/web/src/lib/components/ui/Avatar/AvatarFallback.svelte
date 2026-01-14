@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { type createAvatar, melt } from '@melt-ui/svelte';
+  import { getContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -7,9 +8,10 @@
   }
 
   const { children, class: className, ...restProps }: Props = $props();
+  const { elements: { fallback } } = getContext<ReturnType<typeof createAvatar>>('AVATAR');
 </script>
 
-<div class="avatar-fallback {className}" {...restProps}>
+<div use:melt={$fallback} class="avatar-fallback {className ?? ''}" {...restProps}>
   {@render children()}
 </div>
 

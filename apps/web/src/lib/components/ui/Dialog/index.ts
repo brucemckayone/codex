@@ -1,22 +1,8 @@
-import Dialog from './Dialog.svelte';
-import DialogContent from './DialogContent.svelte';
-import DialogDescription from './DialogDescription.svelte';
-import DialogFooter from './DialogFooter.svelte';
-import DialogHeader from './DialogHeader.svelte';
-import DialogTitle from './DialogTitle.svelte';
+import { default as Footer } from '../Card/CardFooter.svelte'; // Reuse or create specific one
+import { default as Header } from '../Card/CardHeader.svelte';
+import Root from './Dialog.svelte';
+import Content from './DialogContent.svelte';
+import Description from './DialogDescription.svelte';
+import Title from './DialogTitle.svelte';
 
-export {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
-  DialogDescription,
-  // Aliases
-  Dialog as Root,
-  DialogContent as Content,
-  DialogHeader as Header,
-  DialogFooter as Footer,
-  DialogTitle as Title,
-  DialogDescription as Description,
-};
+export { Root, Content, Title, Description, Footer, Header };

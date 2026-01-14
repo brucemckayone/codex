@@ -15,7 +15,7 @@
 
 <style>
   .table-row {
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: var(--border-width) var(--border-style) var(--color-border);
     transition: var(--transition-colors);
   }
 

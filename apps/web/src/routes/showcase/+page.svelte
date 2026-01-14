@@ -1,149 +1,236 @@
 <script lang="ts">
-  import * as Avatar from '$lib/components/ui/Avatar';
-  import { Badge } from '$lib/components/ui/Badge';
-  import { Button } from '$lib/components/ui/Button';
-  import * as Card from '$lib/components/ui/Card';
-  import * as Dialog from '$lib/components/ui/Dialog';
-  import { Input } from '$lib/components/ui/Input';
-  import { Label } from '$lib/components/ui/Label';
-  import { Skeleton } from '$lib/components/ui/Skeleton';
-  import { Switch } from '$lib/components/ui/Switch';
-  import * as Table from '$lib/components/ui/Table';
-  import { toast } from '$lib/components/ui/Toast';
+  import {
+    Avatar, Badge, Button, Card, Checkbox, Dialog, ErrorBanner, Input, Label, Select, Skeleton,
+    Switch, Table, TextArea, toast 
+  } from '$lib/components/ui';
 
   const switchState = $state(false);
+  const checkboxState = $state(false);
   const dialogState = $state({ open: false });
+  const textareaValue = $state('Initial value');
+  const selectedValue = $state('option1');
+
+  const selectOptions = [
+    { value: 'option1', label: 'Option 1' },
+    { value: 'option2', label: 'Option 2' },
+    { value: 'option3', label: 'Option 3' },
+  ];
 </script>
 
-<div class="p-8 space-y-8 container mx-auto" style="padding: var(--space-8); max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-8);">
+<div class="showcase-container">
+  <h1>Design System Showcase</h1>
+  <p class="subtitle">Phase 1 Foundation 2 Components</p>
 
   <section>
-    <h2>Buttons</h2>
-    <div style="display: flex; gap: var(--space-4);">
+    <h2>Feedback & Layout</h2>
+    <div class="space-y-4">
+      <ErrorBanner
+        title="Failed to sync data"
+        description="Please check your internet connection and try again."
+      >
+        <Button variant="secondary" size="sm">Retry</Button>
+      </ErrorBanner>
+    </div>
+  </section>
+
+  <section>
+    <h2>Buttons & Actions</h2>
+    <div class="flex-row">
       <Button variant="primary">Primary</Button>
       <Button variant="secondary">Secondary</Button>
       <Button variant="ghost">Ghost</Button>
       <Button variant="destructive">Destructive</Button>
     </div>
-  </section>
-
-  <section>
-    <h2>Badges</h2>
-    <div style="display: flex; gap: var(--space-4);">
-      <Badge variant="neutral">Neutral</Badge>
-      <Badge variant="success">Success</Badge>
-      <Badge variant="warning">Warning</Badge>
-      <Badge variant="error">Error</Badge>
+    <div class="flex-row">
+      <Button size="xs">Extra Small</Button>
+      <Button size="sm">Small</Button>
+      <Button size="md">Medium</Button>
+      <Button size="lg">Large</Button>
+      <Button size="xl">Extra Large</Button>
     </div>
   </section>
 
   <section>
-    <h2>Card</h2>
-    <Card.Root>
-      <Card.Header>
-        <Card.Title>Card Title</Card.Title>
-        <Card.Description>Card Description goes here.</Card.Description>
-      </Card.Header>
-      <Card.Content>
-        <p>This is the main content of the card.</p>
-      </Card.Content>
-      <Card.Footer>
-        <Button>Action</Button>
-      </Card.Footer>
-    </Card.Root>
-  </section>
+    <h2>Forms & Primitives</h2>
+    <div class="form-grid">
+      <div class="form-group">
+        <Label for="username">Input Field</Label>
+        <Input id="username" placeholder="@username" />
+      </div>
 
-  <section>
-    <h2>Avatar & Skeleton</h2>
-    <div style="display: flex; gap: var(--space-4); align-items: center;">
-      <Avatar.Root>
-        <Avatar.Image src="https://github.com/shadcn.png" alt="@shadcn" />
-        <Avatar.Fallback>CN</Avatar.Fallback>
-      </Avatar.Root>
+      <div class="form-group">
+        <Label for="bio">TextArea (Auto-resize)</Label>
+        <TextArea id="bio" bind:value={textareaValue} placeholder="Tell us about yourself..." />
+      </div>
 
-      <Avatar.Root>
-        <Avatar.Fallback>BM</Avatar.Fallback>
-      </Avatar.Root>
+      <div class="form-group">
+        <Select
+          label="Select Option"
+          options={selectOptions}
+          bind:value={selectedValue}
+        />
+      </div>
 
-      <Skeleton style="width: 100px; height: 40px;" />
-      <Skeleton style="width: 40px; height: 40px; border-radius: 999px;" />
+      <div class="flex-row align-center">
+        <Checkbox id="terms" bind:checked={checkboxState} label="Accept terms and conditions" />
+      </div>
+
+      <div class="flex-row align-center">
+        <Switch id="mode" bind:checked={switchState} />
+        <Label for="mode">Airplane Mode ({switchState ? 'On' : 'Off'})</Label>
+      </div>
     </div>
-  </section>
-
-  <section>
-    <h2>Table</h2>
-    <Table.Root>
-      <Table.Header>
-        <Table.Row>
-          <Table.Head>Name</Table.Head>
-          <Table.Head>Status</Table.Head>
-          <Table.Head>Role</Table.Head>
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        <Table.Row>
-          <Table.Cell>Alice</Table.Cell>
-          <Table.Cell>Active</Table.Cell>
-          <Table.Cell>Admin</Table.Cell>
-        </Table.Row>
-        <Table.Row>
-          <Table.Cell>Bob</Table.Cell>
-          <Table.Cell>Inactive</Table.Cell>
-          <Table.Cell>User</Table.Cell>
-        </Table.Row>
-      </Table.Body>
-    </Table.Root>
   </section>
 
   <section>
     <h2>Dialog</h2>
-    <Button onclick={() => dialogState.open = true}>Open Dialog</Button>
+    <Button variant="secondary" onclick={() => dialogState.open = true}>Open Modal Dialog</Button>
 
     <Dialog.Root bind:open={dialogState.open}>
       <Dialog.Content>
         <Dialog.Header>
-          <Dialog.Title>Edit Profile</Dialog.Title>
-          <Dialog.Description>Make changes to your profile here.</Dialog.Description>
+          <Dialog.Title>Confirm Action</Dialog.Title>
+          <Dialog.Description>Are you sure you want to proceed? This action cannot be undone.</Dialog.Description>
         </Dialog.Header>
 
-        <div style="display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-4) 0;">
-          <Label for="username">Username</Label>
-          <Input id="username" placeholder="@username" />
-        </div>
+        <p>Some additional context for the user goes here.</p>
 
         <Dialog.Footer>
-          <Button variant="secondary" onclick={() => dialogState.open = false}>Cancel</Button>
-          <Button onclick={() => dialogState.open = false}>Save changes</Button>
+          <Button variant="ghost" onclick={() => dialogState.open = false}>Cancel</Button>
+          <Button variant="primary" onclick={() => dialogState.open = false}>Confirm</Button>
         </Dialog.Footer>
       </Dialog.Content>
     </Dialog.Root>
   </section>
 
   <section>
-    <h2>Toast</h2>
-    <div style="display: flex; gap: var(--space-4);">
-      <Button onclick={() => toast.success({ title: 'Success', description: 'Operation completed.' })}>Success Toast</Button>
-      <Button onclick={() => toast.error({ title: 'Error', description: 'Something went wrong.' })}>Error Toast</Button>
+    <h2>Badges</h2>
+    <div class="flex-row">
+      <Badge variant="neutral">Beta</Badge>
+      <Badge variant="success">Active</Badge>
+      <Badge variant="warning">Pending</Badge>
+      <Badge variant="error">Critical</Badge>
     </div>
   </section>
 
   <section>
-    <h2>Switch</h2>
-    <div style="display: flex; align-items: center; gap: var(--space-2);">
-      <Switch bind:checked={switchState} id="mode" />
-      <Label for="mode">Airplane Mode</Label>
+    <h2>Cards</h2>
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>Featured Project</Card.Title>
+        <Card.Description>A brief overview of what this card represents.</Card.Description>
+      </Card.Header>
+      <Card.Content>
+        <p>This card utilizes the semantic surface and border tokens for consistency across themes.</p>
+      </Card.Content>
+      <Card.Footer>
+        <Button variant="ghost" size="sm">View Details</Button>
+      </Card.Footer>
+    </Card.Root>
+  </section>
+
+  <section>
+    <h2>Toasts</h2>
+    <div class="flex-row">
+      <Button variant="ghost" onclick={() => toast.success('Operation Successful', 'Your changes have been saved.')}>Trigger Success</Button>
+      <Button variant="ghost" onclick={() => toast.error('Save Failed', 'Could not reach the server.')}>Trigger Error</Button>
     </div>
   </section>
 
+  <section>
+    <h2>Data Visualisation</h2>
+    <Table.Root>
+      <Table.Header>
+        <Table.Row>
+          <Table.Head>Name</Table.Head>
+          <Table.Head>Role</Table.Head>
+          <Table.Head>Status</Table.Head>
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
+        <Table.Row>
+          <Table.Cell>Bruce McKay</Table.Cell>
+          <Table.Cell>Lead Engineer</Table.Cell>
+          <Table.Cell><Badge variant="success">Active</Badge></Table.Cell>
+        </Table.Row>
+        <Table.Row>
+          <Table.Cell>Sarah Chen</Table.Cell>
+          <Table.Cell>Product Designer</Table.Cell>
+          <Table.Cell><Badge variant="warning">Away</Badge></Table.Cell>
+        </Table.Row>
+      </Table.Body>
+    </Table.Root>
+  </section>
+
+  <section>
+    <h2>Avatar & Loading</h2>
+    <div class="flex-row align-center">
+      <Avatar.Root>
+        <Avatar.Image src="https://github.com/shadcn.png" alt="@shadcn" />
+        <Avatar.Fallback>CN</Avatar.Fallback>
+      </Avatar.Root>
+      <Avatar.Root>
+        <Avatar.Fallback>BM</Avatar.Fallback>
+      </Avatar.Root>
+      <Skeleton style="width: 120px; height: 16px; border-radius: 4px;" />
+      <Skeleton style="width: 40px; height: 40px; border-radius: 999px;" />
+    </div>
+  </section>
 </div>
 
 <style>
+  .showcase-container {
+    padding-bottom: var(--space-20);
+  }
+
+  h1 {
+    font-size: var(--text-4xl);
+    margin-bottom: var(--space-2);
+  }
+
+  .subtitle {
+    font-size: var(--text-lg);
+    color: var(--color-text-secondary);
+    margin-bottom: var(--space-10);
+  }
+
   section {
+    margin-bottom: var(--space-12);
     display: flex;
     flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  h2 {
+    font-size: var(--text-2xl);
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: var(--space-2);
+  }
+
+  .flex-row {
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--space-4);
-    padding: var(--space-6);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+  }
+
+  .align-center {
+    align-items: center;
+  }
+
+  .space-y-4 > :global(*) + :global(*) {
+    margin-top: var(--space-4);
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+    max-width: 600px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
   }
 </style>

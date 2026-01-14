@@ -19,7 +19,7 @@
     display: inline-flex;
     align-items: center;
     border-radius: var(--radius-full);
-    border: 1px solid transparent;
+    border: var(--border-width) var(--border-style) transparent;
     padding: var(--space-1) var(--space-2.5);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
@@ -38,25 +38,21 @@
 
   .badge[data-variant="success"] {
     /* background-color is already defined above */
-    /* Usually badges have subtle backgrounds. Let's check color tokens again. */
-    /* The colors.css has --color-success: #22c55e; which is bright green. */
-    /* Ideally we'd have semantic-soft colors, but we don't. */
-    /* Let's use opacity or mix for now, OR stick to solid if that's the design. */
-    /* The doc says "Brief description...". */
-    /* Wait, the existing tokens might have more? No, I viewed them. */
-    /* Let's try to simulate a 'soft' variant using opacity or just use the color as bg and white text for now, assume 'solid' style badges. */
-    background-color: var(--color-success);
-    color: var(--color-text-inverse);
+    background-color: var(--color-success-50);
+    color: var(--color-success-700);
+    border: var(--border-width) var(--border-style) var(--color-success-200);
   }
 
   .badge[data-variant="warning"] {
-    background-color: var(--color-warning);
-    color: var(--color-text-inverse);
+    background-color: var(--color-warning-50);
+    color: var(--color-warning-700);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
   }
 
   .badge[data-variant="error"] {
-    background-color: var(--color-error);
-    color: var(--color-text-inverse);
+    background-color: var(--color-error-50);
+    color: var(--color-error-700);
+    border: var(--border-width) var(--border-style) var(--color-error-200);
   }
 
   /* Dark mode adjusments if needed, but semantic colors should handle it mostly. */
