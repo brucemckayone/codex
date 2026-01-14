@@ -1,45 +1,56 @@
-# Code Review Report
+# Codebase Review Report: feat/frontend-phase1
 
-**Date:** 2026-01-08
-**Branch:** `feature/transcoding-phase1-schema`
-**Focus:** Security (Webhook Auth, API Protection)
+**Date:** January 13, 2026
+**Branch:** `feat/frontend-phase1`
+**Comparison:** `main`
 
-## 🚨 Critical Issues (Blockers)
+## Executive Summary
 
-None found. The security implementation for the webhook authentication is robust.
+This review focuses on the split between **Server-Side/Auth** logic and **Frontend/Routing** structures. The codebase is currently in a foundational state ("bare bones"), establishing critical architectural patterns for multi-tenant routing and worker-based authentication.
 
-## ⚠️ Architectural Risks & Observations
+## Part 1: Server-Side Logic & Organization
 
-### 1. Design Doc vs. Implementation Divergence (Webhook)
-- **Observation:** The design document (`design/roadmap/work-packets/P1-TRANSCODE-001-media-transcoding.md`) specifies using `procedure({ policy: { auth: 'none' } })` for the webhook endpoint. However, the implementation in `workers/media-api/src/routes/webhook.ts` correctly opts for a raw `app.post` route with `verifyRunpodSignature` middleware.
-- **Why this matters:** The `procedure` pattern typically parses the body as JSON before the handler receives it. For HMAC signature verification, **access to the raw, unparsed request body is critical**. Using `JSON.stringify()` on a parsed body (as suggested in the design doc) would likely result in signature mismatches due to key ordering or whitespace differences.
-- **Recommendation:** The implementation is correct and secure. **Update the design document** to reflect this necessary deviation, explicitly noting that webhooks requiring HMAC verification must handle the raw body stream directly.
+### 1. API Client (`apps/web/src/lib/server/api.ts`)
+*   **Status:** Functional but has potential configuration fragility.
+*   **Observations:**
+    *   `DEFAULT_URLS` contains hardcoded `localhost` ports.
+    *   `content` and `access` workers currently share the same URL (`http://localhost:4001`). Verify if this is intentional (e.g., same worker) or a copy-paste error.
+    *   **Recommendation:** Move `DEFAULT_URLS` to a centralized configuration or validate strictly against environment variables. Ensure `content` vs `access` mapping is correct.
 
-### 2. Global Auth Disabled
-- **Observation:** `workers/media-api/src/index.ts` sets `enableGlobalAuth: false`.
-- **Impact:** This shifts the security responsibility entirely to individual route definitions. While currently all routes in `transcoding.ts` coverage use `procedure()` (which enforces policy) and `webhook.ts` uses its own middleware, this increases the risk of future routes being accidentally exposed if a developer forgets to wrap them in `procedure()`.
-- **Recommendation:** Ensure CI/CD or linting rules flag any raw `app.get/post` calls in `media-api` that do not use `procedure()` or explicit middleware, to prevent accidental public exposure.
+### 2. Server Hooks (`apps/web/src/hooks.server.ts`)
+*   **Status:** Implements essential session validation.
+*   **Observations:**
+    *   The `sessionHook` silently catches errors from the Auth Worker ("Auth worker unavailable"). While it logs to observability, the user receives a generic unauthenticated state.
+    *   **Recommendation:** Consider if a partial outage (Auth Worker down) should result in a hard error page or a "degraded mode" banner, rather than just silently logging the user out.
 
-## 🔒 Security Audit Findings
+### 3. Auth Logic (`apps/web/src/routes/(auth)/login/+page.server.ts`)
+*   **Status:** Functional, manual cookie handling.
+*   **Critical Findings:**
+    *   **Cookie Domain:** `domain: '.revelations.studio'` is hardcoded. This will likely break local development (e.g., `localhost`) unless `dev` environment logic overrides it or the browser ignores it for localhost.
+    *   **Secure Flag:** `secure: true` is set unconditionally. Ensure your local dev environment uses HTTPS or that this doesn't block local login.
+    *   **Logic:** Manually parsing `Set-Cookie` from the worker response is fragile.
+    *   **Recommendation:** Create a helper for setting the session cookie that is environment-aware (sets domain/secure flags based on `dev` vs `prod`).
 
-### Webhook Authentication (`workers/media-api/src/routes/webhook.ts`)
-- **✅ Signature Verification:** The implementation correctly accesses `c.req.text()` (via `verifyRunpodSignature` middleware) to verify the HMAC-SHA256 signature against the raw payload.
-- **✅ Timing Attacks:** The `timingSafeEqual` function in `verify-runpod-signature.ts` correctly uses a constant-time XOR comparison loop determined by the minimum length, which is effective for this use case since the expected signature length is fixed by the algorithm (SHA-256).
-- **✅ Replay Protection:** The middleware enforces a 5-minute timestamp window (`maxAge: 300`) and validates the `X-Runpod-Timestamp` header.
-- **✅ Secret Handling:** Uses `ctx.env` for accessing secrets, ensuring they are not hardcoded.
+## Part 2: Frontend & Routing
 
-### API Route Protection (`workers/media-api/src/routes/transcoding.ts`)
-- **✅ Procedure Pattern:** All user-facing routes (`retry`, `status`) leverage `procedure()` with `auth: 'required'`, ensuring `ctx.user` is present and authenticated.
-- **✅ Internal Routes:** The internal trigger route uses `auth: 'worker'`, which (assuming `workerAuth` middleware implementation is standard) effectively restricting access to other Cloudflare Workers carrying the shared secret.
+### 1. Routing Complexity (`apps/web/src/hooks.ts`)
+*   **Status:** Robust, handles multi-tenancy well.
+*   **Observations:**
+    *   The `reroute` logic correctly partitions the application into:
+        *   **Platform:** `revelations.studio` -> `(platform)`
+        *   **Creators:** `creators.revelations.studio` -> `_creators`
+        *   **Organizations:** `*.revelations.studio` -> `_org`
+    *   **Scalability:** The logic is sound and scalable. `AUTH_PATHS` being global is a good decision for UX.
+    *   **Risk:** As `RESERVED_SUBDOMAINS` grows, ensure this list is kept in sync with the actual worker infrastructure to prevent collisions.
 
-## 💡 Refactoring & Polish
+### 2. UI Components ("Bare Bones")
+*   **Status:** Verified.
+*   **Observations:**
+    *   Components like `Button.svelte` are structural only, with no styling classes yet. This aligns with the "bare bones" goal.
+    *   **Recommendation:** Maintain this simplicity until the routing and data layers are fully proven.
 
-### 1. Type Safety in Middleware
-In `webhook.ts`, the code asserts `c.get('rawBody') as string`. Use Hono's `Variables` type augmentation in `verify-runpod-signature.ts` to make this type-safe automatically without casting, if not already done globally.
+## Summary of Action Items
 
-### 2. Error Handling Consistency
-The webhook route manually catches errors and uses `mapErrorToResponse`. The `procedure` pattern likely handles this automatically. The implementation is consistent with the need for manual control here, but ensure `mapErrorToResponse` provides safe error messages to the external caller (RunPod) without leaking internal stack traces (verified: it seems to do so).
-
----
-
-**Status:** ✅ **APPROVED** (with design doc update recommendation)
+1.  **Fix:** Make cookie `domain` and `secure` flags environment-aware in `login/+page.server.ts`.
+2.  **Verify:** Confirm `content` and `access` API URLs in `api.ts`.
+3.  **Refactor:** Extract cookie setting logic into a reusable server-side utility to avoid duplication between `login`, `register`, and `verify-email`.
