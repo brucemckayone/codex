@@ -19,7 +19,7 @@
   {#if fallback}
     {@render fallback(error)}
   {:else}
-    <div class="error-boundary" role="alert">
+    <div role="alert">
       <h2>Something went wrong</h2>
       <button onclick={() => error = null}>
         Try again
@@ -31,13 +31,3 @@
     {@render children()}
   </svelte:boundary>
 {/if}
-
-<style>
-  .error-boundary {
-    padding: var(--space-4);
-    background-color: var(--color-background);
-    border: 1px solid var(--color-error);
-    border-radius: var(--radius-md);
-    color: var(--color-error);
-  }
-</style>

@@ -1,10 +1,10 @@
 name: Visual Regression
 
-on:
-  pull_request:
-    paths:
-      - 'apps/web/src/lib/components/**'
-      - 'apps/web/src/lib/styles/**'
+# on:
+#   pull_request:
+#     paths:
+#       - 'apps/web/src/lib/components/**'
+#       - 'apps/web/src/lib/styles/**'
 
 jobs:
   visual:

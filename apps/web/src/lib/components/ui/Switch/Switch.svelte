@@ -21,20 +21,9 @@
       return next;
     }
   });
-
-  $effect(() => {
-    // Sync external checked state if it changes
-    // This is handled by bindable normally, but explicit sync might be needed if Melt state diverges
-  });
 </script>
 
-<button
-  use:melt={$root}
-  class="switch"
-  class:checked={$isChecked}
-  class:disabled={disabled}
->
-  <span ></span>
+<button use:melt={$root}>
   <!-- Visually hidden input for form submission -->
-  <input use:melt={$input}  />
+  <input use:melt={$input} />
 </button>

@@ -8,37 +8,24 @@
  */
 
 import { dev } from '$app/environment';
+import { ApiError } from './errors';
 
 const DEFAULT_URLS = {
   auth: dev ? 'http://localhost:42069' : 'https://auth.revelations.studio',
-  content: dev ? 'http://localhost:4001' : 'https://api.revelations.studio', // content/access often share api gateway
-  access: dev ? 'http://localhost:4001' : 'https://api.revelations.studio',
-  org: dev ? 'http://localhost:42071' : 'https://api.revelations.studio', // routed via subdomain/path in prod? verify later
+  content: dev
+    ? 'http://localhost:4001'
+    : 'https://content-api.revelations.studio',
+  access: dev
+    ? 'http://localhost:4001'
+    : 'https://content-api.revelations.studio',
+  org: dev
+    ? 'http://localhost:42071'
+    : 'https://organization-api.revelations.studio',
   ecom: dev ? 'http://localhost:42072' : 'https://api.revelations.studio',
 } as const;
 
 type WorkerName = keyof typeof DEFAULT_URLS;
 
-/**
- * API Error with typed properties
- */
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public code?: string
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-/**
- * Create a server-side API client
- *
- * @param platform - The SvelteKit platform object with env bindings
- * @returns API client with typed fetch method
- */
 /**
  * Resolve API URL for a worker
  *

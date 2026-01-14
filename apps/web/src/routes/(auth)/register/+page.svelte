@@ -2,6 +2,7 @@
   import { enhance } from '$app/forms';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import Input from '$lib/components/ui/Input/Input.svelte';
+  import Label from '$lib/components/ui/Label/Label.svelte';
   import * as m from '$paraglide/messages';
 
   const { data, form } = $props();
@@ -30,7 +31,7 @@
   {/if}
 
   <div>
-    <label for="name">{m.auth_name_label()}</label>
+    <Label for="name">{m.auth_name_label()}</Label>
     <Input
       id="name"
       name="name"
@@ -42,7 +43,7 @@
   </div>
 
   <div>
-    <label for="email">{m.auth_email_label()}</label>
+    <Label for="email">{m.auth_email_label()}</Label>
     <Input
       id="email"
       name="email"
@@ -54,7 +55,7 @@
   </div>
 
   <div>
-    <label for="password">{m.auth_password_label()}</label>
+    <Label for="password">{m.auth_password_label()}</Label>
     <Input
       id="password"
       name="password"
@@ -66,7 +67,7 @@
   </div>
 
   <div>
-    <label for="confirmPassword">{m.auth_confirm_password_label()}</label>
+    <Label for="confirmPassword">{m.auth_confirm_password_label()}</Label>
     <Input
       id="confirmPassword"
       name="confirmPassword"
