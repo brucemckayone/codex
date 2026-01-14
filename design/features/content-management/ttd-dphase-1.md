@@ -25,7 +25,9 @@ The content management system enables Creators to upload, organize, and manage v
 
 **Architecture Diagram**:
 
-![Content Management Architecture](./assets/content-management-architecture.png)
+```d2
+@import "design/features/content-management/d2-diagrams/content-management-architecture.d2"
+```
 
 The diagram illustrates the direct upload strategy (browser → R2 via presigned URLs), media library pattern, organization-scoped storage paths, and transcoding queue integration.
 

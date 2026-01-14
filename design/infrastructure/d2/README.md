@@ -6,28 +6,25 @@ This directory contains D2 diagrams for visualizing the Codex infrastructure.
 
 ### 1. CI/CD Pipeline
 - **Source**: [ci-cd-pipeline.d2](ci-cd-pipeline.d2)
-- **Output**: [assets/ci-cd-pipeline.png](assets/ci-cd-pipeline.png)
 - **Purpose**: Complete workflow from push to production - testing, preview, production flows, Neon branching strategy
 
 ### 2. Environment Management
 - **Source**: [environment-management.d2](environment-management.d2)
-- **Output**: [assets/environment-management.png](assets/environment-management.png)
 - **Purpose**: Local → Preview → Production flow, database branching per environment, custom domains, secrets
 
 ### 3. Testing Strategy
 - **Source**: [testing-strategy.d2](testing-strategy.d2)
-- **Output**: [assets/testing-strategy.png](assets/testing-strategy.png)
 - **Purpose**: Unit/integration/E2E test types, CI testing flow, ephemeral branches, test organization
 
 ### 4. Infrastructure Plan
 - **Source**: [infraplan.d2](infraplan.d2)
-- **Output**: [assets/infraplan.png](assets/infraplan.png)
 - **Purpose**: Complete system architecture - Client → Cloudflare → Workers → Database → External services
 
 ### 5. Deployment Architecture
 - **Source**: [deployment-architecture.d2](deployment-architecture.d2)
-- **Output**: [assets/deployment-architecture.png](assets/deployment-architecture.png)
 - **Purpose**: Detailed deployment architecture with all components and flows
+
+> **Note**: D2 diagrams are now embedded directly in markdown documentation files as code blocks rather than compiled to PNG images. The source `.d2` files in this directory serve as the canonical reference.
 
 ## Building Diagrams
 
@@ -92,26 +89,34 @@ d2/
 ├── testing-strategy.d2            # Testing patterns
 ├── infraplan.d2                   # System architecture
 ├── deployment-architecture.d2     # Deployment details
-├── assets/                        # Compiled PNG outputs
-│   ├── ci-cd-pipeline.png
-│   ├── environment-management.png
-│   ├── testing-strategy.png
-│   ├── infraplan.png
-│   └── deployment-architecture.png
 └── README.md                      # This file
 ```
 
+> **Note**: PNG assets have been deprecated. D2 diagrams are now embedded directly in markdown files as code blocks.
+
 ## Using Diagrams in Documentation
 
-Reference diagrams using relative paths:
+D2 diagrams are now embedded directly in markdown files using fenced code blocks:
 
 ```markdown
-<!-- From design/infrastructure/CICD.md -->
-![CI/CD Pipeline](d2/assets/ci-cd-pipeline.png)
+### CI/CD Pipeline
 
-<!-- From design/infrastructure/README.md -->
-![Infrastructure](d2/assets/infraplan.png)
+\`\`\`d2
+# CI/CD Pipeline Architecture
+direction: right
+
+trigger: {
+  label: "Trigger Events"
+  # ... diagram content
+}
+\`\`\`
 ```
+
+This approach allows:
+- **Direct editing**: Modify diagrams inline with documentation
+- **Version control**: Changes are tracked with the documentation
+- **No compilation**: No need to regenerate PNG files
+- **Source reference**: Use the `.d2` files in this directory as canonical references
 
 ## Editing Diagrams
 
@@ -176,30 +181,32 @@ direction: right  # or down, left, up
 
 Example:
 
-```bash
-# Create new diagram
-vim monitoring.d2
+1. Create a new `.d2` file in this directory for reference
+2. Copy the D2 content into the target markdown file as a code block
+3. Use `\`\`\`d2` as the language identifier
 
-# Compile
-d2 --theme=1 --sketch monitoring.d2 assets/monitoring.png
+```markdown
+### New Diagram Section
 
-# Use in markdown
-![Monitoring](d2/assets/monitoring.png)
+\`\`\`d2
+# Diagram content from new-diagram.d2
+direction: right
+# ... rest of diagram
+\`\`\`
 ```
 
 ## Maintenance
 
 ### When Infrastructure Changes
 
-1. Update the relevant `.d2` file(s)
-2. Regenerate PNG(s)
-3. Verify diagrams render correctly
-4. Update documentation if paths changed
+1. Update the relevant `.d2` source file in this directory
+2. Update the embedded D2 code block in the corresponding markdown documentation file(s)
+3. Verify the D2 syntax is correct
+4. Commit the changes
 
 ### Diagram Update Checklist
 
-- [ ] Update D2 source file
-- [ ] Regenerate PNG output
-- [ ] Check PNG renders correctly (open in browser/viewer)
-- [ ] Update documentation references if needed
-- [ ] Commit both .d2 and .png files
+- [ ] Update D2 source file (canonical reference)
+- [ ] Update embedded D2 code blocks in markdown files (README.md, CICD.md)
+- [ ] Verify D2 syntax is valid
+- [ ] Commit changes

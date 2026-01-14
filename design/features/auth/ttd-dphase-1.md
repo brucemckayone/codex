@@ -21,7 +21,9 @@ Phase 1 authentication provides secure user identity management and organization
 
 **Architecture Diagram**:
 
-![Auth System Architecture](./assets/auth-architecture.png)
+```d2
+@import "design/features/auth/d2-diagrams/auth-architecture.d2"
+```
 
 The diagram illustrates the complete authentication flow including BetterAuth integration, session caching in Cloudflare KV, organization context in sessions, and the foundation for Phase 2+ multi-tenancy.
 

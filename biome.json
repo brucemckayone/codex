@@ -56,7 +56,10 @@
       "!**/*.d.ts",
       "!**/pnpm-lock.yaml",
       "!**/package-lock.json",
-      "!**/.turbo"
+      "!**/.turbo",
+      "!**/migrations/meta",
+      "!**/.venv*",
+      "!**/test-media"
     ]
   }
 }

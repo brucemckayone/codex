@@ -130,7 +130,9 @@ export function createTestMediaItemInput(
     width: isReady && mediaType === 'video' ? 1920 : null,
     height: isReady && mediaType === 'video' ? 1080 : null,
     hlsMasterPlaylistKey: isReady ? `hls/${tempId}/master.m3u8` : null, // Required for status='ready'
-    thumbnailKey: isReady ? `thumbnails/${tempId}/thumb.jpg` : null, // Required for status='ready'
+    thumbnailKey: isReady ? `thumbnails/${tempId}/thumb.jpg` : null, // Required for video
+    waveformKey:
+      isReady && mediaType === 'audio' ? `waveforms/${tempId}.json` : null, // Required for audio
     uploadedAt: isReady ? new Date() : null,
     ...overrides,
   };
@@ -164,7 +166,21 @@ export function createTestMediaItem(
     width: mediaType === 'video' ? 1920 : null,
     height: mediaType === 'video' ? 1080 : null,
     hlsMasterPlaylistKey: `hls/${id}/master.m3u8`,
-    thumbnailKey: `thumbnails/${id}/thumb.jpg`,
+    hlsPreviewKey: null, // Transcoding Phase 1 field
+    thumbnailKey: mediaType === 'video' ? `thumbnails/${id}/thumb.jpg` : null,
+    waveformKey: mediaType === 'audio' ? `waveforms/${id}/waveform.json` : null,
+    waveformImageKey:
+      mediaType === 'audio' ? `waveforms/${id}/waveform.png` : null,
+    runpodJobId: null, // Transcoding Phase 1 field
+    transcodingError: null, // Transcoding Phase 1 field
+    transcodingAttempts: 0, // Transcoding Phase 1 field
+    transcodingPriority: 2, // Transcoding Phase 1 field (normal priority)
+    mezzanineKey: null, // Transcoding Phase 1 field
+    mezzanineStatus: null, // Transcoding Phase 1 field
+    readyVariants: null, // Transcoding Phase 1 field
+    loudnessIntegrated: null, // Transcoding Phase 1 field
+    loudnessPeak: null, // Transcoding Phase 1 field
+    loudnessRange: null, // Transcoding Phase 1 field
     uploadedAt: now,
     createdAt: now,
     updatedAt: now,

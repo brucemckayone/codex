@@ -13,7 +13,9 @@ The Content Access system provides secure, authenticated access to purchased med
 
 **Architecture Diagram**:
 
-![Content Access Architecture](./assets/content-access-architecture.png)
+```d2
+@import "design/features/content-access/d2-diagrams/content-access-architecture.d2"
+```
 
 The diagram shows the secure content access flow including purchase verification, signed R2 URL generation, HLS streaming, and playback progress tracking.
 

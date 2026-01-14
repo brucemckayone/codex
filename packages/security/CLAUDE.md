@@ -4,54 +4,64 @@ Comprehensive security layer for Cloudflare Workers. Provides security headers, 
 
 ## Overview
 
-The security package provides multiple overlapping defense mechanisms that combine to create a complete security layer for Cloudflare Workers:
+Security package provides multiple overlapping defense mechanisms for complete protection:
 
-- **Security Headers Middleware** - Content Security Policy, X-Frame-Options, HSTS, and other protective headers
-- **Rate Limiting** - KV-backed distributed rate limiting with fallback to in-memory storage
-- **Session Authentication** - User session validation with KV caching and database fallback
-- **Worker Authentication** - HMAC-based signature verification for service-to-service communication
+- **Security Headers Middleware** - CSP, X-Frame-Options, HSTS, MIME sniffing prevention
+- **Rate Limiting** - KV-backed distributed rate limiting (IP/user/custom based)
+- **Session Authentication** - User session validation with KV caching + database fallback
+- **Worker Authentication** - HMAC-SHA256 signatures for service-to-service communication
+- **KV Secondary Storage** - Better Auth session caching adapter
 
-All components are built on Hono and integrate seamlessly into any Cloudflare Worker application. The package is designed for defense in depth, with each security mechanism protecting against different classes of attacks.
+All components are Hono middleware and integrate seamlessly into any Cloudflare Worker. Defense-in-depth architecture means multiple layers protect against different attack classes.
+
+---
 
 ## Public API Reference
 
-### Exported Functions
+### Middleware Functions
 
 | Export | Type | Purpose |
 |--------|------|---------|
 | `securityHeaders()` | Middleware | Apply security headers (CSP, HSTS, X-Frame-Options, etc.) |
 | `rateLimit()` | Middleware | Rate limit requests using KV or in-memory storage |
-| `optionalAuth()` | Middleware | Validate user session if present (doesn't require auth) |
-| `requireAuth()` | Middleware | Validate user session (requires authentication) |
+| `optionalAuth()` | Middleware | Validate user session if present (fail open) |
+| `requireAuth()` | Middleware | Validate user session (fail closed, returns 401) |
 | `workerAuth()` | Middleware | Validate worker-to-worker HMAC signatures |
-| `generateWorkerSignature()` | Function | Generate HMAC signature for worker requests |
-| `workerFetch()` | Function | Make authenticated worker-to-worker requests |
 
-### Exported Types
+### Utility Functions
+
+| Export | Type | Purpose |
+|--------|------|---------|
+| `generateWorkerSignature()` | Async function | Generate HMAC signature for worker requests |
+| `workerFetch()` | Async function | Make authenticated worker-to-worker requests |
+| `createKVSecondaryStorage()` | Function | Create Better Auth KV cache adapter |
+
+### Types
 
 | Type | Purpose |
 |------|---------|
-| `SecurityHeadersOptions` | Configuration for security headers middleware |
-| `RateLimitOptions` | Configuration for rate limiting middleware |
+| `SecurityHeadersOptions` | Configuration for security headers |
+| `RateLimitOptions` | Configuration for rate limiting |
 | `SessionAuthConfig` | Configuration for session authentication |
 | `SessionData` | Session information structure |
 | `UserData` | Authenticated user information |
-| `CachedSessionData` | Cached session and user data in KV |
+| `CachedSessionData` | Session + user data in KV cache |
 | `WorkerAuthOptions` | Configuration for worker authentication |
 | `CSPDirectives` | Content Security Policy directive configuration |
+| `SecondaryStorage` | Better Auth secondary storage adapter interface |
 
-### Exported Constants
+### Constants
 
 | Constant | Purpose |
 |----------|---------|
-| `RATE_LIMIT_PRESETS` | Pre-configured rate limit profiles (api, auth, strict, etc.) |
+| `RATE_LIMIT_PRESETS` | Pre-configured rate limit profiles (api, auth, strict, streaming, webhook, web) |
 | `CSP_PRESETS` | Pre-configured CSP policies (stripe, api) |
 
 ---
 
 ## Security Headers Middleware
 
-Applies security headers to all responses, protecting against common web vulnerabilities.
+Applies security headers to protect against web vulnerabilities (XSS, clickjacking, MIME sniffing, etc).
 
 ### Function Signature
 
@@ -65,19 +75,18 @@ function securityHeaders(options?: SecurityHeadersOptions): MiddlewareHandler
 interface SecurityHeadersOptions {
   /**
    * Environment (production, preview, development)
-   * HSTS is only enabled in production
+   * HSTS header only applied in production
    */
   environment?: string;
 
   /**
-   * Custom CSP directives (merged with defaults)
-   * Each key overrides the corresponding default directive
+   * Custom CSP directives (merged with defaults, not replacing)
    */
   csp?: Partial<CSPDirectives>;
 
   /**
    * Disable X-Frame-Options header (defaults to DENY)
-   * Set to true only if you need clickjacking for legitimate reasons
+   * Set true only if legitimate need to be embedded in iframe
    */
   disableFrameOptions?: boolean;
 }
@@ -85,29 +94,29 @@ interface SecurityHeadersOptions {
 
 ### Headers Applied
 
-| Header | Value | Purpose |
-|--------|-------|---------|
-| `Content-Security-Policy` | Dynamically built | Prevent XSS attacks by restricting resource loading |
-| `X-Frame-Options` | `DENY` | Prevent clickjacking attacks |
+| Header | Default Value | Purpose |
+|--------|--------|---------|
+| `Content-Security-Policy` | Dynamic CSP string | Prevent XSS attacks by restricting resource loading |
+| `X-Frame-Options` | `DENY` | Prevent clickjacking attacks (disable with option) |
 | `X-Content-Type-Options` | `nosniff` | Prevent MIME sniffing attacks |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` | Control referrer information |
-| `Permissions-Policy` | Disabled features | Disable unnecessary browser features (geolocation, camera, etc.) |
-| `Strict-Transport-Security` | 1 year max-age | Force HTTPS (production only) |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Control referrer information in requests |
+| `Permissions-Policy` | Feature permissions | Disable unnecessary browser features (geolocation, camera, mic, payment) |
+| `Strict-Transport-Security` | 1 year + subdomains | Force HTTPS (production environment only) |
 
-### Default CSP Policy
+### Default CSP Directives
 
 ```typescript
 const DEFAULT_CSP = {
-  defaultSrc: ["'self'"],           // Only allow resources from same origin
-  scriptSrc: ["'self'"],             // JavaScript must be same-origin
-  styleSrc: ["'self'", "'unsafe-inline'"], // CSS from self, inline for components
-  imgSrc: ["'self'", "data:", "https:"],   // Images from self, data URLs, HTTPS
-  fontSrc: ["'self'"],               // Web fonts from same origin only
-  connectSrc: ["'self'"],            // XHR/WebSocket from same origin
-  frameSrc: ["'none'"],              // No iframe embedding
-  frameAncestors: ["'none'"],        // Cannot be embedded in iframes
-  baseUri: ["'self'"],               // Base URLs must be same origin
-  formAction: ["'self'"],            // Form submissions to same origin
+  defaultSrc: ["'self'"],                    // Only same-origin resources
+  scriptSrc: ["'self'"],                     // JavaScript same-origin only
+  styleSrc: ["'self'", "'unsafe-inline'"],   // CSS + inline (needed for component libraries)
+  imgSrc: ["'self'", "data:", "https:"],     // Images from self, data URLs, HTTPS
+  fontSrc: ["'self'"],                       // Web fonts same-origin only
+  connectSrc: ["'self'"],                    // XHR/fetch/WebSocket same-origin
+  frameSrc: ["'none'"],                      // No iframes allowed
+  frameAncestors: ["'none'"],                // Cannot be embedded in iframes
+  baseUri: ["'self'"],                       // Base URLs same-origin only
+  formAction: ["'self'"],                    // Form submissions same-origin
 };
 ```
 
@@ -119,7 +128,7 @@ const DEFAULT_CSP = {
 import { securityHeaders } from '@codex/security';
 
 app.use('*', securityHeaders({
-  environment: c.env.ENVIRONMENT,
+  environment: c.env.ENVIRONMENT,  // 'production' enables HSTS
 }));
 ```
 
@@ -143,7 +152,7 @@ app.use('*', securityHeaders({
 ```typescript
 import { securityHeaders, CSP_PRESETS } from '@codex/security';
 
-// Stripe preset
+// Apply Stripe preset
 app.use('*', securityHeaders({
   environment: c.env.ENVIRONMENT,
   csp: CSP_PRESETS.stripe,
@@ -160,7 +169,7 @@ app.use('*', securityHeaders({
 
 #### stripe
 
-Pre-configured CSP for Stripe.js and Stripe Elements integration:
+Pre-configured for Stripe.js and Stripe Elements:
 
 ```typescript
 CSP_PRESETS.stripe = {
@@ -172,7 +181,7 @@ CSP_PRESETS.stripe = {
 
 #### api
 
-Most restrictive policy for API-only workers with no frontend:
+Most restrictive - for API-only workers with no frontend:
 
 ```typescript
 CSP_PRESETS.api = {
@@ -191,7 +200,7 @@ CSP_PRESETS.api = {
 
 ---
 
-## Rate Limiting
+## Rate Limiting Middleware
 
 Distribute rate limiting across worker instances using Cloudflare KV. Falls back to in-memory storage for local development.
 
@@ -206,7 +215,7 @@ function rateLimit(options?: RateLimitOptions): MiddlewareHandler
 ```typescript
 interface RateLimitOptions {
   /**
-   * Cloudflare KV namespace for storing rate limit data
+   * Cloudflare KV namespace for rate limit storage
    * If not provided, falls back to in-memory (not recommended for production)
    */
   kv?: KVNamespace;
@@ -217,48 +226,46 @@ interface RateLimitOptions {
   windowMs?: number;
 
   /**
-   * Maximum number of requests per window (default: 100)
+   * Maximum requests per window (default: 100)
    */
   maxRequests?: number;
 
   /**
    * Key prefix for KV storage (default: "rl:")
-   * Allows different rate limit scopes (e.g., "rl:stream:" for streaming)
+   * Different prefixes allow separate rate limit buckets
    */
   keyPrefix?: string;
 
   /**
    * Custom key generator function
-   * Default: IP-based keying using CF-Connecting-IP header
-   * Override for user-based or custom rate limiting
+   * Default: IP-based using CF-Connecting-IP header
+   * Override for user-based or custom scoping
    */
   keyGenerator?: (c: Context) => string;
 
   /**
-   * Custom handler when rate limit is exceeded
+   * Custom handler when rate limit exceeded
    * Default: Returns 429 with standard error format
    */
   handler?: (c: Context) => Response | Promise<Response>;
 
   /**
    * Skip rate limiting for certain requests
-   * Useful for exempting health checks or internal requests
+   * Useful for exempting health checks or internal routes
    */
   skip?: (c: Context) => boolean | Promise<boolean>;
 }
 ```
 
-### Response Headers
-
-All rate-limited requests receive these headers:
+### Response Headers (All Requests)
 
 | Header | Value | Purpose |
 |--------|-------|---------|
-| `X-RateLimit-Limit` | Maximum requests | Total allowed requests in window |
-| `X-RateLimit-Remaining` | Requests left | Requests remaining before limit |
-| `X-RateLimit-Reset` | Unix timestamp | When the current window resets |
+| `X-RateLimit-Limit` | Max requests | Total allowed requests in window |
+| `X-RateLimit-Remaining` | Requests left | How many requests left before limit |
+| `X-RateLimit-Reset` | Unix timestamp | When current window resets (seconds) |
 
-### Default Rate Limit Exceeded Response
+### Exceeded Response Format
 
 Status: `429 Too Many Requests`
 
@@ -286,8 +293,7 @@ import { rateLimit, RATE_LIMIT_PRESETS } from '@codex/security';
 
 app.use('*', rateLimit({
   kv: c.env.RATE_LIMIT_KV,
-  windowMs: 60000,     // 1 minute
-  maxRequests: 100,
+  ...RATE_LIMIT_PRESETS.api,  // 100 req/min
 }));
 ```
 
@@ -296,7 +302,7 @@ app.use('*', rateLimit({
 ```typescript
 const authLimiter = rateLimit({
   kv: c.env.RATE_LIMIT_KV,
-  ...RATE_LIMIT_PRESETS.auth,
+  ...RATE_LIMIT_PRESETS.auth,  // 5 req/15min
 });
 
 app.post('/auth/login', authLimiter, loginHandler);
@@ -316,7 +322,7 @@ app.use('/api/*', rateLimit({
 }));
 ```
 
-**Skip health checks from rate limiting:**
+**Skip specific routes:**
 
 ```typescript
 app.use('*', rateLimit({
@@ -335,7 +341,7 @@ app.use('*', rateLimit({
     return c.json({
       status: 'error',
       code: 'RATE_LIMITED',
-      message: 'Too many requests. Please try again later.',
+      message: 'Please wait before trying again.',
     }, 429);
   },
   ...RATE_LIMIT_PRESETS.auth,
@@ -344,136 +350,120 @@ app.use('*', rateLimit({
 
 ### Rate Limit Presets
 
-Pre-configured rate limiting profiles for common scenarios:
+Pre-configured profiles for common scenarios:
 
 #### auth
 
-**Strictest limiting** - For authentication endpoints where abuse is high-risk.
-
-- **Limit**: 5 requests per 15 minutes
-- **Use case**: Login, signup, password reset endpoints
-- **Rationale**: Brute force protection
+**Strictest protection** - Brute force resistance on authentication.
 
 ```typescript
 RATE_LIMIT_PRESETS.auth = {
   windowMs: 15 * 60 * 1000,  // 15 minutes
-  maxRequests: 5,
+  maxRequests: 5,             // 5 requests max
 };
 ```
+
+**Use for**: Login, signup, password reset endpoints
 
 #### strict
 
-**Strict limiting** - For sensitive operations.
-
-- **Limit**: 20 requests per 1 minute
-- **Use case**: Streaming URL generation, sensitive data access
-- **Rationale**: Prevent abuse of expensive operations
+**Strict protection** - Sensitive operations.
 
 ```typescript
 RATE_LIMIT_PRESETS.strict = {
-  windowMs: 60 * 1000,       // 1 minute
-  maxRequests: 20,
+  windowMs: 60 * 1000,  // 1 minute
+  maxRequests: 20,      // 20 requests max
 };
 ```
+
+**Use for**: Streaming URL generation, sensitive data endpoints
 
 #### streaming
 
-**Moderate limiting** - For presigned URL generation.
-
-- **Limit**: 60 requests per 1 minute
-- **Use case**: HLS/DASH streaming URL refresh
-- **Rationale**: Allow legitimate segment refreshes but prevent abuse
-- **Note**: Uses separate KV prefix to avoid interfering with other rate limits
+**Moderate protection** - HLS/DASH segment refresh.
 
 ```typescript
 RATE_LIMIT_PRESETS.streaming = {
-  windowMs: 60 * 1000,       // 1 minute
-  maxRequests: 60,
-  keyPrefix: 'rl:stream:',
+  windowMs: 60 * 1000,        // 1 minute
+  maxRequests: 60,            // 60 requests max
+  keyPrefix: 'rl:stream:',    // Separate bucket from other limits
 };
 ```
+
+**Use for**: Presigned URL generation, video streaming requests
 
 #### api
 
-**Standard limiting** - For general API endpoints.
-
-- **Limit**: 100 requests per 1 minute
-- **Use case**: CRUD operations, content access
-- **Rationale**: Default protection against traffic spikes
+**Standard protection** - General API endpoints.
 
 ```typescript
 RATE_LIMIT_PRESETS.api = {
-  windowMs: 60 * 1000,       // 1 minute
-  maxRequests: 100,
+  windowMs: 60 * 1000,  // 1 minute
+  maxRequests: 100,     // 100 requests max
 };
 ```
+
+**Use for**: CRUD operations, content access, standard endpoints
 
 #### webhook
 
-**Permissive limiting** - For webhook endpoints.
-
-- **Limit**: 1000 requests per 1 minute
-- **Use case**: Stripe webhooks, external service callbacks
-- **Rationale**: Webhooks are trusted and need high throughput
+**Permissive** - Trusted external callbacks.
 
 ```typescript
 RATE_LIMIT_PRESETS.webhook = {
-  windowMs: 60 * 1000,       // 1 minute
-  maxRequests: 1000,
+  windowMs: 60 * 1000,  // 1 minute
+  maxRequests: 1000,    // 1000 requests max
 };
 ```
+
+**Use for**: Stripe webhooks, third-party service callbacks
 
 #### web
 
-**Moderate limiting** - For general web traffic.
-
-- **Limit**: 300 requests per 1 minute
-- **Use case**: Public pages, public APIs
-- **Rationale**: Balance between protection and usability
+**Moderate** - General web traffic.
 
 ```typescript
 RATE_LIMIT_PRESETS.web = {
-  windowMs: 60 * 1000,       // 1 minute
-  maxRequests: 300,
+  windowMs: 60 * 1000,  // 1 minute
+  maxRequests: 300,     // 300 requests max
 };
 ```
 
+**Use for**: Public pages, public APIs
+
 ### Implementation Details
 
-#### KV-based Rate Limiting
+#### KV Storage Format
 
-When a KV namespace is provided, rate limit data is stored distributedly:
+Rate limit data stored in KV with auto-expiration:
 
 ```typescript
-// KV storage format
+// Key: "rl:{ip}:{path}" (or custom via keyGenerator)
+// Value:
 {
-  "rl:192.0.2.1:/api/users": {
-    "count": 42,
-    "resetAt": 1700000000000  // Unix timestamp in milliseconds
-  }
+  "count": 42,
+  "resetAt": 1700000000000  // Unix timestamp ms
 }
 ```
 
-Each entry has a TTL set to the window size, so expired entries are automatically cleaned up.
+TTL set to window size - entries auto-cleanup on expiration.
 
 #### In-Memory Fallback
 
-If no KV namespace is provided, a warning is logged and in-memory storage is used:
+If no KV namespace provided, in-memory store used (warning logged):
 
-```typescript
-// Not recommended for production multi-instance deployments
-// Each worker instance maintains its own counters
-// Rate limits are not shared across instances
-console.warn('[RateLimit] Using in-memory store (not recommended for production)...');
+```
+[RateLimit] Using in-memory store (not recommended for production).
+Bind a KV namespace for distributed rate limiting.
 ```
 
-The in-memory store includes automatic cleanup when size exceeds 10,000 entries.
+Each worker instance has separate counters (not shared). Auto-cleanup when size > 10,000 entries.
 
 ---
 
 ## Session Authentication
 
-Validate user sessions with optional KV caching for performance.
+Validate user sessions from cookies with optional KV caching.
 
 ### Function Signatures
 
@@ -489,19 +479,20 @@ function requireAuth(config?: SessionAuthConfig): MiddlewareHandler
 interface SessionAuthConfig {
   /**
    * KV namespace for session caching (optional)
-   * If not provided, sessions are queried from database on every request
+   * If not provided, sessions queried from database every request
    * Caching significantly improves performance
    */
   kv?: KVNamespace;
 
   /**
    * Cookie name for session token (default: 'codex-session')
+   * Also checks 'better-auth.session_token' for BetterAuth format
    */
   cookieName?: string;
 
   /**
-   * Whether to log authentication failures (default: false)
-   * When enabled, logs will NOT include sensitive session data
+   * Enable logging of auth failures (default: false)
+   * Logs never include sensitive data
    */
   enableLogging?: boolean;
 }
@@ -511,34 +502,35 @@ interface SessionAuthConfig {
 
 #### SessionData
 
-Information about an authenticated session:
+Session information structure:
 
 ```typescript
 interface SessionData {
-  id: string;
-  userId: string;
-  token: string;
-  expiresAt: Date | string;
-  ipAddress: string | null;
-  userAgent: string | null;
-  createdAt: Date | string;
-  updatedAt: Date | string;
+  id: string;                    // Session ID
+  userId: string;                // User this session belongs to
+  token: string;                 // Session token (from cookie)
+  expiresAt: Date | string;      // Session expiration time
+  ipAddress: string | null;      // IP where session created
+  userAgent: string | null;      // User-Agent from creation
+  createdAt: Date | string;      // When session created
+  updatedAt: Date | string;      // Last updated
 }
 ```
 
 #### UserData
 
-Information about the authenticated user:
+Authenticated user information:
 
 ```typescript
 interface UserData {
-  id: string;
-  email: string;
-  name: string;
-  emailVerified: boolean;
-  image: string | null;
-  createdAt: Date | string;
-  updatedAt: Date | string;
+  id: string;                 // User ID
+  email: string;              // Email address
+  name: string;               // Display name
+  emailVerified: boolean;     // Email verification status
+  image: string | null;       // Profile image URL
+  role: string;               // User role
+  createdAt: Date | string;   // Account creation time
+  updatedAt: Date | string;   // Last update
 }
 ```
 
@@ -548,99 +540,95 @@ Combined structure cached in KV:
 
 ```typescript
 interface CachedSessionData {
-  session: SessionData;
-  user: UserData;
+  session: SessionData;  // Session info
+  user: UserData;        // User info
 }
 ```
 
 ### optionalAuth - Optional Session Validation
 
-Attempts to validate user session if present, but does NOT require authentication.
+Attempt to authenticate user session if present (fail open).
 
 **Behavior**:
-- If session cookie exists and is valid: Sets `session` and `user` on context, proceeds
-- If session cookie exists but is invalid/expired: Logs warning (if enabled), proceeds without auth
-- If session cookie missing: Proceeds without auth
-- Always returns to next middleware (fail open)
+- Session cookie present + valid → Sets `session` and `user`, proceeds
+- Session cookie present + invalid/expired → Logs warning if enabled, proceeds without auth
+- Session cookie missing → Proceeds without auth
+- Database error → Proceeds without auth
+
+**Always proceeds to next middleware (fail open)**
 
 **Security Features**:
-- Validates session expiration from database (only non-expired sessions)
-- Uses KV cache for performance (with automatic fallback to database)
-- Gracefully handles cache failures (logs, continues with database)
-- Gracefully handles database errors (logs, continues without auth)
-- Never exposes sensitive data in errors
-- Defense in depth: Validates expiration both from cache and client-side
+- Validates session expiration from database only (prevents replay)
+- Uses KV cache for performance (auto-fallback to database)
+- Graceful degradation on cache failures (logs, continues)
+- Graceful degradation on database errors (logs, continues)
+- Defense in depth: Validates expiration on both cache hit and client-side
+- Never exposes sensitive data in error logs
 
 #### Usage Example
 
 ```typescript
 import { optionalAuth } from '@codex/security';
 
-// Apply to all routes (user is available if authenticated)
+// Apply to all routes
 app.use('*', optionalAuth({
   kv: c.env.AUTH_SESSION_KV,
   enableLogging: false,
 }));
 
-// In route handlers
+// In route handler
 app.get('/api/content/:id', (c) => {
   const user = c.get('user');        // UserData | undefined
   const session = c.get('session');  // SessionData | undefined
 
   if (!user) {
-    // Public endpoint - user is optional
+    // Public content - user optional
     return c.json({ public: true });
   }
 
-  // User is authenticated
+  // User authenticated - return personalized data
   return c.json({
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-    }
+    user: { id: user.id, email: user.email, name: user.name },
+    authenticated: true,
   });
 });
 ```
 
 #### Cache Behavior
 
-When KV is configured:
+With KV namespace configured:
 
-1. **Cache Hit** (valid, non-expired): Uses cached session immediately
-2. **Cache Miss** (first request): Queries database, caches result (async)
-3. **Cache Miss** (database error): Continues without auth, doesn't crash
-4. **Cache Stale** (cached but now expired): Clears cache entry, continues without auth
+1. **Cache Hit** (valid, non-expired) → Use cached session immediately
+2. **Cache Miss** (first request or expired) → Query database, cache for next time
+3. **Cache Failure** (KV error) → Fall back to database query
+4. **DB Error** → Continue without auth (fail gracefully)
+5. **Stale Cache** (cached but expired) → Clear cache entry, continue without auth
 
-The cache uses the session token as the key with KV TTL set to the session's expiration time, ensuring automatic cleanup.
+Cache TTL = session expiration time (auto-cleanup).
 
 ### requireAuth - Required Session Validation
 
-Requires a valid user session. Returns 401 if session is missing or invalid.
+Require valid user session (fail closed).
 
 **Behavior**:
-- If session is valid: Sets `session` and `user` on context, proceeds to handler
-- If session is missing or invalid: Returns 401 error, does NOT proceed
+- Session valid → Sets `session` and `user`, proceeds to handler
+- Session missing or invalid → Returns 401, does NOT proceed
 
-**Security Features**:
-- All features from `optionalAuth`
-- Fails closed (denies access) on authentication failure
-- Returns standardized 401 error format
+**All optionalAuth features + fails closed**
 
 #### Usage Example
 
 ```typescript
 import { requireAuth } from '@codex/security';
 
-// Protect specific routes
+// Protect route group
 app.use('/api/protected/*', requireAuth({
   kv: c.env.AUTH_SESSION_KV,
 }));
 
-// In protected route handlers
+// Handler - user guaranteed to exist
 app.get('/api/protected/profile', (c) => {
-  // User is guaranteed to exist here
-  const user = c.get('user');  // UserData (guaranteed non-undefined)
+  const user = c.get('user');  // UserData (never undefined)
 
   return c.json({
     profile: {
@@ -652,22 +640,19 @@ app.get('/api/protected/profile', (c) => {
   });
 });
 
-// Protect with scope
+// Creator scope - user guaranteed
 app.post('/api/protected/content', (c) => {
-  const user = c.get('user');  // UserData (guaranteed)
+  const user = c.get('user');  // UserData (safe to use)
   const body = await c.req.json();
 
-  // User ID is guaranteed to exist for ownership checks
   return contentService.create({
     ...body,
-    creatorId: user.id,  // Safe - user is never undefined
+    creatorId: user.id,  // Safe - never undefined
   });
 });
 ```
 
 #### Error Response
-
-When authentication is required but missing:
 
 Status: `401 Unauthorized`
 
@@ -680,55 +665,52 @@ Status: `401 Unauthorized`
 }
 ```
 
-### Session Validation Flow
+### Validation Flow
 
-**optionalAuth Flow:**
-
-```
-1. Extract session cookie from Cookie header
-   ├─ If missing → proceed without auth
-   │
-2. Create database client with c.env
-   └─ Uses createDbClient(env) for request-scoped connection
-   │
-3. Try cache (if KV available)
-   ├─ Cache hit with valid session → set context, proceed
-   ├─ Cache hit but expired → clear cache, query DB
-   │
-4. Query database (using request-scoped client)
-   ├─ Valid session found → set context, cache for next time, proceed
-   ├─ Invalid or expired → log if enabled, proceed without auth
-   ├─ Database error → log, proceed without auth
-   │
-5. Always proceed to next middleware
-```
-
-**requireAuth Flow:**
+**optionalAuth**:
 
 ```
-1. Run optionalAuth (all steps above)
+1. Extract session cookie from headers
+   └─ If missing → proceed without auth
+
+2. Try cache (if KV available)
+   ├─ Hit + valid → set context, proceed
+   └─ Miss/expired → query database
+
+3. Query database (request-scoped client)
+   ├─ Valid → set context, cache for next time, proceed
+   ├─ Invalid → log if enabled, proceed
+   └─ DB error → log, proceed
+
+4. Always proceed to next middleware
+```
+
+**requireAuth**:
+
+```
+1. Run optionalAuth (all above)
 2. Check if user was set
-   ├─ User exists → proceed to handler
-   ├─ User missing → return 401
+   ├─ Yes → proceed
+   └─ No → return 401
 ```
 
-**Database Client Creation:**
+**Request-Scoped Database Client**:
 
-The session auth middleware creates a request-scoped database client using `createDbClient(env)`:
+Session middleware creates client per-request:
 
 ```typescript
-// Inside session auth middleware
-const db = createDbClient(env);  // Uses environment from request context
+// Inside middleware
+const db = createDbClient(env);  // Uses c.env from request
 const result = await db.query.sessions.findFirst({...});
 ```
 
-This ensures each request uses the correct environment configuration and prevents connection pool exhaustion.
+Prevents connection pool exhaustion and ensures proper isolation.
 
 ---
 
 ## Worker-to-Worker Authentication
 
-Secure service-to-service communication using HMAC signatures.
+Secure service-to-service communication using HMAC signatures and timestamp validation.
 
 ### Function Signatures
 
@@ -754,14 +736,14 @@ async function workerFetch(
 ```typescript
 interface WorkerAuthOptions {
   /**
-   * Shared secret for HMAC signature (stored in secrets)
+   * Shared secret for HMAC signature (store in secrets)
    * Must be at least 32 characters
    */
   secret: string;
 
   /**
    * Allowed worker origins (e.g., ["https://auth.revelations.studio"])
-   * If not provided, any origin with valid signature is accepted
+   * If not provided, any valid signature accepted
    */
   allowedOrigins?: string[];
 
@@ -776,7 +758,7 @@ interface WorkerAuthOptions {
   timestampHeader?: string;
 
   /**
-   * Maximum age of request in seconds (default: 300 = 5 minutes)
+   * Maximum request age in seconds (default: 300 = 5 minutes)
    * Prevents replay attacks
    */
   maxAge?: number;
@@ -785,36 +767,26 @@ interface WorkerAuthOptions {
 
 ### Security Features
 
-1. **HMAC Signature Verification**: SHA-256 based signature prevents tampering
-2. **Timestamp Validation**: Prevents replay attacks (default 5-minute window)
-3. **Clock Skew Tolerance**: Allows 60 seconds of clock difference
-4. **Origin Whitelisting**: Optional origin validation
-5. **Standard HTTP Headers**: Uses custom headers for authentication
+1. **HMAC Signature** - SHA-256 based signature prevents tampering
+2. **Timestamp Validation** - Prevents replay attacks (configurable window)
+3. **Clock Skew** - Allows 60 seconds clock difference tolerance
+4. **Origin Whitelisting** - Optional origin validation
+5. **Standard Headers** - Custom HTTP headers for authentication
 
-### Implementation Details
+### Signature Computation
 
-#### Signature Generation
-
-The signature is computed over: `{timestamp}:{payload}`
+Signature computed over: `{timestamp}:{payload}` as Base64-encoded SHA-256 HMAC
 
 ```typescript
-// Signature format (Base64-encoded SHA-256 HMAC)
+// Format
 signature = base64(HMAC_SHA256(
-  key: secret,
-  message: `${timestamp}:${payload}`
+  secret,
+  `${timestamp}:${payload}`
 ))
-```
 
-#### Timestamp Format
-
-Unix timestamp in seconds (not milliseconds):
-
-```typescript
-// Correct (seconds)
-const timestamp = Math.floor(Date.now() / 1000);
-
-// Wrong (milliseconds)
-const timestamp = Date.now();  // Don't do this!
+// Timestamp format: Unix seconds (not milliseconds!)
+const timestamp = Math.floor(Date.now() / 1000);  // Correct
+const timestamp = Date.now();                      // Wrong!
 ```
 
 ### Usage Example - Receiving Worker
@@ -822,11 +794,7 @@ const timestamp = Date.now();  // Don't do this!
 ```typescript
 import { workerAuth } from '@codex/security';
 
-// In wrangler.jsonc:
-// [env.production]
-// vars = { WORKER_SHARED_SECRET = "..." }
-
-// Protect internal endpoints
+// Protect internal routes
 app.use('/internal/*', workerAuth({
   secret: c.env.WORKER_SHARED_SECRET,
   allowedOrigins: ['https://auth.revelations.studio'],
@@ -835,9 +803,7 @@ app.use('/internal/*', workerAuth({
 
 app.post('/internal/webhook', async (c) => {
   const body = await c.req.json();
-  // Request has been validated - signature is correct
-  // Origin is in whitelist
-  // Timestamp is fresh
+  // Request validated - signature correct, timestamp fresh, origin whitelisted
   return c.json({ status: 'ok' });
 });
 ```
@@ -866,7 +832,7 @@ const result = await response.json();
 ```typescript
 import { generateWorkerSignature } from '@codex/security';
 
-const timestamp = Math.floor(Date.now() / 1000);
+const timestamp = Math.floor(Date.now() / 1000);  // Unix seconds
 const body = JSON.stringify({ userId: '123', action: 'login' });
 const signature = await generateWorkerSignature(
   body,
@@ -890,7 +856,7 @@ const response = await fetch(
 
 ### Error Responses
 
-#### Missing Authentication Headers
+#### Missing Headers
 
 Status: `401 Unauthorized`
 
@@ -911,7 +877,7 @@ Status: `401 Unauthorized`
 }
 ```
 
-#### Request Too Old (Replay Attack)
+#### Replay Attack (Too Old)
 
 Status: `401 Unauthorized`
 
@@ -923,7 +889,7 @@ Status: `401 Unauthorized`
 }
 ```
 
-#### Request Timestamp in Future
+#### Future Timestamp
 
 Status: `401 Unauthorized`
 
@@ -955,86 +921,118 @@ Status: `403 Forbidden`
 
 ---
 
+## KV Secondary Storage for Better Auth
+
+Adapter to integrate Cloudflare KV with Better Auth's session caching.
+
+### Function Signature
+
+```typescript
+function createKVSecondaryStorage(
+  kv: KVNamespace,
+  obs?: ObservabilityClient
+): SecondaryStorage
+```
+
+### Usage
+
+```typescript
+import { createKVSecondaryStorage } from '@codex/security';
+import { betterAuth } from 'better-auth';
+
+const kvStorage = createKVSecondaryStorage(env.AUTH_SESSION_KV, obs);
+
+const auth = betterAuth({
+  database: dbConnection,
+  secondaryStorage: kvStorage,  // Better Auth will use KV for session caching
+  // ... other config
+});
+```
+
+### What It Does
+
+Wraps Cloudflare KV to provide Better Auth's `SecondaryStorage` interface:
+
+- `get(key)` - Retrieve cached value, returns parsed JSON or null
+- `set(key, value, ttl?)` - Store value with optional TTL in seconds
+- `delete(key)` - Remove cached value
+
+### Error Handling
+
+All operations graceful degrade on KV errors:
+
+- Get error → Returns null (cache miss)
+- Set error → Logs warning, continues (cache write optional)
+- Delete error → Logs warning, continues (cleanup optional)
+
+None of these errors break authentication flow.
+
+---
+
 ## Integration with Codex Workers
 
-The security package is integrated into all Codex workers:
+All Codex workers use security package:
 
 | Worker | Usage |
 |--------|-------|
-| **auth-worker** | Session authentication, rate limiting, security headers |
-| **content-api** | Session authentication, rate limiting, security headers |
-| **identity-api** | Session authentication, rate limiting, security headers |
-| **ecom-api** | Worker-to-worker authentication, rate limiting |
+| **auth-worker** | Session auth, rate limiting, security headers, Better Auth integration |
+| **content-api** | Session auth, rate limiting, security headers |
+| **identity-api** | Session auth, rate limiting, security headers |
+| **ecom-api** | Worker-to-worker auth for webhooks, rate limiting |
 
 ### Integration with worker-utils
 
-The `@codex/worker-utils` package provides a high-level worker factory that automatically applies security middleware:
+The `@codex/worker-utils` package automatically applies security middleware:
 
 ```typescript
 import { createWorker } from '@codex/worker-utils';
 
 const app = createWorker({
   serviceName: 'my-worker',
-  enableSecurityHeaders: true,   // Automatically applies securityHeaders()
-  enableGlobalAuth: true,        // Automatically applies optionalAuth()
-  // Rate limiting is applied at route level via procedure()
+  // Automatically applies:
+  // - securityHeaders()
+  // - optionalAuth()
+  // - rateLimit()
 });
 ```
 
-### Security Policy Pattern
-
-Routes use `procedure()` from `@codex/worker-utils` to declare security requirements. The policy is enforced internally by the procedure:
+Routes use `procedure()` to declare security requirements:
 
 ```typescript
 import { procedure } from '@codex/worker-utils';
 
-// Public endpoint (no auth required)
+// Public endpoint
 app.get('/api/content/:id',
   procedure({
     policy: { auth: 'none' },
-    handler: async (ctx) => {
-      return await ctx.services.content.getById(ctx.input.params.id);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 
-// Authenticated API endpoint with standard rate limiting
+// Authenticated endpoint
 app.get('/api/profile',
   procedure({
     policy: { auth: 'required' },
-    handler: async (ctx) => {
-      return await ctx.services.profile.get(ctx.user.id);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 
-// Creator-only with strict rate limiting
-app.post('/api/content',
-  procedure({
-    policy: { auth: 'required', roles: ['creator'] },
-    handler: async (ctx) => {
-      return await ctx.services.content.create(ctx.input.body);
-    },
-  })
-);
-
-// Internal worker-to-worker endpoint
+// Internal worker-to-worker
 app.post('/internal/webhook',
   procedure({
     policy: { auth: 'worker' },
-    handler: async (ctx) => {
-      return await ctx.services.webhook.process(ctx.input.body);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
+```
 
 ---
 
-## Security Layers - Defense in Depth
+## Defense in Depth - Security Layers
 
-The security package provides multiple overlapping defense mechanisms that work together:
+Multiple overlapping mechanisms protect against different attack classes:
 
-### Layer 1: Transport Security (HTTPS)
+### Layer 1: Transport Security
 
 **Component**: `securityHeaders()` - HSTS header
 - Enforces HTTPS in production
@@ -1043,68 +1041,66 @@ The security package provides multiple overlapping defense mechanisms that work 
 
 ### Layer 2: Content Security
 
-**Component**: `securityHeaders()` - Content Security Policy
-- Prevents XSS attacks by restricting script sources
-- Prevents data exfiltration via fetch/XHR
-- Prevents clickjacking via X-Frame-Options
-- Prevents MIME sniffing via X-Content-Type-Options
+**Component**: `securityHeaders()` - CSP + additional headers
+- Prevents XSS attacks (CSP restricts scripts)
+- Prevents data exfiltration (CSP restricts connections)
+- Prevents clickjacking (X-Frame-Options)
+- Prevents MIME sniffing (X-Content-Type-Options)
 
 ### Layer 3: Rate Limiting
 
 **Component**: `rateLimit()` - Request throttling
-- Prevents brute force attacks (via auth preset)
-- Prevents DoS attacks (via api/webhook presets)
-- Prevents abuse of expensive operations (via strict preset)
-- Distributes across worker instances via KV
+- Prevents brute force attacks (auth preset: 5/15min)
+- Prevents DoS attacks (api/webhook presets)
+- Prevents abuse of expensive operations (strict preset)
+- Distributed across instances via KV
 
 ### Layer 4: User Authentication
 
 **Component**: `requireAuth()` / `optionalAuth()` - Session validation
 - Ensures only authenticated users access protected endpoints
 - Validates session expiration
-- Caches sessions for performance
+- Caches sessions for performance (KV)
 - Falls back to database on cache miss
 
 ### Layer 5: Service Authentication
 
 **Component**: `workerAuth()` - Worker-to-worker HMAC
-- Ensures only authorized services can call internal endpoints
-- Prevents request tampering via HMAC signatures
-- Prevents replay attacks via timestamp validation
+- Ensures only authorized services call internal endpoints
+- Prevents request tampering (HMAC signatures)
+- Prevents replay attacks (timestamp validation)
 - Optional origin whitelisting
 
 ### Combined Example
 
 ```typescript
 import { securityHeaders, rateLimit, optionalAuth, workerAuth, RATE_LIMIT_PRESETS } from '@codex/security';
-import { procedure } from '@codex/worker-utils';
 
+// Layer 1: Security headers (HTTPS, CSP, etc.)
 app.use('*', securityHeaders({
   environment: c.env.ENVIRONMENT,
 }));
 
-// Layer 3: Rate limiting (global)
+// Layer 3: Global rate limiting
 app.use('/api/*', rateLimit({
   kv: c.env.RATE_LIMIT_KV,
   ...RATE_LIMIT_PRESETS.api,
 }));
 
-// Layer 4: User authentication (global optional)
+// Layer 4: Optional user authentication
 app.use('/api/*', optionalAuth({
   kv: c.env.AUTH_SESSION_KV,
 }));
 
-// Protected endpoint with policy (procedure enforces auth + rate limit)
+// Protected endpoint (declared via procedure)
 app.post('/api/content',
   procedure({
     policy: { auth: 'required', rateLimit: 'strict' },
-    handler: async (ctx) => {
-      return await ctx.services.content.create(ctx.input.body);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 
-// Internal endpoint with worker auth
+// Layer 5: Internal worker-to-worker endpoints
 app.use('/internal/*', workerAuth({
   secret: c.env.WORKER_SHARED_SECRET,
   allowedOrigins: ['https://auth.revelations.studio'],
@@ -1113,9 +1109,7 @@ app.use('/internal/*', workerAuth({
 app.post('/internal/webhook',
   procedure({
     policy: { auth: 'worker' },
-    handler: async (ctx) => {
-      return await ctx.services.webhook.process(ctx.input.body);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 ```
@@ -1124,48 +1118,40 @@ app.post('/internal/webhook',
 
 ## Common Patterns
 
-### Protecting Routes with Different Security Levels
+### Protect Routes with Different Security Levels
 
 ```typescript
 import { procedure } from '@codex/worker-utils';
 
-// Public content endpoint
+// Public content - no auth required
 app.get('/api/content/public/:id',
   procedure({
     policy: { auth: 'none', rateLimit: 'web' },
-    handler: async (ctx) => {
-      return await ctx.services.content.getPublic(ctx.input.params.id);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 
-// User content (requires auth)
+// Authenticated user - standard rate limit
 app.get('/api/content/:id',
   procedure({
     policy: { auth: 'required', rateLimit: 'api' },
-    handler: async (ctx) => {
-      return await ctx.services.content.getById(ctx.input.params.id);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 
-// Creator only
+// Creator content - creator role required
 app.post('/api/content',
   procedure({
     policy: { auth: 'required', roles: ['creator'], rateLimit: 'api' },
-    handler: async (ctx) => {
-      return await ctx.services.content.create(ctx.input.body);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 
-// Admin only with strict rate limiting
+// Admin only - strict rate limiting
 app.delete('/api/users/:id',
   procedure({
     policy: { auth: 'required', roles: ['admin'], rateLimit: 'auth' },
-    handler: async (ctx) => {
-      return await ctx.services.users.delete(ctx.input.params.id);
-    },
+    handler: async (ctx) => { /* ... */ },
   })
 );
 ```
@@ -1182,10 +1168,10 @@ const sensitiveLimiter = rateLimit({
   },
 });
 
-// Streaming URL generation (expensive operation)
+// Expensive operation
 app.get('/api/access/:id/stream-url', sensitiveLimiter, getStreamUrl);
 
-// Password reset (sensitive, brute-force risk)
+// High-risk operation
 app.post('/api/auth/forgot-password', sensitiveLimiter, forgotPassword);
 ```
 
@@ -1193,9 +1179,8 @@ app.post('/api/auth/forgot-password', sensitiveLimiter, forgotPassword);
 
 ```typescript
 import { workerAuth } from '@codex/security';
-import { procedure } from '@codex/worker-utils';
 
-// Apply worker auth middleware to internal routes
+// Protect internal endpoints
 app.use('/internal/*', workerAuth({
   secret: c.env.WORKER_SHARED_SECRET,
   allowedOrigins: [
@@ -1204,12 +1189,15 @@ app.use('/internal/*', workerAuth({
   ],
 }));
 
-// Internal webhook endpoints
+// Process webhooks
 app.post('/internal/webhook/:type',
   procedure({
     policy: { auth: 'worker', rateLimit: 'webhook' },
     handler: async (ctx) => {
-      return await ctx.services.webhook.handle(ctx.input.params.type, ctx.input.body);
+      return await ctx.services.webhook.handle(
+        ctx.input.params.type,
+        ctx.input.body
+      );
     },
   })
 );
@@ -1225,21 +1213,17 @@ All middleware returns standardized error responses.
 
 ```json
 {
-  "error": "Error message or error code",
+  "error": "Error message",
   "message": "Detailed description (if applicable)",
   "code": "ERROR_CODE (if applicable)",
-  "retryAfter": "Seconds to wait before retry (rate limit only)"
+  "retryAfter": "Seconds to wait (rate limit only)"
 }
 ```
 
-### Handling Rate Limit Errors
-
-Client-side retry logic:
+### Client-Side Retry Logic
 
 ```typescript
 async function fetchWithRetry(url: string, maxRetries = 3) {
-  let lastError;
-
   for (let i = 0; i < maxRetries; i++) {
     const response = await fetch(url);
 
@@ -1251,39 +1235,11 @@ async function fetchWithRetry(url: string, maxRetries = 3) {
       continue;
     }
 
-    if (response.ok) {
-      return response;
-    }
-
-    lastError = response;
+    if (response.ok) return response;
   }
 
-  throw new Error(`Max retries exceeded. Last error: ${lastError.status}`);
+  throw new Error('Max retries exceeded');
 }
-```
-
-### Handling Authentication Errors
-
-```typescript
-app.get('/api/profile', (c) => {
-  const user = c.get('user');
-
-  if (!user) {
-    // This should not happen if requireAuth() is applied
-    // But handle gracefully anyway
-    return c.json(
-      {
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
-        },
-      },
-      401
-    );
-  }
-
-  return c.json({ user });
-});
 ```
 
 ---
@@ -1292,42 +1248,33 @@ app.get('/api/profile', (c) => {
 
 ### KV Caching Strategy
 
-The package uses intelligent caching to minimize database queries:
-
-- **Session Caching**: KV cache with TTL = session expiration time
-- **Cache-Aside Pattern**: Check cache first, fall back to database
-- **Graceful Degradation**: Cache failures don't break authentication
-
-Expected performance:
+Intelligent caching minimizes database queries:
 
 | Scenario | Latency | Notes |
 |----------|---------|-------|
 | Cache hit | <10ms | Most requests after first |
-| Cache miss (DB available) | 50-200ms | First request or after cache expiration |
-| Cache failure | 50-200ms | Falls back to database automatically |
-| Database error | <5ms | Returns 401, doesn't crash |
+| Cache miss | 50-200ms | First request, after expiration |
+| Cache error | 50-200ms | Graceful fallback to DB |
+| DB error | <5ms | Returns error, doesn't crash |
+
+Cache uses session token as key, TTL = session expiration time.
 
 ### Rate Limit KV Operations
 
-Each rate-limited request performs:
-- 1 KV read (to get counter)
-- 1 KV put (to increment counter)
-- Minimal overhead: typically <5ms
+Each rate-limited request does:
+- 1 KV read (get counter)
+- 1 KV put (increment + update TTL)
+- Overhead: typically <5ms
 
-For high-traffic endpoints, consider:
-- Using custom key generator (user ID instead of IP) to reduce hotspots
-- Increasing rate limit window to reduce KV operations
-- Exempting health checks via `skip` function
+### Security vs Performance
 
-### Security vs Performance Trade-offs
-
-| Feature | Impact | Recommendation |
-|---------|--------|-----------------|
-| HSTS header | ~0ms | Always enable in production |
-| CSP header | ~0ms | Always enable (only header building) |
-| Rate limit KV | ~5ms per request | Use KV in production, in-memory in dev |
-| Session caching | -150ms (database save) | Always use KV when available |
-| Origin whitelisting | ~0ms | Minimal overhead, use when needed |
+| Feature | Latency | Recommendation |
+|---------|---------|-----------------|
+| HSTS header | ~0ms | Always enable (production) |
+| CSP header | ~0ms | Always enable |
+| Rate limit KV | ~5ms | Use in production |
+| Session caching | -150ms | Always use KV |
+| Origin whitelist | ~0ms | Use when needed |
 
 ---
 
@@ -1342,46 +1289,46 @@ For high-traffic endpoints, consider:
       "kv_namespaces": [
         {
           "binding": "RATE_LIMIT_KV",
-          "id": "your-rate-limit-kv-id",
-          "preview_id": "your-rate-limit-preview-id"
+          "id": "rate-limit-kv-id",
+          "preview_id": "rate-limit-preview-id"
         },
         {
           "binding": "AUTH_SESSION_KV",
-          "id": "your-session-kv-id",
-          "preview_id": "your-session-preview-id"
+          "id": "session-kv-id",
+          "preview_id": "session-preview-id"
         }
       ],
       "vars": {
         "ENVIRONMENT": "production",
-        "WORKER_SHARED_SECRET": "your-secret-key-min-32-chars"
+        "WORKER_SHARED_SECRET": "min-32-chars-secret-key-here"
       }
     }
   }
 }
 ```
 
-### Environment Variables Required
+### Environment Variables
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `ENVIRONMENT` | Controls HSTS (production only) | `production`, `staging`, `development` |
-| `WORKER_SHARED_SECRET` | HMAC secret for worker auth | 32+ character secret |
-| `DATABASE_URL` | Database connection (for session validation) | `postgres://...` |
+| `ENVIRONMENT` | Controls HSTS header | `production`, `staging`, `development` |
+| `WORKER_SHARED_SECRET` | HMAC secret (32+ chars) | Random 32-char minimum |
+| `DATABASE_URL` | Database for sessions | `postgres://...` |
 
 ### Security Best Practices
 
-1. **Store secrets securely**: Use Cloudflare Secrets for `WORKER_SHARED_SECRET`
-2. **HTTPS only**: Enable HSTS in production
-3. **Rate limit strictness**: Start strict, loosen based on monitoring
-4. **Origin whitelisting**: Use for internal endpoints
-5. **Log sensitive operations**: Use `enableLogging` for security events
-6. **Rotate secrets regularly**: WORKER_SHARED_SECRET should be rotated quarterly
+1. **Store secrets securely** - Use Cloudflare Secrets, not config files
+2. **HTTPS only** - Enable HSTS in production via environment
+3. **Start strict** - Begin with auth preset (5/15min), loosen based on monitoring
+4. **Origin whitelist** - Use for internal endpoints
+5. **Log sensitive events** - Enable `enableLogging` for security audits
+6. **Rotate secrets** - WORKER_SHARED_SECRET should rotate quarterly
 
 ---
 
 ## Testing
 
-### Basic Security Header Tests
+### Testing Security Headers
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -1389,37 +1336,175 @@ import { securityHeaders } from '@codex/security';
 
 describe('Security Headers', () => {
   it('should set CSP header', async () => {
-    const middleware = securityHeaders({
-      environment: 'production',
-    });
+    const app = new Hono();
+    app.use('*', securityHeaders({ environment: 'production' }));
+    app.get('/', (c) => c.text('OK'));
 
-    const mockContext = {
-      header: vi.fn(),
-    };
-
-    await middleware(mockContext as any, vi.fn());
-
-    expect(mockContext.header).toHaveBeenCalledWith(
-      'Content-Security-Policy',
-      expect.stringContaining('default-src')
-    );
+    const res = await app.request('/');
+    expect(res.headers.get('content-security-policy')).toBeTruthy();
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
   });
 
-  it('should set HSTS in production', async () => {
-    const middleware = securityHeaders({
-      environment: 'production',
+  it('should enable HSTS in production', async () => {
+    const app = new Hono();
+    app.use('*', securityHeaders({ environment: 'production' }));
+    app.get('/', (c) => c.text('OK'));
+
+    const res = await app.request('/');
+    expect(res.headers.get('strict-transport-security')).toContain('31536000');
+  });
+
+  it('should disable HSTS in development', async () => {
+    const app = new Hono();
+    app.use('*', securityHeaders({ environment: 'development' }));
+    app.get('/', (c) => c.text('OK'));
+
+    const res = await app.request('/');
+    expect(res.headers.get('strict-transport-security')).toBeNull();
+  });
+});
+```
+
+### Testing Rate Limiting
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { rateLimit } from '@codex/security';
+
+describe('Rate Limiting', () => {
+  it('should allow requests under limit', async () => {
+    const app = new Hono();
+    app.use('*', rateLimit({ windowMs: 60000, maxRequests: 5 }));
+    app.get('/', (c) => c.text('OK'));
+
+    for (let i = 0; i < 5; i++) {
+      const res = await app.request('/');
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('should block requests over limit', async () => {
+    const app = new Hono();
+    app.use('*', rateLimit({ windowMs: 60000, maxRequests: 3 }));
+    app.get('/', (c) => c.text('OK'));
+
+    for (let i = 0; i < 3; i++) {
+      const res = await app.request('/');
+      expect(res.status).toBe(200);
+    }
+
+    const limitedRes = await app.request('/');
+    expect(limitedRes.status).toBe(429);
+    const body = await limitedRes.json();
+    expect(body.error).toBe('Too many requests');
+  });
+
+  it('should include rate limit headers', async () => {
+    const app = new Hono();
+    app.use('*', rateLimit({ windowMs: 60000, maxRequests: 10 }));
+    app.get('/', (c) => c.text('OK'));
+
+    const res = await app.request('/');
+    expect(res.headers.get('x-ratelimit-limit')).toBe('10');
+    expect(res.headers.get('x-ratelimit-remaining')).toBe('9');
+    expect(res.headers.get('x-ratelimit-reset')).toBeTruthy();
+  });
+});
+```
+
+### Testing Session Authentication
+
+```typescript
+import { describe, it, expect, beforeEach } from 'vitest';
+import { optionalAuth, requireAuth } from '@codex/security';
+import { Hono } from 'hono';
+
+describe('Session Authentication', () => {
+  let app: Hono;
+
+  beforeEach(() => {
+    app = new Hono();
+  });
+
+  it('optionalAuth should proceed without session', async () => {
+    app.use('*', optionalAuth());
+    app.get('/', (c) => c.json({ user: c.get('user') || null }));
+
+    const res = await app.request('/');
+    const body = await res.json();
+    expect(body.user).toBeNull();
+  });
+
+  it('requireAuth should return 401 without session', async () => {
+    app.use('/api/*', requireAuth());
+    app.get('/api/protected', (c) => c.json({ ok: true }));
+
+    const res = await app.request('/api/protected');
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('UNAUTHORIZED');
+  });
+});
+```
+
+### Testing Worker Authentication
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { generateWorkerSignature, workerAuth } from '@codex/security';
+
+describe('Worker Authentication', () => {
+  it('should generate valid signatures', async () => {
+    const secret = 'test-secret-key-at-least-32-chars-long!';
+    const payload = JSON.stringify({ userId: '123' });
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    const signature = await generateWorkerSignature(payload, secret, timestamp);
+    expect(typeof signature).toBe('string');
+    expect(signature.length).toBeGreaterThan(0);
+  });
+
+  it('should validate correct signatures', async () => {
+    const app = new Hono();
+    const secret = 'test-secret-key-at-least-32-chars-long!';
+
+    app.use('/internal/*', workerAuth({ secret }));
+    app.post('/internal/webhook', (c) => c.json({ ok: true }));
+
+    const payload = JSON.stringify({ userId: '123' });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = await generateWorkerSignature(payload, secret, timestamp);
+
+    const res = await app.request('/internal/webhook', {
+      method: 'POST',
+      headers: {
+        'X-Worker-Signature': signature,
+        'X-Worker-Timestamp': timestamp.toString(),
+      },
+      body: payload,
     });
 
-    const mockContext = {
-      header: vi.fn(),
-    };
+    expect(res.status).toBe(200);
+  });
 
-    await middleware(mockContext as any, vi.fn());
+  it('should reject invalid signatures', async () => {
+    const app = new Hono();
+    const secret = 'test-secret-key-at-least-32-chars-long!';
 
-    expect(mockContext.header).toHaveBeenCalledWith(
-      'Strict-Transport-Security',
-      expect.stringContaining('31536000')
-    );
+    app.use('/internal/*', workerAuth({ secret }));
+    app.post('/internal/webhook', (c) => c.json({ ok: true }));
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const res = await app.request('/internal/webhook', {
+      method: 'POST',
+      headers: {
+        'X-Worker-Signature': 'invalid-signature',
+        'X-Worker-Timestamp': timestamp.toString(),
+      },
+      body: '{}',
+    });
+
+    expect(res.status).toBe(401);
   });
 });
 ```
@@ -1430,10 +1515,10 @@ describe('Security Headers', () => {
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `hono` | ^4.0.0 | Web framework and middleware system |
+| `hono` | ^4.0.0 | Web framework and middleware |
 | `@codex/database` | workspace:* | Session and user data queries |
-| `drizzle-orm` | 0.44.7 | ORM for database queries |
-| `@cloudflare/workers-types` | ^4.20251014.0 | TypeScript types for Cloudflare Workers |
+| `drizzle-orm` | 0.44.7 | ORM for database access |
+| `@cloudflare/workers-types` | ^4.20251014.0 | Cloudflare Worker types |
 
 ---
 

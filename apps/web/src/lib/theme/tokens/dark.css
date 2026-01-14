@@ -1,0 +1,145 @@
+/**
+ * Dark Mode Token Overrides
+ * Overrides primitive tokens for dark mode.
+ * Applied via .dark class on <html> element.
+ */
+
+.dark {
+  /* ========================================
+   * SURFACE COLORS (Backgrounds)
+   * ======================================== */
+  --color-surface: var(--color-slate-900);
+  --color-surface-secondary: var(--color-slate-800);
+  --color-surface-tertiary: var(--color-slate-700);
+  --color-surface-elevated: var(--color-slate-800);
+  --color-surface-overlay: rgb(0 0 0 / 0.7);
+
+  /* ========================================
+   * TEXT COLORS
+   * ======================================== */
+  --color-text-primary: var(--color-slate-50);
+  --color-text-secondary: var(--color-slate-300);
+  --color-text-muted: var(--color-slate-400);
+  --color-text-disabled: var(--color-slate-500);
+  --color-text-inverse: var(--color-slate-900);
+
+  /* ========================================
+   * BORDER COLORS
+   * ======================================== */
+  --color-border: var(--color-slate-700);
+  --color-border-strong: var(--color-slate-600);
+  --color-border-subtle: var(--color-slate-800);
+
+  /* ========================================
+   * BRAND ADJUSTMENTS
+   * Slightly lighter for better visibility on dark backgrounds
+   * ======================================== */
+  --color-brand-primary: var(--color-terracotta-400);
+  --color-brand-primary-hover: var(--color-terracotta-300);
+  --color-brand-primary-active: var(--color-terracotta-500);
+  --color-brand-primary-subtle: var(--color-terracotta-900);
+
+  --color-brand-accent: var(--color-amber-400);
+  --color-brand-accent-hover: var(--color-amber-300);
+  --color-brand-accent-subtle: var(--color-amber-900);
+
+  /* ========================================
+   * INTERACTIVE COLORS
+   * ======================================== */
+  --color-interactive: var(--color-terracotta-400);
+  --color-interactive-hover: var(--color-terracotta-300);
+  --color-interactive-active: var(--color-terracotta-500);
+  --color-interactive-subtle: var(--color-terracotta-900);
+
+  --color-focus: var(--color-terracotta-400);
+  --color-focus-ring: var(--color-terracotta-600);
+
+  /* ========================================
+   * STATUS COLORS (adjusted for dark mode)
+   * ======================================== */
+
+  /* Success */
+  --color-success: var(--color-green-500);
+  --color-success-hover: var(--color-green-400);
+  --color-success-subtle: rgb(22 163 74 / 0.15);
+  --color-success-text: var(--color-green-400);
+
+  /* Error */
+  --color-error: var(--color-red-500);
+  --color-error-hover: var(--color-red-400);
+  --color-error-subtle: rgb(220 38 38 / 0.15);
+  --color-error-text: var(--color-red-400);
+
+  /* Warning */
+  --color-warning: var(--color-yellow-400);
+  --color-warning-hover: var(--color-yellow-300);
+  --color-warning-subtle: rgb(234 179 8 / 0.15);
+  --color-warning-text: var(--color-yellow-400);
+
+  /* Info */
+  --color-info: var(--color-blue-500);
+  --color-info-hover: var(--color-blue-400);
+  --color-info-subtle: rgb(37 99 235 / 0.15);
+  --color-info-text: var(--color-blue-400);
+
+  /* ========================================
+   * SHADOW ADJUSTMENTS
+   * Darker, more pronounced shadows in dark mode
+   * ======================================== */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.2);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.35), 0 4px 6px -4px rgb(0 0 0 / 0.25);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.3);
+  --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.5);
+  --shadow-inner: inset 0 2px 4px 0 rgb(0 0 0 / 0.15);
+
+  /* ========================================
+   * COMPONENT TOKEN OVERRIDES
+   * ======================================== */
+
+  /* Input */
+  --input-bg: var(--color-slate-800);
+  --input-bg-disabled: var(--color-slate-700);
+
+  /* Card */
+  --card-bg: var(--color-slate-800);
+  --card-bg-hover: var(--color-slate-700);
+
+  /* Modal */
+  --modal-bg: var(--color-slate-800);
+
+  /* Dropdown */
+  --dropdown-bg: var(--color-slate-800);
+
+  /* Badge */
+  --badge-default-bg: var(--color-slate-700);
+  --badge-default-text: var(--color-slate-300);
+
+  /* Avatar */
+  --avatar-bg: var(--color-slate-700);
+  --avatar-text: var(--color-slate-300);
+
+  /* Toast */
+  --toast-bg: var(--color-slate-800);
+
+  /* Header */
+  --header-bg: var(--color-slate-900);
+
+  /* Sidebar */
+  --sidebar-bg: var(--color-slate-900);
+
+  /* Table */
+  --table-header-bg: var(--color-slate-800);
+  --table-row-bg: var(--color-slate-900);
+  --table-row-bg-hover: var(--color-slate-800);
+  --table-row-bg-striped: var(--color-slate-800);
+
+  /* Skeleton */
+  --skeleton-bg: var(--color-slate-700);
+  --skeleton-shimmer: linear-gradient(
+    90deg,
+    var(--color-slate-700) 0%,
+    var(--color-slate-600) 50%,
+    var(--color-slate-700) 100%
+  );
+}

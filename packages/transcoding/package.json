@@ -1,0 +1,54 @@
+{
+  "name": "@codex/transcoding",
+  "version": "1.0.0",
+  "description": "Media transcoding service for Codex platform - RunPod integration and R2 path management",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./services": {
+      "types": "./dist/services/index.d.ts",
+      "default": "./dist/services/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
+    "./paths": {
+      "types": "./dist/paths.d.ts",
+      "default": "./dist/paths.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.transcoding.ts",
+    "dev": "vite build --config vite.config.transcoding.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.transcoding.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@codex/database": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "drizzle-orm": "0.44.7"
+  },
+  "devDependencies": {
+    "@codex/test-utils": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.2.2",
+    "vitest": "^4.0.2"
+  }
+}

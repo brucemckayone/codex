@@ -1,0 +1,157 @@
+name: RunPod Transcoder CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/runpod/**"
+      - ".github/workflows/runpod-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "infrastructure/runpod/**"
+      - ".github/workflows/runpod-ci.yml"
+
+env:
+  WORKING_DIR: infrastructure/runpod
+
+jobs:
+  quality-and-unit-test:
+    name: Quality & Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint with Black
+        run: black --check .
+
+      - name: Lint with Flake8
+        run: flake8 .
+
+      - name: Run Unit Tests
+        run: pytest tests/unit --cov=handler --cov-report=xml
+
+  container-verification:
+    name: Container Integration Verification
+    runs-on: ubuntu-latest
+    needs: [quality-and-unit-test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.WORKING_DIR }}
+          load: true
+          tags: test-worker:local
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      # Temp fix for cache growing forever
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Run Inner Container Verification
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/${{ env.WORKING_DIR }}/tests/integration:/app/tests/integration \
+            --entrypoint python3 \
+            test-worker:local \
+            tests/integration/verify_cpu_transcode.py
+
+  deploy:
+    name: Deploy to RunPod
+    runs-on: ubuntu-latest
+    needs: [container-verification]
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    environment: production
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.WORKING_DIR }}
+          push: true
+          # ghcr.io/username/repo_name:tag
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/codex-transcoder:latest
+            ghcr.io/${{ github.repository_owner }}/codex-transcoder:sha-${{ github.sha }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      # NOTE: runpodctl is useless for this specific image update flow via script
+      # so we skip installing it and just use the script.
+
+      - name: Setup Python for deployment script
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install script deps
+        run: pip install requests
+
+      - name: Update RunPod Endpoint
+        # Skip on initial setup before endpoint is created
+        if: secrets.RUNPOD_ENDPOINT_ID != ''
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          # Pass the full base image path to the script so it can construct the tag
+          DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/codex-transcoder
+          IMAGE_TAG: sha-${{ github.sha }}
+        run: python ${{ env.WORKING_DIR }}/scripts/update_runpod_endpoint.py
+
+      - name: Initial Setup Notice
+        if: secrets.RUNPOD_ENDPOINT_ID == ''
+        run: |
+          echo "⚠️ RUNPOD_ENDPOINT_ID not set - skipping endpoint update"
+          echo "Image pushed to: ghcr.io/${{ github.repository_owner }}/codex-transcoder:sha-${{ github.sha }}"
+          echo ""
+          echo "To complete setup:"
+          echo "1. Run locally: python infrastructure/runpod/scripts/setup_endpoint.py"
+          echo "2. Add the endpoint ID to GitHub secrets: gh secret set RUNPOD_ENDPOINT_ID"
