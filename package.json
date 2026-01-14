@@ -16,7 +16,7 @@
     "dev:ecom-api": "turbo run dev --filter=ecom-api",
     "dev:content-api": "turbo run dev --filter=content-api",
     "dev:identity-api": "turbo run dev --filter=identity-api",
-    "dev:media-api": "turbo run dev --filter=media-api",
+    "dev:media-api": "turbo run dev --filter=@codex/media-api",
     "dev:organization-api": "turbo run dev --filter=organization-api",
     "dev:notifications-api": "turbo run dev --filter=notifications-api",
     "dev": "concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm dev:web\" \"pnpm dev:admin-api\" \"pnpm dev:auth\" \"pnpm dev:ecom-api\" \"pnpm dev:content-api\" \"pnpm dev:identity-api\" \"pnpm dev:media-api\" \"pnpm dev:organization-api\" \"pnpm dev:notifications-api\"",
