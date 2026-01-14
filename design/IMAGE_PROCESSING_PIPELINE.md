@@ -18,7 +18,7 @@ This document specifies how images are processed, optimized, stored, and served 
 > | Type | Source | Database Field | Processing |
 > |------|--------|----------------|------------|
 > | **Media Thumbnail** | Auto-extracted from video at 10% mark | `media_items.thumbnailKey` | RunPod (FFmpeg) |
-> | **Content Thumbnail** | User-uploaded custom image | `content.thumbnailUrl` | API Worker (Sharp) |
+> | **Content Thumbnail** | User-uploaded custom image | `content.thumbnailUrl` | API Worker (Photon Wasm) |
 >
 > **Frontend Priority**: `content.thumbnailUrl` → `mediaItem.thumbnailKey` → placeholder
 
@@ -38,11 +38,11 @@ graph TB
         IU[Image Upload] --> Process[Image Processing]
     end
 
-    subgraph "Processing (RunPod)"
-        Extract --> FFmpeg[FFmpeg Processing]
-        Process --> Sharp[Sharp/libvips]
+    subgraph "Processing"
+        Extract -->|RunPod| FFmpeg[FFmpeg Processing]
+        Process -->|CF Worker| Photon[Photon Wasm]
         FFmpeg --> Resize[Resize to 3 sizes]
-        Sharp --> Resize
+        Photon --> Resize
         Resize --> Compress[WebP Compression]
         Compress --> JPEG[JPEG Fallback]
     end
@@ -223,11 +223,16 @@ ffmpeg -i input.mp4 \
   -compression_level 6 \
   thumb-md.webp
 
-# Using Sharp for image → WebP (Node.js)
-await sharp(input)
-  .resize(400, null, { withoutEnlargement: true })
-  .webp({ quality: 82, effort: 6 })
-  .toFile('thumb-md.webp');
+# Using Photon (via @cf-wasm/photon in Node.js/Workers)
+import { PhotonImage, resize } from '@cf-wasm/photon';
+
+const input = PhotonImage.new_from_byteslice(new Uint8Array(buffer));
+const resized = resize(input, 400, 0, 1); // width 400, auto height
+const webpBytes = resized.get_bytes_webp();
+
+// CRITICAL: Free Wasm memory
+input.free();
+resized.free();
 ```
 
 ### JPEG Generation
@@ -476,7 +481,7 @@ function getThumbnailUrl(content: Content, size: Size): string {
 | Sizes | 64px, 128px, 256px |
 | Format | WebP, PNG fallback (transparency) |
 | Upload | Via platform settings |
-| Processing | Sharp on API worker (no RunPod needed) |
+| Processing | Photon Wasm on API worker (no RunPod needed) |
 
 ### User Avatars
 
@@ -485,7 +490,7 @@ function getThumbnailUrl(content: Content, size: Size): string {
 | Sizes | 32px, 64px, 128px |
 | Format | WebP, JPEG fallback |
 | Upload | Via account settings |
-| Processing | Sharp on API worker |
+| Processing | Photon Wasm on API worker |
 
 ---
 
@@ -548,9 +553,10 @@ CDN → User: Included in Cloudflare plan
 - [ ] Update path structure to support multiple files per thumbnail
 
 ### Phase 3: Other Images (Planned)
-- [ ] Org logo upload and processing (Sharp on API worker)
-- [ ] User avatar upload and processing (Sharp on API worker)
+- [ ] Org logo upload and processing (Photon Wasm on API worker)
+- [ ] User avatar upload and processing (Photon Wasm on API worker)
 - [ ] Generic image upload component
+- [ ] Create `@codex/image-processing` package with `@cf-wasm/photon`
 
 ---
 
