@@ -1,1 +1,2 @@
-export { default as Label } from './Label.svelte';
+import Label from './Label.svelte';
+export { Label as Root, Label };

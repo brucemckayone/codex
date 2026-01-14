@@ -1,13 +1,15 @@
 <script lang="ts">
   import { createSwitch, melt } from '@melt-ui/svelte';
 
-  interface Props {
+  import type { HTMLButtonAttributes } from 'svelte/elements';
+
+  interface Props extends HTMLButtonAttributes {
     checked?: boolean;
     disabled?: boolean;
     onCheckedChange?: (checked: boolean) => void;
   }
 
-  let { checked = $bindable(false), disabled = false, onCheckedChange }: Props = $props();
+  let { checked = $bindable(false), disabled = false, onCheckedChange, class: className, ...restProps }: Props = $props();
 
   const {
     elements: { root, input },
@@ -23,7 +25,7 @@
   });
 </script>
 
-<button use:melt={$root}>
+<button use:melt={$root} class={className} {...restProps}>
   <!-- Visually hidden input for form submission -->
   <input use:melt={$input} />
 </button>
