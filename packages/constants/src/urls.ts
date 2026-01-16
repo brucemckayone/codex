@@ -8,6 +8,7 @@ export const SERVICE_PORTS = {
   IDENTITY: 42074,
   NOTIFICATIONS: 42075,
   MEDIA: 8788,
+  MAILHOG: 8025,
 } as const;
 
 export const DOMAINS = {
