@@ -6,6 +6,7 @@
  * session management, and database integration.
  */
 
+import { COOKIES } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth } from 'better-auth';
@@ -48,7 +49,6 @@ export function createAuthInstance(options: AuthConfigOptions) {
     session: {
       expiresIn: 60 * 60 * 24, // 24 hours
       updateAge: 60 * 60 * 24, // Update session every 24 hours
-      cookieName: 'codex-session',
       storeSessionInDatabase: true,
       cookieCache: {
         enabled: true,
@@ -60,7 +60,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
       disabled: true,
     },
     emailVerification: {
-      sendVerificationEmail: async ({ user, token }, _request) => {
+      sendVerificationEmail: async ({ user, token }, _request?: Request) => {
         // Store token in KV for E2E tests (development/test only)
         // Use env from closure, not from request object
         if (
