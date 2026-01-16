@@ -782,6 +782,9 @@ importers:
       '@codex/cloudflare-clients':
         specifier: workspace:*
         version: link:../cloudflare-clients
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/content':
         specifier: workspace:*
         version: link:../content
