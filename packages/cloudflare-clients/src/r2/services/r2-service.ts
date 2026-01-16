@@ -8,6 +8,7 @@ import type {
   R2ListOptions,
   R2MultipartOptions,
 } from '@cloudflare/workers-types';
+import { MIME_TYPES } from '@codex/constants';
 
 export type R2Opts = {
   maxRetries?: number;
@@ -127,7 +128,7 @@ export class R2Service {
   // convenience: put JSON
   async putJson(key: string, obj: unknown, metadata?: Record<string, string>) {
     const body = JSON.stringify(obj);
-    const httpMetadata = { contentType: 'application/json' };
+    const httpMetadata = { contentType: MIME_TYPES.APPLICATION.JSON };
     return this.put(key, body, metadata, httpMetadata);
   }
 
