@@ -7,24 +7,9 @@
  * - Typed error handling
  */
 
+import { getServiceUrl, type ServiceName } from '@codex/constants';
 import { dev } from '$app/environment';
 import { ApiError } from './errors';
-
-const DEFAULT_URLS = {
-  auth: dev ? 'http://localhost:42069' : 'https://auth.revelations.studio',
-  content: dev
-    ? 'http://localhost:4001'
-    : 'https://content-api.revelations.studio',
-  access: dev
-    ? 'http://localhost:4001'
-    : 'https://content-api.revelations.studio',
-  org: dev
-    ? 'http://localhost:42071'
-    : 'https://organization-api.revelations.studio',
-  ecom: dev ? 'http://localhost:42072' : 'https://api.revelations.studio',
-} as const;
-
-type WorkerName = keyof typeof DEFAULT_URLS;
 
 /**
  * Resolve API URL for a worker
@@ -35,19 +20,9 @@ type WorkerName = keyof typeof DEFAULT_URLS;
  */
 export function serverApiUrl(
   platform: App.Platform | undefined,
-  worker: WorkerName
+  worker: ServiceName
 ): string {
-  switch (worker) {
-    case 'auth':
-      return platform?.env?.AUTH_WORKER_URL ?? DEFAULT_URLS.auth;
-    case 'content':
-    case 'access':
-      return platform?.env?.API_URL ?? DEFAULT_URLS.content;
-    case 'org':
-      return platform?.env?.ORG_API_URL ?? DEFAULT_URLS.org;
-    case 'ecom':
-      return platform?.env?.ECOM_API_URL ?? DEFAULT_URLS.ecom;
-  }
+  return getServiceUrl(worker, platform?.env || dev);
 }
 
 /**
@@ -68,7 +43,7 @@ export function createServerApi(platform: App.Platform | undefined) {
      * @returns Typed response data
      */
     async fetch<T>(
-      worker: WorkerName,
+      worker: ServiceName,
       path: string,
       sessionCookie?: string,
       options?: RequestInit

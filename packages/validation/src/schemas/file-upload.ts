@@ -1,3 +1,4 @@
+import { MIME_TYPES } from '@codex/constants';
 import { z } from 'zod';
 import { sanitizeSvgContent } from '../primitives';
 import {
@@ -25,10 +26,10 @@ import {
  * Used to prevent MIME type spoofing attacks
  */
 const MAGIC_NUMBERS = {
-  'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-  'image/jpeg': [0xff, 0xd8, 0xff],
-  'image/webp': [0x52, 0x49, 0x46, 0x46], // RIFF
-  'image/svg+xml': [0x3c, 0x3f, 0x78, 0x6d, 0x6c], // <?xml
+  [MIME_TYPES.IMAGE.PNG]: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  [MIME_TYPES.IMAGE.JPEG]: [0xff, 0xd8, 0xff],
+  [MIME_TYPES.IMAGE.WEBP]: [0x52, 0x49, 0x46, 0x46], // RIFF
+  [MIME_TYPES.IMAGE.SVG]: [0x3c, 0x3f, 0x78, 0x6d, 0x6c], // <?xml
 } as const;
 
 /**
@@ -49,7 +50,7 @@ function isValidImageHeader(buffer: Uint8Array, mimeType: string): boolean {
   if (!expectedMagicNumbers) return false;
 
   // Special handling for WebP (RIFF + WEBP marker)
-  if (mimeType === 'image/webp') {
+  if (mimeType === MIME_TYPES.IMAGE.WEBP) {
     if (buffer.length < 12) return false;
     const matchesRiff = expectedMagicNumbers.every(
       (byte, i) => buffer[i] === byte
@@ -60,7 +61,7 @@ function isValidImageHeader(buffer: Uint8Array, mimeType: string): boolean {
   }
 
   // Special handling for SVG (can start with <?xml or <svg)
-  if (mimeType === 'image/svg+xml') {
+  if (mimeType === MIME_TYPES.IMAGE.SVG) {
     if (buffer.length < 5) return false;
     return (
       expectedMagicNumbers.every((byte, i) => buffer[i] === byte) ||
@@ -179,7 +180,7 @@ export async function validateLogoUpload(
 
   // Sanitize SVG content (XSS prevention)
   let finalBuffer = buffer;
-  if (file.type === 'image/svg+xml') {
+  if (file.type === MIME_TYPES.IMAGE.SVG) {
     const textDecoder = new TextDecoder();
     const svgContent = textDecoder.decode(buffer);
     const sanitized = sanitizeSvgContent(svgContent);

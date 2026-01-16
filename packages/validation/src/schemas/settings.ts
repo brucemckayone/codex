@@ -22,23 +22,25 @@ import { hexColorSchema, timezoneSchema, urlSchema } from '../primitives';
  * Allowed MIME types for logo uploads
  * Only common web-safe image formats
  */
+import { FILE_SIZES, MIME_TYPES } from '@codex/constants';
+
 export type AllowedLogoMimeType =
-  | 'image/png'
-  | 'image/jpeg'
-  | 'image/webp'
-  | 'image/svg+xml';
+  | typeof MIME_TYPES.IMAGE.PNG
+  | typeof MIME_TYPES.IMAGE.JPEG
+  | typeof MIME_TYPES.IMAGE.WEBP
+  | typeof MIME_TYPES.IMAGE.SVG;
 
 export const ALLOWED_LOGO_MIME_TYPES = [
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/svg+xml',
+  MIME_TYPES.IMAGE.PNG,
+  MIME_TYPES.IMAGE.JPEG,
+  MIME_TYPES.IMAGE.WEBP,
+  MIME_TYPES.IMAGE.SVG,
 ] as const;
 
 /**
  * Maximum logo file size: 5MB
  */
-export const MAX_LOGO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+export const MAX_LOGO_FILE_SIZE_BYTES = FILE_SIZES.LOGO_MAX_BYTES;
 
 /**
  * Logo MIME type validation
