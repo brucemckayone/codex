@@ -1,7 +1,6 @@
 import {
   COOKIES,
   getCookieConfig,
-  getServiceUrl,
   HEADERS,
   MIME_TYPES,
 } from '@codex/constants';
