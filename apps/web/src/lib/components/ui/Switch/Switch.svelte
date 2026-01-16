@@ -5,12 +5,14 @@
   interface Props extends Omit<HTMLButtonAttributes, 'role' | 'aria-checked'> {
     checked?: boolean;
     disabled?: boolean;
+    required?: boolean;
     onCheckedChange?: (checked: boolean) => void;
   }
 
   let {
     checked = $bindable(false),
     disabled = false,
+    required = false,
     onCheckedChange,
     class: className,
     ...restProps
@@ -41,7 +43,7 @@
   {...restProps}
 >
   <span class="thumb"></span>
-  <input use:melt={$input} />
+  <input use:melt={$input} {required} />
 </button>
 
 <style>

@@ -6,12 +6,14 @@
   interface Props extends Omit<HTMLInputAttributes, 'type' | 'checked'> {
     checked?: boolean | 'indeterminate';
     label?: string;
+    required?: boolean;
     onCheckedChange?: (checked: boolean | 'indeterminate') => void;
   }
 
   let {
     checked = $bindable(false),
     label,
+    required = false,
     onCheckedChange,
     class: className,
     id,
@@ -53,7 +55,7 @@
         <div class="indeterminate-bar"></div>
       {/if}
     </div>
-    <input use:melt={$input} id={generatedId} />
+    <input use:melt={$input} id={generatedId} {required} />
   </button>
 
   {#if label}

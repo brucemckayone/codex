@@ -23,6 +23,7 @@ export { default as Stack } from './Layout/Stack.svelte';
 export * as Popover from './Popover/index';
 export { default as Select } from './Select/Select.svelte';
 export { Skeleton } from './Skeleton/index';
+export { SkipLink } from './SkipLink/index';
 export { default as Switch } from './Switch/Switch.svelte';
 export * as Table from './Table/index';
 export * as Tabs from './Tabs/index';

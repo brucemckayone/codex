@@ -134,7 +134,7 @@
   }
 
   .button[data-variant="destructive"]:hover:not(:disabled) {
-    background-color: #dc2626; /* Should use a token if available, using hard error color for now */
+    background-color: var(--color-error-600);
   }
 
   .button-spinner {

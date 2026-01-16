@@ -1,4 +1,9 @@
 /* global.css */
+
+/* Reset (consolidated from lib/theme/reset.css) */
+@import '../theme/reset.css';
+
+/* Design Tokens */
 @import './tokens/colors.css';
 @import './tokens/typography.css';
 @import './tokens/spacing.css';
@@ -9,18 +14,14 @@
 @import './tokens/z-index.css';
 @import './tokens/motion.css';
 
+/* Themes */
 @import './themes/light.css';
 @import './themes/dark.css';
 
+/* Utilities */
 @import './utilities.css';
 
-/* Modern Reset */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
+/* App-specific base styles */
 html {
   height: 100%;
   font-family: var(--font-sans);
@@ -28,8 +29,6 @@ html {
   line-height: var(--leading-normal);
   color: var(--color-text);
   background-color: var(--color-background);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
@@ -38,38 +37,25 @@ body {
   flex-direction: column;
 }
 
-/* Base Elements */
+/* Link styles */
 a {
   color: inherit;
   text-decoration: none;
   transition: var(--transition-colors);
 }
 
-button, input, textarea, select {
-  font: inherit;
-  color: inherit;
-}
-
+/* Button reset */
 button {
   cursor: pointer;
   background: none;
   border: none;
 }
 
-ul, ol {
-  list-style: none;
-}
-
-img, picture, video, canvas, svg {
-  display: block;
-  max-width: 100%;
-}
-
+/* Typography */
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   font-weight: var(--font-bold);
   line-height: var(--leading-tight);
-  text-wrap: balance;
 }
 
 p {

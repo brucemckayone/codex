@@ -4,14 +4,17 @@
   --space-unit: calc(0.25rem * var(--brand-density-scale, 1));
 
   --space-0: 0;
+  --space-0-5: calc(var(--space-unit) * 0.5); /* 2px * density */
   --space-1: var(--space-unit);         /* 4px * density */
   --space-2: calc(var(--space-unit) * 2); /* 8px * density */
   --space-3: calc(var(--space-unit) * 3); /* 12px * density */
   --space-4: calc(var(--space-unit) * 4); /* 16px * density */
   --space-5: calc(var(--space-unit) * 5); /* 20px * density */
+  --space-5-5: calc(var(--space-unit) * 5.5); /* 22px * density */
   --space-6: calc(var(--space-unit) * 6); /* 24px * density */
   --space-8: calc(var(--space-unit) * 8); /* 32px * density */
   --space-10: calc(var(--space-unit) * 10); /* 40px * density */
+  --space-11: calc(var(--space-unit) * 11); /* 44px * density */
   --space-12: calc(var(--space-unit) * 12); /* 48px * density */
   --space-16: calc(var(--space-unit) * 16); /* 64px * density */
   --space-20: calc(var(--space-unit) * 20); /* 80px * density */
