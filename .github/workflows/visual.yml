@@ -1,0 +1,36 @@
+name: Visual Regression
+
+# on:
+#   pull_request:
+#     paths:
+#       - 'apps/web/src/lib/components/**'
+#       - 'apps/web/src/lib/styles/**'
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install
+      - run: pnpm --filter web build-storybook
+
+      - name: Install Playwright Browsers
+        run: pnpm --filter web exec playwright install --with-deps
+
+      - name: Start Storybook
+        run: npx http-server apps/web/storybook-static -p 6006 &
+
+      - name: Run visual tests
+        run: pnpm --filter web exec playwright test tests/visual tests/a11y
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-diff
+          path: apps/web/test-results/

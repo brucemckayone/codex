@@ -61,6 +61,9 @@
     "!**/node_modules/**"
   ],
 
+  // Svelte language server - use system node for pnpm compatibility
+  "svelte.language-server.runtime": "/usr/local/bin/node",
+
   "editor.fontFamily": "Operator Mono, Menlo, Monaco, 'Courier New', monospace",
   "workbench.colorTheme": "Cobalt2",
   "editor.fontSize": 17,

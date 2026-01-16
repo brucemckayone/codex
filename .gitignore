@@ -55,9 +55,10 @@ packages/**/*.js.map
 # Log files
 *.log
 
-# Beads (local SQLite database files - keep .jsonl for sync)
+# Beads local database and temp files
 .beads/*.db
 .beads/*.db-shm
 .beads/*.db-wal
-.beads/daemon.lock
-.beads/daemon.pid
+.beads/bd.sock
+.beads/daemon.*
+.beads/last-touched
