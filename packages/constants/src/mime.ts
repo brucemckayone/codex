@@ -1,0 +1,20 @@
+export const MIME_TYPES = {
+  VIDEO: {
+    MP4: 'video/mp4',
+  },
+  IMAGE: {
+    PNG: 'image/png',
+    JPEG: 'image/jpeg',
+    WEBP: 'image/webp',
+    GIF: 'image/gif',
+    SVG: 'image/svg+xml',
+  },
+  APPLICATION: {
+    JSON: 'application/json',
+  },
+} as const;
+
+export const HEADERS = {
+  CONTENT_TYPE: 'Content-Type',
+  AUTHORIZATION: 'Authorization',
+} as const;
