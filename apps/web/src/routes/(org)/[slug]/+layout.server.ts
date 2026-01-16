@@ -61,7 +61,8 @@ export const load: LayoutServerLoad = async ({ params, platform, fetch }) => {
         };
 
         // Background write to cache
-        // We construct the full cached object
+        // TODO: Version is hardcoded to 1 here but uses Date.now() in organization-api.
+        // Consider unifying the versioning strategy if we need cache invalidation by version.
         setBrandConfig(platform, slug, {
           version: 1,
           updatedAt: new Date().toISOString(),

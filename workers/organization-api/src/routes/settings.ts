@@ -120,7 +120,7 @@ app.put(
       // Invalidate cache
       const org = await ctx.services.organization.get(ctx.input.params.id);
       if (org) {
-        // biome-ignore lint/suspicious/noExplicitAny: Workaround for missing types
+        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV not in ProcedureContext.env - would need worker-utils update
         const unsafeCtx = ctx as any;
         unsafeCtx.executionCtx.waitUntil(
           updateBrandCache(unsafeCtx.env.BRAND_KV, org.slug, result)
@@ -254,7 +254,7 @@ app.post('/branding/logo', async (c) => {
       const org = await orgService.get(organizationId);
 
       if (org) {
-        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV binding propagation delay
+        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV not in ProcedureContext.env - would need worker-utils update
         const kv = (c.env as any).BRAND_KV;
         c.executionCtx.waitUntil(updateBrandCache(kv, org.slug, branding));
       }
@@ -290,7 +290,7 @@ app.delete(
       // Invalidate cache
       const org = await ctx.services.organization.get(ctx.input.params.id);
       if (org) {
-        // biome-ignore lint/suspicious/noExplicitAny: Workaround for missing types
+        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV not in ProcedureContext.env - would need worker-utils update
         const unsafeCtx = ctx as any;
         unsafeCtx.executionCtx.waitUntil(
           updateBrandCache(unsafeCtx.env.BRAND_KV, org.slug, result)
