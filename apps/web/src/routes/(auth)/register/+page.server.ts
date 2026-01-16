@@ -1,9 +1,8 @@
+import { COOKIES, getCookieConfig, getServiceUrl } from '@codex/constants';
 import { authRegisterSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import type { Actions, PageServerLoad } from './$types';
-
-const AUTH_WORKER_URL = 'http://localhost:42069';
 
 export const load: PageServerLoad = async ({ url, locals }) => {
   if (locals.user) {
@@ -47,7 +46,7 @@ export const actions: Actions = {
 
     try {
       // 2. Call Auth Worker
-      const authUrl = platform?.env?.AUTH_WORKER_URL ?? AUTH_WORKER_URL;
+      const authUrl = getServiceUrl('auth', platform?.env);
       const res = await fetch(`${authUrl}/api/auth/sign-up/email`, {
         method: 'POST',
         headers: {
@@ -83,16 +82,14 @@ export const actions: Actions = {
       // 3. Set Session Cookie (Auto-login)
       const setCookie = res.headers.get('set-cookie');
       if (setCookie) {
-        const sessionMatch = setCookie.match(/codex-session=([^;]+)/);
+        const sessionMatch = setCookie.match(
+          new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
+        );
         if (sessionMatch) {
-          cookies.set('codex-session', sessionMatch[1], {
-            path: '/',
-            httpOnly: true,
-            secure: true,
-            sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 7,
-            domain: '.revelations.studio',
+          const cookieConfig = getCookieConfig(platform?.env, {
+            maxAge: COOKIES.SESSION_MAX_AGE,
           });
+          cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
         }
       }
 

@@ -1,9 +1,8 @@
+import { getServiceUrl } from '@codex/constants';
 import { authResetPasswordSchema } from '@codex/validation';
 import { fail } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import type { Actions } from './$types';
-
-const AUTH_WORKER_URL = 'http://localhost:42069';
 
 export const actions: Actions = {
   default: async ({ request, platform }) => {
@@ -31,7 +30,7 @@ export const actions: Actions = {
 
     try {
       // 2. Call Auth Worker
-      const authUrl = platform?.env?.AUTH_WORKER_URL ?? AUTH_WORKER_URL;
+      const authUrl = getServiceUrl('auth', platform?.env);
 
       const res = await fetch(`${authUrl}/api/auth/reset-password`, {
         method: 'POST',

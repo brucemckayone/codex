@@ -1,7 +1,6 @@
+import { COOKIES, getCookieConfig, getServiceUrl } from '@codex/constants';
 import { logger } from '$lib/observability';
 import type { PageServerLoad } from './$types';
-
-const AUTH_WORKER_URL = 'http://localhost:42069';
 
 export const load: PageServerLoad = async ({ url, platform, cookies }) => {
   const token = url.searchParams.get('token');
@@ -14,7 +13,7 @@ export const load: PageServerLoad = async ({ url, platform, cookies }) => {
   }
 
   try {
-    const authUrl = platform?.env?.AUTH_WORKER_URL ?? AUTH_WORKER_URL;
+    const authUrl = getServiceUrl('auth', platform?.env);
 
     // Attempt verification via API
     // Assuming POST for mutation, or GET if BetterAuth follows generic link pattern
@@ -38,16 +37,14 @@ export const load: PageServerLoad = async ({ url, platform, cookies }) => {
     // Capture session if returned
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) {
-      const sessionMatch = setCookie.match(/codex-session=([^;]+)/);
+      const sessionMatch = setCookie.match(
+        new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
+      );
       if (sessionMatch) {
-        cookies.set('codex-session', sessionMatch[1], {
-          path: '/',
-          httpOnly: true,
-          secure: true,
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 24 * 7,
-          domain: '.revelations.studio',
+        const cookieConfig = getCookieConfig(platform?.env, {
+          maxAge: COOKIES.SESSION_MAX_AGE,
         });
+        cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
       }
     }
 
