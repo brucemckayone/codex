@@ -12,6 +12,7 @@
  * - DELETE /api/media/:id    - Soft delete
  */
 
+import { MIME_TYPES } from '@codex/constants';
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,
@@ -177,7 +178,7 @@ app.post(
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': MIME_TYPES.APPLICATION.JSON,
             'X-Worker-Secret': ctx.env.WORKER_SHARED_SECRET || '',
           },
           body: JSON.stringify({ creatorId }),
