@@ -26,6 +26,7 @@ vi.mock('@codex/purchase', () => ({
   verifyWebhookSignature: vi.fn(),
 }));
 
+import { MIME_TYPES, STRIPE_EVENTS } from '@codex/constants';
 import { createStripeClient, verifyWebhookSignature } from '@codex/purchase';
 import { verifyStripeSignature } from '../verify-signature';
 
@@ -95,7 +96,7 @@ describe('verifyStripeSignature middleware', () => {
   const mockEvent: Stripe.Event = {
     id: 'evt_test_123',
     object: 'event',
-    type: 'checkout.session.completed',
+    type: STRIPE_EVENTS.CHECKOUT_COMPLETED,
     api_version: '2025-10-29.clover',
     created: Date.now() / 1000,
     data: {
@@ -134,7 +135,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: JSON.stringify({ test: true }),
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           // No stripe-signature header
         },
       });
@@ -201,7 +202,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: JSON.stringify({ test: true }),
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=invalid,v1=tampered',
         },
       });
@@ -220,7 +221,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: JSON.stringify({ test: true }),
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1234567890,v1=valid_signature',
         },
       });
@@ -231,7 +232,7 @@ describe('verifyStripeSignature middleware', () => {
         eventType: string;
       };
       expect(body.received).toBe(true);
-      expect(body.eventType).toBe('checkout.session.completed');
+      expect(body.eventType).toBe(STRIPE_EVENTS.CHECKOUT_COMPLETED);
     });
 
     it('should call verifyWebhookSignature with correct parameters', async () => {
@@ -241,7 +242,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: JSON.stringify({ test: 'body' }),
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=123,v1=sig',
         },
       });
@@ -263,7 +264,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: '{}',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1,v1=sig',
         },
       });
@@ -283,7 +284,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: '{}',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1,v1=sig',
         },
       });
@@ -303,7 +304,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: '{}',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1,v1=sig',
         },
       });
@@ -323,7 +324,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: '{}',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1,v1=sig',
         },
       });
@@ -343,7 +344,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: '{}',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1,v1=sig',
         },
       });
@@ -363,7 +364,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: '{}',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1,v1=sig',
         },
       });
@@ -385,7 +386,7 @@ describe('verifyStripeSignature middleware', () => {
         method: 'POST',
         body: '{}',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'stripe-signature': 't=1,v1=sig',
         },
       });
