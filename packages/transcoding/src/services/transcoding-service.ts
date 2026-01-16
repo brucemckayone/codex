@@ -16,6 +16,7 @@
  * - Proper error handling with custom error classes
  */
 
+import { HEADERS, MIME_TYPES } from '@codex/constants';
 import { scopedNotDeleted } from '@codex/database';
 
 import { mediaItems } from '@codex/database/schema';
@@ -174,8 +175,8 @@ export class TranscodingService extends BaseService {
       const response = await fetch(this.runpodApiUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.runpodApiKey}`,
+          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
+          [HEADERS.AUTHORIZATION]: `Bearer ${this.runpodApiKey}`,
         },
         body: JSON.stringify(jobRequest),
         signal: AbortSignal.timeout(this.runpodTimeout),
