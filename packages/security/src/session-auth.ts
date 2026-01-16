@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { COOKIES } from '@codex/constants';
 import { createDbClient, type DbEnvVars, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import { and, eq, gt } from 'drizzle-orm';
@@ -300,7 +301,7 @@ async function getSessionFromCache(
  * @returns Hono middleware function
  */
 export function optionalAuth(config?: SessionAuthConfig) {
-  const cookieName = config?.cookieName || 'codex-session';
+  const cookieName = config?.cookieName || COOKIES.SESSION_NAME;
   const enableLogging = config?.enableLogging || false;
 
   return async (c: Context, next: Next) => {

@@ -17,4 +17,7 @@ export const MIME_TYPES = {
 export const HEADERS = {
   CONTENT_TYPE: 'Content-Type',
   AUTHORIZATION: 'Authorization',
+  WORKER_SIGNATURE: 'X-Worker-Signature',
+  WORKER_TIMESTAMP: 'X-Worker-Timestamp',
+  REQUEST_ID: 'X-Request-Id',
 } as const;
