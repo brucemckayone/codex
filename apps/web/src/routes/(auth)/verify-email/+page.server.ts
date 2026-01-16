@@ -1,4 +1,10 @@
-import { COOKIES, getCookieConfig, getServiceUrl } from '@codex/constants';
+import {
+  COOKIES,
+  getCookieConfig,
+  getServiceUrl,
+  HEADERS,
+  MIME_TYPES,
+} from '@codex/constants';
 import { logger } from '$lib/observability';
 import type { PageServerLoad } from './$types';
 
@@ -21,7 +27,7 @@ export const load: PageServerLoad = async ({ url, platform, cookies }) => {
     const res = await fetch(`${authUrl}/api/auth/verify-email`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
       },
       body: JSON.stringify({ token }),
     });

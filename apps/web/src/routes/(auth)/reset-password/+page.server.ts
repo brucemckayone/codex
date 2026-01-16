@@ -1,4 +1,4 @@
-import { getServiceUrl } from '@codex/constants';
+import { getServiceUrl, HEADERS, MIME_TYPES } from '@codex/constants';
 import { authResetPasswordSchema } from '@codex/validation';
 import { fail } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -35,7 +35,7 @@ export const actions: Actions = {
       const res = await fetch(`${authUrl}/api/auth/reset-password`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         },
         body: JSON.stringify({
           token: result.data.token,

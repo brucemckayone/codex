@@ -1,4 +1,10 @@
-import { COOKIES, getCookieConfig, getServiceUrl } from '@codex/constants';
+import {
+  COOKIES,
+  getCookieConfig,
+  getServiceUrl,
+  HEADERS,
+  MIME_TYPES,
+} from '@codex/constants';
 import { authRegisterSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -50,7 +56,7 @@ export const actions: Actions = {
       const res = await fetch(`${authUrl}/api/auth/sign-up/email`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         },
         body: JSON.stringify({
           name: result.data.name,
