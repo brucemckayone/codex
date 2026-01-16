@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@codex/admin": "workspace:*",
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/security": "workspace:*",
