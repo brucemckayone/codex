@@ -56,6 +56,7 @@ export function isDev(env?: Env | boolean): boolean {
  * - Only allows http:// and https:// protocols
  * - Rejects javascript:, data:, file:, ftp: and other dangerous protocols
  * - Enforces HTTPS in production when requireHttps is true
+ * - Blocks private IP ranges and cloud metadata services
  */
 export function validateServiceUrl(
   url: string,
@@ -78,6 +79,44 @@ export function validateServiceUrl(
   // In production, require HTTPS
   if (requireHttps && parsed.protocol !== 'https:') {
     throw new Error('HTTPS is required in production');
+  }
+
+  const hostname = parsed.hostname;
+
+  // Block Cloud Metadata Service (AWS, GCP, Azure)
+  if (hostname === '169.254.169.254') {
+    throw new Error('Access to metadata service is blocked');
+  }
+
+  // Block Google Cloud Metadata DNS
+  if (hostname === 'metadata.google.internal') {
+    throw new Error('Access to internal metadata DNS is blocked');
+  }
+
+  // Block Private IP Ranges (simple regex check for IPv4)
+  // 10.0.0.0/8
+  // 172.16.0.0/12
+  // 192.168.0.0/16
+  // 127.0.0.0/8 (Loopback - allowed in dev/test via requireHttps=false usually, but strict check here might be safer)
+  //
+  // NOTE: For strict SSRF protection, DNS resolution should ideally happen
+  // to prevent DNS rebinding, but basic IP blocking catches common misconfigurations.
+  // We allow localhost/127.0.0.1 ONLY if requireHttps is false (dev mode implication).
+
+  if (requireHttps) {
+    // In production (requireHttps=true), also block private IPs
+    const isPrivateIp =
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
+      /^127\./.test(hostname) ||
+      hostname === 'localhost';
+
+    if (isPrivateIp) {
+      throw new Error(
+        `Private IP/Localhost access is blocked in production: ${hostname}`
+      );
+    }
   }
 
   return url;
@@ -143,49 +182,49 @@ export function getServiceUrl(
   switch (service) {
     case 'auth':
       return getValidatedUrl(
-        bindings.AUTH_WORKER_URL as string | undefined,
+        bindings.AUTH_WORKER_URL,
         devMode ? DEFAULT_URLS.auth.dev : DEFAULT_URLS.auth.prod
       );
     case 'content':
       return getValidatedUrl(
-        bindings.API_URL as string | undefined,
+        bindings.API_URL,
         devMode ? DEFAULT_URLS.content.dev : DEFAULT_URLS.content.prod
       );
     case 'access':
       return getValidatedUrl(
-        bindings.API_URL as string | undefined,
+        bindings.API_URL,
         devMode ? DEFAULT_URLS.access.dev : DEFAULT_URLS.access.prod
       );
     case 'org':
       return getValidatedUrl(
-        bindings.ORG_API_URL as string | undefined,
+        bindings.ORG_API_URL,
         devMode ? DEFAULT_URLS.org.dev : DEFAULT_URLS.org.prod
       );
     case 'ecom':
       return getValidatedUrl(
-        bindings.ECOM_API_URL as string | undefined,
+        bindings.ECOM_API_URL,
         devMode ? DEFAULT_URLS.ecom.dev : DEFAULT_URLS.ecom.prod
       );
     case 'admin':
       return getValidatedUrl(
-        bindings.ADMIN_API_URL as string | undefined,
+        bindings.ADMIN_API_URL,
         devMode ? DEFAULT_URLS.admin.dev : DEFAULT_URLS.admin.prod
       );
     case 'identity':
       return getValidatedUrl(
-        bindings.IDENTITY_API_URL as string | undefined,
+        bindings.IDENTITY_API_URL,
         devMode ? DEFAULT_URLS.identity.dev : DEFAULT_URLS.identity.prod
       );
     case 'notifications':
       return getValidatedUrl(
-        bindings.NOTIFICATIONS_API_URL as string | undefined,
+        bindings.NOTIFICATIONS_API_URL,
         devMode
           ? DEFAULT_URLS.notifications.dev
           : DEFAULT_URLS.notifications.prod
       );
     case 'media':
       return getValidatedUrl(
-        bindings.MEDIA_API_URL as string | undefined,
+        bindings.MEDIA_API_URL,
         devMode ? DEFAULT_URLS.media.dev : DEFAULT_URLS.media.prod
       );
     default: {
@@ -194,7 +233,7 @@ export function getServiceUrl(
       if (defaults) {
         return devMode ? defaults.dev : defaults.prod;
       }
-      return '';
+      throw new Error(`Unknown service: ${service}`);
     }
   }
 }

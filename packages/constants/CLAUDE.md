@@ -27,6 +27,7 @@ The `@codex/constants` package provides:
 | `validateServiceUrl(url, requireHttps)` | Function | Validates URL protocol and format |
 | `ServiceName` | Type | Union: `'auth' \| 'content' \| 'access' \| 'org' \| 'ecom' \| 'admin' \| 'identity' \| 'notifications' \| 'media'` |
 | `Env` | Interface | Environment bindings interface |
+| `COOKIE_DOMAIN` | Env Var | Optional: Override cookie domain (default: `.revelations.studio` in prod) |
 
 ### Cookies (`cookies.ts`)
 

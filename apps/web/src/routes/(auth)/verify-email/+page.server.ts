@@ -47,10 +47,12 @@ export const load: PageServerLoad = async ({ url, platform, cookies }) => {
         new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
       );
       if (sessionMatch) {
-        const cookieConfig = getCookieConfig(platform?.env, {
-          maxAge: COOKIES.SESSION_MAX_AGE,
-        });
-        cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
+        if (sessionMatch) {
+          const cookieConfig = getCookieConfig(platform?.env, url.host, {
+            maxAge: COOKIES.SESSION_MAX_AGE,
+          });
+          cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
+        }
       }
     }
 

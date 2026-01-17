@@ -101,6 +101,12 @@ describe('getServiceUrl', () => {
       expect(url).toMatch(/^https:\/\/.*revelations\.studio$/);
     }
   });
+  it('throws for unknown service', () => {
+    // @ts-expect-error - Testing invalid input
+    expect(() => getServiceUrl('unknown-service', true)).toThrow(
+      'Unknown service: unknown-service'
+    );
+  });
 });
 
 describe('validateServiceUrl', () => {
@@ -154,5 +160,45 @@ describe('validateServiceUrl', () => {
     expect(validateServiceUrl('https://example.com', true)).toBe(
       'https://example.com'
     );
+  });
+  describe('SSRF Protection', () => {
+    it('blocks AWS/GCP/Azure metadata IP', () => {
+      expect(() =>
+        validateServiceUrl('http://169.254.169.254/latest/meta-data')
+      ).toThrow('Access to metadata service is blocked');
+    });
+
+    it('blocks Google Cloud internal metadata DNS', () => {
+      expect(() =>
+        validateServiceUrl(
+          'http://metadata.google.internal/computeMetadata/v1/'
+        )
+      ).toThrow('Access to internal metadata DNS is blocked');
+    });
+
+    it('blocks private IPs in production (requireHttps=true)', () => {
+      const privateIps = [
+        'https://10.0.0.1',
+        'https://192.168.1.1',
+        'https://172.16.0.1', // 172.16.0.0/12
+        'https://127.0.0.1',
+        'https://localhost',
+      ];
+
+      privateIps.forEach((url) => {
+        expect(() => validateServiceUrl(url, true)).toThrow(
+          /Private IP\/Localhost access is blocked/
+        );
+      });
+    });
+
+    it('allows localhost in dev mode (requireHttps=false)', () => {
+      expect(validateServiceUrl('http://localhost:3000', false)).toBe(
+        'http://localhost:3000'
+      );
+      expect(validateServiceUrl('http://127.0.0.1:8080', false)).toBe(
+        'http://127.0.0.1:8080'
+      );
+    });
   });
 });
