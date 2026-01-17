@@ -11,7 +11,13 @@ export type ServiceName =
   | 'notifications'
   | 'media';
 
-// Loose interface for environment bindings
+/**
+ * Loose interface for environment bindings.
+ *
+ * Note: The index signature `[key: string]: unknown` allows passing any
+ * Cloudflare Worker bindings without requiring explicit type definitions
+ * for all possible bindings (KV, R2, D1, Queues, etc.).
+ */
 export interface Env {
   AUTH_WORKER_URL?: string;
   API_URL?: string;
@@ -21,6 +27,7 @@ export interface Env {
   IDENTITY_API_URL?: string;
   NOTIFICATIONS_API_URL?: string;
   MEDIA_API_URL?: string;
+  COOKIE_DOMAIN?: string;
 
   MODE?: string;
   dev?: boolean;
@@ -35,6 +42,45 @@ export function isDev(env?: Env | boolean): boolean {
   if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development')
     return true;
   return false;
+}
+
+/**
+ * Validate a service URL to prevent SSRF attacks.
+ *
+ * @param url - The URL to validate
+ * @param requireHttps - If true, only HTTPS is allowed (use in production)
+ * @returns The validated URL
+ * @throws Error if the URL is invalid or uses a disallowed protocol
+ *
+ * Security:
+ * - Only allows http:// and https:// protocols
+ * - Rejects javascript:, data:, file:, ftp: and other dangerous protocols
+ * - Enforces HTTPS in production when requireHttps is true
+ */
+export function validateServiceUrl(
+  url: string,
+  requireHttps: boolean = false
+): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid URL format: ${url}`);
+  }
+
+  // Only allow http/https protocols
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      `Invalid protocol: ${parsed.protocol}. Only http/https allowed.`
+    );
+  }
+
+  // In production, require HTTPS
+  if (requireHttps && parsed.protocol !== 'https:') {
+    throw new Error('HTTPS is required in production');
+  }
+
+  return url;
 }
 
 const DEFAULT_URLS = {
@@ -83,53 +129,64 @@ export function getServiceUrl(
   const devMode = isDev(env);
   const bindings = typeof env === 'object' ? env : {};
 
+  // Helper to validate and return URL from env or use default
+  const getValidatedUrl = (
+    envUrl: string | undefined,
+    defaultUrl: string
+  ): string => {
+    if (envUrl) {
+      return validateServiceUrl(envUrl, !devMode);
+    }
+    return defaultUrl;
+  };
+
   switch (service) {
     case 'auth':
-      return (
-        (bindings.AUTH_WORKER_URL as string) ??
-        (devMode ? DEFAULT_URLS.auth.dev : DEFAULT_URLS.auth.prod)
+      return getValidatedUrl(
+        bindings.AUTH_WORKER_URL as string | undefined,
+        devMode ? DEFAULT_URLS.auth.dev : DEFAULT_URLS.auth.prod
       );
     case 'content':
-      return (
-        (bindings.API_URL as string) ??
-        (devMode ? DEFAULT_URLS.content.dev : DEFAULT_URLS.content.prod)
+      return getValidatedUrl(
+        bindings.API_URL as string | undefined,
+        devMode ? DEFAULT_URLS.content.dev : DEFAULT_URLS.content.prod
       );
     case 'access':
-      return (
-        (bindings.API_URL as string) ??
-        (devMode ? DEFAULT_URLS.access.dev : DEFAULT_URLS.access.prod)
+      return getValidatedUrl(
+        bindings.API_URL as string | undefined,
+        devMode ? DEFAULT_URLS.access.dev : DEFAULT_URLS.access.prod
       );
     case 'org':
-      return (
-        (bindings.ORG_API_URL as string) ??
-        (devMode ? DEFAULT_URLS.org.dev : DEFAULT_URLS.org.prod)
+      return getValidatedUrl(
+        bindings.ORG_API_URL as string | undefined,
+        devMode ? DEFAULT_URLS.org.dev : DEFAULT_URLS.org.prod
       );
     case 'ecom':
-      return (
-        (bindings.ECOM_API_URL as string) ??
-        (devMode ? DEFAULT_URLS.ecom.dev : DEFAULT_URLS.ecom.prod)
+      return getValidatedUrl(
+        bindings.ECOM_API_URL as string | undefined,
+        devMode ? DEFAULT_URLS.ecom.dev : DEFAULT_URLS.ecom.prod
       );
     case 'admin':
-      return (
-        (bindings.ADMIN_API_URL as string) ??
-        (devMode ? DEFAULT_URLS.admin.dev : DEFAULT_URLS.admin.prod)
+      return getValidatedUrl(
+        bindings.ADMIN_API_URL as string | undefined,
+        devMode ? DEFAULT_URLS.admin.dev : DEFAULT_URLS.admin.prod
       );
     case 'identity':
-      return (
-        (bindings.IDENTITY_API_URL as string) ??
-        (devMode ? DEFAULT_URLS.identity.dev : DEFAULT_URLS.identity.prod)
+      return getValidatedUrl(
+        bindings.IDENTITY_API_URL as string | undefined,
+        devMode ? DEFAULT_URLS.identity.dev : DEFAULT_URLS.identity.prod
       );
     case 'notifications':
-      return (
-        (bindings.NOTIFICATIONS_API_URL as string) ??
-        (devMode
+      return getValidatedUrl(
+        bindings.NOTIFICATIONS_API_URL as string | undefined,
+        devMode
           ? DEFAULT_URLS.notifications.dev
-          : DEFAULT_URLS.notifications.prod)
+          : DEFAULT_URLS.notifications.prod
       );
     case 'media':
-      return (
-        (bindings.MEDIA_API_URL as string) ??
-        (devMode ? DEFAULT_URLS.media.dev : DEFAULT_URLS.media.prod)
+      return getValidatedUrl(
+        bindings.MEDIA_API_URL as string | undefined,
+        devMode ? DEFAULT_URLS.media.dev : DEFAULT_URLS.media.prod
       );
     default: {
       // Runtime fallback for unknown services

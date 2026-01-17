@@ -13,6 +13,7 @@
   "scripts": {
     "build": "vite build --config vite.config.constants",
     "dev": "vite build --config vite.config.constants --watch",
+    "test": "vitest run --config vitest.config.constants.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint --write .",
     "format": "biome format --write ."

@@ -1,6 +1,11 @@
 export const MIME_TYPES = {
   VIDEO: {
     MP4: 'video/mp4',
+    MP2T: 'video/MP2T', // HLS .ts segments
+  },
+  STREAMING: {
+    HLS: 'application/vnd.apple.mpegurl', // .m3u8 playlists
+    HLS_ALT: 'application/x-mpegURL', // Alternative .m3u8 MIME type
   },
   IMAGE: {
     PNG: 'image/png',

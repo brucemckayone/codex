@@ -49,6 +49,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
     session: {
       expiresIn: 60 * 60 * 24, // 24 hours
       updateAge: 60 * 60 * 24, // Update session every 24 hours
+      cookieName: COOKIES.SESSION_NAME,
       storeSessionInDatabase: true,
       cookieCache: {
         enabled: true,

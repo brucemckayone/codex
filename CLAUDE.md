@@ -83,7 +83,7 @@ REST API for content lifecycle (create, publish, delete), media management, and 
 
 ---
 
-### 3. Identity-API Worker (Port 42071)
+### 3. Identity-API Worker (Port 42074)
 **File**: [workers/identity-api/CLAUDE.md](workers/identity-api/CLAUDE.md)
 
 Placeholder worker reserved for future user identity management (profiles, preferences, account settings). Currently provides only a health check endpoint.
