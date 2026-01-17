@@ -1,14 +1,14 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 	import { getCtx, setItemCtx } from './ctx.js';
 
-	interface Props {
+	interface Props extends HTMLAttributes<HTMLDivElement> {
 		value: string;
 		disabled?: boolean;
 		class?: string;
 		children?: Snippet;
-		[key: string]: any;
 	}
 
 	const { value, disabled, class: className, children, ...rest }: Props = $props();

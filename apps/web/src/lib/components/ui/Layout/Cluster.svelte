@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 
 	const {
 		children,
@@ -14,7 +15,7 @@
 		justify?: string;
 		align?: string;
 		class?: string;
-	} & Record<string, any> = $props();
+	} & HTMLAttributes<HTMLDivElement> = $props();
 </script>
 
 <div

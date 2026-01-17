@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import type { HTMLAttributes } from 'svelte/elements';
+	import { type FlyParams, fly } from 'svelte/transition';
 	import { getCtx } from './ctx.js';
 
 	const {
@@ -8,7 +9,7 @@
 		class: className,
 		transitionConfig = { y: -5, duration: 150 },
 		...rest
-	}: { children?: Snippet; class?: string; transitionConfig?: any } & Record<string, any> = $props();
+	}: { children?: Snippet; class?: string; transitionConfig?: FlyParams } & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
 		elements: { menu },

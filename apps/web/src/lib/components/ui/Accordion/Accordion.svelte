@@ -23,6 +23,7 @@
 	import { type CreateAccordionProps, createAccordion } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 	import { setCtx } from './ctx.js';
 
 	type Props = Omit<CreateAccordionProps, 'value' | 'onValueChange'> & {
@@ -30,7 +31,7 @@
 		class?: string;
         value?: string | string[];
         onValueChange?: (value: string | string[] | undefined) => void;
-	} & Record<string, any>;
+	} & HTMLAttributes<HTMLDivElement>;
 
 	let {
 		multiple,

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { fade } from 'svelte/transition';
+	import type { HTMLAttributes } from 'svelte/elements';
+	import { type FadeParams, fade } from 'svelte/transition';
 	import { getCtx } from './ctx.js';
 
 	const {
@@ -8,7 +9,7 @@
 		class: className,
 		transitionConfig = { duration: 150 },
 		...rest
-	}: { children?: Snippet; class?: string; transitionConfig?: any } & Record<string, any> = $props();
+	}: { children?: Snippet; class?: string; transitionConfig?: FadeParams } & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
 		elements: { content },

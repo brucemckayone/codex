@@ -1,12 +1,13 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 	import { getCtx } from './ctx.js';
 
 	const {
 		children,
 		class: className,
 		...rest
-	}: { children?: Snippet; class?: string } & Record<string, any> = $props();
+	}: { children?: Snippet; class?: string } & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
 		elements: { list }

@@ -1,7 +1,8 @@
 <script lang="ts">
+	import type { HTMLAttributes } from 'svelte/elements';
 	import { getCtx } from './ctx.js';
 
-	const { class: className, ...rest }: { class?: string } & Record<string, any> = $props();
+	const { class: className, ...rest }: { class?: string } & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
 		elements: { separator }

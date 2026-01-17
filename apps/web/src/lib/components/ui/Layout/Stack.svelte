@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 
 	const {
 		children,
@@ -12,7 +13,7 @@
 		gap?: string;
 		align?: string;
 		class?: string;
-	} & Record<string, any> = $props();
+	} & HTMLAttributes<HTMLDivElement> = $props();
 </script>
 
 <div class="stack {className ?? ''}" style:--gap={gap} style:--align={align} {...rest}>

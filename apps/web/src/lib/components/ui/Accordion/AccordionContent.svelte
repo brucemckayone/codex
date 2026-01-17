@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 	import { slide } from 'svelte/transition';
 	import { getCtx, getItemCtx } from './ctx.js';
 
@@ -7,7 +8,7 @@
 		children,
 		class: className,
 		...rest
-	}: { children?: Snippet; class?: string } & Record<string, any> = $props();
+	}: { children?: Snippet; class?: string } & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
 		elements: { content },

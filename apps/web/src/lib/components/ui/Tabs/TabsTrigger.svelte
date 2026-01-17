@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 	import { getCtx } from './ctx.js';
 
 	const {
@@ -8,10 +9,7 @@
 		children,
 		class: className,
 		...rest
-	}: { value: string; disabled?: boolean; children?: Snippet; class?: string } & Record<
-		string,
-		any
-	> = $props();
+	}: { value: string; disabled?: boolean; children?: Snippet; class?: string } & HTMLAttributes<HTMLButtonElement> = $props();
 
 	const {
 		elements: { trigger }

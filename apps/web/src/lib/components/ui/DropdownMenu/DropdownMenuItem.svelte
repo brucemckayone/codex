@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { HTMLAttributes } from 'svelte/elements';
 	import { getCtx } from './ctx.js';
 
 	const {
@@ -7,7 +8,7 @@
 		class: className,
 		disabled = false,
 		...rest
-	}: { children?: Snippet; class?: string; disabled?: boolean } & Record<string, any> = $props();
+	}: { children?: Snippet; class?: string; disabled?: boolean } & HTMLAttributes<HTMLDivElement> = $props();
 
 	const {
 		elements: { item }
