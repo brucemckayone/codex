@@ -1,3 +1,4 @@
+import { ERROR_CODES, UrlValidationError } from './errors';
 import { SERVICE_PORTS } from './urls';
 
 export type ServiceName =
@@ -66,31 +67,44 @@ export function validateServiceUrl(
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(`Invalid URL format: ${url}`);
+    throw new UrlValidationError(
+      `Invalid URL format: ${url}`,
+      ERROR_CODES.INVALID_URL
+    );
   }
 
   // Only allow http/https protocols
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(
-      `Invalid protocol: ${parsed.protocol}. Only http/https allowed.`
+    throw new UrlValidationError(
+      `Invalid protocol: ${parsed.protocol}. Only http/https allowed.`,
+      ERROR_CODES.INVALID_URL
     );
   }
 
   // In production, require HTTPS
   if (requireHttps && parsed.protocol !== 'https:') {
-    throw new Error('HTTPS is required in production');
+    throw new UrlValidationError(
+      'HTTPS is required in production',
+      ERROR_CODES.HTTPS_REQUIRED
+    );
   }
 
   const hostname = parsed.hostname;
 
   // Block Cloud Metadata Service (AWS, GCP, Azure)
   if (hostname === '169.254.169.254') {
-    throw new Error('Access to metadata service is blocked');
+    throw new UrlValidationError(
+      'Access to metadata service is blocked',
+      ERROR_CODES.SSRF_BLOCKED
+    );
   }
 
   // Block Google Cloud Metadata DNS
   if (hostname === 'metadata.google.internal') {
-    throw new Error('Access to internal metadata DNS is blocked');
+    throw new UrlValidationError(
+      'Access to internal metadata DNS is blocked',
+      ERROR_CODES.SSRF_BLOCKED
+    );
   }
 
   // Block Private IP Ranges (simple regex check for IPv4)
@@ -99,8 +113,11 @@ export function validateServiceUrl(
   // 192.168.0.0/16
   // 127.0.0.0/8 (Loopback - allowed in dev/test via requireHttps=false usually, but strict check here might be safer)
   //
-  // NOTE: For strict SSRF protection, DNS resolution should ideally happen
-  // to prevent DNS rebinding, but basic IP blocking catches common misconfigurations.
+  // NOTE: DNS rebinding attacks (where evil.com → 127.0.0.1) are mitigated because:
+  // - Service URLs come from trusted env vars or hardcoded defaults
+  // - No user-controlled URLs are passed to getServiceUrl()
+  // - Cloudflare Workers restrict outbound requests to known origins
+  //
   // We allow localhost/127.0.0.1 ONLY if requireHttps is false (dev mode implication).
 
   if (requireHttps) {
@@ -113,8 +130,9 @@ export function validateServiceUrl(
       hostname === 'localhost';
 
     if (isPrivateIp) {
-      throw new Error(
-        `Private IP/Localhost access is blocked in production: ${hostname}`
+      throw new UrlValidationError(
+        `Private IP/Localhost access is blocked in production: ${hostname}`,
+        ERROR_CODES.SSRF_BLOCKED
       );
     }
   }

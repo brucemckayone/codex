@@ -37,6 +37,11 @@ describe('getCookieConfig', () => {
       const config = getCookieConfig(true);
       expect(config.secure).toBe(true);
     });
+
+    it('handles undefined host safely', () => {
+      const config = getCookieConfig(true, undefined);
+      expect(config.secure).toBe(true); // Should default to secure
+    });
   });
 
   describe('domain', () => {

@@ -111,7 +111,7 @@ const validUrl = validateServiceUrl(customUrl, !isDev(env));
 - Only `http://` and `https://` protocols allowed
 - Rejects `javascript:`, `data:`, `file:`, `ftp:` protocols
 - HTTPS required for service URLs in production
-- Validates environment variable URLs before use
+- Runtime validation of environment variable URLs (not compile-time)
 
 ## Integration
 

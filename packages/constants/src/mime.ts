@@ -14,6 +14,16 @@ export const MIME_TYPES = {
     GIF: 'image/gif',
     SVG: 'image/svg+xml',
   },
+  AUDIO: {
+    MPEG: 'audio/mpeg',
+    WAV: 'audio/wav',
+    MP4: 'audio/mp4',
+  },
+  DOCUMENT: {
+    PDF: 'application/pdf',
+    TXT: 'text/plain',
+    CSV: 'text/csv',
+  },
   APPLICATION: {
     JSON: 'application/json',
   },
