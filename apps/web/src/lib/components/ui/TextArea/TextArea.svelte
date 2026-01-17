@@ -1,14 +1,3 @@
-<!--
-  @component TextArea
-
-  A textarea component with auto-resize functionality to grow with content.
-
-  @prop {string} [value=''] - Bindable textarea value
-  @prop {boolean} [autoResize=true] - Automatically resize height to fit content
-
-  @example
-  <TextArea bind:value={message} autoResize={true} placeholder="Enter message..." />
--->
 <script lang="ts">
   import type { HTMLTextareaAttributes } from 'svelte/elements';
 
@@ -39,7 +28,7 @@
   $effect(() => {
     if (autoResize && textarea && internalValue !== undefined) {
       textarea.style.height = 'auto';
-      textarea.style.height = textarea.scrollHeight + 'px';
+      textarea.style.height = `${textarea.scrollHeight}px`;
     }
   });
 

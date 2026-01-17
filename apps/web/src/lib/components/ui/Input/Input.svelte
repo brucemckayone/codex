@@ -22,10 +22,12 @@
     error?: string;
   }
 
-  const { class: className, error, value = $bindable(), type = 'text', ...rest }: Props = $props();
+  // biome-ignore lint/style/useConst: Svelte 5 $bindable() props require let for reactivity
+  let { class: className, error, value = $bindable(''), type = 'text', ...rest }: Props = $props();
 
   // Password visibility toggle
-  const showPassword = $state(false);
+  // biome-ignore lint/style/useConst: Svelte 5 $state() primitives require let for reactivity
+  let showPassword = $state(false);
   const inputType = $derived(
     type === 'password' && showPassword ? 'text' : type
   );
