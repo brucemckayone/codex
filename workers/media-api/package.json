@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome lint --write .",
     "format": "biome format --write .",
-    "test": "vitest",
+    "test": "vitest run",
     "test:ui": "vitest --ui",
     "cf-typegen": "wrangler types"
   },

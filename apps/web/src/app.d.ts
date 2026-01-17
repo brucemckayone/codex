@@ -34,6 +34,7 @@ declare global {
         ANALYTICS?: AnalyticsEngineDataset;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ASSETS?: any;
+        BRAND_KV?: KVNamespace;
       };
       context: ExecutionContext;
       caches: CacheStorage;

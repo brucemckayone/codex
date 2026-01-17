@@ -305,6 +305,17 @@ export async function startAllWorkers(): Promise<void> {
   // Load .env.test first
   loadTestEnvironment();
 
+  // Also clean up inspector ports (9240-9250 range used by E2E tests)
+  // These can get orphaned if previous test runs crashed
+  // breakdown: cleanup inspector ports FIRST so that any stale test workers are killed
+  // before we check for "external" workers. This prevents detecting a stale test worker
+  // as an external worker and then killing it.
+  const inspectorPorts = Array.from(
+    { length: WORKERS.length + 2 },
+    (_, i) => 9240 + i
+  );
+  await Promise.all(inspectorPorts.map((port) => killProcessOnPort(port)));
+
   // Check which workers are already running (for debugging with external workers)
   console.log('🔍 Checking for already-running workers...');
   const runningWorkers = new Set<string>();
@@ -330,16 +341,6 @@ export async function startAllWorkers(): Promise<void> {
   await Promise.all(
     workersToCleanup.map((worker) => killProcessOnPort(worker.port))
   );
-
-  // Also clean up inspector ports (9240-9250 range used by E2E tests)
-  // These can get orphaned if previous test runs crashed
-  const inspectorPorts = Array.from(
-    { length: WORKERS.length + 2 },
-    (_, i) => 9240 + i
-  );
-  await Promise.all(inspectorPorts.map((port) => killProcessOnPort(port)));
-
-  console.log('✅ Ports cleaned up\n');
 
   // Start only workers that aren't already running
   const workersToStart = WORKERS.filter((w) => !runningWorkers.has(w.name));

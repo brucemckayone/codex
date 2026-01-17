@@ -37,7 +37,7 @@
       class="input"
       data-error={!!error}
       data-has-toggle={type === 'password'}
-      bind:value={value}
+      bind:value
       type={inputType}
       {...rest}
     />

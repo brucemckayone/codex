@@ -19,6 +19,11 @@
     {
       "binding": "AUTH_SESSION_KV",
       "id": "82d04a4236df4aac8e9d87793344f0ed"
+    },
+    {
+      "binding": "BRAND_KV",
+      "id": "e86ed818ff4f4a54bfb801bb46c10788",
+      "preview_id": "d65732c40d7143e38f5b8cf5323a2250"
     }
   ],
 
@@ -60,6 +65,11 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "BRAND_KV",
+          "id": "e86ed818ff4f4a54bfb801bb46c10788",
+          "preview_id": "d65732c40d7143e38f5b8cf5323a2250"
         }
       ],
       "r2_buckets": [
@@ -89,6 +99,10 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "BRAND_KV",
+          "id": "e86ed818ff4f4a54bfb801bb46c10788"
         }
       ],
       "r2_buckets": [
