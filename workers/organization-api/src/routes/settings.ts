@@ -16,12 +16,9 @@
  * - PUT    /api/organizations/:id/settings/features     - Update feature settings
  */
 
-import {
-  FileTooLargeError,
-  InvalidFileTypeError,
-} from '@codex/platform-settings';
-import { ValidationError } from '@codex/service-errors';
-import type { HonoEnv } from '@codex/shared-types';
+import { CACHE_TTL } from '@codex/constants';
+import { createDbClient, eq, schema } from '@codex/database';
+import type { Bindings, HonoEnv } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   type AllSettingsResponse,
@@ -34,9 +31,93 @@ import {
   updateFeaturesSchema,
   uuidSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { multipartProcedure, procedure } from '@codex/worker-utils';
+
 import { Hono } from 'hono';
 import { z } from 'zod';
+
+/**
+/**
+ * Update the branding cache in KV with fresh data from DB
+ *
+ * FIXES:
+ * 1. Race conditions: Always fetches latest state from DB
+ * 2. Performance: runs in background (waitUntil), removing DB fetch from request path
+ * 3. Error reporting: Logs errors properly
+ */
+export async function updateBrandCache(
+  env: Bindings,
+  organizationId: string
+): Promise<void> {
+  const kv = env.BRAND_KV;
+  if (!kv) return;
+
+  try {
+    const db = createDbClient(env);
+
+    // Try to fetch settings with branding and organization info
+    // We query platformSettings because it has relations to both branding and organization
+    const settings = await db.query.platformSettings.findFirst({
+      where: eq(schema.platformSettings.organizationId, organizationId),
+      with: {
+        branding: true,
+        organization: {
+          columns: { slug: true, logoUrl: true },
+        },
+      },
+    });
+
+    let slug: string;
+    let branding: BrandingSettingsResponse;
+
+    if (settings?.organization) {
+      slug = settings.organization.slug;
+
+      // Prefer branding settings, fallback to organization defaults
+      branding = {
+        logoUrl:
+          settings.branding?.logoUrl ?? settings.organization.logoUrl ?? null,
+        primaryColorHex: settings.branding?.primaryColorHex ?? '#3B82F6',
+      };
+    } else {
+      // Fallback: Settings not created yet, fetch org directly
+      const org = await db.query.organizations.findFirst({
+        where: eq(schema.organizations.id, organizationId),
+        columns: {
+          slug: true,
+          logoUrl: true,
+        },
+      });
+
+      if (!org) {
+        console.warn(
+          `[BrandCache] Skip update - Org not found: ${organizationId}`
+        );
+        return;
+      }
+
+      slug = org.slug;
+      branding = {
+        logoUrl: org.logoUrl ?? null,
+        primaryColorHex: '#3B82F6', // Default blue
+      };
+    }
+
+    const cacheData = {
+      updatedAt: new Date().toISOString(),
+      branding,
+    };
+
+    await kv.put(`brand:${slug}`, JSON.stringify(cacheData), {
+      expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS,
+    });
+  } catch (err) {
+    console.error(
+      `[BrandCache] Failed to update cache for org ${organizationId}:`,
+      err
+    );
+  }
+}
 
 const app = new Hono<HonoEnv>();
 
@@ -90,7 +171,14 @@ app.put(
       body: updateBrandingSchema,
     },
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
-      return await ctx.services.settings.updateBranding(ctx.input.body);
+      const result = await ctx.services.settings.updateBranding(ctx.input.body);
+
+      // Invalidate cache - optimized, moves fetch to background
+      ctx.executionCtx.waitUntil(
+        updateBrandCache(ctx.env, ctx.input.params.id)
+      );
+
+      return result;
     },
   })
 );
@@ -110,117 +198,42 @@ app.put(
  * Max size: 5MB
  */
 
-//TODO: this is a horrible break from the worker standards we have implemented thus far and we  need to consider how we can use zod to validate such things as multi part fomr datga
-// so we can use everything we have in place for saftry
-app.post('/branding/logo', async (c) => {
-  const obs = c.get('obs');
+app.post(
+  '/branding/logo',
+  multipartProcedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    files: {
+      logo: {
+        required: true,
+        maxSize: MAX_LOGO_FILE_SIZE_BYTES,
+        allowedMimeTypes: ALLOWED_LOGO_MIME_TYPES,
+      },
+    },
+    handler: async (ctx) => {
+      // Create facade with org context for upload
+      // Note: We're dynamically importing to avoid loading heavy dependencies for other routes
+      // But for cleaner code with procedure(), we could trust the service registry
+      // However, PlatformSettingsFacade is not in standard registry yet?
+      // Actually ctx.services.settings IS PlatformSettingsFacade.
 
-  try {
-    // Check if R2 bucket is configured
-    if (!c.env.MEDIA_BUCKET) {
-      return c.json(
-        {
-          error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'Logo uploads not configured',
-          },
-        },
-        503
-      );
-    }
+      const logoFile = ctx.files.logo; // Typed as ValidatedFile
 
-    // Validate org ID param
-    const id = c.req.param('id');
-    const paramResult = uuidSchema.safeParse(id);
-    if (!paramResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'INVALID_INPUT',
-            message: 'Invalid organization ID',
-          },
-        },
-        400
-      );
-    }
-
-    // Auth is handled by middleware in parent app
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
-
-    // Get organization context (set by org management check)
-    const organizationId = c.get('organizationId') ?? paramResult.data;
-
-    // Parse multipart form data
-    const formData = await c.req.formData();
-    const logoFile = formData.get('logo');
-
-    if (!logoFile || !(logoFile instanceof File)) {
-      throw new ValidationError('Logo file is required');
-    }
-
-    // Validate MIME type
-    if (
-      !ALLOWED_LOGO_MIME_TYPES.includes(
-        logoFile.type as (typeof ALLOWED_LOGO_MIME_TYPES)[number]
-      )
-    ) {
-      throw new InvalidFileTypeError(logoFile.type, ALLOWED_LOGO_MIME_TYPES);
-    }
-
-    // Validate file size
-    if (logoFile.size > MAX_LOGO_FILE_SIZE_BYTES) {
-      throw new FileTooLargeError(logoFile.size, MAX_LOGO_FILE_SIZE_BYTES);
-    }
-
-    // Read file data
-    const fileBuffer = await logoFile.arrayBuffer();
-
-    // Create facade with org context for upload
-    const { PlatformSettingsFacade } = await import('@codex/platform-settings');
-    const { createPerRequestDbClient } = await import('@codex/database');
-    const { R2Service } = await import('@codex/cloudflare-clients');
-
-    const { db, cleanup } = createPerRequestDbClient(c.env);
-    const r2 = new R2Service(c.env.MEDIA_BUCKET);
-
-    try {
-      const environment = c.env.ENVIRONMENT ?? 'development';
-      const facade = new PlatformSettingsFacade({
-        db,
-        environment,
-        organizationId,
-        r2,
-        r2PublicUrlBase: undefined,
-      });
-
-      const branding = await facade.uploadLogo({
-        buffer: fileBuffer,
+      const result = await ctx.services.settings.uploadLogo({
+        buffer: logoFile.buffer,
         mimeType: logoFile.type,
         size: logoFile.size,
       });
 
-      return c.json({ data: branding });
-    } finally {
-      c.executionCtx.waitUntil(cleanup());
-    }
-  } catch (err) {
-    // Use mapErrorToResponse for consistent error handling
-    const { mapErrorToResponse } = await import('@codex/service-errors');
-    const { statusCode, response } = mapErrorToResponse(err, { obs });
-    return c.json(response, statusCode);
-  }
-});
+      // Invalidate cache
+      ctx.executionCtx.waitUntil(
+        updateBrandCache(ctx.env, ctx.input.params.id)
+      );
+
+      return result;
+    },
+  })
+);
 
 /**
  * DELETE /api/organizations/:id/settings/branding/logo
@@ -236,7 +249,14 @@ app.delete(
       if (!ctx.env.MEDIA_BUCKET) {
         throw new Error('Logo operations not configured');
       }
-      return await ctx.services.settings.deleteLogo();
+      const result = await ctx.services.settings.deleteLogo();
+
+      // Invalidate cache
+      ctx.executionCtx.waitUntil(
+        updateBrandCache(ctx.env, ctx.input.params.id)
+      );
+
+      return result;
     },
   })
 );

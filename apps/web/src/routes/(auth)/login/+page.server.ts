@@ -1,3 +1,4 @@
+import { COOKIES, getCookieConfig } from '@codex/constants';
 import { authLoginSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -78,16 +79,14 @@ export const actions: Actions = {
       // The Auth Worker returns a Set-Cookie header. We need to forward it.
       const setCookie = res.headers.get('set-cookie');
       if (setCookie) {
-        const sessionMatch = setCookie.match(/codex-session=([^;]+)/);
+        const sessionMatch = setCookie.match(
+          new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
+        );
         if (sessionMatch) {
-          cookies.set('codex-session', sessionMatch[1], {
-            path: '/',
-            httpOnly: true,
-            secure: true, // Should be true in prod
-            sameSite: 'lax',
-            maxAge: 60 * 60 * 24 * 7, // 7 days
-            domain: '.revelations.studio', // TODO: Make configurable
+          const cookieConfig = getCookieConfig(platform?.env, {
+            maxAge: COOKIES.SESSION_MAX_AGE,
           });
+          cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
         }
       }
 

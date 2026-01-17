@@ -36,11 +36,10 @@ export {
   getClientIP,
   validateInput,
 } from './helpers';
-// Org helper exports (for direct use)
-export {
-  checkOrganizationMembership,
-  extractOrganizationFromSubdomain,
-} from './org-helpers';
+export * from './multipart-procedure';
+// Note: org-helpers (checkOrganizationMembership, extractOrganizationFromSubdomain)
+// are dynamically imported in helpers.ts to enable code-splitting.
+// If you need direct access, import from './org-helpers' directly.
 // Main procedure function
 export { procedure } from './procedure';
 export type { ServiceRegistryResult } from './service-registry';

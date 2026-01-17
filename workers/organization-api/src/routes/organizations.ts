@@ -2,12 +2,13 @@
  * Organization Management Endpoints
  *
  * RESTful API for managing organizations.
- * All routes require authentication.
+ * All routes require authentication (except public branding endpoint).
  *
  * Endpoints:
  * - POST   /api/organizations           - Create organization
  * - GET    /api/organizations/:id       - Get by ID
  * - GET    /api/organizations/slug/:slug - Get by slug
+ * - GET    /api/organizations/public/:slug - Get public branding (no auth)
  * - PATCH  /api/organizations/:id       - Update organization
  * - GET    /api/organizations           - List with filters
  * - DELETE /api/organizations/:id       - Soft delete
@@ -39,6 +40,7 @@ import {
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { updateBrandCache } from './settings';
 
 const app = new Hono<HonoEnv>();
 
@@ -58,7 +60,14 @@ app.post(
     input: { body: createOrganizationSchema },
     successStatus: 201,
     handler: async (ctx): Promise<CreateOrganizationResponse['data']> => {
-      return await ctx.services.organization.create(ctx.input.body);
+      const org = await ctx.services.organization.create(ctx.input.body);
+
+      // Issue 4: Warm cache with default branding for new org
+      if (ctx.env.BRAND_KV) {
+        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, org.id));
+      }
+
+      return org;
     },
   })
 );
@@ -114,6 +123,48 @@ app.get(
   })
 );
 
+/** Response type for public branding endpoint */
+interface PublicBrandingResponse {
+  logoUrl: string | null;
+  primaryColorHex: string;
+}
+
+/**
+ * GET /api/organizations/public/:slug
+ * Public branding endpoint - no auth required
+ *
+ * Returns only public branding fields: { logoUrl, primaryColorHex }
+ * Returns: PublicBrandingResponse (200)
+ * Security: No auth required, rate limited
+ * @returns {PublicBrandingResponse}
+ */
+app.get(
+  '/public/:slug',
+  procedure({
+    policy: { auth: 'none' },
+    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    handler: async (ctx): Promise<PublicBrandingResponse> => {
+      const organization = await ctx.services.organization.getBySlug(
+        ctx.input.params.slug
+      );
+
+      if (!organization) {
+        throw new NotFoundError('Organization not found', {
+          slug: ctx.input.params.slug,
+        });
+      }
+
+      // Get branding from platform settings service
+      const branding = await ctx.services.settings.getBranding();
+
+      return {
+        logoUrl: branding.logoUrl ?? null,
+        primaryColorHex: branding.primaryColorHex ?? '#3B82F6',
+      };
+    },
+  })
+);
+
 /**
  * GET /api/organizations/:id
  * Get organization by ID
@@ -161,10 +212,30 @@ app.patch(
       body: updateOrganizationSchema,
     },
     handler: async (ctx): Promise<UpdateOrganizationResponse['data']> => {
-      return await ctx.services.organization.update(
+      // Get org before update to detect slug change for cache invalidation
+      const existingOrg = await ctx.services.organization.get(
+        ctx.input.params.id
+      );
+      const oldSlug = existingOrg?.slug;
+
+      const updated = await ctx.services.organization.update(
         ctx.input.params.id,
         ctx.input.body
       );
+
+      // Handle slug change: invalidate old cache, new cache warmed on first access
+      // FIX: Warm new cache immediately using updateBrandCache
+      if (ctx.env.BRAND_KV) {
+        if (oldSlug && updated.slug !== oldSlug) {
+          ctx.executionCtx.waitUntil(
+            ctx.env.BRAND_KV.delete(`brand:${oldSlug}`)
+          );
+        }
+        // Always refresh cache on update (in case slug changed OR other relevant fields)
+        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, updated.id));
+      }
+
+      return updated;
     },
   })
 );
@@ -212,7 +283,18 @@ app.delete(
     },
     input: { params: z.object({ id: uuidSchema }) },
     handler: async (ctx): Promise<DeleteOrganizationResponse> => {
+      // Get org slug for cache invalidation before deletion
+      const org = await ctx.services.organization.get(ctx.input.params.id);
+
       await ctx.services.organization.delete(ctx.input.params.id);
+
+      // Invalidate brand cache if exists
+      if (org && ctx.env.BRAND_KV) {
+        ctx.executionCtx.waitUntil(
+          ctx.env.BRAND_KV.delete(`brand:${org.slug}`)
+        );
+      }
+
       return {
         success: true,
         message: 'Organization deleted successfully',
