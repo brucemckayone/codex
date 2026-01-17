@@ -10,26 +10,27 @@
 </script>
 
 <Story name="Default">
-  <div style="position: relative; min-height: 200px;">
-    <p style="color: var(--color-text-secondary); margin-bottom: 1rem;">Press Tab to reveal the skip link:</p>
+  <div style="position: relative; min-height: 200px; padding: var(--space-4); border: 1px dashed var(--color-border);">
+    <p style="margin-bottom: var(--space-2); color: var(--color-text-secondary);">
+      Press Tab to reveal the skip link (centered at top):
+    </p>
     <SkipLink />
-    <main id="main-content" style="padding: 1rem; background: var(--color-surface-secondary); border-radius: 8px;">
+    <div id="main-content" style="margin-top: var(--space-8);">
       <h2 style="color: var(--color-text);">Main Content</h2>
-      <p style="color: var(--color-text);">This is the main content area that the skip link targets.</p>
-    </main>
+      <p style="color: var(--color-text);">This is the main content area that the skip link navigates to.</p>
+    </div>
   </div>
 </Story>
 
-<Story name="Custom Target">
-  <div style="position: relative; min-height: 200px;">
-    <p style="color: var(--color-text-secondary); margin-bottom: 1rem;">Press Tab to reveal the skip link:</p>
-    <SkipLink href="#custom-content" label="Skip to custom section" />
-    <div style="height: 100px; background: var(--color-neutral-100); margin-bottom: 1rem; display: flex; align-items: center; justify-content: center; color: var(--color-text-secondary);">
-      Navigation area (skipped)
-    </div>
-    <section id="custom-content" style="padding: 1rem; background: var(--color-surface-secondary); border-radius: 8px;">
+<Story name="Custom Label">
+  <div style="position: relative; min-height: 200px; padding: var(--space-4); border: 1px dashed var(--color-border);">
+    <p style="margin-bottom: var(--space-2); color: var(--color-text-secondary);">
+      Press Tab to see custom skip link label:
+    </p>
+    <SkipLink href="#custom-section" label="Skip to custom section" />
+    <div id="custom-section" style="margin-top: var(--space-8);">
       <h2 style="color: var(--color-text);">Custom Section</h2>
-      <p style="color: var(--color-text);">This is a custom section targeted by the skip link.</p>
-    </section>
+      <p style="color: var(--color-text);">The skip link can have custom text and target any element with an ID.</p>
+    </div>
   </div>
 </Story>

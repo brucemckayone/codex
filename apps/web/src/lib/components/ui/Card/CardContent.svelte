@@ -16,6 +16,10 @@
 <style>
   .card-content {
     padding: var(--space-6);
+  }
+
+  /* Only remove top padding when following a header */
+  :global(.card-header) + .card-content {
     padding-top: 0;
   }
 </style>

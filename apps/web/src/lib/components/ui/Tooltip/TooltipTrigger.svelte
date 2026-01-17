@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
+
 	import type { Snippet } from 'svelte';
 	import { getCtx } from './ctx.js';
 
@@ -14,6 +14,6 @@
 	} = getCtx();
 </script>
 
-<button use:melt={$trigger} class={className} type="button" {...rest}>
+<button {...$trigger} use:trigger class={className} type="button" {...rest}>
 	{@render children?.()}
 </button>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { type CreateTooltipProps, createTooltip } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
+	import { untrack } from 'svelte';
 	import { setCtx } from './ctx.js';
 
 	type Props = Omit<CreateTooltipProps, 'open' | 'onOpenChange'> & {
@@ -16,7 +17,8 @@
 		closeDelay,
 		closeOnPointerDown,
 		escapeBehavior,
-		forceVisible,
+		portal = true, // Default to true for Storybook compatibility
+		forceVisible = true,
 		defaultOpen,
 		open = $bindable(),
 		onOpenChange,
@@ -26,8 +28,8 @@
 	}: Props = $props();
 
 	const builder = createTooltip({
-		defaultOpen,
-		group,
+		defaultOpen: untrack(() => defaultOpen),
+		group: untrack(() => group),
 		onOpenChange: ({ next }) => {
 			if (open !== next) {
 				open = next;
@@ -51,6 +53,7 @@
 		options.closeDelay.set(closeDelay);
 		options.closeOnPointerDown.set(closeOnPointerDown);
 		options.escapeBehavior.set(escapeBehavior);
+		options.portal.set(portal);
 		options.forceVisible.set(forceVisible);
 		options.disableHoverableContent.set(disableHoverableContent);
 	});

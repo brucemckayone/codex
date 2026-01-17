@@ -1,5 +1,26 @@
+<!--
+  @component Select
+
+  A dropdown select component with search-friendly option list.
+  Portals to document.body for proper z-index layering.
+
+  @prop {Array<{value: string, label: string}>} options - Available options
+  @prop {string} value - Bindable selected value
+  @prop {string} [placeholder='Select an option...'] - Placeholder text
+  @prop {string} [label] - Optional label for the select
+  @prop {function} [onValueChange] - Callback when selection changes
+  @prop {string} [id] - ID for label association (auto-generated if omitted)
+
+  @example
+  <Select
+    options={[{value: 'a', label: 'Option A'}]}
+    bind:value={selected}
+    label="Choose one"
+  />
+-->
 <script lang="ts">
-  import { createSelect, melt } from '@melt-ui/svelte';
+  import { createSelect } from '@melt-ui/svelte';
+  import { untrack } from 'svelte';
   import { fly } from 'svelte/transition';
   import { Label } from '../index';
 
@@ -29,12 +50,13 @@
   }: Props = $props();
 
   const {
-    elements: { trigger, menu, option }, // Removing label from here as we'll use the standalone Label component
+    elements: { trigger, menu, option },
     states: { selectedLabel, open, selected },
     helpers: { isSelected }
   } = createSelect({
     forceVisible: true,
-    defaultSelected: value ? { value, label: options.find(o => o.value === value)?.label ?? '' } : undefined,
+    portal: true, // Portal to body required for Storybook iframe rendering
+    defaultSelected: untrack(() => value ? { value, label: options.find(o => o.value === value)?.label ?? '' } : undefined),
     onSelectedChange: ({ next }) => {
       value = next?.value;
       onValueChange?.(next?.value);
@@ -44,7 +66,7 @@
 
   const generatedId = $derived(id || `select-${Math.random().toString(36).substring(2, 9)}`);
 
-  // Sync prop to melt state
+  // Sync external value prop changes to Melt-UI internal state
   $effect(() => {
     const currentSelected = $selected;
     if (value !== currentSelected?.value) {
@@ -61,7 +83,7 @@
     <Label for={generatedId} class="sr-only">{placeholder}</Label>
   {/if}
 
-  <button use:melt={$trigger} id={generatedId} class="select-trigger">
+  <button {...$trigger} use:trigger id={generatedId} class="select-trigger">
     <span class="select-value">
       {$selectedLabel || placeholder}
     </span>
@@ -69,9 +91,9 @@
   </button>
 
   {#if $open}
-    <div use:melt={$menu} class="select-content" transition:fly={{ y: -5, duration: 150 }}>
+    <div {...$menu} use:menu class="select-content" transition:fly={{ y: -5, duration: 150 }}>
       {#each options as opt}
-        <div use:melt={$option({ value: opt.value, label: opt.label })} class="select-option">
+        <div {...$option({ value: opt.value, label: opt.label })} use:option class="select-option">
           <span class="option-label">{opt.label}</span>
           {#if $isSelected(opt.value)}
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="check-icon"><polyline points="20 6 9 17 4 12"/></svg>

@@ -12,7 +12,7 @@ export default defineConfig({
     sveltekit(),
   ],
   test: {
-    include: ['src/**/*.{test,spec}.ts'],
+    include: ['src/**/*.test.ts'], // Only unit tests, not Playwright .spec.ts files
     globals: true,
     environment: 'happy-dom',
   },

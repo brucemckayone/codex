@@ -1,5 +1,6 @@
-<script module>
+<script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf';
+  import { writable } from 'svelte/store';
   import Button from '../Button/Button.svelte';
   import * as DropdownMenu from './index';
 
@@ -7,15 +8,19 @@
     title: 'UI/DropdownMenu',
     tags: ['autodocs'],
   });
+
+  // State stores for each story
+  const defaultOpen = writable(false);
+  const actionsOpen = writable(false);
 </script>
 
 <Story name="Default">
   <div style="padding: 2rem;">
-    <DropdownMenu.Root>
+    <DropdownMenu.Root bind:open={$defaultOpen}>
       <DropdownMenu.Trigger>
         <Button variant="secondary">
           Open Menu
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 0.25rem;"><path d="m6 9 6 6 6-6"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
         </Button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Content>
@@ -31,7 +36,7 @@
 
 <Story name="Actions Menu">
   <div style="padding: 2rem;">
-    <DropdownMenu.Root>
+    <DropdownMenu.Root bind:open={$actionsOpen}>
       <DropdownMenu.Trigger>
         <button style="padding: 0.5rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; cursor: pointer;">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>

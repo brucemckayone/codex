@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { getCtx, getItemCtx } from './ctx.js';
@@ -19,7 +18,8 @@
 
 {#if $isSelected(value)}
 	<div
-		use:melt={$content(value)}
+		{...$content(value)}
+		use:content
 		class="accordion-content {className ?? ''}"
 		transition:slide={{ duration: 200 }}
 		{...rest}
@@ -37,7 +37,6 @@
 		color: var(--color-text-secondary);
 	}
 	.accordion-content-inner {
-		padding-bottom: var(--space-4);
-		padding-top: 0;
+		padding: var(--space-4);
 	}
 </style>

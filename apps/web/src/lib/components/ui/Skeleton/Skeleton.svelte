@@ -1,32 +1,68 @@
+<!--
+  @component Skeleton
+
+  A skeleton loading placeholder for content that is still loading.
+  Provides a pulsing animation to indicate loading state.
+
+  @prop {string} [width='100%'] - Width of the skeleton (CSS value)
+  @prop {string} [height='1rem'] - Height of the skeleton (CSS value)
+
+  @example
+  <Skeleton width="200px" height="2rem" />
+  <Skeleton width="100%" height="100px" />
+-->
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
+    width?: string;
+    height?: string;
   }
 
-  const { class: className, ...restProps }: Props = $props();
+  const { class: className, width = '100%', height = '1rem', ...restProps }: Props = $props();
 </script>
 
-<div class="skeleton {className}" {...restProps}></div>
+<div
+  class="skeleton {className ?? ''}"
+  style="width: {width}; height: {height};"
+  {...restProps}
+></div>
 
 <style>
   .skeleton {
-    background-color: var(--color-neutral-200); /* Use specific token? */
-    border-radius: var(--radius-md);
-    animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    display: block;
+    position: relative;
+    overflow: hidden;
+    background: var(--color-neutral-200, hsl(210, 10%, 90%));
+    border-radius: var(--radius-sm, 4px);
   }
 
-  /* Dark mode adjustment if not handled by neutral token */
-  :global([data-theme="dark"]) .skeleton {
-    background-color: var(--color-neutral-800);
+  .skeleton:global(.skeleton-circle) {
+    border-radius: var(--radius-full, 9999px);
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% {
-      opacity: 1;
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.6) 50%,
+      transparent 100%
+    );
+    animation: skeleton-shimmer 2s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    0% {
+      transform: translateX(-100%);
     }
-    50% {
-      opacity: 0.5;
+    100% {
+      transform: translateX(100%);
     }
   }
 </style>

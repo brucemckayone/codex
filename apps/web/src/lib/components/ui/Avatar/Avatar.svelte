@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createAvatar } from '@melt-ui/svelte';
-  import { type Snippet, setContext } from 'svelte';
+  import { type Snippet, setContext, untrack } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -12,8 +12,8 @@
   const { src = '', delayMs = 0, children, class: className, ...restProps }: Props = $props();
 
   const avatar = createAvatar({
-    src,
-    delayMs
+    src: untrack(() => src),
+    delayMs: untrack(() => delayMs)
   });
 
   const { options } = avatar;

@@ -1,3 +1,14 @@
+<!--
+  @component TextArea
+
+  A textarea component with auto-resize functionality to grow with content.
+
+  @prop {string} [value=''] - Bindable textarea value
+  @prop {boolean} [autoResize=true] - Automatically resize height to fit content
+
+  @example
+  <TextArea bind:value={message} autoResize={true} placeholder="Enter message..." />
+-->
 <script lang="ts">
   import type { HTMLTextareaAttributes } from 'svelte/elements';
 
@@ -6,7 +17,7 @@
     autoResize?: boolean;
   }
 
-  const {
+  let {
     value = $bindable(''),
     autoResize = true,
     class: className,
@@ -14,20 +25,36 @@
   }: Props = $props();
 
   let textarea: HTMLTextAreaElement;
+  // Internal state prevents resize loop when autoResize updates textarea height
+  let internalValue = $state(value);
 
+  // Sync external prop changes to internal state
   $effect(() => {
-    if (autoResize && textarea) {
-      // Trigger resize on value change
-      const _ = value;
+    if (value !== internalValue) {
+      internalValue = value;
+    }
+  });
+
+  // Auto-resize effect
+  $effect(() => {
+    if (autoResize && textarea && internalValue !== undefined) {
       textarea.style.height = 'auto';
       textarea.style.height = textarea.scrollHeight + 'px';
     }
   });
+
+  // Sync internal state changes back to the bindable prop
+  function handleInput(e: Event) {
+    const target = e.target as HTMLTextAreaElement;
+    internalValue = target.value;
+    value = target.value;
+  }
 </script>
 
 <textarea
   bind:this={textarea}
-  bind:value
+  value={internalValue}
+  oninput={handleInput}
   class="textarea {className ?? ''}"
   {...restProps}
 ></textarea>

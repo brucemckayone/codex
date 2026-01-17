@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { getCtx } from './ctx.js';
 
@@ -15,7 +14,7 @@
 	} = getCtx();
 </script>
 
-<div use:melt={$content(value)} class="tabs-content {className ?? ''}" {...rest}>
+<div {...$content(value)} use:content class="tabs-content {className ?? ''}" {...rest}>
 	{@render children?.()}
 </div>
 

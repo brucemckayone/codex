@@ -25,6 +25,11 @@
         description: 'Disable the checkbox',
       },
     },
+    parameters: {
+      controls: {
+        exclude: /^(?!(checked|label|required|disabled|class|id|onCheckedChange)).*$/g,
+      },
+    },
   });
 </script>
 

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { getCtx } from './ctx.js';
@@ -19,7 +18,8 @@
 
 {#if $open}
 	<div
-		use:melt={$content}
+		{...$content}
+		use:content
 		class="tooltip-content {className ?? ''}"
 		transition:fade={transitionConfig}
 		{...rest}

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { createSwitch, melt } from '@melt-ui/svelte';
+  import { createSwitch } from '@melt-ui/svelte';
+  import { untrack } from 'svelte';
   import type { HTMLButtonAttributes } from 'svelte/elements';
 
   interface Props extends Omit<HTMLButtonAttributes, 'role' | 'aria-checked'> {
@@ -20,10 +21,11 @@
 
   const {
     elements: { root, input },
-    states: { checked: meltChecked }
+    states: { checked: meltChecked },
+    options
   } = createSwitch({
     defaultChecked: checked,
-    disabled: disabled,
+    disabled: untrack(() => disabled),
     onCheckedChange: ({ next }) => {
       checked = next;
       onCheckedChange?.(next);
@@ -31,19 +33,21 @@
     }
   });
 
-  // Sync prop to melt state
+  // Sync component props → Melt-UI state (checked and disabled)
   $effect(() => {
     meltChecked.set(checked);
+    options.disabled.set(disabled);
   });
 </script>
 
 <button
-  use:melt={$root}
+  {...$root}
+  use:root
   class="switch {className ?? ''}"
   {...restProps}
 >
   <span class="thumb"></span>
-  <input use:melt={$input} {required} />
+  <input {...$input} use:input type="hidden" {required} />
 </button>
 
 <style>

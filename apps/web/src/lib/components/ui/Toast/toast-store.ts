@@ -21,32 +21,35 @@ export const toaster = {
   remove: removeToast,
 };
 
+// Default 5s delay balances readability with non-intrusive UX
+const TOAST_CLOSE_DELAY = 5000;
+
 // Helper for easier usage
 export const toast = {
   add: (data: ToastData, options?: { closeDelay?: number }) =>
-    addToast({ data, closeDelay: options?.closeDelay ?? 5000 }),
+    addToast({ data, closeDelay: options?.closeDelay ?? TOAST_CLOSE_DELAY }),
 
   success: (title: string, description?: string) =>
     addToast({
       data: { title, description, variant: 'success' },
-      closeDelay: 5000,
+      closeDelay: TOAST_CLOSE_DELAY,
     }),
 
   error: (title: string, description?: string) =>
     addToast({
       data: { title, description, variant: 'error' },
-      closeDelay: 5000,
+      closeDelay: TOAST_CLOSE_DELAY,
     }),
 
   warning: (title: string, description?: string) =>
     addToast({
       data: { title, description, variant: 'warning' },
-      closeDelay: 5000,
+      closeDelay: TOAST_CLOSE_DELAY,
     }),
 
   info: (title: string, description?: string) =>
     addToast({
       data: { title, description, variant: 'neutral' },
-      closeDelay: 5000,
+      closeDelay: TOAST_CLOSE_DELAY,
     }),
 };

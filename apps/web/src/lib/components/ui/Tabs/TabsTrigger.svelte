@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { getCtx } from './ctx.js';
 
@@ -20,7 +19,8 @@
 </script>
 
 <button
-	use:melt={$trigger({ value, disabled })}
+	{...$trigger({ value, disabled })}
+	use:trigger
 	class="tabs-trigger {className ?? ''}"
 	{...rest}
 >

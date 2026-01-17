@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { getCtx, getItemCtx } from './ctx.js';
 
@@ -18,7 +17,8 @@
 
 <div class="accordion-header">
 	<button
-		use:melt={$trigger(value)}
+		{...$trigger(value)}
+		use:trigger
 		class="accordion-trigger {className ?? ''}"
 		type="button"
 		{...rest}

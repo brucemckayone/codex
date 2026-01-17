@@ -20,7 +20,7 @@
     align-items: center;
     border-radius: var(--radius-full);
     border: var(--border-width) var(--border-style) transparent;
-    padding: var(--space-1) var(--space-2.5);
+    padding: var(--space-2) var(--space-4);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);

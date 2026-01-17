@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import { getCtx } from './ctx.js';
 
 	const { class: className, ...rest }: { class?: string } & Record<string, any> = $props();
@@ -9,7 +8,7 @@
 	} = getCtx();
 </script>
 
-<div use:melt={$separator} class="dropdown-separator {className ?? ''}" {...rest}></div>
+<div {...$separator} use:separator class="dropdown-separator {className ?? ''}" {...rest}></div>
 
 <style>
 	.dropdown-separator {

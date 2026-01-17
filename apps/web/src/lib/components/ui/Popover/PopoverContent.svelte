@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { getCtx } from './ctx.js';
@@ -19,7 +18,8 @@
 
 {#if $open}
 	<div
-		use:melt={$content}
+		{...$content}
+		use:content
 		class="popover-content {className ?? ''}"
 		transition:fly={transitionConfig}
 		{...rest}

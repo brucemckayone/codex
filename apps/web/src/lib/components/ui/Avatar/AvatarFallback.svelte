@@ -23,14 +23,9 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-full);
-    background-color: var(--color-neutral-100);
-    color: var(--color-neutral-600);
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text-secondary);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-  }
-
-  :global([data-theme="dark"]) .avatar-fallback {
-     background-color: var(--color-neutral-800);
-     color: var(--color-neutral-400);
   }
 </style>

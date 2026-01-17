@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { getCtx } from './ctx.js';
 
@@ -16,7 +15,8 @@
 </script>
 
 <div
-	use:melt={$item}
+	{...$item}
+	use:item
 	class="dropdown-item {className ?? ''}"
 	{...rest}
 	aria-disabled={disabled}

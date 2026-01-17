@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { createCheckbox, melt } from '@melt-ui/svelte';
+  import { createCheckbox } from '@melt-ui/svelte';
+  import { untrack } from 'svelte';
   import type { HTMLInputAttributes } from 'svelte/elements';
   import { Label } from '../index';
 
@@ -24,7 +25,7 @@
     elements: { root, input },
     states: { checked: meltChecked }
   } = createCheckbox({
-    defaultChecked: checked,
+    defaultChecked: untrack(() => checked),
     onCheckedChange: ({ next }) => {
       checked = next;
       onCheckedChange?.(next);
@@ -42,7 +43,8 @@
 
 <div class="checkbox-container {className ?? ''}">
   <button
-    use:melt={$root}
+    {...$root}
+    use:root
     {id}
     class="checkbox-root"
   >
@@ -55,7 +57,7 @@
         <div class="indeterminate-bar"></div>
       {/if}
     </div>
-    <input use:melt={$input} id={generatedId} {required} />
+    <input {...$input} use:input id={generatedId} {required} />
   </button>
 
   {#if label}

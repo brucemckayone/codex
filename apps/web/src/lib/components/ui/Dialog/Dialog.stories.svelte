@@ -1,5 +1,6 @@
-<script module>
+<script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf';
+  import { writable } from 'svelte/store';
   import Button from '../Button/Button.svelte';
   import * as Dialog from './index';
 
@@ -7,17 +8,16 @@
     title: 'UI/Dialog',
     tags: ['autodocs'],
   });
-</script>
 
-<script>
-  const open = $state(false);
-  const confirmOpen = $state(false);
-  const formOpen = $state(false);
+  // Create stores for dialog state (each story gets its own)
+  const defaultOpen = writable(false);
+  const confirmOpen = writable(false);
+  const formOpen = writable(false);
 </script>
 
 <Story name="Default">
-  <Button onclick={() => open = true}>Open Dialog</Button>
-  <Dialog.Root bind:open>
+  <Button onclick={() => $defaultOpen = true}>Open Dialog</Button>
+  <Dialog.Root bind:open={$defaultOpen}>
     <Dialog.Content>
       <Dialog.Header>
         <Dialog.Title>Dialog Title</Dialog.Title>
@@ -25,32 +25,32 @@
       </Dialog.Header>
       <p style="color: var(--color-text);">Your dialog content goes here. This is a basic modal dialog with a title, description, and close button.</p>
       <Dialog.Footer>
-        <Button variant="secondary" onclick={() => open = false}>Cancel</Button>
-        <Button variant="primary" onclick={() => open = false}>Confirm</Button>
+        <Button variant="secondary" onclick={() => $defaultOpen = false}>Cancel</Button>
+        <Button variant="primary" onclick={() => $defaultOpen = false}>Confirm</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>
 </Story>
 
 <Story name="Confirmation Dialog">
-  <Button variant="destructive" onclick={() => confirmOpen = true}>Delete Item</Button>
-  <Dialog.Root bind:open={confirmOpen}>
+  <Button variant="destructive" onclick={() => $confirmOpen = true}>Delete Item</Button>
+  <Dialog.Root bind:open={$confirmOpen}>
     <Dialog.Content>
       <Dialog.Header>
         <Dialog.Title>Are you sure?</Dialog.Title>
         <Dialog.Description>This action cannot be undone. This will permanently delete the item.</Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer>
-        <Button variant="secondary" onclick={() => confirmOpen = false}>Cancel</Button>
-        <Button variant="destructive" onclick={() => confirmOpen = false}>Delete</Button>
+        <Button variant="secondary" onclick={() => $confirmOpen = false}>Cancel</Button>
+        <Button variant="destructive" onclick={() => $confirmOpen = false}>Delete</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>
 </Story>
 
 <Story name="Form Dialog">
-  <Button onclick={() => formOpen = true}>Edit Profile</Button>
-  <Dialog.Root bind:open={formOpen}>
+  <Button onclick={() => $formOpen = true}>Edit Profile</Button>
+  <Dialog.Root bind:open={$formOpen}>
     <Dialog.Content>
       <Dialog.Header>
         <Dialog.Title>Edit Profile</Dialog.Title>
@@ -67,8 +67,8 @@
         </div>
       </div>
       <Dialog.Footer>
-        <Button variant="secondary" onclick={() => formOpen = false}>Cancel</Button>
-        <Button variant="primary" onclick={() => formOpen = false}>Save Changes</Button>
+        <Button variant="secondary" onclick={() => $formOpen = false}>Cancel</Button>
+        <Button variant="primary" onclick={() => $formOpen = false}>Save Changes</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>

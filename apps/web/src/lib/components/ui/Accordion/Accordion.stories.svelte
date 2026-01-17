@@ -1,16 +1,21 @@
-<script module>
+<script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf';
+  import { writable } from 'svelte/store';
   import * as Accordion from './index';
 
   const { Story } = defineMeta({
     title: 'UI/Accordion',
     tags: ['autodocs'],
   });
+
+  // Stores to demonstrate two-way binding with accordion state
+  const defaultValue = writable<string | string[] | undefined>('item-1');
+  const faqValue = writable<string | string[] | undefined>('faq-1');
 </script>
 
 <Story name="Default">
   <div style="max-width: 500px;">
-    <Accordion.Root>
+    <Accordion.Root defaultValue="item-1" bind:value={$defaultValue}>
       <Accordion.Item value="item-1">
         <Accordion.Trigger>Is this component accessible?</Accordion.Trigger>
         <Accordion.Content>
@@ -36,7 +41,7 @@
 <Story name="FAQ Example">
   <div style="max-width: 600px;">
     <h3 style="margin-bottom: 1rem; color: var(--color-text);">Frequently Asked Questions</h3>
-    <Accordion.Root>
+    <Accordion.Root defaultValue="faq-1" bind:value={$faqValue}>
       <Accordion.Item value="faq-1">
         <Accordion.Trigger>How do I get started?</Accordion.Trigger>
         <Accordion.Content>

@@ -1,16 +1,21 @@
-<script module>
+<script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf';
+  import { writable } from 'svelte/store';
   import * as Tabs from './index';
 
   const { Story } = defineMeta({
     title: 'UI/Tabs',
     tags: ['autodocs'],
   });
+
+  // State stores for reactive tab values
+  const defaultTab = writable<string | undefined>('account');
+  const contentTab = writable<string | undefined>('overview');
 </script>
 
 <Story name="Default">
   <div style="max-width: 500px;">
-    <Tabs.Root value="account">
+    <Tabs.Root defaultValue="account" bind:value={$defaultTab}>
       <Tabs.List>
         <Tabs.Trigger value="account">Account</Tabs.Trigger>
         <Tabs.Trigger value="password">Password</Tabs.Trigger>
@@ -40,7 +45,7 @@
 
 <Story name="Content Tabs">
   <div style="max-width: 600px;">
-    <Tabs.Root value="overview">
+    <Tabs.Root defaultValue="overview" bind:value={$contentTab}>
       <Tabs.List>
         <Tabs.Trigger value="overview">Overview</Tabs.Trigger>
         <Tabs.Trigger value="analytics">Analytics</Tabs.Trigger>

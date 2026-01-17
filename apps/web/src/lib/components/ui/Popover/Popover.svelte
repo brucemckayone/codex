@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { type CreatePopoverProps, createPopover } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
+	import { untrack } from 'svelte';
 	import { setCtx } from './ctx.js';
 
 	type Props = Omit<CreatePopoverProps, 'open' | 'onOpenChange'> & {
@@ -17,8 +18,8 @@
 		closeOnOutsideClick,
 		preventScroll,
 		preventTextSelectionOverflow,
-		portal,
-		forceVisible,
+		portal = true, // Portal to body required for Storybook iframe rendering
+		forceVisible = true,
 		openFocus,
 		closeFocus,
 		defaultOpen,
@@ -28,7 +29,7 @@
 	}: Props = $props();
 
 	const builder = createPopover({
-		defaultOpen,
+		defaultOpen: untrack(() => defaultOpen),
 		onOpenChange: ({ next }) => {
 			if (open !== next) {
 				open = next;

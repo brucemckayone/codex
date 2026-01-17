@@ -1,6 +1,28 @@
+<!--
+  @component Accordion
+
+  An accessible accordion component supporting single or multiple open items.
+  Follows WAI-ARIA patterns with full keyboard navigation support.
+
+  @prop {boolean} [multiple] - Allow multiple items to be open simultaneously
+  @prop {string|string[]} value - Bindable value(s) of currently open item(s)
+  @prop {string|string[]} [defaultValue] - Initial value (captured at init only)
+  @prop {function} [onValueChange] - Callback when open items change
+  @prop {boolean} [disabled] - Disable the entire accordion
+  @prop {boolean} [forceVisible] - Force all content to be visible (for testing)
+
+  @example
+  <Accordion.Root bind:value={openItems}>
+    <Accordion.Item value="item-1">
+      <Accordion.Trigger>Question?</Accordion.Trigger>
+      <Accordion.Content>Answer</Accordion.Content>
+    </Accordion.Item>
+  </Accordion.Root>
+-->
 <script lang="ts">
-	import { type CreateAccordionProps, createAccordion, melt } from '@melt-ui/svelte';
+	import { type CreateAccordionProps, createAccordion } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
+	import { untrack } from 'svelte';
 	import { setCtx } from './ctx.js';
 
 	type Props = Omit<CreateAccordionProps, 'value' | 'onValueChange'> & {
@@ -22,8 +44,9 @@
 		...rest
 	}: Props = $props();
 
+	// defaultValue must be captured at init only (prevents reactivity bugs when value changes externally)
 	const builder = createAccordion({
-		defaultValue,
+		defaultValue: untrack(() => defaultValue),
 		onValueChange: ({ next }) => {
 			if (value !== next) {
 				value = next;
@@ -38,7 +61,7 @@
 		options,
 		states: { value: valueStore }
 	} = builder;
-	
+
 	setCtx(builder);
 
 	$effect(() => {
@@ -54,6 +77,6 @@
 	});
 </script>
 
-<div use:melt={$root} class={className} {...rest}>
+<div {...$root} use:root class={className} {...rest}>
 	{@render children?.()}
 </div>

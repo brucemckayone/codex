@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { melt } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { getCtx, setItemCtx } from './ctx.js';
 
@@ -17,10 +16,11 @@
 		elements: { item }
 	} = getCtx();
 
+	// Item value is stable identifier (not reactive - intentional)
 	setItemCtx(value);
 </script>
 
-<div use:melt={$item({ value, disabled })} class="accordion-item {className ?? ''}" {...rest}>
+<div {...$item({ value, disabled })} use:item class="accordion-item {className ?? ''}" {...rest}>
 	{@render children?.()}
 </div>
 

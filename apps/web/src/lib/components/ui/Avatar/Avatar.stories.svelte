@@ -9,15 +9,15 @@
 </script>
 
 <Story name="With Image">
-  <Avatar.Root>
-    <Avatar.Image src="https://github.com/shadcn.png" alt="User avatar" />
+  <Avatar.Root src="https://github.com/shadcn.png">
+    <Avatar.Image alt="User avatar" />
     <Avatar.Fallback>CN</Avatar.Fallback>
   </Avatar.Root>
 </Story>
 
 <Story name="Fallback">
-  <Avatar.Root>
-    <Avatar.Image src="/broken-image.jpg" alt="User avatar" />
+  <Avatar.Root src="/broken-image.jpg">
+    <Avatar.Image alt="User avatar" />
     <Avatar.Fallback>JD</Avatar.Fallback>
   </Avatar.Root>
 </Story>

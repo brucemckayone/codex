@@ -1,3 +1,16 @@
+<!--
+  @component Button
+
+  A versatile button component with multiple variants, sizes, and loading state support.
+
+  @prop {('primary'|'secondary'|'ghost'|'destructive')} [variant='primary'] - Visual style variant
+  @prop {('xs'|'sm'|'md'|'lg'|'xl')} [size='md'] - Button size
+  @prop {boolean} [loading=false] - Shows loading state and disables interaction
+  @prop {Snippet} children - Button content
+
+  @example
+  <Button variant="primary" size="md" loading={isSubmitting}>Submit</Button>
+-->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { HTMLButtonAttributes } from 'svelte/elements';
@@ -135,6 +148,12 @@
 
   .button[data-variant="destructive"]:hover:not(:disabled) {
     background-color: var(--color-error-600);
+  }
+
+  .button-content {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
   }
 
   .button-spinner {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { type CreateDropdownMenuProps, createDropdownMenu } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
+	import { untrack } from 'svelte';
 	import { setCtx } from './ctx.js';
 
 	type Props = Omit<CreateDropdownMenuProps, 'open' | 'onOpenChange'> & {
@@ -16,8 +17,8 @@
 		loop,
 		closeOnItemClick,
 		closeOnOutsideClick,
-		portal,
-		forceVisible,
+		portal = true, // Default to true for Storybook compatibility
+		forceVisible = true,
 		defaultOpen,
 		open = $bindable(),
 		onOpenChange,
@@ -25,7 +26,7 @@
 	}: Props = $props();
 
 	const builder = createDropdownMenu({
-		defaultOpen,
+		defaultOpen: untrack(() => defaultOpen),
 		onOpenChange: ({ next }) => {
 			if (open !== next) {
 				open = next;

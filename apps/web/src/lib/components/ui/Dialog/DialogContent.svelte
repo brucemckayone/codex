@@ -44,7 +44,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-4);
+    padding: var(--space-2);
   }
 
   .dialog-content {
@@ -54,7 +54,7 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-xl);
     border: var(--border-width) var(--border-style) var(--color-border);
-    max-width: 32rem;
+    max-width: 42rem;
     width: 100%;
     max-height: 85vh;
     overflow-y: auto;

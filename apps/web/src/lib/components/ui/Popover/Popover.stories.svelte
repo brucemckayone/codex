@@ -1,5 +1,6 @@
-<script module>
+<script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf';
+  import { writable } from 'svelte/store';
   import Button from '../Button/Button.svelte';
   import * as Popover from './index';
 
@@ -7,11 +8,15 @@
     title: 'UI/Popover',
     tags: ['autodocs'],
   });
+
+  // State stores for each story
+  const defaultOpen = writable(false);
+  const filterOpen = writable(false);
 </script>
 
 <Story name="Default">
   <div style="padding: 2rem;">
-    <Popover.Root>
+    <Popover.Root bind:open={$defaultOpen}>
       <Popover.Trigger>
         <Button variant="secondary">Open Popover</Button>
       </Popover.Trigger>
@@ -27,7 +32,7 @@
 
 <Story name="Filter Popover">
   <div style="padding: 2rem;">
-    <Popover.Root>
+    <Popover.Root bind:open={$filterOpen}>
       <Popover.Trigger>
         <Button variant="secondary">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
