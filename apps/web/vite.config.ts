@@ -13,7 +13,6 @@ export default defineConfig({
   ],
   test: {
     include: ['src/**/*.test.ts'], // Only unit tests, not Playwright .spec.ts files
-    globals: true,
     environment: 'happy-dom',
   },
 });
