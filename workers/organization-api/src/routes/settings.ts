@@ -16,6 +16,7 @@
  * - PUT    /api/organizations/:id/settings/features     - Update feature settings
  */
 
+import { CACHE_TTL } from '@codex/constants';
 import { createDbClient, eq, schema } from '@codex/database';
 import type { Bindings, HonoEnv } from '@codex/shared-types';
 import {
@@ -38,6 +39,12 @@ import { z } from 'zod';
 /**
  * Update the branding cache in KV
  * Used to ensure zero-latency branding on the edge
+ *
+ * WARNING: Potential race condition with concurrent updates.
+ * If two branding updates (e.g., logo upload + color change) happen simultaneously,
+ * the second write may overwrite the first with stale partial data.
+ * Risk is low due to small timing window, but for bulletproof consistency,
+ * consider fetching full state from DB before caching instead of using partial results.
  */
 async function updateBrandCache(
   kv: Bindings['BRAND_KV'],
@@ -50,9 +57,8 @@ async function updateBrandCache(
       updatedAt: new Date().toISOString(),
       branding,
     };
-    // 7 days TTL
     await kv.put(`brand:${slug}`, JSON.stringify(cacheData), {
-      expirationTtl: 604800,
+      expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS,
     });
   } catch (err) {
     console.warn(`Failed to update brand cache for ${slug}:`, err);

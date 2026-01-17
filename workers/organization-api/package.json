@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@codex/cloudflare-clients": "workspace:*",
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/organization": "workspace:*",
     "@codex/platform-settings": "workspace:*",

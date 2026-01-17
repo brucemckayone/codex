@@ -1,36 +1,58 @@
+import { CACHE_TTL } from '@codex/constants';
 import type { BrandingSettingsResponse } from '@codex/validation';
 import { logger } from '$lib/observability';
 
 const CACHE_KEY_PREFIX = 'brand:';
-const TTL_SECONDS = 604800; // 7 days
+const TTL_SECONDS = CACHE_TTL.BRAND_CACHE_SECONDS;
 
 export interface CachedBrandConfig {
   updatedAt: string;
   branding: BrandingSettingsResponse;
 }
 
+/** Result type for cache operations - distinguishes hit/miss/error */
+export type CacheResult =
+  | { status: 'hit'; data: CachedBrandConfig }
+  | { status: 'miss' }
+  | { status: 'error'; error: string };
+
+/**
+ * Retrieve branding configuration from KV cache with status information.
+ * Returns status to distinguish between cache miss and KV errors for monitoring.
+ */
+export async function getBrandConfigWithStatus(
+  platform: App.Platform | undefined,
+  slug: string
+): Promise<CacheResult> {
+  if (!platform?.env?.BRAND_KV) return { status: 'miss' };
+
+  try {
+    const result = await platform.env.BRAND_KV.get<CachedBrandConfig>(
+      `${CACHE_KEY_PREFIX}${slug}`,
+      'json'
+    );
+    return result ? { status: 'hit', data: result } : { status: 'miss' };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    logger.error('Error reading brand cache', {
+      slug,
+      error: errorMessage,
+    });
+    return { status: 'error', error: errorMessage };
+  }
+}
+
 /**
  * Retrieve branding configuration from KV cache.
  * Returns null if cache miss, KV undefined (local dev), or error.
+ * @deprecated Use getBrandConfigWithStatus for better error handling
  */
 export async function getBrandConfig(
   platform: App.Platform | undefined,
   slug: string
 ): Promise<CachedBrandConfig | null> {
-  if (!platform?.env?.BRAND_KV) return null;
-
-  try {
-    return await platform.env.BRAND_KV.get<CachedBrandConfig>(
-      `${CACHE_KEY_PREFIX}${slug}`,
-      'json'
-    );
-  } catch (err) {
-    logger.error('Error reading brand cache', {
-      slug,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
+  const result = await getBrandConfigWithStatus(platform, slug);
+  return result.status === 'hit' ? result.data : null;
 }
 
 /**

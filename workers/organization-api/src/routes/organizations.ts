@@ -2,18 +2,20 @@
  * Organization Management Endpoints
  *
  * RESTful API for managing organizations.
- * All routes require authentication.
+ * All routes require authentication (except public branding endpoint).
  *
  * Endpoints:
  * - POST   /api/organizations           - Create organization
  * - GET    /api/organizations/:id       - Get by ID
  * - GET    /api/organizations/slug/:slug - Get by slug
+ * - GET    /api/organizations/public/:slug - Get public branding (no auth)
  * - PATCH  /api/organizations/:id       - Update organization
  * - GET    /api/organizations           - List with filters
  * - DELETE /api/organizations/:id       - Soft delete
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
+import { CACHE_TTL } from '@codex/constants';
 import type {
   CreateOrganizationResponse,
   OrganizationBySlugResponse,
@@ -58,7 +60,27 @@ app.post(
     input: { body: createOrganizationSchema },
     successStatus: 201,
     handler: async (ctx): Promise<CreateOrganizationResponse['data']> => {
-      return await ctx.services.organization.create(ctx.input.body);
+      const org = await ctx.services.organization.create(ctx.input.body);
+
+      // Issue 4: Warm cache with default branding for new org
+      if (ctx.env.BRAND_KV) {
+        const defaultBranding = {
+          logoUrl: null,
+          primaryColorHex: '#3B82F6', // Default blue
+        };
+        ctx.executionCtx.waitUntil(
+          ctx.env.BRAND_KV.put(
+            `brand:${org.slug}`,
+            JSON.stringify({
+              updatedAt: new Date().toISOString(),
+              branding: defaultBranding,
+            }),
+            { expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS }
+          )
+        );
+      }
+
+      return org;
     },
   })
 );
@@ -114,6 +136,48 @@ app.get(
   })
 );
 
+/** Response type for public branding endpoint */
+interface PublicBrandingResponse {
+  logoUrl: string | null;
+  primaryColorHex: string;
+}
+
+/**
+ * GET /api/organizations/public/:slug
+ * Public branding endpoint - no auth required
+ *
+ * Returns only public branding fields: { logoUrl, primaryColorHex }
+ * Returns: PublicBrandingResponse (200)
+ * Security: No auth required, rate limited
+ * @returns {PublicBrandingResponse}
+ */
+app.get(
+  '/public/:slug',
+  procedure({
+    policy: { auth: 'none' },
+    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    handler: async (ctx): Promise<PublicBrandingResponse> => {
+      const organization = await ctx.services.organization.getBySlug(
+        ctx.input.params.slug
+      );
+
+      if (!organization) {
+        throw new NotFoundError('Organization not found', {
+          slug: ctx.input.params.slug,
+        });
+      }
+
+      // Get branding from platform settings service
+      const branding = await ctx.services.settings.getBranding();
+
+      return {
+        logoUrl: branding.logoUrl ?? null,
+        primaryColorHex: branding.primaryColorHex ?? '#3B82F6',
+      };
+    },
+  })
+);
+
 /**
  * GET /api/organizations/:id
  * Get organization by ID
@@ -161,10 +225,23 @@ app.patch(
       body: updateOrganizationSchema,
     },
     handler: async (ctx): Promise<UpdateOrganizationResponse['data']> => {
-      return await ctx.services.organization.update(
+      // Get org before update to detect slug change for cache invalidation
+      const existingOrg = await ctx.services.organization.get(
+        ctx.input.params.id
+      );
+      const oldSlug = existingOrg?.slug;
+
+      const updated = await ctx.services.organization.update(
         ctx.input.params.id,
         ctx.input.body
       );
+
+      // Handle slug change: invalidate old cache, new cache warmed on first access
+      if (oldSlug && updated.slug !== oldSlug && ctx.env.BRAND_KV) {
+        ctx.executionCtx.waitUntil(ctx.env.BRAND_KV.delete(`brand:${oldSlug}`));
+      }
+
+      return updated;
     },
   })
 );
