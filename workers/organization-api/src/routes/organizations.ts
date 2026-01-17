@@ -15,7 +15,6 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { CACHE_TTL } from '@codex/constants';
 import type {
   CreateOrganizationResponse,
   OrganizationBySlugResponse,
@@ -41,6 +40,7 @@ import {
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { updateBrandCache } from './settings';
 
 const app = new Hono<HonoEnv>();
 
@@ -64,20 +64,7 @@ app.post(
 
       // Issue 4: Warm cache with default branding for new org
       if (ctx.env.BRAND_KV) {
-        const defaultBranding = {
-          logoUrl: null,
-          primaryColorHex: '#3B82F6', // Default blue
-        };
-        ctx.executionCtx.waitUntil(
-          ctx.env.BRAND_KV.put(
-            `brand:${org.slug}`,
-            JSON.stringify({
-              updatedAt: new Date().toISOString(),
-              branding: defaultBranding,
-            }),
-            { expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS }
-          )
-        );
+        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, org.id));
       }
 
       return org;
@@ -237,8 +224,15 @@ app.patch(
       );
 
       // Handle slug change: invalidate old cache, new cache warmed on first access
-      if (oldSlug && updated.slug !== oldSlug && ctx.env.BRAND_KV) {
-        ctx.executionCtx.waitUntil(ctx.env.BRAND_KV.delete(`brand:${oldSlug}`));
+      // FIX: Warm new cache immediately using updateBrandCache
+      if (ctx.env.BRAND_KV) {
+        if (oldSlug && updated.slug !== oldSlug) {
+          ctx.executionCtx.waitUntil(
+            ctx.env.BRAND_KV.delete(`brand:${oldSlug}`)
+          );
+        }
+        // Always refresh cache on update (in case slug changed OR other relevant fields)
+        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, updated.id));
       }
 
       return updated;

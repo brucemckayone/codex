@@ -37,31 +37,85 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 /**
- * Update the branding cache in KV
- * Used to ensure zero-latency branding on the edge
+/**
+ * Update the branding cache in KV with fresh data from DB
  *
- * WARNING: Potential race condition with concurrent updates.
- * If two branding updates (e.g., logo upload + color change) happen simultaneously,
- * the second write may overwrite the first with stale partial data.
- * Risk is low due to small timing window, but for bulletproof consistency,
- * consider fetching full state from DB before caching instead of using partial results.
+ * FIXES:
+ * 1. Race conditions: Always fetches latest state from DB
+ * 2. Performance: runs in background (waitUntil), removing DB fetch from request path
+ * 3. Error reporting: Logs errors properly
  */
-async function updateBrandCache(
-  kv: Bindings['BRAND_KV'],
-  slug: string,
-  branding: BrandingSettingsResponse
+export async function updateBrandCache(
+  env: Bindings,
+  organizationId: string
 ): Promise<void> {
+  const kv = env.BRAND_KV;
   if (!kv) return;
+
   try {
+    const db = createDbClient(env);
+
+    // Try to fetch settings with branding and organization info
+    // We query platformSettings because it has relations to both branding and organization
+    const settings = await db.query.platformSettings.findFirst({
+      where: eq(schema.platformSettings.organizationId, organizationId),
+      with: {
+        branding: true,
+        organization: {
+          columns: { slug: true, logoUrl: true },
+        },
+      },
+    });
+
+    let slug: string;
+    let branding: BrandingSettingsResponse;
+
+    if (settings?.organization) {
+      slug = settings.organization.slug;
+
+      // Prefer branding settings, fallback to organization defaults
+      branding = {
+        logoUrl:
+          settings.branding?.logoUrl ?? settings.organization.logoUrl ?? null,
+        primaryColorHex: settings.branding?.primaryColorHex ?? '#3B82F6',
+      };
+    } else {
+      // Fallback: Settings not created yet, fetch org directly
+      const org = await db.query.organizations.findFirst({
+        where: eq(schema.organizations.id, organizationId),
+        columns: {
+          slug: true,
+          logoUrl: true,
+        },
+      });
+
+      if (!org) {
+        console.warn(
+          `[BrandCache] Skip update - Org not found: ${organizationId}`
+        );
+        return;
+      }
+
+      slug = org.slug;
+      branding = {
+        logoUrl: org.logoUrl ?? null,
+        primaryColorHex: '#3B82F6', // Default blue
+      };
+    }
+
     const cacheData = {
       updatedAt: new Date().toISOString(),
       branding,
     };
+
     await kv.put(`brand:${slug}`, JSON.stringify(cacheData), {
       expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS,
     });
   } catch (err) {
-    console.warn(`Failed to update brand cache for ${slug}:`, err);
+    console.error(
+      `[BrandCache] Failed to update cache for org ${organizationId}:`,
+      err
+    );
   }
 }
 
@@ -119,18 +173,10 @@ app.put(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       const result = await ctx.services.settings.updateBranding(ctx.input.body);
 
-      // Invalidate cache - Optimized: fetch only slug
-      const db = createDbClient(ctx.env);
-      const org = await db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, ctx.input.params.id),
-        columns: { slug: true },
-      });
-
-      if (org) {
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env.BRAND_KV, org.slug, result)
-        );
-      }
+      // Invalidate cache - optimized, moves fetch to background
+      ctx.executionCtx.waitUntil(
+        updateBrandCache(ctx.env, ctx.input.params.id)
+      );
 
       return result;
     },
@@ -180,12 +226,9 @@ app.post(
       });
 
       // Invalidate cache
-      const org = await ctx.services.organization.get(ctx.input.params.id);
-      if (org) {
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env.BRAND_KV, org.slug, result)
-        );
-      }
+      ctx.executionCtx.waitUntil(
+        updateBrandCache(ctx.env, ctx.input.params.id)
+      );
 
       return result;
     },
@@ -208,20 +251,10 @@ app.delete(
       }
       const result = await ctx.services.settings.deleteLogo();
 
-      // Invalidate cache - Optimized lookup
-      const db = createDbClient(ctx.env);
-      const organizationId = ctx.input.params.id; // Define organizationId from ctx.input.params.id
-      const branding = result; // Define branding from the result of deleteLogo()
-      const org = await db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-        columns: { slug: true },
-      });
-
-      if (org) {
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env.BRAND_KV, org.slug, branding)
-        );
-      }
+      // Invalidate cache
+      ctx.executionCtx.waitUntil(
+        updateBrandCache(ctx.env, ctx.input.params.id)
+      );
 
       return result;
     },
