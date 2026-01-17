@@ -49,8 +49,8 @@
 
 <Story name="Form Example">
   <div style="display: flex; flex-direction: column; gap: 0.5rem; max-width: 400px;">
-    <label style="font-size: 0.875rem; font-weight: 500;">Description</label>
-    <TextArea placeholder="Describe your content..." rows={4} />
+    <label for="description-textarea" style="font-size: 0.875rem; font-weight: 500;">Description</label>
+    <TextArea id="description-textarea" placeholder="Describe your content..." rows={4} />
     <span style="font-size: 0.75rem; color: #666;">Minimum 50 characters</span>
   </div>
 </Story>

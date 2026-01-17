@@ -22,8 +22,4 @@
     font-weight: var(--font-medium);
     color: var(--color-text-secondary);
   }
-
-  .table-head:has([role=checkbox]) {
-    padding-right: 0;
-  }
 </style>

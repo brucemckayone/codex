@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { untrack } from 'svelte';
 	import { getCtx, setItemCtx } from './ctx.js';
 
 	interface Props {
@@ -16,8 +17,8 @@
 		elements: { item }
 	} = getCtx();
 
-	// Item value is stable identifier (not reactive - intentional)
-	setItemCtx(value);
+	// Item value is a stable identifier, not reactive state
+	setItemCtx(untrack(() => value));
 </script>
 
 <div {...$item({ value, disabled })} use:item class="accordion-item {className ?? ''}" {...rest}>

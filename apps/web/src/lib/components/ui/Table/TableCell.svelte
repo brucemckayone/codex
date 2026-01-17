@@ -18,8 +18,4 @@
     padding: var(--space-4);
     vertical-align: middle;
   }
-
-  .table-cell:has([role=checkbox]) {
-    padding-right: 0;
-  }
 </style>
