@@ -7,7 +7,13 @@ import {
   setBrandConfig,
 } from './brand-cache';
 
-describe('BrandCache Service', () => {
+vi.mock('$lib/observability', () => ({
+  logger: {
+    error: vi.fn(),
+  },
+}));
+
+describe('Brand Cache', () => {
   // Mock implementations
   const mockGet = vi.fn();
   const mockPut = vi.fn();
@@ -33,7 +39,6 @@ describe('BrandCache Service', () => {
     primaryColorHex: '#ff0000',
   };
   const mockCachedData: CachedBrandConfig = {
-    version: 1,
     updatedAt: new Date().toISOString(),
     branding: mockBranding,
   };

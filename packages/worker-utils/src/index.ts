@@ -59,11 +59,20 @@ export {
   enforceIPWhitelist,
   enforcePolicyInline,
   extractOrganizationFromSubdomain,
+  type FileFieldConfig,
+  type FileSchema,
+  type FileTooLargeError,
   // Helper utilities (for advanced use cases)
   generateRequestId,
   getClientIP,
+  type InferFiles,
   type InferInput,
   type InputSchema,
+  type InvalidFileTypeError,
+  type MissingFileError,
+  type MultipartProcedureConfig,
+  type MultipartProcedureContext,
+  multipartProcedure,
   type OrganizationMembership,
   type ProcedureConfig,
   type ProcedureContext,
@@ -74,6 +83,7 @@ export {
   type ServiceRegistryResult,
   type SessionForAuth,
   type UserForAuth,
+  type ValidatedFile,
   validateInput,
 } from './procedure';
 // Test utilities (for integration tests only)

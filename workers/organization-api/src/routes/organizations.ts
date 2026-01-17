@@ -212,7 +212,18 @@ app.delete(
     },
     input: { params: z.object({ id: uuidSchema }) },
     handler: async (ctx): Promise<DeleteOrganizationResponse> => {
+      // Get org slug for cache invalidation before deletion
+      const org = await ctx.services.organization.get(ctx.input.params.id);
+
       await ctx.services.organization.delete(ctx.input.params.id);
+
+      // Invalidate brand cache if exists
+      if (org && ctx.env.BRAND_KV) {
+        ctx.executionCtx.waitUntil(
+          ctx.env.BRAND_KV.delete(`brand:${org.slug}`)
+        );
+      }
+
       return {
         success: true,
         message: 'Organization deleted successfully',

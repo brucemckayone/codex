@@ -1,10 +1,10 @@
 import type { BrandingSettingsResponse } from '@codex/validation';
+import { logger } from '$lib/observability';
 
 const CACHE_KEY_PREFIX = 'brand:';
 const TTL_SECONDS = 604800; // 7 days
 
 export interface CachedBrandConfig {
-  version: number;
   updatedAt: string;
   branding: BrandingSettingsResponse;
 }
@@ -25,7 +25,10 @@ export async function getBrandConfig(
       'json'
     );
   } catch (err) {
-    console.error(`[BrandCache] Error reading cache for ${slug}:`, err);
+    logger.error('Error reading brand cache', {
+      slug,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

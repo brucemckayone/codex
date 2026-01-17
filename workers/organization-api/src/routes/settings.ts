@@ -16,12 +16,8 @@
  * - PUT    /api/organizations/:id/settings/features     - Update feature settings
  */
 
-import {
-  FileTooLargeError,
-  InvalidFileTypeError,
-} from '@codex/platform-settings';
-import { ValidationError } from '@codex/service-errors';
-import type { HonoEnv } from '@codex/shared-types';
+import { createDbClient, eq, schema } from '@codex/database';
+import type { Bindings, HonoEnv } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   type AllSettingsResponse,
@@ -34,7 +30,8 @@ import {
   updateFeaturesSchema,
   uuidSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { multipartProcedure, procedure } from '@codex/worker-utils';
+
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -43,14 +40,13 @@ import { z } from 'zod';
  * Used to ensure zero-latency branding on the edge
  */
 async function updateBrandCache(
-  kv: KVNamespace | undefined,
+  kv: Bindings['BRAND_KV'],
   slug: string,
   branding: BrandingSettingsResponse
 ): Promise<void> {
   if (!kv) return;
   try {
     const cacheData = {
-      version: Date.now(),
       updatedAt: new Date().toISOString(),
       branding,
     };
@@ -117,13 +113,16 @@ app.put(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       const result = await ctx.services.settings.updateBranding(ctx.input.body);
 
-      // Invalidate cache
-      const org = await ctx.services.organization.get(ctx.input.params.id);
+      // Invalidate cache - Optimized: fetch only slug
+      const db = createDbClient(ctx.env);
+      const org = await db.query.organizations.findFirst({
+        where: eq(schema.organizations.id, ctx.input.params.id),
+        columns: { slug: true },
+      });
+
       if (org) {
-        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV not in ProcedureContext.env - would need worker-utils update
-        const unsafeCtx = ctx as any;
-        unsafeCtx.executionCtx.waitUntil(
-          updateBrandCache(unsafeCtx.env.BRAND_KV, org.slug, result)
+        ctx.executionCtx.waitUntil(
+          updateBrandCache(ctx.env.BRAND_KV, org.slug, result)
         );
       }
 
@@ -147,129 +146,45 @@ app.put(
  * Max size: 5MB
  */
 
-//TODO: this is a horrible break from the worker standards we have implemented thus far and we  need to consider how we can use zod to validate such things as multi part fomr datga
-// so we can use everything we have in place for saftry
-app.post('/branding/logo', async (c) => {
-  const obs = c.get('obs');
+app.post(
+  '/branding/logo',
+  multipartProcedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    files: {
+      logo: {
+        required: true,
+        maxSize: MAX_LOGO_FILE_SIZE_BYTES,
+        allowedMimeTypes: ALLOWED_LOGO_MIME_TYPES,
+      },
+    },
+    handler: async (ctx) => {
+      // Create facade with org context for upload
+      // Note: We're dynamically importing to avoid loading heavy dependencies for other routes
+      // But for cleaner code with procedure(), we could trust the service registry
+      // However, PlatformSettingsFacade is not in standard registry yet?
+      // Actually ctx.services.settings IS PlatformSettingsFacade.
 
-  try {
-    // Check if R2 bucket is configured
-    if (!c.env.MEDIA_BUCKET) {
-      return c.json(
-        {
-          error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'Logo uploads not configured',
-          },
-        },
-        503
-      );
-    }
+      const logoFile = ctx.files.logo; // Typed as ValidatedFile
 
-    // Validate org ID param
-    const id = c.req.param('id');
-    const paramResult = uuidSchema.safeParse(id);
-    if (!paramResult.success) {
-      return c.json(
-        {
-          error: {
-            code: 'INVALID_INPUT',
-            message: 'Invalid organization ID',
-          },
-        },
-        400
-      );
-    }
-
-    // Auth is handled by middleware in parent app
-    const user = c.get('user');
-    if (!user) {
-      return c.json(
-        {
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Authentication required',
-          },
-        },
-        401
-      );
-    }
-
-    // Get organization context (set by org management check)
-    const organizationId = c.get('organizationId') ?? paramResult.data;
-
-    // Parse multipart form data
-    const formData = await c.req.formData();
-    const logoFile = formData.get('logo');
-
-    if (!logoFile || !(logoFile instanceof File)) {
-      throw new ValidationError('Logo file is required');
-    }
-
-    // Validate MIME type
-    if (
-      !ALLOWED_LOGO_MIME_TYPES.includes(
-        logoFile.type as (typeof ALLOWED_LOGO_MIME_TYPES)[number]
-      )
-    ) {
-      throw new InvalidFileTypeError(logoFile.type, ALLOWED_LOGO_MIME_TYPES);
-    }
-
-    // Validate file size
-    if (logoFile.size > MAX_LOGO_FILE_SIZE_BYTES) {
-      throw new FileTooLargeError(logoFile.size, MAX_LOGO_FILE_SIZE_BYTES);
-    }
-
-    // Read file data
-    const fileBuffer = await logoFile.arrayBuffer();
-
-    // Create facade with org context for upload
-    const { PlatformSettingsFacade } = await import('@codex/platform-settings');
-    const { createPerRequestDbClient } = await import('@codex/database');
-    const { R2Service } = await import('@codex/cloudflare-clients');
-
-    const { db, cleanup } = createPerRequestDbClient(c.env);
-    const r2 = new R2Service(c.env.MEDIA_BUCKET);
-
-    try {
-      const environment = c.env.ENVIRONMENT ?? 'development';
-      const facade = new PlatformSettingsFacade({
-        db,
-        environment,
-        organizationId,
-        r2,
-        r2PublicUrlBase: undefined,
-      });
-
-      const branding = await facade.uploadLogo({
-        buffer: fileBuffer,
+      const result = await ctx.services.settings.uploadLogo({
+        buffer: logoFile.buffer,
         mimeType: logoFile.type,
         size: logoFile.size,
       });
 
       // Invalidate cache
-      // We need to resolve the slug from the organization ID
-      const { OrganizationService } = await import('@codex/organization');
-      const orgService = new OrganizationService({ db, environment });
-      const org = await orgService.get(organizationId);
-
+      const org = await ctx.services.organization.get(ctx.input.params.id);
       if (org) {
-        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV not in ProcedureContext.env - would need worker-utils update
-        const kv = (c.env as any).BRAND_KV;
-        c.executionCtx.waitUntil(updateBrandCache(kv, org.slug, branding));
+        ctx.executionCtx.waitUntil(
+          updateBrandCache(ctx.env.BRAND_KV, org.slug, result)
+        );
       }
 
-      return c.json({ data: branding });
-    } finally {
-      c.executionCtx.waitUntil(cleanup());
-    }
-  } catch (err) {
-    // Use mapErrorToResponse for consistent error handling
-    const { mapErrorToResponse } = await import('@codex/service-errors');
-    const { statusCode, response } = mapErrorToResponse(err, { obs });
-    return c.json(response, statusCode);
-  }
-});
+      return result;
+    },
+  })
+);
 
 /**
  * DELETE /api/organizations/:id/settings/branding/logo
@@ -287,13 +202,18 @@ app.delete(
       }
       const result = await ctx.services.settings.deleteLogo();
 
-      // Invalidate cache
-      const org = await ctx.services.organization.get(ctx.input.params.id);
+      // Invalidate cache - Optimized lookup
+      const db = createDbClient(ctx.env);
+      const organizationId = ctx.input.params.id; // Define organizationId from ctx.input.params.id
+      const branding = result; // Define branding from the result of deleteLogo()
+      const org = await db.query.organizations.findFirst({
+        where: eq(schema.organizations.id, organizationId),
+        columns: { slug: true },
+      });
+
       if (org) {
-        // biome-ignore lint/suspicious/noExplicitAny: BRAND_KV not in ProcedureContext.env - would need worker-utils update
-        const unsafeCtx = ctx as any;
-        unsafeCtx.executionCtx.waitUntil(
-          updateBrandCache(unsafeCtx.env.BRAND_KV, org.slug, result)
+        ctx.executionCtx.waitUntil(
+          updateBrandCache(ctx.env.BRAND_KV, org.slug, branding)
         );
       }
 
