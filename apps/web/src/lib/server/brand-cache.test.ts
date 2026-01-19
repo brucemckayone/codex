@@ -1,9 +1,10 @@
 import type { BrandingSettingsResponse } from '@codex/validation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '$lib/observability';
 import {
   type CachedBrandConfig,
   deleteBrandConfig,
-  getBrandConfig,
+  getBrandConfigWithStatus,
   setBrandConfig,
 } from './brand-cache';
 
@@ -47,41 +48,42 @@ describe('Brand Cache', () => {
     vi.clearAllMocks();
   });
 
-  describe('getBrandConfig', () => {
-    it('should return cached data on hit', async () => {
+  describe('getBrandConfigWithStatus', () => {
+    it('should return hit status with cached data', async () => {
       mockGet.mockResolvedValue(mockCachedData);
 
-      const result = await getBrandConfig(mockPlatform, mockSlug);
+      const result = await getBrandConfigWithStatus(mockPlatform, mockSlug);
 
-      expect(result).toEqual(mockCachedData);
+      expect(result).toEqual({ status: 'hit', data: mockCachedData });
       expect(mockGet).toHaveBeenCalledWith('brand:test-org', 'json');
     });
 
-    it('should return null on cache miss', async () => {
+    it('should return miss status on cache miss', async () => {
       mockGet.mockResolvedValue(null);
 
-      const result = await getBrandConfig(mockPlatform, mockSlug);
+      const result = await getBrandConfigWithStatus(mockPlatform, mockSlug);
 
-      expect(result).toBeNull();
+      expect(result).toEqual({ status: 'miss' });
     });
 
-    it('should return null when KV is undefined', async () => {
-      // Create incomplete platform override
+    it('should return miss status when KV is undefined', async () => {
       const emptyPlatform = {} as App.Platform;
-      const result = await getBrandConfig(emptyPlatform, mockSlug);
-      expect(result).toBeNull();
+
+      const result = await getBrandConfigWithStatus(emptyPlatform, mockSlug);
+
+      expect(result).toEqual({ status: 'miss' });
     });
 
-    it('should return null on KV error', async () => {
+    it('should return error status on KV error', async () => {
       mockGet.mockRejectedValue(new Error('KV Error'));
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
 
-      const result = await getBrandConfig(mockPlatform, mockSlug);
+      const result = await getBrandConfigWithStatus(mockPlatform, mockSlug);
 
-      expect(result).toBeNull();
-      expect(consoleSpy).toHaveBeenCalled();
+      expect(result).toEqual({ status: 'error', error: 'KV Error' });
+      expect(logger.error).toHaveBeenCalledWith('Error reading brand cache', {
+        slug: mockSlug,
+        error: 'KV Error',
+      });
     });
   });
 

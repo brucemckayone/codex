@@ -53,6 +53,7 @@
       "name": "organization-api-test",
       "vars": {
         "ENVIRONMENT": "test",
+        "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
         "API_URL": "http://localhost:8787",
         "R2_PUBLIC_URL_BASE": "https://pub-codex-media-test.r2.dev"

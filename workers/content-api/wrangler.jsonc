@@ -48,6 +48,7 @@
       "name": "content-api-test",
       "vars": {
         "ENVIRONMENT": "test",
+        "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
         "API_URL": "http://localhost:8787"
       },
