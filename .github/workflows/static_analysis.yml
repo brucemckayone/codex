@@ -36,6 +36,9 @@ jobs:
       - name: Biome Check (Lint & Format)
         run: pnpm check:ci
 
+      - name: Generate Paraglide i18n files
+        run: pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide
+
       - name: Type check with Turborepo
         run: pnpm typecheck
         env:

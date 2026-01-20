@@ -1,10 +1,12 @@
 name: Visual Regression
 
-# on:
-#   pull_request:
-#     paths:
-#       - 'apps/web/src/lib/components/**'
-#       - 'apps/web/src/lib/styles/**'
+on:
+  workflow_dispatch: # Allow manual triggers
+  # Uncomment below when visual tests are ready
+  # pull_request:
+  #   paths:
+  #     - 'apps/web/src/lib/components/**'
+  #     - 'apps/web/src/lib/styles/**'
 
 jobs:
   visual:

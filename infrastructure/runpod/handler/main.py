@@ -676,7 +676,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     b2_bucket_name = os.environ.get("B2_BUCKET_NAME")
 
     if not all([b2_endpoint, b2_access_key_id, b2_secret_access_key, b2_bucket_name]):
-        raise ValueError("B2 credentials not configured in environment. Add secrets in RunPod console.")
+        raise ValueError(
+            "B2 credentials not configured in environment. Add secrets in RunPod console."
+        )
 
     # Initialize storage clients
     r2_client = create_s3_client(

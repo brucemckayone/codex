@@ -1,0 +1,16 @@
+/* borders.css */
+:root {
+  /* Border Widths */
+  --border-width-none: 0;
+  --border-width: 1px;
+  --border-width-thick: 2px;
+  --border-width-toast: 4px;
+
+  /* Border Styles */
+  --border-style: solid;
+  --border-style-dashed: dashed;
+
+  /* Compound Tokens (Optional but helpful for consistency) */
+  --border-default: var(--border-width) var(--border-style) var(--color-border);
+  --border-focus: var(--border-width-thick) var(--border-style) var(--color-border-focus);
+}
