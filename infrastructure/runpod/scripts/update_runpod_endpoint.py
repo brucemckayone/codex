@@ -28,21 +28,21 @@ def update_endpoint():
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     # GraphQL Mutation
-    # We update the imageId.
+    # We update the imageId using saveEndpoint (RunPod API changed from updateEndpoint).
     # Note: RunPod might not pull if the tag string is identical unless we force it.
     # One trick is to toggle a dummy env var or rely on hash tags (which we are doing: sha-xxxx).
 
     mutation = """
-    mutation updateEndpoint($id: String!, $input: EndpointInput!) {
-        updateEndpoint(id: $id, input: $input) {
+    mutation saveEndpoint($input: EndpointInput!) {
+        saveEndpoint(input: $input) {
             id
             name
-            imageId
+            templateId
         }
     }
     """
 
-    variables = {"id": endpoint_id, "input": {"imageId": full_image_name}}
+    variables = {"input": {"id": endpoint_id, "templateId": full_image_name}}
 
     response = requests.post(
         url,
@@ -60,8 +60,8 @@ def update_endpoint():
         print(f"❌ GraphQL Errors: {data['errors']}")
         sys.exit(1)
 
-    result = data.get("data", {}).get("updateEndpoint")
-    print(f"✅ Successfully updated endpoint {result['id']} to {result['imageId']}")
+    result = data.get("data", {}).get("saveEndpoint")
+    print(f"✅ Successfully updated endpoint {result['id']} to {result['templateId']}")
 
 
 if __name__ == "__main__":
