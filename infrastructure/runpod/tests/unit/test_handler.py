@@ -62,6 +62,21 @@ def mock_check_gpu():
 
 
 @pytest.fixture
+def mock_b2_env():
+    """Set B2 environment variables required by handler."""
+    with patch.dict(
+        os.environ,
+        {
+            "B2_ENDPOINT": "https://b2.example.com",
+            "B2_ACCESS_KEY_ID": "test-key",
+            "B2_SECRET_ACCESS_KEY": "test-secret",
+            "B2_BUCKET_NAME": "archive-bucket",
+        },
+    ):
+        yield
+
+
+@pytest.fixture
 def basic_job_input():
     return {
         "mediaId": "test-media-123",
@@ -74,10 +89,6 @@ def basic_job_input():
         "r2AccessKeyId": "key",
         "r2SecretAccessKey": "secret",
         "r2BucketName": "media-bucket",
-        "b2Endpoint": "https://b2.example.com",
-        "b2AccessKeyId": "key",
-        "b2SecretAccessKey": "secret",
-        "b2BucketName": "archive-bucket",
     }
 
 
@@ -89,6 +100,7 @@ def test_handler_video_flow_cpu(
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
+    mock_b2_env,
     basic_job_input,
 ):
     """Test full video transcoding flow in CPU mode (mocked)."""
@@ -158,6 +170,7 @@ def test_handler_audio_flow(
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
+    mock_b2_env,
     basic_job_input,
 ):
     """Test full audio transcoding flow."""
@@ -199,7 +212,12 @@ def test_handler_audio_flow(
 
 
 def test_handler_failure_reporting(
-    mock_s3_client, mock_download_file, mock_subprocess, mock_requests, basic_job_input
+    mock_s3_client,
+    mock_download_file,
+    mock_subprocess,
+    mock_requests,
+    mock_b2_env,
+    basic_job_input,
 ):
     """Test that exceptions are caught and reported via webhook."""
 
@@ -219,7 +237,12 @@ def test_handler_failure_reporting(
 
 
 def test_handler_timeout_protection(
-    mock_s3_client, mock_download_file, mock_subprocess, mock_requests, basic_job_input
+    mock_s3_client,
+    mock_download_file,
+    mock_subprocess,
+    mock_requests,
+    mock_b2_env,
+    basic_job_input,
 ):
     """Test that handler catches subprocess timeouts and reports failure."""
     import subprocess
