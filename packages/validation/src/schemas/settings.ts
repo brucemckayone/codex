@@ -101,9 +101,12 @@ export type UpdateFeaturesInput = z.infer<typeof updateFeaturesSchema>;
 /**
  * Branding settings response shape
  */
+/**
+ * Branding settings response shape
+ */
 export const brandingSettingsSchema = z.object({
-  logoUrl: z.string().nullable(),
-  primaryColorHex: z.string(),
+  logoUrl: urlSchema.nullable(),
+  primaryColorHex: hexColorSchema,
 });
 
 export type BrandingSettingsResponse = z.infer<typeof brandingSettingsSchema>;

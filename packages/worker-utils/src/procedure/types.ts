@@ -31,7 +31,7 @@ import type {
   UserData,
 } from '@codex/shared-types';
 import type { TranscodingService } from '@codex/transcoding';
-import type { MiddlewareHandler } from 'hono';
+import type { ExecutionContext, MiddlewareHandler } from 'hono';
 import type { ZodSchema, z } from 'zod';
 
 // ============================================================================
@@ -217,6 +217,9 @@ export interface ProcedureContext<
 
   // Environment bindings
   env: Bindings;
+
+  // Execution context for non-blocking operations
+  executionCtx: ExecutionContext;
 
   // Observability client
   obs: ObservabilityClient | undefined;

@@ -21,7 +21,7 @@ Foundation Layer (Infrastructure)
 External Services (Neon PostgreSQL, R2, KV, Stripe)
 ```
 
-**8 Workers** → **17 Packages** → **Foundation Layer**
+**8 Workers** → **18 Packages** → **Foundation Layer**
 
 ---
 
@@ -155,7 +155,7 @@ Media transcoding and streaming API. Manages the complete transcoding pipeline v
 
 ---
 
-## The 17 Packages
+## The 18 Packages
 
 All packages live in `packages/`. They're organized into three architectural layers:
 
@@ -168,7 +168,7 @@ All packages live in `packages/`. They're organized into three architectural lay
 | **@codex/service-errors** | Error classes, BaseService, error mapping | [service-errors/CLAUDE.md](packages/service-errors/CLAUDE.md) |
 | **@codex/security** | Auth, rate limiting, security headers, HMAC | [security/CLAUDE.md](packages/security/CLAUDE.md) |
 | **@codex/validation** | Zod schemas for all input validation | [validation/CLAUDE.md](packages/validation/CLAUDE.md) |
-
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |
 **Key Concept**: Everything depends on these 5 packages. They provide the infrastructure that services and workers build on.
 
 ---
@@ -234,7 +234,7 @@ All packages live in `packages/`. They're organized into three architectural lay
 - workerAuth() - HMAC-based worker-to-worker authentication
 
 **@codex/validation** [Read Full Docs](packages/validation/CLAUDE.md)
-- Centralized Zod schemas for all input types
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |- Centralized Zod schemas for all input types
 - Content schemas: createContentSchema, updateContentSchema, contentQuerySchema
 - Media schemas: createMediaItemSchema, updateMediaItemSchema
 - Organization schemas: createOrganizationSchema
@@ -311,13 +311,13 @@ All packages live in `packages/`. They're organized into three architectural lay
 ### Pattern: Add New API Endpoint
 
 1. **Validation** - Add schema to @codex/validation
-2. **Service** - Add method to service (@codex/content, @codex/identity, or @codex/access)
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |2. **Service** - Add method to service (@codex/content, @codex/identity, or @codex/access)
 3. **Worker** - Create route in appropriate worker using procedure()
 4. **Types** - Return types from @codex/shared-types
 
 Example: New endpoint to list user's content library
 - Schema: listUserLibrarySchema in @codex/validation
-- Service: ContentAccessService.listUserLibrary() in @codex/access
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |- Service: ContentAccessService.listUserLibrary() in @codex/access
 - Worker: Route in workers/content-api
 - Response: UserLibraryResponse from @codex/shared-types
 
@@ -356,14 +356,14 @@ See [packages/worker-utils/CLAUDE.md](packages/worker-utils/CLAUDE.md) for worke
 import { BaseService, NotFoundError, ConflictError } from '@codex/service-errors';
 import { dbHttp, schema, scopedNotDeleted } from '@codex/database';
 import { createContentSchema } from '@codex/validation';
-import type { ServiceConfig } from '@codex/service-errors';
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |import type { ServiceConfig } from '@codex/service-errors';
 ```
 
 ### For Workers
 ```typescript
 import { createWorker, procedure } from '@codex/worker-utils';
 import { createContentSchema } from '@codex/validation';
-import type { HonoEnv } from '@codex/shared-types';
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |import type { HonoEnv } from '@codex/shared-types';
 ```
 
 ### For Tests
@@ -466,7 +466,7 @@ Service Packages (@codex/content, identity, access)
   ├─ @codex/service-errors
   ├─ @codex/database
   ├─ @codex/validation
-  └─ @codex/security
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |  └─ @codex/security
 
 Foundation Packages
   ├─ @codex/database
@@ -474,7 +474,7 @@ Foundation Packages
   ├─ @codex/service-errors
   ├─ @codex/security
   ├─ @codex/validation
-  ├─ @codex/observability
+| **Shared Constants** | @codex/constants | PLATFORM_FEE_BPS, limits, MIME types |  ├─ @codex/observability
   └─ @codex/test-utils
 ```
 

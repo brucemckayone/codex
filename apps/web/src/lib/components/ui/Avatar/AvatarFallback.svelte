@@ -1,0 +1,31 @@
+<script lang="ts">
+  import { type createAvatar, melt } from '@melt-ui/svelte';
+  import { getContext, type Snippet } from 'svelte';
+  import type { HTMLAttributes } from 'svelte/elements';
+
+  interface Props extends HTMLAttributes<HTMLDivElement> {
+    children: Snippet;
+  }
+
+  const { children, class: className, ...restProps }: Props = $props();
+  const { elements: { fallback } } = getContext<ReturnType<typeof createAvatar>>('AVATAR');
+</script>
+
+<div use:melt={$fallback} class="avatar-fallback {className ?? ''}" {...restProps}>
+  {@render children()}
+</div>
+
+<style>
+  .avatar-fallback {
+    display: flex;
+    height: 100%;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+  }
+</style>

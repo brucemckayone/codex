@@ -1,3 +1,4 @@
+export * from 'drizzle-orm';
 export * from './client';
 export { createDbClient } from './client';
 export type { DbEnvVars } from './config/env.config';

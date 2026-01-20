@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "deploy": "pnpm build && wrangler deploy",
-    "dev": "pnpm build && wrangler dev --port 42072 --inspector-port 9232",
+    "dev": "pnpm build && dotenv -e ../../.env.dev -- wrangler dev --port 42072 --inspector-port 9232",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

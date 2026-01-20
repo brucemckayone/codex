@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:a11y": "start-server-and-test storybook 6006 'playwright test --project=a11y'",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "lint": "biome lint --write .",
@@ -26,6 +27,7 @@
     "@codex/observability": "workspace:*",
     "@codex/test-utils": "workspace:*",
     "@inlang/paraglide-sveltekit": "^0.15.0",
+    "@melt-ui/svelte": "^0.86.6",
     "happy-dom": "^20.0.8",
     "nanoid": "^5.0.0",
     "zod": "^4.3.5"
@@ -34,7 +36,7 @@
     "@axe-core/playwright": "^4.11.0",
     "@cloudflare/workers-types": "^4.20251014.0",
     "@inlang/paraglide-js": "^1.11.8",
-    "@melt-ui/svelte": "^0.86.6",
+    "@melt-ui/pp": "^0.3.2",
     "@playwright/test": "^1.56.1",
     "@rollup/rollup-darwin-arm64": "^4.55.1",
     "@storybook/addon-a11y": "^8.6.15",
@@ -49,11 +51,13 @@
     "@storybook/types": "^8.6.15",
     "@sveltejs/adapter-cloudflare": "^7.2.4",
     "@sveltejs/kit": "^2.0.0",
+    "start-server-and-test": "^2.0.0",
     "storybook": "^8.6.15",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.0",
-    "vitest": "^4.0.2"
+    "vitest": "^4.0.2",
+    "@storybook/addon-docs": "^8.6.15"
   }
 }

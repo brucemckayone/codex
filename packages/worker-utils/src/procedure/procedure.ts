@@ -156,6 +156,7 @@ export function procedure<
         >['organizationId'],
         organizationRole: c.get('organizationRole'),
         env: c.env,
+        executionCtx: c.executionCtx,
         obs,
         services: registry,
       };
