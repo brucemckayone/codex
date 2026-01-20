@@ -4,11 +4,11 @@ import requests
 
 
 def get_endpoint_details(url, headers, endpoint_id):
-    """Query existing endpoint to get current settings."""
+    """Query all endpoints and find the matching one."""
     query = """
-    query getEndpoint($id: String!) {
+    query Endpoints {
         myself {
-            endpoints(input: { id: $id }) {
+            endpoints {
                 id
                 name
                 templateId
@@ -22,27 +22,36 @@ def get_endpoint_details(url, headers, endpoint_id):
 
     response = requests.post(
         url,
-        json={"query": query, "variables": {"id": endpoint_id}},
+        json={"query": query},
         headers=headers,
         timeout=30,
     )
 
     if response.status_code != 200:
+        print(f"❌ Failed to query endpoints: {response.status_code} - {response.text}")
         return None
 
     data = response.json()
     if "errors" in data:
+        print(f"❌ GraphQL Errors: {data['errors']}")
         return None
 
     endpoints = data.get("data", {}).get("myself", {}).get("endpoints", [])
-    return endpoints[0] if endpoints else None
+
+    # Find the matching endpoint
+    for endpoint in endpoints:
+        if endpoint["id"] == endpoint_id:
+            return endpoint
+
+    print(f"❌ Endpoint {endpoint_id} not found in {len(endpoints)} endpoints")
+    return None
 
 
 def update_template(url, headers, template_id, new_image_name):
     """Update template with new Docker image."""
     # First get the template details
     query = """
-    query getTemplate($id: String!) {
+    query PodTemplates {
         myself {
             podTemplates {
                 id
@@ -51,6 +60,10 @@ def update_template(url, headers, template_id, new_image_name):
                 containerDiskInGb
                 volumeInGb
                 dockerArgs
+                env {
+                    key
+                    value
+                }
             }
         }
     }
@@ -58,13 +71,13 @@ def update_template(url, headers, template_id, new_image_name):
 
     response = requests.post(
         url,
-        json={"query": query, "variables": {"id": template_id}},
+        json={"query": query},
         headers=headers,
         timeout=30,
     )
 
     if response.status_code != 200:
-        print(f"❌ Failed to query templates: {response.status_code}")
+        print(f"❌ Failed to query templates: {response.status_code} - {response.text}")
         return False
 
     data = response.json()
@@ -87,7 +100,7 @@ def update_template(url, headers, template_id, new_image_name):
 
     # Update the template with new image
     mutation = """
-    mutation saveTemplate($input: PodTemplateInput!) {
+    mutation saveTemplate($input: SaveTemplateInput!) {
         saveTemplate(input: $input) {
             id
             name
@@ -96,6 +109,9 @@ def update_template(url, headers, template_id, new_image_name):
     }
     """
 
+    # Convert env list to the format expected by the API
+    env_vars = template.get("env") or []
+
     variables = {
         "input": {
             "id": template_id,
@@ -103,6 +119,8 @@ def update_template(url, headers, template_id, new_image_name):
             "imageName": new_image_name,
             "containerDiskInGb": template.get("containerDiskInGb", 10),
             "volumeInGb": template.get("volumeInGb", 0),
+            "dockerArgs": template.get("dockerArgs") or "",
+            "env": env_vars,
             "isServerless": True,
         }
     }
