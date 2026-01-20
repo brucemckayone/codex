@@ -12,6 +12,7 @@
  * - POST   /api/content/:id/publish   - Publish content
  * - POST   /api/content/:id/unpublish - Unpublish content
  * - DELETE /api/content/:id        - Soft delete
+ * - POST   /api/content/:id/thumbnail - Upload content thumbnail
  */
 
 import type {
@@ -31,7 +32,9 @@ import {
 } from '@codex/content';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { procedure, multipartProcedure } from '@codex/worker-utils';
+import { SUPPORTED_MIME_TYPES, MAX_IMAGE_SIZE_BYTES } from '@codex/image-processing';
+import { z } from 'zod';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
@@ -185,6 +188,56 @@ app.delete(
     handler: async (ctx): Promise<DeleteContentResponse> => {
       await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
       return null;
+    },
+  })
+);
+
+/**
+ * POST /api/content/:id/thumbnail
+ * Upload and process content thumbnail
+ *
+ * Security: Creator/Admin only, must own content
+ * Content-Type: multipart/form-data
+ * Form field: thumbnail (file)
+ */
+app.post(
+  '/:id/thumbnail',
+  multipartProcedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: { params: createIdParamsSchema() },
+    files: {
+      thumbnail: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_MIME_TYPES),
+      },
+    },
+    handler: async (ctx) => {
+      // Verify content exists and is owned by user
+      const content = await ctx.services.content.get(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+      if (!content) {
+        throw new ContentNotFoundError(ctx.input.params.id);
+      }
+
+      // Process image via service registry
+      const result = await ctx.services.imageProcessing.processContentThumbnail(
+        ctx.input.params.id,
+        ctx.user.id,
+        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+          type: ctx.files.thumbnail.type,
+        })
+      );
+
+      return {
+        data: {
+          thumbnailUrl: result.url,
+          size: result.size,
+          mimeType: result.mimeType,
+        },
+      };
     },
   })
 );

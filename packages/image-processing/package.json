@@ -1,0 +1,31 @@
+{
+  "name": "@codex/image-processing",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codex/cloudflare-clients": "workspace:*",
+    "@codex/database": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
+    "@codex/transcoding": "workspace:*",
+    "@codex/validation": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "workspace:*"
+  }
+}

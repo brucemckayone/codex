@@ -20,6 +20,7 @@ import { R2Service } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
+import { ImageProcessingService } from '@codex/image-processing';
 import {
   createEmailProvider,
   NotificationsService,
@@ -76,6 +77,7 @@ export function createServiceRegistry(
   let _content: ContentService | undefined;
   let _media: MediaItemService | undefined;
   let _access: ContentAccessService | undefined;
+  let _imageProcessing: ImageProcessingService | undefined;
   let _organization: OrganizationService | undefined;
   let _settings: PlatformSettingsFacade | undefined;
   let _purchase: PurchaseService | undefined;
@@ -141,6 +143,28 @@ export function createServiceRegistry(
         cleanupFns.push(result.cleanup);
       }
       return _access;
+    },
+
+    get imageProcessing() {
+      if (!_imageProcessing) {
+        const r2Service = env.MEDIA_BUCKET
+          ? new R2Service(env.MEDIA_BUCKET)
+          : undefined;
+
+        if (!r2Service) {
+          throw new Error(
+            'MEDIA_BUCKET not configured. Required for image processing.'
+          );
+        }
+
+        _imageProcessing = new ImageProcessingService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          r2Service,
+          mediaBucket: env.MEDIA_BUCKET,
+        });
+      }
+      return _imageProcessing;
     },
 
     // ========================================================================
