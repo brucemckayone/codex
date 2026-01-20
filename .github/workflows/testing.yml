@@ -290,10 +290,10 @@ jobs:
         with:
           name: test-results-${{ github.run_id }}
           path: |
-            **/coverage/**
-            **/.vitest/**
-            **/test-results/**
+            packages/*/coverage/
+            workers/*/coverage/
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Fail if tests failed
         if: steps.run-tests.outcome == 'failure'
