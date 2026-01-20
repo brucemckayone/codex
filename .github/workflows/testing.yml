@@ -62,7 +62,7 @@ jobs:
 
   changes:
     runs-on: ubuntu-latest
-    needs: [static-analysis, cleanup-stale-branches]
+    needs: [cleanup-stale-branches]  # Removed static-analysis - runs in parallel now
     outputs:
       database: ${{ steps.filter.outputs.database }}
       validation: ${{ steps.filter.outputs.validation }}
@@ -137,7 +137,7 @@ jobs:
               - 'workers/admin-api/**'
 
   test:
-    needs: [changes, static-analysis]
+    needs: [changes, static-analysis]  # Both must pass before running tests
     runs-on: ubuntu-latest
     # Use test environment for environment-specific secrets and variables
     environment: test
@@ -309,62 +309,173 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
   # ============================================================================
-  # WORKER TESTS - 5 Parallel Jobs
+  # WORKER TESTS - Matrix Strategy (7 workers in parallel)
   # Each worker gets its own Neon branch for test isolation
+  # Consolidated from 7 separate jobs into 1 matrix job (~650 lines saved)
   # ============================================================================
 
-  auth-test:
-    name: Auth Worker Tests
+  worker-tests:
+    name: ${{ matrix.name }} Tests
     needs: [changes, test]
     runs-on: ubuntu-latest
-    if: |
-      needs.changes.outputs.auth-worker == 'true' ||
-      needs.changes.outputs.worker-utils == 'true' ||
-      needs.changes.outputs.database == 'true' ||
-      needs.changes.outputs.security == 'true'
+    # Run if unit tests passed - individual worker conditions checked in steps
+    if: always() && needs.test.result == 'success'
     environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
-    steps:
-      - uses: actions/checkout@v4
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Auth Worker
+            worker: auth
+            dir: workers/auth
+            branch_name: ci-auth-tests
+            turbo_key: auth-test
+            # Secrets: BETTER_AUTH_SECRET only
+            needs_r2: false
+            needs_stripe: false
 
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-auth-tests" >> $GITHUB_OUTPUT
+          - name: Content API
+            worker: content-api
+            dir: workers/content-api
+            branch_name: ci-content-api-tests
+            turbo_key: content-api-test
+            # Secrets: R2, STRIPE, BETTER_AUTH_SECRET
+            needs_r2: true
+            needs_stripe: true
+
+          - name: Identity API
+            worker: identity-api
+            dir: workers/identity-api
+            branch_name: ci-identity-api-tests
+            turbo_key: identity-api-test
+            # Secrets: BETTER_AUTH_SECRET only
+            needs_r2: false
+            needs_stripe: false
+
+          - name: Admin API
+            worker: admin-api
+            dir: workers/admin-api
+            branch_name: ci-admin-api-tests
+            turbo_key: admin-api-test
+            # Secrets: BETTER_AUTH_SECRET only
+            needs_r2: false
+            needs_stripe: false
+
+          - name: Ecom API
+            worker: ecom-api
+            dir: workers/ecom-api
+            branch_name: ci-ecom-api-tests
+            turbo_key: ecom-api-test
+            # Secrets: STRIPE, BETTER_AUTH_SECRET
+            needs_r2: false
+            needs_stripe: true
+
+          - name: Organization API
+            worker: organization-api
+            dir: workers/organization-api
+            branch_name: ci-organization-api-tests
+            turbo_key: organization-api-test
+            # Secrets: BETTER_AUTH_SECRET only
+            needs_r2: false
+            needs_stripe: false
+
+          - name: Notifications API
+            worker: notifications-api
+            dir: workers/notifications-api
+            branch_name: ci-notifications-api-tests
+            turbo_key: notifications-api-test
+            # Secrets: BETTER_AUTH_SECRET only
+            needs_r2: false
+            needs_stripe: false
+
+    # Note: Each matrix job cleans up its own Neon branch inline (no outputs needed)
+
+    steps:
+      # Step 1: Check if this worker should run based on changed files
+      - name: Check if worker should run
+        id: should-run
+        run: |
+          # Common dependencies that trigger ALL worker tests
+          COMMON_CHANGED="${{ needs.changes.outputs.worker-utils == 'true' || needs.changes.outputs.database == 'true' || needs.changes.outputs.security == 'true' }}"
+
+          # Worker-specific conditions
+          case "${{ matrix.worker }}" in
+            auth)
+              WORKER_CHANGED="${{ needs.changes.outputs.auth-worker == 'true' }}"
+              ;;
+            content-api)
+              WORKER_CHANGED="${{ needs.changes.outputs.content-api == 'true' || needs.changes.outputs.content == 'true' || needs.changes.outputs.access == 'true' || needs.changes.outputs.cloudflare-clients == 'true' }}"
+              ;;
+            identity-api)
+              WORKER_CHANGED="${{ needs.changes.outputs.identity-api == 'true' || needs.changes.outputs.identity == 'true' }}"
+              ;;
+            admin-api)
+              WORKER_CHANGED="${{ needs.changes.outputs.admin-api == 'true' || needs.changes.outputs.observability == 'true' || needs.changes.outputs.service-errors == 'true' || needs.changes.outputs.shared-types == 'true' || needs.changes.outputs.validation == 'true' }}"
+              ;;
+            ecom-api)
+              WORKER_CHANGED="${{ needs.changes.outputs.ecom-api == 'true' || needs.changes.outputs.purchase == 'true' || needs.changes.outputs.validation == 'true' }}"
+              ;;
+            organization-api)
+              WORKER_CHANGED="${{ needs.changes.outputs.organization-api == 'true' || needs.changes.outputs.identity == 'true' }}"
+              ;;
+            notifications-api)
+              WORKER_CHANGED="${{ needs.changes.outputs.notifications-api == 'true' }}"
+              ;;
+            *)
+              WORKER_CHANGED="false"
+              ;;
+          esac
+
+          if [ "$COMMON_CHANGED" = "true" ] || [ "$WORKER_CHANGED" = "true" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "✓ Running ${{ matrix.name }} tests (changes detected)"
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "⊘ Skipping ${{ matrix.name }} tests (no relevant changes)"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.should-run.outputs.should_run == 'true'
 
       - name: Create Neon branch
         id: create-branch
+        if: steps.should-run.outputs.should_run == 'true'
         uses: neondatabase/create-branch-action@v5
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
+          branch_name: ${{ matrix.branch_name }}
           parent: production
           username: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Install pnpm
+        if: steps.should-run.outputs.should_run == 'true'
         uses: pnpm/action-setup@v4
 
       - name: Use Node.js
+        if: steps.should-run.outputs.should_run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: "pnpm"
 
       - name: Install dependencies
+        if: steps.should-run.outputs.should_run == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Cache Turborepo
+        if: steps.should-run.outputs.should_run == 'true'
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-auth-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-${{ matrix.turbo_key }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-auth-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
-            ${{ runner.os }}-turbo-auth-test-
+            ${{ runner.os }}-turbo-${{ matrix.turbo_key }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-${{ matrix.turbo_key }}-
             ${{ runner.os }}-turbo-
 
       - name: Generate migrations
+        if: steps.should-run.outputs.should_run == 'true'
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
@@ -373,6 +484,7 @@ jobs:
           pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations
+        if: steps.should-run.outputs.should_run == 'true'
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
@@ -381,6 +493,7 @@ jobs:
           pnpm --filter @codex/database db:migrate
 
       - name: Build dependencies
+        if: steps.should-run.outputs.should_run == 'true'
         run: pnpm build
         env:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
@@ -388,774 +501,57 @@ jobs:
           TURBO_LOG_VERBOSITY: info
 
       - name: Generate worker dev vars
+        if: steps.should-run.outputs.should_run == 'true'
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: ${{ vars.DB_METHOD }}
+          # Always needed
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          # Conditionally used based on matrix.needs_r2
+          R2_ACCOUNT_ID: ${{ matrix.needs_r2 && secrets.R2_ACCOUNT_ID || '' }}
+          R2_ACCESS_KEY_ID: ${{ matrix.needs_r2 && secrets.R2_ACCESS_KEY_ID || '' }}
+          R2_SECRET_ACCESS_KEY: ${{ matrix.needs_r2 && secrets.R2_SECRET_ACCESS_KEY || '' }}
+          R2_BUCKET_MEDIA: ${{ matrix.needs_r2 && vars.R2_BUCKET_MEDIA || '' }}
+          # Conditionally used based on matrix.needs_stripe
+          STRIPE_SECRET_KEY: ${{ matrix.needs_stripe && secrets.STRIPE_SECRET_KEY || '' }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ matrix.needs_stripe && secrets.STRIPE_WEBHOOK_SECRET_BOOKING || '' }}
         run: |
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$BETTER_AUTH_SECRET"
+          [ -n "$R2_SECRET_ACCESS_KEY" ] && echo "::add-mask::$R2_SECRET_ACCESS_KEY"
+          [ -n "$STRIPE_SECRET_KEY" ] && echo "::add-mask::$STRIPE_SECRET_KEY"
+          [ -n "$STRIPE_WEBHOOK_SECRET_BOOKING" ] && echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
           chmod +x .github/scripts/generate-worker-dev-vars.sh
-          .github/scripts/generate-worker-dev-vars.sh auth
+          .github/scripts/generate-worker-dev-vars.sh ${{ matrix.worker }}
 
-      - name: Run auth tests
+      - name: Run ${{ matrix.worker }} tests
         id: run-tests
+        if: steps.should-run.outputs.should_run == 'true'
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          # R2 env vars for content-api tests
+          R2_ACCOUNT_ID: ${{ matrix.needs_r2 && secrets.R2_ACCOUNT_ID || '' }}
+          R2_ACCESS_KEY_ID: ${{ matrix.needs_r2 && secrets.R2_ACCESS_KEY_ID || '' }}
+          R2_SECRET_ACCESS_KEY: ${{ matrix.needs_r2 && secrets.R2_SECRET_ACCESS_KEY || '' }}
+          R2_BUCKET_MEDIA: ${{ matrix.needs_r2 && vars.R2_BUCKET_MEDIA || '' }}
         run: |
           echo "::add-mask::$DATABASE_URL"
-          cd workers/auth && pnpm test
+          cd ${{ matrix.dir }} && pnpm test
         continue-on-error: true
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.should-run.outputs.should_run == 'true'
         with:
-          name: auth-test-results-${{ github.run_id }}
-          path: workers/auth/coverage/**
+          name: ${{ matrix.worker }}-test-results-${{ github.run_id }}
+          path: ${{ matrix.dir }}/coverage/**
           retention-days: 7
 
       - name: Fail if tests failed
-        if: steps.run-tests.outcome == 'failure'
-        run: exit 1
-
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-  content-api-test:
-    name: Content API Tests
-    needs: [changes, test]
-    runs-on: ubuntu-latest
-    if: |
-      needs.changes.outputs.content-api == 'true' ||
-      needs.changes.outputs.worker-utils == 'true' ||
-      needs.changes.outputs.database == 'true' ||
-      needs.changes.outputs.content == 'true' ||
-      needs.changes.outputs.access == 'true' ||
-      needs.changes.outputs.cloudflare-clients == 'true' ||
-      needs.changes.outputs.security == 'true'
-    environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-content-api-tests" >> $GITHUB_OUTPUT
-
-      - name: Create Neon branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Turborepo
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-content-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-content-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
-            ${{ runner.os }}-turbo-content-api-test-
-            ${{ runner.os }}-turbo-
-
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:gen:drizzle
-
-      - name: Apply migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
-
-      - name: Build dependencies
-        run: pnpm build
-        env:
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_LOG_VERBOSITY: info
-
-      - name: Generate worker dev vars
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          echo "::add-mask::$R2_SECRET_ACCESS_KEY"
-          echo "::add-mask::$STRIPE_SECRET_KEY"
-          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
-          echo "::add-mask::$BETTER_AUTH_SECRET"
-          chmod +x .github/scripts/generate-worker-dev-vars.sh
-          .github/scripts/generate-worker-dev-vars.sh content-api
-
-      - name: Run content-api tests
-        id: run-tests
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          cd workers/content-api && pnpm test
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: content-api-test-results-${{ github.run_id }}
-          path: workers/content-api/coverage/**
-          retention-days: 7
-
-      - name: Fail if tests failed
-        if: steps.run-tests.outcome == 'failure'
-        run: exit 1
-
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-  identity-api-test:
-    name: Identity API Tests
-    needs: [changes, test]
-    runs-on: ubuntu-latest
-    if: |
-      needs.changes.outputs.identity-api == 'true' ||
-      needs.changes.outputs.worker-utils == 'true' ||
-      needs.changes.outputs.database == 'true' ||
-      needs.changes.outputs.identity == 'true' ||
-      needs.changes.outputs.security == 'true'
-    environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-identity-api-tests" >> $GITHUB_OUTPUT
-
-      - name: Create Neon branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Turborepo
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-identity-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-identity-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
-            ${{ runner.os }}-turbo-identity-api-test-
-            ${{ runner.os }}-turbo-
-
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:gen:drizzle
-
-      - name: Apply migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
-
-      - name: Build dependencies
-        run: pnpm build
-        env:
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_LOG_VERBOSITY: info
-
-      - name: Generate worker dev vars
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          echo "::add-mask::$BETTER_AUTH_SECRET"
-          chmod +x .github/scripts/generate-worker-dev-vars.sh
-          .github/scripts/generate-worker-dev-vars.sh identity-api
-
-      - name: Run identity-api tests
-        id: run-tests
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          cd workers/identity-api && pnpm test
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: identity-api-test-results-${{ github.run_id }}
-          path: workers/identity-api/coverage/**
-          retention-days: 7
-
-      - name: Fail if tests failed
-        if: steps.run-tests.outcome == 'failure'
-        run: exit 1
-
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-  admin-api-test:
-    name: Admin API Tests
-    needs: [changes, test]
-    runs-on: ubuntu-latest
-    if: |
-      needs.changes.outputs.admin-api == 'true' ||
-      needs.changes.outputs.worker-utils == 'true' ||
-      needs.changes.outputs.database == 'true' ||
-      needs.changes.outputs.security == 'true' ||
-      needs.changes.outputs.observability == 'true' ||
-      needs.changes.outputs.service-errors == 'true' ||
-      needs.changes.outputs.shared-types == 'true' ||
-      needs.changes.outputs.validation == 'true'
-    environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-admin-api-tests" >> $GITHUB_OUTPUT
-
-      - name: Create Neon branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Turborepo
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-admin-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-admin-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
-            ${{ runner.os }}-turbo-admin-api-test-
-            ${{ runner.os }}-turbo-
-
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:gen:drizzle
-
-      - name: Apply migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
-
-      - name: Build dependencies
-        run: pnpm build
-        env:
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_LOG_VERBOSITY: info
-
-      - name: Generate worker dev vars
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          echo "::add-mask::$BETTER_AUTH_SECRET"
-          chmod +x .github/scripts/generate-worker-dev-vars.sh
-          .github/scripts/generate-worker-dev-vars.sh admin-api
-
-      - name: Run admin-api tests
-        id: run-tests
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          cd workers/admin-api && pnpm test
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: admin-api-test-results-${{ github.run_id }}
-          path: workers/admin-api/coverage/**
-          retention-days: 7
-
-      - name: Fail if tests failed
-        if: steps.run-tests.outcome == 'failure'
-        run: exit 1
-
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-  ecom-api-test:
-    name: Ecom API Tests
-    needs: [changes, test]
-    runs-on: ubuntu-latest
-    if: |
-      needs.changes.outputs.ecom-api == 'true' ||
-      needs.changes.outputs.worker-utils == 'true' ||
-      needs.changes.outputs.database == 'true' ||
-      needs.changes.outputs.purchase == 'true' ||
-      needs.changes.outputs.security == 'true' ||
-      needs.changes.outputs.validation == 'true'
-    environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-ecom-api-tests" >> $GITHUB_OUTPUT
-
-      - name: Create Neon branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Turborepo
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-ecom-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-ecom-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
-            ${{ runner.os }}-turbo-ecom-api-test-
-            ${{ runner.os }}-turbo-
-
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:gen:drizzle
-
-      - name: Apply migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
-
-      - name: Build dependencies
-        run: pnpm build
-        env:
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_LOG_VERBOSITY: info
-
-      - name: Generate worker dev vars
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          echo "::add-mask::$STRIPE_SECRET_KEY"
-          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
-          echo "::add-mask::$BETTER_AUTH_SECRET"
-          chmod +x .github/scripts/generate-worker-dev-vars.sh
-          .github/scripts/generate-worker-dev-vars.sh ecom-api
-
-      - name: Run ecom-api tests
-        id: run-tests
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          cd workers/ecom-api && pnpm test
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ecom-api-test-results-${{ github.run_id }}
-          path: workers/ecom-api/coverage/**
-          retention-days: 7
-
-      - name: Fail if tests failed
-        if: steps.run-tests.outcome == 'failure'
-        run: exit 1
-
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-  organization-api-test:
-    name: Organization API Tests
-    needs: [changes, test]
-    runs-on: ubuntu-latest
-    if: |
-      needs.changes.outputs.organization-api == 'true' ||
-      needs.changes.outputs.worker-utils == 'true' ||
-      needs.changes.outputs.database == 'true' ||
-      needs.changes.outputs.identity == 'true' ||
-      needs.changes.outputs.security == 'true'
-    environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-organization-api-tests" >> $GITHUB_OUTPUT
-
-      - name: Create Neon branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Turborepo
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-organization-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-organization-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
-            ${{ runner.os }}-turbo-organization-api-test-
-            ${{ runner.os }}-turbo-
-
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:gen:drizzle
-
-      - name: Apply migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
-
-      - name: Build dependencies
-        run: pnpm build
-        env:
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_LOG_VERBOSITY: info
-
-      - name: Generate worker dev vars
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          echo "::add-mask::$BETTER_AUTH_SECRET"
-          chmod +x .github/scripts/generate-worker-dev-vars.sh
-          .github/scripts/generate-worker-dev-vars.sh organization-api
-
-      - name: Run organization-api tests
-        id: run-tests
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          cd workers/organization-api && pnpm test
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: organization-api-test-results-${{ github.run_id }}
-          path: workers/organization-api/coverage/**
-          retention-days: 7
-
-      - name: Fail if tests failed
-        if: steps.run-tests.outcome == 'failure'
-        run: exit 1
-
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-  notifications-api-test:
-    name: Notifications API Tests
-    needs: [changes, test]
-    runs-on: ubuntu-latest
-    if: |
-      needs.changes.outputs.notifications-api == 'true' ||
-      needs.changes.outputs.worker-utils == 'true' ||
-      needs.changes.outputs.database == 'true' ||
-      needs.changes.outputs.security == 'true'
-    environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-notifications-api-tests" >> $GITHUB_OUTPUT
-
-      - name: Create Neon branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Turborepo
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-notifications-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-notifications-api-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
-            ${{ runner.os }}-turbo-notifications-api-test-
-            ${{ runner.os }}-turbo-
-
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:gen:drizzle
-
-      - name: Apply migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
-
-      - name: Build dependencies
-        run: pnpm build
-        env:
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_LOG_VERBOSITY: info
-
-      - name: Generate worker dev vars
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          echo "::add-mask::$BETTER_AUTH_SECRET"
-          chmod +x .github/scripts/generate-worker-dev-vars.sh
-          .github/scripts/generate-worker-dev-vars.sh notifications-api
-
-      - name: Run notifications-api tests
-        id: run-tests
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          cd workers/notifications-api && pnpm test
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: notifications-api-test-results-${{ github.run_id }}
-          path: workers/notifications-api/coverage/**
-          retention-days: 7
-
-      - name: Fail if tests failed
-        if: steps.run-tests.outcome == 'failure'
+        if: steps.should-run.outputs.should_run == 'true' && steps.run-tests.outcome == 'failure'
         run: exit 1
 
       # Cleanup: Delete Neon branch immediately after job completes
@@ -1174,16 +570,9 @@ jobs:
 
   e2e-api-tests:
     name: E2E API Tests
-    needs: [auth-test, content-api-test, identity-api-test, admin-api-test, ecom-api-test, organization-api-test, notifications-api-test]
-    if: |
-      always() &&
-      (needs.auth-test.result == 'success' || needs.auth-test.result == 'skipped') &&
-      (needs.content-api-test.result == 'success' || needs.content-api-test.result == 'skipped') &&
-      (needs.identity-api-test.result == 'success' || needs.identity-api-test.result == 'skipped') &&
-      (needs.admin-api-test.result == 'success' || needs.admin-api-test.result == 'skipped') &&
-      (needs.ecom-api-test.result == 'success' || needs.ecom-api-test.result == 'skipped') &&
-      (needs.organization-api-test.result == 'success' || needs.organization-api-test.result == 'skipped') &&
-      (needs.notifications-api-test.result == 'success' || needs.notifications-api-test.result == 'skipped')
+    needs: [worker-tests]
+    # Run if all worker tests passed or were skipped (no failures)
+    if: always() && needs.worker-tests.result != 'failure'
     runs-on: ubuntu-latest
     environment: test
     outputs:
@@ -1318,8 +707,16 @@ jobs:
 
   e2e-tests:
     name: E2E Web Tests
-    needs: [e2e-api-tests]
-    if: always() && needs.e2e-api-tests.result != 'failure'
+    needs: [e2e-api-tests, changes]
+    # Only run E2E web tests if:
+    # 1. E2E API tests didn't fail
+    # 2. AND there are web-related changes (web app, auth, or shared-types)
+    if: |
+      always() &&
+      needs.e2e-api-tests.result != 'failure' &&
+      (needs.changes.outputs.web == 'true' ||
+       needs.changes.outputs.auth-worker == 'true' ||
+       needs.changes.outputs.shared-types == 'true')
     runs-on: ubuntu-latest
     environment: test
     outputs:
@@ -1473,13 +870,20 @@ jobs:
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
+  # ============================================================================
+  # CLEANUP - Safety net for any missed Neon branch deletions
+  # Note: Each test job already cleans up its own branch immediately after completion.
+  # This job serves as a final safety net only for the unit test and E2E jobs
+  # (worker-tests matrix jobs all clean up their own branches inline).
+  # ============================================================================
+
   cleanup-neon-branches:
     name: Cleanup Neon Branches
     runs-on: ubuntu-latest
-    needs: [test, auth-test, content-api-test, identity-api-test, admin-api-test, ecom-api-test, organization-api-test, notifications-api-test, e2e-api-tests, e2e-tests]
+    needs: [test, worker-tests, e2e-api-tests, e2e-tests]
     if: always()
     steps:
-      - name: Delete unit test branch
+      - name: Delete unit test branch (safety net)
         if: needs.test.result != 'skipped' && needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
         continue-on-error: true
         uses: neondatabase/delete-branch-action@v3
@@ -1488,70 +892,7 @@ jobs:
           branch: ${{ needs.test.outputs.branch_id }}
           api_key: ${{ secrets.NEON_API_KEY }}
 
-      - name: Delete auth test branch
-        if: needs.auth-test.result != 'skipped' && needs.auth-test.outputs.branch_id && needs.auth-test.outputs.branch_id != ''
-        continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.auth-test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete content-api test branch
-        if: needs.content-api-test.result != 'skipped' && needs.content-api-test.outputs.branch_id && needs.content-api-test.outputs.branch_id != ''
-        continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.content-api-test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete identity-api test branch
-        if: needs.identity-api-test.result != 'skipped' && needs.identity-api-test.outputs.branch_id && needs.identity-api-test.outputs.branch_id != ''
-        continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.identity-api-test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete admin-api test branch
-        if: needs.admin-api-test.result != 'skipped' && needs.admin-api-test.outputs.branch_id && needs.admin-api-test.outputs.branch_id != ''
-        continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.admin-api-test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete ecom-api test branch
-        if: needs.ecom-api-test.result != 'skipped' && needs.ecom-api-test.outputs.branch_id && needs.ecom-api-test.outputs.branch_id != ''
-        continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.ecom-api-test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete organization-api test branch
-        if: needs.organization-api-test.result != 'skipped' && needs.organization-api-test.outputs.branch_id && needs.organization-api-test.outputs.branch_id != ''
-        continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.organization-api-test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete notifications-api test branch
-        if: needs.notifications-api-test.result != 'skipped' && needs.notifications-api-test.outputs.branch_id && needs.notifications-api-test.outputs.branch_id != ''
-        continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.notifications-api-test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete E2E API test branch
+      - name: Delete E2E API test branch (safety net)
         if: needs.e2e-api-tests.result != 'skipped' && needs.e2e-api-tests.outputs.branch_id && needs.e2e-api-tests.outputs.branch_id != ''
         continue-on-error: true
         uses: neondatabase/delete-branch-action@v3
@@ -1560,7 +901,7 @@ jobs:
           branch: ${{ needs.e2e-api-tests.outputs.branch_id }}
           api_key: ${{ secrets.NEON_API_KEY }}
 
-      - name: Delete E2E web test branch
+      - name: Delete E2E web test branch (safety net)
         if: needs.e2e-tests.result != 'skipped' && needs.e2e-tests.outputs.branch_id && needs.e2e-tests.outputs.branch_id != ''
         continue-on-error: true
         uses: neondatabase/delete-branch-action@v3
