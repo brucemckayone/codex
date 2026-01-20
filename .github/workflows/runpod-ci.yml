@@ -99,6 +99,10 @@ jobs:
       contents: read
       packages: write
 
+    env:
+      # Expose secret as env var so we can check if it's set in step conditions
+      HAS_RUNPOD_ENDPOINT: ${{ secrets.RUNPOD_ENDPOINT_ID != '' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -137,7 +141,7 @@ jobs:
 
       - name: Update RunPod Endpoint
         # Skip on initial setup before endpoint is created
-        if: ${{ secrets.RUNPOD_ENDPOINT_ID != '' }}
+        if: env.HAS_RUNPOD_ENDPOINT == 'true'
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
@@ -147,7 +151,7 @@ jobs:
         run: python ${{ env.WORKING_DIR }}/scripts/update_runpod_endpoint.py
 
       - name: Initial Setup Notice
-        if: ${{ secrets.RUNPOD_ENDPOINT_ID == '' }}
+        if: env.HAS_RUNPOD_ENDPOINT != 'true'
         run: |
           echo "⚠️ RUNPOD_ENDPOINT_ID not set - skipping endpoint update"
           echo "Image pushed to: ghcr.io/${{ github.repository_owner }}/codex-transcoder:sha-${{ github.sha }}"
