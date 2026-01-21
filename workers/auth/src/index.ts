@@ -8,6 +8,7 @@
  * requires direct handler delegation. Request tracking is integrated.
  */
 
+import { ENV_NAMES } from '@codex/constants';
 import { securityHeaders } from '@codex/security';
 import {
   createEnvValidationMiddleware,
@@ -95,10 +96,10 @@ const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
  * Returns 404 in staging/production
  */
 app.get('/api/test/verification-token/:email', async (c) => {
-  const environment = c.env.ENVIRONMENT || 'development';
+  const environment = c.env.ENVIRONMENT || ENV_NAMES.DEVELOPMENT;
 
   // Strict guard: only allow in development/test
-  if (environment !== 'development' && environment !== 'test') {
+  if (environment !== ENV_NAMES.DEVELOPMENT && environment !== ENV_NAMES.TEST) {
     return c.notFound();
   }
   const email = c.req.param('email');
@@ -131,8 +132,10 @@ const securityHeadersMiddleware = async (
   next: Next
 ): Promise<Response | undefined> => {
   const environment =
-    (c.env.ENVIRONMENT as 'development' | 'staging' | 'production') ||
-    'development';
+    (c.env.ENVIRONMENT as
+      | typeof ENV_NAMES.DEVELOPMENT
+      | typeof ENV_NAMES.STAGING
+      | typeof ENV_NAMES.PRODUCTION) || ENV_NAMES.DEVELOPMENT;
   return securityHeaders({ environment })(c, next);
 };
 

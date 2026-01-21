@@ -8,6 +8,7 @@
  * 4. Handle global errors
  */
 
+import { COOKIES } from '@codex/constants';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { nanoid } from 'nanoid';
@@ -24,7 +25,7 @@ const sessionHook: Handle = async ({ event, resolve }) => {
   event.locals.requestId = nanoid(10);
 
   // Extract session cookie
-  const sessionCookie = event.cookies.get('codex-session');
+  const sessionCookie = event.cookies.get(COOKIES.SESSION_NAME);
 
   if (sessionCookie) {
     try {

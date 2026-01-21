@@ -6,6 +6,7 @@
  */
 
 import { SELF } from 'cloudflare:test';
+import { MIME_TYPES } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 
 describe('Template Routes', () => {
@@ -23,7 +24,7 @@ describe('Template Routes', () => {
         'http://localhost/api/templates/global',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({
             name: 'test-template',
             subject: 'Test Subject',
@@ -49,7 +50,7 @@ describe('Template Routes', () => {
         'http://localhost/api/templates/creator',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({
             name: 'my-template',
             subject: 'My Subject',
@@ -77,7 +78,7 @@ describe('Template Routes', () => {
         `http://localhost/api/templates/organizations/${orgId}`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({
             name: 'org-template',
             subject: 'Org Subject',
@@ -97,7 +98,7 @@ describe('Template Routes', () => {
         `http://localhost/api/templates/${templateId}/preview`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({ data: { userName: 'Test' } }),
         }
       );
@@ -110,7 +111,7 @@ describe('Template Routes', () => {
         `http://localhost/api/templates/${templateId}/test-send`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({
             recipientEmail: 'test@example.com',
             data: { userName: 'Test' },
@@ -127,7 +128,7 @@ describe('Template Routes', () => {
         'http://localhost/api/templates/global',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({
             name: 'invalid name with spaces!',
             subject: 'Test',
@@ -145,7 +146,7 @@ describe('Template Routes', () => {
         'http://localhost/api/templates/global',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({
             name: 'test-template',
             // Missing subject, htmlBody, textBody
@@ -160,7 +161,7 @@ describe('Template Routes', () => {
         'http://localhost/api/templates/not-a-uuid/preview',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({ data: {} }),
         }
       );
@@ -173,7 +174,7 @@ describe('Template Routes', () => {
         `http://localhost/api/templates/${templateId}/test-send`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': MIME_TYPES.APPLICATION.JSON },
           body: JSON.stringify({
             recipientEmail: 'not-an-email',
             data: {},

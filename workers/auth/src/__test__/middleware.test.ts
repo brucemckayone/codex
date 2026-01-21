@@ -1,3 +1,4 @@
+import { COOKIES } from '@codex/constants';
 import type { Context, Next } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -82,23 +83,29 @@ describe('Auth Worker Middleware - Unit Tests', () => {
   });
 
   describe('Session Handler Logic', () => {
-    it('should extract session cookie from headers', () => {
-      const cookieHeader = 'codex-session=abc123; other-cookie=value';
-      const match = cookieHeader.match(/codex-session=([^;]+)/)?.[1];
+    it('should extract session token from cookie', () => {
+      const cookieHeader = `${COOKIES.SESSION_NAME}=abc123; other-cookie=value`;
+      const match = cookieHeader.match(
+        new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
+      )?.[1];
 
       expect(match).toBe('abc123');
     });
 
-    it('should return undefined when no session cookie exists', () => {
-      const cookieHeader = 'other-cookie=value';
-      const match = cookieHeader?.match(/codex-session=([^;]+)/)?.[1];
+    it('should return undefined if no matching cookie', () => {
+      const cookieHeader = 'other-cookie=value; another=123';
+      const match = cookieHeader?.match(
+        new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
+      )?.[1];
 
       expect(match).toBeUndefined();
     });
 
-    it('should handle multiple cookies correctly', () => {
-      const cookieHeader = 'first=1; codex-session=xyz789; last=2';
-      const match = cookieHeader.match(/codex-session=([^;]+)/)?.[1];
+    it('should handle cookie in middle of string', () => {
+      const cookieHeader = `first=1; ${COOKIES.SESSION_NAME}=xyz789; last=2`;
+      const match = cookieHeader.match(
+        new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
+      )?.[1];
 
       expect(match).toBe('xyz789');
     });

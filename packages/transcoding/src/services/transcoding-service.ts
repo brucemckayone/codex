@@ -16,6 +16,7 @@
  * - Proper error handling with custom error classes
  */
 
+import { HEADERS, MEDIA_STATUS, MIME_TYPES } from '@codex/constants';
 import { scopedNotDeleted } from '@codex/database';
 
 import { mediaItems } from '@codex/database/schema';
@@ -141,10 +142,15 @@ export class TranscodingService extends BaseService {
     const media = await this.getMediaForTranscoding(mediaId, creatorId);
 
     // Verify media is in correct state
-    if (media.status !== 'uploaded') {
-      throw new InvalidMediaStateError(mediaId, media.status, 'uploaded', {
-        operation: 'triggerJob',
-      });
+    if (media.status !== MEDIA_STATUS.UPLOADED) {
+      throw new InvalidMediaStateError(
+        mediaId,
+        media.status,
+        MEDIA_STATUS.UPLOADED,
+        {
+          operation: 'triggerJob',
+        }
+      );
     }
 
     // Verify input file exists
@@ -174,8 +180,8 @@ export class TranscodingService extends BaseService {
       const response = await fetch(this.runpodApiUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.runpodApiKey}`,
+          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
+          [HEADERS.AUTHORIZATION]: `Bearer ${this.runpodApiKey}`,
         },
         body: JSON.stringify(jobRequest),
         signal: AbortSignal.timeout(this.runpodTimeout),
@@ -209,7 +215,7 @@ export class TranscodingService extends BaseService {
     await this.db
       .update(mediaItems)
       .set({
-        status: 'transcoding',
+        status: MEDIA_STATUS.TRANSCODING,
         runpodJobId,
         transcodingPriority: priority ?? media.transcodingPriority,
         updatedAt: new Date(),
@@ -274,7 +280,7 @@ export class TranscodingService extends BaseService {
       const result = await this.db
         .update(mediaItems)
         .set({
-          status: 'ready',
+          status: MEDIA_STATUS.READY,
           hlsMasterPlaylistKey: output.hlsMasterKey,
           hlsPreviewKey: output.hlsPreviewKey,
           thumbnailKey: output.thumbnailKey,
@@ -291,7 +297,10 @@ export class TranscodingService extends BaseService {
           updatedAt: new Date(),
         })
         .where(
-          and(eq(mediaItems.id, media.id), eq(mediaItems.status, 'transcoding'))
+          and(
+            eq(mediaItems.id, media.id),
+            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
+          )
         )
         .returning();
 
@@ -316,7 +325,7 @@ export class TranscodingService extends BaseService {
       const result = await this.db
         .update(mediaItems)
         .set({
-          status: 'failed',
+          status: MEDIA_STATUS.FAILED,
           // Truncate error message to fit varchar(2000) DB constraint
           transcodingError: (
             errorMessage || 'Unknown transcoding error'
@@ -324,7 +333,10 @@ export class TranscodingService extends BaseService {
           updatedAt: new Date(),
         })
         .where(
-          and(eq(mediaItems.id, media.id), eq(mediaItems.status, 'transcoding'))
+          and(
+            eq(mediaItems.id, media.id),
+            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
+          )
         )
         .returning();
 
@@ -373,7 +385,7 @@ export class TranscodingService extends BaseService {
     const result = await this.db
       .update(mediaItems)
       .set({
-        status: 'uploaded',
+        status: MEDIA_STATUS.UPLOADED,
         transcodingAttempts: media.transcodingAttempts + 1,
         transcodingError: null,
         runpodJobId: null,
@@ -382,7 +394,7 @@ export class TranscodingService extends BaseService {
       .where(
         and(
           eq(mediaItems.id, mediaId),
-          eq(mediaItems.status, 'failed'),
+          eq(mediaItems.status, MEDIA_STATUS.FAILED),
           lt(mediaItems.transcodingAttempts, 3) // Allow up to 3 retries
         )
       )
@@ -390,10 +402,15 @@ export class TranscodingService extends BaseService {
 
     if (result.length === 0) {
       // Determine which condition failed for appropriate error
-      if (media.status !== 'failed') {
-        throw new InvalidMediaStateError(mediaId, media.status, 'failed', {
-          operation: 'retryTranscoding',
-        });
+      if (media.status !== MEDIA_STATUS.FAILED) {
+        throw new InvalidMediaStateError(
+          mediaId,
+          media.status,
+          MEDIA_STATUS.FAILED,
+          {
+            operation: 'retryTranscoding',
+          }
+        );
       }
       // Must be max retries exceeded
       throw new MaxRetriesExceededError(mediaId, media.transcodingAttempts);
@@ -582,10 +599,15 @@ export class TranscodingService extends BaseService {
     const media = await this.getMediaForTranscodingInternal(mediaId);
 
     // Verify media is in correct state
-    if (media.status !== 'uploaded') {
-      throw new InvalidMediaStateError(mediaId, media.status, 'uploaded', {
-        operation: 'triggerJobInternal',
-      });
+    if (media.status !== MEDIA_STATUS.UPLOADED) {
+      throw new InvalidMediaStateError(
+        mediaId,
+        media.status,
+        MEDIA_STATUS.UPLOADED,
+        {
+          operation: 'triggerJobInternal',
+        }
+      );
     }
 
     // Construct job request using media's creatorId
@@ -608,8 +630,8 @@ export class TranscodingService extends BaseService {
       const response = await fetch(this.runpodApiUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.runpodApiKey}`,
+          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
+          [HEADERS.AUTHORIZATION]: `Bearer ${this.runpodApiKey}`,
         },
         body: JSON.stringify(jobRequest),
         signal: AbortSignal.timeout(this.runpodTimeout),
@@ -638,7 +660,7 @@ export class TranscodingService extends BaseService {
     await this.db
       .update(mediaItems)
       .set({
-        status: 'transcoding',
+        status: MEDIA_STATUS.TRANSCODING,
         runpodJobId,
         transcodingPriority: priority ?? media.transcodingPriority,
         updatedAt: new Date(),

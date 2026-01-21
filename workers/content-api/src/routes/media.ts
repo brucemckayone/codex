@@ -12,6 +12,7 @@
  * - DELETE /api/media/:id    - Soft delete
  */
 
+import { AUTH_ROLES, MEDIA_STATUS, MIME_TYPES } from '@codex/constants';
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,
@@ -44,7 +45,10 @@ const app = new Hono<HonoEnv>();
 app.post(
   '/',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { body: createMediaItemSchema },
     successStatus: 201,
     handler: async (ctx): Promise<CreateMediaResponse['data']> => {
@@ -91,7 +95,10 @@ app.get(
 app.patch(
   '/:id',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: {
       params: createIdParamsSchema(),
       body: updateMediaItemSchema,
@@ -144,7 +151,10 @@ app.get(
 app.post(
   '/:id/upload-complete',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<{ success: boolean; status: string }> => {
       const mediaId = ctx.input.params.id;
@@ -157,14 +167,18 @@ app.post(
       }
 
       // 2. Ensure media is in 'uploading' state
-      if (media.status !== 'uploading') {
+      if (media.status !== MEDIA_STATUS.UPLOADING) {
         throw new Error(
           `Cannot mark upload complete: media is already '${media.status}'`
         );
       }
 
       // 3. Update status to 'uploaded'
-      await ctx.services.media.updateStatus(mediaId, 'uploaded', creatorId);
+      await ctx.services.media.updateStatus(
+        mediaId,
+        MEDIA_STATUS.UPLOADED,
+        creatorId
+      );
 
       // 4. Trigger transcoding via media-api worker
       const mediaApiUrl = ctx.env.MEDIA_API_URL;
@@ -177,7 +191,7 @@ app.post(
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': MIME_TYPES.APPLICATION.JSON,
             'X-Worker-Secret': ctx.env.WORKER_SHARED_SECRET || '',
           },
           body: JSON.stringify({ creatorId }),
@@ -189,10 +203,10 @@ app.post(
         console.error(`Failed to trigger transcoding: ${errorText}`);
         // Don't fail the request - media is still marked as 'uploaded'
         // Transcoding can be retried manually
-        return { success: true, status: 'uploaded' };
+        return { success: true, status: MEDIA_STATUS.UPLOADED };
       }
 
-      return { success: true, status: 'transcoding' };
+      return { success: true, status: MEDIA_STATUS.TRANSCODING };
     },
   })
 );
@@ -210,7 +224,7 @@ app.delete(
   procedure({
     policy: {
       auth: 'required',
-      roles: ['creator', 'admin'],
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
       rateLimit: 'auth', // Stricter rate limit for deletion
     },
     input: { params: createIdParamsSchema() },

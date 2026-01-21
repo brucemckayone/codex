@@ -15,9 +15,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/security": "workspace:*",
+    "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",

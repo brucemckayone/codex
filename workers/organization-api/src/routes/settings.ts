@@ -16,7 +16,7 @@
  * - PUT    /api/organizations/:id/settings/features     - Update feature settings
  */
 
-import { CACHE_TTL } from '@codex/constants';
+import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient, eq, schema } from '@codex/database';
 import type { Bindings, HonoEnv } from '@codex/shared-types';
 import {
@@ -77,7 +77,8 @@ export async function updateBrandCache(
       branding = {
         logoUrl:
           settings.branding?.logoUrl ?? settings.organization.logoUrl ?? null,
-        primaryColorHex: settings.branding?.primaryColorHex ?? '#3B82F6',
+        primaryColorHex:
+          settings.branding?.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
       };
     } else {
       // Fallback: Settings not created yet, fetch org directly
@@ -99,7 +100,7 @@ export async function updateBrandCache(
       slug = org.slug;
       branding = {
         logoUrl: org.logoUrl ?? null,
-        primaryColorHex: '#3B82F6', // Default blue
+        primaryColorHex: BRAND_COLORS.DEFAULT_BLUE, // Default blue
       };
     }
 

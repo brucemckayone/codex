@@ -7,7 +7,14 @@
  * - Typed error handling
  */
 
-import { getServiceUrl, type ServiceName } from '@codex/constants';
+import {
+  COOKIES,
+  getServiceUrl,
+  HEADERS,
+  MIME_TYPES,
+  type ServiceName,
+} from '@codex/constants';
+
 import { dev } from '$app/environment';
 import { ApiError } from './errors';
 
@@ -50,13 +57,13 @@ export function createServerApi(platform: App.Platform | undefined) {
     ): Promise<T> {
       const url = `${serverApiUrl(platform, worker)}${path}`;
       const headers: HeadersInit = {
-        'Content-Type': 'application/json',
+        [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         ...options?.headers,
       };
 
       if (sessionCookie) {
         (headers as Record<string, string>).Cookie =
-          `codex-session=${sessionCookie}`;
+          `${COOKIES.SESSION_NAME}=${sessionCookie}`;
       }
 
       const response = await fetch(url, {

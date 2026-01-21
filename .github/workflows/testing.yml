@@ -199,6 +199,7 @@ jobs:
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/constants build
           pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch
@@ -481,6 +482,7 @@ jobs:
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/constants build
           pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations
@@ -622,6 +624,7 @@ jobs:
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/constants build
           pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations
@@ -769,6 +772,7 @@ jobs:
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/constants build
           pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations to ephemeral branch

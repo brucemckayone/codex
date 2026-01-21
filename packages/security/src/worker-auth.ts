@@ -1,3 +1,4 @@
+import { HEADERS, MIME_TYPES } from '@codex/constants';
 import type { Context, Next } from 'hono';
 
 export interface WorkerAuthOptions {
@@ -99,9 +100,9 @@ async function verifyWorkerSignature(
  * await fetch('https://api.revelations.studio/internal/webhook', {
  *   method: 'POST',
  *   headers: {
- *     'Content-Type': 'application/json',
- *     'X-Worker-Signature': signature,
- *     'X-Worker-Timestamp': timestamp.toString(),
+ *     [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
+ *     [HEADERS.WORKER_SIGNATURE]: signature,
+ *     [HEADERS.WORKER_TIMESTAMP]: timestamp.toString(),
  *   },
  *   body,
  * });
@@ -111,8 +112,8 @@ export function workerAuth(options: WorkerAuthOptions) {
   const {
     secret,
     allowedOrigins,
-    signatureHeader = 'X-Worker-Signature',
-    timestampHeader = 'X-Worker-Timestamp',
+    signatureHeader = HEADERS.WORKER_SIGNATURE,
+    timestampHeader = HEADERS.WORKER_TIMESTAMP,
     maxAge = 300,
   } = options;
 
@@ -214,8 +215,8 @@ export async function workerFetch(
   options: Pick<WorkerAuthOptions, 'signatureHeader' | 'timestampHeader'> = {}
 ): Promise<Response> {
   const {
-    signatureHeader = 'X-Worker-Signature',
-    timestampHeader = 'X-Worker-Timestamp',
+    signatureHeader = HEADERS.WORKER_SIGNATURE,
+    timestampHeader = HEADERS.WORKER_TIMESTAMP,
   } = options;
 
   const timestamp = Math.floor(Date.now() / 1000);
@@ -224,7 +225,7 @@ export async function workerFetch(
   const headers = new Headers(init.headers);
   headers.set(signatureHeader, signature);
   headers.set(timestampHeader, timestamp.toString());
-  headers.set('Content-Type', 'application/json');
+  headers.set(HEADERS.CONTENT_TYPE, MIME_TYPES.APPLICATION.JSON);
 
   return fetch(url, {
     ...init,

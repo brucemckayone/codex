@@ -21,6 +21,12 @@
  * @module purchase-service
  */
 
+import {
+  ACCESS_TYPES,
+  CONTENT_STATUS,
+  CURRENCY,
+  PURCHASE_STATUS,
+} from '@codex/constants';
 import { content, contentAccess, purchases } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
@@ -150,7 +156,7 @@ export class PurchaseService extends BaseService {
       }
 
       // Check content is published
-      if (contentRecord.status !== 'published') {
+      if (contentRecord.status !== CONTENT_STATUS.PUBLISHED) {
         throw new ContentNotPurchasableError(
           validated.contentId,
           'not_published',
@@ -184,7 +190,7 @@ export class PurchaseService extends BaseService {
         where: and(
           eq(purchases.customerId, customerId),
           eq(purchases.contentId, validated.contentId),
-          eq(purchases.status, 'completed')
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED)
         ),
       });
 
@@ -199,7 +205,7 @@ export class PurchaseService extends BaseService {
         line_items: [
           {
             price_data: {
-              currency: 'usd',
+              currency: CURRENCY.USD,
               unit_amount: contentRecord.priceCents,
               product_data: {
                 name: contentRecord.title,
@@ -356,9 +362,9 @@ export class PurchaseService extends BaseService {
             contentId: metadata.contentId,
             organizationId: organizationId, // Fetched from content if needed
             amountPaidCents: metadata.amountPaidCents,
-            currency: metadata.currency || 'usd',
+            currency: metadata.currency || CURRENCY.USD,
             stripePaymentIntentId,
-            status: 'completed',
+            status: PURCHASE_STATUS.COMPLETED,
             purchasedAt: new Date(),
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
@@ -380,7 +386,7 @@ export class PurchaseService extends BaseService {
           userId: metadata.customerId,
           contentId: metadata.contentId,
           organizationId: organizationId, // Use same fetched value
-          accessType: 'purchased',
+          accessType: ACCESS_TYPES.PURCHASED,
           expiresAt: null, // Permanent access for purchases
         });
 
@@ -425,7 +431,7 @@ export class PurchaseService extends BaseService {
         where: and(
           eq(purchases.contentId, contentId),
           eq(purchases.customerId, customerId),
-          eq(purchases.status, 'completed')
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED)
         ),
       });
 
