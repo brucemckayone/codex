@@ -1,5 +1,6 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
+import { MEDIA_TYPES, VIDEO_PROGRESS } from '@codex/constants';
 import type { DatabaseWs } from '@codex/database';
 import { createPerRequestDbClient } from '@codex/database';
 import {
@@ -18,6 +19,7 @@ import type {
   SavePlaybackProgressInput,
 } from '@codex/validation';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { LOG_EVENTS, LOG_SEVERITY, SERVICE_NAME } from '../constants';
 import {
   AccessDeniedError,
   ContentNotFoundError,
@@ -201,9 +203,9 @@ export class ContentAccessService {
                     userId,
                     contentId: input.contentId,
                     priceCents: contentRecord.priceCents,
-                    securityEvent: 'UNAUTHORIZED_ACCESS_ATTEMPT',
-                    severity: 'MEDIUM',
-                    eventType: 'access_control',
+                    securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                    severity: LOG_SEVERITY.MEDIUM,
+                    eventType: LOG_EVENTS.ACCESS_CONTROL,
                   }
                 );
                 throw new AccessDeniedError(userId, input.contentId, {
@@ -227,9 +229,9 @@ export class ContentAccessService {
                   contentId: input.contentId,
                   organizationId: contentOrgId,
                   priceCents: contentRecord.priceCents,
-                  securityEvent: 'UNAUTHORIZED_ACCESS_ATTEMPT',
-                  severity: 'MEDIUM',
-                  eventType: 'access_control',
+                  securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                  severity: LOG_SEVERITY.MEDIUM,
+                  eventType: LOG_EVENTS.ACCESS_CONTROL,
                 });
                 throw new AccessDeniedError(userId, input.contentId, {
                   priceCents: contentRecord.priceCents,
@@ -285,7 +287,7 @@ export class ContentAccessService {
           // Validate media type (defense-in-depth)
           const mediaType = contentRecord.mediaItem.mediaType;
 
-          if (!['video', 'audio'].includes(mediaType)) {
+          if (![MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO].includes(mediaType)) {
             obs.error('Invalid media type', {
               mediaType,
               contentId: input.contentId,
@@ -369,8 +371,9 @@ export class ContentAccessService {
   ): Promise<void> {
     const { db, obs } = this.config;
 
-    // Auto-complete if watched >= 95%
-    const completionThreshold = input.durationSeconds * 0.95;
+    // Auto-complete if watched >= completion threshold
+    const completionThreshold =
+      input.durationSeconds * VIDEO_PROGRESS.COMPLETION_THRESHOLD;
     const isCompleted = input.positionSeconds >= completionThreshold;
 
     obs.info('Saving playback progress', {
@@ -646,7 +649,7 @@ export function createContentAccessService(env: ContentAccessEnv): {
   }
 
   const obs = new ObservabilityClient(
-    'content-access-service',
+    SERVICE_NAME,
     env.ENVIRONMENT ?? 'development'
   );
 

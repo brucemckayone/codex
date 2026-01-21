@@ -27,6 +27,7 @@
     "service-layer"
   ],
   "dependencies": {
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "zod": "^3.24.1"

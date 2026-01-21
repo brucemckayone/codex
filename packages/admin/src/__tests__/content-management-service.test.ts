@@ -14,6 +14,7 @@
  * - Each test creates its own data (idempotent tests)
  */
 
+import { CONTENT_STATUS, PAGINATION } from '@codex/constants';
 import {
   content as contentTable,
   mediaItems,
@@ -70,7 +71,7 @@ describe('AdminContentManagementService', () => {
       expect(result.items).toHaveLength(0);
       expect(result.pagination.total).toBe(0);
       expect(result.pagination.page).toBe(1);
-      expect(result.pagination.limit).toBe(20);
+      expect(result.pagination.limit).toBe(PAGINATION.DEFAULT);
     });
 
     it('should list all non-deleted content for organization', async () => {
@@ -98,7 +99,7 @@ describe('AdminContentManagementService', () => {
           title: `Content ${i}`,
           slug: createUniqueSlug(`list-test-${i}`),
           contentType: 'video',
-          status: i % 2 === 0 ? 'draft' : 'published',
+          status: i % 2 === 0 ? CONTENT_STATUS.DRAFT : CONTENT_STATUS.PUBLISHED,
           visibility: 'public',
           priceCents: 0,
         });
@@ -135,7 +136,7 @@ describe('AdminContentManagementService', () => {
           title: `Paginated Content ${i}`,
           slug: createUniqueSlug(`paginate-${i}`),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         });
@@ -183,7 +184,7 @@ describe('AdminContentManagementService', () => {
           title: 'Draft Content',
           slug: createUniqueSlug('draft-filter'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         },
@@ -194,7 +195,7 @@ describe('AdminContentManagementService', () => {
           title: 'Published Content',
           slug: createUniqueSlug('published-filter'),
           contentType: 'video',
-          status: 'published',
+          status: CONTENT_STATUS.PUBLISHED,
           publishedAt: new Date(),
           visibility: 'public',
           priceCents: 0,
@@ -202,16 +203,20 @@ describe('AdminContentManagementService', () => {
       ]);
 
       const draftResult = await service.listAllContent(testOrg.id, {
-        status: 'draft',
+        status: CONTENT_STATUS.DRAFT,
       });
       const publishedResult = await service.listAllContent(testOrg.id, {
-        status: 'published',
+        status: CONTENT_STATUS.PUBLISHED,
       });
 
-      expect(draftResult.items.every((c) => c.status === 'draft')).toBe(true);
-      expect(publishedResult.items.every((c) => c.status === 'published')).toBe(
-        true
-      );
+      expect(
+        draftResult.items.every((c) => c.status === CONTENT_STATUS.DRAFT)
+      ).toBe(true);
+      expect(
+        publishedResult.items.every(
+          (c) => c.status === CONTENT_STATUS.PUBLISHED
+        )
+      ).toBe(true);
     });
 
     it('should exclude soft-deleted content', async () => {
@@ -240,7 +245,7 @@ describe('AdminContentManagementService', () => {
           title: 'Normal Content',
           slug: createUniqueSlug('normal'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -255,7 +260,7 @@ describe('AdminContentManagementService', () => {
           title: 'Deleted Content',
           slug: createUniqueSlug('deleted'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
           deletedAt: new Date(),
@@ -299,7 +304,7 @@ describe('AdminContentManagementService', () => {
           title: 'Draft to Publish',
           slug: createUniqueSlug('publish-test'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -307,7 +312,7 @@ describe('AdminContentManagementService', () => {
 
       const published = await service.publishContent(testOrg.id, draft.id);
 
-      expect(published.status).toBe('published');
+      expect(published.status).toBe(CONTENT_STATUS.PUBLISHED);
       expect(published.publishedAt).not.toBeNull();
     });
 
@@ -336,7 +341,7 @@ describe('AdminContentManagementService', () => {
           title: 'Already Published',
           slug: createUniqueSlug('idempotent-publish'),
           contentType: 'video',
-          status: 'published',
+          status: CONTENT_STATUS.PUBLISHED,
           publishedAt: new Date(),
           visibility: 'public',
           priceCents: 0,
@@ -345,7 +350,7 @@ describe('AdminContentManagementService', () => {
 
       const result = await service.publishContent(testOrg.id, content.id);
 
-      expect(result.status).toBe('published');
+      expect(result.status).toBe(CONTENT_STATUS.PUBLISHED);
     });
 
     it('should throw BusinessLogicError for video content without ready media', async () => {
@@ -373,7 +378,7 @@ describe('AdminContentManagementService', () => {
           title: 'Not Ready Content',
           slug: createUniqueSlug('not-ready'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -399,7 +404,7 @@ describe('AdminContentManagementService', () => {
           slug: createUniqueSlug('written-publish'),
           contentType: 'written',
           contentBody: 'This is written content',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -407,7 +412,7 @@ describe('AdminContentManagementService', () => {
 
       const published = await service.publishContent(testOrg.id, content.id);
 
-      expect(published.status).toBe('published');
+      expect(published.status).toBe(CONTENT_STATUS.PUBLISHED);
     });
 
     it('should throw NotFoundError for content from different organization', async () => {
@@ -439,7 +444,7 @@ describe('AdminContentManagementService', () => {
           title: 'Org1 Content',
           slug: createUniqueSlug('cross-org'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -478,7 +483,7 @@ describe('AdminContentManagementService', () => {
           title: 'Published Content',
           slug: createUniqueSlug('unpublish-test'),
           contentType: 'video',
-          status: 'published',
+          status: CONTENT_STATUS.PUBLISHED,
           publishedAt: new Date(),
           visibility: 'public',
           priceCents: 0,
@@ -490,7 +495,7 @@ describe('AdminContentManagementService', () => {
         content.id
       );
 
-      expect(unpublished.status).toBe('draft');
+      expect(unpublished.status).toBe(CONTENT_STATUS.DRAFT);
     });
 
     it('should be idempotent (unpublishing already draft content)', async () => {
@@ -518,7 +523,7 @@ describe('AdminContentManagementService', () => {
           title: 'Already Draft',
           slug: createUniqueSlug('idempotent-unpublish'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -526,7 +531,7 @@ describe('AdminContentManagementService', () => {
 
       const result = await service.unpublishContent(testOrg.id, content.id);
 
-      expect(result.status).toBe('draft');
+      expect(result.status).toBe(CONTENT_STATUS.DRAFT);
     });
 
     it('should throw NotFoundError for non-existent content', async () => {
@@ -562,7 +567,7 @@ describe('AdminContentManagementService', () => {
           title: 'To Delete',
           slug: createUniqueSlug('delete-test'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -606,7 +611,7 @@ describe('AdminContentManagementService', () => {
           title: 'Cross Org Delete',
           slug: createUniqueSlug('cross-org-delete'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
         })
@@ -643,7 +648,7 @@ describe('AdminContentManagementService', () => {
           title: 'Already Deleted',
           slug: createUniqueSlug('already-deleted'),
           contentType: 'video',
-          status: 'draft',
+          status: CONTENT_STATUS.DRAFT,
           visibility: 'public',
           priceCents: 0,
           deletedAt: new Date(),

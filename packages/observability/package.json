@@ -26,6 +26,7 @@
     "vitest": "^4.0.2"
   },
   "dependencies": {
+    "@codex/constants": "workspace:*",
     "vite-plugin-dts": "^4.5.4"
   }
 }

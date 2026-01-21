@@ -80,7 +80,7 @@ const checkout = new Hono<HonoEnv>();
  *   "cancelUrl": "https://app.example.com/purchase/cancel"
  * }
  */
-checkout.post(
+app.post(
   '/create',
   procedure({
     policy: {

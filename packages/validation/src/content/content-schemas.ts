@@ -1,3 +1,10 @@
+import {
+  CONTENT_STATUS,
+  CONTENT_TYPES,
+  MEDIA_STATUS,
+  MEDIA_TYPES,
+  VISIBILITY,
+} from '@codex/constants';
 import { z } from 'zod';
 import {
   createOptionalTextSchema,
@@ -98,7 +105,7 @@ export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>;
  * Media type enum
  * Aligns with database CHECK constraint: line 73
  */
-export const mediaTypeEnum = z.enum(['video', 'audio'], {
+export const mediaTypeEnum = z.enum([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO], {
   errorMap: () => ({ message: 'Media type must be video or audio' }),
 });
 
@@ -107,7 +114,13 @@ export const mediaTypeEnum = z.enum(['video', 'audio'], {
  * Aligns with database CHECK constraint: line 72
  */
 export const mediaStatusEnum = z.enum(
-  ['uploading', 'uploaded', 'transcoding', 'ready', 'failed'],
+  [
+    MEDIA_STATUS.UPLOADING,
+    MEDIA_STATUS.UPLOADED,
+    MEDIA_STATUS.TRANSCODING,
+    MEDIA_STATUS.READY,
+    MEDIA_STATUS.FAILED,
+  ],
   {
     errorMap: () => ({ message: 'Invalid media status' }),
   }
@@ -193,18 +206,26 @@ export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
  * Content type enum
  * Aligns with database CHECK constraint: line 150
  */
-export const contentTypeEnum = z.enum(['video', 'audio', 'written'], {
-  errorMap: () => ({
-    message: 'Content type must be video, audio, or written',
-  }),
-});
+export const contentTypeEnum = z.enum(
+  [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO, CONTENT_TYPES.WRITTEN],
+  {
+    errorMap: () => ({
+      message: 'Content type must be video, audio, or written',
+    }),
+  }
+);
 
 /**
  * Visibility enum
  * Aligns with database CHECK constraint: line 149
  */
 export const visibilityEnum = z.enum(
-  ['public', 'private', 'members_only', 'purchased_only'],
+  [
+    VISIBILITY.PUBLIC,
+    VISIBILITY.PRIVATE,
+    VISIBILITY.MEMBERS_ONLY,
+    VISIBILITY.PURCHASED_ONLY,
+  ],
   {
     errorMap: () => ({ message: 'Invalid visibility setting' }),
   }
@@ -214,9 +235,14 @@ export const visibilityEnum = z.enum(
  * Content status enum
  * Aligns with database CHECK constraint: line 148
  */
-export const contentStatusEnum = z.enum(['draft', 'published', 'archived'], {
-  errorMap: () => ({ message: 'Status must be draft, published, or archived' }),
-});
+export const contentStatusEnum = z.enum(
+  [CONTENT_STATUS.DRAFT, CONTENT_STATUS.PUBLISHED, CONTENT_STATUS.ARCHIVED],
+  {
+    errorMap: () => ({
+      message: 'Status must be draft, published, or archived',
+    }),
+  }
+);
 
 /**
  * Tag validation
@@ -271,7 +297,7 @@ const baseContentSchema = z.object({
   thumbnailUrl: urlSchema.optional().nullable(),
 
   // Access control
-  visibility: visibilityEnum.default('purchased_only'),
+  visibility: visibilityEnum.default(VISIBILITY.PURCHASED_ONLY),
   priceCents: priceCentsSchema.optional(),
 });
 
@@ -288,7 +314,9 @@ export const createContentSchema = baseContentSchema
   .refine(
     (data) => {
       // Video/audio content MUST have mediaItemId
-      if (['video', 'audio'].includes(data.contentType)) {
+      if (
+        [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO].includes(data.contentType)
+      ) {
         return !!data.mediaItemId;
       }
       return true;
@@ -301,7 +329,7 @@ export const createContentSchema = baseContentSchema
   .refine(
     (data) => {
       // Written content MUST have contentBody
-      if (data.contentType === 'written') {
+      if (data.contentType === CONTENT_TYPES.WRITTEN) {
         return !!data.contentBody && data.contentBody.length > 0;
       }
       return true;
@@ -316,7 +344,7 @@ export const createContentSchema = baseContentSchema
       // Free content (null or 0 price) cannot be purchased_only
       if (
         (data.priceCents === null || data.priceCents === 0) &&
-        data.visibility === 'purchased_only'
+        data.visibility === VISIBILITY.PURCHASED_ONLY
       ) {
         return false;
       }

@@ -8,7 +8,8 @@ import type {
   R2ListOptions,
   R2MultipartOptions,
 } from '@cloudflare/workers-types';
-import { MIME_TYPES } from '@codex/constants';
+import { MIME_TYPES, R2_DEFAULTS } from '@codex/constants';
+import { R2_REGIONS, RETRYABLE_STATUS_CODES } from '../constants';
 
 export type R2Opts = {
   maxRetries?: number;
@@ -38,16 +39,16 @@ export class R2Service {
     private opts: R2Opts = {},
     signingConfig?: R2SigningConfig
   ) {
-    this.opts.maxRetries = this.opts.maxRetries ?? 3;
-    this.opts.baseDelayMs = this.opts.baseDelayMs ?? 100;
-    this.opts.maxDelayMs = this.opts.maxDelayMs ?? 2000;
+    this.opts.maxRetries = this.opts.maxRetries ?? R2_DEFAULTS.MAX_RETRIES;
+    this.opts.baseDelayMs = this.opts.baseDelayMs ?? R2_DEFAULTS.BASE_DELAY_MS;
+    this.opts.maxDelayMs = this.opts.maxDelayMs ?? R2_DEFAULTS.MAX_DELAY_MS;
     this.opts.jitter = this.opts.jitter ?? true;
 
     // Initialize S3 client for presigned URLs if config provided
     if (signingConfig) {
       this.bucketName = signingConfig.bucketName;
       this.s3Client = new S3Client({
-        region: 'auto',
+        region: R2_REGIONS.AUTO,
         endpoint: `https://${signingConfig.accountId}.r2.cloudflarestorage.com`,
         credentials: {
           accessKeyId: signingConfig.accessKeyId,
@@ -62,9 +63,9 @@ export class R2Service {
   }
 
   private backoff(attempt: number) {
-    const maxDelay = this.opts.maxDelayMs ?? 2000;
+    const maxDelay = this.opts.maxDelayMs ?? R2_DEFAULTS.MAX_DELAY_MS;
     const raw = Math.min(
-      (this.opts.baseDelayMs ?? 100) * 2 ** (attempt - 1),
+      (this.opts.baseDelayMs ?? R2_DEFAULTS.BASE_DELAY_MS) * 2 ** (attempt - 1),
       maxDelay
     );
     if (!this.opts.jitter) return raw;
@@ -75,7 +76,7 @@ export class R2Service {
     if (!err) return false;
     const e = err as { status?: number };
     if (e?.status && typeof e.status === 'number')
-      return e.status >= 500 || e.status === 429;
+      return RETRYABLE_STATUS_CODES.includes(e.status);
     return true;
   }
 
@@ -86,7 +87,10 @@ export class R2Service {
       try {
         return await fn();
       } catch (err) {
-        if (attempt > (this.opts.maxRetries ?? 3) || !this.isRetryable(err))
+        if (
+          attempt > (this.opts.maxRetries ?? R2_DEFAULTS.MAX_RETRIES) ||
+          !this.isRetryable(err)
+        )
           throw err;
         await this.sleep(this.backoff(attempt));
       }

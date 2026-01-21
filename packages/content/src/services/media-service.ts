@@ -12,6 +12,7 @@
  * - Soft deletes only (sets deleted_at)
  */
 
+import { MEDIA_STATUS, PAGINATION } from '@codex/constants';
 import {
   scopedNotDeleted,
   withCreatorScope,
@@ -35,7 +36,6 @@ import type {
   MediaItemWithRelations,
   PaginatedResponse,
   PaginationParams,
-  //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
 } from '../types';
 
 /**
@@ -75,7 +75,7 @@ export class MediaItemService extends BaseService {
           title: validated.title,
           description: validated.description || null,
           mediaType: validated.mediaType,
-          status: 'uploading', // Always start as uploading
+          status: MEDIA_STATUS.UPLOADING, // Always start as uploading
           r2Key: validated.r2Key,
           fileSizeBytes: validated.fileSizeBytes,
           mimeType: validated.mimeType,
@@ -272,8 +272,10 @@ export class MediaItemService extends BaseService {
   async list(
     creatorId: string,
     filters: MediaItemFilters = {},
-    pagination: PaginationParams = { page: 1, limit: 20 }
-    //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
+    pagination: PaginationParams = {
+      page: 1,
+      limit: PAGINATION.DEFAULT,
+    }
   ): Promise<PaginatedResponse<MediaItemWithRelations>> {
     try {
       const { limit, offset } = withPagination(pagination);
@@ -361,7 +363,12 @@ export class MediaItemService extends BaseService {
    */
   async updateStatus(
     id: string,
-    status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed',
+    status:
+      | typeof MEDIA_STATUS.UPLOADING
+      | typeof MEDIA_STATUS.UPLOADED
+      | typeof MEDIA_STATUS.TRANSCODING
+      | typeof MEDIA_STATUS.READY
+      | typeof MEDIA_STATUS.FAILED,
     creatorId: string
   ): Promise<MediaItem> {
     return this.update(id, { status }, creatorId);
@@ -391,7 +398,7 @@ export class MediaItemService extends BaseService {
     return this.update(
       id,
       {
-        status: 'ready',
+        status: MEDIA_STATUS.READY,
         hlsMasterPlaylistKey: metadata.hlsMasterPlaylistKey,
         thumbnailKey: metadata.thumbnailKey,
         durationSeconds: metadata.durationSeconds,

@@ -12,6 +12,13 @@ export type ServiceName =
   | 'notifications'
   | 'media';
 
+export const ENV_NAMES = {
+  PRODUCTION: 'production',
+  STAGING: 'staging',
+  DEVELOPMENT: 'development',
+  TEST: 'test',
+} as const;
+
 /**
  * Loose interface for environment bindings.
  *
@@ -34,6 +41,26 @@ export interface Env {
   dev?: boolean;
   [key: string]: unknown;
 }
+
+/**
+ * Shared infrastructure environment variable keys
+ */
+export const INFRA_KEYS = {
+  R2: {
+    ACCOUNT_ID: 'R2_ACCOUNT_ID',
+    ACCESS_KEY_ID: 'R2_ACCESS_KEY_ID',
+    SECRET_ACCESS_KEY: 'R2_SECRET_ACCESS_KEY',
+    BUCKET_MEDIA: 'R2_BUCKET_MEDIA',
+  },
+  STRIPE: {
+    SECRET_KEY: 'STRIPE_SECRET_KEY',
+    WEBHOOK_SECRET: 'STRIPE_WEBHOOK_SECRET',
+  },
+  DATABASE: {
+    URL: 'DATABASE_URL',
+    URL_LOCAL_PROXY: 'DATABASE_URL_LOCAL_PROXY',
+  },
+} as const;
 
 export function isDev(env?: Env | boolean): boolean {
   if (typeof env === 'boolean') return env;

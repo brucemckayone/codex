@@ -1,4 +1,5 @@
 import { neon, neonConfig, Pool } from '@neondatabase/serverless';
+import { sql } from 'drizzle-orm';
 import { drizzle as drizzleHttp } from 'drizzle-orm/neon-http';
 import { drizzle as drizzleWs } from 'drizzle-orm/neon-serverless';
 import ws from 'ws';
@@ -275,7 +276,7 @@ export function createPerRequestDbClient(env: DbEnvVars): {
 export async function testDbConnection(env?: DbEnvVars): Promise<boolean> {
   try {
     const db = getDbHttp(env);
-    const result = await db.execute('SELECT 1 as value');
+    const result = await db.execute(sql`SELECT 1 as value`);
     if (
       result &&
       Array.isArray(result.rows) &&
