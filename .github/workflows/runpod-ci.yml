@@ -92,11 +92,8 @@ jobs:
     name: Deploy to RunPod
     runs-on: ubuntu-latest
     needs: [container-verification]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     environment: production
-
-    env:
-      RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
 
     permissions:
       contents: read
