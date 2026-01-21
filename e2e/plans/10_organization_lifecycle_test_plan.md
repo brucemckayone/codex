@@ -2,7 +2,7 @@
 
 **Test File:** `e2e/tests/10-organization-lifecycle.test.ts`
 **Worker:** `organization-api` (Port 42071)
-**Status:** Planned
+**Status:** Completed
 
 ## Overview
 This test suite validates the full lifecycle of organizations, focusing on creation, slug management, retrieval, updates, and soft-deletion. It complements `07-platform-settings.test.ts` by focusing on the organization entity itself rather than its settings. It ensures strict enforcement of slug uniqueness, data validation, and authorization rules for modification and deletion.
