@@ -141,8 +141,8 @@ export class AdminContentManagementService extends BaseService {
 
         // Validate content is ready to publish (video/audio need ready media)
         if (
-          [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO].includes(
-            existing.contentType as (typeof CONTENT_TYPES)[keyof typeof CONTENT_TYPES]
+          ([CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO] as string[]).includes(
+            existing.contentType
           )
         ) {
           if (!existing.mediaItem) {

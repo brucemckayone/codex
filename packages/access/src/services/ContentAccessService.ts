@@ -287,7 +287,11 @@ export class ContentAccessService {
           // Validate media type (defense-in-depth)
           const mediaType = contentRecord.mediaItem.mediaType;
 
-          if (![MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO].includes(mediaType)) {
+          if (
+            !([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO] as string[]).includes(
+              mediaType
+            )
+          ) {
             obs.error('Invalid media type', {
               mediaType,
               contentId: input.contentId,

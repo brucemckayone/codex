@@ -1,3 +1,8 @@
+export const IP_ADDRESSES = {
+  LOOPBACK: '127.0.0.1',
+  ANY: '0.0.0.0',
+} as const;
+
 export const PAGINATION = {
   DEFAULT: 20,
   MAX: 100,

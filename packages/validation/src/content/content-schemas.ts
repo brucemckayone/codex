@@ -315,7 +315,9 @@ export const createContentSchema = baseContentSchema
     (data) => {
       // Video/audio content MUST have mediaItemId
       if (
-        [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO].includes(data.contentType)
+        ([CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO] as string[]).includes(
+          data.contentType
+        )
       ) {
         return !!data.mediaItemId;
       }
