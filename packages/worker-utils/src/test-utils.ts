@@ -64,7 +64,8 @@ export interface TestUser {
  * ```
  */
 export async function createTestUser(
-  _email: string = 'test@example.com'
+  _email: string = 'test@example.com',
+  db: typeof dbHttp = dbHttp
 ): Promise<TestUser> {
   // Generate unique email to avoid conflicts
   const uniqueEmail = `test-${Date.now()}-${Math.random().toString(36).substring(7)}@example.com`;
@@ -73,7 +74,7 @@ export async function createTestUser(
   const userId = randomUUID();
 
   // Create test user
-  const [user] = await dbHttp
+  const [user] = await db
     .insert(schema.users)
     .values({
       id: userId,
@@ -95,7 +96,7 @@ export async function createTestUser(
   // Create session with 24 hour expiration
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-  const [session] = await dbHttp
+  const [session] = await db
     .insert(schema.sessions)
     .values({
       id: sessionId,
@@ -144,14 +145,15 @@ export async function createTestUser(
  *
  * @param userId - User ID to clean up
  */
-export async function cleanupTestUser(userId: string): Promise<void> {
+export async function cleanupTestUser(
+  userId: string,
+  db: typeof dbHttp = dbHttp
+): Promise<void> {
   // Delete sessions first (foreign key constraint)
-  await dbHttp
-    .delete(schema.sessions)
-    .where(eq(schema.sessions.userId, userId));
+  await db.delete(schema.sessions).where(eq(schema.sessions.userId, userId));
 
   // Delete user
-  await dbHttp.delete(schema.users).where(eq(schema.users.id, userId));
+  await db.delete(schema.users).where(eq(schema.users.id, userId));
 }
 
 /**

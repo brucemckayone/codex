@@ -8,11 +8,13 @@
  * - POST /api/user/avatar - Upload user avatar
  */
 
-import { Hono } from 'hono';
+import {
+  MAX_IMAGE_SIZE_BYTES,
+  SUPPORTED_MIME_TYPES,
+} from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { multipartProcedure } from '@codex/worker-utils';
-import { SUPPORTED_MIME_TYPES, MAX_IMAGE_SIZE_BYTES } from '@codex/image-processing';
-import { z } from 'zod';
+import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
 

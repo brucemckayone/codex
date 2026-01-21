@@ -10,8 +10,18 @@
  * These tests run in actual Cloudflare Workers runtime (workerd).
  */
 
-import { env, SELF } from 'cloudflare:test';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SELF } from 'cloudflare:test';
+import type { SingleItemResponse } from '@codex/shared-types';
+import { describe, expect, it } from 'vitest';
+
+/**
+ * Type for avatar upload response
+ */
+type AvatarResponse = SingleItemResponse<{
+  avatarUrl: string;
+  size: number;
+  mimeType: string;
+}>;
 
 /**
  * Test Utilities
@@ -178,7 +188,7 @@ describe('Image Upload E2E Tests (Codex-8rn.6)', () => {
 
       // Verify it's not accepted as valid
       if (response.status === 200) {
-        const json = await response.json();
+        const json = (await response.json()) as AvatarResponse;
         expect(json).not.toHaveProperty('data.avatarUrl');
       }
     });
@@ -205,7 +215,7 @@ describe('Image Upload E2E Tests (Codex-8rn.6)', () => {
 
       // If somehow accepted, verify scripts are sanitized
       if (response.status === 200) {
-        const json = await response.json();
+        const json = (await response.json()) as AvatarResponse;
         if (json.data?.avatarUrl) {
           // Would need to fetch URL and verify no <script> tags
           // For E2E test, check response structure
@@ -301,7 +311,7 @@ describe('Image Upload E2E Tests (Codex-8rn.6)', () => {
 
       // If upload succeeds, verify URL structure
       if (response.status === 200) {
-        const json = await response.json();
+        const json = (await response.json()) as AvatarResponse;
         expect(json.data).toHaveProperty('avatarUrl');
 
         // URL should contain avatars/ prefix
@@ -330,7 +340,7 @@ describe('Image Upload E2E Tests (Codex-8rn.6)', () => {
       });
 
       if (response.status === 200) {
-        const json = await response.json();
+        const json = (await response.json()) as AvatarResponse;
         const url = json.data.avatarUrl as string;
 
         // URL should be HTTPS and end with .webp
@@ -358,7 +368,7 @@ describe('Image Upload E2E Tests (Codex-8rn.6)', () => {
       });
 
       if (response.status === 200) {
-        const json = await response.json();
+        const json = (await response.json()) as AvatarResponse;
 
         // Output should be WebP
         expect(json.data).toHaveProperty('avatarUrl');
@@ -385,7 +395,7 @@ describe('Image Upload E2E Tests (Codex-8rn.6)', () => {
       });
 
       if (response.status === 200) {
-        const json = await response.json();
+        const json = (await response.json()) as AvatarResponse;
 
         expect(json.data).toMatchObject({
           avatarUrl: expect.any(String),
@@ -503,7 +513,7 @@ describe('Image Upload E2E Tests (Codex-8rn.6)', () => {
       });
 
       if (response.status === 200) {
-        const json = await response.json();
+        const json = (await response.json()) as AvatarResponse;
         const avatarUrl = json.data.avatarUrl as string;
 
         // In production test, would query database:

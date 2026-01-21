@@ -13,8 +13,6 @@ import { createDbClient, schema } from '@codex/database';
 import {
   TemplateAccessDeniedError,
   TemplateNotFoundError,
-  type TemplatePreviewResponse,
-  type TestSendResponse,
 } from '@codex/notifications';
 import type { HonoEnv } from '@codex/shared-types';
 import {
@@ -43,7 +41,7 @@ app.post(
       params: createIdParamsSchema(),
       body: previewTemplateSchema,
     },
-    handler: async (ctx): Promise<TemplatePreviewResponse> => {
+    handler: async (ctx) => {
       // Delegate to TemplateService for access control + rendering
       const preview = await ctx.services.templates.previewTemplateById(
         ctx.input.params.id,
@@ -53,7 +51,7 @@ app.post(
         ctx.services.notifications
       );
 
-      return { data: preview };
+      return preview;
     },
   })
 );
@@ -73,7 +71,7 @@ app.post(
       params: createIdParamsSchema(),
       body: testSendTemplateSchema,
     },
-    handler: async (ctx): Promise<TestSendResponse> => {
+    handler: async (ctx) => {
       const db = createDbClient(ctx.env);
 
       // Get template (we need the name for sending)
@@ -105,7 +103,7 @@ app.post(
         creatorId: template.creatorId,
       });
 
-      return { data: result };
+      return result;
     },
   })
 );

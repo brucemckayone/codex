@@ -30,11 +30,13 @@ import {
   createContentSchema,
   updateContentSchema,
 } from '@codex/content';
+import {
+  MAX_IMAGE_SIZE_BYTES,
+  SUPPORTED_MIME_TYPES,
+} from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
-import { procedure, multipartProcedure } from '@codex/worker-utils';
-import { SUPPORTED_MIME_TYPES, MAX_IMAGE_SIZE_BYTES } from '@codex/image-processing';
-import { z } from 'zod';
+import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();

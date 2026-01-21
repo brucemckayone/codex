@@ -151,9 +151,9 @@ export function createServiceRegistry(
           ? new R2Service(env.MEDIA_BUCKET)
           : undefined;
 
-        if (!r2Service) {
+        if (!env.R2_BUCKET_MEDIA || !r2Service) {
           throw new Error(
-            'MEDIA_BUCKET not configured. Required for image processing.'
+            'MEDIA_BUCKET or R2_BUCKET_MEDIA not configured. Required for image processing.'
           );
         }
 
@@ -161,7 +161,7 @@ export function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           r2Service,
-          mediaBucket: env.MEDIA_BUCKET,
+          mediaBucket: env.R2_BUCKET_MEDIA,
         });
       }
       return _imageProcessing;
@@ -264,6 +264,7 @@ export function createServiceRegistry(
           runpodApiKey,
           runpodEndpointId,
           webhookBaseUrl: webhookBaseUrl || 'http://localhost:4002',
+          runpodApiBaseUrl: env.RUNPOD_API_URL,
         });
       }
       return _transcoding;

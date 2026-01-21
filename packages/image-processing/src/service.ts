@@ -8,7 +8,6 @@
 import type { R2Service } from '@codex/cloudflare-clients';
 import { eq, schema } from '@codex/database';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { ImageUploadError } from './errors';
 import { extractMimeType, validateImageUpload } from './validation';
 
 export interface ImageProcessingResult {
