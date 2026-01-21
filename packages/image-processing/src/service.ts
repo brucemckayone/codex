@@ -5,12 +5,11 @@
  * for thumbnails, logos, and avatars.
  */
 
+import type { R2Service } from '@codex/cloudflare-clients';
+import { eq, schema } from '@codex/database';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { R2Service } from '@codex/cloudflare-clients';
-import { eq } from 'drizzle-orm';
-import { schema } from '@codex/database';
-import { validateImageUpload, extractMimeType } from './validation';
 import { ImageUploadError } from './errors';
+import { extractMimeType, validateImageUpload } from './validation';
 
 export interface ImageProcessingResult {
   url: string;
@@ -26,7 +25,9 @@ export class ImageProcessingService extends BaseService {
   private r2Service: R2Service;
   private mediaBucket: string;
 
-  constructor(config: ServiceConfig & { r2Service: R2Service; mediaBucket: string }) {
+  constructor(
+    config: ServiceConfig & { r2Service: R2Service; mediaBucket: string }
+  ) {
     super(config);
     this.r2Service = config.r2Service;
     this.mediaBucket = config.mediaBucket;
@@ -72,7 +73,10 @@ export class ImageProcessingService extends BaseService {
    * Process and store user avatar
    * Uploads to R2 and updates user record
    */
-  async processUserAvatar(userId: string, file: File): Promise<ImageProcessingResult> {
+  async processUserAvatar(
+    userId: string,
+    file: File
+  ): Promise<ImageProcessingResult> {
     // Validate image
     const buffer = await file.arrayBuffer();
     const mimeType = extractMimeType(file.type || 'image/jpeg');
@@ -90,7 +94,7 @@ export class ImageProcessingService extends BaseService {
     // Update user record
     await this.db
       .update(schema.users)
-      .set({ avatar: url })
+      .set({ image: url })
       .where(eq(schema.users.id, userId));
 
     return {

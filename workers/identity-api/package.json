@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@codex/database": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/worker-utils": "workspace:*",

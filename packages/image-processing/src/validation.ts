@@ -18,7 +18,7 @@ export const SUPPORTED_MIME_TYPES = new Set([
 ]);
 
 // Magic bytes (file signatures) for supported formats
-const MAGIC_BYTES: Record<string, Uint8Array[]> = {
+const MAGIC_BYTES: Record<string, readonly number[][]> = {
   'image/jpeg': [[0xff, 0xd8, 0xff]],
   'image/png': [[0x89, 0x50, 0x4e, 0x47]],
   'image/gif': [
@@ -46,7 +46,9 @@ export function validateImageSignature(
   const magicSets = MAGIC_BYTES[expectedMimeType];
 
   if (!magicSets) {
-    throw new InvalidImageError(`No magic bytes defined for ${expectedMimeType}`);
+    throw new InvalidImageError(
+      `No magic bytes defined for ${expectedMimeType}`
+    );
   }
 
   // Check if file starts with any valid magic bytes for this format
@@ -111,5 +113,9 @@ export function validateImageUpload(
  * Handles cases like "image/jpeg; charset=utf-8"
  */
 export function extractMimeType(contentType: string): string {
-  return contentType.split(';')[0].trim().toLowerCase();
+  const mimeType = contentType.split(';')[0];
+  if (!mimeType) {
+    throw new InvalidImageError('Invalid or empty Content-Type header');
+  }
+  return mimeType.trim().toLowerCase();
 }
