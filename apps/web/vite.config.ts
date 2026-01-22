@@ -12,8 +12,17 @@ export default defineConfig({
     sveltekit(),
   ],
   test: {
-    include: ['src/**/*.test.ts'], // Only unit tests, not Playwright .spec.ts files
+    include: ['src/**/*.test.ts', 'src/**/*.svelte.test.ts'], // Only unit tests, not Playwright .spec.ts files
     globals: true,
-    environment: 'happy-dom',
+    environment: 'jsdom',
+    setupFiles: ['./src/tests/setup.ts'],
   },
+  // Tell Vitest to use the `browser` entry points in `package.json` files,
+  // even though it's running in Node. This is required for Svelte 5 runes
+  // to work properly in @testing-library/svelte.
+  resolve: process.env.VITEST
+    ? {
+        conditions: ['browser'],
+      }
+    : undefined,
 });
