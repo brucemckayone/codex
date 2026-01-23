@@ -1,4 +1,4 @@
-import { createDbClient, dbWs, schema } from '@codex/database';
+import { dbHttp, dbWs, schema } from '@codex/database';
 import { cleanupDatabase, createUniqueSlug } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,24 +10,6 @@ import {
 import { httpClient } from '../helpers/http-client';
 import type { RegisteredUser } from '../helpers/types';
 import { WORKER_URLS } from '../helpers/worker-urls';
-
-/**
- * Create HTTP database client for updates that need to be visible to webhook handlers.
- *
- * Why: Tests use dbWs (WebSocket) but webhook handlers use dbHttp (HTTP).
- * These have different connection pools and transaction isolation.
- */
-function getHttpDbClient() {
-  const url =
-    process.env.DATABASE_URL_LOCAL_PROXY ||
-    'postgres://postgres:postgres@db.localtest.me:5432/main';
-
-  return createDbClient({
-    DB_METHOD: process.env.DB_METHOD || 'LOCAL_PROXY',
-    DATABASE_URL: url,
-    DATABASE_URL_LOCAL_PROXY: url,
-  });
-}
 
 // For HMAC signature generation
 const RUNPOD_WEBHOOK_SECRET =
@@ -126,8 +108,6 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
     });
 
     it('should accept valid webhook from RunPod and mark ready', async () => {
-      const dbHttp = getHttpDbClient();
-
       // Force to transcoding state using the same DB connection type as workers
       await dbHttp
         .update(schema.mediaItems)
@@ -196,7 +176,6 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
       );
       mediaId = (await createRes.json()).data.id;
 
-      const dbHttp = getHttpDbClient();
       await dbHttp
         .update(schema.mediaItems)
         .set({ status: 'transcoding', runpodJobId: failJobId })
