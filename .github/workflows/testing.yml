@@ -773,6 +773,10 @@ jobs:
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
 
+      # Build Storybook for visual/a11y tests
+      - name: Build Storybook
+        run: pnpm --filter web build-storybook
+
       # Generate .dev.vars.test files for workers to use in CI
       - name: Generate worker dev vars for E2E
         env:
@@ -809,6 +813,13 @@ jobs:
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
 
+      - name: Start Storybook server in background
+        run: |
+          cd apps/web
+          npx http-server storybook-static -p 6006 &
+          echo $! > storybook.pid
+          npx wait-on http://localhost:6006 --timeout 60000
+
       - name: Run E2E tests
         env:
           CI: "true"
@@ -827,6 +838,23 @@ jobs:
           echo "::add-mask::$STRIPE_SECRET_KEY"
           pnpm test:e2e
 
+      # Run visual tests with --update-snapshots to generate Linux baselines
+      # TODO: Remove --update-snapshots after committing the generated snapshots
+      - name: Run Visual tests (generate baselines)
+        env:
+          CI: "true"
+          PLAYWRIGHT_BASE_URL: http://localhost:8787
+        run: |
+          cd apps/web
+          pnpm exec playwright test --project=visual --update-snapshots || true
+
+      - name: Run A11y tests
+        env:
+          CI: "true"
+        run: |
+          cd apps/web
+          pnpm exec playwright test --project=a11y || true
+
       - name: Stop Wrangler dev server
         if: always()
         run: |
@@ -834,6 +862,26 @@ jobs:
             kill $(cat apps/web/wrangler.pid) || true
             rm apps/web/wrangler.pid
           fi
+
+      - name: Stop Storybook server
+        if: always()
+        run: |
+          if [ -f apps/web/storybook.pid ]; then
+            kill $(cat apps/web/storybook.pid) || true
+            rm apps/web/storybook.pid
+          fi
+
+      # Upload generated snapshots for committing to repo
+      - name: Upload Visual snapshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-snapshots-linux
+          path: |
+            apps/web/tests/visual/**/*-linux.png
+            apps/web/tests/a11y/**/*-linux.png
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
