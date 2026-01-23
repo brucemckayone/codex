@@ -107,6 +107,10 @@ jobs:
           echo "⚠️ Dry-run testing not implemented yet - relying on test workflow validation"
           echo "✅ Proceeding with migration (validated in test workflow)"
 
+      # Build @codex/constants before migrations (required dependency)
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
       # Apply migrations to production database
       # Uses DATABASE_URL from production environment secrets
       - name: Run production migrations

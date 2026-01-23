@@ -249,6 +249,10 @@ jobs:
           echo "BRANCH_NAME=preview-pr-${{ env.PR_NUMBER }}" >> $GITHUB_ENV
           echo "✅ Database branch created: preview-pr-${{ env.PR_NUMBER }}"
 
+      # Build @codex/constants before migrations (required dependency)
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
       # Run database migrations on the preview branch
       - name: Run migrations on preview branch
         run: pnpm --filter @codex/database db:migrate

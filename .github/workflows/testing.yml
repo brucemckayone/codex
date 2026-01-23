@@ -190,6 +190,10 @@ jobs:
             ${{ runner.os }}-turbo-test-
             ${{ runner.os }}-turbo-
 
+      # Build @codex/constants before migrations (required dependency)
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
       # Database Setup: Apply committed migrations to ephemeral branch
       # Note: Migrations are generated locally and committed; CI only applies them
       # Note: db_url_with_pooler from create-branch step is available in this job
@@ -466,6 +470,10 @@ jobs:
             ${{ runner.os }}-turbo-${{ matrix.turbo_key }}-
             ${{ runner.os }}-turbo-
 
+      - name: Build constants package
+        if: steps.should-run.outputs.should_run == 'true'
+        run: pnpm --filter @codex/constants build
+
       - name: Apply migrations
         if: steps.should-run.outputs.should_run == 'true'
         env:
@@ -598,6 +606,9 @@ jobs:
             ${{ runner.os }}-turbo-e2e-api-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
             ${{ runner.os }}-turbo-e2e-api-
             ${{ runner.os }}-turbo-
+
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
 
       - name: Apply migrations
         env:
@@ -736,6 +747,10 @@ jobs:
             ${{ runner.os }}-turbo-e2e-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
             ${{ runner.os }}-turbo-e2e-
             ${{ runner.os }}-turbo-
+
+      # Build @codex/constants before migrations (required dependency)
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
 
       # Database Setup: Apply committed migrations to ephemeral branch
       - name: Apply migrations to ephemeral branch
