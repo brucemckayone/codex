@@ -1,5 +1,6 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf';
+  import { expect, userEvent, within } from '@storybook/test';
   import { writable } from 'svelte/store';
   import Button from '../Button/Button.svelte';
   import * as Dialog from './index';
@@ -13,6 +14,7 @@
   const defaultOpen = writable(false);
   const confirmOpen = writable(false);
   const formOpen = writable(false);
+  const interactiveOpen = writable(false);
 </script>
 
 <Story name="Default">
@@ -69,6 +71,46 @@
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => $formOpen = false}>Cancel</Button>
         <Button variant="primary" onclick={() => $formOpen = false}>Save Changes</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<Story
+  name="Interactive Test"
+  play={async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    // Find and click the trigger button
+    const trigger = canvas.getByRole('button', { name: /open dialog/i });
+    await expect(trigger).toBeInTheDocument();
+    await userEvent.click(trigger);
+
+    // Dialog renders in a portal, so search the whole document
+    const body = within(document.body);
+    const dialog = await body.findByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // Verify dialog title is present
+    const title = within(dialog).getByText('Dialog Title');
+    await expect(title).toBeVisible();
+
+    // Click cancel to close the dialog
+    const cancelButton = within(dialog).getByRole('button', { name: /cancel/i });
+    await userEvent.click(cancelButton);
+  }}
+>
+  <Button onclick={() => $interactiveOpen = true}>Open Dialog</Button>
+  <Dialog.Root bind:open={$interactiveOpen}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Dialog Title</Dialog.Title>
+        <Dialog.Description>This is a description of the dialog content.</Dialog.Description>
+      </Dialog.Header>
+      <p style="color: var(--color-text);">Test the dialog interactions.</p>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => $interactiveOpen = false}>Cancel</Button>
+        <Button variant="primary" onclick={() => $interactiveOpen = false}>Confirm</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>

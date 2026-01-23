@@ -8,9 +8,10 @@ const config: StorybookConfig = {
   stories: ['../src/**/*.stories.@(js|ts|svelte)'],
   framework: getAbsolutePath('@storybook/sveltekit'),
   addons: [
+    getAbsolutePath('@storybook/addon-essentials'),
     getAbsolutePath('@storybook/addon-a11y'),
     getAbsolutePath('@storybook/addon-svelte-csf'),
-    getAbsolutePath('@storybook/addon-docs'),
+    getAbsolutePath('@storybook/addon-interactions'),
   ],
 };
 
