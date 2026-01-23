@@ -2,6 +2,9 @@
  * Database fixture for e2e tests
  * Integrates with @codex/database for database setup and service instantiation
  * Uses REAL services with actual R2, Stripe, etc. - NO MOCKS
+ *
+ * NOTE: This uses a factory pattern for parallel test execution.
+ * Each test file gets its own fixture instance.
  */
 
 import { ContentAccessService } from '@codex/access';
@@ -24,17 +27,14 @@ export interface DatabaseFixture {
   r2Client: R2SigningClient;
 }
 
-let fixtureInstance: DatabaseFixture | null = null;
-
 /**
- * Setup database and instantiate services with REAL dependencies
- * Reuses existing instance if already set up
+ * Factory function to create a new database fixture instance.
+ * Each test file should call this to get its own isolated fixture.
+ *
+ * NOTE: The underlying dbWs connection is shared (connection pool),
+ * but the service instances are unique per fixture.
  */
-export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
-  if (fixtureInstance) {
-    return fixtureInstance;
-  }
-
+export function createDatabaseFixture(): DatabaseFixture {
   // Use dbWs directly - already configured with environment variables
   const db = dbWs;
   const config = { db, environment: 'test' as const };
@@ -52,7 +52,7 @@ export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
 
   const stripe = createStripeClient(stripeSecretKey);
 
-  fixtureInstance = {
+  return {
     db,
     r2Client,
     contentService: new ContentService(config),
@@ -65,12 +65,31 @@ export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
       purchaseService: new PurchaseService({ db, environment: 'test' }, stripe),
     }),
   };
+}
 
+// Legacy singleton for backward compatibility
+// TODO: Migrate all tests to use createDatabaseFixture() directly
+let fixtureInstance: DatabaseFixture | null = null;
+
+/**
+ * Setup database and instantiate services with REAL dependencies
+ * Reuses existing instance if already set up (legacy behavior)
+ *
+ * @deprecated Use createDatabaseFixture() for parallel test execution
+ */
+export async function setupDatabaseFixture(): Promise<DatabaseFixture> {
+  if (fixtureInstance) {
+    return fixtureInstance;
+  }
+
+  fixtureInstance = createDatabaseFixture();
   return fixtureInstance;
 }
 
 /**
  * Teardown database connection
+ *
+ * @deprecated Use closeDbPool() directly for cleanup
  */
 export async function teardownDatabaseFixture(): Promise<void> {
   if (fixtureInstance) {

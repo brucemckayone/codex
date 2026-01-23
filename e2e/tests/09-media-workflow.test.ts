@@ -1,12 +1,9 @@
-import { dbHttp, dbWs, schema } from '@codex/database';
+import { closeDbPool, dbHttp, dbWs, schema } from '@codex/database';
 import { cleanupDatabase, createUniqueSlug } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { authFixture } from '../fixtures/auth.fixture';
-import {
-  setupDatabaseFixture,
-  teardownDatabaseFixture,
-} from '../fixtures/database.fixture';
+import { setupDatabaseFixture } from '../fixtures/database.fixture';
 import { httpClient } from '../helpers/http-client';
 import type { RegisteredUser } from '../helpers/types';
 import { WORKER_URLS } from '../helpers/worker-urls';
@@ -33,7 +30,7 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
   });
 
   afterAll(async () => {
-    await teardownDatabaseFixture();
+    await closeDbPool();
   });
 
   // Helper to generate HMAC signature

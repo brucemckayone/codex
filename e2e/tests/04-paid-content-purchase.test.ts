@@ -16,9 +16,9 @@
  * - Free content checkout rejection
  */
 
-import { dbHttp, schema } from '@codex/database';
+import { closeDbPool, dbHttp, schema } from '@codex/database';
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, test } from 'vitest';
+import { afterAll, describe, expect, test } from 'vitest';
 import { authFixture, httpClient } from '../fixtures';
 import {
   expectSuccessResponse,
@@ -685,5 +685,9 @@ describe('Paid Content Purchase Flow', () => {
     expect(checkoutResponse.ok).toBeFalsy();
     expect(checkoutResponse.status).toBeGreaterThanOrEqual(400);
     expect(checkoutResponse.status).toBeLessThanOrEqual(422);
+  });
+
+  afterAll(async () => {
+    await closeDbPool();
   });
 });
