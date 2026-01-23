@@ -1,5 +1,7 @@
 <script lang="ts">
-  const { component, props }: { component: any; props: any } = $props();
+  import type { Component } from 'svelte';
+
+  const { component, props }: { component: Component; props: Record<string, unknown> } = $props();
 </script>
 
 <svelte:component this={component} {...props}>

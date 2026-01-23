@@ -9,8 +9,6 @@
  * 5. Soft delete lifecycle and consequences
  */
 
-import { dbHttp, schema } from '@codex/database';
-import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { adminFixture, authFixture, httpClient } from '../fixtures';
 import {
@@ -240,9 +238,9 @@ describe('Organization Lifecycle', () => {
         const body = await response.json();
         const data = body.data;
         expect(data.items.length).toBeGreaterThanOrEqual(1);
-        expect(data.items.some((org: any) => org.name === uniqueName)).toBe(
-          true
-        );
+        expect(
+          data.items.some((org: { name: string }) => org.name === uniqueName)
+        ).toBe(true);
       }
     );
   });

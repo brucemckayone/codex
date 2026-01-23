@@ -1,9 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import {
-  flushSync,
-  mount,
-  unmount,
-} from '$tests/utils/component-test-utils.svelte';
+import { afterEach } from 'vitest';
+import { mount, unmount } from '$tests/utils/component-test-utils.svelte';
 import Toaster from './Toaster.svelte';
 import {
   type ToastData,

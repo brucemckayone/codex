@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
-  flushSync,
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';

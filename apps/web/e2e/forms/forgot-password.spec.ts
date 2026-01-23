@@ -73,7 +73,6 @@ test.describe('Forgot Password Form', () => {
     await page.fill('input[name="email"]', 'test@example.com');
 
     const submitButton = page.locator('button[type="submit"]');
-    const initialText = await submitButton.textContent();
 
     // Click and the button should show loading state
     await submitButton.click();

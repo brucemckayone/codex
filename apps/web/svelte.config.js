@@ -15,6 +15,7 @@ const config = {
     alias: {
       $lib: './src/lib',
       $paraglide: './src/paraglide',
+      $tests: './src/tests',
       '@codex/database': '../../packages/database/src',
       '@codex/validation': '../../packages/validation/src',
       '@codex/cloudflare-clients': '../../packages/cloudflare-clients/src',

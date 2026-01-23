@@ -99,9 +99,6 @@ describe('TextArea', () => {
     ) as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
 
-    // Store initial height state (auto-resize sets style.height)
-    const initialStyle = textarea.style.height;
-
     // Simulate multi-line input
     textarea.value = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
