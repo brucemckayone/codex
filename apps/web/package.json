@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=e2e",
     "test:e2e:ui": "playwright test --ui",
     "test:a11y": "start-server-and-test storybook 6006 'playwright test --project=a11y'",
     "test:storybook": "start-server-and-test storybook 6006 'pnpm exec test-storybook --index-json'",
