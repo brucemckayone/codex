@@ -14,6 +14,7 @@
  * - Each test creates its own data (idempotent tests)
  */
 
+import { PURCHASE_STATUS } from '@codex/constants';
 import {
   content as contentTable,
   mediaItems,
@@ -30,6 +31,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import { AdminAnalyticsService } from '../services/analytics-service';
 
 describe('AdminAnalyticsService', () => {
@@ -120,7 +122,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 2699,
           stripePaymentIntentId: `pi_test_${Date.now()}_1`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
         {
@@ -132,7 +134,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 2699,
           stripePaymentIntentId: `pi_test_${Date.now()}_2`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
       ]);
@@ -189,7 +191,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 900,
           stripePaymentIntentId: `pi_completed_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
         {
@@ -201,7 +203,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 900,
           stripePaymentIntentId: `pi_pending_${Date.now()}`,
-          status: 'pending',
+          status: PURCHASE_STATUS.PENDING,
         },
         {
           customerId,
@@ -212,7 +214,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 900,
           stripePaymentIntentId: `pi_failed_${Date.now()}`,
-          status: 'failed',
+          status: PURCHASE_STATUS.FAILED,
         },
       ]);
 
@@ -271,7 +273,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 450,
           stripePaymentIntentId: `pi_today_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: now,
         },
         {
@@ -283,7 +285,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 450,
           stripePaymentIntentId: `pi_lastweek_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: lastWeek,
         },
       ]);
@@ -365,7 +367,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 900,
           stripePaymentIntentId: `pi_org1_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
         {
@@ -377,7 +379,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 1800,
           stripePaymentIntentId: `pi_org2_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
       ]);
@@ -452,7 +454,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 450,
           stripePaymentIntentId: `pi_c1_1_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
         {
@@ -464,7 +466,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 450,
           stripePaymentIntentId: `pi_c1_2_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
         {
@@ -476,7 +478,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 450,
           stripePaymentIntentId: `pi_c2_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
       ]);
@@ -562,7 +564,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 90,
           stripePaymentIntentId: `pi_low_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
         {
@@ -574,12 +576,15 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 4500,
           stripePaymentIntentId: `pi_high_${Date.now()}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         },
       ]);
 
-      const topContent = await service.getTopContent(testOrg.id, 10);
+      const topContent = await service.getTopContent(
+        testOrg.id,
+        DEFAULT_TOP_CONTENT_LIMIT
+      );
 
       expect(topContent).toHaveLength(2);
       expect(topContent[0].contentId).toBe(highRevenue.id);
@@ -630,7 +635,7 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: (i + 1) * 90,
           stripePaymentIntentId: `pi_limit_${Date.now()}_${i}`,
-          status: 'completed',
+          status: PURCHASE_STATUS.COMPLETED,
           purchasedAt: new Date(),
         });
       }

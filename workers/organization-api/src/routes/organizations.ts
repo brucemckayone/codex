@@ -15,6 +15,7 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
+import { BRAND_COLORS } from '@codex/constants';
 import type {
   CreateOrganizationResponse,
   OrganizationBySlugResponse,
@@ -159,7 +160,7 @@ app.get(
 
       return {
         logoUrl: branding.logoUrl ?? null,
-        primaryColorHex: branding.primaryColorHex ?? '#3B82F6',
+        primaryColorHex: branding.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
       };
     },
   })

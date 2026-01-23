@@ -16,6 +16,7 @@
  * - No cleanup needed - fresh database for this file
  */
 
+import { CONTENT_STATUS, MEDIA_STATUS } from '@codex/constants';
 import { OrganizationService } from '@codex/organization';
 import {
   createUniqueSlug,
@@ -95,7 +96,7 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      expect(readyMedia.status).toBe('ready');
+      expect(readyMedia.status).toBe(MEDIA_STATUS.READY);
 
       // Step 4: Create content linked to org and media
       const content = await contentService.create(
@@ -123,7 +124,7 @@ describe('Integration Tests', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved?.organization?.id).toBe(org.id);
       expect(retrieved?.mediaItem?.id).toBe(readyMedia.id);
-      expect(retrieved?.mediaItem?.status).toBe('ready');
+      expect(retrieved?.mediaItem?.status).toBe(MEDIA_STATUS.READY);
     });
 
     it('should create personal content without organization', async () => {
@@ -186,13 +187,21 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      expect(media.status).toBe('uploading');
+      expect(media.status).toBe(MEDIA_STATUS.UPLOADING);
 
       // 2. Mark as uploaded
-      await mediaService.updateStatus(media.id, 'uploaded', creatorId);
+      await mediaService.updateStatus(
+        media.id,
+        MEDIA_STATUS.UPLOADED,
+        creatorId
+      );
 
       // 3. Mark as transcoding
-      await mediaService.updateStatus(media.id, 'transcoding', creatorId);
+      await mediaService.updateStatus(
+        media.id,
+        MEDIA_STATUS.TRANSCODING,
+        creatorId
+      );
 
       // 4. Mark as ready with metadata
       const ready = await mediaService.markAsReady(
@@ -207,7 +216,7 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      expect(ready.status).toBe('ready');
+      expect(ready.status).toBe(MEDIA_STATUS.READY);
 
       // 5. Create content
       const content = await contentService.create(
@@ -223,18 +232,18 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      expect(content.status).toBe('draft');
+      expect(content.status).toBe(CONTENT_STATUS.DRAFT);
 
       // 6. Publish content
       const published = await contentService.publish(content.id, creatorId);
 
-      expect(published.status).toBe('published');
+      expect(published.status).toBe(CONTENT_STATUS.PUBLISHED);
       expect(published.publishedAt).not.toBeNull();
 
       // 7. Verify final state
       const final = await contentService.get(content.id, creatorId);
-      expect(final?.status).toBe('published');
-      expect(final?.mediaItem?.status).toBe('ready');
+      expect(final?.status).toBe(CONTENT_STATUS.PUBLISHED);
+      expect(final?.mediaItem?.status).toBe(MEDIA_STATUS.READY);
     });
 
     it('should prevent publishing content with non-ready media', async () => {
@@ -250,7 +259,11 @@ describe('Integration Tests', () => {
         creatorId
       );
 
-      await mediaService.updateStatus(media.id, 'transcoding', creatorId);
+      await mediaService.updateStatus(
+        media.id,
+        MEDIA_STATUS.TRANSCODING,
+        creatorId
+      );
 
       const content = await contentService.create(
         {
@@ -559,7 +572,7 @@ describe('Integration Tests', () => {
 
       // Content should remain published
       const published = await contentService.get(content.id, creatorId);
-      expect(published?.status).toBe('published');
+      expect(published?.status).toBe(CONTENT_STATUS.PUBLISHED);
     });
   });
 

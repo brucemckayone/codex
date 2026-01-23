@@ -1,3 +1,4 @@
+import { DOMAINS, SERVICE_PORTS } from '@codex/constants';
 import { describe, expect, it, vi } from 'vitest';
 import { ConsoleProvider } from '../console-provider';
 import { createEmailProvider } from '../index';
@@ -36,7 +37,7 @@ describe('createEmailProvider', () => {
 
   it('returns MailHog provider when URL provided', () => {
     const provider = createEmailProvider({
-      mailhogUrl: 'http://localhost:8025',
+      mailhogUrl: `http://${DOMAINS.LOCAL}:${SERVICE_PORTS.MAILHOG}`,
     });
     expect(provider.name).toBe('mailhog');
   });

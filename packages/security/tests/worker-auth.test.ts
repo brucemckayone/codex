@@ -1,3 +1,4 @@
+import { HEADERS } from '@codex/constants';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -77,7 +78,7 @@ describe('Worker Authentication', () => {
       const res = await app.request('/internal/action', {
         method: 'POST',
         headers: {
-          'X-Worker-Signature': 'some-signature',
+          [HEADERS.WORKER_SIGNATURE]: 'some-signature',
         },
         body: JSON.stringify({ data: 'test' }),
       });
@@ -93,8 +94,8 @@ describe('Worker Authentication', () => {
       const res = await app.request('/internal/action', {
         method: 'POST',
         headers: {
-          'X-Worker-Signature': 'invalid-signature',
-          'X-Worker-Timestamp': timestamp.toString(),
+          [HEADERS.WORKER_SIGNATURE]: 'invalid-signature',
+          [HEADERS.WORKER_TIMESTAMP]: timestamp.toString(),
         },
         body: JSON.stringify({ data: 'test' }),
       });
@@ -116,8 +117,8 @@ describe('Worker Authentication', () => {
       const res = await app.request('/internal/action', {
         method: 'POST',
         headers: {
-          'X-Worker-Signature': signature,
-          'X-Worker-Timestamp': timestamp.toString(),
+          [HEADERS.WORKER_SIGNATURE]: signature,
+          [HEADERS.WORKER_TIMESTAMP]: timestamp.toString(),
         },
         body: payload,
       });
@@ -139,8 +140,8 @@ describe('Worker Authentication', () => {
       const res = await app.request('/internal/action', {
         method: 'POST',
         headers: {
-          'X-Worker-Signature': signature,
-          'X-Worker-Timestamp': oldTimestamp.toString(),
+          [HEADERS.WORKER_SIGNATURE]: signature,
+          [HEADERS.WORKER_TIMESTAMP]: oldTimestamp.toString(),
         },
         body: payload,
       });
@@ -162,8 +163,8 @@ describe('Worker Authentication', () => {
       const res = await app.request('/internal/action', {
         method: 'POST',
         headers: {
-          'X-Worker-Signature': signature,
-          'X-Worker-Timestamp': futureTimestamp.toString(),
+          [HEADERS.WORKER_SIGNATURE]: signature,
+          [HEADERS.WORKER_TIMESTAMP]: futureTimestamp.toString(),
         },
         body: payload,
       });
@@ -177,8 +178,8 @@ describe('Worker Authentication', () => {
       const res = await app.request('/internal/action', {
         method: 'POST',
         headers: {
-          'X-Worker-Signature': 'some-sig',
-          'X-Worker-Timestamp': 'not-a-number',
+          [HEADERS.WORKER_SIGNATURE]: 'some-sig',
+          [HEADERS.WORKER_TIMESTAMP]: 'not-a-number',
         },
         body: JSON.stringify({ data: 'test' }),
       });
@@ -214,8 +215,8 @@ describe('Worker Authentication', () => {
         method: 'POST',
         headers: {
           origin: 'https://malicious-worker.com',
-          'X-Worker-Signature': signature,
-          'X-Worker-Timestamp': timestamp.toString(),
+          [HEADERS.WORKER_SIGNATURE]: signature,
+          [HEADERS.WORKER_TIMESTAMP]: timestamp.toString(),
         },
         body: payload,
       });
@@ -238,8 +239,8 @@ describe('Worker Authentication', () => {
         method: 'POST',
         headers: {
           origin: 'https://trusted-worker.com',
-          'X-Worker-Signature': signature,
-          'X-Worker-Timestamp': timestamp.toString(),
+          [HEADERS.WORKER_SIGNATURE]: signature,
+          [HEADERS.WORKER_TIMESTAMP]: timestamp.toString(),
         },
         body: payload,
       });

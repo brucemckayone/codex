@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/purchase": "workspace:*",

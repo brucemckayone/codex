@@ -17,9 +17,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.931.0",
-    "@aws-sdk/s3-request-presigner": "^3.914.0",
-    "vite-plugin-dts": "^4.5.4"
+    "@aws-sdk/client-s3": "^3.529.0",
+    "@aws-sdk/s3-request-presigner": "^3.529.0",
+    "@codex/constants": "workspace:*",
+    "@codex/service-errors": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",

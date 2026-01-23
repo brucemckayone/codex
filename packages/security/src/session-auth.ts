@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { AUTH_COOKIES, COOKIES } from '@codex/constants';
 import { createDbClient, type DbEnvVars, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import { and, eq, gt } from 'drizzle-orm';
@@ -91,8 +92,8 @@ function extractSessionCookie(
   const cookieNames = [
     cookieName,
     `__Secure-${cookieName}`,
-    'better-auth.session_token',
-    '__Secure-better-auth.session_token',
+    AUTH_COOKIES.BETTER_AUTH,
+    `__Secure-${AUTH_COOKIES.BETTER_AUTH}`,
   ];
   let matchedValue: string | null = null;
 
@@ -300,7 +301,7 @@ async function getSessionFromCache(
  * @returns Hono middleware function
  */
 export function optionalAuth(config?: SessionAuthConfig) {
-  const cookieName = config?.cookieName || 'codex-session';
+  const cookieName = config?.cookieName || COOKIES.SESSION_NAME;
   const enableLogging = config?.enableLogging || false;
 
   return async (c: Context, next: Next) => {

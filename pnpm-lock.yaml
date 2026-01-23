@@ -266,6 +266,9 @@ importers:
       '@codex/cloudflare-clients':
         specifier: workspace:*
         version: link:../cloudflare-clients
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/content':
         specifier: workspace:*
         version: link:../content
@@ -312,6 +315,9 @@ importers:
 
   packages/admin:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/content':
         specifier: workspace:*
         version: link:../content
@@ -347,14 +353,17 @@ importers:
   packages/cloudflare-clients:
     dependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.931.0
+        specifier: ^3.529.0
         version: 3.966.0
       '@aws-sdk/s3-request-presigner':
-        specifier: ^3.914.0
+        specifier: ^3.529.0
         version: 3.966.0
-      vite-plugin-dts:
-        specifier: ^4.5.4
-        version: 4.5.4(@types/node@22.13.0)(rollup@4.55.1)(typescript@5.9.3)(vite@7.3.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../service-errors
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20241127.0
@@ -380,6 +389,9 @@ importers:
 
   packages/content:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -417,6 +429,9 @@ importers:
 
   packages/database:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@neondatabase/serverless':
         specifier: ^0.10.4
         version: 0.10.4
@@ -494,6 +509,9 @@ importers:
 
   packages/notifications:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -540,6 +558,9 @@ importers:
 
   packages/observability:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       vite-plugin-dts:
         specifier: ^4.5.4
         version: 4.5.4(@types/node@22.13.0)(rollup@4.55.1)(typescript@5.9.3)(vite@7.3.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
@@ -556,6 +577,9 @@ importers:
 
   packages/organization:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -593,6 +617,9 @@ importers:
       '@codex/cloudflare-clients':
         specifier: workspace:*
         version: link:../cloudflare-clients
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -630,6 +657,9 @@ importers:
 
   packages/purchase:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -667,6 +697,9 @@ importers:
 
   packages/security:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -692,6 +725,9 @@ importers:
 
   packages/service-errors:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -729,6 +765,9 @@ importers:
 
   packages/test-utils:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -763,6 +802,9 @@ importers:
 
   packages/transcoding:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/database':
         specifier: workspace:*
         version: link:../database
@@ -831,6 +873,9 @@ importers:
       '@codex/cloudflare-clients':
         specifier: workspace:*
         version: link:../cloudflare-clients
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@codex/content':
         specifier: workspace:*
         version: link:../content
@@ -895,6 +940,9 @@ importers:
       '@codex/admin':
         specifier: workspace:*
         version: link:../../packages/admin
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -956,6 +1004,9 @@ importers:
 
   workers/auth:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -965,6 +1016,9 @@ importers:
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../../packages/service-errors
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -1020,6 +1074,9 @@ importers:
       '@codex/access':
         specifier: workspace:*
         version: link:../../packages/access
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@codex/content':
         specifier: workspace:*
         version: link:../../packages/content
@@ -1087,6 +1144,9 @@ importers:
 
   workers/ecom-api:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -1151,6 +1211,9 @@ importers:
 
   workers/identity-api:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -1206,6 +1269,9 @@ importers:
 
   workers/media-api:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -1276,6 +1342,9 @@ importers:
 
   workers/notifications-api:
     dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database

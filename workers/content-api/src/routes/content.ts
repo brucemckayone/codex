@@ -15,6 +15,7 @@
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
  */
 
+import { AUTH_ROLES } from '@codex/constants';
 import type {
   ContentListResponse,
   ContentResponse,
@@ -51,7 +52,10 @@ const app = new Hono<HonoEnv>();
 app.post(
   '/',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { body: createContentSchema },
     successStatus: 201,
     handler: async (ctx): Promise<CreateContentResponse['data']> => {
@@ -95,7 +99,10 @@ app.get(
 app.patch(
   '/:id',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: {
       params: createIdParamsSchema(),
       body: updateContentSchema,
@@ -138,7 +145,10 @@ app.get(
 app.post(
   '/:id/publish',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<PublishContentResponse['data']> => {
       return await ctx.services.content.publish(
@@ -159,7 +169,10 @@ app.post(
 app.post(
   '/:id/unpublish',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<UnpublishContentResponse['data']> => {
       return await ctx.services.content.unpublish(
@@ -182,7 +195,7 @@ app.delete(
   procedure({
     policy: {
       auth: 'required',
-      roles: ['creator', 'admin'],
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
       rateLimit: 'auth', // Stricter rate limit for deletion
     },
     input: { params: createIdParamsSchema() },

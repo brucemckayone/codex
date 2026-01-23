@@ -5,6 +5,7 @@
  * These tests verify actual signature computation and validation.
  */
 
+import { MIME_TYPES } from '@codex/constants';
 import type { HonoEnv } from '@codex/shared-types';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -80,7 +81,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': signature,
           'X-Runpod-Timestamp': timestamp.toString(),
         },
@@ -105,7 +106,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Timestamp': timestamp.toString(),
         },
         body: TEST_PAYLOAD,
@@ -133,7 +134,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': signature,
           // Missing timestamp header
         },
@@ -158,7 +159,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': invalidSignature,
           'X-Runpod-Timestamp': timestamp.toString(),
         },
@@ -182,7 +183,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': 'not-a-valid-hex-string',
           'X-Runpod-Timestamp': timestamp.toString(),
         },
@@ -212,7 +213,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': signature,
           'X-Runpod-Timestamp': expiredTimestamp.toString(),
         },
@@ -242,7 +243,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': signature,
           'X-Runpod-Timestamp': futureTimestamp.toString(),
         },
@@ -277,7 +278,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': signature,
           'X-Runpod-Timestamp': timestamp.toString(),
         },
@@ -306,7 +307,7 @@ describe('verifyRunpodSignature middleware', () => {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
           'X-Runpod-Signature': signature,
           'X-Runpod-Timestamp': timestamp.toString(),
         },

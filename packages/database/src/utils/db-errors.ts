@@ -1,3 +1,5 @@
+import { POSTGRES_ERROR_CODES } from '@codex/constants';
+
 /**
  * Database Error Utilities
  *
@@ -53,14 +55,20 @@ function isPostgresError(error: unknown): error is PostgresError {
  * Checks both the error itself and its cause (for DrizzleQueryError wrapping)
  */
 export function isUniqueViolation(error: unknown): boolean {
-  if (isPostgresError(error) && error.code === '23505') {
+  if (
+    isPostgresError(error) &&
+    error.code === POSTGRES_ERROR_CODES.UNIQUE_VIOLATION
+  ) {
     return true;
   }
 
   // Check if the error has a cause (Drizzle wraps Postgres errors)
   if (error instanceof Error && 'cause' in error) {
     const cause = (error as { cause: unknown }).cause;
-    return isPostgresError(cause) && cause.code === '23505';
+    return (
+      isPostgresError(cause) &&
+      cause.code === POSTGRES_ERROR_CODES.UNIQUE_VIOLATION
+    );
   }
 
   return false;
@@ -73,14 +81,20 @@ export function isUniqueViolation(error: unknown): boolean {
  * Checks both the error itself and its cause (for DrizzleQueryError wrapping)
  */
 export function isForeignKeyViolation(error: unknown): boolean {
-  if (isPostgresError(error) && error.code === '23503') {
+  if (
+    isPostgresError(error) &&
+    error.code === POSTGRES_ERROR_CODES.FOREIGN_KEY_VIOLATION
+  ) {
     return true;
   }
 
   // Check if the error has a cause (Drizzle wraps Postgres errors)
   if (error instanceof Error && 'cause' in error) {
     const cause = (error as { cause: unknown }).cause;
-    return isPostgresError(cause) && cause.code === '23503';
+    return (
+      isPostgresError(cause) &&
+      cause.code === POSTGRES_ERROR_CODES.FOREIGN_KEY_VIOLATION
+    );
   }
 
   return false;
@@ -93,14 +107,20 @@ export function isForeignKeyViolation(error: unknown): boolean {
  * Checks both the error itself and its cause (for DrizzleQueryError wrapping)
  */
 export function isNotNullViolation(error: unknown): boolean {
-  if (isPostgresError(error) && error.code === '23502') {
+  if (
+    isPostgresError(error) &&
+    error.code === POSTGRES_ERROR_CODES.NOT_NULL_VIOLATION
+  ) {
     return true;
   }
 
   // Check if the error has a cause (Drizzle wraps Postgres errors)
   if (error instanceof Error && 'cause' in error) {
     const cause = (error as { cause: unknown }).cause;
-    return isPostgresError(cause) && cause.code === '23502';
+    return (
+      isPostgresError(cause) &&
+      cause.code === POSTGRES_ERROR_CODES.NOT_NULL_VIOLATION
+    );
   }
 
   return false;
