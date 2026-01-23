@@ -55,6 +55,16 @@ export function createAuthInstance(options: AuthConfigOptions) {
         enabled: true,
         maxAge: 60 * 5, // 5 minutes (short-lived)
       },
+      // Cross-subdomain authentication support
+      // Cookie domain with leading dot allows sharing across all subdomains
+      // Example: .revelations.studio allows yoga-studio.revelations.studio access
+      cookie: {
+        name: 'codex-session',
+        domain: '.revelations.studio',
+        sameSite: 'lax', // Changed from strict to support cross-subdomain navigation
+        secure: true, // HTTPS only
+        httpOnly: true, // Prevent JS access
+      },
     },
     logger: {
       level: 'debug',

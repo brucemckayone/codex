@@ -10,4 +10,5 @@ export const WORKER_URLS = {
   notifications: process.env.NOTIFICATIONS_URL || 'http://localhost:42075',
   ecom: process.env.ECOM_URL || 'http://localhost:42072',
   admin: process.env.ADMIN_URL || 'http://localhost:42073',
+  media: process.env.MEDIA_URL || 'http://localhost:4002',
 } as const;

@@ -56,23 +56,6 @@ export async function generateWorkerSignature(
 }
 
 /**
- * Verify HMAC signature for worker-to-worker communication
- */
-async function verifyWorkerSignature(
-  payload: string,
-  signature: string,
-  secret: string,
-  timestamp: number
-): Promise<boolean> {
-  const expectedSignature = await generateWorkerSignature(
-    payload,
-    secret,
-    timestamp
-  );
-  return signature === expectedSignature;
-}
-
-/**
  * Hono middleware to authenticate requests from other workers
  *
  * Validates HMAC signature and timestamp to prevent replay attacks.
@@ -171,12 +154,12 @@ export function workerAuth(options: WorkerAuthOptions) {
     const body = await c.req.text();
 
     // Verify signature
-    const isValid = await verifyWorkerSignature(
+    const expectedSignature = await generateWorkerSignature(
       body,
-      signature,
       secret,
       timestamp
     );
+    const isValid = signature === expectedSignature;
 
     if (!isValid) {
       return c.json({ error: 'Invalid signature' }, 401);

@@ -196,6 +196,11 @@ export type Bindings = {
   RUNPOD_WEBHOOK_BASE_URL?: string;
 
   /**
+   * RunPod API base URL override (for tests)
+   */
+  RUNPOD_API_URL?: string;
+
+  /**
    * Shared secret for worker-to-worker HMAC authentication
    */
   WORKER_SHARED_SECRET?: string;

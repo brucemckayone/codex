@@ -50,7 +50,8 @@
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
-        "API_URL": "http://localhost:8787"
+        "API_URL": "http://localhost:8787",
+        "MEDIA_API_URL": "http://localhost:4002"
       },
       "kv_namespaces": [
         {

@@ -89,10 +89,10 @@ describe('Media API', () => {
         body: body,
       });
 
-      // Expecting 200/202/204 (Success) OR 500 (DB Connection Error)
-      // Getting 500 confirms validation passed (didn't return 401) and we hit the service logic
-      // In this test environment, the real database isn't available, so connection failure is expected
-      expect([200, 202, 204, 500]).toContain(response.status);
+      // Expecting 200/202/204 (Success) OR 404 (Media not found - database connected but no test data)
+      // Getting 404 confirms validation passed (didn't return 401) and we hit the service logic
+      // In this test environment, the real database is available but has no test data seeded
+      expect([200, 202, 204, 404]).toContain(response.status);
     });
   });
 

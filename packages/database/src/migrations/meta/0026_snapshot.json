@@ -1,6 +1,37 @@
 {
+  "id": "f8c4d9e2-0a3b-5c6f-9d7e-2b3c4d5e6f7a",
+  "prevId": "e7b3c8d1-9f2a-4b5e-8c6d-1a2b3c4d5e6f",
   "version": "7",
   "dialect": "postgresql",
+  "enums": {
+    "public.email_send_status": {
+      "name": "email_send_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "success",
+        "failed"
+      ]
+    },
+    "public.template_scope": {
+      "name": "template_scope",
+      "schema": "public",
+      "values": [
+        "global",
+        "organization",
+        "creator"
+      ]
+    },
+    "public.template_status": {
+      "name": "template_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "active",
+        "archived"
+      ]
+    }
+  },
   "tables": {
     "public.accounts": {
       "name": "accounts",
@@ -866,7 +897,6 @@
         "check_media_type": {
           "name": "check_media_type",
           "value": "\"media_items\".\"media_type\" IN ('video', 'audio')"
-        },
         }
       },
       "isRLSEnabled": false

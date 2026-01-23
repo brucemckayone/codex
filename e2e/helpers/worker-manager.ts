@@ -64,6 +64,12 @@ const WORKERS: WorkerConfig[] = [
     cwd: resolve(__dirname, '../../workers/admin-api'),
     healthUrl: 'http://localhost:42073/health',
   },
+  {
+    name: 'media-api',
+    port: 4002,
+    cwd: resolve(__dirname, '../../workers/media-api'),
+    healthUrl: 'http://localhost:4002/health',
+  },
 ];
 
 // Assign unique inspector ports for each worker (used for debugging)

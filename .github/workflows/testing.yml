@@ -190,18 +190,9 @@ jobs:
             ${{ runner.os }}-turbo-test-
             ${{ runner.os }}-turbo-
 
-      # Database Setup: Generate and apply migrations to ephemeral branch
-      # Note: Static analysis (typecheck, lint, format) runs in separate workflow
+      # Database Setup: Apply committed migrations to ephemeral branch
+      # Note: Migrations are generated locally and committed; CI only applies them
       # Note: db_url_with_pooler from create-branch step is available in this job
-      - name: Generate migrations from schema
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/constants build
-          pnpm --filter @codex/database db:gen:drizzle
-
       - name: Apply migrations to ephemeral branch
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
@@ -475,16 +466,6 @@ jobs:
             ${{ runner.os }}-turbo-${{ matrix.turbo_key }}-
             ${{ runner.os }}-turbo-
 
-      - name: Generate migrations
-        if: steps.should-run.outputs.should_run == 'true'
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/constants build
-          pnpm --filter @codex/database db:gen:drizzle
-
       - name: Apply migrations
         if: steps.should-run.outputs.should_run == 'true'
         env:
@@ -617,15 +598,6 @@ jobs:
             ${{ runner.os }}-turbo-e2e-api-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
             ${{ runner.os }}-turbo-e2e-api-
             ${{ runner.os }}-turbo-
-
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/constants build
-          pnpm --filter @codex/database db:gen:drizzle
 
       - name: Apply migrations
         env:
@@ -765,16 +737,7 @@ jobs:
             ${{ runner.os }}-turbo-e2e-
             ${{ runner.os }}-turbo-
 
-      # Database Setup: Generate and apply migrations before E2E tests
-      - name: Generate migrations
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/constants build
-          pnpm --filter @codex/database db:gen:drizzle
-
+      # Database Setup: Apply committed migrations to ephemeral branch
       - name: Apply migrations to ephemeral branch
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}

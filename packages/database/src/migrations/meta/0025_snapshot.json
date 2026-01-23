@@ -1,7 +1,37 @@
 {
+  "id": "e7b3c8d1-9f2a-4b5e-8c6d-1a2b3c4d5e6f",
   "prevId": "26074af1-367e-44c1-8fe2-107b3ed5a75b",
   "version": "7",
   "dialect": "postgresql",
+  "enums": {
+    "public.email_send_status": {
+      "name": "email_send_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "success",
+        "failed"
+      ]
+    },
+    "public.template_scope": {
+      "name": "template_scope",
+      "schema": "public",
+      "values": [
+        "global",
+        "organization",
+        "creator"
+      ]
+    },
+    "public.template_status": {
+      "name": "template_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "active",
+        "archived"
+      ]
+    }
+  },
   "tables": {
     "public.accounts": {
       "name": "accounts",

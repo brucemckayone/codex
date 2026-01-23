@@ -1,5 +1,6 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf';
+  import { expect, userEvent, within } from '@storybook/test';
   import { writable } from 'svelte/store';
   import * as Accordion from './index';
 
@@ -11,6 +12,7 @@
   // Stores to demonstrate two-way binding with accordion state
   const defaultValue = writable<string | string[] | undefined>('item-1');
   const faqValue = writable<string | string[] | undefined>('faq-1');
+  const interactiveValue = writable<string | string[] | undefined>(undefined);
 </script>
 
 <Story name="Default">
@@ -64,6 +66,57 @@
         <Accordion.Trigger>How do I contact support?</Accordion.Trigger>
         <Accordion.Content>
           You can reach our support team via email at support@example.com or through the in-app chat. We typically respond within 24 hours.
+        </Accordion.Content>
+      </Accordion.Item>
+    </Accordion.Root>
+  </div>
+</Story>
+
+<Story
+  name="Interactive Test"
+  play={async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    // Find accordion triggers by their text
+    const trigger1 = canvas.getByRole('button', { name: /first item/i });
+    const trigger2 = canvas.getByRole('button', { name: /second item/i });
+
+    // Verify first trigger is present
+    await expect(trigger1).toBeInTheDocument();
+
+    // Click first item to expand
+    await userEvent.click(trigger1);
+
+    // Wait for content to appear (accordion uses animations)
+    const content1 = await canvas.findByText(/content for the first item/i);
+    await expect(content1).toBeInTheDocument();
+
+    // Click second item
+    await userEvent.click(trigger2);
+
+    // Wait for second content to appear
+    const content2 = await canvas.findByText(/content for the second item/i);
+    await expect(content2).toBeInTheDocument();
+  }}
+>
+  <div style="max-width: 500px;">
+    <Accordion.Root bind:value={$interactiveValue}>
+      <Accordion.Item value="test-1">
+        <Accordion.Trigger>First Item</Accordion.Trigger>
+        <Accordion.Content>
+          Content for the first item. This text should be visible when expanded.
+        </Accordion.Content>
+      </Accordion.Item>
+      <Accordion.Item value="test-2">
+        <Accordion.Trigger>Second Item</Accordion.Trigger>
+        <Accordion.Content>
+          Content for the second item. Only one item can be open at a time.
+        </Accordion.Content>
+      </Accordion.Item>
+      <Accordion.Item value="test-3">
+        <Accordion.Trigger>Third Item</Accordion.Trigger>
+        <Accordion.Content>
+          Content for the third item. Click to expand.
         </Accordion.Content>
       </Accordion.Item>
     </Accordion.Root>

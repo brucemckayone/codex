@@ -56,6 +56,7 @@ export interface TranscodingServiceConfig {
   runpodApiKey: string;
   runpodEndpointId: string;
   webhookBaseUrl: string; // Required for callbacks
+  runpodApiBaseUrl?: string; // Optional: Override base RunPod API URL (for tests)
   runpodTimeout?: number; // Configurable timeout, defaults to 30000ms
 }
 
@@ -111,7 +112,8 @@ export class TranscodingService extends BaseService {
     this.runpodTimeout = config.runpodTimeout ?? 30000;
 
     // Pre-construct URLs (won't change during service lifetime)
-    this.runpodApiUrl = `https://api.runpod.ai/v2/${config.runpodEndpointId}/run`;
+    const apiBaseUrl = config.runpodApiBaseUrl || 'https://api.runpod.ai/v2';
+    this.runpodApiUrl = `${apiBaseUrl}/${config.runpodEndpointId}/run`;
     this.webhookUrl = `${config.webhookBaseUrl}/api/transcoding/webhook`;
   }
 
@@ -657,12 +659,14 @@ export class TranscodingService extends BaseService {
     }
 
     // Update media status to 'transcoding'
+    const finalPriority = priority ?? media.transcodingPriority ?? 2;
+
     await this.db
       .update(mediaItems)
       .set({
         status: MEDIA_STATUS.TRANSCODING,
         runpodJobId,
-        transcodingPriority: priority ?? media.transcodingPriority,
+        transcodingPriority: finalPriority,
         updatedAt: new Date(),
       })
       .where(eq(mediaItems.id, mediaId));

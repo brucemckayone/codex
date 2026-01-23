@@ -26,6 +26,7 @@ import {
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
+import { workerFetch } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
@@ -186,16 +187,13 @@ app.post(
         throw new Error('MEDIA_API_URL not configured');
       }
 
-      const response = await fetch(
+      const response = await workerFetch(
         `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': MIME_TYPES.APPLICATION.JSON,
-            'X-Worker-Secret': ctx.env.WORKER_SHARED_SECRET || '',
-          },
           body: JSON.stringify({ creatorId }),
-        }
+        },
+        ctx.env.WORKER_SHARED_SECRET || ''
       );
 
       if (!response.ok) {
