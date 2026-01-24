@@ -563,6 +563,7 @@ jobs:
     name: E2E API Tests
     needs: [worker-tests]
     # Run if all worker tests passed or were skipped (no failures)
+    # Runs in parallel with e2e-tests (web)
     if: always() && needs.worker-tests.result != 'failure'
     runs-on: ubuntu-latest
     environment: test
@@ -693,13 +694,14 @@ jobs:
 
   e2e-tests:
     name: E2E Web Tests
-    needs: [e2e-api-tests, changes]
+    needs: [worker-tests, changes]
     # Only run E2E web tests if:
-    # 1. E2E API tests didn't fail
+    # 1. Worker tests didn't fail
     # 2. AND there are web-related changes (web app, auth, or shared-types)
+    # Runs in parallel with e2e-api-tests
     if: |
       always() &&
-      needs.e2e-api-tests.result != 'failure' &&
+      needs.worker-tests.result != 'failure' &&
       (needs.changes.outputs.web == 'true' ||
        needs.changes.outputs.auth-worker == 'true' ||
        needs.changes.outputs.shared-types == 'true')
@@ -805,7 +807,7 @@ jobs:
       - name: Start Auth Worker in background
         run: |
           cd workers/auth
-          pnpm wrangler dev --port 42069 --local &
+          pnpm wrangler dev --env test --port 42069 --local &
           echo $! > auth-worker.pid
           # Wait for auth worker to be ready
           timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
@@ -816,7 +818,7 @@ jobs:
         run: |
           echo "::add-mask::$DATABASE_URL"
           cd apps/web
-          pnpm wrangler dev --port 8787 --local &
+          pnpm wrangler dev --env test --port 8787 --local &
           echo $! > wrangler.pid
           # Wait for server to be ready
           timeout 60 bash -c 'until curl -f http://localhost:8787 > /dev/null 2>&1; do sleep 1; done'
