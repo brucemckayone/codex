@@ -30,6 +30,7 @@
     "@codex/observability": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/test-utils": "workspace:*",
+    "@codex/validation": "workspace:*",
     "@inlang/paraglide-sveltekit": "^0.15.0",
     "@melt-ui/svelte": "^0.86.6",
     "happy-dom": "^20.0.8",
