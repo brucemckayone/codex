@@ -25,8 +25,25 @@
     }
   ],
 
-  // Production environment
+  // Environment configurations
   "env": {
+    // Test environment (E2E tests)
+    "test": {
+      "name": "codex-web-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "AUTH_WORKER_URL": "http://localhost:42069",
+        "API_URL": "http://localhost:8787"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "BRAND_KV",
+          "id": "e86ed818ff4f4a54bfb801bb46c10788"
+        }
+      ]
+    },
+
+    // Production environment
     "production": {
       "name": "codex-web-production",
       "vars": {
@@ -41,6 +58,8 @@
         }
       ]
     },
+
+    // Staging environment
     "staging": {
       "name": "codex-web-staging",
       "vars": {
