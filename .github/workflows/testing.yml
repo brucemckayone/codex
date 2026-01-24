@@ -761,11 +761,11 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           pnpm --filter @codex/database db:migrate
 
-      # Build SvelteKit for Cloudflare Workers using Turborepo
-      - name: Build SvelteKit app with Turborepo
+      # Build all packages and workers (including Auth Worker and dependencies)
+      - name: Build all packages and workers with Turborepo
         run: |
           echo "::add-mask::$DATABASE_URL"
-          pnpm build:web
+          pnpm build
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
@@ -801,9 +801,6 @@ jobs:
       # Run E2E tests against built worker using wrangler dev
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
-
-      - name: Build Auth Worker
-        run: pnpm --filter auth build
 
       - name: Start Auth Worker in background
         run: |
