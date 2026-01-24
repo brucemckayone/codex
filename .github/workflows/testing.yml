@@ -802,6 +802,9 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
+      - name: Build Auth Worker
+        run: pnpm --filter auth build
+
       - name: Start Auth Worker in background
         run: |
           cd workers/auth
