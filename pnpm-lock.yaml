@@ -117,6 +117,9 @@ importers:
       '@codex/test-utils':
         specifier: workspace:*
         version: link:../../packages/test-utils
+      '@codex/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       '@inlang/paraglide-sveltekit':
         specifier: ^0.15.0
         version: 0.15.5(@sveltejs/kit@2.49.4(@opentelemetry/api@1.9.0)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.46.1)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)))(svelte@5.46.1)(typescript@5.9.3)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)))
