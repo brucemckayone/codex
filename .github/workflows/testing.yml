@@ -802,6 +802,16 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
+      - name: Start Auth Worker in background
+        run: |
+          cd workers/auth
+          pnpm wrangler dev --port 42069 --local &
+          echo $! > auth-worker.pid
+          # Wait for auth worker to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
       - name: Start Wrangler dev server in background
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -869,6 +879,14 @@ jobs:
           if [ -f apps/web/storybook.pid ]; then
             kill $(cat apps/web/storybook.pid) || true
             rm apps/web/storybook.pid
+          fi
+
+      - name: Stop Auth Worker
+        if: always()
+        run: |
+          if [ -f workers/auth/auth-worker.pid ]; then
+            kill $(cat workers/auth/auth-worker.pid) || true
+            rm workers/auth/auth-worker.pid
           fi
 
       # Upload generated snapshots for committing to repo
