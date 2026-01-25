@@ -2,20 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { sanitizeSvgContent } from '../primitives';
 
 describe('sanitizeSvgContent', () => {
-  it('should preserve safe SVG content', () => {
+  it('should preserve safe SVG content', async () => {
     const safeSvg = `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
         <circle cx="50" cy="50" r="40" fill="blue"/>
       </svg>
     `;
 
-    const result = sanitizeSvgContent(safeSvg);
+    const result = await sanitizeSvgContent(safeSvg);
     expect(result).toContain('<svg');
     expect(result).toContain('<circle');
     expect(result).toContain('fill="blue"');
   });
 
-  it('should remove <script> tags', () => {
+  it('should remove <script> tags', async () => {
     const maliciousSvg = `
       <svg xmlns="http://www.w3.org/2000/svg">
         <script>alert('XSS')</script>
@@ -23,25 +23,25 @@ describe('sanitizeSvgContent', () => {
       </svg>
     `;
 
-    const result = sanitizeSvgContent(maliciousSvg);
+    const result = await sanitizeSvgContent(maliciousSvg);
     expect(result).not.toContain('<script');
     expect(result).not.toContain('alert');
     expect(result).toContain('<circle'); // Safe content preserved
   });
 
-  it('should remove event handler attributes', () => {
+  it('should remove event handler attributes', async () => {
     const maliciousSvg = `
       <svg xmlns="http://www.w3.org/2000/svg">
         <circle cx="50" cy="50" r="40" onclick="alert('XSS')"/>
       </svg>
     `;
 
-    const result = sanitizeSvgContent(maliciousSvg);
+    const result = await sanitizeSvgContent(maliciousSvg);
     expect(result).not.toContain('onclick');
     expect(result).not.toContain('alert');
   });
 
-  it('should block javascript: URIs', () => {
+  it('should block javascript: URIs', async () => {
     const maliciousSvg = `
       <svg xmlns="http://www.w3.org/2000/svg">
         <a href="javascript:alert('XSS')">
@@ -50,11 +50,11 @@ describe('sanitizeSvgContent', () => {
       </svg>
     `;
 
-    const result = sanitizeSvgContent(maliciousSvg);
+    const result = await sanitizeSvgContent(maliciousSvg);
     expect(result).not.toContain('javascript:');
   });
 
-  it('should block <foreignObject> embedding', () => {
+  it('should block <foreignObject> embedding', async () => {
     const maliciousSvg = `
       <svg xmlns="http://www.w3.org/2000/svg">
         <foreignObject>
@@ -63,18 +63,20 @@ describe('sanitizeSvgContent', () => {
       </svg>
     `;
 
-    const result = sanitizeSvgContent(maliciousSvg);
+    const result = await sanitizeSvgContent(maliciousSvg);
     expect(result).not.toContain('foreignObject');
     expect(result).not.toContain('<body>');
   });
 
-  it('should throw error for completely malicious SVG (empty after sanitization)', () => {
+  it('should throw error for completely malicious SVG (empty after sanitization)', async () => {
     const maliciousSvg = '<script>alert("XSS")</script>';
 
-    expect(() => sanitizeSvgContent(maliciousSvg)).toThrow('empty content');
+    await expect(sanitizeSvgContent(maliciousSvg)).rejects.toThrow(
+      'empty content'
+    );
   });
 
-  it('should allow safe SVG elements like path and linearGradient', () => {
+  it('should allow safe SVG elements like path and linearGradient', async () => {
     const complexSvg = `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
         <defs>
@@ -87,7 +89,7 @@ describe('sanitizeSvgContent', () => {
       </svg>
     `;
 
-    const result = sanitizeSvgContent(complexSvg);
+    const result = await sanitizeSvgContent(complexSvg);
     expect(result).toContain('<path');
     expect(result).toContain('linearGradient');
     expect(result).toContain('<stop');
