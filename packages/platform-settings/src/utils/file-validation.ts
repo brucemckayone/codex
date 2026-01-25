@@ -115,8 +115,8 @@ function matchesMagicNumbers(
  * @param content - Raw SVG file content as string
  * @returns Sanitized SVG content safe for rendering
  */
-export function sanitizeSvgContent(content: string): string {
+export async function sanitizeSvgContent(content: string): Promise<string> {
   // Re-export from validation package for backwards compatibility
-  const { sanitizeSvgContent: sanitize } = require('@codex/validation');
+  const { sanitizeSvgContent: sanitize } = await import('@codex/validation');
   return sanitize(content);
 }

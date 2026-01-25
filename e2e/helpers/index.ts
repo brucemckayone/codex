@@ -8,6 +8,7 @@ export { unwrapApiResponse } from './assertions';
 export * from './cookies';
 export * from './r2-test-setup';
 export * from './stripe-webhook';
+export * from './test-isolation';
 export * from './types';
 export * from './wait-for';
 export * from './worker-manager';

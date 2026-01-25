@@ -28,6 +28,9 @@ jobs:
       - name: Start Storybook
         run: npx http-server apps/web/storybook-static -p 6006 &
 
+      - name: Wait for Storybook
+        run: npx wait-on http://localhost:6006 --timeout 60000
+
       - name: Run visual tests
         run: pnpm --filter web exec playwright test tests/visual tests/a11y
 

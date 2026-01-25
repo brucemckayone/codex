@@ -190,6 +190,10 @@ jobs:
             ${{ runner.os }}-turbo-test-
             ${{ runner.os }}-turbo-
 
+      # Build @codex/constants before migrations (required dependency)
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
       # Database Setup: Apply committed migrations to ephemeral branch
       # Note: Migrations are generated locally and committed; CI only applies them
       # Note: db_url_with_pooler from create-branch step is available in this job
@@ -466,6 +470,10 @@ jobs:
             ${{ runner.os }}-turbo-${{ matrix.turbo_key }}-
             ${{ runner.os }}-turbo-
 
+      - name: Build constants package
+        if: steps.should-run.outputs.should_run == 'true'
+        run: pnpm --filter @codex/constants build
+
       - name: Apply migrations
         if: steps.should-run.outputs.should_run == 'true'
         env:
@@ -555,6 +563,7 @@ jobs:
     name: E2E API Tests
     needs: [worker-tests]
     # Run if all worker tests passed or were skipped (no failures)
+    # Runs in parallel with e2e-tests (web)
     if: always() && needs.worker-tests.result != 'failure'
     runs-on: ubuntu-latest
     environment: test
@@ -598,6 +607,9 @@ jobs:
             ${{ runner.os }}-turbo-e2e-api-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
             ${{ runner.os }}-turbo-e2e-api-
             ${{ runner.os }}-turbo-
+
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
 
       - name: Apply migrations
         env:
@@ -682,13 +694,14 @@ jobs:
 
   e2e-tests:
     name: E2E Web Tests
-    needs: [e2e-api-tests, changes]
+    needs: [worker-tests, changes]
     # Only run E2E web tests if:
-    # 1. E2E API tests didn't fail
+    # 1. Worker tests didn't fail
     # 2. AND there are web-related changes (web app, auth, or shared-types)
+    # Runs in parallel with e2e-api-tests
     if: |
       always() &&
-      needs.e2e-api-tests.result != 'failure' &&
+      needs.worker-tests.result != 'failure' &&
       (needs.changes.outputs.web == 'true' ||
        needs.changes.outputs.auth-worker == 'true' ||
        needs.changes.outputs.shared-types == 'true')
@@ -737,6 +750,10 @@ jobs:
             ${{ runner.os }}-turbo-e2e-
             ${{ runner.os }}-turbo-
 
+      # Build @codex/constants before migrations (required dependency)
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
       # Database Setup: Apply committed migrations to ephemeral branch
       - name: Apply migrations to ephemeral branch
         env:
@@ -746,17 +763,21 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           pnpm --filter @codex/database db:migrate
 
-      # Build SvelteKit for Cloudflare Workers using Turborepo
-      - name: Build SvelteKit app with Turborepo
+      # Build all packages and workers (including Auth Worker and dependencies)
+      - name: Build all packages and workers with Turborepo
         run: |
           echo "::add-mask::$DATABASE_URL"
-          pnpm build:web
+          pnpm build
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: NEON_BRANCH
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
+
+      # Build Storybook for visual/a11y tests
+      - name: Build Storybook
+        run: pnpm --filter web build-storybook
 
       # Generate .dev.vars.test files for workers to use in CI
       - name: Generate worker dev vars for E2E
@@ -783,16 +804,33 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
+      - name: Start Auth Worker in background
+        run: |
+          cd workers/auth
+          pnpm wrangler dev --env test --port 42069 --local &
+          echo $! > auth-worker.pid
+          # Wait for auth worker to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
       - name: Start Wrangler dev server in background
         run: |
           echo "::add-mask::$DATABASE_URL"
           cd apps/web
-          pnpm wrangler dev --port 8787 --local &
+          pnpm wrangler dev --env test --port 8787 --local &
           echo $! > wrangler.pid
           # Wait for server to be ready
           timeout 60 bash -c 'until curl -f http://localhost:8787 > /dev/null 2>&1; do sleep 1; done'
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      - name: Start Storybook server in background
+        run: |
+          cd apps/web
+          npx http-server storybook-static -p 6006 &
+          echo $! > storybook.pid
+          npx wait-on http://localhost:6006 --timeout 60000
 
       - name: Run E2E tests
         env:
@@ -812,6 +850,23 @@ jobs:
           echo "::add-mask::$STRIPE_SECRET_KEY"
           pnpm test:e2e
 
+      # Run visual tests with --update-snapshots to generate Linux baselines
+      # TODO: Remove --update-snapshots after committing the generated snapshots
+      - name: Run Visual tests (generate baselines)
+        env:
+          CI: "true"
+          PLAYWRIGHT_BASE_URL: http://localhost:8787
+        run: |
+          cd apps/web
+          pnpm exec playwright test --project=visual --update-snapshots || true
+
+      - name: Run A11y tests
+        env:
+          CI: "true"
+        run: |
+          cd apps/web
+          pnpm exec playwright test --project=a11y || true
+
       - name: Stop Wrangler dev server
         if: always()
         run: |
@@ -819,6 +874,34 @@ jobs:
             kill $(cat apps/web/wrangler.pid) || true
             rm apps/web/wrangler.pid
           fi
+
+      - name: Stop Storybook server
+        if: always()
+        run: |
+          if [ -f apps/web/storybook.pid ]; then
+            kill $(cat apps/web/storybook.pid) || true
+            rm apps/web/storybook.pid
+          fi
+
+      - name: Stop Auth Worker
+        if: always()
+        run: |
+          if [ -f workers/auth/auth-worker.pid ]; then
+            kill $(cat workers/auth/auth-worker.pid) || true
+            rm workers/auth/auth-worker.pid
+          fi
+
+      # Upload generated snapshots for committing to repo
+      - name: Upload Visual snapshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-snapshots-linux
+          path: |
+            apps/web/tests/visual/**/*-linux.png
+            apps/web/tests/a11y/**/*-linux.png
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

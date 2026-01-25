@@ -3,7 +3,8 @@
  * Tests user registration, login, session validation, and logout
  */
 
-import { describe, expect, test } from 'vitest';
+import { closeDbPool } from '@codex/database';
+import { afterAll, describe, expect, test } from 'vitest';
 
 import { authFixture, httpClient } from '../fixtures';
 import { expectSuccessResponse } from '../helpers/assertions';
@@ -133,5 +134,9 @@ describe('Auth Flow', () => {
 
     expect(duplicateResponse.ok).toBe(false);
     expect(duplicateResponse.status).toBe(422); // Unprocessable Entity (validation error)
+  });
+
+  afterAll(async () => {
+    await closeDbPool();
   });
 });

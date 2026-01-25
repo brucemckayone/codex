@@ -183,7 +183,7 @@ export async function validateLogoUpload(
   if (file.type === MIME_TYPES.IMAGE.SVG) {
     const textDecoder = new TextDecoder();
     const svgContent = textDecoder.decode(buffer);
-    const sanitized = sanitizeSvgContent(svgContent);
+    const sanitized = await sanitizeSvgContent(svgContent);
     finalBuffer = new TextEncoder().encode(sanitized).buffer as ArrayBuffer;
   }
 

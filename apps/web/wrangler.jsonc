@@ -25,33 +25,60 @@
     }
   ],
 
-  // Production environment
+  // Environment configurations
   "env": {
+    // Test environment (E2E tests)
+    "test": {
+      "name": "codex-web-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "AUTH_WORKER_URL": "http://localhost:42069",
+        "API_URL": "http://localhost:8787"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "BRAND_KV",
+          "id": "e86ed818ff4f4a54bfb801bb46c10788"
+        }
+      ]
+    },
+
+    // Production environment
     "production": {
       "name": "codex-web-production",
       "vars": {
         "ENVIRONMENT": "production",
         "AUTH_WORKER_URL": "https://auth.revelations.studio",
-        "API_URL": "https://api.revelations.studio"
+        "API_URL": "https://api.revelations.studio",
+        "ORG_API_URL": "https://organization-api.revelations.studio",
+        "ECOM_API_URL": "https://ecom-api.revelations.studio"
       },
       "routes": [
         {
-          "pattern": "codex.revelations.studio",
-          "custom_domain": true
+          "pattern": "*.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        {
+          "pattern": "revelations.studio/*",
+          "zone_name": "revelations.studio"
         }
       ]
     },
+
+    // Staging environment
     "staging": {
       "name": "codex-web-staging",
       "vars": {
         "ENVIRONMENT": "staging",
         "AUTH_WORKER_URL": "https://auth-staging.revelations.studio",
-        "API_URL": "https://api-staging.revelations.studio"
+        "API_URL": "https://api-staging.revelations.studio",
+        "ORG_API_URL": "https://organization-api-staging.revelations.studio",
+        "ECOM_API_URL": "https://ecom-api-staging.revelations.studio"
       },
       "routes": [
         {
           "pattern": "*-staging.revelations.studio/*",
-          "custom_domain": true
+          "zone_name": "revelations.studio"
         }
       ]
     }

@@ -3,19 +3,32 @@ import { defineConfig } from 'vitest/config';
 /**
  * E2E API Testing Configuration (Vitest)
  * Tests backend worker flows across auth, content, identity, and ecom APIs
+ *
+ * Parallel Execution Notes:
+ * - Tests run in parallel using forked processes (maxForks: 4 in CI)
+ * - Each test file gets isolated services but shares the connection pool
+ * - Test data isolation via randomUUID prefixes (see helpers/test-isolation.ts)
+ * - All test files must have afterAll cleanup that calls closeDbPool()
  */
 export default defineConfig({
   test: {
     // Test files location
     include: ['tests/**/*.test.ts'],
 
-    // Run tests sequentially to avoid race conditions on shared database
+    // Enable parallel test execution with forked processes
     pool: 'forks',
     poolOptions: {
       forks: {
-        singleFork: true,
+        // Enable parallel execution (was singleFork: true)
+        singleFork: false,
+        // Limit concurrent forks to avoid connection pool exhaustion
+        // CI gets more forks for faster execution
+        maxForks: process.env.CI ? 4 : 2,
       },
     },
+
+    // Isolate each test file (ensures clean state per file)
+    isolate: true,
 
     // Timeouts
     testTimeout: 60000 * 5, // 5 minutes per test

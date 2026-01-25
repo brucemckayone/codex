@@ -16,10 +16,6 @@ const config = {
       $lib: './src/lib',
       $paraglide: './src/paraglide',
       $tests: './src/tests',
-      '@codex/database': '../../packages/database/src',
-      '@codex/validation': '../../packages/validation/src',
-      '@codex/cloudflare-clients': '../../packages/cloudflare-clients/src',
-      '@codex/test-utils': '../../packages/test-utils/src',
     },
     // NOTE: Remote Functions (experimental.remoteFunctions) available but not enabled yet
     // Enable when stable for type-safe client-server communication

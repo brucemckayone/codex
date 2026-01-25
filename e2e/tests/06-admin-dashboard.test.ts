@@ -12,9 +12,9 @@
  * All tests validate organization scoping to ensure data isolation.
  */
 
-import { dbHttp, schema } from '@codex/database';
+import { closeDbPool, dbHttp, schema } from '@codex/database';
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, test } from 'vitest';
+import { afterAll, describe, expect, test } from 'vitest';
 import { adminFixture, authFixture, httpClient } from '../fixtures';
 import {
   expectErrorResponse,
@@ -1595,5 +1595,9 @@ describe('Admin Dashboard', () => {
 
       expect(accessRecords).toHaveLength(1);
     }, 180000);
+  });
+
+  afterAll(async () => {
+    await closeDbPool();
   });
 });

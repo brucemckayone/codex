@@ -9,7 +9,8 @@
  * 5. Soft delete lifecycle and consequences
  */
 
-import { beforeAll, describe, expect, test } from 'vitest';
+import { closeDbPool } from '@codex/database';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { adminFixture, authFixture, httpClient } from '../fixtures';
 import {
   expectErrorResponse,
@@ -436,5 +437,9 @@ describe('Organization Lifecycle', () => {
         expect(checkBody.data.available).toBe(true);
       }
     );
+  });
+
+  afterAll(async () => {
+    await closeDbPool();
   });
 });
