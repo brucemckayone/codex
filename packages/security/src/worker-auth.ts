@@ -1,3 +1,4 @@
+import { HEADERS, MIME_TYPES } from '@codex/constants';
 import type { Context, Next } from 'hono';
 
 export interface WorkerAuthOptions {
@@ -55,23 +56,6 @@ export async function generateWorkerSignature(
 }
 
 /**
- * Verify HMAC signature for worker-to-worker communication
- */
-async function verifyWorkerSignature(
-  payload: string,
-  signature: string,
-  secret: string,
-  timestamp: number
-): Promise<boolean> {
-  const expectedSignature = await generateWorkerSignature(
-    payload,
-    secret,
-    timestamp
-  );
-  return signature === expectedSignature;
-}
-
-/**
  * Hono middleware to authenticate requests from other workers
  *
  * Validates HMAC signature and timestamp to prevent replay attacks.
@@ -99,9 +83,9 @@ async function verifyWorkerSignature(
  * await fetch('https://api.revelations.studio/internal/webhook', {
  *   method: 'POST',
  *   headers: {
- *     'Content-Type': 'application/json',
- *     'X-Worker-Signature': signature,
- *     'X-Worker-Timestamp': timestamp.toString(),
+ *     [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
+ *     [HEADERS.WORKER_SIGNATURE]: signature,
+ *     [HEADERS.WORKER_TIMESTAMP]: timestamp.toString(),
  *   },
  *   body,
  * });
@@ -111,8 +95,8 @@ export function workerAuth(options: WorkerAuthOptions) {
   const {
     secret,
     allowedOrigins,
-    signatureHeader = 'X-Worker-Signature',
-    timestampHeader = 'X-Worker-Timestamp',
+    signatureHeader = HEADERS.WORKER_SIGNATURE,
+    timestampHeader = HEADERS.WORKER_TIMESTAMP,
     maxAge = 300,
   } = options;
 
@@ -170,12 +154,12 @@ export function workerAuth(options: WorkerAuthOptions) {
     const body = await c.req.text();
 
     // Verify signature
-    const isValid = await verifyWorkerSignature(
+    const expectedSignature = await generateWorkerSignature(
       body,
-      signature,
       secret,
       timestamp
     );
+    const isValid = signature === expectedSignature;
 
     if (!isValid) {
       return c.json({ error: 'Invalid signature' }, 401);
@@ -214,8 +198,8 @@ export async function workerFetch(
   options: Pick<WorkerAuthOptions, 'signatureHeader' | 'timestampHeader'> = {}
 ): Promise<Response> {
   const {
-    signatureHeader = 'X-Worker-Signature',
-    timestampHeader = 'X-Worker-Timestamp',
+    signatureHeader = HEADERS.WORKER_SIGNATURE,
+    timestampHeader = HEADERS.WORKER_TIMESTAMP,
   } = options;
 
   const timestamp = Math.floor(Date.now() / 1000);
@@ -224,7 +208,7 @@ export async function workerFetch(
   const headers = new Headers(init.headers);
   headers.set(signatureHeader, signature);
   headers.set(timestampHeader, timestamp.toString());
-  headers.set('Content-Type', 'application/json');
+  headers.set(HEADERS.CONTENT_TYPE, MIME_TYPES.APPLICATION.JSON);
 
   return fetch(url, {
     ...init,

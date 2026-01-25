@@ -10,6 +10,7 @@
  * Business logic is delegated to TemplateService in @codex/notifications.
  */
 
+import { AUTH_ROLES } from '@codex/constants';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createCreatorTemplateSchema,
@@ -37,7 +38,7 @@ const app = new Hono<HonoEnv>();
 app.get(
   '/global',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
       return ctx.services.templates.listGlobalTemplates(ctx.input.query);
@@ -52,7 +53,7 @@ app.get(
 app.post(
   '/global',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { body: createGlobalTemplateSchema },
     successStatus: 201,
     handler: async (ctx) => {
@@ -71,7 +72,7 @@ app.post(
 app.get(
   '/global/:id',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { params: createIdParamsSchema() },
     handler: async (ctx) => {
       return ctx.services.templates.getGlobalTemplate(ctx.input.params.id);
@@ -86,7 +87,7 @@ app.get(
 app.patch(
   '/global/:id',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: {
       params: createIdParamsSchema(),
       body: updateTemplateSchema,
@@ -107,7 +108,7 @@ app.patch(
 app.delete(
   '/global/:id',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx) => {
@@ -232,7 +233,7 @@ app.delete(
 app.get(
   '/creator',
   procedure({
-    policy: { auth: 'required', roles: ['creator'] },
+    policy: { auth: 'required', roles: [AUTH_ROLES.CREATOR] },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
       return ctx.services.templates.listCreatorTemplates(
@@ -250,7 +251,7 @@ app.get(
 app.post(
   '/creator',
   procedure({
-    policy: { auth: 'required', roles: ['creator'] },
+    policy: { auth: 'required', roles: [AUTH_ROLES.CREATOR] },
     input: { body: createCreatorTemplateSchema },
     successStatus: 201,
     handler: async (ctx) => {
@@ -269,7 +270,7 @@ app.post(
 app.patch(
   '/creator/:id',
   procedure({
-    policy: { auth: 'required', roles: ['creator'] },
+    policy: { auth: 'required', roles: [AUTH_ROLES.CREATOR] },
     input: {
       params: createIdParamsSchema(),
       body: updateTemplateSchema,
@@ -291,7 +292,7 @@ app.patch(
 app.delete(
   '/creator/:id',
   procedure({
-    policy: { auth: 'required', roles: ['creator'] },
+    policy: { auth: 'required', roles: [AUTH_ROLES.CREATOR] },
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx) => {

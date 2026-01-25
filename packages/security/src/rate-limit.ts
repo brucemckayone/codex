@@ -1,4 +1,5 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
+import { RATE_LIMIT_PRESETS as PRESETS } from '@codex/constants';
 import type { Context, Next } from 'hono';
 
 export interface RateLimitOptions {
@@ -253,50 +254,31 @@ export const RATE_LIMIT_PRESETS = {
   /**
    * Auth - for authentication endpoints (5 requests per 15 minutes)
    */
-  auth: {
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    maxRequests: 5,
-  },
+  auth: PRESETS.AUTH,
 
   /**
    * Strict - for sensitive operations like streaming URLs (20 requests per minute)
    */
-  strict: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 20,
-  },
+  strict: PRESETS.STRICT,
 
   /**
    * Streaming - for presigned URL generation (60 requests per minute)
    * Prevents abuse while allowing legitimate HLS segment refreshes
    */
-  streaming: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 60,
-    keyPrefix: 'rl:stream:',
-  },
+  streaming: PRESETS.STREAMING,
 
   /**
    * API - for standard API endpoints (100 requests per minute)
    */
-  api: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 100,
-  },
+  api: PRESETS.API,
 
   /**
    * Webhook - for webhooks (1000 requests per minute)
    */
-  webhook: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 1000,
-  },
+  webhook: PRESETS.WEBHOOK,
 
   /**
    * Web - for general web traffic (300 requests per minute)
    */
-  web: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 300,
-  },
+  web: PRESETS.WEB,
 };

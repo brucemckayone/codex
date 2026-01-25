@@ -10,7 +10,8 @@
  * This test validates the access control logic for public free content.
  */
 
-import { describe, expect, test } from 'vitest';
+import { closeDbPool } from '@codex/database';
+import { afterAll, describe, expect, test } from 'vitest';
 import { authFixture, httpClient } from '../fixtures';
 import {
   expectSuccessResponse,
@@ -393,5 +394,9 @@ describe('Free Content Access Flow', () => {
     expect(data1.data.streamingUrl).toBeDefined();
     expect(data2.data.streamingUrl).toBeDefined();
     expect(data3.data.streamingUrl).toBeDefined();
+  });
+
+  afterAll(async () => {
+    await closeDbPool();
   });
 });

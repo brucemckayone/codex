@@ -8,6 +8,7 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
+import { MIME_TYPES } from '@codex/constants';
 import { schema } from '@codex/database';
 import {
   type Database,
@@ -42,7 +43,7 @@ function createValidImageBuffer(
   const buffer = new ArrayBuffer(sizeBytes);
   const view = new Uint8Array(buffer);
 
-  if (mimeType === 'image/png') {
+  if (mimeType === MIME_TYPES.IMAGE.PNG) {
     const pngHeader = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
     pngHeader.forEach((byte, i) => {
       view[i] = byte;
@@ -197,8 +198,8 @@ describe('PlatformSettingsFacade', () => {
       const facade = createFacade(mockR2);
 
       const result = await facade.uploadLogo({
-        buffer: createValidImageBuffer('image/png', 1024),
-        mimeType: 'image/png',
+        buffer: createValidImageBuffer(MIME_TYPES.IMAGE.PNG, 1024),
+        mimeType: MIME_TYPES.IMAGE.PNG,
         size: 1024,
       });
 
@@ -308,7 +309,7 @@ describe('PlatformSettingsFacade', () => {
       await expect(
         facade.uploadLogo({
           buffer: new ArrayBuffer(100),
-          mimeType: 'image/png',
+          mimeType: MIME_TYPES.IMAGE.PNG,
           size: 100,
         })
       ).rejects.toThrow('R2 service not configured');

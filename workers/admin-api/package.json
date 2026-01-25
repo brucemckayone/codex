@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "deploy": "pnpm build && wrangler deploy",
-    "dev": "pnpm build && wrangler dev --port 42073 --inspector-port 9233",
+    "dev": "pnpm build && dotenv -e ../../.env.dev -- wrangler dev --port 42073 --inspector-port 9238",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@codex/admin": "workspace:*",
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/security": "workspace:*",

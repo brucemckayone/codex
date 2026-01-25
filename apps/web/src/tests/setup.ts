@@ -1,8 +1,9 @@
-import { cleanup } from '@testing-library/svelte';
 import { afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
-// Cleanup after each test
+// Clean up DOM after each test (only if running in DOM environment)
 afterEach(() => {
-  cleanup();
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.innerHTML = '';
+  }
 });

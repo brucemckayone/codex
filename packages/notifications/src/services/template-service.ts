@@ -5,6 +5,11 @@
  * Encapsulates business logic including access control and membership validation.
  */
 
+import {
+  ORGANIZATION_ROLES,
+  ORGANIZATION_STATUS,
+  TEMPLATE_SCOPES,
+} from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService, InternalServiceError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -53,7 +58,7 @@ export class TemplateService extends BaseService {
     const offset = (page - 1) * limit;
 
     const whereGlobalTemplates = and(
-      eq(schema.emailTemplates.scope, 'global'),
+      eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.GLOBAL),
       isNull(schema.emailTemplates.deletedAt),
       status ? eq(schema.emailTemplates.status, status) : undefined
     );
@@ -96,7 +101,7 @@ export class TemplateService extends BaseService {
         .insert(schema.emailTemplates)
         .values({
           ...input,
-          scope: 'global',
+          scope: TEMPLATE_SCOPES.GLOBAL,
           organizationId: null,
           creatorId: null,
           createdBy,
@@ -130,7 +135,7 @@ export class TemplateService extends BaseService {
     const template = await this.db.query.emailTemplates.findFirst({
       where: and(
         eq(schema.emailTemplates.id, id),
-        eq(schema.emailTemplates.scope, 'global'),
+        eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.GLOBAL),
         isNull(schema.emailTemplates.deletedAt)
       ),
     });
@@ -158,7 +163,7 @@ export class TemplateService extends BaseService {
       .where(
         and(
           eq(schema.emailTemplates.id, id),
-          eq(schema.emailTemplates.scope, 'global'),
+          eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.GLOBAL),
           isNull(schema.emailTemplates.deletedAt)
         )
       )
@@ -183,7 +188,7 @@ export class TemplateService extends BaseService {
       .where(
         and(
           eq(schema.emailTemplates.id, id),
-          eq(schema.emailTemplates.scope, 'global'),
+          eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.GLOBAL),
           isNull(schema.emailTemplates.deletedAt)
         )
       )
@@ -215,7 +220,7 @@ export class TemplateService extends BaseService {
     const offset = (page - 1) * limit;
 
     const whereClause = and(
-      eq(schema.emailTemplates.scope, 'organization'),
+      eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.ORGANIZATION),
       eq(schema.emailTemplates.organizationId, orgId),
       isNull(schema.emailTemplates.deletedAt),
       status ? eq(schema.emailTemplates.status, status) : undefined
@@ -269,7 +274,7 @@ export class TemplateService extends BaseService {
         .insert(schema.emailTemplates)
         .values({
           ...input,
-          scope: 'organization',
+          scope: TEMPLATE_SCOPES.ORGANIZATION,
           organizationId: orgId,
           creatorId: null,
           createdBy: userId,
@@ -320,7 +325,7 @@ export class TemplateService extends BaseService {
         .where(
           and(
             eq(schema.emailTemplates.id, templateId),
-            eq(schema.emailTemplates.scope, 'organization'),
+            eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.ORGANIZATION),
             eq(schema.emailTemplates.organizationId, orgId),
             isNull(schema.emailTemplates.deletedAt)
           )
@@ -354,7 +359,7 @@ export class TemplateService extends BaseService {
       .where(
         and(
           eq(schema.emailTemplates.id, templateId),
-          eq(schema.emailTemplates.scope, 'organization'),
+          eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.ORGANIZATION),
           eq(schema.emailTemplates.organizationId, orgId),
           isNull(schema.emailTemplates.deletedAt)
         )
@@ -383,7 +388,7 @@ export class TemplateService extends BaseService {
     const offset = (page - 1) * limit;
 
     const whereClause = and(
-      eq(schema.emailTemplates.scope, 'creator'),
+      eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
       eq(schema.emailTemplates.creatorId, creatorId),
       isNull(schema.emailTemplates.deletedAt),
       status ? eq(schema.emailTemplates.status, status) : undefined
@@ -427,7 +432,7 @@ export class TemplateService extends BaseService {
         .insert(schema.emailTemplates)
         .values({
           ...input,
-          scope: 'creator',
+          scope: TEMPLATE_SCOPES.CREATOR,
           organizationId: input.organizationId ?? null,
           creatorId,
           createdBy: creatorId,
@@ -472,7 +477,7 @@ export class TemplateService extends BaseService {
       .where(
         and(
           eq(schema.emailTemplates.id, templateId),
-          eq(schema.emailTemplates.scope, 'creator'),
+          eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
           eq(schema.emailTemplates.creatorId, creatorId),
           isNull(schema.emailTemplates.deletedAt)
         )
@@ -501,7 +506,7 @@ export class TemplateService extends BaseService {
       .where(
         and(
           eq(schema.emailTemplates.id, templateId),
-          eq(schema.emailTemplates.scope, 'creator'),
+          eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
           eq(schema.emailTemplates.creatorId, creatorId),
           isNull(schema.emailTemplates.deletedAt)
         )
@@ -575,11 +580,14 @@ export class TemplateService extends BaseService {
     userId: string,
     userRole: string
   ): Promise<boolean> {
-    if (template.scope === 'global') {
+    if (template.scope === TEMPLATE_SCOPES.GLOBAL) {
       return userRole === 'platform_owner'; // Only platform owner has global template access
     }
 
-    if (template.scope === 'organization' && template.organizationId) {
+    if (
+      template.scope === TEMPLATE_SCOPES.ORGANIZATION &&
+      template.organizationId
+    ) {
       const membership = await this.db.query.organizationMemberships.findFirst({
         where: and(
           eq(schema.organizationMemberships.userId, userId),
@@ -587,13 +595,13 @@ export class TemplateService extends BaseService {
             schema.organizationMemberships.organizationId,
             template.organizationId
           ),
-          eq(schema.organizationMemberships.status, 'active')
+          eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE)
         ),
       });
       return !!membership;
     }
 
-    if (template.scope === 'creator') {
+    if (template.scope === TEMPLATE_SCOPES.CREATOR) {
       return template.creatorId === userId;
     }
 
@@ -615,7 +623,7 @@ export class TemplateService extends BaseService {
       where: and(
         eq(schema.organizationMemberships.userId, userId),
         eq(schema.organizationMemberships.organizationId, orgId),
-        eq(schema.organizationMemberships.status, 'active')
+        eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE)
       ),
     });
 
@@ -638,11 +646,18 @@ export class TemplateService extends BaseService {
       where: and(
         eq(schema.organizationMemberships.userId, userId),
         eq(schema.organizationMemberships.organizationId, orgId),
-        eq(schema.organizationMemberships.status, 'active')
+        eq(schema.organizationMemberships.status, ORGANIZATION_STATUS.ACTIVE)
       ),
     });
 
-    if (!membership || !['owner', 'admin'].includes(membership.role)) {
+    if (
+      !membership ||
+      ![ORGANIZATION_ROLES.OWNER, ORGANIZATION_ROLES.ADMIN].includes(
+        membership.role as
+          | typeof ORGANIZATION_ROLES.OWNER
+          | typeof ORGANIZATION_ROLES.ADMIN
+      )
+    ) {
       throw new TemplateAccessDeniedError(orgId);
     }
   }

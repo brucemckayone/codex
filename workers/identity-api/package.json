@@ -5,7 +5,7 @@
   "description": "Cloudflare Worker for Identity API endpoints (minimal placeholder)",
   "type": "module",
   "scripts": {
-    "dev": "pnpm build && wrangler dev --port 42074 --inspector-port 9236",
+    "dev": "pnpm build && dotenv -e ../../.env.dev -- wrangler dev --port 42074 --inspector-port 9236",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:production": "wrangler deploy --env production",
@@ -18,7 +18,9 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/identity": "workspace:*",
     "@codex/image-processing": "workspace:*",

@@ -26,6 +26,8 @@ import {
 } from '@codex/worker-utils';
 
 import identityRoutes from './routes/identity';
+// Import route modules
+import userRoutes from './routes/users';
 
 // ============================================================================
 // Application Setup
@@ -56,9 +58,19 @@ app.use(
   '*',
   createEnvValidationMiddleware({
     required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
-    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL', 'MEDIA_BUCKET'],
   })
 );
+
+// ============================================================================
+// API Routes
+// ============================================================================
+
+/**
+ * Mount user routes
+ * All routes require authentication
+ */
+app.route('/api/user', userRoutes);
 
 // ============================================================================
 // Export

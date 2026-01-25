@@ -3,7 +3,12 @@
   "compilerOptions": {
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "types": ["@sveltejs/kit", "@testing-library/jest-dom", "vite/client"]
+    "types": [
+      "@sveltejs/kit",
+      "@testing-library/jest-dom",
+      "vite/client",
+      "vitest/globals"
+    ]
   },
   "exclude": [
     "../node_modules/**",

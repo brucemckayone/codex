@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "deploy": "pnpm build && wrangler deploy",
-    "dev": "pnpm build && wrangler dev --port 42069 --inspector-port 9231",
+    "dev": "pnpm build && dotenv -e ../../.env.dev -- wrangler dev --port 42069 --inspector-port 9231",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -15,9 +15,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/security": "workspace:*",
+    "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",

@@ -1,0 +1,64 @@
+/* global.css */
+
+/* Reset (consolidated from lib/theme/reset.css) */
+@import '../theme/reset.css';
+
+/* Design Tokens */
+@import './tokens/colors.css';
+@import './tokens/typography.css';
+@import './tokens/spacing.css';
+@import './tokens/radius.css';
+@import './tokens/borders.css';
+@import './tokens/shadows.css';
+@import './tokens/materials.css';
+@import './tokens/z-index.css';
+@import './tokens/motion.css';
+
+/* Themes */
+@import './themes/light.css';
+@import './themes/dark.css';
+
+/* Utilities */
+@import './utilities.css';
+
+/* App-specific base styles */
+html {
+  height: 100%;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background-color: var(--color-background);
+}
+
+body {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Link styles */
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: var(--transition-colors);
+}
+
+/* Button reset */
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-bold);
+  line-height: var(--leading-tight);
+}
+
+p {
+  text-wrap: pretty;
+  max-width: 65ch;
+}

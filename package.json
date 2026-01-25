@@ -1,5 +1,5 @@
 {
-  "name": "Codex",
+  "name": "@codex/root",
   "private": true,
   "version": "1.0.0",
   "description": "",
@@ -19,7 +19,8 @@
     "dev:media-api": "turbo run dev --filter=@codex/media-api",
     "dev:organization-api": "turbo run dev --filter=organization-api",
     "dev:notifications-api": "turbo run dev --filter=notifications-api",
-    "dev": "dotenv -e .env.dev -- concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm dev:web\" \"pnpm dev:admin-api\" \"pnpm dev:auth\" \"pnpm dev:ecom-api\" \"pnpm dev:content-api\" \"pnpm dev:identity-api\" \"pnpm dev:media-api\" \"pnpm dev:organization-api\" \"pnpm dev:notifications-api\"",
+    "dev": "concurrently \"pnpm docker:up && wait-on tcp:4444 && pnpm dev:web\" \"pnpm dev:admin-api\" \"pnpm dev:auth\" \"pnpm dev:ecom-api\" \"pnpm dev:content-api\" \"pnpm dev:identity-api\" \"pnpm dev:media-api\" \"pnpm dev:organization-api\" \"pnpm dev:notifications-api\"",
+    "dev:full": "bash scripts/dev-full-stack.sh",
     "dev:clean": "pnpm docker:down && rm -rf node_modules/.cache && rm -rf apps/*/dist && rm -rf workers/*/dist && rm -rf packages/*/dist",
     "stop": "pnpm docker:down",
     "build": "turbo run build",
@@ -73,6 +74,7 @@
     "@biomejs/biome": "^2.3.5",
     "@cloudflare/workers-types": "^4.20250129.0",
     "@playwright/test": "^1.56.1",
+    "@rollup/rollup-darwin-arm64": "^4.55.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.2.8",
@@ -108,7 +110,8 @@
   "author": "",
   "license": "ISC",
   "lint-staged": {
-    "*.{js,ts,json,svelte}": "biome check --write --no-errors-on-unmatched"
+    "*.{js,ts,json,svelte}": "biome check --write --no-errors-on-unmatched",
+    "infrastructure/runpod/**/*.py": "uvx black"
   },
   "packageManager": "pnpm@10.18.3",
   "dependencies": {

@@ -84,6 +84,7 @@ export interface TranscodingServiceConfig {
   runpodApiKey: string;
   runpodEndpointId: string;
   webhookBaseUrl: string;
+  runpodApiBaseUrl?: string;
 }
 
 /**

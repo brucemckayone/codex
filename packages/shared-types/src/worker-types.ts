@@ -49,6 +49,12 @@ export type Bindings = {
   AUTH_SESSION_KV?: import('@cloudflare/workers-types').KVNamespace;
 
   /**
+   * Branding cache KV namespace
+   * Used for zero-latency organization branding
+   */
+  BRAND_KV?: import('@cloudflare/workers-types').KVNamespace;
+
+  /**
    * R2 bucket binding for media storage
    */
   MEDIA_BUCKET?: import('@cloudflare/workers-types').R2Bucket;
@@ -188,6 +194,11 @@ export type Bindings = {
    * e.g., https://api.example.com - used to construct webhook URLs
    */
   RUNPOD_WEBHOOK_BASE_URL?: string;
+
+  /**
+   * RunPod API base URL override (for tests)
+   */
+  RUNPOD_API_URL?: string;
 
   /**
    * Shared secret for worker-to-worker HMAC authentication

@@ -1,0 +1,25 @@
+/* materials.css */
+:root {
+  /* Glass Material (Light Mode) */
+  --material-glass: rgba(255, 255, 255, 0.7);
+  --material-glass-border: rgba(255, 255, 255, 0.5);
+
+  /* Blurs */
+  --blur-sm: 4px;
+  --blur-md: 8px;
+  --blur-lg: 12px;
+  --blur-xl: 20px;
+}
+
+[data-theme="dark"] {
+  /* Glass Material (Dark Mode) */
+  --material-glass: rgba(23, 23, 23, 0.7);
+  --material-glass-border: rgba(255, 255, 255, 0.1);
+}
+
+.glass {
+  background-color: var(--material-glass);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--material-glass-border);
+}

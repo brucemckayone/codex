@@ -1,0 +1,92 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "codex-web",
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Static assets binding for SvelteKit
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".svelte-kit/cloudflare"
+  },
+
+  // Observability configuration
+  "observability": {
+    "enabled": true
+  },
+
+  // KV Namespaces
+  "kv_namespaces": [
+    {
+      "binding": "BRAND_KV",
+      "id": "e86ed818ff4f4a54bfb801bb46c10788",
+      "preview_id": "d65732c40d7143e38f5b8cf5323a2250"
+    }
+  ],
+
+  // Environment configurations
+  "env": {
+    // Test environment (E2E tests)
+    "test": {
+      "name": "codex-web-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "AUTH_WORKER_URL": "http://localhost:42069",
+        "API_URL": "http://localhost:8787"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "BRAND_KV",
+          "id": "e86ed818ff4f4a54bfb801bb46c10788"
+        }
+      ]
+    },
+
+    // Production environment
+    "production": {
+      "name": "codex-web-production",
+      "vars": {
+        "ENVIRONMENT": "production",
+        "AUTH_WORKER_URL": "https://auth.revelations.studio",
+        "API_URL": "https://api.revelations.studio",
+        "ORG_API_URL": "https://organization-api.revelations.studio",
+        "ECOM_API_URL": "https://ecom-api.revelations.studio"
+      },
+      "routes": [
+        {
+          "pattern": "*.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        {
+          "pattern": "revelations.studio/*",
+          "zone_name": "revelations.studio"
+        }
+      ]
+    },
+
+    // Staging environment
+    "staging": {
+      "name": "codex-web-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "AUTH_WORKER_URL": "https://auth-staging.revelations.studio",
+        "API_URL": "https://api-staging.revelations.studio",
+        "ORG_API_URL": "https://organization-api-staging.revelations.studio",
+        "ECOM_API_URL": "https://ecom-api-staging.revelations.studio"
+      },
+      "routes": [
+        {
+          "pattern": "*-staging.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        }
+      ]
+    }
+    // Note: Preview configs are generated dynamically
+  }
+
+  // Note: Secrets to be set via wrangler CLI or CI/CD:
+  // - DATABASE_URL
+  // - SESSION_SECRET
+  // - PUBLIC_APP_URL
+}

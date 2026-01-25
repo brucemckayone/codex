@@ -6,6 +6,7 @@
  * session management, and database integration.
  */
 
+import { AUTH_ROLES, COOKIES, ENV_NAMES } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth } from 'better-auth';
@@ -48,11 +49,21 @@ export function createAuthInstance(options: AuthConfigOptions) {
     session: {
       expiresIn: 60 * 60 * 24, // 24 hours
       updateAge: 60 * 60 * 24, // Update session every 24 hours
-      cookieName: 'codex-session',
+      cookieName: COOKIES.SESSION_NAME,
       storeSessionInDatabase: true,
       cookieCache: {
         enabled: true,
         maxAge: 60 * 5, // 5 minutes (short-lived)
+      },
+      // Cross-subdomain authentication support
+      // Cookie domain with leading dot allows sharing across all subdomains
+      // Example: .revelations.studio allows yoga-studio.revelations.studio access
+      cookie: {
+        name: 'codex-session',
+        domain: '.revelations.studio',
+        sameSite: 'lax', // Changed from strict to support cross-subdomain navigation
+        secure: true, // HTTPS only
+        httpOnly: true, // Prevent JS access
       },
     },
     logger: {
@@ -60,12 +71,13 @@ export function createAuthInstance(options: AuthConfigOptions) {
       disabled: true,
     },
     emailVerification: {
-      sendVerificationEmail: async ({ user, token }, _request) => {
+      sendVerificationEmail: async ({ user, token }, _request?: Request) => {
         // Store token in KV for E2E tests (development/test only)
         // Use env from closure, not from request object
         if (
           env.AUTH_SESSION_KV &&
-          (env.ENVIRONMENT === 'development' || env.ENVIRONMENT === 'test')
+          (env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT ||
+            env.ENVIRONMENT === ENV_NAMES.TEST)
         ) {
           // Store with email as key, auto-expire after 5 minutes
           await env.AUTH_SESSION_KV.put(`verification:${user.email}`, token, {
@@ -86,7 +98,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
         role: {
           type: 'string',
           required: true,
-          defaultValue: 'customer',
+          defaultValue: AUTH_ROLES.USER,
         },
       },
     },

@@ -12,6 +12,7 @@
  * - Idempotency (duplicate events handled safely)
  */
 
+import { CURRENCY, STRIPE_EVENTS } from '@codex/constants';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -76,7 +77,7 @@ function createMockCheckoutEvent(
   return {
     id: eventId,
     object: 'event',
-    type: 'checkout.session.completed',
+    type: STRIPE_EVENTS.CHECKOUT_COMPLETED,
     api_version: '2025-10-29.clover',
     created: Date.now() / 1000,
     data: {
@@ -86,7 +87,7 @@ function createMockCheckoutEvent(
         payment_intent: paymentIntentId,
         payment_status: paymentStatus,
         amount_total: amountTotal,
-        currency: 'usd',
+        currency: CURRENCY.USD,
         metadata,
       } as Stripe.Checkout.Session,
     },
@@ -210,7 +211,7 @@ describe('handleCheckoutCompleted', () => {
           contentId: 'content_456',
           organizationId: 'org_789',
           amountPaidCents: 2999,
-          currency: 'usd',
+          currency: CURRENCY.USD,
         })
       );
 
@@ -590,7 +591,7 @@ describe('handleCheckoutCompleted', () => {
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          currency: 'usd',
+          currency: CURRENCY.USD,
         })
       );
     });

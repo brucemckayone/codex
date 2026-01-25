@@ -206,14 +206,24 @@ export function setupTestDatabase(): Database {
  * - No retry logic needed - ephemeral branches ensure complete isolation
  *
  * Deletion order (respects foreign keys):
- * 1. content (references media_items, organizations, users)
- * 2. media_items (references users)
- * 3. organizations (no foreign keys from other content tables)
+ * 1. video_playback (references content, users)
+ * 2. purchases (references content, users, organizations)
+ * 3. content_access (references content, users, organizations)
+ * 4. creator_organization_agreements (references users, organizations)
+ * 5. organization_platform_agreements (references organizations)
+ * 6. content (references media_items, organizations, users)
+ * 7. media_items (references users)
+ * 8. organizations (no foreign keys from other content tables)
  *
  * @param db - Database client
  */
 export async function cleanupDatabase(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
+  await db.delete(schema.videoPlayback);
+  await db.delete(schema.purchases);
+  await db.delete(schema.contentAccess);
+  await db.delete(schema.creatorOrganizationAgreements);
+  await db.delete(schema.organizationPlatformAgreements);
   await db.delete(schema.content);
   await db.delete(schema.mediaItems);
   await db.delete(schema.organizations);
@@ -230,6 +240,11 @@ export async function cleanupDatabase(db: Database): Promise<void> {
  */
 export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
+  await db.delete(schema.videoPlayback);
+  await db.delete(schema.purchases);
+  await db.delete(schema.contentAccess);
+  await db.delete(schema.creatorOrganizationAgreements);
+  await db.delete(schema.organizationPlatformAgreements);
   await db.delete(schema.content);
   await db.delete(schema.mediaItems);
   await db.delete(schema.organizations);

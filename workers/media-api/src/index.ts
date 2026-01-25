@@ -94,6 +94,24 @@ app.route('/', transcodingRoutes);
 app.route('/', webhookRoutes);
 
 // ============================================================================
+// Mock Routes (Development/Test Only)
+// ============================================================================
+
+/**
+ * Mock RunPod API for E2E tests
+ * Only active if RUNPOD_API_URL points here
+ */
+app.post('/internal/mock-runpod/:endpointId/run', async (c) => {
+  const body = (await c.req.json()) as { input?: { mediaId?: string } };
+  const mediaId = body.input?.mediaId || 'unknown';
+
+  return c.json({
+    id: `mock-job-${mediaId}-${Date.now()}`,
+    status: 'IN_QUEUE',
+  });
+});
+
+// ============================================================================
 // Export
 // ============================================================================
 

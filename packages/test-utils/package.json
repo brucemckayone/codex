@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@neondatabase/serverless": "^0.10.4",
     "drizzle-orm": "0.44.7",

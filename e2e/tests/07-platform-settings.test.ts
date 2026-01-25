@@ -13,7 +13,8 @@
  * All tests validate organization scoping to ensure data isolation.
  */
 
-import { describe, expect, test } from 'vitest';
+import { closeDbPool } from '@codex/database';
+import { afterAll, describe, expect, test } from 'vitest';
 import { adminFixture, httpClient, settingsFixture } from '../fixtures';
 import { expectErrorResponse, expectForbidden } from '../helpers/assertions';
 import { WORKER_URLS } from '../helpers/worker-urls';
@@ -504,5 +505,9 @@ describe('Platform Settings', () => {
         expect(response.status).toBe(403);
       }
     );
+  });
+
+  afterAll(async () => {
+    await closeDbPool();
   });
 });

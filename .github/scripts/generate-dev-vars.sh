@@ -17,7 +17,7 @@ set -e
 
 echo "Generating .dev.vars.test files for workers..."
 
-WORKERS=("auth" "content-api" "identity-api" "organization-api" "notifications-api" "ecom-api" "admin-api")
+WORKERS=("auth" "content-api" "identity-api" "organization-api" "notifications-api" "ecom-api" "admin-api" "media-api")
 
 for worker in "${WORKERS[@]}"; do
   VARS_FILE="workers/${worker}/.dev.vars.test"
@@ -31,6 +31,7 @@ DB_METHOD=${DB_METHOD:-NEON_BRANCH}
 BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-test-secret-key-minimum-32-characters-long}
 BETTER_AUTH_URL=http://localhost:42069
 AUTH_TRUST_HOST=true
+WORKER_SHARED_SECRET=${WORKER_SHARED_SECRET:-${BETTER_AUTH_SECRET:-test-secret-key-minimum-32-characters-long}}
 EOF
 
   # Add Stripe and R2 variables for workers that need them

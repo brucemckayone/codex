@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/test-utils.d.ts",
+      "default": "./dist/test-utils.js"
     }
   },
   "scripts": {
@@ -31,11 +35,12 @@
     "@codex/access": "workspace:*",
     "@codex/admin": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
+    "@codex/constants": "workspace:*",
     "@codex/identity": "workspace:*",
-    "@codex/image-processing": "workspace:*",
     "@codex/organization": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "@codex/notifications": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/platform-settings": "workspace:*",

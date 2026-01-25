@@ -5,6 +5,7 @@
  * Generic implementation that works with any ServiceError subclass.
  */
 
+import { ERROR_CODES, STATUS_CODES } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import { ZodError } from 'zod';
 import { type ErrorStatusCode, isServiceError } from './base-errors';
@@ -97,10 +98,10 @@ export function mapErrorToResponse(
   // Handle Zod validation errors
   if (error instanceof ZodError) {
     return {
-      statusCode: 422,
+      statusCode: STATUS_CODES.UNPROCESSABLE_ENTITY as ErrorStatusCode,
       response: {
         error: {
-          code: 'VALIDATION_ERROR',
+          code: ERROR_CODES.VALIDATION_ERROR,
           message: 'Invalid request data',
           details: error.errors.map((err) => ({
             path: err.path.join('.'),
@@ -142,7 +143,7 @@ export function mapErrorToResponse(
 
   const response: ErrorResponse = {
     error: {
-      code: 'INTERNAL_ERROR',
+      code: ERROR_CODES.INTERNAL_ERROR,
       message: 'An unexpected error occurred',
     },
   };
@@ -156,7 +157,7 @@ export function mapErrorToResponse(
   }
 
   return {
-    statusCode: 500,
+    statusCode: STATUS_CODES.INTERNAL_ERROR as ErrorStatusCode,
     response,
   };
 }

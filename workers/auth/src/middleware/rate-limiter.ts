@@ -5,6 +5,7 @@
  * Protects against brute force attacks on login endpoints.
  */
 
+import { IP_ADDRESSES } from '@codex/constants';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import type { Context, Next } from 'hono';
 import type { AuthEnv } from '../types';
@@ -27,7 +28,7 @@ export function createAuthRateLimiter() {
         const success = await rateLimit({
           kv,
           keyGenerator: (c: Context) =>
-            c.req.header('cf-connecting-ip') || '127.0.0.1',
+            c.req.header('cf-connecting-ip') || IP_ADDRESSES.LOOPBACK,
           ...RATE_LIMIT_PRESETS.auth,
         })(c, next);
 

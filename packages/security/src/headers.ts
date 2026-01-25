@@ -1,3 +1,4 @@
+import { CSP_DIRECTIVES, ENV_NAMES } from '@codex/constants';
 import type { Context, Next } from 'hono';
 
 export interface SecurityHeadersOptions {
@@ -19,30 +20,19 @@ export interface SecurityHeadersOptions {
 }
 
 export interface CSPDirectives {
-  defaultSrc: string[];
-  scriptSrc: string[];
-  styleSrc: string[];
-  imgSrc: string[];
-  fontSrc: string[];
-  connectSrc: string[];
-  frameSrc: string[];
-  frameAncestors: string[];
-  baseUri: string[];
-  formAction: string[];
+  readonly defaultSrc: readonly string[];
+  readonly scriptSrc: readonly string[];
+  readonly styleSrc: readonly string[];
+  readonly imgSrc: readonly string[];
+  readonly fontSrc: readonly string[];
+  readonly connectSrc: readonly string[];
+  readonly frameSrc: readonly string[];
+  readonly frameAncestors: readonly string[];
+  readonly baseUri: readonly string[];
+  readonly formAction: readonly string[];
 }
 
-const DEFAULT_CSP: CSPDirectives = {
-  defaultSrc: ["'self'"],
-  scriptSrc: ["'self'"],
-  styleSrc: ["'self'", "'unsafe-inline'"], // unsafe-inline often needed for component libraries
-  imgSrc: ["'self'", 'data:', 'https:'],
-  fontSrc: ["'self'"],
-  connectSrc: ["'self'"],
-  frameSrc: ["'none'"],
-  frameAncestors: ["'none'"],
-  baseUri: ["'self'"],
-  formAction: ["'self'"],
-};
+const DEFAULT_CSP: CSPDirectives = CSP_DIRECTIVES.DEFAULT;
 
 /**
  * Merge CSP directives
@@ -129,7 +119,7 @@ export function securityHeaders(options: SecurityHeadersOptions = {}) {
     );
 
     // HSTS - only in production (avoid issues in dev/preview)
-    if (options.environment === 'production') {
+    if (options.environment === ENV_NAMES.PRODUCTION) {
       c.header(
         'Strict-Transport-Security',
         'max-age=31536000; includeSubDomains; preload'
@@ -147,25 +137,10 @@ export const CSP_PRESETS = {
   /**
    * Stripe integration (Stripe.js + Elements)
    */
-  stripe: {
-    scriptSrc: ["'self'", 'https://js.stripe.com'],
-    frameSrc: ['https://js.stripe.com', 'https://hooks.stripe.com'],
-    connectSrc: ["'self'", 'https://api.stripe.com'],
-  } satisfies Partial<CSPDirectives>,
+  stripe: CSP_DIRECTIVES.PRESETS.STRIPE satisfies Partial<CSPDirectives>,
 
   /**
    * API worker (no frontend, restrictive)
    */
-  api: {
-    defaultSrc: ["'none'"],
-    scriptSrc: ["'none'"],
-    styleSrc: ["'none'"],
-    imgSrc: ["'none'"],
-    fontSrc: ["'none'"],
-    connectSrc: ["'self'"],
-    frameSrc: ["'none'"],
-    frameAncestors: ["'none'"],
-    baseUri: ["'none'"],
-    formAction: ["'none'"],
-  } satisfies Partial<CSPDirectives>,
+  api: CSP_DIRECTIVES.PRESETS.API satisfies Partial<CSPDirectives>,
 };

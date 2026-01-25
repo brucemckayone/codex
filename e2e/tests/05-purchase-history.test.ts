@@ -14,9 +14,9 @@
  * 6. Error handling (401, 403, 404)
  */
 
-import { dbHttp, schema } from '@codex/database';
+import { closeDbPool, dbHttp, schema } from '@codex/database';
 import { and, eq } from 'drizzle-orm';
-import { beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { authFixture, httpClient } from '../fixtures';
 import {
   expectSuccessResponse,
@@ -705,5 +705,9 @@ describe('Purchase History API', () => {
       // Creator is not the customer, should be forbidden
       expect(response.status).toBe(403);
     });
+  });
+
+  afterAll(async () => {
+    await closeDbPool();
   });
 });

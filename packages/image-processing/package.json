@@ -2,8 +2,11 @@
   "name": "@codex/image-processing",
   "version": "0.1.0",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -11,30 +14,33 @@
     }
   },
   "scripts": {
-    "build": "vite build --config vite.config.image-processing",
-    "dev": "vite build --config vite.config.image-processing --watch",
-    "test": "vitest run --config vitest.config.image-processing",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "build": "vite build --config vite.config.image-processing.ts",
+    "dev": "vite build --config vite.config.image-processing.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.image-processing.ts",
+    "test:watch": "vitest --config vitest.config.image-processing.ts",
+    "test:coverage": "vitest run --coverage --config vitest.config.image-processing.ts",
     "lint": "biome lint --write .",
-    "format": "biome format --write .",
-    "typecheck": "tsc --noEmit"
+    "format": "biome format --write ."
   },
   "dependencies": {
     "@cf-wasm/photon": "^0.3.4",
     "@codex/cloudflare-clients": "workspace:*",
-    "@codex/validation": "workspace:*",
-    "@codex/transcoding": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
+    "@codex/transcoding": "workspace:*",
+    "@codex/validation": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250102.0",
     "@types/node": "^22.0.0",
-    "typescript": "^5.6.3",
-    "vite": "^6.4.1",
+    "typescript": "^5.7.3",
+    "vite": "^7.2.2",
     "vite-plugin-dts": "^4.5.4",
-    "vite-plugin-wasm": "^3.4.1",
     "vite-plugin-top-level-await": "^1.4.4",
-    "vitest": "^4.0.13"
+    "vite-plugin-wasm": "^3.4.1",
+    "vitest": "^2.1.8"
   }
 }

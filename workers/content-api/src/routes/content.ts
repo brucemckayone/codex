@@ -12,8 +12,10 @@
  * - POST   /api/content/:id/publish   - Publish content
  * - POST   /api/content/:id/unpublish - Unpublish content
  * - DELETE /api/content/:id        - Soft delete
+ * - POST   /api/content/:id/thumbnail - Upload content thumbnail
  */
 
+import { AUTH_ROLES } from '@codex/constants';
 import type {
   ContentListResponse,
   ContentResponse,
@@ -29,10 +31,13 @@ import {
   createContentSchema,
   updateContentSchema,
 } from '@codex/content';
-import type { ImageUploadResult } from '@codex/image-processing';
+import {
+  MAX_IMAGE_SIZE_BYTES,
+  SUPPORTED_MIME_TYPES,
+} from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
@@ -47,7 +52,10 @@ const app = new Hono<HonoEnv>();
 app.post(
   '/',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { body: createContentSchema },
     successStatus: 201,
     handler: async (ctx): Promise<CreateContentResponse['data']> => {
@@ -91,7 +99,10 @@ app.get(
 app.patch(
   '/:id',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: {
       params: createIdParamsSchema(),
       body: updateContentSchema,
@@ -134,7 +145,10 @@ app.get(
 app.post(
   '/:id/publish',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<PublishContentResponse['data']> => {
       return await ctx.services.content.publish(
@@ -155,7 +169,10 @@ app.post(
 app.post(
   '/:id/unpublish',
   procedure({
-    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<UnpublishContentResponse['data']> => {
       return await ctx.services.content.unpublish(
@@ -178,7 +195,7 @@ app.delete(
   procedure({
     policy: {
       auth: 'required',
-      roles: ['creator', 'admin'],
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
       rateLimit: 'auth', // Stricter rate limit for deletion
     },
     input: { params: createIdParamsSchema() },
@@ -192,30 +209,50 @@ app.delete(
 
 /**
  * POST /api/content/:id/thumbnail
- * Upload content thumbnail
+ * Upload and process content thumbnail
  *
- * Security: Creator/Admin only, Rate limited
- * @returns {ImageUploadResult}
+ * Security: Creator/Admin only, must own content
+ * Content-Type: multipart/form-data
+ * Form field: thumbnail (file)
  */
 app.post(
   '/:id/thumbnail',
-  procedure({
+  multipartProcedure({
     policy: { auth: 'required', roles: ['creator', 'admin'] },
     input: { params: createIdParamsSchema() },
-    handler: async (ctx): Promise<ImageUploadResult> => {
-      const formData = await ctx.req.raw.formData();
-      const file = formData.get('thumbnail');
-
-      if (!file || !(file instanceof File)) {
-        throw new Error('Thumbnail file is required');
+    files: {
+      thumbnail: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_MIME_TYPES),
+      },
+    },
+    handler: async (ctx) => {
+      // Verify content exists and is owned by user
+      const content = await ctx.services.content.get(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+      if (!content) {
+        throw new ContentNotFoundError(ctx.input.params.id);
       }
 
-      return await ctx.services.content.uploadThumbnail(
+      // Process image via service registry
+      const result = await ctx.services.imageProcessing.processContentThumbnail(
         ctx.input.params.id,
         ctx.user.id,
-        file,
-        ctx.env.MEDIA_BUCKET
+        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+          type: ctx.files.thumbnail.type,
+        })
       );
+
+      return {
+        data: {
+          thumbnailUrl: result.url,
+          size: result.size,
+          mimeType: result.mimeType,
+        },
+      };
     },
   })
 );

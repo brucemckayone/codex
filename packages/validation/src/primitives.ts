@@ -1,4 +1,3 @@
-import DOMPurify from 'isomorphic-dompurify';
 import { z } from 'zod';
 
 /**
@@ -294,17 +293,22 @@ export const timezoneSchema = z
  * - Prevents <foreignObject> and other embedding vectors
  * - Allows safe SVG elements and attributes
  *
+ * Uses dynamic import to avoid SSR issues (DOMPurify requires browser globals).
+ *
  * @param content - Raw SVG file content as string
  * @returns Sanitized SVG content safe for rendering
  * @throws Error if sanitization results in empty content (indicates malicious file)
  *
  * @example
  * ```typescript
- * const safeSvg = sanitizeSvgContent(userUploadedSvg);
+ * const safeSvg = await sanitizeSvgContent(userUploadedSvg);
  * // <script> tags removed, onclick handlers stripped, etc.
  * ```
  */
-export function sanitizeSvgContent(content: string): string {
+export async function sanitizeSvgContent(content: string): Promise<string> {
+  // Dynamic import to avoid SSR issues - DOMPurify accesses `self` at module load
+  const DOMPurify = (await import('isomorphic-dompurify')).default;
+
   const clean = DOMPurify.sanitize(content, {
     USE_PROFILES: { svg: true, svgFilters: true },
 

@@ -1,3 +1,5 @@
+import { MIME_TYPES } from '@codex/constants';
+
 /**
  * File Content Validation Utilities
  *
@@ -12,11 +14,11 @@
  * Magic number signatures for supported image formats
  * These are the first bytes that identify file types
  */
-const MAGIC_NUMBERS = {
-  'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-  'image/jpeg': [0xff, 0xd8, 0xff],
-  'image/webp': [0x52, 0x49, 0x46, 0x46], // RIFF
-  'image/svg+xml': [0x3c, 0x3f, 0x78, 0x6d, 0x6c], // <?xml or <svg
+const MAGIC_NUMBERS: Record<string, number[]> = {
+  [MIME_TYPES.IMAGE.PNG]: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  [MIME_TYPES.IMAGE.JPEG]: [0xff, 0xd8, 0xff],
+  [MIME_TYPES.IMAGE.WEBP]: [0x52, 0x49, 0x46, 0x46], // RIFF
+  [MIME_TYPES.IMAGE.SVG]: [0x3c, 0x3f, 0x78, 0x6d, 0x6c], // <?xml or <svg
 } as const;
 
 /**
@@ -57,22 +59,17 @@ export function isValidImageHeader(
     return false;
   }
 
-  // Special handling for WebP (needs additional check after RIFF)
-  if (mimeType === 'image/webp') {
-    if (bytes.length < 12) return false;
-
-    // Check RIFF header
-    if (!matchesMagicNumbers(bytes, expectedMagicNumbers)) {
-      return false;
-    }
-
-    // Check WEBP identifier at offset 8
-    const webpMarker = [0x57, 0x45, 0x42, 0x50]; // WEBP
-    return matchesMagicNumbers(bytes.slice(8), webpMarker);
+  // Special handling for WebP (check for RIFF header)
+  if (mimeType === MIME_TYPES.IMAGE.WEBP) {
+    // Check first 4 bytes match RIFF
+    if (!bytes.slice(0, 4).every((b, i) => b === bytes[i])) return false;
+    // Check bytes 8-11 match WEBP
+    const webpMagic = [0x57, 0x45, 0x42, 0x50]; // WEBP
+    return webpMagic.every((b, i) => b === bytes[i + 8]);
   }
 
-  // Special handling for SVG (can start with <?xml or <svg)
-  if (mimeType === 'image/svg+xml') {
+  // Special handling for SVG (check for XML declaration or SVG tag)
+  if (mimeType === MIME_TYPES.IMAGE.SVG) {
     if (bytes.length < 5) return false;
 
     return (
@@ -110,14 +107,16 @@ function matchesMagicNumbers(
  *
  * @deprecated Moved to @codex/validation package. Import from there instead:
  * ```typescript
+ * import { MIME_TYPES } from '@codex/constants';
+ * import { MIME_TYPES, FILE_SIZES } from '@codex/constants';
  * import { sanitizeSvgContent } from '@codex/validation';
  * ```
  *
  * @param content - Raw SVG file content as string
  * @returns Sanitized SVG content safe for rendering
  */
-export function sanitizeSvgContent(content: string): string {
+export async function sanitizeSvgContent(content: string): Promise<string> {
   // Re-export from validation package for backwards compatibility
-  const { sanitizeSvgContent: sanitize } = require('@codex/validation');
+  const { sanitizeSvgContent: sanitize } = await import('@codex/validation');
   return sanitize(content);
 }

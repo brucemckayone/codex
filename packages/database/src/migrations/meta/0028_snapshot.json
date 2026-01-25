@@ -1,8 +1,42 @@
 {
+<<<<<<< HEAD:packages/database/src/migrations/meta/0028_snapshot.json
   "id": "e36f2e2a-aa93-4123-8879-a041670d2e71",
   "prevId": "26460183-78c7-4454-a086-5736787da06d",
+=======
+  "id": "f8c4d9e2-0a3b-5c6f-9d7e-2b3c4d5e6f7a",
+  "prevId": "e7b3c8d1-9f2a-4b5e-8c6d-1a2b3c4d5e6f",
+>>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf:packages/database/src/migrations/meta/0026_snapshot.json
   "version": "7",
   "dialect": "postgresql",
+  "enums": {
+    "public.email_send_status": {
+      "name": "email_send_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "success",
+        "failed"
+      ]
+    },
+    "public.template_scope": {
+      "name": "template_scope",
+      "schema": "public",
+      "values": [
+        "global",
+        "organization",
+        "creator"
+      ]
+    },
+    "public.template_status": {
+      "name": "template_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "active",
+        "archived"
+      ]
+    }
+  },
   "tables": {
     "public.accounts": {
       "name": "accounts",
@@ -1018,6 +1052,7 @@
         "check_media_type": {
           "name": "check_media_type",
           "value": "\"media_items\".\"media_type\" IN ('video', 'audio')"
+<<<<<<< HEAD:packages/database/src/migrations/meta/0028_snapshot.json
         },
         "check_mezzanine_status": {
           "name": "check_mezzanine_status",
@@ -1034,6 +1069,8 @@
         "status_ready_requires_keys": {
           "name": "status_ready_requires_keys",
           "value": "\"media_items\".\"status\" != 'ready' OR (\n        \"media_items\".\"hls_master_playlist_key\" IS NOT NULL\n        AND \"media_items\".\"duration_seconds\" IS NOT NULL\n        AND (\n          (\"media_items\".\"media_type\" = 'video' AND \"media_items\".\"thumbnail_key\" IS NOT NULL)\n          OR (\"media_items\".\"media_type\" = 'audio' AND \"media_items\".\"waveform_key\" IS NOT NULL)\n        )\n      )"
+=======
+>>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf:packages/database/src/migrations/meta/0026_snapshot.json
         }
       },
       "isRLSEnabled": false

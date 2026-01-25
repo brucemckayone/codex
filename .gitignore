@@ -54,3 +54,11 @@ packages/**/*.js.map
 
 # Log files
 *.log
+
+# Beads local database and temp files
+.beads/*.db
+.beads/*.db-shm
+.beads/*.db-wal
+.beads/bd.sock
+.beads/daemon.*
+.beads/last-touched
