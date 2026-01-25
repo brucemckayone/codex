@@ -19,7 +19,8 @@ BASE_DOMAIN="revelations.studio"
 # Define the preview subdomains
 PREVIEW_SUBDOMAINS=(
   "codex-preview-${PR_NUMBER}"
-  "api-preview-${PR_NUMBER}"
+  "ecom-api-preview-${PR_NUMBER}"
+  "media-api-preview-${PR_NUMBER}"
   "content-api-preview-${PR_NUMBER}"
   "identity-api-preview-${PR_NUMBER}"
   "organization-api-preview-${PR_NUMBER}"
