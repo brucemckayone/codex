@@ -1,3 +1,4 @@
+import { COOKIES } from '@codex/constants';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -116,7 +117,7 @@ describe('Session Authentication Middleware', () => {
         const res = await app.request('/test', {
           method: 'GET',
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -190,7 +191,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -239,7 +240,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -275,7 +276,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -305,7 +306,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -397,7 +398,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -433,7 +434,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -471,7 +472,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -511,7 +512,7 @@ describe('Session Authentication Middleware', () => {
 
         await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -539,7 +540,7 @@ describe('Session Authentication Middleware', () => {
 
         await app.request('/test', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -565,7 +566,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/protected/resource', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -634,7 +635,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/protected/resource', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -654,7 +655,7 @@ describe('Session Authentication Middleware', () => {
 
         const res = await app.request('/protected/resource', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
 
@@ -686,7 +687,7 @@ describe('Session Authentication Middleware', () => {
         // Protected route should work with auth
         const authedRes = await app.request('/protected/secret', {
           headers: {
-            cookie: `codex-session=${mockSessionToken}`,
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
           },
         });
         expect(authedRes.status).toBe(200);

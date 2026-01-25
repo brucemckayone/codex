@@ -16,6 +16,7 @@
  * - Transaction safety ensures purchase + access grant atomicity
  */
 
+import { CURRENCY } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';
 import { checkoutSessionMetadataSchema } from '@codex/validation';
@@ -127,7 +128,7 @@ export async function handleCheckoutCompleted(
         contentId: validatedMetadata.contentId,
         organizationId: validatedMetadata.organizationId,
         amountPaidCents: amountTotal,
-        currency: 'usd',
+        currency: CURRENCY.USD,
       });
 
       obs?.info('Purchase completed successfully', {

@@ -5,6 +5,7 @@
  */
 
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
+import { COOKIES } from '@codex/constants';
 import { createRequestTimer, ObservabilityClient } from '@codex/observability';
 import {
   type CSP_PRESETS,
@@ -145,7 +146,7 @@ export function createAuthMiddleware(): MiddlewareHandler<HonoEnv> {
 
     // Always use real authentication
     const authMiddleware = requireAuth({
-      cookieName: 'codex-session',
+      cookieName: COOKIES.SESSION_NAME,
       enableLogging: environment === 'development',
     });
 

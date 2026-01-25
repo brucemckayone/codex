@@ -1,6 +1,8 @@
+import { DATABASE_DIALECT, type DB_METHODS } from '@codex/constants';
 import type { NeonConfig } from '@neondatabase/serverless';
+import { DRIZZLE_CONFIG, NEON_CONFIG, ROOT_ENV_PATH } from '../constants';
 
-type DbMethod = 'LOCAL_PROXY' | 'NEON_BRANCH' | 'PRODUCTION';
+type DbMethod = keyof typeof DB_METHODS;
 
 // Type for environment variables that can come from process.env or c.env
 export interface DbEnvVars {
@@ -41,7 +43,9 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
       // The local Neon proxy runs on HTTP (not HTTPS) at port 4444
       neonConfigInstance.fetchEndpoint = (host: string): string => {
         const [protocol, port] =
-          host === 'db.localtest.me' ? ['http', 4444] : ['https', 443];
+          host === NEON_CONFIG.LOCAL_HOST
+            ? ['http', NEON_CONFIG.PROXY_PORT]
+            : ['https', NEON_CONFIG.HTTPS_PORT];
         return `${protocol}://${host}:${port}/sql`;
       };
 
@@ -56,8 +60,9 @@ const DB_METHOD_CONFIGS: Record<DbMethod, DbMethodConfig> = {
       // WebSocket proxy configuration for local development
       // The local proxy expects WebSocket connections on the same port (4444)
       const dbUrl = env.DATABASE_URL_LOCAL_PROXY;
-      if (dbUrl && new URL(dbUrl).hostname === 'db.localtest.me') {
-        neonConfigInstance.wsProxy = (host: string) => `${host}:4444/v1`;
+      if (dbUrl && new URL(dbUrl).hostname === NEON_CONFIG.LOCAL_HOST) {
+        neonConfigInstance.wsProxy = (host: string) =>
+          `${host}:${NEON_CONFIG.PROXY_PORT}/v1`;
       }
     },
   },
@@ -110,7 +115,7 @@ function getCurrentDbMethod(dbMethod?: string): DbMethod {
   const method = dbMethod || process.env.DB_METHOD;
   if (!method || !(method in DB_METHOD_CONFIGS)) {
     throw new Error(
-      `Invalid DB_METHOD: ${method}. Must be one of: LOCAL_PROXY, NEON_BRANCH, PRODUCTION`
+      `Invalid DB_METHOD: ${method}. Must be one of: ${Object.keys(DB_METHOD_CONFIGS).join(', ')}`
     );
   }
   return method as DbMethod;
@@ -141,12 +146,12 @@ function applyNeonConfig(
 
 // Main exported value for config/env logic
 export const DbEnvConfig = {
-  rootEnvPath: '../../../../env.dev',
+  rootEnvPath: ROOT_ENV_PATH,
   getDbUrl,
   method: process.env.DB_METHOD ?? '',
-  out: './src/migrations',
-  schema: './src/schema/index.ts',
-  dialect: 'postgresql' as
+  out: DRIZZLE_CONFIG.OUT,
+  schema: DRIZZLE_CONFIG.SCHEMA,
+  dialect: DATABASE_DIALECT as
     | 'postgresql'
     | 'mysql'
     | 'sqlite'

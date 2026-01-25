@@ -1,3 +1,4 @@
+import { TEMPLATE_SCOPES } from '@codex/constants';
 import { type EmailTemplate, emailTemplates } from '@codex/database/schema';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import type { Database } from '../types';
@@ -30,14 +31,14 @@ export class TemplateRepository {
     // Build scope conditions explicitly (no undefined values)
     // Global scope is always included as the fallback
     const scopeConditions: ReturnType<typeof and>[] = [
-      eq(emailTemplates.scope, 'global'),
+      eq(emailTemplates.scope, TEMPLATE_SCOPES.GLOBAL),
     ];
 
     // Add organization scope if orgId provided (highest priority)
     if (organizationId) {
       scopeConditions.unshift(
         and(
-          eq(emailTemplates.scope, 'organization'),
+          eq(emailTemplates.scope, TEMPLATE_SCOPES.ORGANIZATION),
           eq(emailTemplates.organizationId, organizationId)
         )
       );
@@ -47,7 +48,7 @@ export class TemplateRepository {
     if (creatorId) {
       scopeConditions.push(
         and(
-          eq(emailTemplates.scope, 'creator'),
+          eq(emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
           eq(emailTemplates.creatorId, creatorId)
         )
       );
@@ -66,9 +67,9 @@ export class TemplateRepository {
 
     // In-memory priority resolution: Organization > Creator > Global
     return (
-      templates.find((t) => t.scope === 'organization') ??
-      templates.find((t) => t.scope === 'creator') ??
-      templates.find((t) => t.scope === 'global') ??
+      templates.find((t) => t.scope === TEMPLATE_SCOPES.ORGANIZATION) ??
+      templates.find((t) => t.scope === TEMPLATE_SCOPES.CREATOR) ??
+      templates.find((t) => t.scope === TEMPLATE_SCOPES.GLOBAL) ??
       null
     );
   }

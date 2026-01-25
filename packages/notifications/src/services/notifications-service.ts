@@ -1,3 +1,4 @@
+import { EMAIL_SEND_STATUS } from '@codex/constants';
 import { schema } from '@codex/database';
 import {
   BrandingSettingsService,
@@ -212,7 +213,7 @@ export class NotificationsService extends BaseService {
           recipientEmail: to,
           organizationId: organizationId || null,
           creatorId: creatorId || null,
-          status: 'pending',
+          status: EMAIL_SEND_STATUS.PENDING,
           metadata: JSON.stringify(data), // basic metadata storage
         })
         .returning();
@@ -237,7 +238,7 @@ export class NotificationsService extends BaseService {
         await tx
           .update(schema.emailAuditLogs)
           .set({
-            status: 'success',
+            status: EMAIL_SEND_STATUS.SUCCESS,
             updatedAt: new Date(),
           })
           .where(eq(schema.emailAuditLogs.id, auditLog.id));
@@ -248,7 +249,7 @@ export class NotificationsService extends BaseService {
         await tx
           .update(schema.emailAuditLogs)
           .set({
-            status: 'failed',
+            status: EMAIL_SEND_STATUS.FAILED,
             error: error instanceof Error ? error.message : String(error),
             updatedAt: new Date(),
           })

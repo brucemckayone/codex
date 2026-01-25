@@ -10,6 +10,7 @@
 
 /// <reference types="@cloudflare/workers-types" />
 
+import { COOKIES } from '@codex/constants';
 import { createDbClient } from '@codex/database';
 import { sessions } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
@@ -112,9 +113,11 @@ async function cacheSessionInKV(
  * 4. __Secure-better-auth.session_token
  */
 function extractSessionToken(cookieHeader: string): string | null {
-  let match = cookieHeader.match(/codex-session=([^;]+)/);
+  let match = cookieHeader.match(new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`));
   if (!match) {
-    match = cookieHeader.match(/__Secure-codex-session=([^;]+)/);
+    match = cookieHeader.match(
+      new RegExp(`__Secure-${COOKIES.SESSION_NAME}=([^;]+)`)
+    );
   }
   if (!match) {
     match = cookieHeader.match(/better-auth\.session_token=([^;]+)/);

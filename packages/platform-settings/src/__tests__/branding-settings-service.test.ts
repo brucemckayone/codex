@@ -10,6 +10,7 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
+import { MIME_TYPES } from '@codex/constants';
 import { schema } from '@codex/database';
 import {
   type Database,
@@ -42,19 +43,20 @@ function createValidImageBuffer(
   const view = new Uint8Array(buffer);
 
   // Add magic numbers based on MIME type
-  if (mimeType === 'image/png') {
+  // Add magic numbers based on MIME type
+  if (mimeType === MIME_TYPES.IMAGE.PNG) {
     // PNG magic number: 89 50 4E 47 0D 0A 1A 0A
     const pngHeader = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
     pngHeader.forEach((byte, i) => {
       view[i] = byte;
     });
-  } else if (mimeType === 'image/jpeg') {
+  } else if (mimeType === MIME_TYPES.IMAGE.JPEG) {
     // JPEG magic number: FF D8 FF
     const jpegHeader = [0xff, 0xd8, 0xff];
     jpegHeader.forEach((byte, i) => {
       view[i] = byte;
     });
-  } else if (mimeType === 'image/webp') {
+  } else if (mimeType === MIME_TYPES.IMAGE.WEBP) {
     // WebP: RIFF....WEBP
     const riff = [0x52, 0x49, 0x46, 0x46]; // RIFF
     const webp = [0x57, 0x45, 0x42, 0x50]; // WEBP
@@ -64,7 +66,7 @@ function createValidImageBuffer(
     webp.forEach((byte, i) => {
       view[i + 8] = byte;
     });
-  } else if (mimeType === 'image/svg+xml') {
+  } else if (mimeType === MIME_TYPES.IMAGE.SVG) {
     // SVG: starts with <?xml or <svg
     const svg = '<?xml version="1.0"?><svg></svg>';
     const encoder = new TextEncoder();
@@ -232,7 +234,11 @@ describe('BrandingSettingsService', () => {
       const service = createService(); // No R2
 
       await expect(
-        service.uploadLogo(new ArrayBuffer(100), 'image/png', 100)
+        service.uploadLogo({
+          buffer: new ArrayBuffer(100),
+          mimeType: MIME_TYPES.IMAGE.PNG,
+          size: 100,
+        })
       ).rejects.toThrow('R2 service not configured for logo uploads');
     });
 
@@ -241,7 +247,11 @@ describe('BrandingSettingsService', () => {
       const service = createService(mockR2);
 
       await expect(
-        service.uploadLogo(new ArrayBuffer(100), 'application/pdf', 100)
+        service.uploadLogo({
+          buffer: new ArrayBuffer(100),
+          mimeType: 'application/pdf',
+          size: 100,
+        })
       ).rejects.toThrow(InvalidFileTypeError);
     });
 
@@ -255,10 +265,10 @@ describe('BrandingSettingsService', () => {
       const mockR2 = createMockR2();
       const service = createService(mockR2);
 
-      const fileData = createValidImageBuffer('image/png', 1024);
+      const fileData = createValidImageBuffer(MIME_TYPES.IMAGE.PNG, 1024);
       const result = await service.uploadLogo({
         buffer: fileData,
-        mimeType: 'image/png',
+        mimeType: MIME_TYPES.IMAGE.PNG,
         size: 1024,
       });
 
@@ -268,7 +278,7 @@ describe('BrandingSettingsService', () => {
         fileData,
         undefined,
         expect.objectContaining({
-          contentType: 'image/png',
+          contentType: MIME_TYPES.IMAGE.PNG,
           cacheControl: 'public, max-age=31536000',
         })
       );
@@ -292,8 +302,8 @@ describe('BrandingSettingsService', () => {
 
       // Upload new logo
       await service.uploadLogo({
-        buffer: createValidImageBuffer('image/jpeg', 1024),
-        mimeType: 'image/jpeg',
+        buffer: createValidImageBuffer(MIME_TYPES.IMAGE.JPEG, 1024),
+        mimeType: MIME_TYPES.IMAGE.JPEG,
         size: 1024,
       });
 
@@ -307,8 +317,8 @@ describe('BrandingSettingsService', () => {
 
       // Test PNG
       await service.uploadLogo({
-        buffer: createValidImageBuffer('image/png', 100),
-        mimeType: 'image/png',
+        buffer: createValidImageBuffer(MIME_TYPES.IMAGE.PNG, 100),
+        mimeType: MIME_TYPES.IMAGE.PNG,
         size: 100,
       });
       expect(mockR2.put).toHaveBeenLastCalledWith(
@@ -321,8 +331,8 @@ describe('BrandingSettingsService', () => {
       // Reset and test JPEG
       mockR2.put.mockClear();
       await service.uploadLogo({
-        buffer: createValidImageBuffer('image/jpeg', 100),
-        mimeType: 'image/jpeg',
+        buffer: createValidImageBuffer(MIME_TYPES.IMAGE.JPEG, 100),
+        mimeType: MIME_TYPES.IMAGE.JPEG,
         size: 100,
       });
       expect(mockR2.put).toHaveBeenLastCalledWith(
@@ -335,8 +345,8 @@ describe('BrandingSettingsService', () => {
       // Reset and test WebP
       mockR2.put.mockClear();
       await service.uploadLogo({
-        buffer: createValidImageBuffer('image/webp', 100),
-        mimeType: 'image/webp',
+        buffer: createValidImageBuffer(MIME_TYPES.IMAGE.WEBP, 100),
+        mimeType: MIME_TYPES.IMAGE.WEBP,
         size: 100,
       });
       expect(mockR2.put).toHaveBeenLastCalledWith(

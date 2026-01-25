@@ -11,6 +11,7 @@
  * - Slug uniqueness enforced
  */
 
+import { PAGINATION } from '@codex/constants';
 import {
   isUniqueViolation,
   whereNotDeleted,
@@ -248,7 +249,7 @@ export class OrganizationService extends BaseService {
    */
   async list(
     filters: OrganizationFilters = {},
-    pagination: PaginationParams = { page: 1, limit: 20 }
+    pagination: PaginationParams = { page: 1, limit: PAGINATION.DEFAULT }
     //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedResponse<Organization>> {
     try {

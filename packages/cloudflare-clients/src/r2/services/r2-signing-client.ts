@@ -16,6 +16,8 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { AWS_ERRORS, INFRA_KEYS } from '@codex/constants';
+import { R2_REGIONS } from '../constants';
 
 // Import from r2-service (exported via index.ts)
 import type { R2SigningConfig } from './r2-service';
@@ -27,7 +29,7 @@ export class R2SigningClient {
   constructor(config: R2SigningConfig) {
     this.bucketName = config.bucketName;
     this.s3Client = new S3Client({
-      region: 'auto',
+      region: R2_REGIONS.AUTO,
       endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: config.accessKeyId,
@@ -72,7 +74,7 @@ export class R2SigningClient {
       return true;
     } catch (err) {
       const error = err as { name?: string };
-      if (error.name === 'NotFound') {
+      if (error.name === AWS_ERRORS.NOT_FOUND) {
         return false;
       }
       throw err;
@@ -92,14 +94,14 @@ export class R2SigningClient {
  * Expects: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_MEDIA
  */
 export function createR2SigningClientFromEnv(): R2SigningClient {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucketName = process.env.R2_BUCKET_MEDIA;
+  const accountId = process.env[INFRA_KEYS.R2.ACCOUNT_ID];
+  const accessKeyId = process.env[INFRA_KEYS.R2.ACCESS_KEY_ID];
+  const secretAccessKey = process.env[INFRA_KEYS.R2.SECRET_ACCESS_KEY];
+  const bucketName = process.env[INFRA_KEYS.R2.BUCKET_MEDIA];
 
   if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
     throw new Error(
-      'Missing R2 environment variables. Required: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_MEDIA'
+      `Missing R2 environment variables. Required: ${INFRA_KEYS.R2.ACCOUNT_ID}, ${INFRA_KEYS.R2.ACCESS_KEY_ID}, ${INFRA_KEYS.R2.SECRET_ACCESS_KEY}, ${INFRA_KEYS.R2.BUCKET_MEDIA}`
     );
   }
 
