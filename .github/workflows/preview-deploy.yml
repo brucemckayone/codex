@@ -334,23 +334,11 @@ jobs:
             --route "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload media-api secrets
-        run: .github/scripts/upload-worker-secrets.sh preview media-api
+        run: |
+          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}","RUNPOD_API_KEY":"${{ secrets.RUNPOD_API_KEY }}","RUNPOD_ENDPOINT_ID":"${{ secrets.RUNPOD_ENDPOINT_ID }}","RUNPOD_WEBHOOK_SECRET":"${{ secrets.RUNPOD_WEBHOOK_SECRET }}","WORKER_SHARED_SECRET":"${{ secrets.WORKER_SHARED_SECRET }}","B2_ENDPOINT":"${{ secrets.B2_ENDPOINT }}","B2_KEY_ID":"${{ secrets.B2_KEY_ID }}","B2_APP_KEY":"${{ secrets.B2_APP_KEY }}","B2_BUCKET":"${{ secrets.B2_BUCKET }}","R2_BUCKET_MEDIA":"${{ vars.R2_BUCKET_MEDIA }}","R2_BUCKET_ASSETS":"${{ vars.R2_BUCKET_ASSETS }}","R2_BUCKET_PLATFORM":"${{ vars.R2_BUCKET_PLATFORM }}","R2_BUCKET_RESOURCES":"${{ vars.R2_BUCKET_RESOURCES }}"}' | npx wrangler secret bulk --name media-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
-          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
-          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
-          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
-          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
-          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
-          B2_BUCKET: ${{ secrets.B2_BUCKET }}
-          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
-          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
-          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
-          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Media API URL
         id: media-api-url
