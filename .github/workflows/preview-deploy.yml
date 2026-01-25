@@ -299,8 +299,8 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --route "ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       # Upload secrets to the preview worker (wrangler-action uploads to wrong worker name)
       - name: Upload ecom-api secrets
@@ -313,7 +313,7 @@ jobs:
       - name: Set API URL
         id: api-url
         run: |
-          API_URL="https://api-preview-${{ env.PR_NUMBER }}.revelations.studio"
+          API_URL="https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
           echo "url=$API_URL" >> $GITHUB_OUTPUT
           echo "API_URL=$API_URL" >> $GITHUB_ENV
 
@@ -608,7 +608,7 @@ jobs:
             ### 🌐 Preview URLs
             - **Web App:** https://codex-preview-${prNumber}.revelations.studio
             - **Media API:** https://media-api-preview-${prNumber}.revelations.studio
-            - **Stripe API:** https://api-preview-${prNumber}.revelations.studio
+            - **Ecom API:** https://ecom-api-preview-${prNumber}.revelations.studio
             - **Content API:** https://content-api-preview-${prNumber}.revelations.studio
             - **Identity API:** https://identity-api-preview-${prNumber}.revelations.studio
             - **Organization API:** https://organization-api-preview-${prNumber}.revelations.studio

@@ -24,7 +24,7 @@ BASE_DOMAIN="revelations.studio"
 #
 # Workers managed by Wrangler (DO NOT ADD HERE):
 # - auth.revelations.studio -> auth-worker-production (custom_domain: true)
-# - api.revelations.studio -> ecom-api-production (custom_domain: true)
+# - ecom-api.revelations.studio -> ecom-api-production (custom_domain: true)
 # - content-api.revelations.studio -> content-api-production (custom_domain: true)
 # - identity-api.revelations.studio -> identity-api-production (custom_domain: true)
 #

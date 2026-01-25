@@ -55,7 +55,7 @@ const DEFAULT_URLS = {
     dev: `http://localhost:${SERVICE_PORTS.ORGANIZATION}`,
   },
   ecom: {
-    prod: 'https://api.revelations.studio',
+    prod: 'https://ecom-api.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.ECOMMERCE}`,
   },
   admin: {

@@ -58,10 +58,6 @@ jobs:
             ${{ runner.os }}-turbo-
 
       # Verify production DNS records exist
-      # NOTE: While Cloudflare Workers custom domains handle routing, the underlying
-      # DNS records must exist first. This step verifies all required DNS records are
-      # in place, and creates them if missing (only on first deployment).
-      # After initial setup, this step will just verify and pass quickly.
       - name: Verify production DNS records
         id: verify-dns
         run: |
@@ -76,12 +72,10 @@ jobs:
 
           echo "✅ Production DNS verified"
 
-      # Pre-deployment validation: Build all workers BEFORE touching database
-      # Using Turborepo for parallel builds and caching
-      - name: Validate all workers build successfully with Turborepo
+      # Build all workers BEFORE touching database
+      - name: Build all workers with Turborepo
         run: |
           echo "🔍 Validating worker builds before database migration..."
-          # Build all workers and the web app in parallel using Turborepo
           pnpm build
           echo "✅ All workers and web app built successfully"
         env:
@@ -89,30 +83,11 @@ jobs:
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
 
-      # Test migrations on a temporary branch first (dry run)
-      - name: Test migrations on temporary Neon branch
-        id: test-migration
-        run: |
-          echo "🧪 Testing migrations on temporary branch..."
-
-          # Create temporary test branch
-          TEMP_BRANCH_NAME="migration-test-$(date +%s)"
-          echo "Creating temporary branch: $TEMP_BRANCH_NAME"
-
-          # Note: This requires neonctl CLI. Install it if not available:
-          # npm install -g neonctl
-
-          # For now, we'll skip this test in CI and rely on ephemeral branch testing
-          # TODO: Add neonctl and implement full dry-run testing
-          echo "⚠️ Dry-run testing not implemented yet - relying on test workflow validation"
-          echo "✅ Proceeding with migration (validated in test workflow)"
-
-      # Build @codex/constants before migrations (required dependency)
+      # Build @codex/constants before migrations
       - name: Build constants package
         run: pnpm --filter @codex/constants build
 
       # Apply migrations to production database
-      # Uses DATABASE_URL from production environment secrets
       - name: Run production migrations
         id: run-migrations
         run: pnpm --filter @codex/database db:migrate
@@ -120,16 +95,14 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DB_METHOD: ${{ vars.DB_METHOD }}
 
-      # Verify migration success
-      - name: Verify migrations applied successfully
+      - name: Verify migrations applied
         if: steps.run-migrations.outcome == 'success'
-        run: |
-          echo "✅ Migrations completed successfully"
-          echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+        run: echo "✅ Migrations completed successfully"
 
-      # Deploy media-api to production
+      # --- WORKER DEPLOYMENTS ---
+
+      # 1. Media API
       - name: Deploy media-api
-        id: deploy-media-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -137,7 +110,6 @@ jobs:
           workingDirectory: workers/media-api
           command: deploy --env production
 
-      # Upload secrets to the media-api worker
       - name: Upload media-api secrets
         run: .github/scripts/upload-worker-secrets.sh production media-api
         env:
@@ -157,42 +129,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify media-api worker is healthy
-      - name: Health check - Media API worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Media API worker health at https://media-api.revelations.studio/health..."
-
-          # Wait for custom domain SSL
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 30
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://media-api.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Media API worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Media API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Media API worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
+      # 2. Ecom API (formerly 'api')
       - name: Deploy ecom-api
-        id: deploy-ecom
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -200,7 +138,6 @@ jobs:
           workingDirectory: workers/ecom-api
           command: deploy --env production
 
-      # Upload secrets to the production worker
       - name: Upload ecom-api secrets
         run: .github/scripts/upload-worker-secrets.sh production ecom-api
         env:
@@ -219,45 +156,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify API worker is healthy after deployment
-      - name: Health check - API worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking API worker health at https://api.revelations.studio..."
-
-          # Wait for custom domain SSL to provision (can take 30-90 seconds)
-          echo "⏳ Waiting for SSL certificate provisioning..."
-          sleep 30
-
-          # Retry health check with exponential backoff
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://api.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ API worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2)) # Exponential backoff
-          done
-
-          echo "❌ API worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Deploy content-api to production
+      # 3. Content API
       - name: Deploy content-api
-        id: deploy-content-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -279,44 +179,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify content-api worker is healthy after deployment
-      - name: Health check - Content API worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Content API worker health at https://content-api.revelations.studio..."
-
-          # Wait for custom domain SSL
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 15
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://content-api.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Content API worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Content API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Content API worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Deploy identity-api to production
+      # 4. Identity API
       - name: Deploy identity-api
-        id: deploy-identity-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -335,44 +199,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify identity-api worker is healthy after deployment
-      - name: Health check - Identity API worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Identity API worker health at https://identity-api.revelations.studio..."
-
-          # Wait for custom domain SSL
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 15
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://identity-api.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Identity API worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Identity API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Identity API worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Deploy admin-api to production
+      # 5. Admin API
       - name: Deploy admin-api
-        id: deploy-admin-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -391,44 +219,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify admin-api worker is healthy after deployment
-      - name: Health check - Admin API worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Admin API worker health at https://admin-api.revelations.studio/health..."
-
-          # Wait for custom domain SSL
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 15
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://admin-api.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Admin API worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Admin API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Admin API worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Deploy organization-api to production
+      # 6. Organization API
       - name: Deploy organization-api
-        id: deploy-organization-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -447,44 +239,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify organization-api worker is healthy after deployment
-      - name: Health check - Organization API worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Organization API worker health at https://organization-api.revelations.studio..."
-
-          # Wait for custom domain SSL
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 15
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://organization-api.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Organization API worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Organization API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Organization API worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Deploy notifications-api to production
+      # 7. Notifications API
       - name: Deploy notifications-api
-        id: deploy-notifications-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -503,44 +259,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify notifications-api worker is healthy after deployment
-      - name: Health check - Notifications API worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Notifications API worker health at https://notifications-api.revelations.studio..."
-
-          # Wait for custom domain SSL
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 15
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://notifications-api.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Notifications API worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Notifications API returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Notifications API worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Deploy auth-worker to production
+      # 8. Auth Worker
       - name: Deploy auth-worker
-        id: deploy-auth
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -561,44 +281,8 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # Verify auth worker is healthy after deployment
-      - name: Health check - Auth worker
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Auth worker health at https://auth.revelations.studio..."
-
-          # Wait for custom domain SSL (shorter wait since API already provisioned)
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 15
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://auth.revelations.studio/health || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Auth worker is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Auth returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Auth worker health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Build SvelteKit app using Turborepo (NOTE: Build was already validated earlier)
-      # This rebuild ensures fresh artifacts with production env vars
-      - name: Build SvelteKit app for production with Turborepo
+      # 9. Web App
+      - name: Build SvelteKit app
         run: pnpm build:web
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -607,8 +291,7 @@ jobs:
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
 
-      # Deploy SvelteKit to production
-      - name: Deploy SvelteKit to production
+      - name: Deploy SvelteKit
         id: deploy-web
         uses: cloudflare/wrangler-action@v3
         with:
@@ -624,43 +307,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # Verify web app is healthy after deployment
-      - name: Health check - Web app
-        timeout-minutes: 5
-        run: |
-          echo "🏥 Checking Web app health at https://codex.revelations.studio..."
+      # --- POST-DEPLOYMENT VERIFICATION ---
 
-          # Wait for custom domain SSL
-          echo "⏳ Waiting for SSL certificate..."
-          sleep 15
-
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          RETRY_DELAY=5
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            # For SvelteKit app, check the homepage (may not have /health endpoint)
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://codex.revelations.studio || echo "000")
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Web app is healthy (HTTP $HTTP_CODE)"
-              exit 0
-            elif [ "$HTTP_CODE" = "000" ]; then
-              echo "⏳ Connection failed (SSL provisioning?), retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            else
-              echo "⏳ Web app returned HTTP $HTTP_CODE, retrying in ${RETRY_DELAY}s... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-            fi
-
-            sleep $RETRY_DELAY
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            RETRY_DELAY=$((RETRY_DELAY * 2))
-          done
-
-          echo "❌ Web app health check failed after $MAX_RETRIES attempts"
-          echo "Last HTTP code: $HTTP_CODE"
-          exit 1
-
-      # Comprehensive smoke tests for all 8 services
       - name: Comprehensive smoke tests
         timeout-minutes: 5
         run: |
@@ -669,119 +317,53 @@ jobs:
           echo "## 🧪 Production Smoke Tests" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-
           FAILED=0
 
-          # Test 0: Media API
-          echo "Testing Media API..."
-          if curl -f -s https://media-api.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Media API (media-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Media API (media-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
+          # Function to check health
+          check_health() {
+            local service_name=$1
+            local url=$2
+            echo "Testing $service_name ($url)..."
 
-          # Test 1: Stripe Webhook Handler
-          echo "Testing Stripe webhook handler..."
-          if curl -f -s https://api.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Stripe webhook handler (api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Stripe webhook handler (api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
+            # Use curl to get status code, follow redirects, match 200
+            if curl -L -f -s "$url" > /dev/null 2>&1; then
+              echo "✅ $service_name" >> $GITHUB_STEP_SUMMARY
+              return 0
+            else
+              echo "❌ $service_name ($url)" >> $GITHUB_STEP_SUMMARY
+              return 1
+            fi
+          }
 
-          # Test 2: Content API
-          echo "Testing Content API..."
-          if curl -f -s https://content-api.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Content API (content-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Content API (content-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
+          # Wait for propagation (initial delay)
+          echo "⏳ Waiting 30s for partial propagation..."
+          sleep 30
 
-          # Test 3: Identity API
-          echo "Testing Identity API..."
-          if curl -f -s https://identity-api.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Identity API (identity-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Identity API (identity-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
-
-          # Test 4: Organization API
-          echo "Testing Organization API..."
-          if curl -f -s https://organization-api.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Organization API (organization-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Organization API (organization-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
-
-          # Test 5: Notifications API
-          echo "Testing Notifications API..."
-          if curl -f -s https://notifications-api.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Notifications API (notifications-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Notifications API (notifications-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
-
-          # Test 6: Admin API
-          echo "Testing Admin API..."
-          if curl -f -s https://admin-api.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Admin API (admin-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Admin API (admin-api.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
-
-          # Test 7: Auth Worker
-          echo "Testing Auth worker..."
-          if curl -f -s https://auth.revelations.studio/health > /dev/null 2>&1; then
-            echo "✅ Auth worker (auth.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Auth worker (auth.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
-
-          # Test 8: Web App
-          echo "Testing Web app..."
-          if curl -f -s https://codex.revelations.studio > /dev/null 2>&1; then
-            echo "✅ Web app (codex.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Web app (codex.revelations.studio)" >> $GITHUB_STEP_SUMMARY
-            FAILED=1
-          fi
+          # Test all endpoints
+          check_health "Media API" "https://media-api.revelations.studio/health" || FAILED=1
+          check_health "Ecom API" "https://ecom-api.revelations.studio/health" || FAILED=1
+          check_health "Content API" "https://content-api.revelations.studio/health" || FAILED=1
+          check_health "Identity API" "https://identity-api.revelations.studio/health" || FAILED=1
+          check_health "Organization API" "https://organization-api.revelations.studio/health" || FAILED=1
+          check_health "Notifications API" "https://notifications-api.revelations.studio/health" || FAILED=1
+          check_health "Admin API" "https://admin-api.revelations.studio/health" || FAILED=1
+          check_health "Auth Worker" "https://auth.revelations.studio/health" || FAILED=1
+          check_health "Web App" "https://codex.revelations.studio/" || FAILED=1
 
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ $FAILED -eq 0 ]; then
-            echo "✅ **All 8 services passed smoke tests**" >> $GITHUB_STEP_SUMMARY
-            echo "✅ All smoke tests passed"
+            echo "✅ **All services passed smoke tests**" >> $GITHUB_STEP_SUMMARY
             exit 0
           else
             echo "❌ **Some services failed smoke tests**" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Smoke tests failed"
+            # Don't fail the build immediately, allow notification to run
             exit 1
           fi
 
-      - name: Deployment notification with metrics
-        if: success()
+      - name: Deployment summary
+        if: always()
         run: |
-          echo "✅ Production deployment successful"
-          echo "🌐 Web App: https://codex.revelations.studio - Health: OK"
-          echo "🎬 Media API: https://media-api.revelations.studio - Health: OK"
-          echo "🔌 API (Stripe): https://api.revelations.studio - Health: OK"
-          echo "📝 Content API: https://content-api.revelations.studio - Health: OK"
-          echo "👤 Identity API: https://identity-api.revelations.studio - Health: OK"
-          echo "🏢 Organization API: https://organization-api.revelations.studio - Health: OK"
-          echo "📧 Notifications API: https://notifications-api.revelations.studio - Health: OK"
-          echo "🛠️ Admin API: https://admin-api.revelations.studio - Health: OK"
-          echo "🔐 Auth: https://auth.revelations.studio - Health: OK"
-          echo "💾 Database: Migrations applied successfully"
-          echo "⚡ All workers deployed and verified healthy"
-
-          # Add prominent URL section at TOP of summary
           echo "## 🚀 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Deployed Services" >> $GITHUB_STEP_SUMMARY
@@ -790,85 +372,10 @@ jobs:
           echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
           echo "| Web App | [codex.revelations.studio](https://codex.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Media API | [media-api.revelations.studio](https://media-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Stripe API | [api.revelations.studio](https://api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ecom API | [ecom-api.revelations.studio](https://ecom-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Content API | [content-api.revelations.studio](https://content-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Identity API | [identity-api.revelations.studio](https://identity-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Organization API | [organization-api.revelations.studio](https://organization-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Notifications API | [notifications-api.revelations.studio](https://notifications-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Admin API | [admin-api.revelations.studio](https://admin-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Auth | [auth.revelations.studio](https://auth.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Add deployment metrics
-          echo "## ⚡ Deployment Metrics" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Trigger:** Merged to main" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Completed:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Workers deployed:** 9 (media, stripe, content, identity, organization, notifications, admin, auth, web)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Health checks:** All passed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- **Smoke tests:** All passed ✅" >> $GITHUB_STEP_SUMMARY
-
-      - name: Rollback instructions on failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🚨 Production Deployment Failed - ${context.sha.substring(0, 7)}`,
-              labels: ['production', 'deployment-failure', 'urgent'],
-              body: `## Production Deployment Failed
-
-            **Commit**: ${context.sha}
-            **Workflow Run**: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
-            **Timestamp**: ${new Date().toISOString()}
-
-            ### Immediate Actions Required
-
-            #### 1. Check which step failed
-            [View workflow logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-
-            #### 2. If migrations failed
-            - Database is still on old schema ✅
-            - Workers are still on old version ✅
-            - **No rollback needed** - safe to retry after fixing migrations
-
-            #### 3. If worker deployment failed AFTER migrations
-            ⚠️ **CRITICAL**: Database has new schema, but workers expect old schema
-
-            **Manual rollback required**:
-
-            \`\`\`bash
-            # Option A: Rollback worker to previous version
-            wrangler rollback --name ecom-api-production
-            wrangler rollback --name auth-worker-production
-            wrangler rollback --name codex-web-production
-
-            # Option B: Restore database from Neon point-in-time
-            # Create restore branch from 30 minutes ago
-            neonctl branches create \\
-              --name emergency-restore-$(date +%s) \\
-              --parent production \\
-              --timestamp "30 minutes ago"
-
-            # Then redeploy workers pointing to restored branch
-            \`\`\`
-
-            #### 4. If health checks failed
-            - Workers deployed successfully but not responding
-            - Check Cloudflare dashboard for errors
-            - Verify DNS is resolving correctly
-            - Check worker logs: \`wrangler tail <worker-name>\`
-
-            ### Prevention
-            - This workflow now validates builds BEFORE running migrations
-            - Health checks verify each worker after deployment
-            - Consider adding staged rollout or blue-green deployment
-
-            @${context.actor} please investigate and respond here once resolved.
-            `
-            });
-
-            console.log('Created issue:', issue.data.html_url);
