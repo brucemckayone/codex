@@ -87,9 +87,7 @@ jobs:
       - name: Build constants package
         run: pnpm --filter @codex/constants build
 
-      # Build @codex/constants before migrations (required dependency)
-      - name: Build constants package
-        run: pnpm --filter @codex/constants build
+
 
       # Apply migrations to production database
       - name: Run production migrations
@@ -133,7 +131,7 @@ jobs:
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
-      # 2. Ecom API (formerly 'api')
+      # 2. Ecom API
       - name: Deploy ecom-api
         uses: cloudflare/wrangler-action@v3
         with:
