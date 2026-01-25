@@ -5,9 +5,11 @@
  * Uses SQL aggregation for efficient queries on purchases table.
  */
 
+import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { schema } from '@codex/database';
 import { BaseService, NotFoundError, wrapError } from '@codex/service-errors';
 import { and, countDistinct, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import type {
   CustomerStats,
   DailyRevenue,
@@ -32,7 +34,7 @@ export class AdminAnalyticsService extends BaseService {
       // Build date filter conditions
       const dateConditions = [
         eq(schema.purchases.organizationId, organizationId),
-        eq(schema.purchases.status, 'completed'),
+        eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
       ];
 
       if (options?.startDate) {
@@ -70,9 +72,11 @@ export class AdminAnalyticsService extends BaseService {
           ? Math.round(stats.totalRevenueCents / stats.totalPurchases)
           : 0;
 
-      // Get daily revenue for last 30 days
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      // Get daily revenue for default trend period
+      const trendPeriodStartDate = new Date();
+      trendPeriodStartDate.setDate(
+        trendPeriodStartDate.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
+      );
 
       const dailyRevenue = await this.db
         .select({
@@ -84,8 +88,8 @@ export class AdminAnalyticsService extends BaseService {
         .where(
           and(
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, 'completed'),
-            gte(schema.purchases.purchasedAt, thirtyDaysAgo)
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
+            gte(schema.purchases.purchasedAt, trendPeriodStartDate)
           )
         )
         .groupBy(sql`DATE(${schema.purchases.purchasedAt})`)
@@ -132,14 +136,16 @@ export class AdminAnalyticsService extends BaseService {
         .where(
           and(
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, 'completed')
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
           )
         );
 
-      // Count new customers in last 30 days
-      // A "new customer" is one whose FIRST purchase was in the last 30 days
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      // Count new customers in default trend period
+      // A "new customer" is one whose FIRST purchase was in that period
+      const trendPeriodStartDate = new Date();
+      trendPeriodStartDate.setDate(
+        trendPeriodStartDate.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
+      );
 
       // Subquery to find first purchase date per customer
       const newCustomersResult = await this.db.execute(sql`
@@ -149,12 +155,12 @@ export class AdminAnalyticsService extends BaseService {
             MIN(purchased_at) as first_purchase_at
           FROM purchases
           WHERE organization_id = ${organizationId}
-            AND status = 'completed'
+            AND status = ${PURCHASE_STATUS.COMPLETED}
           GROUP BY customer_id
         )
         SELECT COUNT(*) as count
         FROM first_purchases
-        WHERE first_purchase_at >= ${thirtyDaysAgo}
+        WHERE first_purchase_at >= ${trendPeriodStartDate}
       `);
 
       const newCustomersLast30Days = Number(
@@ -180,7 +186,7 @@ export class AdminAnalyticsService extends BaseService {
    */
   async getTopContent(
     organizationId: string,
-    limit = 10
+    limit = DEFAULT_TOP_CONTENT_LIMIT
   ): Promise<TopContentItem[]> {
     try {
       // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
@@ -200,7 +206,7 @@ export class AdminAnalyticsService extends BaseService {
         .where(
           and(
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, 'completed')
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
           )
         )
         .groupBy(schema.purchases.contentId, schema.content.title)

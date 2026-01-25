@@ -13,6 +13,7 @@
  */
 
 import { env, SELF } from 'cloudflare:test';
+import { MIME_TYPES } from '@codex/constants';
 import type { HealthCheckResponse } from '@codex/worker-utils';
 import { describe, expect, it } from 'vitest';
 
@@ -62,7 +63,7 @@ describe('Organization API Worker', () => {
       const response = await SELF.fetch('http://localhost/api/organizations', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
         },
         body: 'invalid json{',
       });

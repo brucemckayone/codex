@@ -6,6 +6,7 @@
  * the procedure() function to handle all errors uniformly via mapErrorToResponse().
  */
 
+import { AUTH_ROLES, ERROR_CODES } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import {
   ForbiddenError,
@@ -68,7 +69,7 @@ function formatValidationError(zodError: ZodError): {
   details: Array<{ path: string; message: string }>;
 } {
   return {
-    code: 'VALIDATION_ERROR',
+    code: ERROR_CODES.VALIDATION_ERROR,
     message: 'Invalid request data',
     details: zodError.errors.map((err) => ({
       path: err.path.join('.'),
@@ -289,7 +290,7 @@ export async function enforcePolicyInline(
     const sessionMiddleware = createSessionMiddleware({
       required:
         mergedPolicy.auth === 'required' ||
-        mergedPolicy.auth === 'platform_owner',
+        mergedPolicy.auth === AUTH_ROLES.PLATFORM_OWNER,
     });
 
     // Execute middleware and check result
@@ -341,11 +342,11 @@ export async function enforcePolicyInline(
   // ========================================================================
   // Platform Owner Check
   // ========================================================================
-  if (mergedPolicy.auth === 'platform_owner') {
-    if (user.role !== 'platform_owner') {
+  if (mergedPolicy.auth === AUTH_ROLES.PLATFORM_OWNER) {
+    if (user.role !== AUTH_ROLES.PLATFORM_OWNER) {
       throw new ForbiddenError('Platform owner access required', {
         userRole: user.role,
-        required: 'platform_owner',
+        required: AUTH_ROLES.PLATFORM_OWNER,
       });
     }
 
@@ -363,7 +364,7 @@ export async function enforcePolicyInline(
 
       if (membership) {
         c.set('organizationId', membership.organizationId);
-        c.set('organizationRole', 'platform_owner');
+        c.set('organizationRole', AUTH_ROLES.PLATFORM_OWNER);
         obs?.info('Platform owner organization resolved from membership', {
           organizationId: membership.organizationId,
           userId: user.id,
@@ -406,7 +407,7 @@ export async function enforcePolicyInline(
 
     if (idParam && uuidSchema.safeParse(idParam).success) {
       // URL param org access is ONLY allowed for platform owners (superadmin)
-      if (user?.role !== 'platform_owner') {
+      if (user?.role !== AUTH_ROLES.PLATFORM_OWNER) {
         throw new ForbiddenError(
           'Organization access via URL parameter is not allowed',
           {
@@ -474,7 +475,7 @@ export async function enforcePolicyInline(
       c.set('organizationMembership', membership);
     } else {
       // Platform owner - set role as 'platform_owner' for context
-      c.set('organizationRole', 'platform_owner');
+      c.set('organizationRole', AUTH_ROLES.PLATFORM_OWNER);
     }
 
     // Store organization context for downstream handlers

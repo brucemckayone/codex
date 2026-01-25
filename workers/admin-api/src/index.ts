@@ -19,6 +19,7 @@
  * Uses the procedure() pattern for unified policy, validation, and error handling.
  */
 
+import { AUTH_ROLES, type CONTENT_STATUS } from '@codex/constants';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
   adminContentIdParamsSchema,
@@ -81,7 +82,7 @@ app.use('/api/*', (c, next) => {
 app.get(
   '/api/admin/analytics/revenue',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { query: adminRevenueQuerySchema },
     handler: async (ctx) => {
       return await ctx.services.adminAnalytics.getRevenueStats(
@@ -99,7 +100,7 @@ app.get(
 app.get(
   '/api/admin/analytics/customers',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     handler: async (ctx) => {
       return await ctx.services.adminAnalytics.getCustomerStats(
         ctx.organizationId
@@ -115,7 +116,7 @@ app.get(
 app.get(
   '/api/admin/analytics/top-content',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { query: adminTopContentQuerySchema },
     handler: async (ctx) => {
       return await ctx.services.adminAnalytics.getTopContent(
@@ -137,7 +138,7 @@ app.get(
 app.get(
   '/api/admin/content',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { query: adminContentListQuerySchema },
     handler: async (ctx) => {
       // Map 'all' status to undefined for service layer
@@ -150,9 +151,9 @@ app.get(
           page: ctx.input.query.page,
           limit: ctx.input.query.limit,
           status: statusFilter as
-            | 'draft'
-            | 'published'
-            | 'archived'
+            | typeof CONTENT_STATUS.DRAFT
+            | typeof CONTENT_STATUS.PUBLISHED
+            | typeof CONTENT_STATUS.ARCHIVED
             | undefined,
         }
       );
@@ -167,7 +168,7 @@ app.get(
 app.post(
   '/api/admin/content/:id/publish',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { params: adminContentIdParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.adminContent.publishContent(
@@ -185,7 +186,7 @@ app.post(
 app.post(
   '/api/admin/content/:id/unpublish',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { params: adminContentIdParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.adminContent.unpublishContent(
@@ -203,7 +204,7 @@ app.post(
 app.delete(
   '/api/admin/content/:id',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { params: adminContentIdParamsSchema },
     successStatus: 204,
     handler: async (ctx) => {
@@ -227,7 +228,7 @@ app.delete(
 app.get(
   '/api/admin/customers',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { query: adminCustomerListQuerySchema },
     handler: async (ctx) => {
       return await ctx.services.adminCustomer.listCustomers(
@@ -245,7 +246,7 @@ app.get(
 app.get(
   '/api/admin/customers/:id',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { params: adminCustomerIdParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.adminCustomer.getCustomerDetails(
@@ -263,7 +264,7 @@ app.get(
 app.post(
   '/api/admin/customers/:customerId/grant-access/:contentId',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { params: adminGrantAccessParamsSchema },
     handler: async (ctx) => {
       await ctx.services.adminCustomer.grantContentAccess(
@@ -283,7 +284,7 @@ app.post(
 app.get(
   '/api/admin/status',
   procedure({
-    policy: { auth: 'platform_owner' },
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     handler: async (ctx) => {
       return {
         status: 'ok',

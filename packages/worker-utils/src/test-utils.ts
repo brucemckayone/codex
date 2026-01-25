@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { COOKIES } from '@codex/constants';
 import { dbHttp, schema } from '@codex/database';
 import type { SessionData, UserData } from '@codex/security';
 import { eq } from 'drizzle-orm';
@@ -52,7 +53,7 @@ export interface TestUser {
  *       method: 'POST',
  *       headers: {
  *         'Content-Type': 'application/json',
- *         'Cookie': `codex-session=${testUser.sessionToken}`,
+ *         'Cookie': `${COOKIES.SESSION_NAME}=${testUser.sessionToken}`,
  *       },
  *       body: JSON.stringify({ title: 'Test', slug: 'test', contentType: 'video' }),
  *     });
@@ -188,7 +189,7 @@ export function createAuthenticatedRequest(
     ...options,
     headers: {
       ...options.headers,
-      Cookie: `codex-session=${sessionToken}`,
+      Cookie: `${COOKIES.SESSION_NAME}=${sessionToken}`,
     },
   });
 }

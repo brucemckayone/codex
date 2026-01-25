@@ -24,6 +24,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import {
+  CONTENT_STATUS,
+  CONTENT_TYPES,
+  MEDIA_STATUS,
+  MEDIA_TYPES,
+  VISIBILITY,
+} from '@codex/constants';
 import type {
   Content,
   MediaItem,
@@ -110,12 +117,12 @@ export function createTestMediaItemInput(
   creatorId: string,
   overrides: Partial<NewMediaItem> = {}
 ): NewMediaItem {
-  const mediaType = overrides.mediaType || 'video';
+  const mediaType = overrides.mediaType || MEDIA_TYPES.VIDEO;
   const tempId = randomUUID(); // For generating R2 key
-  const status = overrides.status || 'uploading';
+  const status = overrides.status || MEDIA_STATUS.UPLOADING;
 
   // If status is 'ready', automatically populate required fields to satisfy DB constraint
-  const isReady = status === 'ready';
+  const isReady = status === MEDIA_STATUS.READY;
 
   return {
     creatorId,
@@ -125,14 +132,16 @@ export function createTestMediaItemInput(
     status,
     r2Key: `originals/${tempId}/${mediaType}.mp4`,
     fileSizeBytes: 1024 * 1024 * 10, // 10MB
-    mimeType: mediaType === 'video' ? 'video/mp4' : 'audio/mpeg',
+    mimeType: mediaType === MEDIA_TYPES.VIDEO ? 'video/mp4' : 'audio/mpeg',
     durationSeconds: isReady ? 120 : null, // Required for status='ready'
-    width: isReady && mediaType === 'video' ? 1920 : null,
-    height: isReady && mediaType === 'video' ? 1080 : null,
+    width: isReady && mediaType === MEDIA_TYPES.VIDEO ? 1920 : null,
+    height: isReady && mediaType === MEDIA_TYPES.VIDEO ? 1080 : null,
     hlsMasterPlaylistKey: isReady ? `hls/${tempId}/master.m3u8` : null, // Required for status='ready'
     thumbnailKey: isReady ? `thumbnails/${tempId}/thumb.jpg` : null, // Required for video
     waveformKey:
-      isReady && mediaType === 'audio' ? `waveforms/${tempId}.json` : null, // Required for audio
+      isReady && mediaType === MEDIA_TYPES.AUDIO
+        ? `waveforms/${tempId}.json`
+        : null, // Required for audio
     uploadedAt: isReady ? new Date() : null,
     ...overrides,
   };
@@ -150,7 +159,7 @@ export function createTestMediaItem(
   const now = new Date();
   const id = randomUUID();
   const creatorId = overrides.creatorId || randomUUID();
-  const mediaType = overrides.mediaType || 'video';
+  const mediaType = overrides.mediaType || MEDIA_TYPES.VIDEO;
 
   return {
     id,
@@ -158,19 +167,21 @@ export function createTestMediaItem(
     title: `Test ${mediaType} ${Date.now()}`,
     description: `Test ${mediaType} for automated testing`,
     mediaType,
-    status: 'ready',
+    status: MEDIA_STATUS.READY,
     r2Key: `originals/${id}/${mediaType}.mp4`,
     fileSizeBytes: 1024 * 1024 * 10, // 10MB
-    mimeType: mediaType === 'video' ? 'video/mp4' : 'audio/mpeg',
+    mimeType: mediaType === MEDIA_TYPES.VIDEO ? 'video/mp4' : 'audio/mpeg',
     durationSeconds: 120, // 2 minutes
-    width: mediaType === 'video' ? 1920 : null,
-    height: mediaType === 'video' ? 1080 : null,
+    width: mediaType === MEDIA_TYPES.VIDEO ? 1920 : null,
+    height: mediaType === MEDIA_TYPES.VIDEO ? 1080 : null,
     hlsMasterPlaylistKey: `hls/${id}/master.m3u8`,
     hlsPreviewKey: null, // Transcoding Phase 1 field
-    thumbnailKey: mediaType === 'video' ? `thumbnails/${id}/thumb.jpg` : null,
-    waveformKey: mediaType === 'audio' ? `waveforms/${id}/waveform.json` : null,
+    thumbnailKey:
+      mediaType === MEDIA_TYPES.VIDEO ? `thumbnails/${id}/thumb.jpg` : null,
+    waveformKey:
+      mediaType === MEDIA_TYPES.AUDIO ? `waveforms/${id}/waveform.json` : null,
     waveformImageKey:
-      mediaType === 'audio' ? `waveforms/${id}/waveform.png` : null,
+      mediaType === MEDIA_TYPES.AUDIO ? `waveforms/${id}/waveform.png` : null,
     runpodJobId: null, // Transcoding Phase 1 field
     transcodingError: null, // Transcoding Phase 1 field
     transcodingAttempts: 0, // Transcoding Phase 1 field
@@ -201,7 +212,7 @@ export function createTestContentInput(
   overrides: Partial<NewContent> = {}
 ): NewContent {
   const slug = createUniqueSlug('content');
-  const contentType = overrides.contentType || 'video';
+  const contentType = overrides.contentType || CONTENT_TYPES.VIDEO;
 
   return {
     creatorId,
@@ -212,12 +223,13 @@ export function createTestContentInput(
     description: 'Test content for automated testing',
     contentType,
     thumbnailUrl: null,
-    contentBody: contentType === 'written' ? 'Test content body' : null,
+    contentBody:
+      contentType === CONTENT_TYPES.WRITTEN ? 'Test content body' : null,
     category: 'test-category',
     tags: ['test', 'automation'],
-    visibility: 'public',
+    visibility: VISIBILITY.PUBLIC,
     priceCents: 0,
-    status: 'draft',
+    status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
     viewCount: 0,
     purchaseCount: 0,
@@ -234,7 +246,7 @@ export function createTestContentInput(
 export function createTestContent(overrides: Partial<Content> = {}): Content {
   const now = new Date();
   const slug = createUniqueSlug('content');
-  const contentType = overrides.contentType || 'video';
+  const contentType = overrides.contentType || CONTENT_TYPES.VIDEO;
 
   return {
     id: randomUUID(),
@@ -246,12 +258,13 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     description: 'Test content for automated testing',
     contentType,
     thumbnailUrl: null,
-    contentBody: contentType === 'written' ? 'Test content body' : null,
+    contentBody:
+      contentType === CONTENT_TYPES.WRITTEN ? 'Test content body' : null,
     category: 'test-category',
     tags: ['test', 'automation'],
-    visibility: 'public',
+    visibility: VISIBILITY.PUBLIC,
     priceCents: 0,
-    status: 'draft',
+    status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
     viewCount: 0,
     purchaseCount: 0,
@@ -329,8 +342,11 @@ export function createTestContentWorkflow(
   options: {
     creatorId?: string;
     withOrganization?: boolean;
-    contentType?: 'video' | 'audio';
-    status?: 'draft' | 'published' | 'archived';
+    contentType?: typeof CONTENT_TYPES.VIDEO | typeof CONTENT_TYPES.AUDIO;
+    status?:
+      | typeof CONTENT_STATUS.DRAFT
+      | typeof CONTENT_STATUS.PUBLISHED
+      | typeof CONTENT_STATUS.ARCHIVED;
   } = {}
 ): {
   creatorId: string;
@@ -339,8 +355,8 @@ export function createTestContentWorkflow(
   content: Content;
 } {
   const creatorId = options.creatorId || createTestUserId();
-  const contentType = options.contentType || 'video';
-  const status = options.status || 'draft';
+  const contentType = options.contentType || CONTENT_TYPES.VIDEO;
+  const status = options.status || CONTENT_STATUS.DRAFT;
 
   const organization = options.withOrganization
     ? createTestOrganization()
@@ -349,7 +365,7 @@ export function createTestContentWorkflow(
   const mediaItem = createTestMediaItem({
     creatorId,
     mediaType: contentType,
-    status: 'ready',
+    status: MEDIA_STATUS.READY,
   });
 
   const content = createTestContent({
@@ -358,7 +374,7 @@ export function createTestContentWorkflow(
     mediaItemId: mediaItem.id,
     contentType,
     status,
-    publishedAt: status === 'published' ? new Date() : null,
+    publishedAt: status === CONTENT_STATUS.PUBLISHED ? new Date() : null,
   });
 
   return {

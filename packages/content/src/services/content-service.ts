@@ -13,6 +13,14 @@
  */
 
 import {
+  CONTENT_STATUS,
+  CONTENT_TYPES,
+  MEDIA_STATUS,
+  MEDIA_TYPES,
+  PAGINATION,
+  VISIBILITY,
+} from '@codex/constants';
+import {
   isUniqueViolation,
   scopedNotDeleted,
   withCreatorScope,
@@ -84,7 +92,9 @@ export class ContentService extends BaseService {
             tx as DatabaseTransaction,
             validated.mediaItemId,
             creatorId,
-            validated.contentType,
+            validated.contentType as
+              | typeof CONTENT_TYPES.VIDEO
+              | typeof CONTENT_TYPES.AUDIO,
             false // requireReady = false for draft creation
           );
         }
@@ -104,9 +114,9 @@ export class ContentService extends BaseService {
             category: validated.category || null,
             tags: validated.tags || [],
             thumbnailUrl: validated.thumbnailUrl || null,
-            visibility: validated.visibility || 'purchased_only',
+            visibility: validated.visibility || VISIBILITY.PURCHASED_ONLY,
             priceCents: validated.priceCents ?? null,
-            status: 'draft', // Always start as draft
+            status: CONTENT_STATUS.DRAFT, // Always start as draft
             viewCount: 0,
             purchaseCount: 0,
           })
@@ -266,12 +276,18 @@ export class ContentService extends BaseService {
         }
 
         // Already published - idempotent
-        if (existing.status === 'published') {
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
           return existing;
         }
 
         // Validate content is ready to publish
-        if (['video', 'audio'].includes(existing.contentType)) {
+        if (
+          [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO].includes(
+            existing.contentType as
+              | typeof CONTENT_TYPES.VIDEO
+              | typeof CONTENT_TYPES.AUDIO
+          )
+        ) {
           if (!existing.mediaItem) {
             throw new BusinessLogicError(
               'Cannot publish content without media',
@@ -281,7 +297,7 @@ export class ContentService extends BaseService {
               }
             );
           }
-          if (existing.mediaItem.status !== 'ready') {
+          if (existing.mediaItem.status !== MEDIA_STATUS.READY) {
             throw new MediaNotReadyError(existing.mediaItem.id);
           }
         }
@@ -290,7 +306,7 @@ export class ContentService extends BaseService {
         const [published] = await tx
           .update(content)
           .set({
-            status: 'published',
+            status: CONTENT_STATUS.PUBLISHED,
             publishedAt: new Date(),
             updatedAt: new Date(),
           })
@@ -346,7 +362,7 @@ export class ContentService extends BaseService {
         const [unpublished] = await tx
           .update(content)
           .set({
-            status: 'draft',
+            status: CONTENT_STATUS.DRAFT,
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
@@ -429,7 +445,10 @@ export class ContentService extends BaseService {
   async list(
     creatorId: string,
     filters: ContentFilters = {},
-    pagination: PaginationParams = { page: 1, limit: 20 }
+    pagination: PaginationParams = {
+      page: 1,
+      limit: PAGINATION.DEFAULT,
+    }
   ): Promise<PaginatedResponse<ContentWithRelations>> {
     try {
       const { limit, offset } = withPagination(pagination);
@@ -549,7 +568,7 @@ export class ContentService extends BaseService {
     tx: DatabaseTransaction,
     mediaItemId: string,
     creatorId: string,
-    contentType: 'video' | 'audio' | 'written',
+    contentType: typeof CONTENT_TYPES.VIDEO | typeof CONTENT_TYPES.AUDIO,
     requireReady: boolean = true
   ): Promise<void> {
     const mediaItem = await tx.query.mediaItems.findFirst({
@@ -564,14 +583,16 @@ export class ContentService extends BaseService {
     }
 
     // Only check ready status when required (e.g., during publishing)
-    if (requireReady && mediaItem.status !== 'ready') {
+    if (requireReady && mediaItem.status !== MEDIA_STATUS.READY) {
       throw new MediaNotReadyError(mediaItemId);
     }
 
     // Validate content type matches media type
     if (
-      (contentType === 'video' && mediaItem.mediaType !== 'video') ||
-      (contentType === 'audio' && mediaItem.mediaType !== 'audio')
+      (contentType === CONTENT_TYPES.VIDEO &&
+        mediaItem.mediaType !== MEDIA_TYPES.VIDEO) ||
+      (contentType === CONTENT_TYPES.AUDIO &&
+        mediaItem.mediaType !== MEDIA_TYPES.AUDIO)
     ) {
       throw new ContentTypeMismatchError(contentType, mediaItem.mediaType);
     }

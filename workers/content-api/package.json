@@ -20,6 +20,7 @@
   "dependencies": {
     "@codex/access": "workspace:*",
     "@codex/content": "workspace:*",
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/image-processing": "workspace:*",
     "@codex/security": "workspace:*",

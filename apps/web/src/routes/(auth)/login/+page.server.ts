@@ -1,4 +1,9 @@
-import { COOKIES, getCookieConfig } from '@codex/constants';
+import {
+  COOKIES,
+  getCookieConfig,
+  HEADERS,
+  MIME_TYPES,
+} from '@codex/constants';
 import { authLoginSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -42,7 +47,7 @@ export const actions: Actions = {
       const res = await fetch(`${authUrl}/api/auth/sign-in/email`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         },
         body: JSON.stringify({
           email: result.data.email,
@@ -83,10 +88,16 @@ export const actions: Actions = {
           new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
         );
         if (sessionMatch) {
-          const cookieConfig = getCookieConfig(platform?.env, {
-            maxAge: COOKIES.SESSION_MAX_AGE,
-          });
-          cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
+          if (sessionMatch) {
+            const cookieConfig = getCookieConfig(
+              platform?.env,
+              request.headers.get('host') ?? undefined,
+              {
+                maxAge: COOKIES.SESSION_MAX_AGE,
+              }
+            );
+            cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
+          }
         }
       }
 

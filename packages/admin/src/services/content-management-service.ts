@@ -10,6 +10,7 @@
  * - Soft deletes only (preserves purchase history)
  */
 
+import { CONTENT_STATUS, CONTENT_TYPES, PAGINATION } from '@codex/constants';
 import { schema, withPagination } from '@codex/database';
 import {
   BaseService,
@@ -35,7 +36,7 @@ export class AdminContentManagementService extends BaseService {
     organizationId: string,
     options: Partial<AdminContentListOptions> = {}
   ): Promise<PaginatedResponse<AdminContentItem>> {
-    const { page = 1, limit = 20, status } = options;
+    const { page = 1, limit = PAGINATION.DEFAULT, status } = options;
 
     try {
       // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
@@ -134,12 +135,16 @@ export class AdminContentManagementService extends BaseService {
         }
 
         // Already published - idempotent
-        if (existing.status === 'published') {
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
           return existing as AdminContentItem;
         }
 
         // Validate content is ready to publish (video/audio need ready media)
-        if (['video', 'audio'].includes(existing.contentType)) {
+        if (
+          ([CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO] as string[]).includes(
+            existing.contentType
+          )
+        ) {
           if (!existing.mediaItem) {
             throw new BusinessLogicError(
               'Cannot publish content without media',
@@ -162,7 +167,7 @@ export class AdminContentManagementService extends BaseService {
         await tx
           .update(schema.content)
           .set({
-            status: 'published',
+            status: CONTENT_STATUS.PUBLISHED,
             publishedAt: new Date(),
             updatedAt: new Date(),
           })
@@ -226,7 +231,7 @@ export class AdminContentManagementService extends BaseService {
         }
 
         // Already draft - idempotent
-        if (existing.status === 'draft') {
+        if (existing.status === CONTENT_STATUS.DRAFT) {
           const contentWithCreator = await tx.query.content.findFirst({
             where: eq(schema.content.id, contentId),
             with: {
@@ -246,7 +251,7 @@ export class AdminContentManagementService extends BaseService {
         await tx
           .update(schema.content)
           .set({
-            status: 'draft',
+            status: CONTENT_STATUS.DRAFT,
             updatedAt: new Date(),
           })
           .where(eq(schema.content.id, contentId));

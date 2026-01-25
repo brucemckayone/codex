@@ -1,9 +1,8 @@
+import { getServiceUrl, HEADERS, MIME_TYPES } from '@codex/constants';
 import { authForgotPasswordSchema } from '@codex/validation';
 import { fail } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import type { Actions } from './$types';
-
-const AUTH_WORKER_URL = 'http://localhost:42069';
 
 export const actions: Actions = {
   default: async ({ request, platform }) => {
@@ -25,12 +24,12 @@ export const actions: Actions = {
 
     try {
       // 2. Call Auth Worker
-      const authUrl = platform?.env?.AUTH_WORKER_URL ?? AUTH_WORKER_URL;
+      const authUrl = getServiceUrl('auth', platform?.env);
 
       const res = await fetch(`${authUrl}/api/auth/forget-password`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         },
         body: JSON.stringify({
           email: result.data.email,

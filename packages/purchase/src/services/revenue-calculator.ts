@@ -18,6 +18,7 @@
  * @module revenue-calculator
  */
 
+import { FEES } from '@codex/constants';
 import { RevenueCalculationError } from '../errors';
 
 /**
@@ -166,5 +167,5 @@ export function calculateRevenueSplit(
  * Default revenue split configuration
  * Phase 1 defaults: 10% platform, 0% org, 90% creator
  */
-export const DEFAULT_PLATFORM_FEE_PERCENTAGE = 1000; // 10%
-export const DEFAULT_ORG_FEE_PERCENTAGE = 0; // 0%
+export const DEFAULT_PLATFORM_FEE_PERCENTAGE = FEES.PLATFORM_PERCENT;
+export const DEFAULT_ORG_FEE_PERCENTAGE = FEES.ORG_PERCENT;

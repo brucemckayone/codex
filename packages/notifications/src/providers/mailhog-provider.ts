@@ -1,3 +1,4 @@
+import { DOMAINS, SERVICE_PORTS } from '@codex/constants';
 import type {
   EmailFrom,
   EmailMessage,
@@ -25,7 +26,9 @@ export class MailHogHttpProvider implements EmailProvider {
   readonly name = 'mailhog';
   private baseUrl: string;
 
-  constructor(baseUrl: string = 'http://localhost:8025') {
+  constructor(
+    baseUrl: string = `http://${DOMAINS.LOCAL}:${SERVICE_PORTS.MAILHOG}`
+  ) {
     this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
   }
 

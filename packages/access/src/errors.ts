@@ -1,10 +1,8 @@
+import { ERROR_CODES } from '@codex/constants';
 import { InternalServiceError, ServiceError } from '@codex/service-errors';
 
 // Re-export error classes from @codex/content (canonical source)
-export {
-  ContentNotFoundError,
-  MediaNotFoundError,
-} from '@codex/content';
+export { ContentNotFoundError, MediaNotFoundError } from '@codex/content';
 
 /**
  * Access denied error
@@ -32,11 +30,11 @@ export class AccessDeniedError extends ServiceError {
       : {
           userId: userIdOrMessage,
           contentId,
-          code: 'ACCESS_DENIED',
+          code: ERROR_CODES.ACCESS_DENIED,
           ...context,
         };
 
-    super(message, 'ACCESS_DENIED', 403, contextData);
+    super(message, ERROR_CODES.ACCESS_DENIED, 403, contextData);
   }
 }
 
@@ -49,7 +47,7 @@ export class R2SigningError extends InternalServiceError {
     super('Failed to generate R2 signed URL', {
       r2Key,
       cause,
-      code: 'R2_SIGNING_ERROR',
+      code: ERROR_CODES.R2_SIGNING_ERROR,
     });
   }
 }
@@ -63,7 +61,7 @@ export class InvalidContentTypeError extends InternalServiceError {
     super('Invalid media type for streaming', {
       contentId,
       mediaType,
-      code: 'INVALID_CONTENT_TYPE',
+      code: ERROR_CODES.INVALID_CONTENT_TYPE,
     });
   }
 }
@@ -80,7 +78,7 @@ export class OrganizationMismatchError extends ServiceError {
   ) {
     super(
       'Content does not belong to the specified organization',
-      'ORGANIZATION_MISMATCH',
+      ERROR_CODES.ORGANIZATION_MISMATCH,
       403,
       {
         contentId,
@@ -100,7 +98,7 @@ export class MediaNotReadyForStreamingError extends ServiceError {
   constructor(mediaId: string, status: string) {
     super(
       `Media item is not ready for streaming (status: ${status})`,
-      'MEDIA_NOT_READY',
+      ERROR_CODES.MEDIA_NOT_READY,
       422,
       {
         mediaId,

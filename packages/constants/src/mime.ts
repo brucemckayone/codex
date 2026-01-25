@@ -1,6 +1,11 @@
 export const MIME_TYPES = {
   VIDEO: {
     MP4: 'video/mp4',
+    MP2T: 'video/MP2T', // HLS .ts segments
+  },
+  STREAMING: {
+    HLS: 'application/vnd.apple.mpegurl', // .m3u8 playlists
+    HLS_ALT: 'application/x-mpegURL', // Alternative .m3u8 MIME type
   },
   IMAGE: {
     PNG: 'image/png',
@@ -8,6 +13,16 @@ export const MIME_TYPES = {
     WEBP: 'image/webp',
     GIF: 'image/gif',
     SVG: 'image/svg+xml',
+  },
+  AUDIO: {
+    MPEG: 'audio/mpeg',
+    WAV: 'audio/wav',
+    MP4: 'audio/mp4',
+  },
+  DOCUMENT: {
+    PDF: 'application/pdf',
+    TXT: 'text/plain',
+    CSV: 'text/csv',
   },
   APPLICATION: {
     JSON: 'application/json',
@@ -17,4 +32,7 @@ export const MIME_TYPES = {
 export const HEADERS = {
   CONTENT_TYPE: 'Content-Type',
   AUTHORIZATION: 'Authorization',
+  WORKER_SIGNATURE: 'X-Worker-Signature',
+  WORKER_TIMESTAMP: 'X-Worker-Timestamp',
+  REQUEST_ID: 'X-Request-Id',
 } as const;

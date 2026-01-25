@@ -5,6 +5,7 @@
  * Extends base errors from @codex/service-errors.
  */
 
+import { ERROR_CODES } from '@codex/constants';
 import {
   BusinessLogicError,
   ConflictError,
@@ -33,7 +34,7 @@ export class ContentNotFoundError extends NotFoundError {
   constructor(contentId: string, context?: Record<string, unknown>) {
     super('Content not found', {
       contentId,
-      code: 'CONTENT_NOT_FOUND',
+      code: ERROR_CODES.CONTENT_NOT_FOUND || 'CONTENT_NOT_FOUND',
       ...context,
     });
   }
@@ -56,7 +57,7 @@ export class MediaNotFoundError extends NotFoundError {
       : {
           r2Key: mediaItemIdOrR2Key,
           contentId,
-          code: 'MEDIA_NOT_FOUND',
+          code: ERROR_CODES.MEDIA_NOT_FOUND || 'MEDIA_NOT_FOUND',
           ...context,
         };
 

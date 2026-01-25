@@ -6,6 +6,7 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
+import { MIME_TYPES } from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
 import {
@@ -314,17 +315,23 @@ export class BrandingSettingsService extends BaseService {
    * Get file extension from MIME type.
    */
   private getExtensionFromMimeType(mimeType: string): string {
+    let extension = '';
     switch (mimeType) {
-      case 'image/png':
-        return 'png';
-      case 'image/jpeg':
-        return 'jpg';
-      case 'image/webp':
-        return 'webp';
-      case 'image/svg+xml':
-        return 'svg';
+      case MIME_TYPES.IMAGE.PNG:
+        extension = 'png';
+        break;
+      case MIME_TYPES.IMAGE.JPEG:
+        extension = 'jpg';
+        break;
+      case MIME_TYPES.IMAGE.WEBP:
+        extension = 'webp';
+        break;
+      case MIME_TYPES.IMAGE.SVG:
+        extension = 'svg';
+        break;
       default:
         throw new InvalidFileTypeError(mimeType, ALLOWED_LOGO_MIME_TYPES);
     }
+    return extension;
   }
 }

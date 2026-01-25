@@ -13,6 +13,7 @@
  * NOT by creating purchase records. This keeps revenue analytics accurate.
  */
 
+import { ACCESS_TYPES, PAGINATION, PURCHASE_STATUS } from '@codex/constants';
 import { schema, withPagination } from '@codex/database';
 import {
   BaseService,
@@ -43,7 +44,7 @@ export class AdminCustomerManagementService extends BaseService {
     organizationId: string,
     options: Partial<PaginationParams> = {}
   ): Promise<PaginatedResponse<CustomerWithStats>> {
-    const { page = 1, limit = 20 } = options;
+    const { page = 1, limit = PAGINATION.DEFAULT } = options;
 
     try {
       // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
@@ -68,7 +69,7 @@ export class AdminCustomerManagementService extends BaseService {
         .where(
           and(
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, 'completed')
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
           )
         )
         .groupBy(
@@ -90,7 +91,7 @@ export class AdminCustomerManagementService extends BaseService {
         .where(
           and(
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, 'completed')
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
           )
         );
 
@@ -157,7 +158,7 @@ export class AdminCustomerManagementService extends BaseService {
           and(
             eq(schema.purchases.customerId, customerId),
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, 'completed')
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
           )
         );
 
@@ -192,7 +193,7 @@ export class AdminCustomerManagementService extends BaseService {
           and(
             eq(schema.purchases.customerId, customerId),
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, 'completed')
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
           )
         )
         .orderBy(desc(schema.purchases.purchasedAt));
@@ -311,7 +312,7 @@ export class AdminCustomerManagementService extends BaseService {
           userId: customerId,
           contentId,
           organizationId,
-          accessType: 'complimentary',
+          accessType: ACCESS_TYPES.COMPLIMENTARY,
         });
       });
 
