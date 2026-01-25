@@ -87,6 +87,10 @@ jobs:
       - name: Build constants package
         run: pnpm --filter @codex/constants build
 
+      # Build @codex/constants before migrations (required dependency)
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
       # Apply migrations to production database
       - name: Run production migrations
         id: run-migrations
