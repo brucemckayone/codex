@@ -1,19 +1,5 @@
-<<<<<<< HEAD
-
+import { validateImageUpload } from '../image';
 import { ALLOWED_LOGO_MIME_TYPES, MAX_LOGO_FILE_SIZE_BYTES } from './settings';
-
-=======
-
-import { MIME_TYPES } from '@codex/constants';
-import { z } from 'zod';
-import { sanitizeSvgContent } from '../primitives';
-import {
-  ALLOWED_LOGO_MIME_TYPES,
-  type AllowedLogoMimeType,
-  MAX_LOGO_FILE_SIZE_BYTES,
-} from './settings';
-
->>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf
 
 /**
  * File Upload Validation
@@ -25,7 +11,14 @@ import {
  * - SVG sanitization (XSS prevention)
  */
 
-import { validateImageUpload } from '../image';
+/**
+ * Validated logo file data ready for upload
+ */
+export interface ValidatedLogoFile {
+  buffer: ArrayBuffer;
+  mimeType: string;
+  size: number;
+}
 
 /**
  * Parse and validate logo file from FormData

@@ -1,11 +1,3 @@
-<<<<<<< HEAD
-
-export * from './photon-wrapper';
-export * from './processor';
-export * from './service';
-
-=======
-
 /**
  * @codex/image-processing
  *
@@ -22,5 +14,3 @@ export {
   validateImageSignature,
   validateImageUpload,
 } from './validation';
-
->>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf

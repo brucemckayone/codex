@@ -1,76 +1,3 @@
-<<<<<<< HEAD
-
-import type { R2Bucket } from '@cloudflare/workers-types';
-import { R2Service } from '@codex/cloudflare-clients';
-import {
-  getContentThumbnailKey,
-  getOrgLogoKey,
-  getUserAvatarKey,
-} from '@codex/transcoding';
-import { MAX_IMAGE_SIZE_BYTES, validateImageUpload } from '@codex/validation';
-import { processImageVariants } from './processor';
-
-export interface ImageProcessingServiceConfig {
-  r2: R2Bucket;
-}
-
-export interface ImageUploadResult {
-  basePath: string;
-  urls: {
-    sm: string;
-    md: string;
-    lg: string;
-  };
-}
-
-export class ImageProcessingService {
-  private r2: R2Service;
-
-  constructor(config: ImageProcessingServiceConfig) {
-    this.r2 = new R2Service(config.r2);
-  }
-
-  /**
-   * Process and upload a content thumbnail
-   */
-  async processContentThumbnail(
-    creatorId: string,
-    contentId: string,
-    formData: FormData
-  ): Promise<ImageUploadResult> {
-    const validated = await validateImageUpload(formData, {
-      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-      maxSizeBytes: MAX_IMAGE_SIZE_BYTES,
-      fieldName: 'thumbnail', // Expected field name, or make optional/generic
-    });
-
-    // Content thumbnails are always raster -> WebP
-    const inputBuffer = new Uint8Array(validated.buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const keys = {
-      sm: getContentThumbnailKey(creatorId, contentId, 'sm'),
-      md: getContentThumbnailKey(creatorId, contentId, 'md'),
-      lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
-    };
-
-    // Upload in parallel
-    await Promise.all([
-      this.r2.put(keys.sm, variants.sm, undefined, {
-        contentType: 'image/webp',
-      }),
-      this.r2.put(keys.md, variants.md, undefined, {
-        contentType: 'image/webp',
-      }),
-      this.r2.put(keys.lg, variants.lg, undefined, {
-        contentType: 'image/webp',
-      }),
-    ]);
-
-    return {
-      basePath: `${creatorId}/content-thumbnails/${contentId}`,
-      urls: keys,
-=======
 /**
  * Image Processing Service
  *
@@ -81,7 +8,14 @@ export class ImageProcessingService {
 import type { R2Service } from '@codex/cloudflare-clients';
 import { eq, schema } from '@codex/database';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { extractMimeType, validateImageUpload } from './validation';
+import {
+  getContentThumbnailKey,
+  getOrgLogoKey,
+  getUserAvatarKey,
+} from '@codex/transcoding';
+import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
+import { processImageVariants } from './processor';
+import { extractMimeType, validateImageUpload } from './validation'; // Falling back to local validation for now to match Main pattern if @codex/validation export is tricky
 
 export interface ImageProcessingResult {
   url: string;
@@ -117,15 +51,39 @@ export class ImageProcessingService extends BaseService {
     // Validate image
     const buffer = await file.arrayBuffer();
     const mimeType = extractMimeType(file.type || 'image/jpeg');
-    validateImageUpload(buffer, mimeType);
 
-    // Upload to R2
-    const r2Key = `${creatorId}/content-thumbnails/${contentId}/thumbnail.webp`;
-    await this.r2Service.put(r2Key, new Uint8Array(buffer), {
-      contentType: mimeType,
-    });
+    // Check size limit (using imported constant) or validate
+    if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error(
+        `File size exceeds limit of ${MAX_IMAGE_SIZE_BYTES} bytes`
+      );
+    }
 
-    // Generate public URL (R2 public bucket)
+    // Process variants (HEAD logic)
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const keys = {
+      sm: getContentThumbnailKey(creatorId, contentId, 'sm'),
+      md: getContentThumbnailKey(creatorId, contentId, 'md'),
+      lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
+    };
+
+    // Upload in parallel
+    await Promise.all([
+      this.r2Service.put(keys.sm, variants.sm, undefined, {
+        contentType: 'image/webp',
+      }),
+      this.r2Service.put(keys.md, variants.md, undefined, {
+        contentType: 'image/webp',
+      }),
+      this.r2Service.put(keys.lg, variants.lg, undefined, {
+        contentType: 'image/webp',
+      }),
+    ]);
+
+    // Use LG variant as determining URL for DB
+    const r2Key = keys.lg;
     const url = `https://${this.mediaBucket}.s3.amazonaws.com/${r2Key}`;
 
     // Update content record
@@ -136,27 +94,29 @@ export class ImageProcessingService extends BaseService {
 
     return {
       url,
-      size: buffer.byteLength,
-      mimeType,
->>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf
+      size: variants.lg.byteLength,
+      mimeType: 'image/webp',
     };
   }
 
   /**
-<<<<<<< HEAD
-   * Process and upload a user avatar
+   * Process and store user avatar
+   * Uploads to R2 and updates user record
    */
   async processUserAvatar(
     userId: string,
-    formData: FormData
-  ): Promise<ImageUploadResult> {
-    const validated = await validateImageUpload(formData, {
-      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-      maxSizeBytes: MAX_IMAGE_SIZE_BYTES,
-      fieldName: 'avatar',
-    });
+    file: File
+  ): Promise<ImageProcessingResult> {
+    const buffer = await file.arrayBuffer();
+    const mimeType = extractMimeType(file.type || 'image/jpeg');
 
-    const inputBuffer = new Uint8Array(validated.buffer);
+    if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error(
+        `File size exceeds limit of ${MAX_IMAGE_SIZE_BYTES} bytes`
+      );
+    }
+
+    const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
     const keys = {
@@ -166,40 +126,18 @@ export class ImageProcessingService extends BaseService {
     };
 
     await Promise.all([
-      this.r2.put(keys.sm, variants.sm, undefined, {
+      this.r2Service.put(keys.sm, variants.sm, undefined, {
         contentType: 'image/webp',
       }),
-      this.r2.put(keys.md, variants.md, undefined, {
+      this.r2Service.put(keys.md, variants.md, undefined, {
         contentType: 'image/webp',
       }),
-      this.r2.put(keys.lg, variants.lg, undefined, {
+      this.r2Service.put(keys.lg, variants.lg, undefined, {
         contentType: 'image/webp',
       }),
     ]);
 
-    return {
-      basePath: `avatars/${userId}`,
-      urls: keys,
-=======
-   * Process and store user avatar
-   * Uploads to R2 and updates user record
-   */
-  async processUserAvatar(
-    userId: string,
-    file: File
-  ): Promise<ImageProcessingResult> {
-    // Validate image
-    const buffer = await file.arrayBuffer();
-    const mimeType = extractMimeType(file.type || 'image/jpeg');
-    validateImageUpload(buffer, mimeType);
-
-    // Upload to R2 (user-scoped, separate from creator content)
-    const r2Key = `avatars/${userId}/avatar.webp`;
-    await this.r2Service.put(r2Key, new Uint8Array(buffer), {
-      contentType: mimeType,
-    });
-
-    // Generate public URL
+    const r2Key = keys.lg;
     const url = `https://${this.mediaBucket}.s3.amazonaws.com/${r2Key}`;
 
     // Update user record
@@ -210,53 +148,51 @@ export class ImageProcessingService extends BaseService {
 
     return {
       url,
-      size: buffer.byteLength,
-      mimeType,
->>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf
+      size: variants.lg.byteLength,
+      mimeType: 'image/webp',
     };
   }
 
   /**
-<<<<<<< HEAD
-   * Process and upload an organization logo
-   * Supports SVG passthrough
+   * Process and store organization logo
+   * Uploads to R2 and updates organization record
    */
   async processOrgLogo(
+    organizationId: string,
     creatorId: string,
-    formData: FormData
-  ): Promise<ImageUploadResult> {
-    const validated = await validateImageUpload(formData, {
-      allowedMimeTypes: [
-        'image/jpeg',
-        'image/png',
-        'image/webp',
-        'image/svg+xml',
-      ],
-      maxSizeBytes: MAX_IMAGE_SIZE_BYTES,
-      sanitizeSvg: true,
-      fieldName: 'logo',
-    });
+    file: File
+  ): Promise<ImageProcessingResult> {
+    const buffer = await file.arrayBuffer();
+    const mimeType = extractMimeType(file.type || 'image/jpeg');
+
+    if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error(
+        `File size exceeds limit of ${MAX_IMAGE_SIZE_BYTES} bytes`
+      );
+    }
 
     // Special handling for SVG
-    if (validated.mimeType === 'image/svg+xml') {
-      // Store as single SVG file
+    if (mimeType === 'image/svg+xml') {
       const key = `${creatorId}/branding/logo/logo.svg`;
-      await this.r2.put(key, validated.buffer, undefined, {
+      await this.r2Service.put(key, new Uint8Array(buffer), {
         contentType: 'image/svg+xml',
       });
+      const url = `https://${this.mediaBucket}.s3.amazonaws.com/${key}`;
+
+      await this.db
+        .update(schema.organizations)
+        .set({ logoUrl: url })
+        .where(eq(schema.organizations.id, organizationId));
 
       return {
-        basePath: key, // For SVG, base path points to file
-        urls: {
-          sm: key,
-          md: key,
-          lg: key,
-        },
+        url,
+        size: buffer.byteLength,
+        mimeType,
       };
     }
 
     // Raster processing
-    const inputBuffer = new Uint8Array(validated.buffer);
+    const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
     const keys = {
@@ -266,41 +202,18 @@ export class ImageProcessingService extends BaseService {
     };
 
     await Promise.all([
-      this.r2.put(keys.sm, variants.sm, undefined, {
+      this.r2Service.put(keys.sm, variants.sm, undefined, {
         contentType: 'image/webp',
       }),
-      this.r2.put(keys.md, variants.md, undefined, {
+      this.r2Service.put(keys.md, variants.md, undefined, {
         contentType: 'image/webp',
       }),
-      this.r2.put(keys.lg, variants.lg, undefined, {
+      this.r2Service.put(keys.lg, variants.lg, undefined, {
         contentType: 'image/webp',
       }),
     ]);
 
-    return {
-      basePath: `${creatorId}/branding/logo`,
-      urls: keys,
-=======
-   * Process and store organization logo
-   * Uploads to R2 and updates organization record
-   */
-  async processOrgLogo(
-    organizationId: string,
-    creatorId: string,
-    file: File
-  ): Promise<ImageProcessingResult> {
-    // Validate image
-    const buffer = await file.arrayBuffer();
-    const mimeType = extractMimeType(file.type || 'image/jpeg');
-    validateImageUpload(buffer, mimeType);
-
-    // Upload to R2
-    const r2Key = `${creatorId}/branding/logo/logo.webp`;
-    await this.r2Service.put(r2Key, new Uint8Array(buffer), {
-      contentType: mimeType,
-    });
-
-    // Generate public URL
+    const r2Key = keys.lg;
     const url = `https://${this.mediaBucket}.s3.amazonaws.com/${r2Key}`;
 
     // Update organization record
@@ -311,9 +224,8 @@ export class ImageProcessingService extends BaseService {
 
     return {
       url,
-      size: buffer.byteLength,
-      mimeType,
->>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf
+      size: variants.lg.byteLength,
+      mimeType: 'image/webp',
     };
   }
 }

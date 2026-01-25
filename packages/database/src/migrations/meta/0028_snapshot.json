@@ -1,11 +1,6 @@
 {
-<<<<<<< HEAD:packages/database/src/migrations/meta/0028_snapshot.json
   "id": "e36f2e2a-aa93-4123-8879-a041670d2e71",
   "prevId": "26460183-78c7-4454-a086-5736787da06d",
-=======
-  "id": "f8c4d9e2-0a3b-5c6f-9d7e-2b3c4d5e6f7a",
-  "prevId": "e7b3c8d1-9f2a-4b5e-8c6d-1a2b3c4d5e6f",
->>>>>>> 8382ae6cb976af715f83b1cc106536c18c8b47cf:packages/database/src/migrations/meta/0026_snapshot.json
   "version": "7",
   "dialect": "postgresql",
   "enums": {
