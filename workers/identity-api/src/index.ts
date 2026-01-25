@@ -25,6 +25,8 @@ import {
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 
+import identityRoutes from './routes/identity';
+
 // ============================================================================
 // Application Setup
 // ============================================================================
@@ -42,6 +44,8 @@ const app = createWorker({
     checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
   },
 });
+
+app.route('/api/identity', identityRoutes);
 
 /**
  * Environment validation

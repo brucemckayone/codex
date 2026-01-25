@@ -5,11 +5,7 @@ import {
   getOrgLogoKey,
   getUserAvatarKey,
 } from '@codex/transcoding';
-import {
-  MAX_IMAGE_SIZE_BYTES,
-  type VariantUrls,
-  validateImageUpload,
-} from '@codex/validation';
+import { MAX_IMAGE_SIZE_BYTES, validateImageUpload } from '@codex/validation';
 import { processImageVariants } from './processor';
 
 export interface ImageProcessingServiceConfig {

@@ -20,6 +20,7 @@ import { R2Service } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
+import { IdentityService } from '@codex/identity';
 import { ImageProcessingService } from '@codex/image-processing';
 import {
   createEmailProvider,
@@ -87,6 +88,7 @@ export function createServiceRegistry(
   let _templates: TemplateService | undefined;
   let _notifications: NotificationsService | undefined;
   let _images: ImageProcessingService | undefined;
+  let _identity: IdentityService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -254,9 +256,7 @@ export function createServiceRegistry(
             'MEDIA_BUCKET not configured. Required for image processing.'
           );
         }
-        // Create R2Service for image bucket
-        const r2 = new R2Service(env.MEDIA_BUCKET);
-        _images = new ImageProcessingService(r2);
+        _images = new ImageProcessingService({ r2: env.MEDIA_BUCKET });
       }
       return _images;
     },
@@ -337,6 +337,20 @@ export function createServiceRegistry(
         });
       }
       return _notifications;
+    },
+
+    // ========================================================================
+    // Identity Domain
+    // ========================================================================
+
+    get identity() {
+      if (!_identity) {
+        _identity = new IdentityService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _identity;
     },
   };
 

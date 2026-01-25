@@ -26,6 +26,7 @@
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "hono": "^4.7.8",
     "vite-plugin-dts": "^4.5.4"
   },

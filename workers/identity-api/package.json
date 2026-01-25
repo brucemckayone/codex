@@ -20,6 +20,8 @@
   "dependencies": {
     "@codex/database": "workspace:*",
     "@codex/security": "workspace:*",
+    "@codex/identity": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/worker-utils": "workspace:*",
     "hono": "^4.7.8",

@@ -29,6 +29,7 @@ import {
   createContentSchema,
   updateContentSchema,
 } from '@codex/content';
+import type { ImageUploadResult } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
@@ -185,6 +186,36 @@ app.delete(
     handler: async (ctx): Promise<DeleteContentResponse> => {
       await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
       return null;
+    },
+  })
+);
+
+/**
+ * POST /api/content/:id/thumbnail
+ * Upload content thumbnail
+ *
+ * Security: Creator/Admin only, Rate limited
+ * @returns {ImageUploadResult}
+ */
+app.post(
+  '/:id/thumbnail',
+  procedure({
+    policy: { auth: 'required', roles: ['creator', 'admin'] },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<ImageUploadResult> => {
+      const formData = await ctx.req.raw.formData();
+      const file = formData.get('thumbnail');
+
+      if (!file || !(file instanceof File)) {
+        throw new Error('Thumbnail file is required');
+      }
+
+      return await ctx.services.content.uploadThumbnail(
+        ctx.input.params.id,
+        ctx.user.id,
+        file,
+        ctx.env.MEDIA_BUCKET
+      );
     },
   })
 );

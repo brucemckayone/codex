@@ -1,7 +1,7 @@
 {
-  "name": "@codex/content",
+  "name": "@codex/identity",
   "version": "1.0.0",
-  "description": "Content management service for Codex platform - media items and content",
+  "description": "Identity and user profile management service",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,25 +9,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./services": {
-      "types": "./dist/services/index.d.ts",
-      "default": "./dist/services/index.js"
-    },
-    "./errors": {
-      "types": "./dist/errors.d.ts",
-      "default": "./dist/errors.js"
-    },
-    "./types": {
-      "types": "./dist/types.d.ts",
-      "default": "./dist/types.js"
     }
   },
   "scripts": {
-    "build": "vite build --config vite.config.content.ts",
-    "dev": "vite build --config vite.config.content.ts --watch",
+    "build": "vite build --config vite.config.identity.ts",
+    "dev": "vite build --config vite.config.identity.ts --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config vitest.config.content.ts",
+    "test": "vitest run --config vitest.config.identity.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint --write .",
@@ -35,18 +23,18 @@
   },
   "dependencies": {
     "@codex/database": "workspace:*",
-    "@codex/organization": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
-    "drizzle-orm": "0.44.7",
-    "@codex/image-processing": "workspace:*"
+    "drizzle-orm": "0.44.7"
   },
   "devDependencies": {
     "@codex/test-utils": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.3",
     "vite": "^7.2.2",
+    "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.0.2"
   }
 }

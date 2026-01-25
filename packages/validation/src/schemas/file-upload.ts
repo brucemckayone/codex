@@ -1,10 +1,4 @@
-import { z } from 'zod';
-
-import {
-  ALLOWED_LOGO_MIME_TYPES,
-  type AllowedLogoMimeType,
-  MAX_LOGO_FILE_SIZE_BYTES,
-} from './settings';
+import { ALLOWED_LOGO_MIME_TYPES, MAX_LOGO_FILE_SIZE_BYTES } from './settings';
 
 /**
  * File Upload Validation
