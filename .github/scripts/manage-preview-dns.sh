@@ -18,21 +18,18 @@ BASE_DOMAIN="revelations.studio"
 
 # Define the preview subdomains that need CNAME DNS records created manually
 #
-# IMPORTANT: Workers with routes should NOT be listed here!
-# Wrangler automatically creates "Worker" type DNS records when deploying
-# with --route. Adding them here creates CNAME records that conflict,
-# causing DNS_PROBE_FINISHED_NXDOMAIN errors.
-#
-# Workers managed by Wrangler routes (DO NOT ADD HERE):
-# - ecom-api-preview-*, media-api-preview-*, content-api-preview-*
-# - identity-api-preview-*, organization-api-preview-*
-# - notifications-api-preview-*, admin-api-preview-*, auth-preview-*
-#
-# Add entries here for:
-# - Cloudflare Pages deployments (web app)
-# - Other non-worker subdomains
+# All workers and the web app need CNAME records pointing to revelations.studio
+# The Worker routes will then intercept traffic for these domains
 PREVIEW_SUBDOMAINS=(
   "codex-preview-${PR_NUMBER}"
+  "ecom-api-preview-${PR_NUMBER}"
+  "media-api-preview-${PR_NUMBER}"
+  "content-api-preview-${PR_NUMBER}"
+  "identity-api-preview-${PR_NUMBER}"
+  "admin-api-preview-${PR_NUMBER}"
+  "organization-api-preview-${PR_NUMBER}"
+  "notifications-api-preview-${PR_NUMBER}"
+  "auth-preview-${PR_NUMBER}"
 )
 
 # Cloudflare API endpoint
