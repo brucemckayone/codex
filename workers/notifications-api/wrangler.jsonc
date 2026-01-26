@@ -78,8 +78,7 @@
       ],
       "routes": [
         {
-          "pattern": "notifications-api.revelations.studio",
-          "custom_domain": true,
+          "pattern": "notifications-api.revelations.studio/*",
           "zone_name": "revelations.studio"
         }
       ]

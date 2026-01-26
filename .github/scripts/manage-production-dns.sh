@@ -34,6 +34,17 @@ BASE_DOMAIN="revelations.studio"
 # - External service subdomains
 declare -A PRODUCTION_DOMAINS=(
   ["codex"]="codex-web-production"
+  ["www"]="codex-web-production"
+  ["creators"]="codex-web-production"
+  ["auth"]="auth-worker-production"
+  ["content-api"]="content-api-production"
+  ["ecom-api"]="ecom-api-production"
+  ["identity-api"]="identity-api-production"
+  ["media-api"]="media-api-production"
+  ["notifications-api"]="notifications-api-production"
+  ["organization-api"]="organization-api-production"
+  ["admin-api"]="admin-api-production"
+  ["*"]="codex-web-production"
 )
 
 # Cloudflare API endpoint

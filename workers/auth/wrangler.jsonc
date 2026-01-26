@@ -78,8 +78,7 @@
       ],
       "routes": [
         {
-          "pattern": "auth.revelations.studio",
-          "custom_domain": true,
+          "pattern": "auth.revelations.studio/*",
           "zone_name": "revelations.studio"
         }
       ]
