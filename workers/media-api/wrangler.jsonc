@@ -108,7 +108,8 @@
       "routes": [
         {
           "pattern": "media-api.revelations.studio",
-          "custom_domain": true
+          "custom_domain": true,
+          "zone_name": "revelations.studio"
         }
       ]
     },
