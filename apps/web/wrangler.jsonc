@@ -54,12 +54,28 @@
         "ECOM_API_URL": "https://ecom-api.revelations.studio"
       },
       "routes": [
+        // Specific routes first (for priority)
         {
-          "pattern": "*.revelations.studio/*",
+          "pattern": "revelations.studio/*",
           "zone_name": "revelations.studio"
         },
         {
-          "pattern": "revelations.studio/*",
+          "pattern": "www.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        {
+          "pattern": "codex.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        {
+          "pattern": "creators.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        // Wildcard for organization subdomains (LAST - catches org slugs)
+        // Note: API worker subdomains (auth, content-api, ecom-api, etc.) are
+        // registered separately with custom_domain: true and take precedence
+        {
+          "pattern": "*.revelations.studio/*",
           "zone_name": "revelations.studio"
         }
       ]
@@ -76,6 +92,18 @@
         "ECOM_API_URL": "https://ecom-api-staging.revelations.studio"
       },
       "routes": [
+        // Specific routes first (for priority)
+        {
+          "pattern": "codex-staging.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        {
+          "pattern": "creators-staging.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        // Wildcard for organization subdomains (LAST)
+        // Note: Staging API workers use {service}-staging.revelations.studio pattern
+        // and are registered separately with custom_domain: true
         {
           "pattern": "*-staging.revelations.studio/*",
           "zone_name": "revelations.studio"
