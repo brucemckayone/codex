@@ -69,6 +69,26 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      - name: Delete preview custom domains
+        continue-on-error: true
+        run: |
+          for domain in \
+            "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "admin-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "auth-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "codex-preview-${{ env.PR_NUMBER }}.revelations.studio"; do
+            echo "Deleting $domain..."
+            wrangler custom-domains delete "$domain" || echo "Domain $domain may not exist"
+          done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Delete preview DNS records
         continue-on-error: true
         run: |
@@ -83,7 +103,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: ${{ env.PR_NUMBER }},
-              body: '🧹 Preview environment cleaned up successfully (9 workers, web app, database branch, and 9 DNS records removed).'
+              body: '🧹 Preview environment cleaned up successfully (9 workers, web app, database branch, 9 custom domains, and 9 DNS records removed).'
             });
 
   deploy-preview:
@@ -285,6 +305,27 @@ jobs:
             echo "Waiting for DNS propagation... ($i/30)"
             sleep 2
           done
+
+      # Register custom domains for worker routing
+      - name: Register preview custom domains
+        run: |
+          echo "🔐 Registering custom domains for preview-${{ env.PR_NUMBER }}..."
+          for domain in \
+            "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "admin-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "auth-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "codex-preview-${{ env.PR_NUMBER }}.revelations.studio"; do
+            echo "Registering $domain..."
+            wrangler custom-domains create "$domain" || echo "Domain $domain may already exist"
+          done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # --- WORKER DEPLOYMENTS (using shared upload script) ---
 
