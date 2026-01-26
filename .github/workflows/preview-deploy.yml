@@ -83,7 +83,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: ${{ env.PR_NUMBER }},
-              body: '🧹 Preview environment cleaned up successfully (workers, database, and DNS records removed).'
+              body: '🧹 Preview environment cleaned up successfully (9 workers, web app, database branch, and 9 DNS records removed).'
             });
 
   deploy-preview:
