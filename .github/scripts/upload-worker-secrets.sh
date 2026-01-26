@@ -4,11 +4,11 @@ set -e
 # Upload Worker Secrets Script
 # One script to upload secrets and vars to all workers across all environments
 #
-# Usage:
-#   ./upload-worker-secrets.sh <environment> <worker-name>
+#   ./upload-worker-secrets.sh <environment> <worker-name> [target-worker-name]
 #
 # Environments: production, preview, test
-# Workers: ecom-api, content-api, identity-api, organization-api, notifications-api, admin-api, auth
+# Workers: ecom-api, content-api, identity-api, organization-api, notifications-api, admin-api, media-api, auth
+# Target Worker Name (optional): Override the destination worker name (e.g. for PR builds)
 #
 # Environment variables required (set via GitHub Actions):
 #   - CLOUDFLARE_API_TOKEN
@@ -18,57 +18,58 @@ set -e
 #   - R2_BUCKET_MEDIA, R2_BUCKET_ASSETS, R2_BUCKET_PLATFORM, R2_BUCKET_RESOURCES (vars)
 #   - STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only)
 #   - BETTER_AUTH_SECRET, SESSION_SECRET (secrets, auth only)
+#   - RUNPOD_*, B2_*, WORKER_SHARED_SECRET (secrets, media-api only)
 
 ENVIRONMENT=$1
 WORKER=$2
+TARGET_WORKER_NAME=$3
 
 if [ -z "$ENVIRONMENT" ] || [ -z "$WORKER" ]; then
-  echo "Usage: $0 <environment> <worker-name>"
+  echo "Usage: $0 <environment> <worker-name> [target-worker-name]"
   echo "  Environments: production, preview, test"
-  echo "  Workers: ecom-api, content-api, identity-api, organization-api, notifications-api, admin-api, auth"
+  echo "  Workers: ecom-api, content-api, identity-api, organization-api, notifications-api, admin-api, media-api, auth"
   exit 1
 fi
 
-# Determine worker name suffix based on environment
-case "$ENVIRONMENT" in
-  production)
-    WORKER_SUFFIX="-production"
-    ;;
-  preview)
-    WORKER_SUFFIX="-preview"
-    ;;
-  test)
-    WORKER_SUFFIX="-test"
-    ;;
-  *)
-    echo "❌ Unknown environment: $ENVIRONMENT"
-    exit 1
-    ;;
-esac
+# Determine worker name
+if [ -n "$TARGET_WORKER_NAME" ]; then
+  # Use explicit target name if provided (e.g. media-api-preview-123)
+  WORKER_NAME="$TARGET_WORKER_NAME"
+else
+  # Auto-generate name based on environment suffix
+  case "$ENVIRONMENT" in
+    production)
+      WORKER_SUFFIX="-production"
+      ;;
+    preview)
+      WORKER_SUFFIX="-preview"
+      ;;
+    test)
+      WORKER_SUFFIX="-test"
+      ;;
+    *)
+      echo "❌ Unknown environment: $ENVIRONMENT"
+      exit 1
+      ;;
+  esac
 
-# Map worker argument to actual worker name (auth -> auth-worker)
-case "$WORKER" in
-  auth)
-    WORKER_BASE="auth-worker"
-    ;;
-  *)
-    WORKER_BASE="$WORKER"
-    ;;
-esac
+  # Map worker argument to actual worker name prefix (auth -> auth-worker)
+  case "$WORKER" in
+    auth)
+      WORKER_BASE="auth-worker"
+      ;;
+    *)
+      WORKER_BASE="$WORKER"
+      ;;
+  esac
 
-WORKER_NAME="${WORKER_BASE}${WORKER_SUFFIX}"
+  WORKER_NAME="${WORKER_BASE}${WORKER_SUFFIX}"
+fi
+
 echo "📤 Uploading secrets to ${WORKER_NAME}..."
 
-# Common R2 bucket vars (available to all workers)
-R2_BUCKETS=$(cat <<EOF
-"R2_BUCKET_MEDIA":"${R2_BUCKET_MEDIA}",
-"R2_BUCKET_ASSETS":"${R2_BUCKET_ASSETS}",
-"R2_BUCKET_PLATFORM":"${R2_BUCKET_PLATFORM}",
-"R2_BUCKET_RESOURCES":"${R2_BUCKET_RESOURCES}"
-EOF
-)
-
 # Build secrets JSON based on worker type
+# Note: R2_BUCKET_* are passed as --var during deploy, not as secrets
 case "$WORKER" in
   ecom-api)
     SECRETS_JSON=$(cat <<EOF
@@ -80,8 +81,7 @@ case "$WORKER" in
   "STRIPE_WEBHOOK_SECRET_CONNECT":"${STRIPE_WEBHOOK_SECRET_CONNECT}",
   "STRIPE_WEBHOOK_SECRET_CUSTOMER":"${STRIPE_WEBHOOK_SECRET_CUSTOMER}",
   "STRIPE_WEBHOOK_SECRET_BOOKING":"${STRIPE_WEBHOOK_SECRET_BOOKING}",
-  "STRIPE_WEBHOOK_SECRET_DISPUTE":"${STRIPE_WEBHOOK_SECRET_DISPUTE}",
-  ${R2_BUCKETS}
+  "STRIPE_WEBHOOK_SECRET_DISPUTE":"${STRIPE_WEBHOOK_SECRET_DISPUTE}"
 }
 EOF
 )
@@ -93,8 +93,7 @@ EOF
   "DATABASE_URL":"${DATABASE_URL}",
   "R2_ACCOUNT_ID":"${R2_ACCOUNT_ID}",
   "R2_ACCESS_KEY_ID":"${R2_ACCESS_KEY_ID}",
-  "R2_SECRET_ACCESS_KEY":"${R2_SECRET_ACCESS_KEY}",
-  ${R2_BUCKETS}
+  "R2_SECRET_ACCESS_KEY":"${R2_SECRET_ACCESS_KEY}"
 }
 EOF
 )
@@ -103,8 +102,7 @@ EOF
   identity-api)
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}",
-  ${R2_BUCKETS}
+  "DATABASE_URL":"${DATABASE_URL}"
 }
 EOF
 )
@@ -113,8 +111,7 @@ EOF
   admin-api)
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}",
-  ${R2_BUCKETS}
+  "DATABASE_URL":"${DATABASE_URL}"
 }
 EOF
 )
@@ -123,8 +120,7 @@ EOF
   organization-api)
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}",
-  ${R2_BUCKETS}
+  "DATABASE_URL":"${DATABASE_URL}"
 }
 EOF
 )
@@ -133,8 +129,7 @@ EOF
   notifications-api)
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}",
-  ${R2_BUCKETS}
+  "DATABASE_URL":"${DATABASE_URL}"
 }
 EOF
 )
@@ -151,8 +146,7 @@ EOF
   "B2_ENDPOINT":"${B2_ENDPOINT}",
   "B2_KEY_ID":"${B2_KEY_ID}",
   "B2_APP_KEY":"${B2_APP_KEY}",
-  "B2_BUCKET":"${B2_BUCKET}",
-  ${R2_BUCKETS}
+  "B2_BUCKET":"${B2_BUCKET}"
 }
 EOF
 )
@@ -163,8 +157,7 @@ EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",
   "SESSION_SECRET":"${SESSION_SECRET}",
-  "BETTER_AUTH_SECRET":"${BETTER_AUTH_SECRET}",
-  ${R2_BUCKETS}
+  "BETTER_AUTH_SECRET":"${BETTER_AUTH_SECRET}"
 }
 EOF
 )

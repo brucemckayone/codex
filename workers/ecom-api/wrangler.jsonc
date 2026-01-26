@@ -75,7 +75,7 @@
       ],
       "routes": [
         {
-          "pattern": "api.revelations.studio",
+          "pattern": "ecom-api.revelations.studio",
           "custom_domain": true
         }
       ]
@@ -91,7 +91,7 @@
       },
       "routes": [
         {
-          "pattern": "api-staging.revelations.studio/*",
+          "pattern": "ecom-api-staging.revelations.studio/*",
           "custom_domain": true
         }
       ]
