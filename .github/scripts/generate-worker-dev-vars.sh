@@ -27,11 +27,11 @@ fi
 
 # Validate worker name
 case "${WORKER}" in
-  "auth"|"content-api"|"identity-api"|"organization-api"|"notifications-api"|"ecom-api"|"admin-api")
+  "auth"|"content-api"|"identity-api"|"organization-api"|"notifications-api"|"ecom-api"|"admin-api"|"media-api")
     ;;
   *)
     echo "Error: Unknown worker '${WORKER}'"
-    echo "Available workers: auth, content-api, identity-api, organization-api, notifications-api, ecom-api, admin-api"
+    echo "Available workers: auth, content-api, identity-api, organization-api, notifications-api, ecom-api, admin-api, media-api"
     exit 1
     ;;
 esac
@@ -65,6 +65,18 @@ R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
 R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
 R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
 R2_BUCKET_MEDIA=${R2_BUCKET_MEDIA}
+EOF
+    ;;
+  "media-api")
+    cat >> "${VARS_FILE}" << EOF
+RUNPOD_API_KEY=${RUNPOD_API_KEY}
+RUNPOD_ENDPOINT_ID=${RUNPOD_ENDPOINT_ID}
+RUNPOD_WEBHOOK_SECRET=${RUNPOD_WEBHOOK_SECRET}
+RUNPOD_API_URL=${RUNPOD_API_URL:-http://localhost:4002/internal/mock-runpod}
+B2_ENDPOINT=${B2_ENDPOINT}
+B2_KEY_ID=${B2_KEY_ID}
+B2_APP_KEY=${B2_APP_KEY}
+B2_BUCKET=${B2_BUCKET}
 EOF
     ;;
 esac

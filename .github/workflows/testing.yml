@@ -637,12 +637,24 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          # Media API specific
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          RUNPOD_API_URL: http://localhost:4002/internal/mock-runpod
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
         run: |
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
           echo "::add-mask::$BETTER_AUTH_SECRET"
+          echo "::add-mask::$RUNPOD_API_KEY"
+          echo "::add-mask::$RUNPOD_WEBHOOK_SECRET"
+          echo "::add-mask::$B2_APP_KEY"
           chmod +x .github/scripts/generate-dev-vars.sh
           .github/scripts/generate-dev-vars.sh
 
@@ -791,12 +803,24 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          # Media API specific
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          RUNPOD_API_URL: http://localhost:4002/internal/mock-runpod
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
         run: |
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$BETTER_AUTH_SECRET"
+          echo "::add-mask::$RUNPOD_API_KEY"
+          echo "::add-mask::$RUNPOD_WEBHOOK_SECRET"
+          echo "::add-mask::$B2_APP_KEY"
           chmod +x .github/scripts/generate-dev-vars.sh
           .github/scripts/generate-dev-vars.sh
 
