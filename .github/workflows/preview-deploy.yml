@@ -301,6 +301,10 @@ jobs:
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload ecom-api secrets
@@ -339,6 +343,10 @@ jobs:
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload media-api secrets
@@ -379,6 +387,9 @@ jobs:
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload content-api secrets
@@ -413,6 +424,10 @@ jobs:
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload identity-api secrets
@@ -445,6 +460,10 @@ jobs:
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var AUTH_WORKER_URL:https://auth-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "admin-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload admin-api secrets
@@ -476,6 +495,10 @@ jobs:
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload organization-api secrets
@@ -507,6 +530,10 @@ jobs:
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload notifications-api secrets
@@ -544,6 +571,10 @@ jobs:
             --var DB_METHOD:NEON_BRANCH
             --var API_URL:${{ env.API_URL }}
             --var WEB_APP_URL:${{ env.WEB_URL }}
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "auth-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload auth-worker secrets

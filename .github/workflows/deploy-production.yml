@@ -110,7 +110,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/media-api
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload media-api secrets
         run: .github/scripts/upload-worker-secrets.sh production media-api
@@ -138,7 +143,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/ecom-api
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload ecom-api secrets
         run: .github/scripts/upload-worker-secrets.sh production ecom-api
@@ -165,7 +175,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/content-api
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload content-api secrets
         run: .github/scripts/upload-worker-secrets.sh production content-api
@@ -188,7 +203,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/identity-api
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload identity-api secrets
         run: .github/scripts/upload-worker-secrets.sh production identity-api
@@ -208,7 +228,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/admin-api
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload admin-api secrets
         run: .github/scripts/upload-worker-secrets.sh production admin-api
@@ -228,7 +253,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/organization-api
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload organization-api secrets
         run: .github/scripts/upload-worker-secrets.sh production organization-api
@@ -248,7 +278,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/notifications-api
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload notifications-api secrets
         run: .github/scripts/upload-worker-secrets.sh production notifications-api
@@ -268,7 +303,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/auth
-          command: deploy --env production
+          command: >
+            deploy --env production
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload auth-worker secrets
         run: .github/scripts/upload-worker-secrets.sh production auth
