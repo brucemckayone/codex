@@ -390,7 +390,7 @@ jobs:
           check_health "Notifications API" "https://notifications-api.revelations.studio/health" || FAILED=1
           check_health "Admin API" "https://admin-api.revelations.studio/health" || FAILED=1
           check_health "Auth Worker" "https://auth.revelations.studio/health" || FAILED=1
-          check_health "Web App" "https://codex.revelations.studio/" || FAILED=1
+          check_health "Web App" "https://revelations.studio/" || FAILED=1
 
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -412,7 +412,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
-          echo "| Web App | [codex.revelations.studio](https://codex.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Web App | [revelations.studio](https://revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Media API | [media-api.revelations.studio](https://media-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Ecom API | [ecom-api.revelations.studio](https://ecom-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
           echo "| Content API | [content-api.revelations.studio](https://content-api.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
