@@ -33,6 +33,7 @@ BASE_DOMAIN="revelations.studio"
 # - Organization tenant subdomains (e.g., yogastudio.revelations.studio)
 # - External service subdomains
 declare -A PRODUCTION_DOMAINS=(
+  ["@"]="codex-web-production"
   ["codex"]="codex-web-production"
   ["www"]="codex-web-production"
   ["creators"]="codex-web-production"
@@ -79,7 +80,12 @@ echo ""
 # Function to check if a DNS record exists
 check_dns_record() {
   local subdomain=$1
-  local full_domain="${subdomain}.${BASE_DOMAIN}"
+  local full_domain
+  if [ "$subdomain" = "@" ]; then
+    full_domain="${BASE_DOMAIN}"
+  else
+    full_domain="${subdomain}.${BASE_DOMAIN}"
+  fi
 
   echo "🔍 Checking DNS record for ${full_domain}..."
 
@@ -111,22 +117,30 @@ check_dns_record() {
 create_dns_record() {
   local subdomain=$1
   local worker_name=$2
-  local full_domain="${subdomain}.${BASE_DOMAIN}"
+  local full_domain
+  if [ "$subdomain" = "@" ]; then
+    full_domain="${BASE_DOMAIN}"
+  else
+    full_domain="${subdomain}.${BASE_DOMAIN}"
+  fi
 
   echo "📝 Creating DNS record for ${full_domain} -> ${worker_name}..."
 
-  # For Cloudflare Workers with custom domains:
-  # Create a CNAME pointing to the zone apex (revelations.studio)
-  # The worker route will intercept traffic to this subdomain
-  # Cloudflare Workers' custom domains feature handles the rest
+  local type="CNAME"
+  local content="${BASE_DOMAIN}"
+  
+  if [ "$subdomain" = "@" ]; then
+    type="A"
+    content="192.0.2.1" # Dummy IP for Worker-only apex domain (Cloudflare best practice)
+  fi
 
   local response=$(curl -s -X POST "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/dns_records" \
     -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
     -H "Content-Type: application/json" \
     --data "{
-      \"type\": \"CNAME\",
+      \"type\": \"${type}\",
       \"name\": \"${subdomain}\",
-      \"content\": \"${BASE_DOMAIN}\",
+      \"content\": \"${content}\",
       \"ttl\": 1,
       \"proxied\": true,
       \"comment\": \"Production custom domain for ${worker_name}\"
@@ -152,7 +166,12 @@ create_dns_record() {
 verify_custom_domain() {
   local subdomain=$1
   local worker_name=$2
-  local full_domain="${subdomain}.${BASE_DOMAIN}"
+  local full_domain
+  if [ "$subdomain" = "@" ]; then
+    full_domain="${BASE_DOMAIN}"
+  else
+    full_domain="${subdomain}.${BASE_DOMAIN}"
+  fi
 
   echo "🔍 Verifying custom domain attachment for ${full_domain}..."
 
