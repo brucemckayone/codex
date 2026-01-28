@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vitest/globals", "@cloudflare/workers-types"]
+  },
+  "include": [
+    "src/**/*",
+    "vite.config.identity.ts",
+    "vitest.config.identity.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

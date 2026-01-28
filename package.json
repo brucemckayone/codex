@@ -84,7 +84,7 @@
     "concurrently": "^7.0.0",
     "dotenv": "^17.2.3",
     "dotenv-cli": "^11.0.0",
-    "happy-dom": "^20.0.8",
+    "happy-dom": "^20.0.10",
     "husky": "^9.1.7",
     "jsdom": "^27.0.1",
     "knip": "^5.72.0",

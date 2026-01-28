@@ -36,6 +36,13 @@ export const PATH_CONFIG = {
   THUMBNAIL_FILENAME: 'auto-generated.jpg',
   WAVEFORM_JSON_FILENAME: 'waveform.json',
   WAVEFORM_IMAGE_FILENAME: 'waveform.png',
+
+  /** New image pipeline folders */
+  CONTENT_THUMBNAILS_FOLDER: 'content-thumbnails',
+  BRANDING_FOLDER: 'branding',
+  LOGO_SUBFOLDER: 'logo',
+  /** Root level avatars folder (not creator-scoped) */
+  AVATARS_FOLDER: 'avatars',
 } as const;
 
 /**
@@ -203,6 +210,64 @@ export function getWaveformImageKey(
   mediaId: string
 ): string {
   return `${creatorId}/${PATH_CONFIG.WAVEFORMS_FOLDER}/${mediaId}/${PATH_CONFIG.WAVEFORM_IMAGE_FILENAME}`;
+}
+
+/**
+ * Generate R2 key for content thumbnail (custom uploaded)
+ *
+ * @param creatorId - Creator's user ID
+ * @param contentId - Content UUID
+ * @param size - Size variant (sm, md, lg)
+ * @returns R2 key path to webp image
+ *
+ * @example
+ * getContentThumbnailKey('user-123', 'content-456', 'md')
+ * // Returns: 'user-123/content-thumbnails/content-456/md.webp'
+ */
+export function getContentThumbnailKey(
+  creatorId: string,
+  contentId: string,
+  size: string
+): string {
+  return `${creatorId}/${PATH_CONFIG.CONTENT_THUMBNAILS_FOLDER}/${contentId}/${size}.webp`;
+}
+
+/**
+ * Generate R2 key for organization logo
+ *
+ * @param creatorId - Organization/Creator ID
+ * @param size - Size variant (sm, md, lg) or 'original' for SVG
+ * @returns R2 key path to webp image (or svg)
+ *
+ * @example
+ * getOrgLogoKey('org-123', 'lg')
+ * // Returns: 'org-123/branding/logo/lg.webp'
+ */
+export function getOrgLogoKey(creatorId: string, size: string): string {
+  // SVG logos might use 'original' size without .webp extension?
+  // Plan says "Store original sanitized SVG".
+  // But also says "ensure consistent {size}.webp naming".
+  // If size is 'original' and it's SVG, we might want to handle extension,
+  // but for now implementing strict {size}.webp as per task unless size implies extension.
+  // Actually, let's stick to .webp for now as the plan emphasizes it.
+  // For SVG support, we might need a separate function or 'original.svg'
+  // but the interface for this task is about the standard sizes.
+  return `${creatorId}/${PATH_CONFIG.BRANDING_FOLDER}/${PATH_CONFIG.LOGO_SUBFOLDER}/${size}.webp`;
+}
+
+/**
+ * Generate R2 key for user avatar
+ *
+ * @param userId - User ID
+ * @param size - Size variant (sm, md, lg)
+ * @returns R2 key path to webp image
+ *
+ * @example
+ * getUserAvatarKey('user-123', 'sm')
+ * // Returns: 'avatars/user-123/sm.webp'
+ */
+export function getUserAvatarKey(userId: string, size: string): string {
+  return `${PATH_CONFIG.AVATARS_FOLDER}/${userId}/${size}.webp`;
 }
 
 /**

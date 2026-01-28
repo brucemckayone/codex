@@ -21,7 +21,9 @@
     { "path": "./workers/organization-api" },
     { "path": "./workers/notifications-api" },
     { "path": "./workers/ecom-api" },
-    { "path": "./workers/admin-api" }
+    { "path": "./workers/admin-api" },
+    { "path": "./packages/identity" },
+    { "path": "./packages/image-processing" }
   ],
   "compilerOptions": {
     "target": "ES2022",
@@ -64,7 +66,11 @@
       "@codex/shared-types": ["packages/shared-types/src/index.ts"],
       "@codex/shared-types/*": ["packages/shared-types/src/*"],
       "@codex/admin": ["packages/admin/src/index.ts"],
-      "@codex/admin/*": ["packages/admin/src/*"]
+      "@codex/admin/*": ["packages/admin/src/*"],
+      "@codex/identity": ["packages/identity/src/index.ts"],
+      "@codex/identity/*": ["packages/identity/src/*"],
+      "@codex/image-processing": ["packages/image-processing/src/index.ts"],
+      "@codex/image-processing/*": ["packages/image-processing/src/*"]
     }
   }
 }

@@ -9,5 +9,7 @@ export default packageVitestConfig({
     '@codex/service-errors': '../service-errors/src',
     '@codex/shared-types': '../shared-types/src',
     '@codex/observability': '../observability/src',
+    '@codex/identity': '../identity/src',
+    '@codex/image-processing': '../image-processing/src',
   },
 });

@@ -36,6 +36,7 @@
     "@codex/admin": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",
+    "@codex/identity": "workspace:*",
     "@codex/organization": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
