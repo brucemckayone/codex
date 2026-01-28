@@ -51,9 +51,13 @@ export type HlsVariant = '1080p' | '720p' | '480p' | '360p' | 'audio';
  * RunPod job request payload
  * Sent when triggering a new transcoding job
  *
- * NOTE: B2 credentials are no longer passed in job payloads.
- * They are configured in RunPod's secret manager and injected
- * as environment variables on workers.
+ * SECURITY: Credentials are NOT passed in job payloads.
+ * - B2 credentials: Configure in RunPod's secret manager (injected as env vars)
+ * - R2 credentials: Configure in RunPod's secret manager (injected as env vars)
+ * - webhookSecret: Configure in RunPod's secret manager (for signing callbacks)
+ *
+ * The job payload only includes paths (inputKey) so the handler knows
+ * which files to download/upload.
  */
 export interface RunPodJobRequest {
   input: {
@@ -77,8 +81,12 @@ export interface RunPodJobResponse {
 /**
  * Service configuration for TranscodingService
  *
- * NOTE: B2 credentials are no longer passed here - they are configured
- * in RunPod's secret manager and injected as environment variables on workers.
+ * SECURITY: Credentials are NOT passed to RunPod via job payloads.
+ * - B2 credentials: Configure in RunPod's secret manager (outside this codebase)
+ * - R2 credentials: Configure in RunPod's secret manager (outside this codebase)
+ * - webhookSecret: Configure in RunPod's secret manager (outside this codebase)
+ *
+ * This service only needs RunPod API credentials to trigger jobs.
  */
 export interface TranscodingServiceConfig {
   runpodApiKey: string;
