@@ -95,6 +95,17 @@ def save_template(api_key, registry_auth_id=None):
                 "value": "{{ RUNPOD_SECRET_b2_secret_access_key }}",
             },
             {"key": "B2_BUCKET_NAME", "value": "{{ RUNPOD_SECRET_b2_bucket_name }}"},
+            # R2 credentials from RunPod secret manager (not in job payload)
+            {"key": "R2_ENDPOINT", "value": "{{ RUNPOD_SECRET_r2_endpoint }}"},
+            {
+                "key": "R2_ACCESS_KEY_ID",
+                "value": "{{ RUNPOD_SECRET_r2_access_key_id }}",
+            },
+            {
+                "key": "R2_SECRET_ACCESS_KEY",
+                "value": "{{ RUNPOD_SECRET_r2_secret_access_key }}",
+            },
+            {"key": "R2_BUCKET_NAME", "value": "{{ RUNPOD_SECRET_r2_bucket_name }}"},
         ],
         "isServerless": True,
     }

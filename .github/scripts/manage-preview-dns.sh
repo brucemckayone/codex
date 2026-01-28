@@ -16,15 +16,19 @@ fi
 
 BASE_DOMAIN="revelations.studio"
 
-# Define the preview subdomains
+# Define the preview subdomains that need CNAME DNS records created manually
+#
+# All workers and the web app need CNAME records pointing to revelations.studio
+# The Worker routes will then intercept traffic for these domains
 PREVIEW_SUBDOMAINS=(
   "codex-preview-${PR_NUMBER}"
-  "api-preview-${PR_NUMBER}"
+  "ecom-api-preview-${PR_NUMBER}"
+  "media-api-preview-${PR_NUMBER}"
   "content-api-preview-${PR_NUMBER}"
   "identity-api-preview-${PR_NUMBER}"
+  "admin-api-preview-${PR_NUMBER}"
   "organization-api-preview-${PR_NUMBER}"
   "notifications-api-preview-${PR_NUMBER}"
-  "admin-api-preview-${PR_NUMBER}"
   "auth-preview-${PR_NUMBER}"
 )
 

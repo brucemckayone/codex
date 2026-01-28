@@ -259,7 +259,7 @@ export function createServiceRegistry(
           );
         }
 
-        // NOTE: B2 credentials are configured in RunPod's secret manager,
+        // NOTE: B2 and R2 credentials are configured in RunPod's secret manager,
         // not passed via service config (security: avoids credential sprawl)
         _transcoding = new TranscodingService({
           db: getSharedDb(),

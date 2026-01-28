@@ -69,6 +69,26 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      - name: Delete preview custom domains
+        continue-on-error: true
+        run: |
+          for domain in \
+            "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "admin-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "auth-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "codex-preview-${{ env.PR_NUMBER }}.revelations.studio"; do
+            echo "Deleting $domain..."
+            wrangler custom-domains delete "$domain" || echo "Domain $domain may not exist"
+          done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Delete preview DNS records
         continue-on-error: true
         run: |
@@ -83,7 +103,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: ${{ env.PR_NUMBER }},
-              body: '🧹 Preview environment cleaned up successfully (workers, database, and DNS records removed).'
+              body: '🧹 Preview environment cleaned up successfully (9 workers, web app, database branch, 9 custom domains, and 9 DNS records removed).'
             });
 
   deploy-preview:
@@ -268,7 +288,7 @@ jobs:
           chmod +x .github/scripts/manage-preview-dns.sh
           .github/scripts/manage-preview-dns.sh create ${{ env.PR_NUMBER }} ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} ${{ secrets.CLOUDFLARE_ZONE_ID }}
 
-      # Verify DNS propagation with polling instead of fixed sleep
+      # Verify DNS propagation
       - name: Verify DNS propagation
         timeout-minutes: 2
         run: |
@@ -286,9 +306,31 @@ jobs:
             sleep 2
           done
 
-      # Deploy ecom-api worker
+      # Register custom domains for worker routing
+      - name: Register preview custom domains
+        run: |
+          echo "🔐 Registering custom domains for preview-${{ env.PR_NUMBER }}..."
+          for domain in \
+            "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "admin-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "auth-preview-${{ env.PR_NUMBER }}.revelations.studio" \
+            "codex-preview-${{ env.PR_NUMBER }}.revelations.studio"; do
+            echo "Registering $domain..."
+            wrangler custom-domains create "$domain" || echo "Domain $domain may already exist"
+          done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # --- WORKER DEPLOYMENTS (using shared upload script) ---
+
+      # 1. Ecom API
       - name: Deploy ecom-api (preview)
-        id: deploy-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -299,27 +341,38 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --route "api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
+            --route "ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
-      # Upload secrets to the preview worker (wrangler-action uploads to wrong worker name)
       - name: Upload ecom-api secrets
-        run: |
-          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}","STRIPE_SECRET_KEY":"${{ secrets.STRIPE_SECRET_KEY }}","STRIPE_WEBHOOK_SECRET_PAYMENT":"${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}","STRIPE_WEBHOOK_SECRET_SUBSCRIPTION":"${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}","STRIPE_WEBHOOK_SECRET_CONNECT":"${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}","STRIPE_WEBHOOK_SECRET_CUSTOMER":"${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}","STRIPE_WEBHOOK_SECRET_BOOKING":"${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}","STRIPE_WEBHOOK_SECRET_DISPUTE":"${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}"}' | npx wrangler secret bulk --name ecom-api-preview-${{ env.PR_NUMBER }}
+        run: .github/scripts/upload-worker-secrets.sh preview ecom-api ecom-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set API URL
-        id: api-url
         run: |
-          API_URL="https://api-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$API_URL" >> $GITHUB_OUTPUT
+          API_URL="https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
           echo "API_URL=$API_URL" >> $GITHUB_ENV
 
-      # Deploy media-api worker
+      # 2. Media API
       - name: Deploy media-api (preview)
-        id: deploy-media-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -330,11 +383,15 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "media-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload media-api secrets
-        run: .github/scripts/upload-worker-secrets.sh preview media-api
+        run: .github/scripts/upload-worker-secrets.sh preview media-api media-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -353,15 +410,12 @@ jobs:
           R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Media API URL
-        id: media-api-url
         run: |
           MEDIA_API_URL="https://media-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$MEDIA_API_URL" >> $GITHUB_OUTPUT
           echo "MEDIA_API_URL=$MEDIA_API_URL" >> $GITHUB_ENV
 
-      # Deploy content-api worker
+      # 3. Content API
       - name: Deploy content-api (preview)
-        id: deploy-content-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -372,27 +426,34 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "content-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload content-api secrets
-        run: |
-          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}","R2_ACCOUNT_ID":"${{ secrets.R2_ACCOUNT_ID }}","R2_ACCESS_KEY_ID":"${{ secrets.R2_ACCESS_KEY_ID }}","R2_SECRET_ACCESS_KEY":"${{ secrets.R2_SECRET_ACCESS_KEY }}"}' | npx wrangler secret bulk --name content-api-preview-${{ env.PR_NUMBER }}
+        run: .github/scripts/upload-worker-secrets.sh preview content-api content-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Content API URL
-        id: content-api-url
         run: |
           CONTENT_API_URL="https://content-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$CONTENT_API_URL" >> $GITHUB_OUTPUT
           echo "CONTENT_API_URL=$CONTENT_API_URL" >> $GITHUB_ENV
 
-      # Deploy identity-api worker
+      # 4. Identity API
       - name: Deploy identity-api (preview)
-        id: deploy-identity-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -403,26 +464,31 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload identity-api secrets
-        run: |
-          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name identity-api-preview-${{ env.PR_NUMBER }}
+        run: .github/scripts/upload-worker-secrets.sh preview identity-api identity-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Identity API URL
-        id: identity-api-url
         run: |
           IDENTITY_API_URL="https://identity-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$IDENTITY_API_URL" >> $GITHUB_OUTPUT
           echo "IDENTITY_API_URL=$IDENTITY_API_URL" >> $GITHUB_ENV
 
-      # Deploy admin-api worker
+      # 5. Admin API
       - name: Deploy admin-api (preview)
-        id: deploy-admin-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -433,27 +499,32 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
             --var AUTH_WORKER_URL:https://auth-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "admin-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload admin-api secrets
-        run: |
-          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name admin-api-preview-${{ env.PR_NUMBER }}
+        run: .github/scripts/upload-worker-secrets.sh preview admin-api admin-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Admin API URL
-        id: admin-api-url
         run: |
           ADMIN_API_URL="https://admin-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$ADMIN_API_URL" >> $GITHUB_OUTPUT
           echo "ADMIN_API_URL=$ADMIN_API_URL" >> $GITHUB_ENV
 
-      # Deploy organization-api worker
+      # 6. Organization API
       - name: Deploy organization-api (preview)
-        id: deploy-organization-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -464,26 +535,31 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload organization-api secrets
-        run: |
-          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name organization-api-preview-${{ env.PR_NUMBER }}
+        run: .github/scripts/upload-worker-secrets.sh preview organization-api organization-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Organization API URL
-        id: organization-api-url
         run: |
           ORGANIZATION_API_URL="https://organization-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$ORGANIZATION_API_URL" >> $GITHUB_OUTPUT
           echo "ORGANIZATION_API_URL=$ORGANIZATION_API_URL" >> $GITHUB_ENV
 
-      # Deploy notifications-api worker
+      # 7. Notifications API
       - name: Deploy notifications-api (preview)
-        id: deploy-notifications-api
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -494,32 +570,37 @@ jobs:
             --var ENVIRONMENT:preview
             --var DB_METHOD:NEON_BRANCH
             --var WEB_APP_URL:https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio
-            --var API_URL:https://api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var API_URL:https://ecom-api-preview-${{ env.PR_NUMBER }}.revelations.studio
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload notifications-api secrets
-        run: |
-          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}"}' | npx wrangler secret bulk --name notifications-api-preview-${{ env.PR_NUMBER }}
+        run: .github/scripts/upload-worker-secrets.sh preview notifications-api notifications-api-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Notifications API URL
-        id: notifications-api-url
         run: |
           NOTIFICATIONS_API_URL="https://notifications-api-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$NOTIFICATIONS_API_URL" >> $GITHUB_OUTPUT
           echo "NOTIFICATIONS_API_URL=$NOTIFICATIONS_API_URL" >> $GITHUB_ENV
 
-      # Set web URL first (needed for auth worker)
+      # 8. Set web URL first (needed for auth worker)
       - name: Set Web URL
         run: |
           WEB_URL="https://codex-preview-${{ env.PR_NUMBER }}.revelations.studio"
           echo "WEB_URL=$WEB_URL" >> $GITHUB_ENV
 
-      # Deploy auth worker
+      # 9. Deploy auth worker
       - name: Deploy auth-worker (preview)
-        id: deploy-auth
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -531,23 +612,31 @@ jobs:
             --var DB_METHOD:NEON_BRANCH
             --var API_URL:${{ env.API_URL }}
             --var WEB_APP_URL:${{ env.WEB_URL }}
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
             --route "auth-preview-${{ env.PR_NUMBER }}.revelations.studio/*"
 
       - name: Upload auth-worker secrets
-        run: |
-          echo '{"DATABASE_URL":"${{ env.DATABASE_URL }}","BETTER_AUTH_SECRET":"${{ secrets.BETTER_AUTH_SECRET }}","SESSION_SECRET":"${{ secrets.SESSION_SECRET }}"}' | npx wrangler secret bulk --name auth-worker-preview-${{ env.PR_NUMBER }}
+        run: .github/scripts/upload-worker-secrets.sh preview auth auth-worker-preview-${{ env.PR_NUMBER }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
+          R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}
+          R2_BUCKET_RESOURCES: ${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Set Auth URL
-        id: auth-url
         run: |
           AUTH_URL="https://auth-preview-${{ env.PR_NUMBER }}.revelations.studio"
-          echo "url=$AUTH_URL" >> $GITHUB_OUTPUT
           echo "AUTH_URL=$AUTH_URL" >> $GITHUB_ENV
 
-      # Build and deploy SvelteKit app using Turborepo
+      # Build and deploy SvelteKit app
       - name: Build SvelteKit app with Turborepo
         run: pnpm build:web
         env:
@@ -579,7 +668,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # Comment final status on PR (only when triggered by workflow_run with a real PR)
+      # Comment final status on PR
       - name: Comment final status
         if: always() && github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0].number
         uses: actions/github-script@v7
@@ -608,7 +697,7 @@ jobs:
             ### 🌐 Preview URLs
             - **Web App:** https://codex-preview-${prNumber}.revelations.studio
             - **Media API:** https://media-api-preview-${prNumber}.revelations.studio
-            - **Stripe API:** https://api-preview-${prNumber}.revelations.studio
+            - **Ecom API:** https://ecom-api-preview-${prNumber}.revelations.studio
             - **Content API:** https://content-api-preview-${prNumber}.revelations.studio
             - **Identity API:** https://identity-api-preview-${prNumber}.revelations.studio
             - **Organization API:** https://organization-api-preview-${prNumber}.revelations.studio

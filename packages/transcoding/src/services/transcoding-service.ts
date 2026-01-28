@@ -49,8 +49,9 @@ import type {
 /**
  * Extended service config for TranscodingService
  *
- * NOTE: B2 credentials are no longer passed here - they are configured
- * in RunPod's secret manager and injected as environment variables on workers.
+ * SECURITY: All storage credentials (B2 and R2) are configured in
+ * RunPod's secret manager, not passed via job payload or this config.
+ * This service only needs RunPod API credentials to trigger jobs.
  */
 export interface TranscodingServiceConfig {
   runpodApiKey: string;
@@ -161,8 +162,10 @@ export class TranscodingService extends BaseService {
     }
 
     // Step 2: Construct job request
-    // NOTE: B2 credentials are configured in RunPod's secret manager,
-    // not passed in job payload (security: avoids logging credentials)
+    // SECURITY: Storage credentials are NOT passed in job payload.
+    // - B2 and R2 credentials are configured in RunPod's secret manager
+    // - Job payload only includes paths (inputKey, output paths) for the handler
+    // - This avoids logging credentials in RunPod's system
     const jobRequest: RunPodJobRequest = {
       input: {
         mediaId: media.id,

@@ -34,12 +34,8 @@ const mockConfig = {
   runpodApiKey: 'mock-api-key',
   runpodEndpointId: 'mock-endpoint-id',
   webhookBaseUrl: 'https://api.example.com',
-  hmacSecret: 'mock-secret',
-  // B2 Config
-  b2Endpoint: 'https://b2.mock',
-  b2AccessKeyId: 'mock-b2-key',
-  b2SecretAccessKey: 'mock-b2-secret',
-  b2BucketName: 'mock-bucket',
+  runpodApiBaseUrl: 'https://api.mock', // For testing with mock RunPod
+  runpodTimeout: 30000,
 } as TranscodingServiceFullConfig;
 
 describe('TranscodingService', () => {
@@ -90,7 +86,7 @@ describe('TranscodingService', () => {
 
       // Verify RunPod API called correctly
       expect(global.fetch).toHaveBeenCalledWith(
-        `https://api.runpod.ai/v2/${mockConfig.runpodEndpointId}/run`,
+        `${mockConfig.runpodApiBaseUrl}/${mockConfig.runpodEndpointId}/run`,
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
@@ -99,16 +95,24 @@ describe('TranscodingService', () => {
           body: expect.stringContaining(mediaId),
         })
       );
-      // Verify B2 fields are NOT in body (security: credentials now come from RunPod env)
+      // Verify storage credentials are NOT in body (security: configured in RunPod env)
       const call = (global.fetch as Mock).mock.calls[0] as [
         string,
         RequestInit,
       ];
       const body = JSON.parse(call[1].body as string);
+      // Should NOT have B2 or R2 credentials in payload
       expect(body.input.b2Endpoint).toBeUndefined();
       expect(body.input.b2AccessKeyId).toBeUndefined();
       expect(body.input.b2SecretAccessKey).toBeUndefined();
       expect(body.input.b2BucketName).toBeUndefined();
+      expect(body.input.r2Endpoint).toBeUndefined();
+      expect(body.input.r2AccessKeyId).toBeUndefined();
+      expect(body.input.r2SecretAccessKey).toBeUndefined();
+      expect(body.input.r2BucketName).toBeUndefined();
+      // Should only have path information
+      expect(body.input.inputKey).toBeDefined();
+      expect(body.input.webhookUrl).toBeDefined();
       // Verify required fields ARE present
       expect(body.input).toMatchObject({
         mediaId,

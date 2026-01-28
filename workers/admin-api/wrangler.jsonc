@@ -83,8 +83,8 @@
       ],
       "routes": [
         {
-          "pattern": "admin-api.revelations.studio",
-          "custom_domain": true
+          "pattern": "admin-api.revelations.studio/*",
+          "zone_name": "revelations.studio"
         }
       ]
     },
