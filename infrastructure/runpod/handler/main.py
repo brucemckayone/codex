@@ -43,8 +43,9 @@ import runpod
 class JobInput(TypedDict):
     """Input payload from RunPod job trigger.
 
-    NOTE: B2 credentials are read from environment variables (via RunPod secrets)
-    instead of job payload to avoid logging credentials.
+    SECURITY: Both B2 and R2 credentials are read from environment variables
+    (via RunPod secrets) instead of job payload to avoid logging credentials.
+    Credentials are never passed in job payloads.
     """
 
     mediaId: str
@@ -53,12 +54,7 @@ class JobInput(TypedDict):
     inputKey: str  # R2 key for original file
     webhookUrl: str
     webhookSecret: str
-    # R2 config (delivery assets) - still passed in payload
-    r2Endpoint: str
-    r2AccessKeyId: str
-    r2SecretAccessKey: str
-    r2BucketName: str
-    # NOTE: B2 config now comes from environment variables, not job payload
+    # NOTE: Both B2 and R2 credentials come from environment variables, not job payload
 
 
 class TranscodingResult(TypedDict):
@@ -680,11 +676,22 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "B2 credentials not configured in environment. Add secrets in RunPod console."
         )
 
+    # Read R2 credentials from environment (set via RunPod secret manager)
+    r2_endpoint = os.environ.get("R2_ENDPOINT")
+    r2_access_key_id = os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_access_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket_name = os.environ.get("R2_BUCKET_NAME")
+
+    if not all([r2_endpoint, r2_access_key_id, r2_secret_access_key, r2_bucket_name]):
+        raise ValueError(
+            "R2 credentials not configured in environment. Add secrets in RunPod console."
+        )
+
     # Initialize storage clients
     r2_client = create_s3_client(
-        job_input["r2Endpoint"],
-        job_input["r2AccessKeyId"],
-        job_input["r2SecretAccessKey"],
+        r2_endpoint,
+        r2_access_key_id,
+        r2_secret_access_key,
     )
     b2_client = create_s3_client(
         b2_endpoint,
@@ -703,7 +710,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         # Step 1: Download original from R2
         input_ext = os.path.splitext(input_key)[1] or ".mp4"
         input_path = os.path.join(work_dir, f"input{input_ext}")
-        download_file(r2_client, job_input["r2BucketName"], input_key, input_path)
+        download_file(r2_client, r2_bucket_name, input_key, input_path)
 
         # Step 2: Probe metadata
         probe_data = probe_media(input_path)
@@ -741,7 +748,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
         # Upload HLS to R2
         hls_prefix = f"{creator_id}/hls/{media_id}/"
-        upload_directory(r2_client, job_input["r2BucketName"], hls_prefix, hls_dir)
+        upload_directory(r2_client, r2_bucket_name, hls_prefix, hls_dir)
         hls_master_key = f"{hls_prefix}master.m3u8"
         hls_preview_key = (
             f"{hls_prefix}preview/preview.m3u8" if media_type == "video" else None
@@ -760,7 +767,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             thumbnail_key = f"{creator_id}/thumbnails/{media_id}/auto-generated.jpg"
             upload_file(
                 r2_client,
-                job_input["r2BucketName"],
+                r2_bucket_name,
                 thumbnail_key,
                 thumbnail_path,
                 "image/jpeg",
@@ -778,14 +785,14 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             waveform_image_key = f"{creator_id}/waveforms/{media_id}/waveform.png"
             upload_file(
                 r2_client,
-                job_input["r2BucketName"],
+                r2_bucket_name,
                 waveform_key,
                 waveform_json_path,
                 "application/json",
             )
             upload_file(
                 r2_client,
-                job_input["r2BucketName"],
+                r2_bucket_name,
                 waveform_image_key,
                 waveform_png_path,
                 "image/png",
