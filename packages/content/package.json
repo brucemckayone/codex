@@ -34,14 +34,15 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "@codex/organization": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
-    "drizzle-orm": "0.44.7",
-    "@codex/image-processing": "workspace:*"
+    "drizzle-orm": "0.44.7"
   },
   "devDependencies": {
     "@codex/test-utils": "workspace:*",

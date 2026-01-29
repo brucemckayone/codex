@@ -1,6 +1,7 @@
-import type { ImageUploadResult } from '@codex/image-processing';
+import type { ImageProcessingResult } from '@codex/image-processing';
+import { SUPPORTED_MIME_TYPES } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
-import { procedure } from '@codex/worker-utils';
+import { multipartProcedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
@@ -13,33 +14,30 @@ const app = new Hono<HonoEnv>();
  */
 app.post(
   '/avatar',
-  procedure({
+  multipartProcedure({
     policy: { auth: 'required' },
-    handler: async (ctx): Promise<ImageUploadResult> => {
-      const formData = await ctx.req.raw.formData();
-      const file = formData.get('avatar');
+    files: {
+      avatar: {
+        required: true,
+        maxSizeBytes: 5 * 1024 * 1024, // 5MB
+        allowedMimeTypes: Array.from(SUPPORTED_MIME_TYPES),
+      },
+    },
+    handler: async (ctx): Promise<ImageProcessingResult> => {
+      const { avatar } = ctx.files;
 
-      if (!file || !(file instanceof File)) {
+      if (!avatar) {
         throw new Error('Avatar file is required');
       }
 
-      await ctx.services.identity.uploadAvatar(
-        ctx.user.id,
-        file,
-        ctx.env.MEDIA_BUCKET
-      );
+      // Convert ValidatedFile to File object
+      const file = new File([avatar.buffer], avatar.name, {
+        type: avatar.type,
+      });
 
-      // Return result from service (uploadAvatar should return it)
-      // I need to update IdentityService.uploadAvatar to return ImageUploadResult
-      // checking my implementation, it does return it.
-
-      // Wait, I need to call it again or assume it worked.
-      // Re-reading my previous write...
-      return await ctx.services.identity.uploadAvatar(
-        ctx.user.id,
-        file,
-        ctx.env.MEDIA_BUCKET
-      );
+      // IdentityService is configured with r2Service and mediaBucket
+      // via the service registry, so we only pass userId and file
+      return await ctx.services.identity.uploadAvatar(ctx.user.id, file);
     },
   })
 );

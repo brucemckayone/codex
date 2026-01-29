@@ -153,7 +153,7 @@ export async function validateImageUpload(
   if (config.sanitizeSvg && file.type === 'image/svg+xml') {
     const textDecoder = new TextDecoder();
     const svgContent = textDecoder.decode(buffer);
-    const sanitized = sanitizeSvgContent(svgContent);
+    const sanitized = await sanitizeSvgContent(svgContent);
     finalBuffer = new TextEncoder().encode(sanitized).buffer as ArrayBuffer;
   }
 

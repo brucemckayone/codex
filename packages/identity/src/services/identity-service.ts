@@ -1,32 +1,39 @@
-import type { R2Bucket } from '@cloudflare/workers-types';
+import type { R2Service } from '@codex/cloudflare-clients';
 import { users } from '@codex/database/schema';
 import {
+  type ImageProcessingResult,
   ImageProcessingService,
-  type ImageUploadResult,
 } from '@codex/image-processing';
-import { BaseService } from '@codex/service-errors';
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import { eq } from 'drizzle-orm';
 import { UserNotFoundError } from '../errors';
 
-export interface IdentityServiceConfig {
-  db: any; // Using any for BaseService compatibility, strictly typings are handled in BaseService
-  r2?: R2Bucket;
+export interface IdentityServiceConfig extends ServiceConfig {
+  r2Service: R2Service;
+  mediaBucket: string;
 }
 
 export class IdentityService extends BaseService {
+  private r2Service: R2Service;
+  private mediaBucket: string;
+
+  constructor(config: IdentityServiceConfig) {
+    super(config);
+    this.r2Service = config.r2Service;
+    this.mediaBucket = config.mediaBucket;
+  }
+
   /**
    * Upload and process user avatar
    *
    * @param userId - User ID
    * @param file - Avatar image file
-   * @param r2 - R2 Bucket instance
-   * @returns Result containing upload URLs
+   * @returns Result containing upload URL
    */
   async uploadAvatar(
     userId: string,
-    file: File,
-    r2: R2Bucket
-  ): Promise<ImageUploadResult> {
+    file: File
+  ): Promise<ImageProcessingResult> {
     const existing = await this.db.query.users.findFirst({
       where: eq(users.id, userId),
     });
@@ -35,34 +42,38 @@ export class IdentityService extends BaseService {
       throw new UserNotFoundError(userId);
     }
 
-    // Process image
-    const imageService = new ImageProcessingService({ r2 });
+    // Create image processing service
+    const imageService = new ImageProcessingService({
+      db: this.db,
+      environment: this.environment,
+      r2Service: this.r2Service,
+      mediaBucket: this.mediaBucket,
+    });
 
-    // Convert File to FormData as expected by the service
-    const formData = new FormData();
-    formData.append('avatar', file);
-
-    const result = await imageService.processUserAvatar(userId, formData);
+    // Process and upload avatar
+    const result = await imageService.processUserAvatar(userId, file);
 
     try {
       // Update database
       await this.db
         .update(users)
         .set({
-          avatarUrl: result.basePath,
+          image: result.url,
           updatedAt: new Date(),
         })
         .where(eq(users.id, userId));
 
       return result;
     } catch (error) {
-      // Best-effort cleanup of uploaded images if DB update fails
+      // Best-effort cleanup of uploaded image if DB update fails
       try {
-        const keys = Object.values(result.urls);
-        await Promise.all(keys.map((key) => r2.delete(key)));
+        // Extract key from URL (format: https://bucket.s3.amazonaws.com/key)
+        const url = new URL(result.url);
+        const key = url.pathname.slice(1); // Remove leading slash
+        await this.r2Service.delete(key);
       } catch (cleanupError) {
         // Log cleanup error but throw original error
-        console.error('Failed to cleanup orphaned images:', cleanupError);
+        console.error('Failed to cleanup orphaned avatar:', cleanupError);
       }
       throw error;
     }

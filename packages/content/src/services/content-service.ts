@@ -13,6 +13,7 @@
  */
 
 import type { R2Bucket } from '@cloudflare/workers-types';
+import { R2Service } from '@codex/cloudflare-clients';
 import {
   CONTENT_STATUS,
   CONTENT_TYPES,
@@ -29,8 +30,8 @@ import {
 } from '@codex/database';
 import { content, mediaItems } from '@codex/database/schema';
 import {
+  type ImageProcessingResult,
   ImageProcessingService,
-  type ImageUploadResult,
 } from '@codex/image-processing';
 import { BaseService } from '@codex/service-errors';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
@@ -256,21 +257,23 @@ export class ContentService extends BaseService {
    * Security:
    * - Validates creator ownership
    * - Validates image file (size, type) via ImageProcessingService
-   * - Updates content record with new thumbnail URL
+   * - ImageProcessingService updates content record with thumbnail URL
    *
    * @param id - Content ID
    * @param creatorId - Creator ID (for authorization)
    * @param file - Image file to upload
    * @param r2 - R2 Bucket instance
-   * @returns Result containing upload URLs
+   * @param mediaBucket - R2 bucket name for URL construction
+   * @returns Result containing upload URL and metadata
    * @throws {ContentNotFoundError} If content doesn't exist
    */
   async uploadThumbnail(
     id: string,
     creatorId: string,
     file: File,
-    r2: R2Bucket
-  ): Promise<ImageUploadResult> {
+    r2: R2Bucket,
+    mediaBucket: string
+  ): Promise<ImageProcessingResult> {
     const existing = await this.db.query.content.findFirst({
       where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
     });
@@ -279,45 +282,25 @@ export class ContentService extends BaseService {
       throw new ContentNotFoundError(id);
     }
 
-    // Process image
-    const imageService = new ImageProcessingService({ r2 });
+    // Create R2Service from R2 bucket
+    const r2Service = new R2Service(r2);
 
-    // Convert File to FormData as expected by the service
-    const formData = new FormData();
-    formData.append('thumbnail', file);
+    // Create image processing service with all required config
+    const imageService = new ImageProcessingService({
+      db: this.db,
+      environment: this.environment,
+      r2Service,
+      mediaBucket,
+    });
 
+    // Process the thumbnail (service handles validation, upload, and DB update)
     const result = await imageService.processContentThumbnail(
-      creatorId,
       id,
-      formData
+      creatorId,
+      file
     );
 
-    try {
-      // Update database
-      await this.db
-        .update(content)
-        .set({
-          thumbnailUrl: result.basePath,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(content.id, id), withCreatorScope(content, creatorId)));
-
-      return result;
-    } catch (error) {
-      // Best-effort cleanup of uploaded images if DB update fails
-      try {
-        const keys = Object.values(result.urls);
-        await Promise.all(keys.map((key) => r2.delete(key)));
-      } catch (cleanupError) {
-        // Log cleanup error but throw original error
-        console.error('Failed to cleanup orphaned images:', cleanupError);
-      }
-      throw error;
-    }
-  }
-
-  protected createImageProcessingService(r2: R2Bucket): ImageProcessingService {
-    return new ImageProcessingService({ r2 });
+    return result;
   }
 
   /**

@@ -15,7 +15,7 @@ import {
 } from '@codex/transcoding';
 import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
 import { processImageVariants } from './processor';
-import { extractMimeType, validateImageUpload } from './validation'; // Falling back to local validation for now to match Main pattern if @codex/validation export is tricky
+import { extractMimeType } from './validation'; // Falling back to local validation for now to match Main pattern if @codex/validation export is tricky
 
 export interface ImageProcessingResult {
   url: string;
@@ -95,7 +95,7 @@ export class ImageProcessingService extends BaseService {
     return {
       url,
       size: variants.lg.byteLength,
-      mimeType: 'image/webp',
+      mimeType,
     };
   }
 
@@ -149,7 +149,7 @@ export class ImageProcessingService extends BaseService {
     return {
       url,
       size: variants.lg.byteLength,
-      mimeType: 'image/webp',
+      mimeType,
     };
   }
 

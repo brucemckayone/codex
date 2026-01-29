@@ -1,25 +1,53 @@
-import type { R2Bucket } from '@cloudflare/workers-types';
-import * as validation from '@codex/validation';
+import type { R2Service } from '@codex/cloudflare-clients';
+import type { DB } from '@codex/database';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as processor from '../processor';
 import { ImageProcessingService } from '../service';
 
-// Mock R2Bucket
-const mockR2Bucket = {
-  put: vi.fn(),
-  get: vi.fn(),
-  delete: vi.fn(),
-} as unknown as R2Bucket;
+/**
+ * Creates a File object with proper ArrayBuffer content for testing
+ */
+function createTestImageFile(mimeType: string, filename: string): File {
+  if (mimeType === 'image/png') {
+    const pngBuffer = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a, // PNG signature
+    ]).buffer;
+    return new File([pngBuffer], filename, { type: mimeType });
+  }
 
-// Mock dependencies
-vi.mock('@codex/validation', async (importOriginal) => {
-  const actual = await importOriginal<typeof validation>();
-  return {
-    ...actual,
-    validateImageUpload: vi.fn(),
-  };
-});
+  if (mimeType === 'image/svg+xml') {
+    const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>';
+    const encoder = new TextEncoder();
+    return new File([encoder.encode(svgContent)], filename, { type: mimeType });
+  }
 
+  // Fallback JPEG signature
+  const jpegBuffer = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+  return new File([jpegBuffer], filename, { type: mimeType });
+}
+
+// Mock database
+const mockDb = {
+  update: vi.fn().mockReturnValue({
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockResolvedValue([{ id: 'content-1' }]),
+    }),
+  }),
+} as unknown as DB;
+
+// Mock R2Service (not raw R2Bucket)
+const mockR2Service = {
+  put: vi.fn().mockResolvedValue(undefined),
+} as unknown as R2Service;
+
+// Mock processor
 vi.mock('../processor', () => ({
   processImageVariants: vi.fn(),
 }));
@@ -29,20 +57,17 @@ describe('ImageProcessingService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    service = new ImageProcessingService({ r2: mockR2Bucket });
+
+    service = new ImageProcessingService({
+      db: mockDb,
+      environment: 'test',
+      r2Service: mockR2Service,
+      mediaBucket: 'test-media-bucket',
+    });
   });
 
   it('should process content thumbnail (raster) and upload variants', async () => {
-    const file = new File(['dummy'], 'test.png', { type: 'image/png' });
-    const formData = new FormData();
-    formData.append('thumbnail', file);
-
-    // Mock validation success
-    vi.mocked(validation.validateImageUpload).mockResolvedValueOnce({
-      buffer: new ArrayBuffer(8),
-      mimeType: 'image/png',
-      size: 8,
-    });
+    const file = createTestImageFile('image/png', 'test.png');
 
     // Mock processing success
     vi.mocked(processor.processImageVariants).mockReturnValueOnce({
@@ -52,55 +77,43 @@ describe('ImageProcessingService', () => {
     });
 
     const result = await service.processContentThumbnail(
-      'user-1',
       'content-1',
-      formData
+      'user-1',
+      file
     );
 
-    expect(validation.validateImageUpload).toHaveBeenCalled();
     expect(processor.processImageVariants).toHaveBeenCalled();
 
-    expect(result.basePath).toBe('user-1/content-thumbnails/content-1');
-    expect(mockR2Bucket.put).toHaveBeenCalledTimes(3);
+    expect(result.url).toContain('user-1/content-thumbnails/content-1');
+    expect(result.url).toContain('.s3.amazonaws.com/');
+    expect(result.size).toBe(1); // lg variant is Uint8Array([3]), byteLength is 1
+    expect(result.mimeType).toBe('image/png');
+    expect(mockR2Service.put).toHaveBeenCalledTimes(3);
 
     // Verify one of the calls
-    expect(mockR2Bucket.put).toHaveBeenCalledWith(
+    expect(mockR2Service.put).toHaveBeenCalledWith(
       expect.stringContaining('/sm.webp'),
       expect.any(Uint8Array),
-      expect.objectContaining({
-        httpMetadata: expect.objectContaining({ contentType: 'image/webp' }),
-      })
+      undefined,
+      { contentType: 'image/webp' }
     );
   });
 
   it('should process org logo (SVG)', async () => {
-    const file = new File(['<svg></svg>'], 'logo.svg', {
-      type: 'image/svg+xml',
-    });
-    const formData = new FormData();
-    formData.append('logo', file);
+    const file = createTestImageFile('image/svg+xml', 'logo.svg');
 
-    // Mock validation success (returns SVG mime)
-    vi.mocked(validation.validateImageUpload).mockResolvedValueOnce({
-      buffer: new ArrayBuffer(8), // Content of SVG
-      mimeType: 'image/svg+xml',
-      size: 8,
-    });
-
-    const result = await service.processOrgLogo('org-1', formData);
-
-    expect(validation.validateImageUpload).toHaveBeenCalled();
+    const result = await service.processOrgLogo('org-1', 'user-1', file);
     // Should NOT call processor for SVG
     expect(processor.processImageVariants).not.toHaveBeenCalled();
 
-    expect(result.basePath).toContain('logo.svg');
-    expect(mockR2Bucket.put).toHaveBeenCalledTimes(1);
-    expect(mockR2Bucket.put).toHaveBeenCalledWith(
-      'org-1/branding/logo/logo.svg',
-      expect.any(ArrayBuffer),
-      expect.objectContaining({
-        httpMetadata: expect.objectContaining({ contentType: 'image/svg+xml' }),
-      })
+    expect(result.url).toContain('logo.svg');
+    expect(result.url).toContain('.s3.amazonaws.com/');
+    expect(result.mimeType).toBe('image/svg+xml');
+    expect(mockR2Service.put).toHaveBeenCalledTimes(1);
+    expect(mockR2Service.put).toHaveBeenCalledWith(
+      expect.stringContaining('logo.svg'),
+      expect.any(Uint8Array),
+      { contentType: 'image/svg+xml' }
     );
   });
 });

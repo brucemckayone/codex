@@ -274,15 +274,8 @@ export function createServiceRegistry(
     },
 
     get images() {
-      if (!_images) {
-        if (!env.MEDIA_BUCKET) {
-          throw new Error(
-            'MEDIA_BUCKET not configured. Required for image processing.'
-          );
-        }
-        _images = new ImageProcessingService({ r2: env.MEDIA_BUCKET });
-      }
-      return _images;
+      // Delegate to imageProcessing getter which has correct initialization
+      return this.imageProcessing;
     },
 
     // ========================================================================
@@ -369,9 +362,22 @@ export function createServiceRegistry(
 
     get identity() {
       if (!_identity) {
+        // Create R2Service for image processing (avatar uploads)
+        const r2Service = env.MEDIA_BUCKET
+          ? new R2Service(env.MEDIA_BUCKET)
+          : undefined;
+
+        if (!env.R2_BUCKET_MEDIA || !r2Service) {
+          throw new Error(
+            'MEDIA_BUCKET or R2_BUCKET_MEDIA not configured. Required for identity service (avatar uploads).'
+          );
+        }
+
         _identity = new IdentityService({
           db: getSharedDb(),
           environment: getEnvironment(),
+          r2Service,
+          mediaBucket: env.R2_BUCKET_MEDIA,
         });
       }
       return _identity;

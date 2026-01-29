@@ -392,6 +392,9 @@ importers:
 
   packages/content:
     dependencies:
+      '@codex/cloudflare-clients':
+        specifier: workspace:*
+        version: link:../cloudflare-clients
       '@codex/constants':
         specifier: workspace:*
         version: link:../constants
