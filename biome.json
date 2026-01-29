@@ -47,7 +47,7 @@
     "includes": [
       "**/packages/**/*.{ts,js,json}",
       "**/workers/**/*.{ts,js,json}",
-      "**/apps/**/*.{ts,js,svelte,json}",
+      "**/apps/**/*.{ts,js,json}",
       "**/config/**/*.{ts,js,json}",
       "**/*.{ts,js,json}",
       "!**/.obsidian",
@@ -67,13 +67,5 @@
       "!**/test-media",
       "!**/src/paraglide"
     ]
-  },
-  "overrides": [
-    {
-      "includes": ["**/*.svelte"],
-      "linter": {
-        "enabled": false
-      }
-    }
-  ]
+  }
 }
