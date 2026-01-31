@@ -42,7 +42,7 @@
     "DB_METHOD": "LOCAL_PROXY",
     "WEB_APP_URL": "http://localhost:3000",
     "API_URL": "http://localhost:8787",
-    "R2_PUBLIC_URL_BASE": "https://pub-codex-media-test.r2.dev"
+    "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio"
   },
 
   // Environment configurations
@@ -56,7 +56,7 @@
         "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
         "API_URL": "http://localhost:8787",
-        "R2_PUBLIC_URL_BASE": "https://pub-codex-media-test.r2.dev"
+        "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio"
       },
       "kv_namespaces": [
         {
@@ -90,7 +90,7 @@
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://codex.revelations.studio",
         "API_URL": "https://api.revelations.studio",
-        "R2_PUBLIC_URL_BASE": "https://pub-codex-media-production.r2.dev"
+        "R2_PUBLIC_URL_BASE": "https://cdn.revelations.studio"
       },
       "kv_namespaces": [
         {
@@ -128,7 +128,7 @@
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://codex-staging.revelations.studio",
         "API_URL": "https://api-staging.revelations.studio",
-        "R2_PUBLIC_URL_BASE": "https://pub-codex-media-staging.r2.dev"
+        "R2_PUBLIC_URL_BASE": "https://cdn-staging.revelations.studio"
       },
       "routes": [
         {
