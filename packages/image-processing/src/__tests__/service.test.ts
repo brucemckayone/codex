@@ -62,7 +62,7 @@ describe('ImageProcessingService', () => {
       db: mockDb,
       environment: 'test',
       r2Service: mockR2Service,
-      mediaBucket: 'test-media-bucket',
+      r2PublicUrlBase: 'https://test.r2.dev',
     });
   });
 

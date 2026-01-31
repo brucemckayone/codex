@@ -5,12 +5,13 @@
  * Handles static image assets: thumbnails, logos, avatars
  */
 
-export { ImageUploadError, InvalidImageError } from './errors';
-export { type ImageProcessingResult, ImageProcessingService } from './service';
+// Re-export from @codex/validation for convenience
 export {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
-  SUPPORTED_MIME_TYPES,
+  SUPPORTED_IMAGE_MIME_TYPES,
   validateImageSignature,
   validateImageUpload,
-} from './validation';
+} from '@codex/validation';
+export { ImageUploadError, InvalidImageError } from './errors';
+export { type ImageProcessingResult, ImageProcessingService } from './service';

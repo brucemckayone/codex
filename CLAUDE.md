@@ -386,6 +386,21 @@ import { setupTestDatabase, seedTestUsers } from '@codex/test-utils';
 
 ---
 
+## Coding Standards: Static Asserts & Safeguards (Required)
+
+Compile-time and runtime checks are **required** to improve debuggability and catch mistakes early. Follow these standards; they are not optional.
+
+- **Static type asserts** – **Must** use `satisfies` to narrow inferred types without widening (config objects, literal unions). **Required** over manual type annotations when you need both inference and a contract.
+- **Const assertions** – **Must** use `as const` for literal tuples and object literals that must stay narrow (allowed MIME lists, status enums). TypeScript **must** enforce exhaustiveness.
+- **Exhaustiveness checks** – **Required** in every `switch` on unions/enums: add a default that narrows to `never`, e.g. `default: ((x: never) => x)(value)`, so adding a new variant causes a compile error.
+- **Invariant / assertion helpers** – **Must** use an `assert(condition, message)` or `invariant(condition, message)` for runtime safeguards on impossible states; it **must** throw with a clear message so failures are debuggable.
+- **Schema ↔ type alignment** – Where Zod schemas back API or DB types, **must** add a static assertion (e.g. `z.infer<typeof schema> satisfies DbType` or equivalent compile-time check) so schema drift breaks the build.
+- **Constants and enums** – When validation enums align with DB CHECK constraints or external contracts, **must** use a single source of truth (e.g. constant array with `as const` and derived types); document the coupling.
+
+These safeguards are mandatory in addition to tests and validation.
+
+---
+
 ## Helpful Commands
 
 ```bash

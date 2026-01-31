@@ -10,7 +10,7 @@
 
 import {
   MAX_IMAGE_SIZE_BYTES,
-  SUPPORTED_MIME_TYPES,
+  SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { multipartProcedure } from '@codex/worker-utils';
@@ -34,7 +34,7 @@ app.post(
       avatar: {
         required: true,
         maxSize: MAX_IMAGE_SIZE_BYTES,
-        allowedMimeTypes: Array.from(SUPPORTED_MIME_TYPES),
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
     handler: async (ctx) => {
@@ -53,6 +53,26 @@ app.post(
           mimeType: result.mimeType,
         },
       };
+    },
+  })
+);
+
+/**
+ * DELETE /api/user/avatar
+ * Remove user avatar (revert to default)
+ *
+ * Security: Authenticated user (own avatar only)
+ */
+app.delete(
+  '/avatar',
+  procedure({
+    policy: { auth: 'required' },
+    successStatus: 204,
+    handler: async (ctx) => {
+      // Use service method for cleanup (deletes R2 files + clears DB field)
+      await ctx.services.imageProcessing.deleteUserAvatar(ctx.user.id);
+
+      return null;
     },
   })
 );

@@ -1,18 +1,33 @@
+import { MIME_TYPES } from '@codex/constants';
 import { z } from 'zod';
-import { MAX_IMAGE_SIZE_BYTES } from './limits';
 import { sanitizeSvgContent } from './primitives';
 
 /**
  * Magic numbers (file signatures) for supported image formats
  * Used to prevent MIME type spoofing attacks
  */
-export const MAGIC_NUMBERS = {
+const MAGIC_NUMBERS = {
   'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
   'image/jpeg': [0xff, 0xd8, 0xff],
   'image/webp': [0x52, 0x49, 0x46, 0x46], // RIFF
   'image/gif': [0x47, 0x49, 0x46, 0x38], // GIF8
   'image/svg+xml': [0x3c, 0x3f, 0x78, 0x6d, 0x6c], // <?xml
 } as const;
+
+/**
+ * Supported MIME types for image uploads across the platform
+ */
+export const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  MIME_TYPES.IMAGE.PNG,
+  MIME_TYPES.IMAGE.JPEG,
+  MIME_TYPES.IMAGE.WEBP,
+  MIME_TYPES.IMAGE.GIF,
+]) as Set<string>;
+
+/**
+ * Maximum image size: 5MB
+ */
+export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Alternate SVG magic number (files starting with <svg)

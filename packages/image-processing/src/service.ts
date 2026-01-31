@@ -13,9 +13,12 @@ import {
   getOrgLogoKey,
   getUserAvatarKey,
 } from '@codex/transcoding';
-import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
+import {
+  extractMimeType,
+  MAX_IMAGE_SIZE_BYTES,
+  sanitizeSvgContent,
+} from '@codex/validation';
 import { processImageVariants } from './processor';
-import { extractMimeType } from './validation'; // Falling back to local validation for now to match Main pattern if @codex/validation export is tricky
 
 export interface ImageProcessingResult {
   url: string;
@@ -29,14 +32,14 @@ export interface ImageProcessingResult {
  */
 export class ImageProcessingService extends BaseService {
   private r2Service: R2Service;
-  private mediaBucket: string;
+  private r2PublicUrlBase: string;
 
   constructor(
-    config: ServiceConfig & { r2Service: R2Service; mediaBucket: string }
+    config: ServiceConfig & { r2Service: R2Service; r2PublicUrlBase: string }
   ) {
     super(config);
     this.r2Service = config.r2Service;
-    this.mediaBucket = config.mediaBucket;
+    this.r2PublicUrlBase = config.r2PublicUrlBase;
   }
 
   /**
@@ -73,18 +76,21 @@ export class ImageProcessingService extends BaseService {
     await Promise.all([
       this.r2Service.put(keys.sm, variants.sm, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
       this.r2Service.put(keys.md, variants.md, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
       this.r2Service.put(keys.lg, variants.lg, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
     ]);
 
     // Use LG variant as determining URL for DB
     const r2Key = keys.lg;
-    const url = `https://${this.mediaBucket}.s3.amazonaws.com/${r2Key}`;
+    const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
     // Update content record
     await this.db
@@ -128,22 +134,25 @@ export class ImageProcessingService extends BaseService {
     await Promise.all([
       this.r2Service.put(keys.sm, variants.sm, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
       this.r2Service.put(keys.md, variants.md, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
       this.r2Service.put(keys.lg, variants.lg, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
     ]);
 
     const r2Key = keys.lg;
-    const url = `https://${this.mediaBucket}.s3.amazonaws.com/${r2Key}`;
+    const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
-    // Update user record
+    // Update user record (use avatarUrl for custom uploads, NOT image which is for OAuth)
     await this.db
       .update(schema.users)
-      .set({ image: url })
+      .set({ avatarUrl: url })
       .where(eq(schema.users.id, userId));
 
     return {
@@ -174,10 +183,17 @@ export class ImageProcessingService extends BaseService {
     // Special handling for SVG
     if (mimeType === 'image/svg+xml') {
       const key = `${creatorId}/branding/logo/logo.svg`;
-      await this.r2Service.put(key, new Uint8Array(buffer), {
+
+      // Sanitize SVG to remove XSS vectors (script tags, event handlers, etc.)
+      const svgText = new TextDecoder().decode(new Uint8Array(buffer));
+      const sanitized = await sanitizeSvgContent(svgText);
+      const sanitizedBuffer = new TextEncoder().encode(sanitized);
+
+      await this.r2Service.put(key, sanitizedBuffer, {
         contentType: 'image/svg+xml',
+        cacheControl: 'public, max-age=31536000, immutable',
       });
-      const url = `https://${this.mediaBucket}.s3.amazonaws.com/${key}`;
+      const url = `${this.r2PublicUrlBase}/${key}`;
 
       await this.db
         .update(schema.organizations)
@@ -186,7 +202,7 @@ export class ImageProcessingService extends BaseService {
 
       return {
         url,
-        size: buffer.byteLength,
+        size: sanitizedBuffer.byteLength,
         mimeType,
       };
     }
@@ -204,17 +220,20 @@ export class ImageProcessingService extends BaseService {
     await Promise.all([
       this.r2Service.put(keys.sm, variants.sm, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
       this.r2Service.put(keys.md, variants.md, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
       this.r2Service.put(keys.lg, variants.lg, undefined, {
         contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
       }),
     ]);
 
     const r2Key = keys.lg;
-    const url = `https://${this.mediaBucket}.s3.amazonaws.com/${r2Key}`;
+    const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
     // Update organization record
     await this.db
@@ -227,5 +246,99 @@ export class ImageProcessingService extends BaseService {
       size: variants.lg.byteLength,
       mimeType: 'image/webp',
     };
+  }
+
+  /**
+   * Delete all size variants for a content thumbnail
+   * Called by DELETE endpoint
+   */
+  async deleteContentThumbnail(
+    contentId: string,
+    creatorId: string
+  ): Promise<void> {
+    const keys = [
+      getContentThumbnailKey(creatorId, contentId, 'sm'),
+      getContentThumbnailKey(creatorId, contentId, 'md'),
+      getContentThumbnailKey(creatorId, contentId, 'lg'),
+    ];
+
+    await Promise.all(keys.map((key) => this.r2Service.delete(key)));
+
+    // Clear database field
+    await this.db
+      .update(schema.content)
+      .set({ thumbnailUrl: null })
+      .where(eq(schema.content.id, contentId));
+  }
+
+  /**
+   * Delete all size variants for a user avatar
+   * Called by DELETE endpoint
+   */
+  async deleteUserAvatar(userId: string): Promise<void> {
+    // Get current avatar URL
+    const user = await this.db.query.users.findFirst({
+      where: eq(schema.users.id, userId),
+      columns: { avatarUrl: true },
+    });
+
+    if (!user?.avatarUrl) {
+      return; // Nothing to delete
+    }
+
+    // Delete all size variants using key helpers
+    const keys = [
+      getUserAvatarKey(userId, 'sm'),
+      getUserAvatarKey(userId, 'md'),
+      getUserAvatarKey(userId, 'lg'),
+    ];
+    await Promise.all(keys.map((key) => this.r2Service.delete(key)));
+
+    // Clear database field
+    await this.db
+      .update(schema.users)
+      .set({ avatarUrl: null, updatedAt: new Date() })
+      .where(eq(schema.users.id, userId));
+  }
+
+  /**
+   * Delete all size variants for an organization logo
+   * Called by DELETE endpoint
+   */
+  async deleteOrgLogo(
+    organizationId: string,
+    creatorId: string
+  ): Promise<void> {
+    // Get current logo URL
+    const org = await this.db.query.organizations.findFirst({
+      where: eq(schema.organizations.id, organizationId),
+      columns: { logoUrl: true },
+    });
+
+    if (!org?.logoUrl) {
+      return; // Nothing to delete
+    }
+
+    // Determine if SVG or WebP
+    const isSvg = org.logoUrl.includes('.svg');
+
+    if (isSvg) {
+      // Delete single SVG file
+      await this.r2Service.delete(`${creatorId}/branding/logo/logo.svg`);
+    } else {
+      // Delete WebP variants using key helpers
+      const keys = [
+        getOrgLogoKey(creatorId, 'sm'),
+        getOrgLogoKey(creatorId, 'md'),
+        getOrgLogoKey(creatorId, 'lg'),
+      ];
+      await Promise.all(keys.map((key) => this.r2Service.delete(key)));
+    }
+
+    // Clear database field
+    await this.db
+      .update(schema.organizations)
+      .set({ logoUrl: null })
+      .where(eq(schema.organizations.id, organizationId));
   }
 }

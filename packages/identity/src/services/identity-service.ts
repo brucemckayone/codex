@@ -10,17 +10,17 @@ import { UserNotFoundError } from '../errors';
 
 export interface IdentityServiceConfig extends ServiceConfig {
   r2Service: R2Service;
-  mediaBucket: string;
+  r2PublicUrlBase: string;
 }
 
 export class IdentityService extends BaseService {
   private r2Service: R2Service;
-  private mediaBucket: string;
+  private r2PublicUrlBase: string;
 
   constructor(config: IdentityServiceConfig) {
     super(config);
     this.r2Service = config.r2Service;
-    this.mediaBucket = config.mediaBucket;
+    this.r2PublicUrlBase = config.r2PublicUrlBase;
   }
 
   /**
@@ -47,7 +47,7 @@ export class IdentityService extends BaseService {
       db: this.db,
       environment: this.environment,
       r2Service: this.r2Service,
-      mediaBucket: this.mediaBucket,
+      r2PublicUrlBase: this.r2PublicUrlBase,
     });
 
     // Process and upload avatar
