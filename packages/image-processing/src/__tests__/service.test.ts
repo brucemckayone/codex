@@ -52,6 +52,18 @@ vi.mock('../processor', () => ({
   processImageVariants: vi.fn(),
 }));
 
+// Mock SVG sanitization from @codex/validation
+vi.mock('@codex/validation', async () => {
+  const actual = await vi.importActual('@codex/validation');
+  return {
+    ...actual,
+    sanitizeSvgContent: vi.fn().mockImplementation(async (svgText: string) => {
+      // Mock implementation that preserves the SVG but would sanitize in real code
+      return svgText;
+    }),
+  };
+});
+
 describe('ImageProcessingService', () => {
   let service: ImageProcessingService;
 
@@ -85,17 +97,21 @@ describe('ImageProcessingService', () => {
     expect(processor.processImageVariants).toHaveBeenCalled();
 
     expect(result.url).toContain('user-1/content-thumbnails/content-1');
-    expect(result.url).toContain('.s3.amazonaws.com/');
+    expect(result.url).toContain('test.r2.dev'); // R2 public URL base
     expect(result.size).toBe(1); // lg variant is Uint8Array([3]), byteLength is 1
-    expect(result.mimeType).toBe('image/png');
+    expect(result.mimeType).toBe('image/png'); // Returns original MIME type
     expect(mockR2Service.put).toHaveBeenCalledTimes(3);
 
-    // Verify one of the calls
+    // Verify one of the calls includes cache headers
+    // R2Service.put signature: (key, body, metadata, httpMetadata)
     expect(mockR2Service.put).toHaveBeenCalledWith(
       expect.stringContaining('/sm.webp'),
       expect.any(Uint8Array),
-      undefined,
-      { contentType: 'image/webp' }
+      undefined, // No custom metadata
+      {
+        contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
+      }
     );
   });
 
@@ -107,13 +123,17 @@ describe('ImageProcessingService', () => {
     expect(processor.processImageVariants).not.toHaveBeenCalled();
 
     expect(result.url).toContain('logo.svg');
-    expect(result.url).toContain('.s3.amazonaws.com/');
+    expect(result.url).toContain('test.r2.dev'); // R2 public URL base
     expect(result.mimeType).toBe('image/svg+xml');
     expect(mockR2Service.put).toHaveBeenCalledTimes(1);
+    // SVG upload uses 3-param signature (key, body, httpMetadata) - skips optional metadata
     expect(mockR2Service.put).toHaveBeenCalledWith(
       expect.stringContaining('logo.svg'),
       expect.any(Uint8Array),
-      { contentType: 'image/svg+xml' }
+      {
+        contentType: 'image/svg+xml',
+        cacheControl: 'public, max-age=31536000, immutable',
+      }
     );
   });
 });
