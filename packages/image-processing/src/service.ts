@@ -7,7 +7,11 @@
 
 import type { R2Service } from '@codex/cloudflare-clients';
 import { eq, schema } from '@codex/database';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  type ServiceConfig,
+  ValidationError,
+} from '@codex/service-errors';
 import {
   getContentThumbnailKey,
   getOrgLogoKey,
@@ -16,6 +20,7 @@ import {
 import {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
+  SUPPORTED_IMAGE_MIME_TYPES,
   sanitizeSvgContent,
   validateImageSignature,
 } from '@codex/validation';
@@ -25,6 +30,62 @@ export interface ImageProcessingResult {
   url: string;
   size: number;
   mimeType: string;
+}
+
+/**
+ * Validates image file before processing
+ * @throws ValidationError if file is invalid
+ */
+async function validateImageFile(
+  file: File,
+  allowSvg: boolean = false
+): Promise<{ buffer: ArrayBuffer; mimeType: string }> {
+  // 1. Check file is not empty
+  if (file.size === 0) {
+    throw new ValidationError('File cannot be empty');
+  }
+
+  // 2. Validate file size (5MB limit)
+  if (file.size > MAX_IMAGE_SIZE_BYTES) {
+    const maxMB = MAX_IMAGE_SIZE_BYTES / 1024 / 1024;
+    throw new ValidationError(
+      `File size exceeds maximum allowed size of ${maxMB}MB`
+    );
+  }
+
+  // 3. Extract and validate MIME type
+  const mimeType = extractMimeType(file.type || 'image/jpeg');
+
+  // Check if MIME type is supported
+  const isSupportedRaster = SUPPORTED_IMAGE_MIME_TYPES.has(mimeType);
+  const isSvg = mimeType === 'image/svg+xml';
+
+  if (!isSupportedRaster && !(isSvg && allowSvg)) {
+    const allowed = Array.from(SUPPORTED_IMAGE_MIME_TYPES);
+    if (allowSvg) allowed.push('image/svg+xml');
+    throw new ValidationError(
+      `Unsupported MIME type: ${mimeType}. Allowed: ${allowed.join(', ')}`
+    );
+  }
+
+  // 4. Read file and validate magic bytes (signature)
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  // Ensure file has enough bytes to check signature
+  if (bytes.length < 4) {
+    throw new ValidationError(
+      'File is too small to validate (minimum 4 bytes required)'
+    );
+  }
+
+  if (!validateImageSignature(bytes, mimeType)) {
+    throw new ValidationError(
+      `File content does not match claimed MIME type (${mimeType}). Invalid file signature.`
+    );
+  }
+
+  return { buffer, mimeType };
 }
 
 /**
@@ -52,16 +113,8 @@ export class ImageProcessingService extends BaseService {
     creatorId: string,
     file: File
   ): Promise<ImageProcessingResult> {
-    // Validate image
-    const buffer = await file.arrayBuffer();
-    const mimeType = extractMimeType(file.type || 'image/jpeg');
-
-    // Check size limit (using imported constant) or validate
-    if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
-      throw new Error(
-        `File size exceeds limit of ${MAX_IMAGE_SIZE_BYTES} bytes`
-      );
-    }
+    // Validate image (MIME type, size, magic bytes)
+    const { buffer, mimeType } = await validateImageFile(file, false);
 
     // Process variants (HEAD logic)
     const inputBuffer = new Uint8Array(buffer);
@@ -129,14 +182,8 @@ export class ImageProcessingService extends BaseService {
     userId: string,
     file: File
   ): Promise<ImageProcessingResult> {
-    const buffer = await file.arrayBuffer();
-    const mimeType = extractMimeType(file.type || 'image/jpeg');
-
-    if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
-      throw new Error(
-        `File size exceeds limit of ${MAX_IMAGE_SIZE_BYTES} bytes`
-      );
-    }
+    // Validate image (MIME type, size, magic bytes)
+    const { buffer, mimeType } = await validateImageFile(file, false);
 
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
@@ -202,22 +249,11 @@ export class ImageProcessingService extends BaseService {
     creatorId: string,
     file: File
   ): Promise<ImageProcessingResult> {
-    const buffer = await file.arrayBuffer();
-    const mimeType = extractMimeType(file.type || 'image/jpeg');
-
-    if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
-      throw new Error(
-        `File size exceeds limit of ${MAX_IMAGE_SIZE_BYTES} bytes`
-      );
-    }
+    // Validate image (MIME type, size, magic bytes) - allow SVG for logos
+    const { buffer, mimeType } = await validateImageFile(file, true);
 
     // Special handling for SVG
     if (mimeType === 'image/svg+xml') {
-      // Validate SVG signature before processing
-      if (!validateImageSignature(new Uint8Array(buffer), mimeType)) {
-        throw new ValidationError('Invalid SVG file signature');
-      }
-
       const key = `${creatorId}/branding/logo/logo.svg`;
 
       // Sanitize SVG to remove XSS vectors (script tags, event handlers, etc.)
