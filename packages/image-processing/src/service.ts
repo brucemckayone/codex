@@ -17,6 +17,7 @@ import {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
   sanitizeSvgContent,
+  validateImageSignature,
 } from '@codex/validation';
 import { processImageVariants } from './processor';
 
@@ -74,18 +75,33 @@ export class ImageProcessingService extends BaseService {
 
     // Upload in parallel
     await Promise.all([
-      this.r2Service.put(keys.sm, variants.sm, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
-      this.r2Service.put(keys.md, variants.md, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
-      this.r2Service.put(keys.lg, variants.lg, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
+      this.r2Service.put(
+        keys.sm,
+        variants.sm,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
+      this.r2Service.put(
+        keys.md,
+        variants.md,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
+      this.r2Service.put(
+        keys.lg,
+        variants.lg,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
     ]);
 
     // Use LG variant as determining URL for DB
@@ -132,18 +148,33 @@ export class ImageProcessingService extends BaseService {
     };
 
     await Promise.all([
-      this.r2Service.put(keys.sm, variants.sm, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
-      this.r2Service.put(keys.md, variants.md, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
-      this.r2Service.put(keys.lg, variants.lg, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
+      this.r2Service.put(
+        keys.sm,
+        variants.sm,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
+      this.r2Service.put(
+        keys.md,
+        variants.md,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
+      this.r2Service.put(
+        keys.lg,
+        variants.lg,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
     ]);
 
     const r2Key = keys.lg;
@@ -182,6 +213,11 @@ export class ImageProcessingService extends BaseService {
 
     // Special handling for SVG
     if (mimeType === 'image/svg+xml') {
+      // Validate SVG signature before processing
+      if (!validateImageSignature(new Uint8Array(buffer), mimeType)) {
+        throw new ValidationError('Invalid SVG file signature');
+      }
+
       const key = `${creatorId}/branding/logo/logo.svg`;
 
       // Sanitize SVG to remove XSS vectors (script tags, event handlers, etc.)
@@ -218,18 +254,33 @@ export class ImageProcessingService extends BaseService {
     };
 
     await Promise.all([
-      this.r2Service.put(keys.sm, variants.sm, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
-      this.r2Service.put(keys.md, variants.md, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
-      this.r2Service.put(keys.lg, variants.lg, undefined, {
-        contentType: 'image/webp',
-        cacheControl: 'public, max-age=31536000, immutable',
-      }),
+      this.r2Service.put(
+        keys.sm,
+        variants.sm,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
+      this.r2Service.put(
+        keys.md,
+        variants.md,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
+      this.r2Service.put(
+        keys.lg,
+        variants.lg,
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      ),
     ]);
 
     const r2Key = keys.lg;

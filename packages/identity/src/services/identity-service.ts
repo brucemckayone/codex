@@ -54,11 +54,11 @@ export class IdentityService extends BaseService {
     const result = await imageService.processUserAvatar(userId, file);
 
     try {
-      // Update database
+      // Update database - use avatarUrl for custom uploads (image is for OAuth avatars)
       await this.db
         .update(users)
         .set({
-          image: result.url,
+          avatarUrl: result.url,
           updatedAt: new Date(),
         })
         .where(eq(users.id, userId));

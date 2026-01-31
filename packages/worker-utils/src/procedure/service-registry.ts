@@ -377,7 +377,7 @@ export function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           r2Service,
-          mediaBucket: env.R2_BUCKET_MEDIA,
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _identity;

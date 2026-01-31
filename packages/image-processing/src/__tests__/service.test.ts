@@ -107,7 +107,7 @@ describe('ImageProcessingService', () => {
     expect(mockR2Service.put).toHaveBeenCalledWith(
       expect.stringContaining('/sm.webp'),
       expect.any(Uint8Array),
-      undefined, // No custom metadata
+      {}, // Empty metadata object (not undefined)
       {
         contentType: 'image/webp',
         cacheControl: 'public, max-age=31536000, immutable',
