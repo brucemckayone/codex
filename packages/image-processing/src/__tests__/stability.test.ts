@@ -12,89 +12,9 @@
  * behavior that contribute to production stability.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SafePhotonImage } from '../photon-wrapper';
-import { processImageVariants, VARIANT_WIDTHS } from '../processor';
-
-/**
- * Create a minimal valid PNG buffer (1x1 transparent pixel)
- * This is the smallest valid PNG that can be processed
- */
-function createMinimalPng(): Uint8Array {
-  // PNG header + 1x1 transparent IDAT + IEND
-  return new Uint8Array([
-    // PNG signature
-    0x89,
-    0x50,
-    0x4e,
-    0x47,
-    0x0d,
-    0x0a,
-    0x1a,
-    0x0a,
-    // IHDR chunk (13 bytes of data)
-    0x00,
-    0x00,
-    0x00,
-    0x0d, // length
-    0x49,
-    0x48,
-    0x44,
-    0x52, // IHDR
-    0x00,
-    0x00,
-    0x00,
-    0x01, // width = 1
-    0x00,
-    0x00,
-    0x00,
-    0x01, // height = 1
-    0x08, // bit depth = 8
-    0x06, // color type = RGBA
-    0x00, // compression method
-    0x00, // filter method
-    0x00, // interlace method
-    0x1f,
-    0x15,
-    0xc4,
-    0x89, // CRC
-    // IDAT chunk (minimal zlib compressed data for 1x1 RGBA)
-    0x00,
-    0x00,
-    0x00,
-    0x0a, // length
-    0x49,
-    0x44,
-    0x41,
-    0x54, // IDAT
-    0x78,
-    0x9c,
-    0x62,
-    0x00,
-    0x00,
-    0x00,
-    0x01,
-    0x00,
-    0x01, // compressed data
-    0x00,
-    0x05,
-    0xfe,
-    0x02, // CRC (placeholder)
-    // IEND chunk
-    0x00,
-    0x00,
-    0x00,
-    0x00, // length
-    0x49,
-    0x45,
-    0x4e,
-    0x44, // IEND
-    0xae,
-    0x42,
-    0x60,
-    0x82, // CRC
-  ]);
-}
+import { VARIANT_WIDTHS } from '../processor';
 
 /**
  * Create an invalid/corrupt image buffer

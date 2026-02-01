@@ -1,9 +1,19 @@
 import type { R2Service } from '@codex/cloudflare-clients';
-import type { DB } from '@codex/database';
+import type { Database } from '@codex/database';
+import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as processor from '../processor';
 import { ImageProcessingService } from '../service';
 
+/** Lightweight mock shape for db.query table objects used in tests */
+interface MockQueryTable {
+  findFirst: Mock;
+}
+interface MockDbQuery {
+  users: MockQueryTable;
+  content: MockQueryTable;
+  organizations: MockQueryTable;
+}
 /**
  * Creates a File object with proper ArrayBuffer content for testing
  */
@@ -80,7 +90,7 @@ const createMockDb = () =>
         where: vi.fn().mockResolvedValue([{ id: 'content-1' }]),
       }),
     }),
-  }) as unknown as DB;
+  }) as unknown as Database;
 
 // Mock processor
 vi.mock('../processor', () => ({
@@ -101,9 +111,9 @@ vi.mock('@codex/validation', async () => {
 
 describe('ImageProcessingService', () => {
   let service: ImageProcessingService;
-  let mockDbQuery: any;
+  let mockDbQuery: MockDbQuery;
   let testMockR2Service: R2Service;
-  let testMockDb: DB;
+  let testMockDb: Database;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -138,7 +148,7 @@ describe('ImageProcessingService', () => {
     };
 
     service = new ImageProcessingService({
-      db: { ...testMockDb, query: mockDbQuery } as unknown as DB,
+      db: { ...testMockDb, query: mockDbQuery } as unknown as Database,
       environment: 'test',
       r2Service: testMockR2Service,
       r2PublicUrlBase: 'https://test.r2.dev',
@@ -167,7 +177,7 @@ describe('ImageProcessingService', () => {
       expect(result.url).toContain('user-1/content-thumbnails/content-1');
       expect(result.url).toContain('test.r2.dev'); // R2 public URL base
       expect(result.size).toBe(1); // lg variant is Uint8Array([3]), byteLength is 1
-      expect(result.mimeType).toBe('image/png'); // Returns original MIME type
+      expect(result.mimeType).toBe('image/webp'); // Stored as WebP after processing
       expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
 
       // Verify one of the calls includes cache headers
@@ -213,7 +223,7 @@ describe('ImageProcessingService', () => {
       expect(processor.processImageVariants).toHaveBeenCalled();
       expect(result.url).toContain('avatars/user-1');
       expect(result.url).toContain('lg.webp'); // Large variant used as primary
-      expect(result.mimeType).toBe('image/jpeg'); // Returns original MIME type
+      expect(result.mimeType).toBe('image/webp'); // Stored as WebP after processing
       expect(testMockR2Service.put).toHaveBeenCalledTimes(3); // sm, md, lg
     });
 
@@ -246,11 +256,12 @@ describe('ImageProcessingService', () => {
       expect(result.mimeType).toBe('image/svg+xml');
       expect(testMockR2Service.put).toHaveBeenCalledTimes(1);
 
-      // SVG upload uses 3-param signature (key, body, httpMetadata) - skips optional metadata
+      // SVG upload uses 4-param signature (key, body, metadata, httpMetadata)
       // SVG uses shorter cache (1 hour) because filename is fixed, allowing logo updates to propagate
       expect(testMockR2Service.put).toHaveBeenCalledWith(
         expect.stringContaining('logo.svg'),
         expect.any(Uint8Array),
+        {},
         {
           contentType: 'image/svg+xml',
           cacheControl: 'public, max-age=3600',
@@ -336,7 +347,7 @@ describe('ImageProcessingService', () => {
         logoUrl: 'https://test.r2.dev/organizations/org-1/logo/lg.webp',
       });
 
-      await service.deleteOrgLogo('org-1');
+      await service.deleteOrgLogo('org-1', 'user-1');
 
       expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
     });
@@ -346,7 +357,7 @@ describe('ImageProcessingService', () => {
         logoUrl: 'https://test.r2.dev/organizations/org-1/logo.svg',
       });
 
-      await service.deleteOrgLogo('org-1');
+      await service.deleteOrgLogo('org-1', 'user-1');
 
       expect(testMockR2Service.delete).toHaveBeenCalledTimes(1);
       expect(testMockR2Service.delete).toHaveBeenCalledWith(
@@ -359,7 +370,7 @@ describe('ImageProcessingService', () => {
         logoUrl: null,
       });
 
-      await service.deleteOrgLogo('org-1');
+      await service.deleteOrgLogo('org-1', 'user-1');
 
       expect(testMockR2Service.delete).not.toHaveBeenCalled();
     });
@@ -530,7 +541,7 @@ describe('ImageProcessingService', () => {
 
         // Create a new service instance with the error mock
         const errorService = new ImageProcessingService({
-          db: { ...errorMockDb, query: mockDbQuery } as unknown as DB,
+          db: { ...errorMockDb, query: mockDbQuery } as unknown as Database,
           environment: 'test',
           r2Service: testMockR2Service,
           r2PublicUrlBase: 'https://test.r2.dev',
@@ -603,6 +614,37 @@ describe('ImageProcessingService', () => {
         expect(testMockR2Service.put).toHaveBeenCalledTimes(1);
       });
 
+      it('should sanitize SVG by removing script tags', async () => {
+        // Mock sanitizeSvgContent to simulate real sanitization (strips <script>)
+        const { sanitizeSvgContent: mockedSanitize } = await import(
+          '@codex/validation'
+        );
+        vi.mocked(mockedSanitize).mockImplementationOnce(
+          async (svgText: string) => {
+            // Simulate DOMPurify stripping <script> tags
+            return svgText.replace(/<script[^>]*>.*?<\/script>/gi, '');
+          }
+        );
+
+        const maliciousSvg =
+          '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect width="10" height="10"/></svg>';
+        const encoder = new TextEncoder();
+        const file = new File([encoder.encode(maliciousSvg)], 'evil.svg', {
+          type: 'image/svg+xml',
+        });
+
+        const result = await service.processOrgLogo('org-1', 'user-1', file);
+
+        expect(result.mimeType).toBe('image/svg+xml');
+
+        // Verify the uploaded content was sanitized (no script tag)
+        const putCall = vi.mocked(testMockR2Service.put).mock.calls[0];
+        const uploadedBytes = putCall[1] as Uint8Array;
+        const uploadedSvg = new TextDecoder().decode(uploadedBytes);
+        expect(uploadedSvg).not.toContain('<script');
+        expect(uploadedSvg).toContain('rect');
+      });
+
       it('should handle SVG with complex content', async () => {
         const complexSvg =
           '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/><path d="M10,10 L90,90"/></svg>';
@@ -669,7 +711,7 @@ describe('ImageProcessingService', () => {
           file
         );
 
-        expect(result.mimeType).toBe('image/gif');
+        expect(result.mimeType).toBe('image/webp');
         expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
       });
 

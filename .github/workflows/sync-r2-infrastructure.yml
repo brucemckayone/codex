@@ -1,0 +1,112 @@
+name: Sync R2 Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/config/r2-infrastructure.json'
+      - '.github/scripts/manage-r2-infrastructure.sh'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - verify
+          - apply
+        default: 'verify'
+
+permissions:
+  contents: read
+
+jobs:
+  sync-r2:
+    name: Sync R2 Infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Setup wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify R2 infrastructure configuration
+        id: verify
+        run: |
+          echo "🔍 Verifying R2 infrastructure against config..."
+          chmod +x .github/scripts/manage-r2-infrastructure.sh
+
+          if .github/scripts/manage-r2-infrastructure.sh verify \
+            ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} \
+            ${{ secrets.CLOUDFLARE_ZONE_ID }} \
+            ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}; then
+            echo "verify_passed=true" >> $GITHUB_OUTPUT
+            echo "✅ R2 infrastructure is already configured correctly"
+          else
+            echo "verify_passed=false" >> $GITHUB_OUTPUT
+            echo "⚠️  R2 infrastructure needs updates"
+          fi
+
+      - name: Apply R2 infrastructure changes
+        if: |
+          (github.event_name == 'push' && steps.verify.outputs.verify_passed == 'false') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+        run: |
+          echo "📝 Applying R2 infrastructure changes..."
+          .github/scripts/manage-r2-infrastructure.sh apply \
+            ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} \
+            ${{ secrets.CLOUDFLARE_ZONE_ID }} \
+            ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+          echo "✅ R2 infrastructure synchronized successfully"
+
+      - name: Verify after apply
+        if: |
+          (github.event_name == 'push' && steps.verify.outputs.verify_passed == 'false') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+        run: |
+          echo "🔍 Re-verifying R2 infrastructure..."
+          if .github/scripts/manage-r2-infrastructure.sh verify \
+            ${{ secrets.CLOUDFLARE_DNS_API_TOKEN }} \
+            ${{ secrets.CLOUDFLARE_ZONE_ID }} \
+            ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}; then
+            echo "✅ Verification passed after apply"
+          else
+            echo "❌ Verification failed after apply - manual intervention required"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📦 R2 Infrastructure Sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.verify.outputs.verify_passed }}" = "true" ]; then
+            echo "✅ **Infrastructure already configured correctly**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "📝 **Infrastructure changes applied**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configured Resources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Bucket | Custom Domain | Public Access |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------------|---------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-media-production | cdn.revelations.studio | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-media-preview | cdn-staging.revelations.studio | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-media-dev | cdn-dev.revelations.studio | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Ensure wrangler.jsonc files use the correct R2_PUBLIC_URL_BASE values" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy workers to start using the new CDN URLs" >> $GITHUB_STEP_SUMMARY

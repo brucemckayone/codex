@@ -22,6 +22,15 @@
     }
   ],
 
+  // R2 Buckets (required for avatar uploads via identity/image-processing services)
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "codex-media-production",
+      "preview_bucket_name": "codex-media-test"
+    }
+  ],
+
   // Default environment variables (local development)
   "vars": {
     "ENVIRONMENT": "development",
@@ -53,6 +62,12 @@
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
         }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-test"
+        }
       ]
     },
 
@@ -76,6 +91,12 @@
           "id": "82d04a4236df4aac8e9d87793344f0ed"
         }
       ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production"
+        }
+      ],
       "routes": [
         {
           "pattern": "identity-api.revelations.studio/*",
@@ -94,6 +115,12 @@
         "API_URL": "https://api-staging.revelations.studio",
         "R2_PUBLIC_URL_BASE": "https://cdn-staging.revelations.studio"
       },
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-staging"
+        }
+      ],
       "routes": [
         {
           "pattern": "identity-api-staging.revelations.studio/*",

@@ -325,6 +325,25 @@ export type UserData = {
 };
 
 /**
+ * Playback progress data for video/audio content
+ * Used for tracking user position in media content
+ */
+export type ProgressData = {
+  positionSeconds: number;
+  durationSeconds: number;
+  completed: boolean;
+};
+
+/**
+ * Stripe checkout session response
+ * Returned from ecom-api checkout creation endpoint
+ */
+export type CheckoutResponse = {
+  sessionId: string;
+  url: string;
+};
+
+/**
  * Standard API Error Response
  */
 export type ErrorResponse = {

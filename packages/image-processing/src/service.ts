@@ -114,7 +114,7 @@ export class ImageProcessingService extends BaseService {
     file: File
   ): Promise<ImageProcessingResult> {
     // Validate image (MIME type, size, magic bytes)
-    const { buffer, mimeType } = await validateImageFile(file, false);
+    const { buffer } = await validateImageFile(file, false);
 
     // Process variants (HEAD logic)
     const inputBuffer = new Uint8Array(buffer);
@@ -183,7 +183,7 @@ export class ImageProcessingService extends BaseService {
     return {
       url,
       size: variants.lg.byteLength,
-      mimeType,
+      mimeType: 'image/webp',
     };
   }
 
@@ -196,7 +196,7 @@ export class ImageProcessingService extends BaseService {
     file: File
   ): Promise<ImageProcessingResult> {
     // Validate image (MIME type, size, magic bytes)
-    const { buffer, mimeType } = await validateImageFile(file, false);
+    const { buffer } = await validateImageFile(file, false);
 
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
@@ -262,7 +262,7 @@ export class ImageProcessingService extends BaseService {
     return {
       url,
       size: variants.lg.byteLength,
-      mimeType,
+      mimeType: 'image/webp',
     };
   }
 
@@ -290,10 +290,15 @@ export class ImageProcessingService extends BaseService {
       // SVG uses shorter cache (1 hour) because filename is fixed.
       // This allows logo updates to propagate within reasonable time.
       // Raster images use immutable cache since they have unique filenames per upload.
-      await this.r2Service.put(key, sanitizedBuffer, {
-        contentType: 'image/svg+xml',
-        cacheControl: 'public, max-age=3600',
-      });
+      await this.r2Service.put(
+        key,
+        sanitizedBuffer,
+        {},
+        {
+          contentType: 'image/svg+xml',
+          cacheControl: 'public, max-age=3600',
+        }
+      );
       const url = `${this.r2PublicUrlBase}/${key}`;
 
       try {

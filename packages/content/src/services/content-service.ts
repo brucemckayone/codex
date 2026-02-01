@@ -263,7 +263,7 @@ export class ContentService extends BaseService {
    * @param creatorId - Creator ID (for authorization)
    * @param file - Image file to upload
    * @param r2 - R2 Bucket instance
-   * @param mediaBucket - R2 bucket name for URL construction
+   * @param r2PublicUrlBase - Public CDN base URL (e.g., https://cdn.revelations.studio)
    * @returns Result containing upload URL and metadata
    * @throws {ContentNotFoundError} If content doesn't exist
    */
@@ -272,7 +272,7 @@ export class ContentService extends BaseService {
     creatorId: string,
     file: File,
     r2: R2Bucket,
-    mediaBucket: string
+    r2PublicUrlBase: string
   ): Promise<ImageProcessingResult> {
     const existing = await this.db.query.content.findFirst({
       where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
@@ -290,7 +290,7 @@ export class ContentService extends BaseService {
       db: this.db,
       environment: this.environment,
       r2Service,
-      mediaBucket,
+      r2PublicUrlBase,
     });
 
     // Process the thumbnail (service handles validation, upload, and DB update)

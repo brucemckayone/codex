@@ -13,7 +13,7 @@ import {
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
-import { multipartProcedure } from '@codex/worker-utils';
+import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { validateImageSignature, validateImageUpload } from '../image';
-import { MAX_IMAGE_SIZE_BYTES } from '../limits';
 
 describe('Image Validation', () => {
   describe('validateImageSignature', () => {

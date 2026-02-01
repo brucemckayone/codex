@@ -1,5 +1,5 @@
 import type { ImageProcessingResult } from '@codex/image-processing';
-import { SUPPORTED_MIME_TYPES } from '@codex/image-processing';
+import { SUPPORTED_IMAGE_MIME_TYPES } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { multipartProcedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -20,7 +20,7 @@ app.post(
       avatar: {
         required: true,
         maxSizeBytes: 5 * 1024 * 1024, // 5MB
-        allowedMimeTypes: Array.from(SUPPORTED_MIME_TYPES),
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
     handler: async (ctx): Promise<ImageProcessingResult> => {

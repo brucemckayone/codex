@@ -26,9 +26,11 @@ export type {
 export type {
   AuthenticatedContext,
   Bindings,
+  CheckoutResponse,
   EnrichedAuthContext,
   ErrorResponse,
   HonoEnv,
+  ProgressData,
   SessionData,
   SuccessResponse,
   UserData,

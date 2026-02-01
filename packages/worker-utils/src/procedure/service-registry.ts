@@ -160,11 +160,17 @@ export function createServiceRegistry(
           );
         }
 
+        if (!env.R2_PUBLIC_URL_BASE) {
+          throw new Error(
+            'R2_PUBLIC_URL_BASE not configured. Required for image processing (public image URLs).'
+          );
+        }
+
         _imageProcessing = new ImageProcessingService({
           db: getSharedDb(),
           environment: getEnvironment(),
           r2Service,
-          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE ?? '',
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _imageProcessing;
@@ -203,8 +209,8 @@ export function createServiceRegistry(
           environment: getEnvironment(),
           organizationId,
           r2,
-          // R2 public URL base is configured server-side
-          r2PublicUrlBase: undefined,
+          // Pass R2 public URL base from env (BrandingSettingsService handles undefined gracefully)
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _settings;
@@ -370,6 +376,12 @@ export function createServiceRegistry(
         if (!env.R2_BUCKET_MEDIA || !r2Service) {
           throw new Error(
             'MEDIA_BUCKET or R2_BUCKET_MEDIA not configured. Required for identity service (avatar uploads).'
+          );
+        }
+
+        if (!env.R2_PUBLIC_URL_BASE) {
+          throw new Error(
+            'R2_PUBLIC_URL_BASE not configured. Required for identity service (public image URLs).'
           );
         }
 

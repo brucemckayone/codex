@@ -108,7 +108,7 @@ describe('ContentService.uploadThumbnail', () => {
       creatorId,
       file,
       mockR2,
-      'test-media-bucket'
+      'https://cdn-test.revelations.studio'
     );
 
     // Assert Result

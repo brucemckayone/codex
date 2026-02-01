@@ -1,8 +1,6 @@
 import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
-import { users } from '@codex/database/schema';
 import type { ImageProcessingResult } from '@codex/image-processing';
-import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UserNotFoundError } from '../errors';
 import { IdentityService } from '../services/identity-service';
@@ -75,7 +73,7 @@ describe('IdentityService', () => {
       db: mockDb,
       environment: 'test',
       r2Service: mockR2Service,
-      mediaBucket: 'test-media-bucket',
+      r2PublicUrlBase: 'https://cdn-test.revelations.studio',
     });
   });
 
@@ -83,7 +81,7 @@ describe('IdentityService', () => {
     const userId = 'user-123';
     const file = createTestImageFile('image/jpeg', 'avatar.jpg');
     const mockUploadResult: ImageProcessingResult = {
-      url: `https://test-media-bucket.s3.amazonaws.com/avatars/${userId}/lg.webp`,
+      url: `https://cdn-test.revelations.studio/avatars/${userId}/lg.webp`,
       size: 1024,
       mimeType: 'image/webp',
     };
