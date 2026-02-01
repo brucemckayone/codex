@@ -104,16 +104,11 @@ describe('IdentityService', () => {
         where: expect.anything(), // Complex eq argument matcher
       });
 
-      // Verify image processing
+      // Verify image processing delegated to ImageProcessingService
       expect(mockProcessUserAvatar).toHaveBeenCalledWith(userId, file);
 
-      // Verify DB update
-      expect(mockDb.update).toHaveBeenCalledWith(users);
-      expect(mockUpdateSet).toHaveBeenCalledWith({
-        image: mockUploadResult.url,
-        updatedAt: expect.any(Date),
-      });
-      expect(mockUpdateWhere).toHaveBeenCalledWith(eq(users.id, userId));
+      // DB update now handled inside ImageProcessingService, not here
+      expect(mockDb.update).not.toHaveBeenCalled();
 
       expect(result).toEqual(mockUploadResult);
     });

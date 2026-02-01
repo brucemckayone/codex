@@ -6,6 +6,7 @@ import {
 } from '@codex/image-processing';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import { eq } from 'drizzle-orm';
+
 import { UserNotFoundError } from '../errors';
 
 export interface IdentityServiceConfig extends ServiceConfig {
@@ -50,32 +51,7 @@ export class IdentityService extends BaseService {
       r2PublicUrlBase: this.r2PublicUrlBase,
     });
 
-    // Process and upload avatar
-    const result = await imageService.processUserAvatar(userId, file);
-
-    try {
-      // Update database - use avatarUrl for custom uploads (image is for OAuth avatars)
-      await this.db
-        .update(users)
-        .set({
-          avatarUrl: result.url,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId));
-
-      return result;
-    } catch (error) {
-      // Best-effort cleanup of uploaded image if DB update fails
-      try {
-        // Extract key from URL (format: https://bucket.s3.amazonaws.com/key)
-        const url = new URL(result.url);
-        const key = url.pathname.slice(1); // Remove leading slash
-        await this.r2Service.delete(key);
-      } catch (cleanupError) {
-        // Log cleanup error but throw original error
-        console.error('Failed to cleanup orphaned avatar:', cleanupError);
-      }
-      throw error;
-    }
+    // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
+    return await imageService.processUserAvatar(userId, file);
   }
 }

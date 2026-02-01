@@ -161,11 +161,24 @@ export class ImageProcessingService extends BaseService {
     const r2Key = keys.lg;
     const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
-    // Update content record
-    await this.db
-      .update(schema.content)
-      .set({ thumbnailUrl: url })
-      .where(eq(schema.content.id, contentId));
+    // Update content record — cleanup R2 if DB fails
+    try {
+      await this.db
+        .update(schema.content)
+        .set({ thumbnailUrl: url })
+        .where(eq(schema.content.id, contentId));
+    } catch (error) {
+      try {
+        await Promise.all([
+          this.r2Service.delete(keys.sm),
+          this.r2Service.delete(keys.md),
+          this.r2Service.delete(keys.lg),
+        ]);
+      } catch (cleanupError) {
+        console.error('Failed to cleanup orphaned thumbnails:', cleanupError);
+      }
+      throw error;
+    }
 
     return {
       url,
@@ -227,11 +240,24 @@ export class ImageProcessingService extends BaseService {
     const r2Key = keys.lg;
     const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
-    // Update user record (use avatarUrl for custom uploads, NOT image which is for OAuth)
-    await this.db
-      .update(schema.users)
-      .set({ avatarUrl: url })
-      .where(eq(schema.users.id, userId));
+    // Update user record — cleanup R2 if DB fails
+    try {
+      await this.db
+        .update(schema.users)
+        .set({ avatarUrl: url })
+        .where(eq(schema.users.id, userId));
+    } catch (error) {
+      try {
+        await Promise.all([
+          this.r2Service.delete(keys.sm),
+          this.r2Service.delete(keys.md),
+          this.r2Service.delete(keys.lg),
+        ]);
+      } catch (cleanupError) {
+        console.error('Failed to cleanup orphaned avatars:', cleanupError);
+      }
+      throw error;
+    }
 
     return {
       url,
@@ -267,10 +293,19 @@ export class ImageProcessingService extends BaseService {
       });
       const url = `${this.r2PublicUrlBase}/${key}`;
 
-      await this.db
-        .update(schema.organizations)
-        .set({ logoUrl: url })
-        .where(eq(schema.organizations.id, organizationId));
+      try {
+        await this.db
+          .update(schema.organizations)
+          .set({ logoUrl: url })
+          .where(eq(schema.organizations.id, organizationId));
+      } catch (error) {
+        try {
+          await this.r2Service.delete(key);
+        } catch (cleanupError) {
+          console.error('Failed to cleanup orphaned SVG logo:', cleanupError);
+        }
+        throw error;
+      }
 
       return {
         url,
@@ -322,11 +357,24 @@ export class ImageProcessingService extends BaseService {
     const r2Key = keys.lg;
     const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
-    // Update organization record
-    await this.db
-      .update(schema.organizations)
-      .set({ logoUrl: url })
-      .where(eq(schema.organizations.id, organizationId));
+    // Update organization record — cleanup R2 if DB fails
+    try {
+      await this.db
+        .update(schema.organizations)
+        .set({ logoUrl: url })
+        .where(eq(schema.organizations.id, organizationId));
+    } catch (error) {
+      try {
+        await Promise.all([
+          this.r2Service.delete(keys.sm),
+          this.r2Service.delete(keys.md),
+          this.r2Service.delete(keys.lg),
+        ]);
+      } catch (cleanupError) {
+        console.error('Failed to cleanup orphaned logos:', cleanupError);
+      }
+      throw error;
+    }
 
     return {
       url,
