@@ -18,13 +18,16 @@
 
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient, eq, schema } from '@codex/database';
-import type { Bindings, HonoEnv } from '@codex/shared-types';
+import type {
+  AllSettingsResponse,
+  Bindings,
+  BrandingSettingsResponse,
+  ContactSettingsResponse,
+  FeatureSettingsResponse,
+  HonoEnv,
+} from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
-  type AllSettingsResponse,
-  type BrandingSettingsResponse,
-  type ContactSettingsResponse,
-  type FeatureSettingsResponse,
   MAX_LOGO_FILE_SIZE_BYTES,
   updateBrandingSchema,
   updateContactSchema,

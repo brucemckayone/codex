@@ -7,11 +7,8 @@
 
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
-import {
-  DEFAULT_FEATURES,
-  type FeatureSettingsResponse,
-  type UpdateFeaturesInput,
-} from '@codex/validation';
+import type { FeatureSettingsResponse } from '@codex/shared-types';
+import { DEFAULT_FEATURES, type UpdateFeaturesInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 import { SettingsUpsertError } from '../errors';
 

@@ -32,6 +32,7 @@ import type {
   CheckSlugResponse,
   DeleteOrganizationResponse,
   HonoEnv,
+  PublicBrandingResponse,
 } from '@codex/shared-types';
 import {
   createSlugSchema,
@@ -123,12 +124,6 @@ app.get(
     },
   })
 );
-
-/** Response type for public branding endpoint */
-interface PublicBrandingResponse {
-  logoUrl: string | null;
-  primaryColorHex: string;
-}
 
 /**
  * GET /api/organizations/public/:slug

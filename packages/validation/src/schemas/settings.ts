@@ -1,3 +1,8 @@
+import type {
+  BrandingSettingsResponse,
+  ContactSettingsResponse,
+  FeatureSettingsResponse,
+} from '@codex/shared-types';
 import { z } from 'zod';
 import { hexColorSchema, timezoneSchema, urlSchema } from '../primitives';
 
@@ -109,8 +114,6 @@ export const brandingSettingsSchema = z.object({
   primaryColorHex: hexColorSchema,
 });
 
-export type BrandingSettingsResponse = z.infer<typeof brandingSettingsSchema>;
-
 /**
  * Contact settings response shape
  */
@@ -121,8 +124,6 @@ export const contactSettingsSchema = z.object({
   timezone: z.string(),
 });
 
-export type ContactSettingsResponse = z.infer<typeof contactSettingsSchema>;
-
 /**
  * Feature settings response shape
  */
@@ -130,8 +131,6 @@ export const featureSettingsSchema = z.object({
   enableSignups: z.boolean(),
   enablePurchases: z.boolean(),
 });
-
-export type FeatureSettingsResponse = z.infer<typeof featureSettingsSchema>;
 
 /**
  * All settings combined response shape
@@ -141,8 +140,6 @@ export const allSettingsSchema = z.object({
   contact: contactSettingsSchema,
   features: featureSettingsSchema,
 });
-
-export type AllSettingsResponse = z.infer<typeof allSettingsSchema>;
 
 // ============================================================================
 // Defaults (returned when no settings exist)

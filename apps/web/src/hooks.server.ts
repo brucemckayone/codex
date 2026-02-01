@@ -9,7 +9,6 @@
  */
 
 import { COOKIES } from '@codex/constants';
-import type { SessionData, UserData } from '@codex/shared-types';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { nanoid } from 'nanoid';

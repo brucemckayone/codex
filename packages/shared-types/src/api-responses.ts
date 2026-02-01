@@ -16,6 +16,8 @@
  * to avoid circular dependencies.
  */
 
+import type { ProgressData } from './worker-types';
+
 /**
  * Standard pagination metadata for all paginated responses
  * @example
@@ -95,12 +97,7 @@ export interface StreamingUrlResponse {
  * }
  */
 export interface PlaybackProgressResponse {
-  progress: {
-    positionSeconds: number;
-    durationSeconds: number;
-    completed: boolean;
-    updatedAt: string; // ISO 8601 timestamp
-  } | null;
+  progress: ProgressData | null;
 }
 
 /**
@@ -130,13 +127,7 @@ export interface UserLibraryResponse {
       purchasedAt: string; // ISO 8601 timestamp
       priceCents: number;
     };
-    progress: {
-      positionSeconds: number;
-      durationSeconds: number;
-      completed: boolean;
-      percentComplete: number;
-      updatedAt: string; // ISO 8601 timestamp
-    } | null;
+    progress: (ProgressData & { percentComplete: number }) | null;
   }>;
   pagination: PaginationMetadata;
 }
@@ -173,4 +164,51 @@ export interface DeleteOrganizationResponse {
  */
 export interface CheckSlugResponse {
   available: boolean;
+}
+
+// ============================================================================
+// Settings Response Types
+// ============================================================================
+
+/**
+ * Branding settings response shape
+ */
+export interface BrandingSettingsResponse {
+  logoUrl: string | null;
+  primaryColorHex: string;
+}
+
+/**
+ * Contact settings response shape
+ */
+export interface ContactSettingsResponse {
+  platformName: string;
+  supportEmail: string;
+  contactUrl: string | null;
+  timezone: string;
+}
+
+/**
+ * Feature settings response shape
+ */
+export interface FeatureSettingsResponse {
+  enableSignups: boolean;
+  enablePurchases: boolean;
+}
+
+/**
+ * All settings combined response shape
+ */
+export interface AllSettingsResponse {
+  branding: BrandingSettingsResponse;
+  contact: ContactSettingsResponse;
+  features: FeatureSettingsResponse;
+}
+
+/**
+ * Public branding response shape (for unauthenticated endpoints)
+ */
+export interface PublicBrandingResponse {
+  logoUrl: string | null;
+  primaryColorHex: string;
 }

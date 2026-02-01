@@ -15,6 +15,8 @@ import type {
   BrandingSettingsResponse,
   ContactSettingsResponse,
   FeatureSettingsResponse,
+} from '@codex/shared-types';
+import type {
   UpdateBrandingInput,
   UpdateContactInput,
   UpdateFeaturesInput,

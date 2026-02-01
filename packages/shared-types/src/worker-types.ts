@@ -332,6 +332,7 @@ export type ProgressData = {
   positionSeconds: number;
   durationSeconds: number;
   completed: boolean;
+  updatedAt: string;
 };
 
 /**
@@ -340,7 +341,7 @@ export type ProgressData = {
  */
 export type CheckoutResponse = {
   sessionId: string;
-  url: string;
+  sessionUrl: string;
 };
 
 /**

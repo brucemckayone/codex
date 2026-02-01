@@ -16,14 +16,25 @@ import {
   type ServiceName,
 } from '@codex/constants';
 import type {
-  CheckoutResponse,
-  ProgressData,
+  AllSettingsResponse,
+  PaginatedListResponse,
+  PlaybackProgressResponse,
   SessionData,
+  SingleItemResponse,
+  StreamingUrlResponse,
+  UpdatePlaybackProgressResponse,
   UserData,
+  UserLibraryResponse,
 } from '@codex/shared-types';
 import type { CreateCheckoutInput } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
+// Import local types that extend DB types with relations
+import type {
+  CheckoutResponse,
+  ContentWithRelations,
+  OrganizationData,
+} from '../types';
 import { ApiError } from './errors';
 
 /**
@@ -186,37 +197,52 @@ export function createServerApi(
       /**
        * Get content by ID
        */
-      get: (id: string) => request('content', `/api/content/${id}`),
+      get: (id: string) =>
+        request<SingleItemResponse<ContentWithRelations>>(
+          'content',
+          `/api/content/${id}`
+        ),
 
       /**
        * List content with optional filters
        */
       list: (params?: URLSearchParams) =>
-        request('content', `/api/content${params ? `?${params}` : ''}`),
+        request<PaginatedListResponse<ContentWithRelations>>(
+          'content',
+          `/api/content${params ? `?${params}` : ''}`
+        ),
 
       /**
        * Create new content
        */
       create: (data: unknown) =>
-        request('content', '/api/content', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+        request<SingleItemResponse<ContentWithRelations>>(
+          'content',
+          '/api/content',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * Update content
        */
       update: (id: string, data: unknown) =>
-        request('content', `/api/content/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify(data),
-        }),
+        request<SingleItemResponse<ContentWithRelations>>(
+          'content',
+          `/api/content/${id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * Delete content
        */
       delete: (id: string) =>
-        request('content', `/api/content/${id}`, {
+        request<void>('content', `/api/content/${id}`, {
           method: 'DELETE',
         }),
     },
@@ -229,17 +255,16 @@ export function createServerApi(
        * Get streaming URL for content
        */
       getStreamingUrl: (contentId: string) =>
-        request<{
-          streamingUrl: string;
-          expiresAt: string;
-          contentType: string;
-        }>('access', `/api/access/content/${contentId}/stream`),
+        request<StreamingUrlResponse>(
+          'access',
+          `/api/access/content/${contentId}/stream`
+        ),
 
       /**
        * Get playback progress
        */
       getProgress: (contentId: string) =>
-        request<{ progress: ProgressData | null }>(
+        request<PlaybackProgressResponse>(
           'access',
           `/api/access/content/${contentId}/progress`
         ),
@@ -247,17 +272,21 @@ export function createServerApi(
       /**
        * Save playback progress
        */
-      saveProgress: (contentId: string, data: ProgressData) =>
-        request('access', `/api/access/content/${contentId}/progress`, {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+      saveProgress: (contentId: string, data: unknown) =>
+        request<UpdatePlaybackProgressResponse>(
+          'access',
+          `/api/access/content/${contentId}/progress`,
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * Get user library (purchased + free content)
        */
       getUserLibrary: (params?: URLSearchParams) =>
-        request(
+        request<UserLibraryResponse>(
           'access',
           `/api/access/user/library${params ? `?${params}` : ''}`
         ),
@@ -271,19 +300,28 @@ export function createServerApi(
        * Get organization by slug
        */
       getBySlug: (slug: string) =>
-        request('org', `/api/organizations/slug/${slug}`),
+        request<SingleItemResponse<OrganizationData>>(
+          'org',
+          `/api/organizations/slug/${slug}`
+        ),
 
       /**
        * Get organization settings
        */
       getSettings: (id: string) =>
-        request('org', `/api/organizations/${id}/settings`),
+        request<AllSettingsResponse>(
+          'org',
+          `/api/organizations/${id}/settings`
+        ),
 
       /**
        * Update organization settings
+       * Note: This maps to a hypothetical PATCH endpoint or requires individual PUTs.
+       * Typing as generic object/unknown for now to match flexibility,
+       * but ideally should be specific endpoints.
        */
       updateSettings: (id: string, data: unknown) =>
-        request('org', `/api/organizations/${id}/settings`, {
+        request<unknown>('org', `/api/organizations/${id}/settings`, {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
@@ -297,10 +335,14 @@ export function createServerApi(
        * Create Stripe checkout session
        */
       create: (data: CreateCheckoutInput) =>
-        request<CheckoutResponse>('ecom', '/checkout/create', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+        request<SingleItemResponse<CheckoutResponse>>(
+          'ecom',
+          '/checkout/create',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
     },
   };
 }
