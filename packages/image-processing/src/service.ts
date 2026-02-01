@@ -287,9 +287,12 @@ export class ImageProcessingService extends BaseService {
       const sanitized = await sanitizeSvgContent(svgText);
       const sanitizedBuffer = new TextEncoder().encode(sanitized);
 
+      // SVG uses shorter cache (1 hour) because filename is fixed.
+      // This allows logo updates to propagate within reasonable time.
+      // Raster images use immutable cache since they have unique filenames per upload.
       await this.r2Service.put(key, sanitizedBuffer, {
         contentType: 'image/svg+xml',
-        cacheControl: 'public, max-age=31536000, immutable',
+        cacheControl: 'public, max-age=3600',
       });
       const url = `${this.r2PublicUrlBase}/${key}`;
 

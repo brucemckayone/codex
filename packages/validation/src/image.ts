@@ -67,12 +67,22 @@ export function validateImageSignature(
   if (mimeType === 'image/svg+xml') {
     if (buffer.length < 4) return false; // Minimum 4 bytes for <svg
 
-    // Check <svg
-    if (SVG_ALTERNATE.every((byte, i) => buffer[i] === byte)) return true;
+    // Check direct <svg start
+    const startsWithSvg = SVG_ALTERNATE.every((byte, i) => buffer[i] === byte);
+    if (startsWithSvg) return true;
 
-    // Check <?xml
+    // Check <?xml declaration - requires <svg somewhere in file
     if (buffer.length < 5) return false;
-    return expectedMagicNumbers.every((byte, i) => buffer[i] === byte);
+    const startsWithXml = expectedMagicNumbers.every(
+      (byte, i) => buffer[i] === byte
+    );
+    if (!startsWithXml) return false;
+
+    // For <?xml files, verify <svg tag exists within first 1KB (defense in depth)
+    // DOMPurify will catch invalid SVGs later, but we reject obvious non-SVG XML early
+    const searchLimit = Math.min(buffer.length, 1024);
+    const text = new TextDecoder().decode(buffer.slice(0, searchLimit));
+    return /<svg[\s>]/i.test(text);
   }
 
   // Standard check for PNG, JPEG, GIF

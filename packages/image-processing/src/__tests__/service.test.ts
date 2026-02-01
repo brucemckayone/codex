@@ -247,12 +247,13 @@ describe('ImageProcessingService', () => {
       expect(testMockR2Service.put).toHaveBeenCalledTimes(1);
 
       // SVG upload uses 3-param signature (key, body, httpMetadata) - skips optional metadata
+      // SVG uses shorter cache (1 hour) because filename is fixed, allowing logo updates to propagate
       expect(testMockR2Service.put).toHaveBeenCalledWith(
         expect.stringContaining('logo.svg'),
         expect.any(Uint8Array),
         {
           contentType: 'image/svg+xml',
-          cacheControl: 'public, max-age=31536000, immutable',
+          cacheControl: 'public, max-age=3600',
         }
       );
     });
