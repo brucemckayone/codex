@@ -80,7 +80,7 @@ export type Bindings = {
   R2_BUCKET_MEDIA?: string;
 
   /**
-   * Public URL base for R2 bucket (e.g., https://pub-codex-media.r2.dev)
+   * Public URL base for R2 bucket (e.g., https://cdn.revelations.studio)
    * Used to generate public URLs for logo uploads and other static assets
    */
   R2_PUBLIC_URL_BASE?: string;
