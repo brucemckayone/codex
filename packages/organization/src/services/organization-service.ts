@@ -19,6 +19,7 @@ import {
 } from '@codex/database';
 import { organizations } from '@codex/database/schema';
 import { BaseService } from '@codex/service-errors';
+import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -32,7 +33,6 @@ import { ConflictError, OrganizationNotFoundError, wrapError } from '../errors';
 import type {
   Organization,
   OrganizationFilters,
-  PaginatedResponse,
   PaginationParams,
 } from '../types';
 
@@ -251,7 +251,7 @@ export class OrganizationService extends BaseService {
     filters: OrganizationFilters = {},
     pagination: PaginationParams = { page: 1, limit: PAGINATION.DEFAULT }
     //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
-  ): Promise<PaginatedResponse<Organization>> {
+  ): Promise<PaginatedListResponse<Organization>> {
     try {
       const { limit, offset } = withPagination(pagination);
 

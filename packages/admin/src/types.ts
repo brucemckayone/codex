@@ -5,18 +5,18 @@
  * Defines admin-specific domain types only.
  */
 
-import type {
-  PaginatedResponse,
-  PaginationMetadata,
-  PaginationParams,
-} from '@codex/content';
+import type { PaginationParams } from '@codex/content';
 import type { Content, Purchase, User } from '@codex/database/schema';
+import type {
+  PaginatedListResponse,
+  PaginationMetadata,
+} from '@codex/shared-types';
 
 // Re-export ServiceConfig from service-errors (standard pattern)
 export type { ServiceConfig } from '@codex/service-errors';
 
-// Re-export pagination types from @codex/content (standard pattern)
-export type { PaginatedResponse, PaginationMetadata, PaginationParams };
+// Re-export pagination types for convenience
+export type { PaginatedListResponse, PaginationMetadata, PaginationParams };
 
 // ============================================================================
 // Analytics Types

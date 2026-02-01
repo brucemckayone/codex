@@ -25,7 +25,7 @@ import { and, countDistinct, desc, eq, sql } from 'drizzle-orm';
 import type {
   CustomerDetails,
   CustomerWithStats,
-  PaginatedResponse,
+  PaginatedListResponse,
   PaginationParams,
   PurchaseHistoryItem,
 } from '../types';
@@ -43,7 +43,7 @@ export class AdminCustomerManagementService extends BaseService {
   async listCustomers(
     organizationId: string,
     options: Partial<PaginationParams> = {}
-  ): Promise<PaginatedResponse<CustomerWithStats>> {
+  ): Promise<PaginatedListResponse<CustomerWithStats>> {
     const { page = 1, limit = PAGINATION.DEFAULT } = options;
 
     try {

@@ -22,7 +22,7 @@ import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import type {
   AdminContentItem,
   AdminContentListOptions,
-  PaginatedResponse,
+  PaginatedListResponse,
 } from '../types';
 
 export class AdminContentManagementService extends BaseService {
@@ -35,7 +35,7 @@ export class AdminContentManagementService extends BaseService {
   async listAllContent(
     organizationId: string,
     options: Partial<AdminContentListOptions> = {}
-  ): Promise<PaginatedResponse<AdminContentItem>> {
+  ): Promise<PaginatedListResponse<AdminContentItem>> {
     const { page = 1, limit = PAGINATION.DEFAULT, status } = options;
 
     try {

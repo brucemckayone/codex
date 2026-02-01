@@ -52,7 +52,7 @@ export type {
   CustomerStats,
   CustomerWithStats,
   DailyRevenue,
-  PaginatedResponse,
+  PaginatedListResponse,
   PaginationMetadata,
   PaginationParams,
   PurchaseHistoryItem,

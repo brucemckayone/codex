@@ -34,6 +34,7 @@ import {
   ImageProcessingService,
 } from '@codex/image-processing';
 import { BaseService } from '@codex/service-errors';
+import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
 import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
@@ -51,7 +52,6 @@ import type {
   ContentFilters,
   ContentWithRelations,
   DatabaseTransaction,
-  PaginatedResponse,
   PaginationParams,
 } from '../types';
 
@@ -507,7 +507,7 @@ export class ContentService extends BaseService {
       page: 1,
       limit: PAGINATION.DEFAULT,
     }
-  ): Promise<PaginatedResponse<ContentWithRelations>> {
+  ): Promise<PaginatedListResponse<ContentWithRelations>> {
     try {
       const { limit, offset } = withPagination(pagination);
 

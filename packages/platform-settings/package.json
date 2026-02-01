@@ -35,6 +35,7 @@
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/service-errors": "workspace:*",
+    "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7"
   },

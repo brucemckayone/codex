@@ -88,8 +88,6 @@ export type {
   MediaResponse,
   NewContent,
   NewMediaItem,
-  PaginatedResponse,
-  PaginationMetadata,
   PaginationParams,
   PublishContentResponse,
   ServiceConfig,

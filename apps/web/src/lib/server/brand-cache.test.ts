@@ -1,4 +1,4 @@
-import type { BrandingSettingsResponse } from '@codex/validation';
+import type { BrandingSettingsResponse } from '@codex/shared-types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '$lib/observability';
 import {
