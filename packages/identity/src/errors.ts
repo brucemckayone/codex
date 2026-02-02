@@ -1,13 +1,19 @@
-export class IdentityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'IdentityError';
+import { ConflictError, NotFoundError } from '@codex/service-errors';
+
+export class UserNotFoundError extends NotFoundError {
+  constructor(userId: string) {
+    super('User not found', { userId });
   }
 }
 
-export class UserNotFoundError extends IdentityError {
-  constructor(userId: string) {
-    super(`User with ID ${userId} not found`);
-    this.name = 'UserNotFoundError';
+export class OrganizationNotFoundError extends NotFoundError {
+  constructor(organizationId: string) {
+    super('Organization not found', { organizationId });
+  }
+}
+
+export class OrganizationSlugConflictError extends ConflictError {
+  constructor(slug: string) {
+    super('Organization slug already exists', { slug });
   }
 }

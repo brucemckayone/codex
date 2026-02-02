@@ -6,9 +6,10 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { eq, schema } from '@codex/database';
+import { and, eq, schema } from '@codex/database';
 import {
   BaseService,
+  ForbiddenError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -166,7 +167,12 @@ export class ImageProcessingService extends BaseService {
       await this.db
         .update(schema.content)
         .set({ thumbnailUrl: url })
-        .where(eq(schema.content.id, contentId));
+        .where(
+          and(
+            eq(schema.content.id, contentId),
+            eq(schema.content.creatorId, creatorId)
+          )
+        );
     } catch (error) {
       try {
         await Promise.all([
@@ -411,7 +417,12 @@ export class ImageProcessingService extends BaseService {
     await this.db
       .update(schema.content)
       .set({ thumbnailUrl: null })
-      .where(eq(schema.content.id, contentId));
+      .where(
+        and(
+          eq(schema.content.id, contentId),
+          eq(schema.content.creatorId, creatorId)
+        )
+      );
   }
 
   /**
