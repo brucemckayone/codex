@@ -14,7 +14,6 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { nanoid } from 'nanoid';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
-import type { SessionData, UserData } from '$lib/types';
 
 /**
  * Session validation hook
@@ -29,12 +28,9 @@ const sessionHook: Handle = async ({ event, resolve }) => {
 
   if (sessionCookie) {
     try {
-      const api = createServerApi(event.platform);
-      const data = await api.fetch<{ user?: UserData; session?: SessionData }>(
-        'auth',
-        '/api/auth/session',
-        sessionCookie
-      );
+      // Use modern API helper with cookies for type safety
+      const api = createServerApi(event.platform, event.cookies);
+      const data = await api.auth.getSession();
 
       // BetterAuth returns { user, session } structure
       event.locals.user = data.user ?? null;

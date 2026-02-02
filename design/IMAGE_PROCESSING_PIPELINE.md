@@ -1,8 +1,8 @@
 # Image Processing Pipeline
 
-**Status**: In Progress (Phase 1 Complete)
+**Status**: Phase 3 Complete, Production Ready
 **Created**: 2026-01-12
-**Updated**: 2026-01-12
+**Updated**: 2026-02-01
 **Purpose**: Define the complete image processing pipeline for thumbnails and media assets
 **Work Packet**: [P1-IMG-001](./roadmap/work-packets/backend/P1-IMG-001-image-processing.md)
 
@@ -25,7 +25,10 @@ This document specifies how images are processed, optimized, stored, and served 
 ### Current State
 
 - ✅ **Implemented**: Video frame extraction via RunPod (media thumbnails)
-- ❌ **Not Implemented**: Custom image upload pipeline (content thumbnails, logos, avatars)
+- ✅ **Implemented**: Custom image upload pipeline (content thumbnails, logos, avatars)
+- ✅ **Implemented**: `@codex/image-processing` package with Wasm/Photon processing
+- ✅ **Implemented**: Multi-size WebP variants (sm: 200px, md: 400px, lg: 800px)
+- ✅ **Implemented**: SVG logo support with DOMPurify sanitization
 
 ---
 
@@ -544,19 +547,31 @@ CDN → User: Included in Cloudflare plan
 - [x] Database stores key in `media_items.thumbnail_key`
 - [ ] Frontend displays thumbnails (pending)
 
-### Phase 2: Multi-Size + Format Optimization (Planned)
-- [ ] Generate 3 sizes: sm (200px), md (400px), lg (800px)
-- [ ] Primary format: WebP (quality 82, effort 6)
-- [ ] Fallback format: JPEG (quality 85, mozjpeg)
-- [ ] Implement scene detection for better frame selection
-- [ ] Add quality scoring to reject poor thumbnails
-- [ ] Update path structure to support multiple files per thumbnail
+### Phase 2: Multi-Size + Format Optimization ✅ (Complete)
+- [x] Generate 3 sizes: sm (200px), md (400px), lg (800px)
+- [x] Primary format: WebP via Photon Wasm
+- [x] Never upscale: preserve original dimensions if smaller than target
+- [x] Aspect ratio preservation via Lanczos3 resize algorithm
+- [ ] Implement scene detection for better frame selection (deferred)
+- [ ] Add quality scoring to reject poor thumbnails (deferred)
 
-### Phase 3: Other Images (Planned)
-- [ ] Org logo upload and processing (Photon Wasm on API worker)
-- [ ] User avatar upload and processing (Photon Wasm on API worker)
-- [ ] Generic image upload component
-- [ ] Create `@codex/image-processing` package with `@cf-wasm/photon`
+### Phase 3: Other Images ✅ (Complete)
+- [x] Org logo upload and processing (Photon Wasm on API worker)
+- [x] User avatar upload and processing (Photon Wasm on API worker)
+- [x] SVG logo support with DOMPurify sanitization (XSS protection)
+- [x] Create `@codex/image-processing` package with `@cf-wasm/photon`
+- [x] SafePhotonImage wrapper for Wasm memory safety
+- [x] R2 storage with immutable caching (raster) and 1-hour cache (SVG)
+- [x] Orphan prevention: cleanup R2 on database failure
+- [x] 44 unit tests (34 service + 10 stability)
+
+### Phase 4: Production Hardening (Planned)
+- [ ] Memory profiling in deployed Workers environment
+- [ ] OOM testing with 5MB images under load
+- [ ] Performance benchmarks (latency, throughput)
+- [ ] Quality benchmarks (WebP SSIM vs original)
+- [ ] AVIF format support (better compression, slower encode)
+- [ ] Frontend image component integration
 
 ---
 

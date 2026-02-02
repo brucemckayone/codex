@@ -24,16 +24,24 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@cf-wasm/photon": "^0.3.4",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
-    "@codex/validation": "workspace:*"
+    "@codex/transcoding": "workspace:*",
+    "@codex/validation": "workspace:*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250102.0",
+    "@codex/test-utils": "workspace:*",
+    "@types/node": "^22.0.0",
     "typescript": "^5.7.3",
     "vite": "^7.2.2",
+    "vite-plugin-dts": "^4.5.4",
+    "vite-plugin-top-level-await": "^1.4.4",
+    "vite-plugin-wasm": "^3.4.1",
     "vitest": "^2.1.8"
   }
 }

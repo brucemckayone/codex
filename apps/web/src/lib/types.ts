@@ -1,36 +1,42 @@
 /**
- * Shared type definitions for the web app
+ * Web app-specific type definitions
+ *
+ * NOTE: Most API types (UserData, SessionData, ProgressData, CheckoutResponse)
+ * are imported from @codex/shared-types for consistency across the platform.
+ * Only web-app-specific types should be defined here.
  */
 
-/**
- * User data returned from auth session
- * Matches the structure from Auth Worker's /api/auth/session endpoint
- */
-export interface UserData {
-  id: string;
-  email: string;
-  emailVerified: boolean;
-  name: string | null;
-  image: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+// Re-export commonly used types for convenience
+export type {
+  CheckoutResponse,
+  ProgressData,
+  SessionData,
+  UserData,
+} from '@codex/shared-types';
+
+import type { Content, MediaItem, Organization } from '@codex/database/schema';
+
+export interface ContentWithRelations extends Content {
+  creator?: {
+    id: string;
+    email: string;
+    name: string | null;
+  };
+  organization?: Organization | null;
+  mediaItem?: MediaItem | null;
+}
+
+export interface MediaItemWithRelations extends MediaItem {
+  creator?: {
+    id: string;
+    email: string;
+    name: string | null;
+  };
 }
 
 /**
- * Session data returned from auth validation
- */
-export interface SessionData {
-  id: string;
-  userId: string;
-  expiresAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-  ipAddress: string | null;
-  userAgent: string | null;
-}
-
-/**
- * Organization data for org context
+ * Organization data for org context (web app extended version)
+ * Includes UI-specific fields not present in backend Organization type
  */
 export interface OrganizationData {
   id: string;

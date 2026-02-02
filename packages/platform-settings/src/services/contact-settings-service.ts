@@ -7,11 +7,8 @@
 
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
-import {
-  type ContactSettingsResponse,
-  DEFAULT_CONTACT,
-  type UpdateContactInput,
-} from '@codex/validation';
+import type { ContactSettingsResponse } from '@codex/shared-types';
+import { DEFAULT_CONTACT, type UpdateContactInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 import { SettingsUpsertError } from '../errors';
 

@@ -1,0 +1,224 @@
+{
+  "$schema": "./r2-infrastructure.schema.json",
+  "comment": "R2 bucket infrastructure configuration - defines public access, custom domains, and cache rules. All buckets share the same custom domain per environment (bucket name in URL path).",
+  "buckets": {
+    "codex-media-production": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": true
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Media - Production",
+        "description": "Cache HLS streams and video assets"
+      },
+      "dns": {
+        "subdomain": "cdn",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all production buckets"
+      }
+    },
+    "codex-assets-production": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": true
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Assets - Production",
+        "description": "Cache thumbnails, logos, and branding assets"
+      },
+      "dns": {
+        "subdomain": "cdn",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all production buckets"
+      }
+    },
+    "codex-resources-production": {
+      "publicAccess": {
+        "enabled": false,
+        "comment": "Resources are private - signed URLs only"
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Resources - Production",
+        "description": "Cache downloadable resources (PDFs, workbooks)"
+      }
+    },
+    "codex-platform-production": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": true
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Platform - Production",
+        "description": "Cache platform-wide assets (email templates, legal docs)"
+      },
+      "dns": {
+        "subdomain": "cdn",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all production buckets"
+      }
+    },
+    "codex-media-staging": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn-staging.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Media - Staging",
+        "description": "Cache staging HLS streams and video assets"
+      },
+      "dns": {
+        "subdomain": "cdn-staging",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all staging buckets"
+      }
+    },
+    "codex-assets-staging": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn-staging.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Assets - Staging",
+        "description": "Cache staging thumbnails and assets"
+      },
+      "dns": {
+        "subdomain": "cdn-staging",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all staging buckets"
+      }
+    },
+    "codex-resources-staging": {
+      "publicAccess": {
+        "enabled": false,
+        "comment": "Resources are private - signed URLs only"
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Resources - Staging",
+        "description": "Cache staging downloadable resources"
+      }
+    },
+    "codex-platform-staging": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn-staging.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Platform - Staging",
+        "description": "Cache staging platform assets"
+      },
+      "dns": {
+        "subdomain": "cdn-staging",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all staging buckets"
+      }
+    },
+    "codex-media-dev": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn-dev.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
+      },
+      "cache": {
+        "enabled": false,
+        "comment": "Cache disabled for development - always serve latest"
+      },
+      "dns": {
+        "subdomain": "cdn-dev",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all dev buckets"
+      }
+    },
+    "codex-assets-dev": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn-dev.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
+      },
+      "cache": {
+        "enabled": false,
+        "comment": "Cache disabled for development - always serve latest"
+      },
+      "dns": {
+        "subdomain": "cdn-dev",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all dev buckets"
+      }
+    },
+    "codex-resources-dev": {
+      "publicAccess": {
+        "enabled": false,
+        "comment": "Resources are private - signed URLs only"
+      },
+      "cache": {
+        "enabled": false,
+        "comment": "Cache disabled for development"
+      }
+    },
+    "codex-platform-dev": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn-dev.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
+      },
+      "cache": {
+        "enabled": false,
+        "comment": "Cache disabled for development - always serve latest"
+      },
+      "dns": {
+        "subdomain": "cdn-dev",
+        "type": "CNAME",
+        "proxied": true,
+        "comment": "Shared CDN for all dev buckets"
+      }
+    }
+  },
+  "wranglerBindings": {
+    "comment": "After applying infrastructure changes, update these bindings in wrangler.jsonc files",
+    "workers": ["content-api", "organization-api", "identity-api"],
+    "binding": "R2_PUBLIC_URL_BASE",
+    "values": {
+      "development": "https://cdn-dev.revelations.studio",
+      "preview": "https://cdn-staging.revelations.studio",
+      "production": "https://cdn.revelations.studio"
+    }
+  }
+}

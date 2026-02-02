@@ -12,6 +12,9 @@ export * from './auth';
 export * from './content/content-schemas';
 // User schemas
 export * from './identity/user-schema';
+// Image validation utilities
+export * from './image';
+
 // Primitive validation schemas (reusable)
 export * from './primitives';
 // Access schemas

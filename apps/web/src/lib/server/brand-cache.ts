@@ -1,5 +1,5 @@
 import { CACHE_TTL } from '@codex/constants';
-import type { BrandingSettingsResponse } from '@codex/validation';
+import type { BrandingSettingsResponse } from '@codex/shared-types';
 import { logger } from '$lib/observability';
 
 const CACHE_KEY_PREFIX = 'brand:';

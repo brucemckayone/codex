@@ -72,8 +72,6 @@ export type {
   OrganizationFilters,
   OrganizationListResponse,
   OrganizationResponse,
-  PaginatedResponse,
-  PaginationMetadata,
   PaginationParams,
   ServiceConfig,
   SortOrder,

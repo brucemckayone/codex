@@ -36,33 +36,17 @@ export interface ServiceConfig {
   environment: string;
 }
 
-//TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
+import type {
+  PaginatedListResponse,
+  SingleItemResponse,
+} from '@codex/shared-types';
+
 /**
  * Pagination parameters for list queries
  */
 export interface PaginationParams {
   page: number;
   limit: number;
-}
-
-//TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder
-/**
- * Pagination metadata in responses
- */
-export interface PaginationMetadata {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
-//TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
-/**
- * Paginated response structure
- */
-export interface PaginatedResponse<T> {
-  items: T[];
-  pagination: PaginationMetadata;
 }
 
 /**
@@ -133,11 +117,6 @@ export type { NewContent, NewMediaItem };
 // ============================================================================
 // API Response Types
 // ============================================================================
-
-import type {
-  PaginatedListResponse,
-  SingleItemResponse,
-} from '@codex/shared-types';
 
 /**
  * Response for GET /api/content/:id

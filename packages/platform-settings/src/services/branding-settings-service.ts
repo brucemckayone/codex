@@ -9,9 +9,9 @@ import type { R2Service } from '@codex/cloudflare-clients';
 import { MIME_TYPES } from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
+import type { BrandingSettingsResponse } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
-  type BrandingSettingsResponse,
   DEFAULT_BRANDING,
   type UpdateBrandingInput,
 } from '@codex/validation';

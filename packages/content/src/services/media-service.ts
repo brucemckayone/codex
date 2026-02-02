@@ -20,6 +20,7 @@ import {
 } from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
 import { BaseService } from '@codex/service-errors';
+import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -34,7 +35,6 @@ import type {
   MediaItem,
   MediaItemFilters,
   MediaItemWithRelations,
-  PaginatedResponse,
   PaginationParams,
 } from '../types';
 
@@ -276,7 +276,7 @@ export class MediaItemService extends BaseService {
       page: 1,
       limit: PAGINATION.DEFAULT,
     }
-  ): Promise<PaginatedResponse<MediaItemWithRelations>> {
+  ): Promise<PaginatedListResponse<MediaItemWithRelations>> {
     try {
       const { limit, offset } = withPagination(pagination);
 

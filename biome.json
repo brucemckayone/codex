@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.3.7/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -47,7 +47,7 @@
     "includes": [
       "**/packages/**/*.{ts,js,json}",
       "**/workers/**/*.{ts,js,json}",
-      "**/apps/**/*.{ts,js,svelte,json}",
+      "**/apps/**/*.{ts,js,json}",
       "**/config/**/*.{ts,js,json}",
       "**/*.{ts,js,json}",
       "!**/.obsidian",
@@ -67,18 +67,5 @@
       "!**/test-media",
       "!**/src/paraglide"
     ]
-  },
-  "overrides": [
-    {
-      "includes": ["**/*.svelte"],
-      "linter": {
-        "rules": {
-          "correctness": {
-            "noUnusedVariables": "off",
-            "noUnusedImports": "off"
-          }
-        }
-      }
-    }
-  ]
+  }
 }

@@ -351,3 +351,30 @@ export async function sanitizeSvgContent(content: string): Promise<string> {
 
   return clean;
 }
+
+// ============================================================================
+// MIME Type Utilities
+// ============================================================================
+
+/**
+ * Extract MIME type from Content-Type header
+ * Removes parameters like "charset=utf-8" and returns the clean MIME type
+ *
+ * @param contentType - Full Content-Type header value (e.g., "image/jpeg; charset=utf-8")
+ * @returns Clean MIME type (e.g., "image/jpeg")
+ * @throws Error if Content-Type is empty or invalid
+ *
+ * @example
+ * ```typescript
+ * extractMimeType('image/jpeg; charset=utf-8'); // 'image/jpeg'
+ * extractMimeType('image/png');                // 'image/png'
+ * extractMimeType('');                        // throws Error
+ * ```
+ */
+export function extractMimeType(contentType: string): string {
+  const mimeType = contentType.split(';')[0];
+  if (!mimeType) {
+    throw new Error('Invalid or empty Content-Type header');
+  }
+  return mimeType.trim().toLowerCase();
+}

@@ -20,6 +20,7 @@ import { R2Service } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
+import { IdentityService } from '@codex/identity';
 import { ImageProcessingService } from '@codex/image-processing';
 import {
   createEmailProvider,
@@ -87,6 +88,8 @@ export function createServiceRegistry(
   let _adminCustomer: AdminCustomerManagementService | undefined;
   let _templates: TemplateService | undefined;
   let _notifications: NotificationsService | undefined;
+  let _images: ImageProcessingService | undefined;
+  let _identity: IdentityService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -157,11 +160,17 @@ export function createServiceRegistry(
           );
         }
 
+        if (!env.R2_PUBLIC_URL_BASE) {
+          throw new Error(
+            'R2_PUBLIC_URL_BASE not configured. Required for image processing (public image URLs).'
+          );
+        }
+
         _imageProcessing = new ImageProcessingService({
           db: getSharedDb(),
           environment: getEnvironment(),
           r2Service,
-          mediaBucket: env.R2_BUCKET_MEDIA,
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _imageProcessing;
@@ -200,8 +209,8 @@ export function createServiceRegistry(
           environment: getEnvironment(),
           organizationId,
           r2,
-          // R2 public URL base is configured server-side
-          r2PublicUrlBase: undefined,
+          // Pass R2 public URL base from env (BrandingSettingsService handles undefined gracefully)
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _settings;
@@ -268,6 +277,11 @@ export function createServiceRegistry(
         });
       }
       return _transcoding;
+    },
+
+    get images() {
+      // Delegate to imageProcessing getter which has correct initialization
+      return this.imageProcessing;
     },
 
     // ========================================================================
@@ -346,6 +360,39 @@ export function createServiceRegistry(
         });
       }
       return _notifications;
+    },
+
+    // ========================================================================
+    // Identity Domain
+    // ========================================================================
+
+    get identity() {
+      if (!_identity) {
+        // Create R2Service for image processing (avatar uploads)
+        const r2Service = env.MEDIA_BUCKET
+          ? new R2Service(env.MEDIA_BUCKET)
+          : undefined;
+
+        if (!env.R2_BUCKET_MEDIA || !r2Service) {
+          throw new Error(
+            'MEDIA_BUCKET or R2_BUCKET_MEDIA not configured. Required for identity service (avatar uploads).'
+          );
+        }
+
+        if (!env.R2_PUBLIC_URL_BASE) {
+          throw new Error(
+            'R2_PUBLIC_URL_BASE not configured. Required for identity service (public image URLs).'
+          );
+        }
+
+        _identity = new IdentityService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          r2Service,
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
+        });
+      }
+      return _identity;
     },
   };
 

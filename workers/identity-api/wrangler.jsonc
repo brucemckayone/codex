@@ -22,12 +22,22 @@
     }
   ],
 
+  // R2 Buckets (required for avatar uploads via identity/image-processing services)
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "codex-media-production",
+      "preview_bucket_name": "codex-media-test"
+    }
+  ],
+
   // Default environment variables (local development)
   "vars": {
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
     "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "API_URL": "http://localhost:8787",
+    "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio"
   },
 
   // Environment configurations
@@ -40,7 +50,8 @@
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
-        "API_URL": "http://localhost:8787"
+        "API_URL": "http://localhost:8787",
+        "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio"
       },
       "kv_namespaces": [
         {
@@ -50,6 +61,12 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-test"
         }
       ]
     },
@@ -61,7 +78,8 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://codex.revelations.studio",
-        "API_URL": "https://api.revelations.studio"
+        "API_URL": "https://api.revelations.studio",
+        "R2_PUBLIC_URL_BASE": "https://cdn.revelations.studio"
       },
       "kv_namespaces": [
         {
@@ -71,6 +89,12 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production"
         }
       ],
       "routes": [
@@ -88,8 +112,15 @@
         "ENVIRONMENT": "staging",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://codex-staging.revelations.studio",
-        "API_URL": "https://api-staging.revelations.studio"
+        "API_URL": "https://api-staging.revelations.studio",
+        "R2_PUBLIC_URL_BASE": "https://cdn-staging.revelations.studio"
       },
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-staging"
+        }
+      ],
       "routes": [
         {
           "pattern": "identity-api-staging.revelations.studio/*",

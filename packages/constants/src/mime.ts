@@ -29,6 +29,19 @@ export const MIME_TYPES = {
   },
 } as const;
 
+/**
+ * Supported MIME types for image uploads across the platform
+ * Used by image-processing and validation packages
+ *
+ * Note: SVG excluded from upload validation (sanitized separately via DOMPurify)
+ */
+export const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  MIME_TYPES.IMAGE.PNG,
+  MIME_TYPES.IMAGE.JPEG,
+  MIME_TYPES.IMAGE.WEBP,
+  MIME_TYPES.IMAGE.GIF,
+]) as Set<string>;
+
 export const HEADERS = {
   CONTENT_TYPE: 'Content-Type',
   AUTHORIZATION: 'Authorization',

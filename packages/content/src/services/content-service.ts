@@ -12,6 +12,8 @@
  * - Soft deletes only (sets deleted_at)
  */
 
+import type { R2Bucket } from '@cloudflare/workers-types';
+import { R2Service } from '@codex/cloudflare-clients';
 import {
   CONTENT_STATUS,
   CONTENT_TYPES,
@@ -27,7 +29,12 @@ import {
   withPagination,
 } from '@codex/database';
 import { content, mediaItems } from '@codex/database/schema';
+import {
+  type ImageProcessingResult,
+  ImageProcessingService,
+} from '@codex/image-processing';
 import { BaseService } from '@codex/service-errors';
+import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
 import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
@@ -45,7 +52,6 @@ import type {
   ContentFilters,
   ContentWithRelations,
   DatabaseTransaction,
-  PaginatedResponse,
   PaginationParams,
 } from '../types';
 
@@ -243,6 +249,58 @@ export class ContentService extends BaseService {
       }
       throw wrapError(error, { contentId: id, creatorId, input: validated });
     }
+  }
+
+  /**
+   * Upload and process content thumbnail
+   *
+   * Security:
+   * - Validates creator ownership
+   * - Validates image file (size, type) via ImageProcessingService
+   * - ImageProcessingService updates content record with thumbnail URL
+   *
+   * @param id - Content ID
+   * @param creatorId - Creator ID (for authorization)
+   * @param file - Image file to upload
+   * @param r2 - R2 Bucket instance
+   * @param r2PublicUrlBase - Public CDN base URL (e.g., https://cdn.revelations.studio)
+   * @returns Result containing upload URL and metadata
+   * @throws {ContentNotFoundError} If content doesn't exist
+   */
+  async uploadThumbnail(
+    id: string,
+    creatorId: string,
+    file: File,
+    r2: R2Bucket,
+    r2PublicUrlBase: string
+  ): Promise<ImageProcessingResult> {
+    const existing = await this.db.query.content.findFirst({
+      where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
+    });
+
+    if (!existing) {
+      throw new ContentNotFoundError(id);
+    }
+
+    // Create R2Service from R2 bucket
+    const r2Service = new R2Service(r2);
+
+    // Create image processing service with all required config
+    const imageService = new ImageProcessingService({
+      db: this.db,
+      environment: this.environment,
+      r2Service,
+      r2PublicUrlBase,
+    });
+
+    // Process the thumbnail (service handles validation, upload, and DB update)
+    const result = await imageService.processContentThumbnail(
+      id,
+      creatorId,
+      file
+    );
+
+    return result;
   }
 
   /**
@@ -449,7 +507,7 @@ export class ContentService extends BaseService {
       page: 1,
       limit: PAGINATION.DEFAULT,
     }
-  ): Promise<PaginatedResponse<ContentWithRelations>> {
+  ): Promise<PaginatedListResponse<ContentWithRelations>> {
     try {
       const { limit, offset } = withPagination(pagination);
 

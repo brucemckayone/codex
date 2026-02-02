@@ -12,7 +12,7 @@
  * - DELETE /api/media/:id    - Soft delete
  */
 
-import { AUTH_ROLES, MEDIA_STATUS, MIME_TYPES } from '@codex/constants';
+import { AUTH_ROLES, MEDIA_STATUS } from '@codex/constants';
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,

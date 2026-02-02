@@ -33,7 +33,7 @@ import {
 } from '@codex/content';
 import {
   MAX_IMAGE_SIZE_BYTES,
-  SUPPORTED_MIME_TYPES,
+  SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
@@ -224,7 +224,7 @@ app.post(
       thumbnail: {
         required: true,
         maxSize: MAX_IMAGE_SIZE_BYTES,
-        allowedMimeTypes: Array.from(SUPPORTED_MIME_TYPES),
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
     handler: async (ctx) => {
@@ -253,6 +253,41 @@ app.post(
           mimeType: result.mimeType,
         },
       };
+    },
+  })
+);
+
+/**
+ * DELETE /api/content/:id/thumbnail
+ * Remove content thumbnail (revert to auto-generated)
+ *
+ * Security: Creator/Admin only, must own content
+ */
+app.delete(
+  '/:id/thumbnail',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { params: createIdParamsSchema() },
+    successStatus: 204,
+    handler: async (ctx) => {
+      const { id: contentId } = ctx.input.params;
+
+      // Get content to verify ownership
+      const content = await ctx.services.content.get(contentId, ctx.user.id);
+      if (!content) {
+        throw new ContentNotFoundError(contentId);
+      }
+
+      // Use service method for cleanup (deletes R2 files + clears DB field)
+      await ctx.services.imageProcessing.deleteContentThumbnail(
+        contentId,
+        content.creatorId
+      );
+
+      return null;
     },
   })
 );

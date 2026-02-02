@@ -12,6 +12,8 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').default(false).notNull(),
   image: text('image'),
+  /** Custom uploaded avatar URL (R2 base path). Falls back to `image` if null. */
+  avatarUrl: text('avatar_url'),
   role: text('role').default('customer').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
