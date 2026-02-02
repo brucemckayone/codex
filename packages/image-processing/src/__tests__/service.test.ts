@@ -504,9 +504,11 @@ describe('ImageProcessingService', () => {
           .fn()
           .mockRejectedValue(new Error('R2 service unavailable'));
 
+        // With Promise.allSettled, we get a cleaner error about upload failure
+        // rather than the raw R2 error, and cleanup is guaranteed
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
-        ).rejects.toThrow(/R2 service unavailable/i);
+        ).rejects.toThrow(/upload failed.*variant.*failed/i);
       });
 
       it('should propagate R2Service.delete errors', async () => {

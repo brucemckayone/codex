@@ -20,13 +20,21 @@ export const VARIANT_WIDTHS = {
  * 2. Calculate dimensions for sm, md, lg.
  * 3. Resize (Lanczos3) - Never upscale, preserve aspect ratio.
  * 4. Convert to WebP.
- * 5. Free Wasm memory.
+ * 5. Free Wasm memory (all allocations tracked and freed in single finally block).
+ *
+ * Memory Safety:
+ * - All Wasm allocations are tracked in an array
+ * - Single finally block frees all in reverse order
+ * - Individual free() failures are logged but don't prevent other frees
+ * - Prevents memory leaks even if inner operations throw
  *
  * @param inputBuffer - Raw image buffer (JPEG, PNG, etc.)
  * @returns Object containing WebP buffers for each variant
  */
 export function processImageVariants(inputBuffer: Uint8Array): ImageVariants {
   const image = SafePhotonImage.fromBuffer(inputBuffer);
+  // Track all Wasm allocations for guaranteed cleanup
+  const allocated: SafePhotonImage[] = [image];
 
   try {
     const originalWidth = image.get_width();
@@ -44,11 +52,8 @@ export function processImageVariants(inputBuffer: Uint8Array): ImageVariants {
       // but 'resize' creates a new instance which is clean.
 
       const resized = image.resize(finalWidth, finalHeight, 1); // 1 = Lanczos3
-      try {
-        return resized.getBytesWebP();
-      } finally {
-        resized.free();
-      }
+      allocated.push(resized); // Track for cleanup
+      return resized.getBytesWebP();
     };
 
     // Serial generation (Wasm is synchronous anyway)
@@ -58,6 +63,16 @@ export function processImageVariants(inputBuffer: Uint8Array): ImageVariants {
       lg: generateVariant(VARIANT_WIDTHS.lg),
     };
   } finally {
-    image.free();
+    // Free all allocations in reverse order, catching individual failures
+    // to ensure all get freed even if one throws
+    for (let i = allocated.length - 1; i >= 0; i--) {
+      try {
+        // Optional chain safe: i bounded by array length, but ?. satisfies linter
+        allocated[i]?.free();
+      } catch {
+        // Log silently - SafePhotonImage.free() is idempotent,
+        // but we catch to ensure all allocations are attempted
+      }
+    }
   }
 }

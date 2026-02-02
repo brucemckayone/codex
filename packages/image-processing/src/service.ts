@@ -9,7 +9,6 @@ import type { R2Service } from '@codex/cloudflare-clients';
 import { and, eq, schema } from '@codex/database';
 import {
   BaseService,
-  ForbiddenError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -127,8 +126,8 @@ export class ImageProcessingService extends BaseService {
       lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
     };
 
-    // Upload in parallel
-    await Promise.all([
+    // Upload in parallel with allSettled to handle partial failures
+    const uploadResults = await Promise.allSettled([
       this.r2Service.put(
         keys.sm,
         variants.sm,
@@ -158,6 +157,19 @@ export class ImageProcessingService extends BaseService {
       ),
     ]);
 
+    const failures = uploadResults.filter((r) => r.status === 'rejected');
+    if (failures.length > 0) {
+      // Cleanup all variants (R2 delete is idempotent)
+      await Promise.allSettled([
+        this.r2Service.delete(keys.sm),
+        this.r2Service.delete(keys.md),
+        this.r2Service.delete(keys.lg),
+      ]);
+      throw new ValidationError(
+        `Thumbnail upload failed: ${failures.length} variant(s) failed`
+      );
+    }
+
     // Use LG variant as determining URL for DB
     const r2Key = keys.lg;
     const url = `${this.r2PublicUrlBase}/${r2Key}`;
@@ -181,7 +193,16 @@ export class ImageProcessingService extends BaseService {
           this.r2Service.delete(keys.lg),
         ]);
       } catch (cleanupError) {
-        console.error('Failed to cleanup orphaned thumbnails:', cleanupError);
+        this.obs.warn('R2 cleanup failed after DB error', {
+          context: 'content-thumbnail',
+          resourceId: contentId,
+          creatorId,
+          r2Keys: [keys.sm, keys.md, keys.lg],
+          error:
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+        });
       }
       throw error;
     }
@@ -213,7 +234,8 @@ export class ImageProcessingService extends BaseService {
       lg: getUserAvatarKey(userId, 'lg'),
     };
 
-    await Promise.all([
+    // Upload in parallel with allSettled to handle partial failures
+    const avatarUploadResults = await Promise.allSettled([
       this.r2Service.put(
         keys.sm,
         variants.sm,
@@ -243,6 +265,21 @@ export class ImageProcessingService extends BaseService {
       ),
     ]);
 
+    const avatarFailures = avatarUploadResults.filter(
+      (r) => r.status === 'rejected'
+    );
+    if (avatarFailures.length > 0) {
+      // Cleanup all variants (R2 delete is idempotent)
+      await Promise.allSettled([
+        this.r2Service.delete(keys.sm),
+        this.r2Service.delete(keys.md),
+        this.r2Service.delete(keys.lg),
+      ]);
+      throw new ValidationError(
+        `Avatar upload failed: ${avatarFailures.length} variant(s) failed`
+      );
+    }
+
     const r2Key = keys.lg;
     const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
@@ -260,7 +297,15 @@ export class ImageProcessingService extends BaseService {
           this.r2Service.delete(keys.lg),
         ]);
       } catch (cleanupError) {
-        console.error('Failed to cleanup orphaned avatars:', cleanupError);
+        this.obs.warn('R2 cleanup failed after DB error', {
+          context: 'user-avatar',
+          resourceId: userId,
+          r2Keys: [keys.sm, keys.md, keys.lg],
+          error:
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+        });
       }
       throw error;
     }
@@ -316,7 +361,16 @@ export class ImageProcessingService extends BaseService {
         try {
           await this.r2Service.delete(key);
         } catch (cleanupError) {
-          console.error('Failed to cleanup orphaned SVG logo:', cleanupError);
+          this.obs.warn('R2 cleanup failed after DB error', {
+            context: 'org-logo-svg',
+            resourceId: organizationId,
+            creatorId,
+            r2Keys: [key],
+            error:
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError),
+          });
         }
         throw error;
       }
@@ -338,7 +392,8 @@ export class ImageProcessingService extends BaseService {
       lg: getOrgLogoKey(creatorId, 'lg'),
     };
 
-    await Promise.all([
+    // Upload in parallel with allSettled to handle partial failures
+    const logoUploadResults = await Promise.allSettled([
       this.r2Service.put(
         keys.sm,
         variants.sm,
@@ -368,6 +423,21 @@ export class ImageProcessingService extends BaseService {
       ),
     ]);
 
+    const logoFailures = logoUploadResults.filter(
+      (r) => r.status === 'rejected'
+    );
+    if (logoFailures.length > 0) {
+      // Cleanup all variants (R2 delete is idempotent)
+      await Promise.allSettled([
+        this.r2Service.delete(keys.sm),
+        this.r2Service.delete(keys.md),
+        this.r2Service.delete(keys.lg),
+      ]);
+      throw new ValidationError(
+        `Logo upload failed: ${logoFailures.length} variant(s) failed`
+      );
+    }
+
     const r2Key = keys.lg;
     const url = `${this.r2PublicUrlBase}/${r2Key}`;
 
@@ -385,7 +455,16 @@ export class ImageProcessingService extends BaseService {
           this.r2Service.delete(keys.lg),
         ]);
       } catch (cleanupError) {
-        console.error('Failed to cleanup orphaned logos:', cleanupError);
+        this.obs.warn('R2 cleanup failed after DB error', {
+          context: 'org-logo-raster',
+          resourceId: organizationId,
+          creatorId,
+          r2Keys: [keys.sm, keys.md, keys.lg],
+          error:
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+        });
       }
       throw error;
     }
