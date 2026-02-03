@@ -24,12 +24,19 @@ import {
   sanitizeSvgContent,
   validateImageSignature,
 } from '@codex/validation';
+import type { OrphanedFileService } from './orphaned-file-service';
 import { processImageVariants } from './processor';
 
 export interface ImageProcessingResult {
   url: string;
   size: number;
   mimeType: string;
+}
+
+export interface ImageProcessingServiceConfig extends ServiceConfig {
+  r2Service: R2Service;
+  r2PublicUrlBase: string;
+  orphanedFileService?: OrphanedFileService;
 }
 
 /**
@@ -95,13 +102,13 @@ async function validateImageFile(
 export class ImageProcessingService extends BaseService {
   private r2Service: R2Service;
   private r2PublicUrlBase: string;
+  private orphanedFileService?: OrphanedFileService;
 
-  constructor(
-    config: ServiceConfig & { r2Service: R2Service; r2PublicUrlBase: string }
-  ) {
+  constructor(config: ImageProcessingServiceConfig) {
     super(config);
     this.r2Service = config.r2Service;
     this.r2PublicUrlBase = config.r2PublicUrlBase;
+    this.orphanedFileService = config.orphanedFileService;
   }
 
   /**
@@ -186,23 +193,33 @@ export class ImageProcessingService extends BaseService {
           )
         );
     } catch (error) {
-      try {
-        await Promise.all([
-          this.r2Service.delete(keys.sm),
-          this.r2Service.delete(keys.md),
-          this.r2Service.delete(keys.lg),
-        ]);
-      } catch (cleanupError) {
-        this.obs.warn('R2 cleanup failed after DB error', {
-          context: 'content-thumbnail',
-          resourceId: contentId,
-          creatorId,
-          r2Keys: [keys.sm, keys.md, keys.lg],
-          error:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        });
+      const allKeys = [keys.sm, keys.md, keys.lg];
+      const cleanupResults = await Promise.allSettled(
+        allKeys.map((key) => this.r2Service.delete(key))
+      );
+
+      // Track any failed cleanups as orphans
+      const failedKeys = allKeys.filter(
+        (_, i) => cleanupResults[i]?.status === 'rejected'
+      );
+      if (failedKeys.length > 0) {
+        if (this.orphanedFileService) {
+          await this.orphanedFileService.recordOrphanedFiles(
+            failedKeys.map((r2Key) => ({
+              r2Key,
+              imageType: 'content_thumbnail' as const,
+              entityId: contentId,
+              entityType: 'content' as const,
+            }))
+          );
+        } else {
+          this.obs.warn('R2 cleanup failed after DB error', {
+            context: 'content-thumbnail',
+            resourceId: contentId,
+            creatorId,
+            r2Keys: failedKeys,
+          });
+        }
       }
       throw error;
     }
@@ -290,22 +307,32 @@ export class ImageProcessingService extends BaseService {
         .set({ avatarUrl: url })
         .where(eq(schema.users.id, userId));
     } catch (error) {
-      try {
-        await Promise.all([
-          this.r2Service.delete(keys.sm),
-          this.r2Service.delete(keys.md),
-          this.r2Service.delete(keys.lg),
-        ]);
-      } catch (cleanupError) {
-        this.obs.warn('R2 cleanup failed after DB error', {
-          context: 'user-avatar',
-          resourceId: userId,
-          r2Keys: [keys.sm, keys.md, keys.lg],
-          error:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        });
+      const allKeys = [keys.sm, keys.md, keys.lg];
+      const cleanupResults = await Promise.allSettled(
+        allKeys.map((key) => this.r2Service.delete(key))
+      );
+
+      // Track any failed cleanups as orphans
+      const failedKeys = allKeys.filter(
+        (_, i) => cleanupResults[i]?.status === 'rejected'
+      );
+      if (failedKeys.length > 0) {
+        if (this.orphanedFileService) {
+          await this.orphanedFileService.recordOrphanedFiles(
+            failedKeys.map((r2Key) => ({
+              r2Key,
+              imageType: 'avatar' as const,
+              entityId: userId,
+              entityType: 'user' as const,
+            }))
+          );
+        } else {
+          this.obs.warn('R2 cleanup failed after DB error', {
+            context: 'user-avatar',
+            resourceId: userId,
+            r2Keys: failedKeys,
+          });
+        }
       }
       throw error;
     }
@@ -358,19 +385,27 @@ export class ImageProcessingService extends BaseService {
           .set({ logoUrl: url })
           .where(eq(schema.organizations.id, organizationId));
       } catch (error) {
-        try {
-          await this.r2Service.delete(key);
-        } catch (cleanupError) {
-          this.obs.warn('R2 cleanup failed after DB error', {
-            context: 'org-logo-svg',
-            resourceId: organizationId,
-            creatorId,
-            r2Keys: [key],
-            error:
-              cleanupError instanceof Error
-                ? cleanupError.message
-                : String(cleanupError),
-          });
+        const cleanupResult = await this.r2Service
+          .delete(key)
+          .then(() => ({ success: true as const }))
+          .catch((e) => ({ success: false as const, error: e }));
+
+        if (!cleanupResult.success) {
+          if (this.orphanedFileService) {
+            await this.orphanedFileService.recordOrphanedFile({
+              r2Key: key,
+              imageType: 'logo',
+              entityId: organizationId,
+              entityType: 'organization',
+            });
+          } else {
+            this.obs.warn('R2 cleanup failed after DB error', {
+              context: 'org-logo-svg',
+              resourceId: organizationId,
+              creatorId,
+              r2Keys: [key],
+            });
+          }
         }
         throw error;
       }
@@ -448,23 +483,33 @@ export class ImageProcessingService extends BaseService {
         .set({ logoUrl: url })
         .where(eq(schema.organizations.id, organizationId));
     } catch (error) {
-      try {
-        await Promise.all([
-          this.r2Service.delete(keys.sm),
-          this.r2Service.delete(keys.md),
-          this.r2Service.delete(keys.lg),
-        ]);
-      } catch (cleanupError) {
-        this.obs.warn('R2 cleanup failed after DB error', {
-          context: 'org-logo-raster',
-          resourceId: organizationId,
-          creatorId,
-          r2Keys: [keys.sm, keys.md, keys.lg],
-          error:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        });
+      const allKeys = [keys.sm, keys.md, keys.lg];
+      const cleanupResults = await Promise.allSettled(
+        allKeys.map((key) => this.r2Service.delete(key))
+      );
+
+      // Track any failed cleanups as orphans
+      const failedKeys = allKeys.filter(
+        (_, i) => cleanupResults[i]?.status === 'rejected'
+      );
+      if (failedKeys.length > 0) {
+        if (this.orphanedFileService) {
+          await this.orphanedFileService.recordOrphanedFiles(
+            failedKeys.map((r2Key) => ({
+              r2Key,
+              imageType: 'logo' as const,
+              entityId: organizationId,
+              entityType: 'organization' as const,
+            }))
+          );
+        } else {
+          this.obs.warn('R2 cleanup failed after DB error', {
+            context: 'org-logo-raster',
+            resourceId: organizationId,
+            creatorId,
+            r2Keys: failedKeys,
+          });
+        }
       }
       throw error;
     }
@@ -479,6 +524,8 @@ export class ImageProcessingService extends BaseService {
   /**
    * Delete all size variants for a content thumbnail
    * Called by DELETE endpoint
+   *
+   * On R2 failure: Records orphans for deferred cleanup instead of throwing
    */
   async deleteContentThumbnail(
     contentId: string,
@@ -490,9 +537,34 @@ export class ImageProcessingService extends BaseService {
       getContentThumbnailKey(creatorId, contentId, 'lg'),
     ];
 
-    await Promise.all(keys.map((key) => this.r2Service.delete(key)));
+    // Try to delete from R2, track failures as orphans
+    const deleteResults = await Promise.allSettled(
+      keys.map((key) => this.r2Service.delete(key))
+    );
 
-    // Clear database field
+    // Record any failed deletions as orphans
+    const failedKeys = keys.filter(
+      (_, i) => deleteResults[i]?.status === 'rejected'
+    );
+    if (failedKeys.length > 0 && this.orphanedFileService) {
+      await this.orphanedFileService.recordOrphanedFiles(
+        failedKeys.map((r2Key) => ({
+          r2Key,
+          imageType: 'content_thumbnail' as const,
+          entityId: contentId,
+          entityType: 'content' as const,
+        }))
+      );
+    } else if (failedKeys.length > 0) {
+      this.obs.warn('R2 thumbnail deletion failed, no orphan service', {
+        context: 'content-thumbnail-delete',
+        contentId,
+        creatorId,
+        failedKeys,
+      });
+    }
+
+    // Clear database field regardless of R2 result
     await this.db
       .update(schema.content)
       .set({ thumbnailUrl: null })
@@ -507,6 +579,8 @@ export class ImageProcessingService extends BaseService {
   /**
    * Delete all size variants for a user avatar
    * Called by DELETE endpoint
+   *
+   * On R2 failure: Records orphans for deferred cleanup instead of throwing
    */
   async deleteUserAvatar(userId: string): Promise<void> {
     // Get current avatar URL
@@ -525,9 +599,35 @@ export class ImageProcessingService extends BaseService {
       getUserAvatarKey(userId, 'md'),
       getUserAvatarKey(userId, 'lg'),
     ];
-    await Promise.all(keys.map((key) => this.r2Service.delete(key)));
 
-    // Clear database field
+    // Try to delete from R2, track failures as orphans
+    const deleteResults = await Promise.allSettled(
+      keys.map((key) => this.r2Service.delete(key))
+    );
+
+    // Record any failed deletions as orphans
+    const failedKeys = keys.filter(
+      (_, i) => deleteResults[i]?.status === 'rejected'
+    );
+
+    if (failedKeys.length > 0 && this.orphanedFileService) {
+      await this.orphanedFileService.recordOrphanedFiles(
+        failedKeys.map((r2Key) => ({
+          r2Key,
+          imageType: 'avatar' as const,
+          entityId: userId,
+          entityType: 'user' as const,
+        }))
+      );
+    } else if (failedKeys.length > 0) {
+      this.obs.warn('R2 avatar deletion failed, no orphan service', {
+        context: 'user-avatar-delete',
+        userId,
+        failedKeys,
+      });
+    }
+
+    // Clear database field regardless of R2 result
     await this.db
       .update(schema.users)
       .set({ avatarUrl: null, updatedAt: new Date() })
@@ -537,6 +637,8 @@ export class ImageProcessingService extends BaseService {
   /**
    * Delete all size variants for an organization logo
    * Called by DELETE endpoint
+   *
+   * On R2 failure: Records orphans for deferred cleanup instead of throwing
    */
   async deleteOrgLogo(
     organizationId: string,
@@ -555,20 +657,46 @@ export class ImageProcessingService extends BaseService {
     // Determine if SVG or WebP
     const isSvg = org.logoUrl.includes('.svg');
 
+    let keys: string[];
     if (isSvg) {
-      // Delete single SVG file
-      await this.r2Service.delete(`${creatorId}/branding/logo/logo.svg`);
+      keys = [`${creatorId}/branding/logo/logo.svg`];
     } else {
-      // Delete WebP variants using key helpers
-      const keys = [
+      keys = [
         getOrgLogoKey(creatorId, 'sm'),
         getOrgLogoKey(creatorId, 'md'),
         getOrgLogoKey(creatorId, 'lg'),
       ];
-      await Promise.all(keys.map((key) => this.r2Service.delete(key)));
     }
 
-    // Clear database field
+    // Try to delete from R2, track failures as orphans
+    const deleteResults = await Promise.allSettled(
+      keys.map((key) => this.r2Service.delete(key))
+    );
+
+    // Record any failed deletions as orphans
+    const failedKeys = keys.filter(
+      (_, i) => deleteResults[i]?.status === 'rejected'
+    );
+
+    if (failedKeys.length > 0 && this.orphanedFileService) {
+      await this.orphanedFileService.recordOrphanedFiles(
+        failedKeys.map((r2Key) => ({
+          r2Key,
+          imageType: 'logo' as const,
+          entityId: organizationId,
+          entityType: 'organization' as const,
+        }))
+      );
+    } else if (failedKeys.length > 0) {
+      this.obs.warn('R2 logo deletion failed, no orphan service', {
+        context: 'org-logo-delete',
+        organizationId,
+        creatorId,
+        failedKeys,
+      });
+    }
+
+    // Clear database field regardless of R2 result
     await this.db
       .update(schema.organizations)
       .set({ logoUrl: null })

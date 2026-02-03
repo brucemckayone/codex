@@ -10,6 +10,24 @@
     "enabled": true
   },
 
+  // Durable Objects
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ORPHAN_CLEANUP_DO",
+        "class_name": "OrphanedFileCleanupDO"
+      }
+    ]
+  },
+
+  // Migrations for Durable Objects
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["OrphanedFileCleanupDO"]
+    }
+  ],
+
   // KV Namespaces
   "kv_namespaces": [
     {

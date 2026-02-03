@@ -14,4 +14,10 @@ export {
   validateImageUpload,
 } from '@codex/validation';
 export { ImageUploadError, InvalidImageError } from './errors';
+export {
+  type CleanupStats,
+  type OrphanedFileRecord,
+  OrphanedFileService,
+  type RecordOrphanInput,
+} from './orphaned-file-service';
 export { type ImageProcessingResult, ImageProcessingService } from './service';

@@ -204,6 +204,13 @@
       "when": 1768337966562,
       "tag": "0028_green_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1770147622550,
+      "tag": "0029_optimal_newton_destine",
+      "breakpoints": true
     }
   ]
 }
