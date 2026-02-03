@@ -10,5 +10,6 @@ export * from './ecommerce';
 export * from './notifications';
 export * from './playback';
 export * from './settings';
+export * from './storage';
 export * from './test';
 export * from './users';

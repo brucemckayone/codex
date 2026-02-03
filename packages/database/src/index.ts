@@ -24,4 +24,12 @@ export * from './client';
 export { createDbClient } from './client';
 export type { DbEnvVars } from './config/env.config';
 export * as schema from './schema';
+
+export type {
+  ORPHANED_ENTITY_TYPES,
+  ORPHANED_IMAGE_TYPES,
+  OrphanedEntityType,
+  OrphanedImageType,
+  OrphanStatus,
+} from './schema/storage';
 export * from './utils';

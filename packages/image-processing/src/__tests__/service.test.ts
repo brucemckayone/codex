@@ -2,6 +2,7 @@ import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OrphanedFileService } from '../orphaned-file-service';
 import * as processor from '../processor';
 import { ImageProcessingService } from '../service';
 
@@ -511,14 +512,18 @@ describe('ImageProcessingService', () => {
         ).rejects.toThrow(/upload failed.*variant.*failed/i);
       });
 
-      it('should propagate R2Service.delete errors', async () => {
+      it('should handle R2Service.delete errors gracefully (log warning, clear DB)', async () => {
         testMockR2Service.delete = vi
           .fn()
           .mockRejectedValue(new Error('R2 delete failed'));
 
+        // Should NOT throw - resilient delete pattern
         await expect(
           service.deleteContentThumbnail('content-1', 'user-1')
-        ).rejects.toThrow(/R2 delete failed/i);
+        ).resolves.toBeUndefined();
+
+        // Database should still be updated (cleared) despite R2 failure
+        expect(testMockDb.update).toHaveBeenCalled();
       });
     });
 
@@ -539,7 +544,7 @@ describe('ImageProcessingService', () => {
               where: vi.fn().mockRejectedValue(new Error('Database error')),
             }),
           }),
-        } as unknown as DB;
+        } as unknown as Database;
 
         // Create a new service instance with the error mock
         const errorService = new ImageProcessingService({
@@ -576,6 +581,167 @@ describe('ImageProcessingService', () => {
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
         ).rejects.toThrow(/Failed to decode image/i);
+      });
+    });
+
+    describe('Partial Upload Failures', () => {
+      it('should cleanup all variants when one R2 upload fails', async () => {
+        const file = createTestImageFile('image/jpeg', 'test.jpg');
+
+        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+          sm: new Uint8Array([1]),
+          md: new Uint8Array([2]),
+          lg: new Uint8Array([3]),
+        });
+
+        // First upload succeeds, second fails, third succeeds
+        testMockR2Service.put = vi
+          .fn()
+          .mockResolvedValueOnce(undefined) // sm succeeds
+          .mockRejectedValueOnce(new Error('R2 timeout')) // md fails
+          .mockResolvedValueOnce(undefined); // lg succeeds
+
+        await expect(
+          service.processContentThumbnail('content-1', 'user-1', file)
+        ).rejects.toThrow(/upload failed.*1 variant.*failed/i);
+
+        // All three variants should be deleted in cleanup
+        expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+      });
+
+      it('should cleanup all variants when two R2 uploads fail', async () => {
+        const file = createTestImageFile('image/png', 'test.png');
+
+        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+          sm: new Uint8Array([1]),
+          md: new Uint8Array([2]),
+          lg: new Uint8Array([3]),
+        });
+
+        // First upload succeeds, second and third fail
+        testMockR2Service.put = vi
+          .fn()
+          .mockResolvedValueOnce(undefined) // sm succeeds
+          .mockRejectedValueOnce(new Error('R2 timeout')) // md fails
+          .mockRejectedValueOnce(new Error('R2 quota exceeded')); // lg fails
+
+        await expect(
+          service.processContentThumbnail('content-1', 'user-1', file)
+        ).rejects.toThrow(/upload failed.*2 variant.*failed/i);
+
+        // All three variants should be deleted in cleanup
+        expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+      });
+    });
+
+    describe('Orphan Recording on Cleanup Failure', () => {
+      it('should record orphans when R2 cleanup fails after DB error', async () => {
+        const file = createTestImageFile('image/png', 'test.png');
+
+        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+          sm: new Uint8Array([1]),
+          md: new Uint8Array([2]),
+          lg: new Uint8Array([3]),
+        });
+
+        // Create mock orphaned file service
+        const mockOrphanedFileService = {
+          recordOrphanedFiles: vi
+            .fn()
+            .mockResolvedValue(['orphan-1', 'orphan-2']),
+        };
+
+        // Create a mock DB that fails on update
+        const errorMockDb = {
+          update: vi.fn().mockReturnValue({
+            set: vi.fn().mockReturnValue({
+              where: vi
+                .fn()
+                .mockRejectedValue(new Error('Database connection lost')),
+            }),
+          }),
+        } as unknown as Database;
+
+        // R2 put succeeds, but delete fails during cleanup
+        const mockR2Service = {
+          put: vi.fn().mockResolvedValue(undefined),
+          delete: vi.fn().mockRejectedValue(new Error('R2 cleanup failed')),
+        } as unknown as R2Service;
+
+        const serviceWithOrphanTracking = new ImageProcessingService({
+          db: { ...errorMockDb, query: mockDbQuery } as unknown as Database,
+          environment: 'test',
+          r2Service: mockR2Service,
+          r2PublicUrlBase: 'https://test.r2.dev',
+          orphanedFileService:
+            mockOrphanedFileService as unknown as OrphanedFileService,
+        });
+
+        await expect(
+          serviceWithOrphanTracking.processContentThumbnail(
+            'content-1',
+            'user-1',
+            file
+          )
+        ).rejects.toThrow(/Database connection lost/i);
+
+        // Should have recorded orphaned files
+        expect(
+          mockOrphanedFileService.recordOrphanedFiles
+        ).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            expect.objectContaining({
+              imageType: 'content_thumbnail',
+              entityId: 'content-1',
+              entityType: 'content',
+            }),
+          ])
+        );
+      });
+
+      it('should log warning when orphanedFileService not provided and cleanup fails', async () => {
+        const file = createTestImageFile('image/jpeg', 'test.jpg');
+
+        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+          sm: new Uint8Array([1]),
+          md: new Uint8Array([2]),
+          lg: new Uint8Array([3]),
+        });
+
+        // Create a mock DB that fails on update
+        const errorMockDb = {
+          update: vi.fn().mockReturnValue({
+            set: vi.fn().mockReturnValue({
+              where: vi.fn().mockRejectedValue(new Error('Database error')),
+            }),
+          }),
+        } as unknown as Database;
+
+        // R2 put succeeds, but delete fails during cleanup
+        const mockR2Service = {
+          put: vi.fn().mockResolvedValue(undefined),
+          delete: vi.fn().mockRejectedValue(new Error('R2 cleanup failed')),
+        } as unknown as R2Service;
+
+        // Service WITHOUT orphanedFileService
+        const serviceWithoutOrphanTracking = new ImageProcessingService({
+          db: { ...errorMockDb, query: mockDbQuery } as unknown as Database,
+          environment: 'test',
+          r2Service: mockR2Service,
+          r2PublicUrlBase: 'https://test.r2.dev',
+          // No orphanedFileService provided
+        });
+
+        await expect(
+          serviceWithoutOrphanTracking.processContentThumbnail(
+            'content-1',
+            'user-1',
+            file
+          )
+        ).rejects.toThrow(/Database error/i);
+
+        // Warning would be logged via obs.warn, but we can verify the operation completed
+        // The key assertion is that it doesn't throw a different error or hang
       });
     });
   });

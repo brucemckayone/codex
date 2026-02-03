@@ -17,12 +17,16 @@
  * - @codex/security for authentication
  * - @codex/worker-utils for standardized worker setup
  *
+ * Durable Objects:
+ * - OrphanedFileCleanupDO: Periodic cleanup of orphaned R2 files
+ *
  * Routes:
  * - /health - Health check endpoint (public)
  * - /internal/media/:id/transcode - Trigger transcoding (worker auth)
  * - /api/transcoding/webhook - RunPod webhook callback (HMAC verified)
  * - /api/transcoding/retry/:id - Retry failed transcoding (authenticated)
  * - /api/transcoding/status/:id - Get transcoding status (authenticated)
+ * - /internal/orphan-cleanup/* - Orphan cleanup DO management (internal)
  */
 
 import {
@@ -33,6 +37,9 @@ import {
 // Import route modules
 import transcodingRoutes from './routes/transcoding';
 import webhookRoutes from './routes/webhook';
+
+// Export Durable Object class for Cloudflare binding
+export { OrphanedFileCleanupDO } from './durable-objects/orphaned-file-cleanup-do';
 
 // ============================================================================
 // Application Setup
@@ -92,6 +99,44 @@ app.route('/', transcodingRoutes);
  * - /api/transcoding/webhook (HMAC verified, no session auth)
  */
 app.route('/', webhookRoutes);
+
+// ============================================================================
+// Orphan Cleanup DO Routes (Internal)
+// ============================================================================
+
+/**
+ * Forward requests to OrphanedFileCleanupDO
+ * - GET /internal/orphan-cleanup/status - Get cleanup stats
+ * - POST /internal/orphan-cleanup/trigger - Manually trigger cleanup
+ * - POST /internal/orphan-cleanup/schedule - Reschedule next alarm
+ */
+app.all('/internal/orphan-cleanup/*', async (c) => {
+  const env = c.env as unknown as {
+    ORPHAN_CLEANUP_DO: DurableObjectNamespace;
+  };
+
+  if (!env.ORPHAN_CLEANUP_DO) {
+    return c.json({ error: 'Orphan cleanup DO not configured' }, 503);
+  }
+
+  // Get the singleton DO instance
+  const id = env.ORPHAN_CLEANUP_DO.idFromName('singleton');
+  const stub = env.ORPHAN_CLEANUP_DO.get(id);
+
+  // Extract the path after /internal/orphan-cleanup
+  const url = new URL(c.req.url);
+  const doPath = url.pathname.replace('/internal/orphan-cleanup', '');
+  const doUrl = new URL(doPath || '/', url.origin);
+
+  // Forward the request to the DO
+  return stub.fetch(
+    new Request(doUrl.toString(), {
+      method: c.req.method,
+      headers: c.req.raw.headers,
+      body: c.req.method !== 'GET' ? c.req.raw.body : undefined,
+    })
+  );
+});
 
 // ============================================================================
 // Mock Routes (Development/Test Only)

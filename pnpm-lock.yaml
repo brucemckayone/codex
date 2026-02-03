@@ -1363,12 +1363,21 @@ importers:
 
   workers/media-api:
     dependencies:
+      '@codex/cloudflare-clients':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare-clients
       '@codex/constants':
         specifier: workspace:*
         version: link:../../packages/constants
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@codex/image-processing':
+        specifier: workspace:*
+        version: link:../../packages/image-processing
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
@@ -1403,9 +1412,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250102.0
         version: 4.20251121.0
-      '@codex/image-processing':
-        specifier: workspace:*
-        version: link:../../packages/image-processing
       '@types/node':
         specifier: ^22.13.0
         version: 22.13.0
