@@ -17,7 +17,6 @@ import {
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context, MiddlewareHandler, Next } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 
 /**
  * Configuration for worker middleware
@@ -34,12 +33,6 @@ export interface MiddlewareConfig {
   environment?: 'development' | 'staging' | 'production';
 
   /**
-   * Enable request logging
-   * @default true
-   */
-  enableLogging?: boolean;
-
-  /**
    * Enable CORS
    * @default true
    */
@@ -50,13 +43,6 @@ export interface MiddlewareConfig {
    * @default true
    */
   enableSecurityHeaders?: boolean;
-}
-
-/**
- * Creates standard logging middleware
- */
-export function createLoggerMiddleware(): MiddlewareHandler {
-  return logger();
 }
 
 /**

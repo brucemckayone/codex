@@ -496,7 +496,6 @@ describe('Worker Factory Integration', () => {
     it('should support all middleware flags', async () => {
       const app = createWorker({
         serviceName: 'test-worker',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableRequestTracking: false,

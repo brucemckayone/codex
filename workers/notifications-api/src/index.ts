@@ -38,7 +38,6 @@ const app = createWorker({
   serviceName: 'notifications-api',
   version: '1.0.0',
   enableRequestTracking: true,
-  enableLogging: true,
   enableCors: true,
   enableSecurityHeaders: true,
   enableGlobalAuth: false, // Using route-level procedure() instead
