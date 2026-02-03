@@ -17,7 +17,6 @@ import {
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context, MiddlewareHandler, Next } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 
 /**
  * Configuration for worker middleware
@@ -34,12 +33,6 @@ export interface MiddlewareConfig {
   environment?: 'development' | 'staging' | 'production';
 
   /**
-   * Enable request logging
-   * @default true
-   */
-  enableLogging?: boolean;
-
-  /**
    * Enable CORS
    * @default true
    */
@@ -50,13 +43,6 @@ export interface MiddlewareConfig {
    * @default true
    */
   enableSecurityHeaders?: boolean;
-}
-
-/**
- * Creates standard logging middleware
- */
-export function createLoggerMiddleware(): MiddlewareHandler {
-  return logger();
 }
 
 /**
@@ -442,11 +428,13 @@ export function createNotFoundHandler() {
 export function createErrorHandler(environment?: string) {
   return (err: Error, c: Context) => {
     const obs = c.get('obs');
+    const requestId = c.get('requestId');
     obs?.error('Unhandled error', {
       error: err.message,
       stack: err.stack,
       path: c.req.path,
       method: c.req.method,
+      ...(requestId && { requestId }),
     });
 
     // Don't expose internal error details in production
@@ -550,6 +538,12 @@ export function createObservabilityMiddleware<T extends HonoEnv = HonoEnv>(
       c.env?.ENVIRONMENT || 'development'
     );
 
+    // Correlate logs with the request ID from tracking middleware
+    const requestId = c.get('requestId');
+    if (requestId) {
+      obs.setRequestId(requestId);
+    }
+
     // Make observability client available in context
     c.set('obs', obs);
 
@@ -572,9 +566,14 @@ export function createObservabilityErrorHandler(
   environment?: string
 ) {
   return (err: Error, c: Context) => {
-    const obs =
-      (c.get('obs') as ObservabilityClient | undefined) ||
-      new ObservabilityClient(serviceName, environment || 'development');
+    let obs = c.get('obs') as ObservabilityClient | undefined;
+    if (!obs) {
+      obs = new ObservabilityClient(serviceName, environment || 'development');
+      const requestId = c.get('requestId');
+      if (requestId) {
+        obs.setRequestId(requestId);
+      }
+    }
 
     obs.trackError(err, {
       url: c.req.url,

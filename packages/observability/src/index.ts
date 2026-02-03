@@ -39,6 +39,7 @@ export interface ErrorContext {
 export class ObservabilityClient {
   private environment: string;
   private serviceName: string;
+  private requestId?: string;
   private redactionOptions: RedactionOptions;
 
   constructor(
@@ -58,6 +59,13 @@ export class ObservabilityClient {
   }
 
   /**
+   * Set the request ID for correlation across log entries
+   */
+  setRequestId(requestId: string): void {
+    this.requestId = requestId;
+  }
+
+  /**
    * Log a generic event
    */
   log(event: LogEvent): void {
@@ -72,6 +80,7 @@ export class ObservabilityClient {
       service: this.serviceName,
       environment: this.environment,
       timestamp: event.timestamp.toISOString(),
+      ...(this.requestId && { requestId: this.requestId }),
     };
 
     // Current implementation: console logging

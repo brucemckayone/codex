@@ -11,7 +11,6 @@ import type { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context, Hono, MiddlewareHandler, Next } from 'hono';
 import {
-  createLoggerMiddleware,
   createObservabilityMiddleware,
   createRequestTrackingMiddleware,
   createSecurityHeadersMiddleware,
@@ -25,12 +24,6 @@ export interface MiddlewareChainOptions {
    * Service name for identification (used in observability)
    */
   serviceName: string;
-
-  /**
-   * Skip request logging middleware
-   * @default false
-   */
-  skipLogging?: boolean;
 
   /**
    * Skip security headers middleware
@@ -79,10 +72,9 @@ export interface ApplyMiddlewareChainOptions extends MiddlewareChainOptions {
  *
  * The standard chain includes (in order):
  * 1. Request tracking (UUID, client IP, user agent) - unless skipRequestTracking is true
- * 2. Request logging - unless skipLogging is true
- * 3. Security headers - unless skipSecurityHeaders is true
- * 4. Observability middleware - if enableObservability is true
- * 5. Custom middleware - if provided
+ * 2. Security headers - unless skipSecurityHeaders is true
+ * 3. Observability middleware - if enableObservability is true
+ * 4. Custom middleware - if provided
  *
  * @param options - Configuration options for the middleware chain
  * @returns Array of middleware handlers to apply
@@ -112,7 +104,6 @@ export interface ApplyMiddlewareChainOptions extends MiddlewareChainOptions {
  * ```typescript
  * const middleware = createStandardMiddlewareChain({
  *   serviceName: 'my-api',
- *   skipLogging: true,
  *   skipSecurityHeaders: true,
  * });
  * ```
@@ -122,7 +113,6 @@ export function createStandardMiddlewareChain(
 ): MiddlewareHandler<HonoEnv>[] {
   const {
     serviceName,
-    skipLogging = false,
     skipSecurityHeaders = false,
     skipRequestTracking = false,
     enableObservability = false,
@@ -136,22 +126,17 @@ export function createStandardMiddlewareChain(
     chain.push(createRequestTrackingMiddleware());
   }
 
-  // 2. Request logging
-  if (!skipLogging) {
-    chain.push(createLoggerMiddleware());
-  }
-
-  // 3. Security headers
+  // 2. Security headers
   if (!skipSecurityHeaders) {
     chain.push(createSecurityHeadersMiddleware());
   }
 
-  // 4. Observability
+  // 3. Observability
   if (enableObservability) {
     chain.push(createObservabilityMiddleware(serviceName));
   }
 
-  // 5. Custom middleware (applied last so they can access context from standard middleware)
+  // 4. Custom middleware (applied last so they can access context from standard middleware)
   if (customMiddleware.length > 0) {
     chain.push(...customMiddleware);
   }

@@ -145,6 +145,74 @@ describe('ObservabilityClient', () => {
     });
   });
 
+  describe('requestId correlation', () => {
+    it('should include requestId in log output when set', () => {
+      const obs = new ObservabilityClient('test-service');
+      obs.setRequestId('req-abc-123');
+      obs.info('correlated log');
+
+      const loggedData = JSON.parse(
+        consoleSpy.info.mock.calls[0]?.[0] as string
+      );
+      expect(loggedData.requestId).toBe('req-abc-123');
+    });
+
+    it('should not include requestId when not set', () => {
+      const obs = new ObservabilityClient('test-service');
+      obs.info('uncorrelated log');
+
+      const loggedData = JSON.parse(
+        consoleSpy.info.mock.calls[0]?.[0] as string
+      );
+      expect(loggedData).not.toHaveProperty('requestId');
+    });
+
+    it('should include requestId across all log levels', () => {
+      const obs = new ObservabilityClient('test-service');
+      obs.setRequestId('req-levels-456');
+
+      obs.info('info msg');
+      obs.warn('warn msg');
+      obs.error('error msg');
+
+      for (const [level, spy] of [
+        ['info', consoleSpy.info],
+        ['warn', consoleSpy.warn],
+        ['error', consoleSpy.error],
+      ] as const) {
+        const loggedData = JSON.parse(spy.mock.calls[0]?.[0] as string);
+        expect(loggedData.requestId).toBe('req-levels-456');
+      }
+    });
+
+    it('should include requestId in trackError output', () => {
+      const obs = new ObservabilityClient('test-service');
+      obs.setRequestId('req-err-789');
+      obs.trackError(new Error('fail'), { url: '/test' });
+
+      const loggedData = JSON.parse(
+        consoleSpy.error.mock.calls[0]?.[0] as string
+      );
+      expect(loggedData.requestId).toBe('req-err-789');
+    });
+
+    it('should include requestId in trackRequest output', () => {
+      const obs = new ObservabilityClient('test-service');
+      obs.setRequestId('req-track-000');
+      obs.trackRequest({
+        url: '/api/test',
+        method: 'GET',
+        duration: 50,
+        status: 200,
+      });
+
+      const loggedData = JSON.parse(
+        consoleSpy.info.mock.calls[0]?.[0] as string
+      );
+      expect(loggedData.requestId).toBe('req-track-000');
+    });
+  });
+
   describe('redaction', () => {
     it('should redact sensitive data from metadata', () => {
       const obs = new ObservabilityClient('secure-service', 'production');

@@ -14,7 +14,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,
@@ -38,7 +37,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,
@@ -59,7 +57,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,
@@ -86,7 +83,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,
@@ -114,7 +110,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,
@@ -135,7 +130,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,
@@ -164,7 +158,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,
@@ -187,7 +180,6 @@ describe('Health Check Enhancements', () => {
       const app = createWorker({
         serviceName: 'test-service',
         version: '1.0.0',
-        enableLogging: false,
         enableCors: false,
         enableSecurityHeaders: false,
         enableGlobalAuth: false,

@@ -30,7 +30,6 @@ export {
   createErrorResponse,
   createHealthCheckHandler,
   createKvCheck,
-  createLoggerMiddleware,
   createNotFoundHandler,
   createObservabilityErrorHandler,
   createObservabilityMiddleware,

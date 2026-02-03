@@ -49,7 +49,6 @@ const app = createWorker({
   serviceName: 'media-api',
   version: '1.0.0',
   enableRequestTracking: true, // UUID request IDs, IP tracking, user agent
-  enableLogging: true,
   enableCors: true,
   enableSecurityHeaders: true,
   enableGlobalAuth: false, // Using route-level procedure() instead

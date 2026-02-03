@@ -37,7 +37,6 @@ const app = createWorker({
   serviceName: 'identity-api',
   version: '1.0.0',
   enableRequestTracking: true,
-  enableLogging: true,
   enableCors: true,
   enableSecurityHeaders: true,
   enableGlobalAuth: false,

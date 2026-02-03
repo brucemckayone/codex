@@ -29,7 +29,6 @@ import type { AuthEnv } from './types';
  *
  * Configuration:
  * - enableGlobalAuth: false (BetterAuth handles its own authentication)
- * - enableLogging: false (BetterAuth has custom logging)
  * - enableSecurityHeaders: false (custom security headers applied below)
  * - enableRequestTracking: true (default - needed for request correlation)
  */
@@ -37,7 +36,6 @@ const app = createWorker({
   serviceName: 'auth-worker',
   version: '1.0.0',
   enableGlobalAuth: false,
-  enableLogging: false,
   enableSecurityHeaders: false,
   healthCheck: {
     checkDatabase: standardDatabaseCheck,

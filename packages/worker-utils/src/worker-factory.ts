@@ -13,8 +13,8 @@ import {
   createCorsMiddleware,
   createErrorHandler,
   createHealthCheckHandler,
-  createLoggerMiddleware,
   createNotFoundHandler,
+  createObservabilityMiddleware,
   createRequestTrackingMiddleware,
   createSecurityHeadersMiddleware,
   type MiddlewareConfig,
@@ -211,7 +211,6 @@ export function createWorker<TEnv extends HonoEnv = HonoEnv>(
     serviceName,
     version = '1.0.0',
     environment,
-    enableLogging = true,
     enableCors = true,
     enableSecurityHeaders = true,
     enableRequestTracking = true,
@@ -234,9 +233,8 @@ export function createWorker<TEnv extends HonoEnv = HonoEnv>(
     app.use('*', createRequestTrackingMiddleware());
   }
 
-  if (enableLogging) {
-    app.use('*', createLoggerMiddleware());
-  }
+  // Observability (after tracking so requestId is available for log correlation)
+  app.use('*', createObservabilityMiddleware(serviceName));
 
   if (enableCors) {
     app.use('*', createCorsMiddleware());
