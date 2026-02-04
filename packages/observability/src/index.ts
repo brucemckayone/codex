@@ -52,7 +52,7 @@ export class ObservabilityClient {
 
     // Default redaction based on environment
     this.redactionOptions = redactionOptions ?? {
-      mode: environment === 'production' ? 'mask' : 'mask',
+      mode: environment === 'production' ? 'hash' : 'mask',
       redactEmails: environment === 'production',
       keepChars: environment === 'production' ? undefined : 4,
     };

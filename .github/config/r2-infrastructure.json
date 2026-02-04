@@ -4,10 +4,11 @@
   "buckets": {
     "codex-media-production": {
       "publicAccess": {
-        "enabled": true,
+        "enabled": false,
         "customDomain": "cdn.revelations.studio",
         "minTls": "1.2",
-        "disableR2DevUrl": true
+        "disableR2DevUrl": true,
+        "comment": "PRIVATE: HLS streams and originals require presigned URLs"
       },
       "cache": {
         "enabled": true,
@@ -76,10 +77,11 @@
     },
     "codex-media-staging": {
       "publicAccess": {
-        "enabled": true,
+        "enabled": false,
         "customDomain": "cdn-staging.revelations.studio",
         "minTls": "1.2",
-        "disableR2DevUrl": false
+        "disableR2DevUrl": false,
+        "comment": "PRIVATE: HLS streams and originals require presigned URLs"
       },
       "cache": {
         "enabled": true,
@@ -148,10 +150,11 @@
     },
     "codex-media-dev": {
       "publicAccess": {
-        "enabled": true,
+        "enabled": false,
         "customDomain": "cdn-dev.revelations.studio",
         "minTls": "1.2",
-        "disableR2DevUrl": false
+        "disableR2DevUrl": false,
+        "comment": "PRIVATE: HLS streams and originals require presigned URLs"
       },
       "cache": {
         "enabled": false,

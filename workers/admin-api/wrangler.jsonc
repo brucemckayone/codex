@@ -28,6 +28,11 @@
       "binding": "MEDIA_BUCKET",
       "bucket_name": "codex-media-production",
       "preview_bucket_name": "codex-media-test"
+    },
+    {
+      "binding": "ASSETS_BUCKET",
+      "bucket_name": "codex-assets-production",
+      "preview_bucket_name": "codex-assets-test"
     }
   ],
 
@@ -59,6 +64,16 @@
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
         }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-test"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-test"
+        }
       ]
     },
 
@@ -81,6 +96,16 @@
           "id": "82d04a4236df4aac8e9d87793344f0ed"
         }
       ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-production"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-production"
+        }
+      ],
       "routes": [
         {
           "pattern": "admin-api.revelations.studio/*",
@@ -97,6 +122,16 @@
         "WEB_APP_URL": "https://codex-staging.revelations.studio",
         "AUTH_WORKER_URL": "https://auth-staging.revelations.studio"
       },
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-staging"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-staging"
+        }
+      ],
       "routes": [
         {
           "pattern": "admin-api-staging.revelations.studio/*",

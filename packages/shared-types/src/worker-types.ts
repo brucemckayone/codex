@@ -55,9 +55,18 @@ export type Bindings = {
   BRAND_KV?: import('@cloudflare/workers-types').KVNamespace;
 
   /**
-   * R2 bucket binding for media storage
+   * R2 bucket binding for media storage (PRIVATE)
+   * Used for HLS streams, original uploads, and other protected content
+   * Access requires presigned URLs
    */
   MEDIA_BUCKET?: import('@cloudflare/workers-types').R2Bucket;
+
+  /**
+   * R2 bucket binding for public assets (PUBLIC)
+   * Used for thumbnails, avatars, logos, and other publicly accessible content
+   * Direct URL access without signatures
+   */
+  ASSETS_BUCKET?: import('@cloudflare/workers-types').R2Bucket;
 
   /**
    * Cloudflare Account ID for R2 endpoint
@@ -75,9 +84,14 @@ export type Bindings = {
   R2_SECRET_ACCESS_KEY?: string;
 
   /**
-   * R2 bucket name for media storage
+   * R2 bucket name for media storage (private bucket)
    */
   R2_BUCKET_MEDIA?: string;
+
+  /**
+   * R2 bucket name for public assets (thumbnails, avatars, logos)
+   */
+  R2_BUCKET_ASSETS?: string;
 
   /**
    * Public URL base for R2 bucket (e.g., https://cdn.revelations.studio)

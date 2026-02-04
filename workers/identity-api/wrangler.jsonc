@@ -28,6 +28,11 @@
       "binding": "MEDIA_BUCKET",
       "bucket_name": "codex-media-production",
       "preview_bucket_name": "codex-media-test"
+    },
+    {
+      "binding": "ASSETS_BUCKET",
+      "bucket_name": "codex-assets-production",
+      "preview_bucket_name": "codex-assets-test"
     }
   ],
 
@@ -67,6 +72,10 @@
         {
           "binding": "MEDIA_BUCKET",
           "bucket_name": "codex-media-test"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-test"
         }
       ]
     },
@@ -95,6 +104,10 @@
         {
           "binding": "MEDIA_BUCKET",
           "bucket_name": "codex-media-production"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-production"
         }
       ],
       "routes": [
@@ -119,6 +132,10 @@
         {
           "binding": "MEDIA_BUCKET",
           "bucket_name": "codex-media-staging"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-staging"
         }
       ],
       "routes": [

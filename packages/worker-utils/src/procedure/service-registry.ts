@@ -150,13 +150,13 @@ export function createServiceRegistry(
 
     get imageProcessing() {
       if (!_imageProcessing) {
-        const r2Service = env.MEDIA_BUCKET
-          ? new R2Service(env.MEDIA_BUCKET)
-          : undefined;
+        // Use ASSETS_BUCKET for public images (thumbnails, avatars, logos)
+        // Falls back to MEDIA_BUCKET for backwards compatibility during migration
+        const assetsBucket = env.ASSETS_BUCKET || env.MEDIA_BUCKET;
 
-        if (!env.R2_BUCKET_MEDIA || !r2Service) {
+        if (!assetsBucket) {
           throw new Error(
-            'MEDIA_BUCKET or R2_BUCKET_MEDIA not configured. Required for image processing.'
+            'ASSETS_BUCKET not configured. Required for image processing (thumbnails, avatars, logos).'
           );
         }
 
@@ -165,6 +165,8 @@ export function createServiceRegistry(
             'R2_PUBLIC_URL_BASE not configured. Required for image processing (public image URLs).'
           );
         }
+
+        const r2Service = new R2Service(assetsBucket);
 
         _imageProcessing = new ImageProcessingService({
           db: getSharedDb(),
@@ -199,10 +201,10 @@ export function createServiceRegistry(
           );
         }
 
-        // Create R2Service if bucket is available
-        const r2 = env.MEDIA_BUCKET
-          ? new R2Service(env.MEDIA_BUCKET)
-          : undefined;
+        // Use ASSETS_BUCKET for public assets (logos, branding)
+        // Falls back to MEDIA_BUCKET for backwards compatibility
+        const assetsBucket = env.ASSETS_BUCKET || env.MEDIA_BUCKET;
+        const r2 = assetsBucket ? new R2Service(assetsBucket) : undefined;
 
         _settings = new PlatformSettingsFacade({
           db: getSharedDb(),
@@ -368,14 +370,13 @@ export function createServiceRegistry(
 
     get identity() {
       if (!_identity) {
-        // Create R2Service for image processing (avatar uploads)
-        const r2Service = env.MEDIA_BUCKET
-          ? new R2Service(env.MEDIA_BUCKET)
-          : undefined;
+        // Use ASSETS_BUCKET for public assets (avatars)
+        // Falls back to MEDIA_BUCKET for backwards compatibility
+        const assetsBucket = env.ASSETS_BUCKET || env.MEDIA_BUCKET;
 
-        if (!env.R2_BUCKET_MEDIA || !r2Service) {
+        if (!assetsBucket) {
           throw new Error(
-            'MEDIA_BUCKET or R2_BUCKET_MEDIA not configured. Required for identity service (avatar uploads).'
+            'ASSETS_BUCKET not configured. Required for identity service (avatar uploads).'
           );
         }
 
@@ -384,6 +385,8 @@ export function createServiceRegistry(
             'R2_PUBLIC_URL_BASE not configured. Required for identity service (public image URLs).'
           );
         }
+
+        const r2Service = new R2Service(assetsBucket);
 
         _identity = new IdentityService({
           db: getSharedDb(),

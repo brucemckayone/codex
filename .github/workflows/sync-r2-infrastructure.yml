@@ -43,6 +43,9 @@ jobs:
           node-version: 20
           cache: "pnpm"
 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Setup wrangler
         uses: cloudflare/wrangler-action@v3
         with:
@@ -110,11 +113,17 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Configured Resources" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Bucket | Custom Domain | Public Access |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|---------------|---------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| codex-media-production | cdn.revelations.studio | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| codex-media-preview | cdn-staging.revelations.studio | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| codex-media-dev | cdn-dev.revelations.studio | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bucket | Custom Domain | Public Access | Notes |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------------|---------------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-media-* | cdn*.revelations.studio | ❌ Private | HLS streams require presigned URLs |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-assets-* | cdn*.revelations.studio | ✅ Public | Thumbnails, logos, avatars |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-resources-* | N/A | ❌ Private | PDFs require presigned URLs |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-platform-* | cdn*.revelations.studio | ✅ Public | Email assets, legal docs |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security Notes" >> $GITHUB_STEP_SUMMARY
+          echo "- Media buckets are **private** to protect paid content" >> $GITHUB_STEP_SUMMARY
+          echo "- Assets buckets are **public** for fast thumbnail/avatar loading" >> $GITHUB_STEP_SUMMARY
+          echo "- All streaming URLs use time-limited presigned URLs" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
           echo "- Ensure wrangler.jsonc files use the correct R2_PUBLIC_URL_BASE values" >> $GITHUB_STEP_SUMMARY
