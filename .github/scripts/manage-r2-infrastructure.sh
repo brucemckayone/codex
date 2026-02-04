@@ -6,12 +6,12 @@ set -e
 # Configuration is defined in .github/config/r2-infrastructure.json
 
 ACTION=$1
-CLOUDFLARE_API_TOKEN=$2
+CLOUDFLARE_DNS_TOKEN=$2
 CLOUDFLARE_ZONE_ID=$3
 CLOUDFLARE_ACCOUNT_ID=$4
 
-if [ -z "$ACTION" ] || [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ZONE_ID" ]; then
-  echo "Usage: $0 <verify|apply> <CLOUDFLARE_API_TOKEN> <CLOUDFLARE_ZONE_ID> [CLOUDFLARE_ACCOUNT_ID]"
+if [ -z "$ACTION" ] || [ -z "$CLOUDFLARE_DNS_TOKEN" ] || [ -z "$CLOUDFLARE_ZONE_ID" ]; then
+  echo "Usage: $0 <verify|apply> <CLOUDFLARE_DNS_TOKEN> <CLOUDFLARE_ZONE_ID> [CLOUDFLARE_ACCOUNT_ID]"
   exit 1
 fi
 
@@ -42,10 +42,11 @@ fi
 # Validate Cloudflare credentials
 echo "🔍 Validating Cloudflare credentials..."
 echo "   Zone ID: ${CLOUDFLARE_ZONE_ID:0:8}... (length: ${#CLOUDFLARE_ZONE_ID})"
-echo "   API Token: ${CLOUDFLARE_API_TOKEN:0:8}... (length: ${#CLOUDFLARE_API_TOKEN})"
+echo "   DNS Token: ${CLOUDFLARE_DNS_TOKEN:0:8}... (length: ${#CLOUDFLARE_DNS_TOKEN})"
+echo "   R2 Token (env): ${CLOUDFLARE_API_TOKEN:0:8}... (length: ${#CLOUDFLARE_API_TOKEN})"
 
 VERIFY_RESPONSE=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}" \
-  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}" \
   -H "Content-Type: application/json")
 
 if echo "$VERIFY_RESPONSE" | grep -q '"success":true'; then
@@ -109,7 +110,7 @@ check_dns_record() {
   echo "🔍 Checking DNS record for ${full_domain}..."
 
   local records=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/dns_records?name=${full_domain}" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+    -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}")
 
   local record_count=$(echo "$records" | jq -r '.result | length')
 
@@ -138,7 +139,7 @@ check_cache_rule() {
 
   # Get cache rules for the zone
   local rules=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+    -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}")
 
   if echo "$rules" | jq -e ".result[] | select(.phase == \"http_request_cache_settings\")" > /dev/null 2>&1; then
     # Check if our specific rule exists
@@ -208,7 +209,7 @@ create_dns_record() {
   local content="${BASE_DOMAIN}"
 
   local response=$(curl -s -X POST "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/dns_records" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}" \
     -H "Content-Type: application/json" \
     --data "{
       \"type\": \"${record_type}\",
@@ -245,7 +246,7 @@ create_cache_rule() {
 
   # Get or create the cache settings ruleset
   local rulesets=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+    -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}")
 
   local ruleset_id=$(echo "$rulesets" | jq -r '.result[] | select(.phase == "http_request_cache_settings") | .id')
 
@@ -254,7 +255,7 @@ create_cache_rule() {
 
     # Create new ruleset
     local create_response=$(curl -s -X POST "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets" \
-      -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+      -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}" \
       -H "Content-Type: application/json" \
       --data "{
         \"name\": \"Cache Settings\",
@@ -285,7 +286,7 @@ create_cache_rule() {
     }')
 
   local response=$(curl -s -X PUT "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets/${ruleset_id}" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}" \
     -H "Content-Type: application/json" \
     --data "{
       \"rules\": [${rule_data}]
