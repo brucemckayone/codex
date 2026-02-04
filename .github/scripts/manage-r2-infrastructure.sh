@@ -72,7 +72,7 @@ check_r2_custom_domain() {
 
   echo "🔍 Checking custom domain for bucket: ${bucket}..."
 
-  local domains=$(wrangler r2 bucket domain list "$bucket" 2>&1 || echo "ERROR")
+  local domains=$(npx wrangler r2 bucket domain list "$bucket" 2>&1 || echo "ERROR")
 
   if echo "$domains" | grep -q "$expected_domain"; then
     echo -e "${GREEN}✅ Custom domain ${expected_domain} is attached${NC}"
@@ -90,7 +90,7 @@ check_r2_custom_domain() {
 check_r2_dev_url() {
   local bucket=$1
 
-  local status=$(wrangler r2 bucket dev-url get "$bucket" 2>&1)
+  local status=$(npx wrangler r2 bucket dev-url get "$bucket" 2>&1)
 
   if echo "$status" | grep -q "enabled"; then
     echo -e "${GREEN}✅ R2.dev URL is enabled${NC}"
@@ -162,7 +162,7 @@ add_r2_custom_domain() {
 
   # Note: wrangler r2 bucket domain add requires zone-id
   # We'll get the zone-id from the environment or API
-  local result=$(wrangler r2 bucket domain add "$bucket" \
+  local result=$(npx wrangler r2 bucket domain add "$bucket" \
     --domain "$domain" \
     --zone-id "$CLOUDFLARE_ZONE_ID" \
     --min-tls "$min_tls" \
@@ -185,11 +185,11 @@ configure_r2_dev_url() {
 
   if [ "$should_enable" = "true" ]; then
     echo "📝 Enabling r2.dev URL for bucket ${bucket}..."
-    wrangler r2 bucket dev-url enable "$bucket" > /dev/null 2>&1
+    npx wrangler r2 bucket dev-url enable "$bucket" > /dev/null 2>&1
     echo -e "${GREEN}✅ R2.dev URL enabled${NC}"
   else
     echo "📝 Disabling r2.dev URL for bucket ${bucket}..."
-    wrangler r2 bucket dev-url disable "$bucket" > /dev/null 2>&1
+    npx wrangler r2 bucket dev-url disable "$bucket" > /dev/null 2>&1
     echo -e "${GREEN}✅ R2.dev URL disabled${NC}"
   fi
 }
