@@ -75,77 +75,73 @@
         "comment": "Shared CDN for all production buckets"
       }
     },
-    "codex-media-staging": {
+    "codex-media-preview": {
       "publicAccess": {
         "enabled": false,
-        "customDomain": "cdn-staging.revelations.studio",
+        "customDomain": "cdn-preview.revelations.studio",
         "minTls": "1.2",
         "disableR2DevUrl": false,
         "comment": "PRIVATE: HLS streams and originals require presigned URLs"
       },
       "cache": {
         "enabled": true,
-        "smartTieredCache": true,
-        "ruleName": "Cache R2 Media - Staging",
-        "description": "Cache staging HLS streams and video assets"
+        "ruleName": "Cache R2 Media - Preview",
+        "description": "Cache preview HLS streams and video assets"
       },
       "dns": {
-        "subdomain": "cdn-staging",
+        "subdomain": "cdn-preview",
         "type": "CNAME",
         "proxied": true,
-        "comment": "Shared CDN for all staging buckets"
+        "comment": "Shared CDN for all preview buckets"
       }
     },
-    "codex-assets-staging": {
+    "codex-assets-preview": {
       "publicAccess": {
         "enabled": true,
-        "customDomain": "cdn-staging.revelations.studio",
+        "customDomain": "cdn-preview.revelations.studio",
         "minTls": "1.2",
         "disableR2DevUrl": false
       },
       "cache": {
         "enabled": true,
-        "smartTieredCache": true,
-        "ruleName": "Cache R2 Assets - Staging",
-        "description": "Cache staging thumbnails and assets"
+        "ruleName": "Cache R2 Assets - Preview",
+        "description": "Cache preview thumbnails and assets"
       },
       "dns": {
-        "subdomain": "cdn-staging",
+        "subdomain": "cdn-preview",
         "type": "CNAME",
         "proxied": true,
-        "comment": "Shared CDN for all staging buckets"
+        "comment": "Shared CDN for all preview buckets"
       }
     },
-    "codex-resources-staging": {
+    "codex-resources-preview": {
       "publicAccess": {
         "enabled": false,
         "comment": "Resources are private - signed URLs only"
       },
       "cache": {
         "enabled": true,
-        "smartTieredCache": true,
-        "ruleName": "Cache R2 Resources - Staging",
-        "description": "Cache staging downloadable resources"
+        "ruleName": "Cache R2 Resources - Preview",
+        "description": "Cache preview downloadable resources"
       }
     },
-    "codex-platform-staging": {
+    "codex-platform-preview": {
       "publicAccess": {
         "enabled": true,
-        "customDomain": "cdn-staging.revelations.studio",
+        "customDomain": "cdn-preview.revelations.studio",
         "minTls": "1.2",
         "disableR2DevUrl": false
       },
       "cache": {
         "enabled": true,
-        "smartTieredCache": true,
-        "ruleName": "Cache R2 Platform - Staging",
-        "description": "Cache staging platform assets"
+        "ruleName": "Cache R2 Platform - Preview",
+        "description": "Cache preview platform assets"
       },
       "dns": {
-        "subdomain": "cdn-staging",
+        "subdomain": "cdn-preview",
         "type": "CNAME",
         "proxied": true,
-        "comment": "Shared CDN for all staging buckets"
+        "comment": "Shared CDN for all preview buckets"
       }
     },
     "codex-media-dev": {
@@ -220,7 +216,7 @@
     "binding": "R2_PUBLIC_URL_BASE",
     "values": {
       "development": "https://cdn-dev.revelations.studio",
-      "preview": "https://cdn-staging.revelations.studio",
+      "preview": "https://cdn-preview.revelations.studio",
       "production": "https://cdn.revelations.studio"
     }
   }
