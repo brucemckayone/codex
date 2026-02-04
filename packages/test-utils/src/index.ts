@@ -19,5 +19,7 @@ export * from './database';
 export * from './factories';
 // Test Helpers and Assertions
 export * from './helpers';
+// Mock Factories (Observability, Context, DB, KV, R2)
+export * from './mocks';
 // Test Setup Helpers
 export * from './setup';

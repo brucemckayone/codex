@@ -1,4 +1,9 @@
 import { COOKIES } from '@codex/constants';
+import {
+  createMockKVNamespace,
+  createMockSession,
+  createMockUser,
+} from '@codex/test-utils';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -17,7 +22,8 @@ type TestEnv = {
   };
 };
 
-// Create a mock db instance using vi.hoisted so it's available in vi.mock factory
+// Create mock database using vi.hoisted() to ensure it's available in vi.mock factory
+// This pattern is required because vi.mock() calls are hoisted to the top of the file
 const { mockDb } = vi.hoisted(() => ({
   mockDb: {
     query: {
@@ -40,42 +46,32 @@ vi.mock('@codex/database', () => {
   };
 });
 
-// Mock drizzle-orm
+// Mock drizzle-orm with all required exports
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((a, b) => ({ eq: [a, b] })),
   and: vi.fn((...args) => ({ and: args })),
   gt: vi.fn((a, b) => ({ gt: [a, b] })),
+  relations: vi.fn(() => ({})),
+  sql: vi.fn(),
+  isNull: vi.fn((a) => ({ isNull: a })),
 }));
-
-// No import needed - we use mockDb directly which is returned by createDbClient
 
 describe('Session Authentication Middleware', () => {
   let app: Hono<TestEnv>;
-  let mockKV: KVNamespace;
+  let mockKV: ReturnType<typeof createMockKVNamespace>;
   const mockSessionToken = 'session_abc123xyz';
 
-  // Mock session and user data
-  const mockSession: SessionData = {
-    id: 'session_1',
-    userId: 'user_1',
-    token: mockSessionToken,
-    expiresAt: new Date(Date.now() + 86400000).toISOString(), // 24 hours from now
-    ipAddress: '203.0.113.42',
-    userAgent: 'Mozilla/5.0',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  const mockUser: UserData = {
+  // Create mock data using shared factories
+  const mockUser = createMockUser({
     id: 'user_1',
     email: 'test@example.com',
     name: 'Test User',
-    emailVerified: true,
-    image: null,
-    role: 'user',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  });
+
+  const mockSession = createMockSession('user_1', {
+    id: 'session_1',
+    token: mockSessionToken,
+  });
 
   const mockCachedData: CachedSessionData = {
     session: mockSession,
@@ -89,25 +85,17 @@ describe('Session Authentication Middleware', () => {
     // Reset all mocks
     vi.clearAllMocks();
 
-    // Create mock KV namespace
-    mockKV = {
-      get: vi.fn(),
-      put: vi.fn().mockResolvedValue(undefined),
-      delete: vi.fn().mockResolvedValue(undefined),
-      list: vi.fn(),
-      getWithMetadata: vi.fn(),
-    } as unknown as KVNamespace;
+    // Create fresh mock KV namespace
+    mockKV = createMockKVNamespace();
   });
 
   describe('optionalAuth', () => {
     describe('Valid Session in Cache', () => {
       it('should set user and session from cache', async () => {
         // Mock KV cache hit
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          mockCachedData
-        );
+        mockKV.get.mockResolvedValue(mockCachedData);
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           const session = c.get('session');
@@ -139,13 +127,14 @@ describe('Session Authentication Middleware', () => {
 
       it('should handle custom cookie name', async () => {
         const customCookieName = 'my-custom-session';
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          mockCachedData
-        );
+        mockKV.get.mockResolvedValue(mockCachedData);
 
         app.use(
           '*',
-          optionalAuth({ kv: mockKV, cookieName: customCookieName })
+          optionalAuth({
+            kv: mockKV as unknown as KVNamespace,
+            cookieName: customCookieName,
+          })
         );
         app.get('/test', (c) => c.json({ success: true }));
 
@@ -165,12 +154,10 @@ describe('Session Authentication Middleware', () => {
     describe('Valid Session from Database', () => {
       it('should query database on cache miss and cache result', async () => {
         // Mock cache miss
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        mockKV.get.mockResolvedValue(null);
 
         // Mock database query success
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue({
+        mockDb.query.sessions.findFirst.mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
           createdAt: new Date(mockSession.createdAt),
@@ -182,7 +169,7 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           const session = c.get('session');
@@ -210,16 +197,14 @@ describe('Session Authentication Middleware', () => {
 
         // Verify result was cached
         expect(mockKV.put).toHaveBeenCalled();
-        const putCall = (mockKV.put as ReturnType<typeof vi.fn>).mock.calls[0];
+        const putCall = mockKV.put.mock.calls[0];
         expect(putCall[0]).toBe(`session:${mockSessionToken}`);
         expect(putCall[2]).toHaveProperty('expirationTtl');
       });
 
       it('should work without KV (database-only mode)', async () => {
         // Mock database query success
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue({
+        mockDb.query.sessions.findFirst.mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
           createdAt: new Date(mockSession.createdAt),
@@ -261,14 +246,10 @@ describe('Session Authentication Middleware', () => {
           },
         };
 
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          expiredSession
-        );
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue(null);
+        mockKV.get.mockResolvedValue(expiredSession);
+        mockDb.query.sessions.findFirst.mockResolvedValue(null);
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           return c.json({ hasUser: !!user });
@@ -291,14 +272,12 @@ describe('Session Authentication Middleware', () => {
       });
 
       it('should reject expired session from database', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        mockKV.get.mockResolvedValue(null);
 
         // Database returns null for expired session (handled by query WHERE clause)
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue(null);
+        mockDb.query.sessions.findFirst.mockResolvedValue(null);
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           return c.json({ hasUser: !!user });
@@ -318,7 +297,7 @@ describe('Session Authentication Middleware', () => {
 
     describe('No Session Cookie', () => {
       it('should proceed without authentication when no cookie', async () => {
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           return c.json({ hasUser: !!user });
@@ -338,11 +317,9 @@ describe('Session Authentication Middleware', () => {
       });
 
       it('should handle multiple cookies correctly', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          mockCachedData
-        );
+        mockKV.get.mockResolvedValue(mockCachedData);
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => c.json({ success: true }));
 
         await app.request('/test', {
@@ -360,12 +337,10 @@ describe('Session Authentication Middleware', () => {
 
     describe('Invalid Session Token', () => {
       it('should handle invalid session token from database', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue(null);
+        mockKV.get.mockResolvedValue(null);
+        mockDb.query.sessions.findFirst.mockResolvedValue(null);
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           return c.json({ hasUser: !!user });
@@ -385,12 +360,12 @@ describe('Session Authentication Middleware', () => {
 
     describe('Error Handling', () => {
       it('should handle database errors gracefully', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockRejectedValue(new Error('Database connection failed'));
+        mockKV.get.mockResolvedValue(null);
+        mockDb.query.sessions.findFirst.mockRejectedValue(
+          new Error('Database connection failed')
+        );
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           return c.json({ hasUser: !!user });
@@ -409,12 +384,8 @@ describe('Session Authentication Middleware', () => {
       });
 
       it('should handle KV read errors gracefully', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockRejectedValue(
-          new Error('KV unavailable')
-        );
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue({
+        mockKV.get.mockRejectedValue(new Error('KV unavailable'));
+        mockDb.query.sessions.findFirst.mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
           createdAt: new Date(mockSession.createdAt),
@@ -426,7 +397,7 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           return c.json({ hasUser: !!user });
@@ -446,13 +417,9 @@ describe('Session Authentication Middleware', () => {
       });
 
       it('should handle KV write errors gracefully', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-        (mockKV.put as ReturnType<typeof vi.fn>).mockRejectedValue(
-          new Error('KV write failed')
-        );
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue({
+        mockKV.get.mockResolvedValue(null);
+        mockKV.put.mockRejectedValue(new Error('KV write failed'));
+        mockDb.query.sessions.findFirst.mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
           createdAt: new Date(mockSession.createdAt),
@@ -464,7 +431,7 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => {
           const user = c.get('user');
           return c.json({ hasUser: !!user });
@@ -490,12 +457,10 @@ describe('Session Authentication Middleware', () => {
           .mockImplementation(() => {});
 
         // Mock cache miss so logging happens
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        mockKV.get.mockResolvedValue(null);
 
         // Mock database query success
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue({
+        mockDb.query.sessions.findFirst.mockResolvedValue({
           ...mockSession,
           expiresAt: new Date(mockSession.expiresAt),
           createdAt: new Date(mockSession.createdAt),
@@ -507,7 +472,13 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        app.use('*', optionalAuth({ kv: mockKV, enableLogging: true }));
+        app.use(
+          '*',
+          optionalAuth({
+            kv: mockKV as unknown as KVNamespace,
+            enableLogging: true,
+          })
+        );
         app.get('/test', (c) => c.json({ success: true }));
 
         await app.request('/test', {
@@ -531,11 +502,9 @@ describe('Session Authentication Middleware', () => {
           .spyOn(console, 'info')
           .mockImplementation(() => {});
 
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          mockCachedData
-        );
+        mockKV.get.mockResolvedValue(mockCachedData);
 
-        app.use('*', optionalAuth({ kv: mockKV }));
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
         app.get('/test', (c) => c.json({ success: true }));
 
         await app.request('/test', {
@@ -554,11 +523,12 @@ describe('Session Authentication Middleware', () => {
   describe('requireAuth', () => {
     describe('Valid Session', () => {
       it('should allow access with valid session', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          mockCachedData
-        );
+        mockKV.get.mockResolvedValue(mockCachedData);
 
-        app.use('/protected/*', requireAuth({ kv: mockKV }));
+        app.use(
+          '/protected/*',
+          requireAuth({ kv: mockKV as unknown as KVNamespace })
+        );
         app.get('/protected/resource', (c) => {
           const user = c.get('user');
           return c.json({ userId: user?.id });
@@ -578,7 +548,10 @@ describe('Session Authentication Middleware', () => {
 
     describe('No Session', () => {
       it('should return 401 when no cookie', async () => {
-        app.use('/protected/*', requireAuth({ kv: mockKV }));
+        app.use(
+          '/protected/*',
+          requireAuth({ kv: mockKV as unknown as KVNamespace })
+        );
         app.get('/protected/resource', (c) => c.json({ data: 'secret' }));
 
         const res = await app.request('/protected/resource', {
@@ -596,12 +569,13 @@ describe('Session Authentication Middleware', () => {
       });
 
       it('should return 401 when session invalid', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockResolvedValue(null);
+        mockKV.get.mockResolvedValue(null);
+        mockDb.query.sessions.findFirst.mockResolvedValue(null);
 
-        app.use('/protected/*', requireAuth({ kv: mockKV }));
+        app.use(
+          '/protected/*',
+          requireAuth({ kv: mockKV as unknown as KVNamespace })
+        );
         app.get('/protected/resource', (c) => c.json({ data: 'secret' }));
 
         const res = await app.request('/protected/resource', {
@@ -626,11 +600,12 @@ describe('Session Authentication Middleware', () => {
           },
         };
 
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          expiredSession
-        );
+        mockKV.get.mockResolvedValue(expiredSession);
 
-        app.use('/protected/*', requireAuth({ kv: mockKV }));
+        app.use(
+          '/protected/*',
+          requireAuth({ kv: mockKV as unknown as KVNamespace })
+        );
         app.get('/protected/resource', (c) => c.json({ data: 'secret' }));
 
         const res = await app.request('/protected/resource', {
@@ -645,12 +620,15 @@ describe('Session Authentication Middleware', () => {
 
     describe('Error Handling', () => {
       it('should return 401 on database error (fail closed)', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-        (
-          mockDb.query.sessions.findFirst as ReturnType<typeof vi.fn>
-        ).mockRejectedValue(new Error('Database error'));
+        mockKV.get.mockResolvedValue(null);
+        mockDb.query.sessions.findFirst.mockRejectedValue(
+          new Error('Database error')
+        );
 
-        app.use('/protected/*', requireAuth({ kv: mockKV }));
+        app.use(
+          '/protected/*',
+          requireAuth({ kv: mockKV as unknown as KVNamespace })
+        );
         app.get('/protected/resource', (c) => c.json({ data: 'secret' }));
 
         const res = await app.request('/protected/resource', {
@@ -666,11 +644,12 @@ describe('Session Authentication Middleware', () => {
 
     describe('Public vs Protected Routes', () => {
       it('should protect only specified routes', async () => {
-        (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-          mockCachedData
-        );
+        mockKV.get.mockResolvedValue(mockCachedData);
 
-        app.use('/protected/*', requireAuth({ kv: mockKV }));
+        app.use(
+          '/protected/*',
+          requireAuth({ kv: mockKV as unknown as KVNamespace })
+        );
         app.get('/public', (c) => c.json({ type: 'public' }));
         app.get('/protected/secret', (c) => c.json({ type: 'protected' }));
 
@@ -697,11 +676,9 @@ describe('Session Authentication Middleware', () => {
 
   describe('Session and User Data Types', () => {
     it('should preserve all session fields', async () => {
-      (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockCachedData
-      );
+      mockKV.get.mockResolvedValue(mockCachedData);
 
-      app.use('*', optionalAuth({ kv: mockKV }));
+      app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
       app.get('/test', (c) => {
         const session = c.get('session');
         return c.json({ session });
@@ -725,11 +702,9 @@ describe('Session Authentication Middleware', () => {
     });
 
     it('should preserve all user fields', async () => {
-      (mockKV.get as ReturnType<typeof vi.fn>).mockResolvedValue(
-        mockCachedData
-      );
+      mockKV.get.mockResolvedValue(mockCachedData);
 
-      app.use('*', optionalAuth({ kv: mockKV }));
+      app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
       app.get('/test', (c) => {
         const user = c.get('user');
         return c.json({ user });

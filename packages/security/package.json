@@ -28,6 +28,7 @@
     "hono": "^4.0.0"
   },
   "devDependencies": {
+    "@codex/test-utils": "workspace:*",
     "@cloudflare/workers-types": "^4.20251014.0",
     "typescript": "^5.7.3",
     "vitest": "^4.0.2"

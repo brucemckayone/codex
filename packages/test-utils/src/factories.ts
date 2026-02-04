@@ -384,3 +384,307 @@ export function createTestContentWorkflow(
     content,
   };
 }
+
+// =============================================================================
+// Auth Entity Factories
+// =============================================================================
+
+/**
+ * User data for authentication testing
+ */
+export interface MockUserData {
+  id: string;
+  email: string;
+  name: string | null;
+  emailVerified: boolean;
+  image: string | null;
+  role: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Session data for authentication testing
+ */
+export interface MockSessionData {
+  id: string;
+  userId: string;
+  token: string;
+  expiresAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Create a mock user for authentication testing.
+ *
+ * @param overrides - Partial user data to override defaults
+ * @returns MockUserData with realistic defaults
+ *
+ * @example
+ * ```typescript
+ * const user = createMockUser({ email: 'admin@example.com', role: 'admin' });
+ * ```
+ */
+export function createMockUser(
+  overrides: Partial<MockUserData> = {}
+): MockUserData {
+  const now = new Date().toISOString();
+
+  return {
+    id: randomUUID(),
+    email: `test-${Date.now()}@example.com`,
+    name: 'Test User',
+    emailVerified: true,
+    image: null,
+    role: 'user',
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+/**
+ * Create a mock session for authentication testing.
+ *
+ * @param userId - User ID to associate with session (defaults to random UUID)
+ * @param overrides - Partial session data to override defaults
+ * @returns MockSessionData with realistic defaults
+ *
+ * @example
+ * ```typescript
+ * const user = createMockUser();
+ * const session = createMockSession(user.id);
+ * ```
+ */
+export function createMockSession(
+  userId?: string,
+  overrides: Partial<MockSessionData> = {}
+): MockSessionData {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+
+  return {
+    id: randomUUID(),
+    userId: userId || randomUUID(),
+    token: `session_${randomUUID().replace(/-/g, '')}`,
+    expiresAt: expiresAt.toISOString(),
+    ipAddress: '203.0.113.42',
+    userAgent: 'Mozilla/5.0 (Test Agent)',
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    ...overrides,
+  };
+}
+
+/**
+ * Cached session data format (as stored in KV)
+ */
+export interface MockCachedSessionData {
+  session: MockSessionData;
+  user: MockUserData;
+}
+
+/**
+ * Create a complete cached session data object for KV testing.
+ *
+ * @param overrides - Optional overrides for user and session
+ * @returns Object with session and user data ready for KV storage
+ *
+ * @example
+ * ```typescript
+ * const cached = createMockCachedSession({
+ *   user: { role: 'admin' }
+ * });
+ * mockKV._storage.set(`session:${cached.session.token}`, cached);
+ * ```
+ */
+export function createMockCachedSession(overrides?: {
+  user?: Partial<MockUserData>;
+  session?: Partial<MockSessionData>;
+}): MockCachedSessionData {
+  const user = createMockUser(overrides?.user);
+  const session = createMockSession(user.id, overrides?.session);
+
+  return { session, user };
+}
+
+// =============================================================================
+// Stripe Event Factories
+// =============================================================================
+
+/**
+ * Stripe checkout session event options
+ */
+export interface MockStripeCheckoutEventOptions {
+  eventId?: string;
+  sessionId?: string;
+  paymentIntentId?: string;
+  paymentStatus?: string;
+  amountTotal?: number;
+  currency?: string;
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Create a mock Stripe checkout.session.completed event.
+ *
+ * Use this factory to generate realistic Stripe webhook events for testing
+ * checkout completion handlers.
+ *
+ * @param overrides - Partial event data to override defaults
+ * @returns Stripe.Event object matching checkout.session.completed type
+ *
+ * @example
+ * ```typescript
+ * const event = createMockStripeCheckoutEvent({
+ *   metadata: {
+ *     customerId: 'user_123',
+ *     contentId: 'content_456',
+ *   },
+ *   amountTotal: 2999, // $29.99 in cents
+ * });
+ *
+ * await handleCheckoutCompleted(event, mockStripe, context);
+ * ```
+ */
+export function createMockStripeCheckoutEvent(
+  overrides: MockStripeCheckoutEventOptions = {}
+): {
+  id: string;
+  object: 'event';
+  type: 'checkout.session.completed';
+  api_version: string;
+  created: number;
+  data: {
+    object: {
+      id: string;
+      object: 'checkout.session';
+      payment_intent: string | null;
+      payment_status: string;
+      amount_total: number;
+      currency: string;
+      metadata: Record<string, string>;
+    };
+  };
+  livemode: boolean;
+  pending_webhooks: number;
+  request: null;
+} {
+  const {
+    eventId = `evt_test_${randomUUID().slice(0, 8)}`,
+    sessionId = `cs_test_${randomUUID().slice(0, 8)}`,
+    paymentIntentId = `pi_test_${randomUUID().slice(0, 8)}`,
+    paymentStatus = 'paid',
+    amountTotal = 2999,
+    currency = 'usd',
+    metadata = {
+      customerId: randomUUID(),
+      contentId: randomUUID(),
+      organizationId: randomUUID(),
+    },
+  } = overrides;
+
+  return {
+    id: eventId,
+    object: 'event',
+    type: 'checkout.session.completed',
+    api_version: '2025-10-29.clover',
+    created: Math.floor(Date.now() / 1000),
+    data: {
+      object: {
+        id: sessionId,
+        object: 'checkout.session',
+        payment_intent: paymentIntentId,
+        payment_status: paymentStatus,
+        amount_total: amountTotal,
+        currency,
+        metadata,
+      },
+    },
+    livemode: false,
+    pending_webhooks: 0,
+    request: null,
+  };
+}
+
+/**
+ * Stripe payment intent event options
+ */
+export interface MockStripePaymentIntentEventOptions {
+  eventId?: string;
+  paymentIntentId?: string;
+  status?: string;
+  amount?: number;
+  currency?: string;
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Create a mock Stripe payment_intent.succeeded event.
+ *
+ * @param overrides - Partial event data to override defaults
+ * @returns Stripe.Event object matching payment_intent.succeeded type
+ *
+ * @example
+ * ```typescript
+ * const event = createMockStripePaymentIntentEvent({
+ *   amount: 5000, // $50.00
+ *   metadata: { orderId: 'order_123' }
+ * });
+ * ```
+ */
+export function createMockStripePaymentIntentEvent(
+  overrides: MockStripePaymentIntentEventOptions = {}
+): {
+  id: string;
+  object: 'event';
+  type: 'payment_intent.succeeded';
+  api_version: string;
+  created: number;
+  data: {
+    object: {
+      id: string;
+      object: 'payment_intent';
+      status: string;
+      amount: number;
+      currency: string;
+      metadata: Record<string, string>;
+    };
+  };
+  livemode: boolean;
+  pending_webhooks: number;
+  request: null;
+} {
+  const {
+    eventId = `evt_test_${randomUUID().slice(0, 8)}`,
+    paymentIntentId = `pi_test_${randomUUID().slice(0, 8)}`,
+    status = 'succeeded',
+    amount = 2999,
+    currency = 'usd',
+    metadata = {},
+  } = overrides;
+
+  return {
+    id: eventId,
+    object: 'event',
+    type: 'payment_intent.succeeded',
+    api_version: '2025-10-29.clover',
+    created: Math.floor(Date.now() / 1000),
+    data: {
+      object: {
+        id: paymentIntentId,
+        object: 'payment_intent',
+        status,
+        amount,
+        currency,
+        metadata,
+      },
+    },
+    livemode: false,
+    pending_webhooks: 0,
+    request: null,
+  };
+}

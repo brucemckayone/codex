@@ -30,6 +30,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@codex/test-utils": "workspace:*",
     "@cloudflare/vitest-pool-workers": "^0.10.0",
     "@types/node": "22.13.0",
     "@vitest/runner": "~3.2.4",
