@@ -114,20 +114,28 @@ jobs:
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Configured Resources" >> $GITHUB_STEP_SUMMARY
+          echo "### Domain Structure (1:1 bucket-to-domain mapping)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Bucket | Custom Domain | Public Access | Notes |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|---------------|---------------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| codex-media-* | cdn*.revelations.studio | ❌ Private | HLS streams require presigned URLs |" >> $GITHUB_STEP_SUMMARY
-          echo "| codex-assets-* | cdn*.revelations.studio | ✅ Public | Thumbnails, logos, avatars |" >> $GITHUB_STEP_SUMMARY
-          echo "| codex-resources-* | N/A | ❌ Private | PDFs require presigned URLs |" >> $GITHUB_STEP_SUMMARY
-          echo "| codex-platform-* | cdn*.revelations.studio | ✅ Public | Email assets, legal docs |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bucket Type | Custom Domain Pattern | Public | Purpose |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|----------------------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-assets-* | cdn-assets[-env].revelations.studio | ✅ | Thumbnails, logos, branding |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-media-* | cdn-media[-env].revelations.studio | ❌ | HLS streams (presigned URLs) |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-platform-* | cdn-platform[-env].revelations.studio | ✅ | Email assets, legal docs |" >> $GITHUB_STEP_SUMMARY
+          echo "| codex-resources-* | cdn-resources[-env].revelations.studio | ❌ | PDFs (presigned URLs) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Environment Subdomains" >> $GITHUB_STEP_SUMMARY
+          echo "- **Production**: \`cdn-{type}.revelations.studio\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Preview**: \`cdn-{type}-preview.revelations.studio\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Development**: \`cdn-{type}-dev.revelations.studio\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test**: No custom domains (uses R2 dev URLs)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Security Notes" >> $GITHUB_STEP_SUMMARY
-          echo "- Media buckets are **private** to protect paid content" >> $GITHUB_STEP_SUMMARY
-          echo "- Assets buckets are **public** for fast thumbnail/avatar loading" >> $GITHUB_STEP_SUMMARY
-          echo "- All streaming URLs use time-limited presigned URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- Media & Resources buckets are **private** - presigned URLs required" >> $GITHUB_STEP_SUMMARY
+          echo "- Assets & Platform buckets are **public** for fast loading" >> $GITHUB_STEP_SUMMARY
+          echo "- Production buckets disable R2 dev URLs for security" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "- Ensure wrangler.jsonc files use the correct R2_PUBLIC_URL_BASE values" >> $GITHUB_STEP_SUMMARY
-          echo "- Deploy workers to start using the new CDN URLs" >> $GITHUB_STEP_SUMMARY
+          echo "### Wrangler Bindings" >> $GITHUB_STEP_SUMMARY
+          echo "- \`R2_ASSETS_URL_BASE\` - Public asset URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- \`R2_MEDIA_URL_BASE\` - Streaming media URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- \`R2_PLATFORM_URL_BASE\` - Platform content URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- \`R2_RESOURCES_URL_BASE\` - Downloadable resource URLs" >> $GITHUB_STEP_SUMMARY

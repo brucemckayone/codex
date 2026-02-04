@@ -441,8 +441,13 @@ apply_infrastructure() {
   echo "2. Deploy workers: wrangler deploy --env production"
   echo "3. Verify public URLs are accessible"
   echo ""
-  echo -e "${YELLOW}Recommended wrangler.jsonc updates:${NC}"
-  jq -r '.wranglerBindings.values | to_entries[] | "  " + .key + ": " + .value' "$CONFIG_FILE"
+  echo -e "${YELLOW}Recommended wrangler.jsonc bindings:${NC}"
+  echo "  Production:"
+  jq -r '.wranglerBindings.bindings | to_entries[] | "    " + .key + ": " + .value.production' "$CONFIG_FILE"
+  echo "  Preview:"
+  jq -r '.wranglerBindings.bindings | to_entries[] | "    " + .key + ": " + .value.preview' "$CONFIG_FILE"
+  echo "  Development:"
+  jq -r '.wranglerBindings.bindings | to_entries[] | "    " + .key + ": " + .value.development' "$CONFIG_FILE"
 }
 
 # Main execution

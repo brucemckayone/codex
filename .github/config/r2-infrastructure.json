@@ -1,32 +1,42 @@
 {
   "$schema": "./r2-infrastructure.schema.json",
-  "comment": "R2 bucket infrastructure configuration - defines public access, custom domains, and cache rules. All buckets share the same custom domain per environment (bucket name in URL path).",
-  "buckets": {
-    "codex-media-production": {
-      "publicAccess": {
-        "enabled": false,
-        "customDomain": "cdn.revelations.studio",
-        "minTls": "1.2",
-        "disableR2DevUrl": true,
-        "comment": "PRIVATE: HLS streams and originals require presigned URLs"
-      },
-      "cache": {
-        "enabled": true,
-        "smartTieredCache": true,
-        "ruleName": "Cache R2 Media - Production",
-        "description": "Cache HLS streams and video assets"
-      },
-      "dns": {
-        "subdomain": "cdn",
-        "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all production buckets"
-      }
+  "comment": "R2 bucket infrastructure configuration. Each bucket type gets a unique subdomain (R2 custom domains are 1:1 with buckets).",
+  "domainStructure": {
+    "comment": "Domain mapping per bucket type",
+    "assets": {
+      "production": "cdn-assets.revelations.studio",
+      "preview": "cdn-assets-preview.revelations.studio",
+      "dev": "cdn-assets-dev.revelations.studio",
+      "publicAccess": true,
+      "purpose": "Thumbnails, logos, branding assets"
     },
+    "media": {
+      "production": "cdn-media.revelations.studio",
+      "preview": "cdn-media-preview.revelations.studio",
+      "dev": "cdn-media-dev.revelations.studio",
+      "publicAccess": false,
+      "purpose": "HLS streams, video originals (presigned URLs required)"
+    },
+    "platform": {
+      "production": "cdn-platform.revelations.studio",
+      "preview": "cdn-platform-preview.revelations.studio",
+      "dev": "cdn-platform-dev.revelations.studio",
+      "publicAccess": true,
+      "purpose": "Email assets, legal documents, platform-wide content"
+    },
+    "resources": {
+      "production": "cdn-resources.revelations.studio",
+      "preview": "cdn-resources-preview.revelations.studio",
+      "dev": "cdn-resources-dev.revelations.studio",
+      "publicAccess": false,
+      "purpose": "PDFs, workbooks (presigned URLs required)"
+    }
+  },
+  "buckets": {
     "codex-assets-production": {
       "publicAccess": {
         "enabled": true,
-        "customDomain": "cdn.revelations.studio",
+        "customDomain": "cdn-assets.revelations.studio",
         "minTls": "1.2",
         "disableR2DevUrl": true
       },
@@ -34,31 +44,142 @@
         "enabled": true,
         "smartTieredCache": true,
         "ruleName": "Cache R2 Assets - Production",
-        "description": "Cache thumbnails, logos, and branding assets"
+        "description": "Cache thumbnails, logos, and branding assets",
+        "cacheEverything": true,
+        "edgeTtl": 86400,
+        "browserTtl": 3600
       },
       "dns": {
-        "subdomain": "cdn",
+        "subdomain": "cdn-assets",
         "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all production buckets"
+        "proxied": true
       }
     },
-    "codex-resources-production": {
+    "codex-assets-preview": {
       "publicAccess": {
-        "enabled": false,
-        "comment": "Resources are private - signed URLs only"
+        "enabled": true,
+        "customDomain": "cdn-assets-preview.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
       },
       "cache": {
         "enabled": true,
         "smartTieredCache": true,
-        "ruleName": "Cache R2 Resources - Production",
-        "description": "Cache downloadable resources (PDFs, workbooks)"
+        "ruleName": "Cache R2 Assets - Preview",
+        "description": "Cache preview thumbnails and assets",
+        "cacheEverything": true,
+        "edgeTtl": 3600,
+        "browserTtl": 300
+      },
+      "dns": {
+        "subdomain": "cdn-assets-preview",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-assets-dev": {
+      "publicAccess": {
+        "enabled": true,
+        "customDomain": "cdn-assets-dev.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false
+      },
+      "cache": {
+        "enabled": false,
+        "comment": "Cache disabled for development - always serve latest"
+      },
+      "dns": {
+        "subdomain": "cdn-assets-dev",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-assets-test": {
+      "publicAccess": {
+        "enabled": false,
+        "comment": "Test bucket - no custom domain needed"
+      },
+      "cache": {
+        "enabled": false
+      }
+    },
+    "codex-media-production": {
+      "publicAccess": {
+        "enabled": false,
+        "customDomain": "cdn-media.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": true,
+        "comment": "PRIVATE: HLS streams require presigned URLs for access control"
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Media - Production",
+        "description": "Cache HLS streams and video segments",
+        "cacheEverything": true,
+        "edgeTtl": 86400,
+        "browserTtl": 3600
+      },
+      "dns": {
+        "subdomain": "cdn-media",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-media-preview": {
+      "publicAccess": {
+        "enabled": false,
+        "customDomain": "cdn-media-preview.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false,
+        "comment": "PRIVATE: HLS streams require presigned URLs"
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Media - Preview",
+        "description": "Cache preview HLS streams",
+        "cacheEverything": true,
+        "edgeTtl": 3600,
+        "browserTtl": 300
+      },
+      "dns": {
+        "subdomain": "cdn-media-preview",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-media-dev": {
+      "publicAccess": {
+        "enabled": false,
+        "customDomain": "cdn-media-dev.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false,
+        "comment": "PRIVATE: HLS streams require presigned URLs"
+      },
+      "cache": {
+        "enabled": false,
+        "comment": "Cache disabled for development"
+      },
+      "dns": {
+        "subdomain": "cdn-media-dev",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-media-test": {
+      "publicAccess": {
+        "enabled": false,
+        "comment": "Test bucket - no custom domain needed"
+      },
+      "cache": {
+        "enabled": false
       }
     },
     "codex-platform-production": {
       "publicAccess": {
         "enabled": true,
-        "customDomain": "cdn.revelations.studio",
+        "customDomain": "cdn-platform.revelations.studio",
         "minTls": "1.2",
         "disableR2DevUrl": true
       },
@@ -66,158 +187,192 @@
         "enabled": true,
         "smartTieredCache": true,
         "ruleName": "Cache R2 Platform - Production",
-        "description": "Cache platform-wide assets (email templates, legal docs)"
+        "description": "Cache platform-wide assets (email templates, legal docs)",
+        "cacheEverything": true,
+        "edgeTtl": 86400,
+        "browserTtl": 3600
       },
       "dns": {
-        "subdomain": "cdn",
+        "subdomain": "cdn-platform",
         "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all production buckets"
-      }
-    },
-    "codex-media-preview": {
-      "publicAccess": {
-        "enabled": false,
-        "customDomain": "cdn-preview.revelations.studio",
-        "minTls": "1.2",
-        "disableR2DevUrl": false,
-        "comment": "PRIVATE: HLS streams and originals require presigned URLs"
-      },
-      "cache": {
-        "enabled": true,
-        "ruleName": "Cache R2 Media - Preview",
-        "description": "Cache preview HLS streams and video assets"
-      },
-      "dns": {
-        "subdomain": "cdn-preview",
-        "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all preview buckets"
-      }
-    },
-    "codex-assets-preview": {
-      "publicAccess": {
-        "enabled": true,
-        "customDomain": "cdn-preview.revelations.studio",
-        "minTls": "1.2",
-        "disableR2DevUrl": false
-      },
-      "cache": {
-        "enabled": true,
-        "ruleName": "Cache R2 Assets - Preview",
-        "description": "Cache preview thumbnails and assets"
-      },
-      "dns": {
-        "subdomain": "cdn-preview",
-        "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all preview buckets"
-      }
-    },
-    "codex-resources-preview": {
-      "publicAccess": {
-        "enabled": false,
-        "comment": "Resources are private - signed URLs only"
-      },
-      "cache": {
-        "enabled": true,
-        "ruleName": "Cache R2 Resources - Preview",
-        "description": "Cache preview downloadable resources"
+        "proxied": true
       }
     },
     "codex-platform-preview": {
       "publicAccess": {
         "enabled": true,
-        "customDomain": "cdn-preview.revelations.studio",
+        "customDomain": "cdn-platform-preview.revelations.studio",
         "minTls": "1.2",
         "disableR2DevUrl": false
       },
       "cache": {
         "enabled": true,
+        "smartTieredCache": true,
         "ruleName": "Cache R2 Platform - Preview",
-        "description": "Cache preview platform assets"
+        "description": "Cache preview platform assets",
+        "cacheEverything": true,
+        "edgeTtl": 3600,
+        "browserTtl": 300
       },
       "dns": {
-        "subdomain": "cdn-preview",
+        "subdomain": "cdn-platform-preview",
         "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all preview buckets"
-      }
-    },
-    "codex-media-dev": {
-      "publicAccess": {
-        "enabled": false,
-        "customDomain": "cdn-dev.revelations.studio",
-        "minTls": "1.2",
-        "disableR2DevUrl": false,
-        "comment": "PRIVATE: HLS streams and originals require presigned URLs"
-      },
-      "cache": {
-        "enabled": false,
-        "comment": "Cache disabled for development - always serve latest"
-      },
-      "dns": {
-        "subdomain": "cdn-dev",
-        "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all dev buckets"
-      }
-    },
-    "codex-assets-dev": {
-      "publicAccess": {
-        "enabled": true,
-        "customDomain": "cdn-dev.revelations.studio",
-        "minTls": "1.2",
-        "disableR2DevUrl": false
-      },
-      "cache": {
-        "enabled": false,
-        "comment": "Cache disabled for development - always serve latest"
-      },
-      "dns": {
-        "subdomain": "cdn-dev",
-        "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all dev buckets"
-      }
-    },
-    "codex-resources-dev": {
-      "publicAccess": {
-        "enabled": false,
-        "comment": "Resources are private - signed URLs only"
-      },
-      "cache": {
-        "enabled": false,
-        "comment": "Cache disabled for development"
+        "proxied": true
       }
     },
     "codex-platform-dev": {
       "publicAccess": {
         "enabled": true,
-        "customDomain": "cdn-dev.revelations.studio",
+        "customDomain": "cdn-platform-dev.revelations.studio",
         "minTls": "1.2",
         "disableR2DevUrl": false
       },
       "cache": {
         "enabled": false,
-        "comment": "Cache disabled for development - always serve latest"
+        "comment": "Cache disabled for development"
       },
       "dns": {
-        "subdomain": "cdn-dev",
+        "subdomain": "cdn-platform-dev",
         "type": "CNAME",
-        "proxied": true,
-        "comment": "Shared CDN for all dev buckets"
+        "proxied": true
+      }
+    },
+    "codex-platform-test": {
+      "publicAccess": {
+        "enabled": false,
+        "comment": "Test bucket - no custom domain needed"
+      },
+      "cache": {
+        "enabled": false
+      }
+    },
+    "codex-resources-production": {
+      "publicAccess": {
+        "enabled": false,
+        "customDomain": "cdn-resources.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": true,
+        "comment": "PRIVATE: Resources require presigned URLs for access control"
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Resources - Production",
+        "description": "Cache downloadable resources (PDFs, workbooks)",
+        "cacheEverything": true,
+        "edgeTtl": 86400,
+        "browserTtl": 3600
+      },
+      "dns": {
+        "subdomain": "cdn-resources",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-resources-preview": {
+      "publicAccess": {
+        "enabled": false,
+        "customDomain": "cdn-resources-preview.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false,
+        "comment": "PRIVATE: Resources require presigned URLs"
+      },
+      "cache": {
+        "enabled": true,
+        "smartTieredCache": true,
+        "ruleName": "Cache R2 Resources - Preview",
+        "description": "Cache preview downloadable resources",
+        "cacheEverything": true,
+        "edgeTtl": 3600,
+        "browserTtl": 300
+      },
+      "dns": {
+        "subdomain": "cdn-resources-preview",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-resources-dev": {
+      "publicAccess": {
+        "enabled": false,
+        "customDomain": "cdn-resources-dev.revelations.studio",
+        "minTls": "1.2",
+        "disableR2DevUrl": false,
+        "comment": "PRIVATE: Resources require presigned URLs"
+      },
+      "cache": {
+        "enabled": false,
+        "comment": "Cache disabled for development"
+      },
+      "dns": {
+        "subdomain": "cdn-resources-dev",
+        "type": "CNAME",
+        "proxied": true
+      }
+    },
+    "codex-resources-test": {
+      "publicAccess": {
+        "enabled": false,
+        "comment": "Test bucket - no custom domain needed"
+      },
+      "cache": {
+        "enabled": false
       }
     }
   },
   "wranglerBindings": {
-    "comment": "After applying infrastructure changes, update these bindings in wrangler.jsonc files",
-    "workers": ["content-api", "organization-api", "identity-api"],
-    "binding": "R2_PUBLIC_URL_BASE",
-    "values": {
-      "development": "https://cdn-dev.revelations.studio",
-      "preview": "https://cdn-preview.revelations.studio",
-      "production": "https://cdn.revelations.studio"
+    "comment": "URL bindings per bucket type for wrangler.jsonc files",
+    "workers": [
+      "content-api",
+      "organization-api",
+      "identity-api",
+      "media-api",
+      "ecom-api"
+    ],
+    "bindings": {
+      "R2_ASSETS_URL_BASE": {
+        "development": "https://cdn-assets-dev.revelations.studio",
+        "preview": "https://cdn-assets-preview.revelations.studio",
+        "production": "https://cdn-assets.revelations.studio"
+      },
+      "R2_MEDIA_URL_BASE": {
+        "development": "https://cdn-media-dev.revelations.studio",
+        "preview": "https://cdn-media-preview.revelations.studio",
+        "production": "https://cdn-media.revelations.studio"
+      },
+      "R2_PLATFORM_URL_BASE": {
+        "development": "https://cdn-platform-dev.revelations.studio",
+        "preview": "https://cdn-platform-preview.revelations.studio",
+        "production": "https://cdn-platform.revelations.studio"
+      },
+      "R2_RESOURCES_URL_BASE": {
+        "development": "https://cdn-resources-dev.revelations.studio",
+        "preview": "https://cdn-resources-preview.revelations.studio",
+        "production": "https://cdn-resources.revelations.studio"
+      }
     }
+  },
+  "summary": {
+    "comment": "Quick reference for bucket configuration",
+    "table": [
+      "| Bucket Type | Env        | Custom Domain                          | Public | Cache |",
+      "|-------------|------------|----------------------------------------|--------|-------|",
+      "| assets      | production | cdn-assets.revelations.studio          | ✅     | ✅    |",
+      "| assets      | preview    | cdn-assets-preview.revelations.studio  | ✅     | ✅    |",
+      "| assets      | dev        | cdn-assets-dev.revelations.studio      | ✅     | ❌    |",
+      "| assets      | test       | (none)                                 | ❌     | ❌    |",
+      "| media       | production | cdn-media.revelations.studio           | ❌     | ✅    |",
+      "| media       | preview    | cdn-media-preview.revelations.studio   | ❌     | ✅    |",
+      "| media       | dev        | cdn-media-dev.revelations.studio       | ❌     | ❌    |",
+      "| media       | test       | (none)                                 | ❌     | ❌    |",
+      "| platform    | production | cdn-platform.revelations.studio        | ✅     | ✅    |",
+      "| platform    | preview    | cdn-platform-preview.revelations.studio| ✅     | ✅    |",
+      "| platform    | dev        | cdn-platform-dev.revelations.studio    | ✅     | ❌    |",
+      "| platform    | test       | (none)                                 | ❌     | ❌    |",
+      "| resources   | production | cdn-resources.revelations.studio       | ❌     | ✅    |",
+      "| resources   | preview    | cdn-resources-preview.revelations.studio| ❌    | ✅    |",
+      "| resources   | dev        | cdn-resources-dev.revelations.studio   | ❌     | ❌    |",
+      "| resources   | test       | (none)                                 | ❌     | ❌    |"
+    ]
   }
 }
