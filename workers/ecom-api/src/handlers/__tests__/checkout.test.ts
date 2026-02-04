@@ -12,8 +12,11 @@
  * - Idempotency (duplicate events handled safely)
  */
 
-import { CURRENCY, STRIPE_EVENTS } from '@codex/constants';
-import type { Context } from 'hono';
+import { CURRENCY } from '@codex/constants';
+import {
+  createMockHonoContext,
+  createMockStripeCheckoutEvent,
+} from '@codex/test-utils';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
@@ -49,102 +52,14 @@ import { checkoutSessionMetadataSchema } from '@codex/validation';
 import { handleCheckoutCompleted } from '../checkout';
 
 /**
- * Create a mock Stripe checkout session event
+ * Helper to create context with StripeWebhookEnv bindings
  */
-function createMockCheckoutEvent(
-  overrides: Partial<{
-    eventId: string;
-    sessionId: string;
-    paymentIntentId: string;
-    paymentStatus: string;
-    amountTotal: number;
-    metadata: Record<string, string>;
-  }>
-): Stripe.Event {
-  const {
-    eventId = 'evt_test_123',
-    sessionId = 'cs_test_abc',
-    paymentIntentId = 'pi_test_xyz',
-    paymentStatus = 'paid',
-    amountTotal = 2999,
-    metadata = {
-      customerId: 'user_123',
-      contentId: 'content_456',
-      organizationId: 'org_789',
-    },
-  } = overrides;
-
-  return {
-    id: eventId,
-    object: 'event',
-    type: STRIPE_EVENTS.CHECKOUT_COMPLETED,
-    api_version: '2025-10-29.clover',
-    created: Date.now() / 1000,
-    data: {
-      object: {
-        id: sessionId,
-        object: 'checkout.session',
-        payment_intent: paymentIntentId,
-        payment_status: paymentStatus,
-        amount_total: amountTotal,
-        currency: CURRENCY.USD,
-        metadata,
-      } as Stripe.Checkout.Session,
-    },
-    livemode: false,
-    pending_webhooks: 0,
-    request: null,
-  } as Stripe.Event;
-}
-
-/** Mock observability interface for tests */
-interface MockObs {
-  info: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-}
-
-/** Extended context type with test utilities */
-type MockContext = Context<StripeWebhookEnv> & {
-  _logs: { level: string; message: string; data?: unknown }[];
-  _obs: MockObs;
-};
-
-/**
- * Create a mock Hono context for webhook handler tests
- */
-function createMockContext(
-  env: Partial<StripeWebhookEnv['Bindings']> = {}
-): MockContext {
-  const logs: { level: string; message: string; data?: unknown }[] = [];
-
-  const obs = {
-    info: vi.fn((message: string, data?: unknown) => {
-      logs.push({ level: 'info', message, data });
-    }),
-    warn: vi.fn((message: string, data?: unknown) => {
-      logs.push({ level: 'warn', message, data });
-    }),
-    error: vi.fn((message: string, data?: unknown) => {
-      logs.push({ level: 'error', message, data });
-    }),
-  };
-
-  return {
-    get: vi.fn((key: string) => {
-      if (key === 'obs') return obs;
-      return undefined;
-    }),
-    env: {
-      DATABASE_URL: 'postgresql://test',
-      ENVIRONMENT: 'test',
-      DB_METHOD: 'LOCAL',
-      ...env,
-    },
-    // Access logs for assertions
-    _logs: logs,
-    _obs: obs,
-  } as unknown as MockContext;
+function createContext(
+  envOverrides: Partial<StripeWebhookEnv['Bindings']> = {}
+) {
+  return createMockHonoContext<StripeWebhookEnv['Bindings']>({
+    env: envOverrides,
+  });
 }
 
 describe('handleCheckoutCompleted', () => {
@@ -195,8 +110,17 @@ describe('handleCheckoutCompleted', () => {
 
   describe('successful purchase completion', () => {
     it('should process valid checkout.session.completed event', async () => {
-      const event = createMockCheckoutEvent({});
-      const context = createMockContext();
+      const event = createMockStripeCheckoutEvent({
+        eventId: 'evt_test_123',
+        sessionId: 'cs_test_abc',
+        paymentIntentId: 'pi_test_xyz',
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -230,10 +154,15 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should handle payment_intent as string', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
         paymentIntentId: 'pi_string_123',
-      });
-      const context = createMockContext();
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -258,8 +187,15 @@ describe('handleCheckoutCompleted', () => {
     it('should process events regardless of payment_status field', async () => {
       // This tests the ACTUAL behavior - handler processes all events
       // Stripe guarantees checkout.session.completed only fires after payment
-      const event = createMockCheckoutEvent({ paymentStatus: 'paid' });
-      const context = createMockContext();
+      const event = createMockStripeCheckoutEvent({
+        paymentStatus: 'paid',
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -270,12 +206,19 @@ describe('handleCheckoutCompleted', () => {
 
   describe('payment intent validation', () => {
     it('should log error and return early if payment_intent is missing', async () => {
-      const event = createMockCheckoutEvent({});
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_test_abc',
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
       // Remove payment_intent from the session
       (event.data.object as Stripe.Checkout.Session).payment_intent =
         null as unknown as string;
 
-      const context = createMockContext();
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -289,13 +232,14 @@ describe('handleCheckoutCompleted', () => {
 
   describe('metadata validation', () => {
     it('should log error for missing customerId in metadata', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_test_abc',
         metadata: {
           contentId: 'content_456',
-          // Missing customerId
-        },
-      });
-      const context = createMockContext();
+          // Missing customerId - will cause validation to fail
+        } as Record<string, string>,
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       // Make schema throw for missing customerId
       (
@@ -316,13 +260,14 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should log error for missing contentId in metadata', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_test_abc',
         metadata: {
           customerId: 'user_123',
           // Missing contentId
-        },
-      });
-      const context = createMockContext();
+        } as Record<string, string>,
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       (
         checkoutSessionMetadataSchema.parse as ReturnType<typeof vi.fn>
@@ -340,14 +285,14 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should handle null organizationId gracefully', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
         metadata: {
           customerId: 'user_123',
           contentId: 'content_456',
           // No organizationId
         },
-      });
-      const context = createMockContext();
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       (
         checkoutSessionMetadataSchema.parse as ReturnType<typeof vi.fn>
@@ -370,11 +315,18 @@ describe('handleCheckoutCompleted', () => {
 
   describe('amount validation', () => {
     it('should log error for invalid amount_total', async () => {
-      const event = createMockCheckoutEvent({});
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_test_abc',
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
       // Set invalid amount
       (event.data.object as Stripe.Checkout.Session).amount_total = null;
 
-      const context = createMockContext();
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -388,8 +340,14 @@ describe('handleCheckoutCompleted', () => {
 
   describe('error handling', () => {
     it('should log error but not throw when PurchaseService throws', async () => {
-      const event = createMockCheckoutEvent({});
-      const context = createMockContext();
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       mockCompletePurchase.mockRejectedValueOnce(
         new Error('Database connection failed')
@@ -410,8 +368,14 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should always cleanup database connection even on error', async () => {
-      const event = createMockCheckoutEvent({});
-      const context = createMockContext();
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       mockCompletePurchase.mockRejectedValueOnce(new Error('Test error'));
 
@@ -421,10 +385,15 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should include error context in logs', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
         sessionId: 'cs_specific_session',
-      });
-      const context = createMockContext();
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       const testError = new Error('Specific failure reason');
       testError.name = 'PaymentProcessingError';
@@ -445,10 +414,15 @@ describe('handleCheckoutCompleted', () => {
 
   describe('idempotency', () => {
     it('should handle duplicate events gracefully via PurchaseService idempotency', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
         paymentIntentId: 'pi_duplicate_123',
-      });
-      const context = createMockContext();
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       // First call returns new purchase
       mockCompletePurchase.mockResolvedValueOnce({
@@ -466,7 +440,7 @@ describe('handleCheckoutCompleted', () => {
         contentId: 'content_456',
       });
 
-      const context2 = createMockContext();
+      const context2 = createContext();
       await handleCheckoutCompleted(event, mockStripe, context2);
 
       // Both should succeed without error
@@ -487,11 +461,16 @@ describe('handleCheckoutCompleted', () => {
 
   describe('logging', () => {
     it('should log processing start with event details', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
         sessionId: 'cs_log_test',
         paymentIntentId: 'pi_log_test',
-      });
-      const context = createMockContext();
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -507,8 +486,14 @@ describe('handleCheckoutCompleted', () => {
 
   describe('service initialization', () => {
     it('should pass correct config to createPerRequestDbClient', async () => {
-      const event = createMockCheckoutEvent({});
-      const context = createMockContext({
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext({
         DATABASE_URL: 'postgresql://custom-test-url',
         DB_METHOD: 'PRODUCTION',
       });
@@ -524,8 +509,14 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should pass db and environment to PurchaseService', async () => {
-      const event = createMockCheckoutEvent({});
-      const context = createMockContext({
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext({
         ENVIRONMENT: 'production',
       });
 
@@ -541,8 +532,14 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should pass stripe client to PurchaseService', async () => {
-      const event = createMockCheckoutEvent({});
-      const context = createMockContext();
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -554,8 +551,14 @@ describe('handleCheckoutCompleted', () => {
     });
 
     it('should default environment to development when not set', async () => {
-      const event = createMockCheckoutEvent({});
-      const context = createMockContext({
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext({
         ENVIRONMENT: undefined,
       });
 
@@ -579,11 +582,17 @@ describe('handleCheckoutCompleted', () => {
      * For now, we only support USD purchases.
      */
     it('should use hardcoded USD currency regardless of session currency', async () => {
-      const event = createMockCheckoutEvent({});
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
       // Even though session has currency, handler uses hardcoded 'usd'
       (event.data.object as Stripe.Checkout.Session).currency = 'eur';
 
-      const context = createMockContext();
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -609,11 +618,16 @@ describe('handleCheckoutCompleted', () => {
      * These tests document the current behavior.
      */
     it('should process no_payment_required status (free trials/zero-amount)', async () => {
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
         paymentStatus: 'no_payment_required',
         amountTotal: 0,
-      });
-      const context = createMockContext();
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -624,10 +638,15 @@ describe('handleCheckoutCompleted', () => {
 
     it('should process unpaid status if Stripe sends it', async () => {
       // This shouldn't happen per Stripe docs, but test defensive behavior
-      const event = createMockCheckoutEvent({
+      const event = createMockStripeCheckoutEvent({
         paymentStatus: 'unpaid',
-      });
-      const context = createMockContext();
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const context = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
