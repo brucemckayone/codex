@@ -268,10 +268,8 @@ create_cache_rule() {
   fi
 
   # Build cache settings
+  # Note: tiered_cache is configured at zone level, not per-rule
   local cache_settings="{\"cache\": true}"
-  if [ "$enable_tiered_cache" = "true" ]; then
-    cache_settings=$(echo "$cache_settings" | jq '. + {tiered_cache: true}')
-  fi
 
   # Add rule to ruleset
   local rule_data=$(jq -n \
