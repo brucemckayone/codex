@@ -16,7 +16,9 @@ import { CURRENCY } from '@codex/constants';
 import {
   createMockHonoContext,
   createMockStripeCheckoutEvent,
+  type MockHonoContext,
 } from '@codex/test-utils';
+import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
@@ -52,14 +54,25 @@ import { checkoutSessionMetadataSchema } from '@codex/validation';
 import { handleCheckoutCompleted } from '../checkout';
 
 /**
- * Helper to create context with StripeWebhookEnv bindings
+ * Helper to create context with StripeWebhookEnv bindings.
+ * Returns both the typed context for the handler and the mock for assertions.
+ *
+ * We cast through `unknown` because MockHonoContext implements only the subset
+ * of Hono's Context methods actually used by the handler (get, env).
  */
 function createContext(
   envOverrides: Partial<StripeWebhookEnv['Bindings']> = {}
-) {
-  return createMockHonoContext<StripeWebhookEnv['Bindings']>({
+): {
+  context: Context<StripeWebhookEnv>;
+  mock: MockHonoContext<StripeWebhookEnv['Bindings']>;
+} {
+  const mock = createMockHonoContext<StripeWebhookEnv['Bindings']>({
     env: envOverrides,
   });
+  return {
+    context: mock as unknown as Context<StripeWebhookEnv>,
+    mock,
+  };
 }
 
 describe('handleCheckoutCompleted', () => {
@@ -120,7 +133,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -140,7 +153,7 @@ describe('handleCheckoutCompleted', () => {
       );
 
       // Verify success was logged
-      expect(context._obs.info).toHaveBeenCalledWith(
+      expect(mock._obs.info).toHaveBeenCalledWith(
         'Purchase completed successfully',
         expect.objectContaining({
           purchaseId: 'purchase_123',
@@ -162,7 +175,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -195,12 +208,12 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
       expect(mockCompletePurchase).toHaveBeenCalled();
-      expect(context._obs.error).not.toHaveBeenCalled();
+      expect(mock._obs.error).not.toHaveBeenCalled();
     });
   });
 
@@ -218,11 +231,11 @@ describe('handleCheckoutCompleted', () => {
       (event.data.object as Stripe.Checkout.Session).payment_intent =
         null as unknown as string;
 
-      const context = createContext();
+      const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(context._obs.error).toHaveBeenCalledWith(
+      expect(mock._obs.error).toHaveBeenCalledWith(
         'Missing payment intent ID',
         expect.objectContaining({ sessionId: 'cs_test_abc' })
       );
@@ -239,7 +252,7 @@ describe('handleCheckoutCompleted', () => {
           // Missing customerId - will cause validation to fail
         } as Record<string, string>,
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       // Make schema throw for missing customerId
       (
@@ -250,7 +263,7 @@ describe('handleCheckoutCompleted', () => {
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(context._obs.error).toHaveBeenCalledWith(
+      expect(mock._obs.error).toHaveBeenCalledWith(
         'Invalid checkout session metadata',
         expect.objectContaining({
           sessionId: 'cs_test_abc',
@@ -267,7 +280,7 @@ describe('handleCheckoutCompleted', () => {
           // Missing contentId
         } as Record<string, string>,
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       (
         checkoutSessionMetadataSchema.parse as ReturnType<typeof vi.fn>
@@ -277,7 +290,7 @@ describe('handleCheckoutCompleted', () => {
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(context._obs.error).toHaveBeenCalledWith(
+      expect(mock._obs.error).toHaveBeenCalledWith(
         'Invalid checkout session metadata',
         expect.anything()
       );
@@ -292,7 +305,7 @@ describe('handleCheckoutCompleted', () => {
           // No organizationId
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context } = createContext();
 
       (
         checkoutSessionMetadataSchema.parse as ReturnType<typeof vi.fn>
@@ -326,11 +339,11 @@ describe('handleCheckoutCompleted', () => {
       // Set invalid amount
       (event.data.object as Stripe.Checkout.Session).amount_total = null;
 
-      const context = createContext();
+      const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(context._obs.error).toHaveBeenCalledWith(
+      expect(mock._obs.error).toHaveBeenCalledWith(
         'Invalid amount_total',
         expect.objectContaining({ sessionId: 'cs_test_abc' })
       );
@@ -347,7 +360,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       mockCompletePurchase.mockRejectedValueOnce(
         new Error('Database connection failed')
@@ -359,7 +372,7 @@ describe('handleCheckoutCompleted', () => {
       ).resolves.not.toThrow();
 
       // Should log the error
-      expect(context._obs.error).toHaveBeenCalledWith(
+      expect(mock._obs.error).toHaveBeenCalledWith(
         'Failed to complete purchase from Stripe webhook',
         expect.objectContaining({
           errorMessage: 'Database connection failed',
@@ -375,7 +388,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context } = createContext();
 
       mockCompletePurchase.mockRejectedValueOnce(new Error('Test error'));
 
@@ -393,7 +406,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       const testError = new Error('Specific failure reason');
       testError.name = 'PaymentProcessingError';
@@ -401,7 +414,7 @@ describe('handleCheckoutCompleted', () => {
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(context._obs.error).toHaveBeenCalledWith(
+      expect(mock._obs.error).toHaveBeenCalledWith(
         'Failed to complete purchase from Stripe webhook',
         expect.objectContaining({
           sessionId: 'cs_specific_session',
@@ -422,7 +435,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       // First call returns new purchase
       mockCompletePurchase.mockResolvedValueOnce({
@@ -440,19 +453,19 @@ describe('handleCheckoutCompleted', () => {
         contentId: 'content_456',
       });
 
-      const context2 = createContext();
+      const { context: context2, mock: mock2 } = createContext();
       await handleCheckoutCompleted(event, mockStripe, context2);
 
       // Both should succeed without error
-      expect(context._obs.error).not.toHaveBeenCalled();
-      expect(context2._obs.error).not.toHaveBeenCalled();
+      expect(mock._obs.error).not.toHaveBeenCalled();
+      expect(mock2._obs.error).not.toHaveBeenCalled();
 
       // Both should log success
-      expect(context._obs.info).toHaveBeenCalledWith(
+      expect(mock._obs.info).toHaveBeenCalledWith(
         'Purchase completed successfully',
         expect.anything()
       );
-      expect(context2._obs.info).toHaveBeenCalledWith(
+      expect(mock2._obs.info).toHaveBeenCalledWith(
         'Purchase completed successfully',
         expect.anything()
       );
@@ -470,11 +483,11 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(context._obs.info).toHaveBeenCalledWith(
+      expect(mock._obs.info).toHaveBeenCalledWith(
         'Processing checkout.session.completed',
         expect.objectContaining({
           sessionId: 'cs_log_test',
@@ -493,7 +506,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext({
+      const { context } = createContext({
         DATABASE_URL: 'postgresql://custom-test-url',
         DB_METHOD: 'PRODUCTION',
       });
@@ -516,7 +529,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext({
+      const { context } = createContext({
         ENVIRONMENT: 'production',
       });
 
@@ -539,7 +552,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -558,7 +571,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext({
+      const { context } = createContext({
         ENVIRONMENT: undefined,
       });
 
@@ -592,7 +605,7 @@ describe('handleCheckoutCompleted', () => {
       // Even though session has currency, handler uses hardcoded 'usd'
       (event.data.object as Stripe.Checkout.Session).currency = 'eur';
 
-      const context = createContext();
+      const { context } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
@@ -627,13 +640,13 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
       // Handler processes the event (current behavior)
       expect(mockCompletePurchase).toHaveBeenCalled();
-      expect(context._obs.error).not.toHaveBeenCalled();
+      expect(mock._obs.error).not.toHaveBeenCalled();
     });
 
     it('should process unpaid status if Stripe sends it', async () => {
@@ -646,7 +659,7 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const context = createContext();
+      const { context } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
