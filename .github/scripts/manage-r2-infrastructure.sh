@@ -273,8 +273,8 @@ create_cache_rule() {
 
   local existing_rules=$(echo "$ruleset_details" | jq -c '.result.rules // []')
 
-  # Check if rule with this description already exists
-  if echo "$existing_rules" | jq -e ".[] | select(.description == \"$description\")" > /dev/null 2>&1; then
+  # Check if rule with this name already exists (must match check_cache_rule lookup)
+  if echo "$existing_rules" | jq -e ".[] | select(.description == \"$rule_name\")" > /dev/null 2>&1; then
     echo -e "${BLUE}ℹ️  Cache rule already exists${NC}"
     return 0
   fi
@@ -283,9 +283,9 @@ create_cache_rule() {
   # Note: tiered_cache is configured at zone level, not per-rule
   local cache_settings="{\"cache\": true}"
 
-  # Create new rule
+  # Create new rule (use rule_name as description for consistency with check_cache_rule)
   local new_rule=$(jq -n \
-    --arg desc "$description" \
+    --arg desc "$rule_name" \
     --arg pattern "$domain_pattern" \
     --argjson settings "$cache_settings" \
     '{
@@ -296,7 +296,7 @@ create_cache_rule() {
     }')
 
   # Append new rule to existing rules
-  local all_rules=$(echo "$existing_rules" | jq -c ". + [$new_rule]" --argjson new_rule "$new_rule")
+  local all_rules=$(echo "$existing_rules" | jq -c --argjson new_rule "$new_rule" '. + [$new_rule]')
 
   local response=$(curl -s -X PUT "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets/${ruleset_id}" \
     -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}" \
