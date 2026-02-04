@@ -364,21 +364,23 @@ export function optionalAuth(config?: SessionAuthConfig) {
     }
 
     // Cache miss or no KV - query database
-    console.log(
-      '[session-auth] Querying database for token:',
-      `${sessionToken.substring(0, 10)}...`
-    );
+    if (enableLogging) {
+      obs?.debug('[session-auth] Querying database for token', {
+        tokenPrefix: `${sessionToken.substring(0, 10)}...`,
+      });
+    }
     const sessionData = await querySessionFromDatabase(
       sessionToken,
       c.env as DbEnvVars,
       obs
     );
-    console.log(
-      '[session-auth] Database query result:',
-      sessionData
-        ? `user=${sessionData.user.id}, role=${sessionData.user.role}`
-        : 'null'
-    );
+    if (enableLogging) {
+      obs?.debug('[session-auth] Database query result', {
+        found: sessionData !== null,
+        userId: sessionData?.user.id,
+        role: sessionData?.user.role,
+      });
+    }
 
     if (sessionData) {
       // Valid session from database - set context

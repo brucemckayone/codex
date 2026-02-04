@@ -39,7 +39,7 @@ export interface MiddlewareChainOptions {
 
   /**
    * Enable observability middleware
-   * @default false
+   * @default true
    */
   enableObservability?: boolean;
 
@@ -115,7 +115,7 @@ export function createStandardMiddlewareChain(
     serviceName,
     skipSecurityHeaders = false,
     skipRequestTracking = false,
-    enableObservability = false,
+    enableObservability = true,
     customMiddleware = [],
   } = options;
 
