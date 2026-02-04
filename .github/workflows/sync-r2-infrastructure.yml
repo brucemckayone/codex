@@ -46,13 +46,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup wrangler
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
       - name: Verify R2 infrastructure configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         id: verify
         run: |
           echo "🔍 Verifying R2 infrastructure against config..."
@@ -73,6 +70,9 @@ jobs:
         if: |
           (github.event_name == 'push' && steps.verify.outputs.verify_passed == 'false') ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "📝 Applying R2 infrastructure changes..."
           .github/scripts/manage-r2-infrastructure.sh apply \
@@ -86,6 +86,9 @@ jobs:
         if: |
           (github.event_name == 'push' && steps.verify.outputs.verify_passed == 'false') ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "🔍 Re-verifying R2 infrastructure..."
           if .github/scripts/manage-r2-infrastructure.sh verify \

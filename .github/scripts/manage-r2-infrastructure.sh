@@ -320,9 +320,13 @@ verify_infrastructure() {
     local cache_enabled=$(jq -r ".buckets[\"$bucket\"].cache.enabled" "$CONFIG_FILE")
     local subdomain=$(jq -r ".buckets[\"$bucket\"].dns.subdomain" "$CONFIG_FILE")
 
-    # Check custom domain
-    if ! check_r2_custom_domain "$bucket" "$custom_domain"; then
-      all_verified=false
+    # Check custom domain (skip if not configured)
+    if [ "$custom_domain" != "null" ] && [ -n "$custom_domain" ]; then
+      if ! check_r2_custom_domain "$bucket" "$custom_domain"; then
+        all_verified=false
+      fi
+    else
+      echo -e "${BLUE}ℹ️  No custom domain configured (private bucket)${NC}"
     fi
 
     # Check dev URL status
@@ -332,9 +336,13 @@ verify_infrastructure() {
       all_verified=false
     fi
 
-    # Check DNS record
-    if ! check_dns_record "$subdomain"; then
-      all_verified=false
+    # Check DNS record (skip if not configured)
+    if [ "$subdomain" != "null" ] && [ -n "$subdomain" ]; then
+      if ! check_dns_record "$subdomain"; then
+        all_verified=false
+      fi
+    else
+      echo -e "${BLUE}ℹ️  No DNS record configured (private bucket)${NC}"
     fi
 
     # Check cache rule
@@ -380,11 +388,15 @@ apply_infrastructure() {
     local dns_proxied=$(jq -r ".buckets[\"$bucket\"].dns.proxied" "$CONFIG_FILE")
     local dns_comment=$(jq -r ".buckets[\"$bucket\"].dns.comment" "$CONFIG_FILE")
 
-    # 1. Add custom domain if not present
-    if ! check_r2_custom_domain "$bucket" "$custom_domain" > /dev/null 2>&1; then
-      add_r2_custom_domain "$bucket" "$custom_domain" "$min_tls"
+    # 1. Add custom domain if configured and not present
+    if [ "$custom_domain" != "null" ] && [ -n "$custom_domain" ]; then
+      if ! check_r2_custom_domain "$bucket" "$custom_domain" > /dev/null 2>&1; then
+        add_r2_custom_domain "$bucket" "$custom_domain" "$min_tls"
+      else
+        echo -e "${BLUE}ℹ️  Custom domain already configured${NC}"
+      fi
     else
-      echo -e "${BLUE}ℹ️  Custom domain already configured${NC}"
+      echo -e "${BLUE}ℹ️  Skipping custom domain (private bucket)${NC}"
     fi
 
     # 2. Configure R2 dev URL
@@ -394,11 +406,15 @@ apply_infrastructure() {
     fi
     configure_r2_dev_url "$bucket" "$should_enable_dev"
 
-    # 3. Create DNS record if not present
-    if ! check_dns_record "$subdomain" > /dev/null 2>&1; then
-      create_dns_record "$subdomain" "$dns_type" "$dns_proxied" "$dns_comment"
+    # 3. Create DNS record if configured and not present
+    if [ "$subdomain" != "null" ] && [ -n "$subdomain" ]; then
+      if ! check_dns_record "$subdomain" > /dev/null 2>&1; then
+        create_dns_record "$subdomain" "$dns_type" "$dns_proxied" "$dns_comment"
+      else
+        echo -e "${BLUE}ℹ️  DNS record already exists${NC}"
+      fi
     else
-      echo -e "${BLUE}ℹ️  DNS record already exists${NC}"
+      echo -e "${BLUE}ℹ️  Skipping DNS record (private bucket)${NC}"
     fi
 
     # 4. Create cache rule if enabled and not present
