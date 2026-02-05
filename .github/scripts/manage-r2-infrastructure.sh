@@ -235,14 +235,29 @@ create_dns_record() {
   fi
 }
 
-# Function to create cache rule (appends to existing rules)
-create_cache_rule() {
-  local rule_name=$1
-  local description=$2
-  local domain_pattern=$3
-  local enable_tiered_cache=$4
+# Function to apply all cache rules in a single atomic PUT.
+# Cloudflare limits cache rulesets to 10 rules per zone — appending one at a time
+# fails once stale/orphaned rules fill the quota.  This builds the complete desired
+# ruleset from the config and replaces whatever is currently there.
+apply_all_cache_rules() {
+  echo -e "${BLUE}--- Applying cache rules (atomic) ---${NC}"
 
-  echo "📝 Creating cache rule: ${rule_name}..."
+  # Build desired rules array from config: one rule per bucket that has cache.enabled=true
+  local desired_rules=$(jq -c '
+    [.buckets | to_entries[]
+      | select(.value.cache.enabled == true)
+      | select(.value.publicAccess.customDomain)
+      | {
+          description: .value.cache.ruleName,
+          expression: ("http.host eq \"" + .value.publicAccess.customDomain + "\""),
+          action: "set_cache_settings",
+          action_parameters: { cache: true }
+        }
+    ]
+  ' "$CONFIG_FILE")
+
+  local rule_count=$(echo "$desired_rules" | jq -r 'length')
+  echo "📝 Desired cache rules: ${rule_count}"
 
   # Get or create the cache settings ruleset
   local rulesets=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets" \
@@ -253,7 +268,6 @@ create_cache_rule() {
   if [ -z "$ruleset_id" ] || [ "$ruleset_id" = "null" ]; then
     echo -e "${YELLOW}⚠️  No cache ruleset found, creating one...${NC}"
 
-    # Create new ruleset
     local create_response=$(curl -s -X POST "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets" \
       -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}" \
       -H "Content-Type: application/json" \
@@ -267,47 +281,17 @@ create_cache_rule() {
     ruleset_id=$(echo "$create_response" | jq -r '.result.id')
   fi
 
-  # Get existing rules from the ruleset
-  local ruleset_details=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets/${ruleset_id}" \
-    -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}")
-
-  local existing_rules=$(echo "$ruleset_details" | jq -c '.result.rules // []')
-
-  # Check if rule with this name already exists (must match check_cache_rule lookup)
-  if echo "$existing_rules" | jq -e ".[] | select(.description == \"$rule_name\")" > /dev/null 2>&1; then
-    echo -e "${BLUE}ℹ️  Cache rule already exists${NC}"
-    return 0
-  fi
-
-  # Build cache settings
-  # Note: tiered_cache is configured at zone level, not per-rule
-  local cache_settings="{\"cache\": true}"
-
-  # Create new rule (use rule_name as description for consistency with check_cache_rule)
-  local new_rule=$(jq -n \
-    --arg desc "$rule_name" \
-    --arg pattern "$domain_pattern" \
-    --argjson settings "$cache_settings" \
-    '{
-      "description": $desc,
-      "expression": ("http.host eq \"" + $pattern + "\""),
-      "action": "set_cache_settings",
-      "action_parameters": $settings
-    }')
-
-  # Append new rule to existing rules
-  local all_rules=$(echo "$existing_rules" | jq -c --argjson new_rule "$new_rule" '. + [$new_rule]')
-
+  # PUT replaces the entire ruleset — cleans up any orphaned rules from prior runs
   local response=$(curl -s -X PUT "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets/${ruleset_id}" \
     -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}" \
     -H "Content-Type: application/json" \
-    --data "{\"rules\": $all_rules}")
+    --data "{\"rules\": $desired_rules}")
 
   if echo "$response" | jq -e '.success == true' > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Created cache rule${NC}"
+    echo -e "${GREEN}✅ All ${rule_count} cache rules applied${NC}"
     return 0
   else
-    echo -e "${RED}❌ Failed to create cache rule${NC}"
+    echo -e "${RED}❌ Failed to apply cache rules${NC}"
     echo "Response: $response"
     return 1
   fi
@@ -429,21 +413,11 @@ apply_infrastructure() {
       echo -e "${BLUE}ℹ️  Skipping DNS record (private bucket)${NC}"
     fi
 
-    # 4. Create cache rule if enabled and not present
-    if [ "$cache_enabled" = "true" ]; then
-      local rule_name=$(jq -r ".buckets[\"$bucket\"].cache.ruleName" "$CONFIG_FILE")
-      local rule_desc=$(jq -r ".buckets[\"$bucket\"].cache.description" "$CONFIG_FILE")
-      local tiered_cache=$(jq -r ".buckets[\"$bucket\"].cache.smartTieredCache // false" "$CONFIG_FILE")
-
-      if ! check_cache_rule "$rule_name" "$custom_domain" > /dev/null 2>&1; then
-        create_cache_rule "$rule_name" "$rule_desc" "$custom_domain" "$tiered_cache"
-      else
-        echo -e "${BLUE}ℹ️  Cache rule already exists${NC}"
-      fi
-    fi
-
     echo ""
   done
+
+  # 4. Apply all cache rules in one atomic PUT (after all domains are configured)
+  apply_all_cache_rules
 
   echo -e "${GREEN}========================================${NC}"
   echo -e "${GREEN}✅ R2 Infrastructure Applied${NC}"
