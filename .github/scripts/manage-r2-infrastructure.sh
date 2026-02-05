@@ -137,16 +137,25 @@ check_cache_rule() {
 
   echo "🔍 Checking cache rule: ${rule_name}..."
 
-  # Get cache rules for the zone
-  local rules=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets" \
+  # First get list of rulesets to find the cache settings ruleset ID
+  local rulesets=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets" \
     -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}")
 
-  if echo "$rules" | jq -e ".result[] | select(.phase == \"http_request_cache_settings\")" > /dev/null 2>&1; then
-    # Check if our specific rule exists
-    if echo "$rules" | jq -e ".result[] | .rules[]? | select(.description == \"$rule_name\")" > /dev/null 2>&1; then
-      echo -e "${GREEN}✅ Cache rule exists${NC}"
-      return 0
-    fi
+  local ruleset_id=$(echo "$rulesets" | jq -r '.result[] | select(.phase == "http_request_cache_settings") | .id')
+
+  if [ -z "$ruleset_id" ] || [ "$ruleset_id" = "null" ]; then
+    echo -e "${YELLOW}⚠️  No cache ruleset found${NC}"
+    return 1
+  fi
+
+  # Fetch the actual ruleset to get its rules
+  local ruleset=$(curl -s -X GET "${API_BASE}/zones/${CLOUDFLARE_ZONE_ID}/rulesets/${ruleset_id}" \
+    -H "Authorization: Bearer ${CLOUDFLARE_DNS_TOKEN}")
+
+  # Check if our specific rule exists by description
+  if echo "$ruleset" | jq -e ".result.rules[]? | select(.description == \"$rule_name\")" > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ Cache rule exists${NC}"
+    return 0
   fi
 
   echo -e "${YELLOW}⚠️  Cache rule NOT found${NC}"
