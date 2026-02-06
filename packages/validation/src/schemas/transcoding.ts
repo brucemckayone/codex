@@ -76,6 +76,16 @@ export const runpodWebhookOutputSchema = z.object({
   waveformKey: z.string().max(500).optional(),
   waveformImageKey: z.string().max(500).optional(),
 
+  // Multi-size thumbnail variants (NEW - optional for gradual rollout)
+  thumbnailVariants: z
+    .object({
+      sm: z.string().max(500),
+      md: z.string().max(500),
+      lg: z.string().max(500),
+    })
+    .nullable()
+    .optional(),
+
   // Media metadata
   durationSeconds: z.number().int().min(0).max(86400).optional(), // Max 24 hours
   width: z.number().int().min(1).max(7680).optional(), // Max 8K

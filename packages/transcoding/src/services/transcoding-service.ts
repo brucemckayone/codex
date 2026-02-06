@@ -288,6 +288,8 @@ export class TranscodingService extends BaseService {
           status: MEDIA_STATUS.READY,
           hlsMasterPlaylistKey: output.hlsMasterKey,
           hlsPreviewKey: output.hlsPreviewKey,
+          // Store 'lg' variant as canonical thumbnailKey
+          // (sm/md variants reconstructed via getMediaThumbnailKey helper)
           thumbnailKey: output.thumbnailKey,
           waveformKey: output.waveformKey,
           waveformImageKey: output.waveformImageKey,
@@ -324,6 +326,7 @@ export class TranscodingService extends BaseService {
         mediaId: media.id,
         jobId,
         durationSeconds: output.durationSeconds,
+        thumbnailVariants: output.thumbnailVariants, // Log all 3 sizes
       });
     } else {
       // Failure: Store error message atomically

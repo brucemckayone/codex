@@ -4,6 +4,8 @@ import {
   getContentThumbnailKey,
   getHlsMasterKey,
   getHlsPreviewKey,
+  getMediaThumbnailKey,
+  getMediaThumbnailUrl,
   getMezzanineKey,
   getMezzaninePrefix,
   getOrgLogoKey,
@@ -58,6 +60,37 @@ describe('Path Helpers', () => {
     it('getUserAvatarKey should return correct format', () => {
       const key = getUserAvatarKey('user-456', 'sm');
       expect(key).toBe(`avatars/user-456/sm.webp`);
+    });
+
+    it('getMediaThumbnailKey should generate correct WebP path for each size', () => {
+      expect(getMediaThumbnailKey(creatorId, mediaId, 'sm')).toBe(
+        `${creatorId}/media-thumbnails/${mediaId}/sm.webp`
+      );
+      expect(getMediaThumbnailKey(creatorId, mediaId, 'md')).toBe(
+        `${creatorId}/media-thumbnails/${mediaId}/md.webp`
+      );
+      expect(getMediaThumbnailKey(creatorId, mediaId, 'lg')).toBe(
+        `${creatorId}/media-thumbnails/${mediaId}/lg.webp`
+      );
+    });
+
+    it('getMediaThumbnailUrl should generate correct CDN URL', () => {
+      const url = getMediaThumbnailUrl(creatorId, mediaId, 'md');
+      expect(url).toBe(
+        `https://cdn-assets.revelations.studio/${creatorId}/media-thumbnails/${mediaId}/md.webp`
+      );
+    });
+
+    it('getMediaThumbnailUrl should accept custom CDN base', () => {
+      const url = getMediaThumbnailUrl(
+        creatorId,
+        mediaId,
+        'lg',
+        'https://custom-cdn.example.com'
+      );
+      expect(url).toBe(
+        `https://custom-cdn.example.com/${creatorId}/media-thumbnails/${mediaId}/lg.webp`
+      );
     });
   });
 
