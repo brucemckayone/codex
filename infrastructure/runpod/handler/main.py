@@ -162,6 +162,44 @@ def upload_directory(client: Any, bucket: str, key_prefix: str, local_dir: str) 
 
 
 # =============================================================================
+# Input Validation
+# =============================================================================
+
+
+def validate_path_component(value: str, name: str) -> None:
+    """
+    Validate path component to prevent path traversal attacks.
+
+    Args:
+        value: The path component to validate
+        name: Name of the component for error messages
+
+    Raises:
+        ValueError: If validation fails
+    """
+    import re
+
+    if not value:
+        raise ValueError(f"{name} cannot be empty")
+
+    # Check for path traversal attempts
+    if ".." in value or "//" in value or "\\" in value:
+        raise ValueError(f"Invalid {name}: path traversal detected")
+
+    # Check for URL-encoded traversal
+    if "%2e" in value.lower() or "%2f" in value.lower() or "%5c" in value.lower():
+        raise ValueError(f"Invalid {name}: encoded path traversal detected")
+
+    # Check for null bytes
+    if "\0" in value or "%00" in value:
+        raise ValueError(f"Invalid {name}: null byte detected")
+
+    # Must be alphanumeric with allowed chars (hyphen, underscore)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", value):
+        raise ValueError(f"Invalid {name}: contains disallowed characters")
+
+
+# =============================================================================
 # Media Analysis
 # =============================================================================
 
@@ -717,6 +755,10 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     creator_id = job_input["creatorId"]
     media_type = job_input["type"]
     input_key = job_input["inputKey"]
+
+    # Validate path components to prevent traversal attacks
+    validate_path_component(creator_id, "creatorId")
+    validate_path_component(media_id, "mediaId")
 
     print(f"Starting transcoding job for {media_type}: {media_id}")
 

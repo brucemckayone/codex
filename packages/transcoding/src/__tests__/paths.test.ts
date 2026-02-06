@@ -75,13 +75,18 @@ describe('Path Helpers', () => {
     });
 
     it('getMediaThumbnailUrl should generate correct CDN URL', () => {
-      const url = getMediaThumbnailUrl(creatorId, mediaId, 'md');
+      const url = getMediaThumbnailUrl(
+        creatorId,
+        mediaId,
+        'md',
+        'https://cdn-assets.revelations.studio'
+      );
       expect(url).toBe(
         `https://cdn-assets.revelations.studio/${creatorId}/media-thumbnails/${mediaId}/md.webp`
       );
     });
 
-    it('getMediaThumbnailUrl should accept custom CDN base', () => {
+    it('getMediaThumbnailUrl should work with any CDN base', () => {
       const url = getMediaThumbnailUrl(
         creatorId,
         mediaId,

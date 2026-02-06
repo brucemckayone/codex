@@ -309,18 +309,18 @@ export function getMediaThumbnailKey(
  * @param creatorId - Creator's user ID
  * @param mediaId - Media item UUID
  * @param size - Size variant (sm/md/lg)
- * @param cdnBase - CDN base URL (defaults to production CDN)
+ * @param cdnBase - CDN base URL (required, from environment config)
  * @returns Full CDN URL to thumbnail
  *
  * @example
- * getMediaThumbnailUrl('user-123', 'media-456', 'lg')
+ * getMediaThumbnailUrl('user-123', 'media-456', 'lg', 'https://cdn-assets.revelations.studio')
  * // Returns: 'https://cdn-assets.revelations.studio/user-123/media-thumbnails/media-456/lg.webp'
  */
 export function getMediaThumbnailUrl(
   creatorId: string,
   mediaId: string,
   size: ThumbnailSize,
-  cdnBase = 'https://cdn-assets.revelations.studio'
+  cdnBase: string
 ): string {
   const key = getMediaThumbnailKey(creatorId, mediaId, size);
   return `${cdnBase}/${key}`;
