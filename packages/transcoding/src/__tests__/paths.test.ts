@@ -149,4 +149,25 @@ describe('Path Helpers', () => {
       expect(parseR2Key('invalid-key')).toBeNull();
     });
   });
+
+  describe('Path Traversal Protection', () => {
+    it('isValidR2Key should reject path traversal attempts', () => {
+      expect(isValidR2Key('../../../etc/passwd')).toBe(false);
+      expect(isValidR2Key('user/../admin/file.mp4')).toBe(false);
+      expect(isValidR2Key('user/originals/../../../secret')).toBe(false);
+    });
+
+    it('isValidR2Key should reject URL-encoded traversal', () => {
+      expect(isValidR2Key('user%2f..%2f..%2fetc/passwd')).toBe(false);
+      expect(isValidR2Key('%2e%2e/admin')).toBe(false);
+    });
+
+    it('isValidR2Key should reject null bytes', () => {
+      expect(isValidR2Key('user/file%00.mp4')).toBe(false);
+    });
+
+    it('isValidR2Key should reject backslash paths', () => {
+      expect(isValidR2Key('user\\..\\admin')).toBe(false);
+    });
+  });
 });

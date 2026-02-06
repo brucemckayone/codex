@@ -618,6 +618,11 @@ def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
     subprocess.run(cmd, check=True, timeout=60)
 
 
+# Allowed thumbnail sizes - must match THUMBNAIL_SIZES in @codex/validation
+# Canonical source: packages/validation/src/schemas/transcoding.ts
+ALLOWED_THUMBNAIL_SIZES: frozenset[str] = frozenset({"sm", "md", "lg"})
+
+
 def extract_thumbnail_variants(
     input_path: str, output_dir: str, duration: int
 ) -> dict[str, str]:
@@ -636,6 +641,11 @@ def extract_thumbnail_variants(
         "md": {"width": 400, "quality": 80, "compression": 5},  # <40KB target
         "lg": {"width": 800, "quality": 82, "compression": 4},  # <100KB target
     }
+
+    # Validate all size keys are in allowed set (defense in depth)
+    for size_name in sizes:
+        if size_name not in ALLOWED_THUMBNAIL_SIZES:
+            raise ValueError(f"Invalid thumbnail size: {size_name}")
 
     variants = {}
 

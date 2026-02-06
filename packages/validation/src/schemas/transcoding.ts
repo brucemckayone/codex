@@ -48,6 +48,15 @@ export const runpodJobStatusEnum = z.enum(['completed', 'failed'], {
 });
 
 /**
+ * Canonical thumbnail size variants
+ * Used by: transcoding paths, RunPod handler, webhook validation
+ * Python mirror: infrastructure/runpod/handler/main.py ALLOWED_THUMBNAIL_SIZES
+ */
+export const THUMBNAIL_SIZES = ['sm', 'md', 'lg'] as const;
+export const thumbnailSizeSchema = z.enum(THUMBNAIL_SIZES);
+export type ThumbnailSize = z.infer<typeof thumbnailSizeSchema>;
+
+/**
  * HLS variant names (quality levels)
  */
 export const hlsVariantSchema = z.enum([
@@ -76,7 +85,7 @@ export const runpodWebhookOutputSchema = z.object({
   waveformKey: z.string().max(500).optional(),
   waveformImageKey: z.string().max(500).optional(),
 
-  // Multi-size thumbnail variants (NEW - optional for gradual rollout)
+  // Multi-size thumbnail variants (keys match THUMBNAIL_SIZES constant)
   thumbnailVariants: z
     .object({
       sm: z.string().max(500),

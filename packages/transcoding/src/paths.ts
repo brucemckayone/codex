@@ -15,6 +15,11 @@
 
 import type { MediaType } from './types';
 
+// Re-export from canonical source (@codex/validation)
+export type { ThumbnailSize } from '@codex/validation';
+
+import type { ThumbnailSize } from '@codex/validation';
+
 /**
  * Path configuration constants
  */
@@ -270,11 +275,6 @@ export function getOrgLogoKey(creatorId: string, size: string): string {
 export function getUserAvatarKey(userId: string, size: string): string {
   return `${PATH_CONFIG.AVATARS_FOLDER}/${userId}/${size}.webp`;
 }
-
-/**
- * Thumbnail size variant type
- */
-export type ThumbnailSize = 'sm' | 'md' | 'lg';
 
 /**
  * Generate R2 key for auto-generated media thumbnail
