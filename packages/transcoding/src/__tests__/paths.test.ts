@@ -97,6 +97,18 @@ describe('Path Helpers', () => {
         `https://custom-cdn.example.com/${creatorId}/media-thumbnails/${mediaId}/lg.webp`
       );
     });
+
+    it('getMediaThumbnailUrl should handle trailing slash in CDN base', () => {
+      const url = getMediaThumbnailUrl(
+        creatorId,
+        mediaId,
+        'sm',
+        'https://cdn.example.com/' // Note trailing slash
+      );
+      expect(url).toBe(
+        `https://cdn.example.com/${creatorId}/media-thumbnails/${mediaId}/sm.webp`
+      );
+    });
   });
 
   describe('B2 Key Generation', () => {

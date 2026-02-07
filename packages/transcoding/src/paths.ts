@@ -322,8 +322,10 @@ export function getMediaThumbnailUrl(
   size: ThumbnailSize,
   cdnBase: string
 ): string {
+  // Normalize: strip trailing slash to prevent double slashes in URL
+  const base = cdnBase.endsWith('/') ? cdnBase.slice(0, -1) : cdnBase;
   const key = getMediaThumbnailKey(creatorId, mediaId, size);
-  return `${cdnBase}/${key}`;
+  return `${base}/${key}`;
 }
 
 /**

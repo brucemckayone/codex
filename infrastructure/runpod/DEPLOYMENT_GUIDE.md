@@ -69,16 +69,21 @@ Go to: https://www.runpod.io/console
 2. Find and click **"codex-transcoder-template"**
 3. Click **"Edit"** button
 
-#### 2.3. Add R2 Secrets
+#### 2.3. Add All Secrets (9 Total)
 
-In the **Environment Variables** section, add the following 4 secrets:
+In the **Environment Variables** section, add the following secrets:
+
+**R2 Secrets** (5) — shared credentials for all R2 buckets:
 
 | Secret Name | Value Source | Description |
 |-------------|--------------|-------------|
 | `r2_endpoint` | GitHub secret: `R2_ENDPOINT` | Your R2 endpoint URL |
 | `r2_access_key_id` | GitHub secret: `R2_ACCESS_KEY_ID` | R2 access key ID |
 | `r2_secret_access_key` | GitHub secret: `R2_SECRET_ACCESS_KEY` | R2 secret access key |
-| `r2_bucket_name` | GitHub secret: `R2_BUCKET_MEDIA` | R2 bucket name for media |
+| `r2_media_bucket_name` | GitHub secret: `R2_MEDIA_BUCKET_NAME` | R2 bucket for HLS streams and waveforms |
+| `r2_assets_bucket_name` | GitHub secret: `R2_ASSETS_BUCKET_NAME` | R2 bucket for public CDN thumbnails (sm/md/lg WebP) |
+
+> **Note**: R2 credentials are shared across all buckets. Only the bucket names differ.
 
 **How to get values**:
 
@@ -94,9 +99,9 @@ gh secret list  # List GitHub secrets (if configured)
 - `r2_secret_access_key`: `xyz789uvw012mnop345qrs678tuv`
 - `r2_bucket_name`: `codex-media-production`
 
-#### 2.4. Verify All 8 Secrets
+#### 2.4. Verify All 9 Secrets
 
-After adding R2 secrets, you should have **8 total secrets** configured:
+After adding all secrets, you should have **9 total secrets** configured:
 
 **B2 Secrets** (4):
 - ✅ `b2_endpoint`
@@ -104,11 +109,12 @@ After adding R2 secrets, you should have **8 total secrets** configured:
 - ✅ `b2_secret_access_key`
 - ✅ `b2_bucket_name`
 
-**R2 Secrets** (4):
+**R2 Secrets** (5) — shared credentials, two buckets:
 - ✅ `r2_endpoint`
 - ✅ `r2_access_key_id`
 - ✅ `r2_secret_access_key`
-- ✅ `r2_bucket_name`
+- ✅ `r2_media_bucket_name` (HLS/waveforms)
+- ✅ `r2_assets_bucket_name` (public thumbnails)
 
 #### 2.5. Save Template
 
@@ -411,7 +417,7 @@ If you encounter issues during deployment:
 1. Check this guide's troubleshooting section
 2. Review RunPod logs in the console
 3. Test R2 connection manually using boto3
-4. Verify all 8 secrets are configured (4 B2 + 4 R2)
+4. Verify all 9 secrets are configured (4 B2 + 5 R2)
 5. Check GitHub Actions build completed successfully
 
 **Last Updated**: 2025-01-28
