@@ -12,6 +12,83 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"
 sys.modules["runpod"] = MagicMock()
 from handler import main as handler_module
 
+# =============================================================================
+# Path Validation Tests
+# =============================================================================
+
+
+class TestValidatePathComponent:
+    """Tests for validate_path_component() security function."""
+
+    def test_valid_inputs(self):
+        """Valid path components should pass without raising."""
+        valid_inputs = [
+            ("user123", "creatorId"),
+            ("abc-def", "mediaId"),
+            ("ABC_DEF", "creatorId"),
+            ("a1b2c3", "mediaId"),
+            ("550e8400-e29b-41d4-a716-446655440000", "mediaId"),  # UUID format
+        ]
+        for value, name in valid_inputs:
+            # Should not raise
+            handler_module.validate_path_component(value, name)
+
+    def test_empty_value_rejected(self):
+        """Empty values should be rejected."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            handler_module.validate_path_component("", "creatorId")
+
+    def test_path_traversal_rejected(self):
+        """Path traversal attempts should be rejected."""
+        traversal_attempts = [
+            "../../../etc/passwd",
+            "user/../admin",
+            "..\\windows\\system32",
+            "foo//bar",
+            "valid\\path",
+        ]
+        for attempt in traversal_attempts:
+            with pytest.raises(ValueError, match="path traversal"):
+                handler_module.validate_path_component(attempt, "testPath")
+
+    def test_encoded_traversal_rejected(self):
+        """URL-encoded path traversal should be rejected."""
+        encoded_attempts = [
+            "%2e%2e/admin",  # ../admin
+            "%2E%2E/admin",  # ../admin (uppercase)
+            "foo%2fbar",  # foo/bar
+            "foo%5cbar",  # foo\bar
+        ]
+        for attempt in encoded_attempts:
+            with pytest.raises(ValueError, match="encoded path traversal"):
+                handler_module.validate_path_component(attempt, "testPath")
+
+    def test_null_byte_rejected(self):
+        """Null bytes should be rejected."""
+        null_attempts = [
+            "user\0admin",  # literal null
+            "user%00admin",  # URL-encoded null
+        ]
+        for attempt in null_attempts:
+            with pytest.raises(ValueError, match="null byte"):
+                handler_module.validate_path_component(attempt, "testPath")
+
+    def test_disallowed_characters_rejected(self):
+        """Characters outside [a-zA-Z0-9_-] should be rejected."""
+        invalid_chars = [
+            "user@name",
+            "user.name",
+            "user name",
+            "user/name",
+            "user:name",
+            "user;name",
+            "user<name",
+            "user>name",
+        ]
+        for attempt in invalid_chars:
+            with pytest.raises(ValueError, match="disallowed characters"):
+                handler_module.validate_path_component(attempt, "testPath")
+
 
 @pytest.fixture
 def mock_s3_client():

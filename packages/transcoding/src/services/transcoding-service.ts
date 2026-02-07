@@ -322,11 +322,15 @@ export class TranscodingService extends BaseService {
         return;
       }
 
+      // NOTE: thumbnailVariants (sm/md/lg) are NOT stored in DB - by design.
+      // Only thumbnailKey ('lg' variant) is persisted. The sm/md variants are
+      // reconstructed on-demand using getMediaThumbnailKey(creatorId, mediaId, size).
+      // This avoids schema changes and keeps the DB lean since paths are deterministic.
       this.obs.info('Transcoding completed successfully', {
         mediaId: media.id,
         jobId,
         durationSeconds: output.durationSeconds,
-        thumbnailVariants: output.thumbnailVariants, // Log all 3 sizes
+        thumbnailVariants: output.thumbnailVariants, // Logged for debugging, not stored
       });
     } else {
       // Failure: Store error message atomically
