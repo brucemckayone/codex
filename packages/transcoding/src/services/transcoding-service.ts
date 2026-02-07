@@ -288,6 +288,8 @@ export class TranscodingService extends BaseService {
           status: MEDIA_STATUS.READY,
           hlsMasterPlaylistKey: output.hlsMasterKey,
           hlsPreviewKey: output.hlsPreviewKey,
+          // Store 'lg' variant as canonical thumbnailKey
+          // (sm/md variants reconstructed via getMediaThumbnailKey helper)
           thumbnailKey: output.thumbnailKey,
           waveformKey: output.waveformKey,
           waveformImageKey: output.waveformImageKey,
@@ -320,10 +322,15 @@ export class TranscodingService extends BaseService {
         return;
       }
 
+      // NOTE: thumbnailVariants (sm/md/lg) are NOT stored in DB - by design.
+      // Only thumbnailKey ('lg' variant) is persisted. The sm/md variants are
+      // reconstructed on-demand using getMediaThumbnailKey(creatorId, mediaId, size).
+      // This avoids schema changes and keeps the DB lean since paths are deterministic.
       this.obs.info('Transcoding completed successfully', {
         mediaId: media.id,
         jobId,
         durationSeconds: output.durationSeconds,
+        thumbnailVariants: output.thumbnailVariants, // Logged for debugging, not stored
       });
     } else {
       // Failure: Store error message atomically

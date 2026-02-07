@@ -4,6 +4,8 @@ import {
   getContentThumbnailKey,
   getHlsMasterKey,
   getHlsPreviewKey,
+  getMediaThumbnailKey,
+  getMediaThumbnailUrl,
   getMezzanineKey,
   getMezzaninePrefix,
   getOrgLogoKey,
@@ -59,6 +61,54 @@ describe('Path Helpers', () => {
       const key = getUserAvatarKey('user-456', 'sm');
       expect(key).toBe(`avatars/user-456/sm.webp`);
     });
+
+    it('getMediaThumbnailKey should generate correct WebP path for each size', () => {
+      expect(getMediaThumbnailKey(creatorId, mediaId, 'sm')).toBe(
+        `${creatorId}/media-thumbnails/${mediaId}/sm.webp`
+      );
+      expect(getMediaThumbnailKey(creatorId, mediaId, 'md')).toBe(
+        `${creatorId}/media-thumbnails/${mediaId}/md.webp`
+      );
+      expect(getMediaThumbnailKey(creatorId, mediaId, 'lg')).toBe(
+        `${creatorId}/media-thumbnails/${mediaId}/lg.webp`
+      );
+    });
+
+    it('getMediaThumbnailUrl should generate correct CDN URL', () => {
+      const url = getMediaThumbnailUrl(
+        creatorId,
+        mediaId,
+        'md',
+        'https://cdn-assets.revelations.studio'
+      );
+      expect(url).toBe(
+        `https://cdn-assets.revelations.studio/${creatorId}/media-thumbnails/${mediaId}/md.webp`
+      );
+    });
+
+    it('getMediaThumbnailUrl should work with any CDN base', () => {
+      const url = getMediaThumbnailUrl(
+        creatorId,
+        mediaId,
+        'lg',
+        'https://custom-cdn.example.com'
+      );
+      expect(url).toBe(
+        `https://custom-cdn.example.com/${creatorId}/media-thumbnails/${mediaId}/lg.webp`
+      );
+    });
+
+    it('getMediaThumbnailUrl should handle trailing slash in CDN base', () => {
+      const url = getMediaThumbnailUrl(
+        creatorId,
+        mediaId,
+        'sm',
+        'https://cdn.example.com/' // Note trailing slash
+      );
+      expect(url).toBe(
+        `https://cdn.example.com/${creatorId}/media-thumbnails/${mediaId}/sm.webp`
+      );
+    });
   });
 
   describe('B2 Key Generation', () => {
@@ -109,6 +159,27 @@ describe('Path Helpers', () => {
 
     it('parseR2Key should return null for invalid keys', () => {
       expect(parseR2Key('invalid-key')).toBeNull();
+    });
+  });
+
+  describe('Path Traversal Protection', () => {
+    it('isValidR2Key should reject path traversal attempts', () => {
+      expect(isValidR2Key('../../../etc/passwd')).toBe(false);
+      expect(isValidR2Key('user/../admin/file.mp4')).toBe(false);
+      expect(isValidR2Key('user/originals/../../../secret')).toBe(false);
+    });
+
+    it('isValidR2Key should reject URL-encoded traversal', () => {
+      expect(isValidR2Key('user%2f..%2f..%2fetc/passwd')).toBe(false);
+      expect(isValidR2Key('%2e%2e/admin')).toBe(false);
+    });
+
+    it('isValidR2Key should reject null bytes', () => {
+      expect(isValidR2Key('user/file%00.mp4')).toBe(false);
+    });
+
+    it('isValidR2Key should reject backslash paths', () => {
+      expect(isValidR2Key('user\\..\\admin')).toBe(false);
     });
   });
 });

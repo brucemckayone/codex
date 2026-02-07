@@ -64,7 +64,8 @@ class TranscodingResult(TypedDict):
     mediaId: str
     hlsMasterPlaylistKey: str | None
     hlsPreviewKey: str | None
-    thumbnailKey: str | None
+    thumbnailKey: str | None  # Points to 'lg' variant
+    thumbnailVariants: dict[str, str] | None  # {'sm': key, 'md': key, 'lg': key}
     waveformKey: str | None
     waveformImageKey: str | None
     mezzanineKey: str | None
@@ -158,6 +159,44 @@ def upload_directory(client: Any, bucket: str, key_prefix: str, local_dir: str) 
                 content_type = "image/jpeg"
 
             upload_file(client, bucket, key, local_path, content_type)
+
+
+# =============================================================================
+# Input Validation
+# =============================================================================
+
+
+def validate_path_component(value: str, name: str) -> None:
+    """
+    Validate path component to prevent path traversal attacks.
+
+    Args:
+        value: The path component to validate
+        name: Name of the component for error messages
+
+    Raises:
+        ValueError: If validation fails
+    """
+    import re
+
+    if not value:
+        raise ValueError(f"{name} cannot be empty")
+
+    # Check for path traversal attempts
+    if ".." in value or "//" in value or "\\" in value:
+        raise ValueError(f"Invalid {name}: path traversal detected")
+
+    # Check for URL-encoded traversal
+    if "%2e" in value.lower() or "%2f" in value.lower() or "%5c" in value.lower():
+        raise ValueError(f"Invalid {name}: encoded path traversal detected")
+
+    # Check for null bytes
+    if "\0" in value or "%00" in value:
+        raise ValueError(f"Invalid {name}: null byte detected")
+
+    # Must be alphanumeric with allowed chars (hyphen, underscore)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", value):
+        raise ValueError(f"Invalid {name}: contains disallowed characters")
 
 
 # =============================================================================
@@ -579,6 +618,70 @@ def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
     subprocess.run(cmd, check=True, timeout=60)
 
 
+# Allowed thumbnail sizes - must match THUMBNAIL_SIZES in @codex/validation
+# Canonical source: packages/validation/src/schemas/transcoding.ts
+ALLOWED_THUMBNAIL_SIZES: frozenset[str] = frozenset({"sm", "md", "lg"})
+
+
+def extract_thumbnail_variants(
+    input_path: str, output_dir: str, duration: int
+) -> dict[str, str]:
+    """
+    Extract thumbnail at 10% mark and generate 3 WebP size variants.
+
+    Returns dict with local file paths: {'sm': path, 'md': path, 'lg': path}
+    """
+    print("Extracting thumbnail variants (sm/md/lg)...")
+
+    timestamp = max(1, int(duration * 0.1))
+
+    # Size configurations (quality tuned for file size targets)
+    sizes = {
+        "sm": {"width": 200, "quality": 75, "compression": 6},  # <15KB target
+        "md": {"width": 400, "quality": 80, "compression": 5},  # <40KB target
+        "lg": {"width": 800, "quality": 82, "compression": 4},  # <100KB target
+    }
+
+    # Validate all size keys are in allowed set (defense in depth)
+    for size_name in sizes:
+        if size_name not in ALLOWED_THUMBNAIL_SIZES:
+            raise ValueError(f"Invalid thumbnail size: {size_name}")
+
+    variants = {}
+
+    for size_name, config in sizes.items():
+        output_path = os.path.join(output_dir, f"thumbnail-{size_name}.webp")
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(timestamp),
+            "-i",
+            input_path,
+            "-vframes",
+            "1",
+            "-vf",
+            f"scale={config['width']}:-1",  # Preserve aspect ratio
+            "-c:v",
+            "libwebp",
+            "-quality",
+            str(config["quality"]),
+            "-compression_level",
+            str(config["compression"]),
+            output_path,
+        ]
+
+        subprocess.run(cmd, check=True, timeout=60)
+        variants[size_name] = output_path
+
+        # Log file size
+        file_size = os.path.getsize(output_path)
+        print(f"  {size_name}: {file_size} bytes")
+
+    return variants
+
+
 def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
     """Generate audio waveform data and image using audiowaveform."""
     print("Generating audio waveform...")
@@ -663,6 +766,10 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     media_type = job_input["type"]
     input_key = job_input["inputKey"]
 
+    # Validate path components to prevent traversal attacks
+    validate_path_component(creator_id, "creatorId")
+    validate_path_component(media_id, "mediaId")
+
     print(f"Starting transcoding job for {media_type}: {media_id}")
 
     # Read B2 credentials from environment (set via RunPod secret manager)
@@ -687,6 +794,24 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "R2 credentials not configured in environment. Add secrets in RunPod console."
         )
 
+    # Read ASSETS_BUCKET credentials from environment (for public CDN assets)
+    assets_endpoint = os.environ.get("ASSETS_R2_ENDPOINT")
+    assets_access_key_id = os.environ.get("ASSETS_R2_ACCESS_KEY_ID")
+    assets_secret_access_key = os.environ.get("ASSETS_R2_SECRET_ACCESS_KEY")
+    assets_bucket_name = os.environ.get("ASSETS_BUCKET_NAME")
+
+    if not all(
+        [
+            assets_endpoint,
+            assets_access_key_id,
+            assets_secret_access_key,
+            assets_bucket_name,
+        ]
+    ):
+        raise ValueError(
+            "ASSETS_BUCKET credentials not configured in environment. Add secrets in RunPod console."
+        )
+
     # Initialize storage clients
     r2_client = create_s3_client(
         r2_endpoint,
@@ -697,6 +822,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         b2_endpoint,
         b2_access_key_id,
         b2_secret_access_key,
+    )
+    assets_client = create_s3_client(
+        assets_endpoint,
+        assets_access_key_id,
+        assets_secret_access_key,
     )
 
     # Check GPU availability
@@ -759,19 +889,28 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             create_preview(input_path, hls_dir, duration, use_gpu)
             # Preview is already in hls_dir, uploaded above
 
-        # Step 7: Extract thumbnail (video only)
+        # Step 7: Extract thumbnail variants (video only)
         thumbnail_key = None
+        thumbnail_variants = None
         if media_type == "video" and duration > 0:
-            thumbnail_path = os.path.join(work_dir, "thumbnail.jpg")
-            extract_thumbnail(input_path, thumbnail_path, duration)
-            thumbnail_key = f"{creator_id}/thumbnails/{media_id}/auto-generated.jpg"
-            upload_file(
-                r2_client,
-                r2_bucket_name,
-                thumbnail_key,
-                thumbnail_path,
-                "image/jpeg",
-            )
+            # Generate 3 WebP size variants (sm/md/lg)
+            thumbnail_files = extract_thumbnail_variants(input_path, work_dir, duration)
+
+            # Upload all 3 variants to ASSETS_BUCKET (public CDN)
+            thumbnail_variants = {}
+            for size_name, local_path in thumbnail_files.items():
+                r2_key = f"{creator_id}/media-thumbnails/{media_id}/{size_name}.webp"
+                upload_file(
+                    assets_client,  # Use ASSETS_BUCKET client, not MEDIA_BUCKET
+                    assets_bucket_name,
+                    r2_key,
+                    local_path,
+                    "image/webp",
+                )
+                thumbnail_variants[size_name] = r2_key
+
+            # Store 'lg' variant as canonical thumbnailKey
+            thumbnail_key = thumbnail_variants.get("lg")
 
         # Step 8: Generate waveform (audio only)
         waveform_key = None
@@ -804,7 +943,8 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "mediaId": media_id,
             "hlsMasterPlaylistKey": hls_master_key,
             "hlsPreviewKey": hls_preview_key,
-            "thumbnailKey": thumbnail_key,
+            "thumbnailKey": thumbnail_key,  # 'lg' variant
+            "thumbnailVariants": thumbnail_variants,  # All 3 sizes
             "waveformKey": waveform_key,
             "waveformImageKey": waveform_image_key,
             "mezzanineKey": mezzanine_key,
@@ -831,6 +971,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "hlsMasterPlaylistKey": None,
             "hlsPreviewKey": None,
             "thumbnailKey": None,
+            "thumbnailVariants": None,
             "waveformKey": None,
             "waveformImageKey": None,
             "mezzanineKey": None,

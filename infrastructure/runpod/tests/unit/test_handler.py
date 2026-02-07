@@ -12,6 +12,83 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"
 sys.modules["runpod"] = MagicMock()
 from handler import main as handler_module
 
+# =============================================================================
+# Path Validation Tests
+# =============================================================================
+
+
+class TestValidatePathComponent:
+    """Tests for validate_path_component() security function."""
+
+    def test_valid_inputs(self):
+        """Valid path components should pass without raising."""
+        valid_inputs = [
+            ("user123", "creatorId"),
+            ("abc-def", "mediaId"),
+            ("ABC_DEF", "creatorId"),
+            ("a1b2c3", "mediaId"),
+            ("550e8400-e29b-41d4-a716-446655440000", "mediaId"),  # UUID format
+        ]
+        for value, name in valid_inputs:
+            # Should not raise
+            handler_module.validate_path_component(value, name)
+
+    def test_empty_value_rejected(self):
+        """Empty values should be rejected."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            handler_module.validate_path_component("", "creatorId")
+
+    def test_path_traversal_rejected(self):
+        """Path traversal attempts should be rejected."""
+        traversal_attempts = [
+            "../../../etc/passwd",
+            "user/../admin",
+            "..\\windows\\system32",
+            "foo//bar",
+            "valid\\path",
+        ]
+        for attempt in traversal_attempts:
+            with pytest.raises(ValueError, match="path traversal"):
+                handler_module.validate_path_component(attempt, "testPath")
+
+    def test_encoded_traversal_rejected(self):
+        """URL-encoded path traversal should be rejected."""
+        encoded_attempts = [
+            "%2e%2e/admin",  # ../admin
+            "%2E%2E/admin",  # ../admin (uppercase)
+            "foo%2fbar",  # foo/bar
+            "foo%5cbar",  # foo\bar
+        ]
+        for attempt in encoded_attempts:
+            with pytest.raises(ValueError, match="encoded path traversal"):
+                handler_module.validate_path_component(attempt, "testPath")
+
+    def test_null_byte_rejected(self):
+        """Null bytes should be rejected."""
+        null_attempts = [
+            "user\0admin",  # literal null
+            "user%00admin",  # URL-encoded null
+        ]
+        for attempt in null_attempts:
+            with pytest.raises(ValueError, match="null byte"):
+                handler_module.validate_path_component(attempt, "testPath")
+
+    def test_disallowed_characters_rejected(self):
+        """Characters outside [a-zA-Z0-9_-] should be rejected."""
+        invalid_chars = [
+            "user@name",
+            "user.name",
+            "user name",
+            "user/name",
+            "user:name",
+            "user;name",
+            "user<name",
+            "user>name",
+        ]
+        for attempt in invalid_chars:
+            with pytest.raises(ValueError, match="disallowed characters"):
+                handler_module.validate_path_component(attempt, "testPath")
+
 
 @pytest.fixture
 def mock_s3_client():
@@ -62,15 +139,26 @@ def mock_check_gpu():
 
 
 @pytest.fixture
-def mock_b2_env():
-    """Set B2 environment variables required by handler."""
+def mock_storage_env():
+    """Set storage environment variables required by handler (B2, R2, ASSETS)."""
     with patch.dict(
         os.environ,
         {
+            # B2 (Backblaze) for mezzanine archival
             "B2_ENDPOINT": "https://b2.example.com",
             "B2_ACCESS_KEY_ID": "test-key",
             "B2_SECRET_ACCESS_KEY": "test-secret",
             "B2_BUCKET_NAME": "archive-bucket",
+            # R2 for HLS streaming outputs
+            "R2_ENDPOINT": "https://r2.example.com",
+            "R2_ACCESS_KEY_ID": "r2-key",
+            "R2_SECRET_ACCESS_KEY": "r2-secret",
+            "R2_BUCKET_NAME": "media-bucket",
+            # ASSETS_BUCKET for public CDN thumbnails
+            "ASSETS_R2_ENDPOINT": "https://assets.r2.example.com",
+            "ASSETS_R2_ACCESS_KEY_ID": "assets-key",
+            "ASSETS_R2_SECRET_ACCESS_KEY": "assets-secret",
+            "ASSETS_BUCKET_NAME": "assets-bucket",
         },
     ):
         yield
@@ -78,6 +166,7 @@ def mock_b2_env():
 
 @pytest.fixture
 def basic_job_input():
+    """Job input payload - credentials come from environment, not payload."""
     return {
         "mediaId": "test-media-123",
         "creatorId": "user-123",
@@ -85,10 +174,6 @@ def basic_job_input():
         "inputKey": "originals/test/video.mp4",
         "webhookUrl": "https://api.example.com/webhook",
         "webhookSecret": "secret-123",
-        "r2Endpoint": "https://r2.example.com",
-        "r2AccessKeyId": "key",
-        "r2SecretAccessKey": "secret",
-        "r2BucketName": "media-bucket",
     }
 
 
@@ -100,7 +185,7 @@ def test_handler_video_flow_cpu(
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
-    mock_b2_env,
+    mock_storage_env,
     basic_job_input,
 ):
     """Test full video transcoding flow in CPU mode (mocked)."""
@@ -133,33 +218,35 @@ def test_handler_video_flow_cpu(
 
     mock_subprocess.side_effect = subprocess_side_effect
 
-    # Execute handler
-    result = handler_module.handler({"input": basic_job_input})
+    # Mock os.path.getsize for thumbnail size logging
+    with patch("os.path.getsize", return_value=5000):
+        # Execute handler
+        result = handler_module.handler({"input": basic_job_input})
 
-    # Verifications
-    assert result["status"] == "success"
-    assert result["mediaId"] == "test-media-123"
+        # Verifications
+        assert result["status"] == "success"
+        assert result["mediaId"] == "test-media-123"
 
-    # Check S3 client creation (R2 and B2)
-    assert mock_s3_client.call_count >= 2
+        # Check S3 client creation (R2, B2, and ASSETS)
+        assert mock_s3_client.call_count >= 3
 
-    # Check steps
-    # 1. Download
-    mock_download_file.assert_called_once()
+        # Check steps
+        # 1. Download
+        mock_download_file.assert_called_once()
 
-    # 2. Transcode Mezzanine (uploaded to B2)
-    # 3. Transcode HLS (uploaded to R2)
-    # 4. Upload HLS directory
-    mock_upload_directory.assert_called()
+        # 2. Transcode Mezzanine (uploaded to B2)
+        # 3. Transcode HLS (uploaded to R2)
+        # 4. Upload HLS directory
+        mock_upload_directory.assert_called()
 
-    # 5. Webhook sent
-    mock_requests.assert_called_once()
-    call_args = mock_requests.call_args
-    assert call_args[0][0] == basic_job_input["webhookUrl"]
+        # 5. Webhook sent
+        mock_requests.assert_called_once()
+        call_args = mock_requests.call_args
+        assert call_args[0][0] == basic_job_input["webhookUrl"]
 
-    # Verify signature header
-    headers = call_args[1]["headers"]
-    assert "X-Runpod-Signature" in headers
+        # Verify signature header
+        headers = call_args[1]["headers"]
+        assert "X-Runpod-Signature" in headers
 
 
 def test_handler_audio_flow(
@@ -170,7 +257,7 @@ def test_handler_audio_flow(
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
-    mock_b2_env,
+    mock_storage_env,
     basic_job_input,
 ):
     """Test full audio transcoding flow."""
@@ -216,7 +303,7 @@ def test_handler_failure_reporting(
     mock_download_file,
     mock_subprocess,
     mock_requests,
-    mock_b2_env,
+    mock_storage_env,
     basic_job_input,
 ):
     """Test that exceptions are caught and reported via webhook."""
@@ -241,7 +328,7 @@ def test_handler_timeout_protection(
     mock_download_file,
     mock_subprocess,
     mock_requests,
-    mock_b2_env,
+    mock_storage_env,
     basic_job_input,
 ):
     """Test that handler catches subprocess timeouts and reports failure."""

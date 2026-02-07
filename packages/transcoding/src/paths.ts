@@ -15,6 +15,11 @@
 
 import type { MediaType } from './types';
 
+// Re-export from canonical source (@codex/validation)
+export type { ThumbnailSize } from '@codex/validation';
+
+import type { ThumbnailSize } from '@codex/validation';
+
 /**
  * Path configuration constants
  */
@@ -39,6 +44,7 @@ export const PATH_CONFIG = {
 
   /** New image pipeline folders */
   CONTENT_THUMBNAILS_FOLDER: 'content-thumbnails',
+  MEDIA_THUMBNAILS_FOLDER: 'media-thumbnails',
   BRANDING_FOLDER: 'branding',
   LOGO_SUBFOLDER: 'logo',
   /** Root level avatars folder (not creator-scoped) */
@@ -268,6 +274,58 @@ export function getOrgLogoKey(creatorId: string, size: string): string {
  */
 export function getUserAvatarKey(userId: string, size: string): string {
   return `${PATH_CONFIG.AVATARS_FOLDER}/${userId}/${size}.webp`;
+}
+
+/**
+ * Generate R2 key for auto-generated media thumbnail
+ * Stored in ASSETS_BUCKET for public CDN access
+ *
+ * These are the responsive WebP thumbnails generated during video transcoding,
+ * distinct from custom-uploaded content thumbnails.
+ *
+ * @param creatorId - Creator's user ID
+ * @param mediaId - Media item UUID
+ * @param size - Size variant (sm/md/lg)
+ * @returns R2 key path to WebP thumbnail in ASSETS_BUCKET
+ *
+ * @example
+ * getMediaThumbnailKey('user-123', 'media-456', 'md')
+ * // Returns: 'user-123/media-thumbnails/media-456/md.webp'
+ */
+export function getMediaThumbnailKey(
+  creatorId: string,
+  mediaId: string,
+  size: ThumbnailSize
+): string {
+  return `${creatorId}/${PATH_CONFIG.MEDIA_THUMBNAILS_FOLDER}/${mediaId}/${size}.webp`;
+}
+
+/**
+ * Get public CDN URL for media thumbnail
+ *
+ * Constructs the full CDN URL for a media thumbnail variant.
+ * No presigned URL needed since ASSETS_BUCKET is public.
+ *
+ * @param creatorId - Creator's user ID
+ * @param mediaId - Media item UUID
+ * @param size - Size variant (sm/md/lg)
+ * @param cdnBase - CDN base URL (required, from environment config)
+ * @returns Full CDN URL to thumbnail
+ *
+ * @example
+ * getMediaThumbnailUrl('user-123', 'media-456', 'lg', 'https://cdn-assets.revelations.studio')
+ * // Returns: 'https://cdn-assets.revelations.studio/user-123/media-thumbnails/media-456/lg.webp'
+ */
+export function getMediaThumbnailUrl(
+  creatorId: string,
+  mediaId: string,
+  size: ThumbnailSize,
+  cdnBase: string
+): string {
+  // Normalize: strip trailing slash to prevent double slashes in URL
+  const base = cdnBase.endsWith('/') ? cdnBase.slice(0, -1) : cdnBase;
+  const key = getMediaThumbnailKey(creatorId, mediaId, size);
+  return `${base}/${key}`;
 }
 
 /**

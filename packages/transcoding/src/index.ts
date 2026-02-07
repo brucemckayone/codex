@@ -65,6 +65,8 @@ export {
   getHlsPrefix,
   getHlsPreviewKey,
   getHlsVariantKey,
+  getMediaThumbnailKey,
+  getMediaThumbnailUrl,
   getMezzanineKey,
   getMezzaninePrefix,
   getOrgLogoKey,
@@ -77,6 +79,7 @@ export {
   isValidR2Key,
   PATH_CONFIG,
   parseR2Key,
+  type ThumbnailSize,
 } from './paths';
 // Services
 export {
