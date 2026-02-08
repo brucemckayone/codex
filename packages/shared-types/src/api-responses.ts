@@ -167,6 +167,23 @@ export interface CheckSlugResponse {
 }
 
 // ============================================================================
+// Membership Response Types
+// ============================================================================
+
+/**
+ * Response for GET /api/organizations/:orgId/membership/:userId
+ * Returns the user's role and join date within an organization
+ * @example
+ * { role: "admin", joinedAt: "2025-06-15T10:30:00.000Z" }
+ * // or if not a member:
+ * { role: null, joinedAt: null }
+ */
+export interface MembershipLookupResponse {
+  role: 'owner' | 'admin' | 'creator' | 'subscriber' | 'member' | null;
+  joinedAt: string | null;
+}
+
+// ============================================================================
 // Settings Response Types
 // ============================================================================
 
