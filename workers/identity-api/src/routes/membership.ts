@@ -7,7 +7,7 @@
  * Endpoints:
  * - GET /:orgId/membership/:userId - Look up membership role
  *
- * Security: No auth required (internal service-to-service call)
+ * Security: Worker-to-worker HMAC authentication required (WORKER_SHARED_SECRET)
  */
 
 import type { HonoEnv, MembershipLookupResponse } from '@codex/shared-types';
@@ -27,7 +27,7 @@ const app = new Hono<HonoEnv>();
 app.get(
   '/:orgId/membership/:userId',
   procedure({
-    policy: { auth: 'none' },
+    policy: { auth: 'worker' },
     input: {
       params: z.object({
         orgId: uuidSchema,

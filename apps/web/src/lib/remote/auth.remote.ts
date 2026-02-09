@@ -14,6 +14,7 @@ import { COOKIES } from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
+import { logger } from '$lib/observability';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -190,11 +191,19 @@ export const forgotPasswordForm = form(
     const { platform } = getRequestEvent();
 
     const authUrl = serverApiUrl(platform, 'auth');
-    await fetch(`${authUrl}/api/auth/forgot-password`, {
+    const response = await fetch(`${authUrl}/api/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
+
+    // Log failures server-side for monitoring (but don't expose to user)
+    if (!response.ok) {
+      logger.warn('Forgot password request failed', {
+        status: response.status,
+        // Don't log email to avoid PII in logs
+      });
+    }
 
     // Always return success to prevent email enumeration
     return {

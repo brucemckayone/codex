@@ -10,3 +10,6 @@ API_URL=http://localhost:8787
 
 # Environment
 ENVIRONMENT=development
+
+# Worker-to-worker authentication (HMAC)
+WORKER_SHARED_SECRET=your-shared-secret-here

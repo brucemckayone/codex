@@ -58,7 +58,7 @@ app.route('/api/organizations', membershipRoutes);
 app.use(
   '*',
   createEnvValidationMiddleware({
-    required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
+    required: ['DATABASE_URL', 'RATE_LIMIT_KV', 'WORKER_SHARED_SECRET'],
     optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL', 'MEDIA_BUCKET'],
   })
 );
