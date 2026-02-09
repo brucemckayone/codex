@@ -18,7 +18,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.auth_signin_title()} | Revelations</title>
+  <title>{m.auth_signin_title()} | Codex</title>
 </svelte:head>
 
 <h1>{m.auth_signin_title()}</h1>

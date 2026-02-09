@@ -1,13 +1,13 @@
 import {
   COOKIES,
   getCookieConfig,
-  getServiceUrl,
   HEADERS,
   MIME_TYPES,
 } from '@codex/constants';
 import { authRegisterSchema } from '@codex/validation';
 import { fail, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
+import { serverApiUrl } from '$lib/server/api';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ url, locals }) => {
@@ -52,7 +52,7 @@ export const actions: Actions = {
 
     try {
       // 2. Call Auth Worker
-      const authUrl = getServiceUrl('auth', platform?.env);
+      const authUrl = serverApiUrl(platform, 'auth');
       const res = await fetch(`${authUrl}/api/auth/sign-up/email`, {
         method: 'POST',
         headers: {
@@ -92,16 +92,14 @@ export const actions: Actions = {
           new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
         );
         if (sessionMatch) {
-          if (sessionMatch) {
-            const cookieConfig = getCookieConfig(
-              platform?.env,
-              request.headers.get('host') ?? undefined,
-              {
-                maxAge: COOKIES.SESSION_MAX_AGE,
-              }
-            );
-            cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
-          }
+          const cookieConfig = getCookieConfig(
+            platform?.env,
+            request.headers.get('host') ?? undefined,
+            {
+              maxAge: COOKIES.SESSION_MAX_AGE,
+            }
+          );
+          cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
         }
       }
 

@@ -6,7 +6,7 @@
  * session management, and database integration.
  */
 
-import { AUTH_ROLES, COOKIES, ENV_NAMES } from '@codex/constants';
+import { AUTH_ROLES, COOKIES, DOMAINS, ENV_NAMES } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth } from 'better-auth';
@@ -57,13 +57,16 @@ export function createAuthInstance(options: AuthConfigOptions) {
       },
       // Cross-subdomain authentication support
       // Cookie domain with leading dot allows sharing across all subdomains
-      // Example: .revelations.studio allows yoga-studio.revelations.studio access
       cookie: {
-        name: 'codex-session',
-        domain: '.revelations.studio',
-        sameSite: 'lax', // Changed from strict to support cross-subdomain navigation
-        secure: true, // HTTPS only
-        httpOnly: true, // Prevent JS access
+        name: COOKIES.SESSION_NAME,
+        sameSite: 'lax',
+        httpOnly: true,
+        // Only set domain and secure in non-dev environments
+        // In dev, omit domain (defaults to request origin) and secure (allows HTTP)
+        ...(env.ENVIRONMENT !== ENV_NAMES.DEVELOPMENT &&
+        env.ENVIRONMENT !== ENV_NAMES.TEST
+          ? { domain: `.${DOMAINS.PROD}`, secure: true }
+          : { secure: false }),
       },
     },
     logger: {

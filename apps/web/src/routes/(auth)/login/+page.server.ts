@@ -88,16 +88,14 @@ export const actions: Actions = {
           new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
         );
         if (sessionMatch) {
-          if (sessionMatch) {
-            const cookieConfig = getCookieConfig(
-              platform?.env,
-              request.headers.get('host') ?? undefined,
-              {
-                maxAge: COOKIES.SESSION_MAX_AGE,
-              }
-            );
-            cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
-          }
+          const cookieConfig = getCookieConfig(
+            platform?.env,
+            request.headers.get('host') ?? undefined,
+            {
+              maxAge: COOKIES.SESSION_MAX_AGE,
+            }
+          );
+          cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
         }
       }
 

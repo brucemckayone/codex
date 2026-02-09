@@ -18,7 +18,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.auth_forgot_password()} | Revelations</title>
+  <title>{m.auth_forgot_password()} | Codex</title>
 </svelte:head>
 
 <h1>{m.auth_forgot_password()}</h1>

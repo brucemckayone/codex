@@ -15,7 +15,7 @@
 </script>
 
 <svelte:head>
-  <title>Email Verification | Revelations</title>
+  <title>Email Verification | Codex</title>
 </svelte:head>
 
 <div>
