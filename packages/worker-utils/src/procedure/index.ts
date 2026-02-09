@@ -37,9 +37,9 @@ export {
   validateInput,
 } from './helpers';
 export * from './multipart-procedure';
-// Note: org-helpers (checkOrganizationMembership, extractOrganizationFromSubdomain)
-// are dynamically imported in helpers.ts to enable code-splitting.
-// If you need direct access, import from './org-helpers' directly.
+// org-helpers: dynamically imported in helpers.ts for code-splitting inside procedure().
+// Re-exported here for direct use by route handlers.
+export { checkOrganizationMembership } from './org-helpers';
 // Main procedure function
 export { procedure } from './procedure';
 export type { ServiceRegistryResult } from './service-registry';

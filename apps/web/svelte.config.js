@@ -17,8 +17,17 @@ const config = {
       $paraglide: './src/paraglide',
       $tests: './src/tests',
     },
-    // NOTE: Remote Functions (experimental.remoteFunctions) available but not enabled yet
-    // Enable when stable for type-safe client-server communication
+    experimental: {
+      // Enable Remote Functions for type-safe server-client communication
+      // See: https://svelte.dev/docs/kit/remote-functions
+      remoteFunctions: true,
+    },
+  },
+  compilerOptions: {
+    experimental: {
+      // Enable await expressions directly in Svelte 5 templates
+      async: true,
+    },
   },
 };
 

@@ -53,9 +53,7 @@ export {
 // Procedure pattern (tRPC-style)
 export {
   type AuthLevel,
-  // Note: checkOrganizationMembership and extractOrganizationFromSubdomain
-  // are dynamically imported internally for code-splitting.
-  // Import from '@codex/worker-utils/procedure/org-helpers' if needed directly.
+  checkOrganizationMembership,
   createServiceRegistry,
   enforceIPWhitelist,
   enforcePolicyInline,

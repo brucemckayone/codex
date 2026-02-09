@@ -17,6 +17,7 @@ export type {
   ContactSettingsResponse,
   DeleteOrganizationResponse,
   FeatureSettingsResponse,
+  MembershipLookupResponse,
   PaginatedListResponse,
   PaginationMetadata,
   PlaybackProgressResponse,

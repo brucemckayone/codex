@@ -11,7 +11,7 @@
  * - Slug uniqueness enforced
  */
 
-import { PAGINATION } from '@codex/constants';
+import { PAGINATION, RESERVED_SUBDOMAINS_SET } from '@codex/constants';
 import {
   isUniqueViolation,
   whereNotDeleted,
@@ -318,16 +318,24 @@ export class OrganizationService extends BaseService {
   /**
    * Check if slug is available
    *
-   * Useful for frontend validation before creating organization
+   * Checks both the reserved subdomains list (infrastructure conflicts)
+   * and database uniqueness (existing organizations).
    *
    * @param slug - Slug to check
-   * @returns True if slug is available, false if taken
+   * @returns True if slug is available, false if taken or reserved
    */
   async isSlugAvailable(slug: string): Promise<boolean> {
+    const normalizedSlug = slug.toLowerCase();
+
+    // Reject reserved subdomains (cdn, auth, api, etc.)
+    if (RESERVED_SUBDOMAINS_SET.has(normalizedSlug)) {
+      return false;
+    }
+
     try {
       const existing = await this.db.query.organizations.findFirst({
         where: and(
-          eq(organizations.slug, slug.toLowerCase()),
+          eq(organizations.slug, normalizedSlug),
           whereNotDeleted(organizations)
         ),
         columns: { id: true },

@@ -26,6 +26,7 @@ import {
 } from '@codex/worker-utils';
 
 import identityRoutes from './routes/identity';
+import membershipRoutes from './routes/membership';
 // Import route modules
 import userRoutes from './routes/users';
 
@@ -47,6 +48,7 @@ const app = createWorker({
 });
 
 app.route('/api/identity', identityRoutes);
+app.route('/api/organizations', membershipRoutes);
 
 /**
  * Environment validation
@@ -56,7 +58,7 @@ app.route('/api/identity', identityRoutes);
 app.use(
   '*',
   createEnvValidationMiddleware({
-    required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
+    required: ['DATABASE_URL', 'RATE_LIMIT_KV', 'WORKER_SHARED_SECRET'],
     optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL', 'MEDIA_BUCKET'],
   })
 );

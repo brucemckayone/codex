@@ -1,3 +1,5 @@
+import { RESERVED_SUBDOMAINS_SET } from '@codex/constants';
+
 /**
  * Auth routes that can be accessed from any domain
  */
@@ -10,27 +12,7 @@ export const AUTH_PATHS = new Set([
 ]);
 
 /**
- * Reserved subdomains that cannot be used as org slugs
- * These are infrastructure, API, or special-purpose subdomains
+ * Reserved subdomains that cannot be used as org slugs.
+ * Single source of truth: @codex/constants (packages/constants/src/urls.ts)
  */
-export const RESERVED_SUBDOMAINS = new Set([
-  // Infrastructure
-  'www',
-  'auth',
-  'api',
-  'content-api',
-  'organization-api',
-  'ecom-api',
-  'identity-api',
-  'media-api',
-  'notifications-api',
-  // Special routes
-  'creators',
-  'admin',
-  'platform',
-  // Environments
-  'staging',
-  'dev',
-  'test',
-  'localhost',
-]);
+export const RESERVED_SUBDOMAINS = RESERVED_SUBDOMAINS_SET;
