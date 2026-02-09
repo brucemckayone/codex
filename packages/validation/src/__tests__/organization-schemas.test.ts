@@ -60,7 +60,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept null for optional URL fields', () => {
         const input = {
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           logoUrl: null,
           websiteUrl: null,
         };
@@ -72,7 +72,7 @@ describe('Organization Validation Schemas', () => {
 
     describe('Name Validation', () => {
       it('should reject empty name', () => {
-        const input = { name: '', slug: 'test' };
+        const input = { name: '', slug: 'my-org' };
         const result = createOrganizationSchema.safeParse(input);
 
         expect(result.success).toBe(false);
@@ -87,7 +87,7 @@ describe('Organization Validation Schemas', () => {
       it('should reject name over 255 characters', () => {
         const input = {
           name: 'a'.repeat(256),
-          slug: 'test',
+          slug: 'my-org',
         };
         const result = createOrganizationSchema.safeParse(input);
         expect(result.success).toBe(false);
@@ -96,7 +96,7 @@ describe('Organization Validation Schemas', () => {
       it('should trim whitespace from name', () => {
         const input = {
           name: '  Test Organization  ',
-          slug: 'test',
+          slug: 'my-org',
         };
         const result = createOrganizationSchema.safeParse(input);
 
@@ -117,7 +117,7 @@ describe('Organization Validation Schemas', () => {
         for (const name of names) {
           const result = createOrganizationSchema.safeParse({
             name,
-            slug: 'test',
+            slug: 'my-org',
           });
           expect(result.success).toBe(true);
         }
@@ -126,7 +126,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept minimum length name', () => {
         const result = createOrganizationSchema.safeParse({
           name: 'A',
-          slug: 'test',
+          slug: 'my-org',
         });
         expect(result.success).toBe(true);
       });
@@ -134,7 +134,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept maximum length name', () => {
         const result = createOrganizationSchema.safeParse({
           name: 'a'.repeat(255),
-          slug: 'test',
+          slug: 'my-org',
         });
         expect(result.success).toBe(true);
       });
@@ -146,7 +146,7 @@ describe('Organization Validation Schemas', () => {
           'test-org',
           'my-company-123',
           'a1-b2-c3',
-          'test',
+          'acme',
           'test-test-test',
         ];
 
@@ -217,13 +217,42 @@ describe('Organization Validation Schemas', () => {
           expect(result.data.slug).toBe('test-org');
         }
       });
+
+      it('should reject reserved subdomains as slugs', () => {
+        const reservedSlugs = [
+          'cdn',
+          'api',
+          'auth',
+          'admin',
+          'www',
+          'staging',
+          'content-api',
+          'identity-api',
+        ];
+
+        for (const slug of reservedSlugs) {
+          const result = createOrganizationSchema.safeParse({
+            name: 'Test',
+            slug,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const slugError = result.error.issues.find((i) =>
+              i.path.includes('slug')
+            );
+            expect(slugError?.message).toBe(
+              'This slug is reserved and cannot be used for an organization'
+            );
+          }
+        }
+      });
     });
 
     describe('Description Validation', () => {
       it('should accept valid description', () => {
         const input = {
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           description: 'A test organization description.',
         };
         const result = createOrganizationSchema.safeParse(input);
@@ -233,7 +262,7 @@ describe('Organization Validation Schemas', () => {
       it('should reject description over 5000 characters', () => {
         const input = {
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           description: 'a'.repeat(5001),
         };
         const result = createOrganizationSchema.safeParse(input);
@@ -243,7 +272,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept maximum length description', () => {
         const input = {
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           description: 'a'.repeat(5000),
         };
         const result = createOrganizationSchema.safeParse(input);
@@ -253,7 +282,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept null description', () => {
         const input = {
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           description: null,
         };
         const result = createOrganizationSchema.safeParse(input);
@@ -263,7 +292,7 @@ describe('Organization Validation Schemas', () => {
       it('should trim and accept description', () => {
         const input = {
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           description: '  Description with spaces  ',
         };
         const result = createOrganizationSchema.safeParse(input);
@@ -288,7 +317,7 @@ describe('Organization Validation Schemas', () => {
         for (const url of validUrls) {
           const result = createOrganizationSchema.safeParse({
             name: 'Test',
-            slug: 'test',
+            slug: 'my-org',
             logoUrl: url,
             websiteUrl: url,
           });
@@ -299,7 +328,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept HTTP URLs', () => {
         const input = {
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           websiteUrl: 'http://example.com',
         };
         const result = createOrganizationSchema.safeParse(input);
@@ -318,7 +347,7 @@ describe('Organization Validation Schemas', () => {
         for (const url of invalidUrls) {
           const result = createOrganizationSchema.safeParse({
             name: 'Test',
-            slug: 'test',
+            slug: 'my-org',
             websiteUrl: url,
           });
           expect(result.success).toBe(false);
@@ -328,7 +357,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept null logoUrl', () => {
         const result = createOrganizationSchema.safeParse({
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           logoUrl: null,
         });
         expect(result.success).toBe(true);
@@ -337,7 +366,7 @@ describe('Organization Validation Schemas', () => {
       it('should accept null websiteUrl', () => {
         const result = createOrganizationSchema.safeParse({
           name: 'Test',
-          slug: 'test',
+          slug: 'my-org',
           websiteUrl: null,
         });
         expect(result.success).toBe(true);
@@ -346,7 +375,7 @@ describe('Organization Validation Schemas', () => {
 
     describe('Missing Required Fields', () => {
       it('should reject missing name', () => {
-        const result = createOrganizationSchema.safeParse({ slug: 'test' });
+        const result = createOrganizationSchema.safeParse({ slug: 'my-org' });
 
         expect(result.success).toBe(false);
         if (!result.success) {
@@ -410,6 +439,19 @@ describe('Organization Validation Schemas', () => {
       for (const update of invalidUpdates) {
         const result = updateOrganizationSchema.safeParse(update);
         expect(result.success).toBe(false);
+      }
+    });
+
+    it('should reject reserved subdomains in slug updates', () => {
+      const result = updateOrganizationSchema.safeParse({ slug: 'cdn' });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const slugError = result.error.issues.find((i) =>
+          i.path.includes('slug')
+        );
+        expect(slugError?.message).toBe(
+          'This slug is reserved and cannot be used for an organization'
+        );
       }
     });
 

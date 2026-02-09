@@ -3,6 +3,7 @@ import {
   CONTENT_TYPES,
   MEDIA_STATUS,
   MEDIA_TYPES,
+  RESERVED_SUBDOMAINS_SET,
   VISIBILITY,
 } from '@codex/constants';
 import { z } from 'zod';
@@ -41,9 +42,12 @@ const slugSchema = createSlugSchema(500);
 
 /**
  * Organization slug validation (max 255 chars)
- * Must be unique across platform
+ * Must be unique across platform and not conflict with reserved subdomains
  */
-const organizationSlugSchema = createSlugSchema(255);
+const organizationSlugSchema = createSlugSchema(255).refine(
+  (slug) => !RESERVED_SUBDOMAINS_SET.has(slug),
+  { message: 'This slug is reserved and cannot be used for an organization' }
+);
 
 /**
  * Sanitized string for user-generated content

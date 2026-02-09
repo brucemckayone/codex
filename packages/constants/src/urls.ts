@@ -54,6 +54,8 @@ export const RESERVED_SUBDOMAINS = [
   'app',
   'codex',
   'codex-staging',
+  'creators',
+  'platform',
   'www',
 
   // Infrastructure & common reserved
@@ -73,6 +75,10 @@ export const RESERVED_SUBDOMAINS = [
   'support',
   'staging',
   'test',
+  'localhost',
 ] as const;
 
 export type ReservedSubdomain = (typeof RESERVED_SUBDOMAINS)[number];
+
+/** Pre-built Set for O(1) lookups against reserved subdomains */
+export const RESERVED_SUBDOMAINS_SET = new Set<string>(RESERVED_SUBDOMAINS);
