@@ -55,6 +55,15 @@ export {
   loadContentForOrg,
   loadContentWithFilters,
 } from './content';
+// SSR Hydration utilities
+export {
+  COLLECTION_KEYS,
+  type CollectionKey,
+  hydrateCollection,
+  hydrateIfNeeded,
+  invalidateCollection,
+  isCollectionHydrated,
+} from './hydration';
 export {
   type LibraryItem,
   type LibraryProgress,
@@ -63,7 +72,6 @@ export {
   resetProgress,
   updateProgress,
 } from './library';
-
 export {
   clearAllProgress,
   clearProgress,
@@ -74,7 +82,6 @@ export {
   syncProgressToServer,
   updateLocalProgress,
 } from './progress';
-
 export {
   cleanupProgressSync,
   forceSync,
