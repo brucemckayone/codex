@@ -1,13 +1,7 @@
 /**
- * API Error with typed properties
+ * Re-export ApiError for backward compatibility
+ *
+ * The canonical definition is in $lib/api/errors.ts
+ * This file maintains imports from $lib/server/errors
  */
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public code?: string
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+export { ApiError } from '$lib/api/errors';

@@ -132,6 +132,18 @@ importers:
       '@melt-ui/svelte':
         specifier: ^0.86.6
         version: 0.86.6(svelte@5.43.14)
+      '@tanstack/db':
+        specifier: ^0.5.25
+        version: 0.5.25(typescript@5.9.3)
+      '@tanstack/query-core':
+        specifier: ^5.90.20
+        version: 5.90.20
+      '@tanstack/query-db-collection':
+        specifier: ^1.0.22
+        version: 1.0.22(@tanstack/query-core@5.90.20)(typescript@5.9.3)
+      '@tanstack/svelte-db':
+        specifier: ^0.1.68
+        version: 0.1.68(svelte@5.43.14)(typescript@5.9.3)
       happy-dom:
         specifier: ^20.0.8
         version: 20.0.10
@@ -587,7 +599,7 @@ importers:
         version: 3.5.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       vitest:
         specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jsdom@27.4.0)
+        version: 2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13(vitest@4.0.13))(happy-dom@20.0.10)(jsdom@27.4.0)
 
   packages/notifications:
     dependencies:
@@ -867,7 +879,7 @@ importers:
         version: 0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)
       vite-plugin-dts:
         specifier: ^4.5.4
-        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       ws:
         specifier: ^8.18.3
         version: 8.18.3
@@ -880,7 +892,7 @@ importers:
         version: 8.18.1
       neon-testing:
         specifier: ^2.2.0
-        version: 2.2.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
+        version: 2.2.0(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -4316,6 +4328,9 @@ packages:
   '@standard-schema/spec@1.0.0':
     resolution: {integrity: sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA==}
 
+  '@standard-schema/spec@1.1.0':
+    resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
   '@storybook/addon-a11y@8.6.15':
     resolution: {integrity: sha512-hNSI28z1PCu7/mQ+skVHX+PvLwnLLiM4d+Ecr0hhZLJDwa5JoZrnszSrCoGadSzaRe270kwjYoEwgX9MGXaxrA==}
     peerDependencies:
@@ -4652,6 +4667,34 @@ packages:
 
   '@swc/wasm@1.15.8':
     resolution: {integrity: sha512-RG2BxGbbsjtddFCo1ghKH6A/BMXbY1eMBfpysV0lJMCpI4DZOjW1BNBnxvBt7YsYmlJtmy5UXIg9/4ekBTFFaQ==}
+
+  '@tanstack/db-ivm@0.1.17':
+    resolution: {integrity: sha512-DK7vm56CDxNuRAdsbiPs+gITJ+16tUtYgZg3BRTLYKGIDsy8sdIO7sQFq5zl7Y+aIKAPmMAbVp9UjJ75FTtwgQ==}
+    peerDependencies:
+      typescript: '>=4.7'
+
+  '@tanstack/db@0.5.25':
+    resolution: {integrity: sha512-VqVchs6Mm4rw2GyiOkaoD+PJw6lCJT8EI/TzPu8KWZy3QxyOlilpMvEuDTCl0LZdp1iLYlQT1NdgDg0gimV3kQ==}
+    peerDependencies:
+      typescript: '>=4.7'
+
+  '@tanstack/pacer-lite@0.2.1':
+    resolution: {integrity: sha512-3PouiFjR4B6x1c969/Pl4ZIJleof1M0n6fNX8NRiC9Sqv1g06CVDlEaXUR4212ycGFyfq4q+t8Gi37Xy+z34iQ==}
+    engines: {node: '>=18'}
+
+  '@tanstack/query-core@5.90.20':
+    resolution: {integrity: sha512-OMD2HLpNouXEfZJWcKeVKUgQ5n+n3A2JFmBaScpNDUqSrQSjiveC7dKMe53uJUg1nDG16ttFPz2xfilz6i2uVg==}
+
+  '@tanstack/query-db-collection@1.0.22':
+    resolution: {integrity: sha512-feYfOIA/xgf3S/aWIhq7Oov/RE66M0wMOZUk1+oAHZ3W7x0br7JzRKFYwdTtIMtopFt8tDq3Pt2gtZVZu+S7rA==}
+    peerDependencies:
+      '@tanstack/query-core': ^5.0.0
+      typescript: '>=4.7'
+
+  '@tanstack/svelte-db@0.1.68':
+    resolution: {integrity: sha512-aSylGluzre+27FJ3GvnvYxHXiJ76rGLRTtrKrx9wos/fxqYizO1t4GUZA4WtrS5yGZiJGsqPtETLH/RL4Sf2Cg==}
+    peerDependencies:
+      svelte: ^5.0.0
 
   '@testing-library/dom@10.4.0':
     resolution: {integrity: sha512-pemlzrSESWbdAloYml3bAJMEfNh1Z7EduzqPKprCH5S341frlpYnUEW0H72dLxa6IsYr+mPno20GiSm+h9dEdQ==}
@@ -6353,6 +6396,10 @@ packages:
     resolution: {integrity: sha512-0iirZp3uVDjVGt9p49aTaqjk84TrglENEDuqfdlZQ1roC9CWlPk6Avf8EEnZNcAqPonwkG35x4n3ww/1THYAeQ==}
     engines: {node: '>= 12.20'}
 
+  fractional-indexing@3.2.0:
+    resolution: {integrity: sha512-PcOxmqwYCW7O2ovKRU8OoQQj2yqTfEB/yeTYk4gPid6dN5ODRfU1hXd9tTVZzax/0NkO7AxpHykvZnT1aYp/BQ==}
+    engines: {node: ^14.13.1 || >=16.0.0}
+
   from@0.1.7:
     resolution: {integrity: sha512-twe20eF1OxVxp/ML/kq2p1uc6KvFK/+vs8WjEbeKmV2He22MKm7YF2ANIt+EOqhJ5L3K/SuuPhk0hWQDjOM23g==}
 
@@ -7991,6 +8038,9 @@ packages:
   sorcery@0.11.1:
     resolution: {integrity: sha512-o7npfeJE6wi6J9l0/5LKshFzZ2rMatRiCDwYeDQaOzqdzRJwALhX7mk/A/ecg6wjMu7wdZbmXfD2S/vpOg0bdQ==}
     hasBin: true
+
+  sorted-btree@1.8.1:
+    resolution: {integrity: sha512-395+XIP+wqNn3USkFSrNz7G3Ss/MXlZEqesxvzCRFwL14h6e8LukDHdLBePn5pwbm5OQ9vGu8mDyz2lLDIqamQ==}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -9912,7 +9962,7 @@ snapshots:
       nanostores: 1.1.0
       zod: 4.3.6
 
-  '@better-auth/core@1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@3.25.76))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)':
+  '@better-auth/core@1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)':
     dependencies:
       '@better-auth/utils': 0.3.0
       '@better-fetch/fetch': 1.1.21
@@ -9939,12 +9989,6 @@ snapshots:
       '@better-auth/core': 1.4.1(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)
       '@better-auth/utils': 0.3.0
       '@better-fetch/fetch': 1.1.18
-
-  '@better-auth/telemetry@1.4.11(@better-auth/core@1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@3.25.76))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0))':
-    dependencies:
-      '@better-auth/core': 1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@3.25.76))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)
-      '@better-auth/utils': 0.3.0
-      '@better-fetch/fetch': 1.1.21
 
   '@better-auth/telemetry@1.4.11(@better-auth/core@1.4.11(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0))':
     dependencies:
@@ -12052,6 +12096,8 @@ snapshots:
 
   '@standard-schema/spec@1.0.0': {}
 
+  '@standard-schema/spec@1.1.0': {}
+
   '@storybook/addon-a11y@8.6.15(storybook@8.6.15(prettier@3.6.2))':
     dependencies:
       '@storybook/addon-highlight': 8.6.15(storybook@8.6.15(prettier@3.6.2))
@@ -12548,6 +12594,37 @@ snapshots:
       '@swc/counter': 0.1.3
 
   '@swc/wasm@1.15.8': {}
+
+  '@tanstack/db-ivm@0.1.17(typescript@5.9.3)':
+    dependencies:
+      fractional-indexing: 3.2.0
+      sorted-btree: 1.8.1
+      typescript: 5.9.3
+
+  '@tanstack/db@0.5.25(typescript@5.9.3)':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db-ivm': 0.1.17(typescript@5.9.3)
+      '@tanstack/pacer-lite': 0.2.1
+      typescript: 5.9.3
+
+  '@tanstack/pacer-lite@0.2.1': {}
+
+  '@tanstack/query-core@5.90.20': {}
+
+  '@tanstack/query-db-collection@1.0.22(@tanstack/query-core@5.90.20)(typescript@5.9.3)':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db': 0.5.25(typescript@5.9.3)
+      '@tanstack/query-core': 5.90.20
+      typescript: 5.9.3
+
+  '@tanstack/svelte-db@0.1.68(svelte@5.43.14)(typescript@5.9.3)':
+    dependencies:
+      '@tanstack/db': 0.5.25(typescript@5.9.3)
+      svelte: 5.43.14
+    transitivePeerDependencies:
+      - typescript
 
   '@testing-library/dom@10.4.0':
     dependencies:
@@ -13194,7 +13271,7 @@ snapshots:
 
   better-auth@1.4.11(@prisma/client@5.22.0(prisma@5.22.0))(@sveltejs/kit@2.49.0(@opentelemetry/api@1.9.0)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.43.14)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.43.14)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(better-sqlite3@12.4.6)(drizzle-kit@0.31.7)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0))(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(solid-js@1.6.12)(svelte@5.43.14)(vitest@4.0.13):
     dependencies:
-      '@better-auth/core': 1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@3.25.76))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)
+      '@better-auth/core': 1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)
       '@better-auth/telemetry': 1.4.11(@better-auth/core@1.4.11(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0))
       '@better-auth/utils': 0.3.0
       '@better-fetch/fetch': 1.1.21
@@ -13223,8 +13300,8 @@ snapshots:
 
   better-auth@1.4.11(@prisma/client@5.22.0(prisma@5.22.0))(@sveltejs/kit@2.49.0(@opentelemetry/api@1.9.0)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.43.14)(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.43.14)(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(better-sqlite3@12.4.6)(drizzle-kit@0.31.7)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0))(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(solid-js@1.6.12)(svelte@5.43.14)(vitest@3.2.4):
     dependencies:
-      '@better-auth/core': 1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@3.25.76))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)
-      '@better-auth/telemetry': 1.4.11(@better-auth/core@1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@3.25.76))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0))
+      '@better-auth/core': 1.4.11(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0)
+      '@better-auth/telemetry': 1.4.11(@better-auth/core@1.4.11(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(nanostores@1.1.0))
       '@better-auth/utils': 0.3.0
       '@better-fetch/fetch': 1.1.21
       '@noble/ciphers': 2.0.1
@@ -14326,6 +14403,8 @@ snapshots:
     dependencies:
       node-domexception: 1.0.0
       web-streams-polyfill: 4.0.0-beta.3
+
+  fractional-indexing@3.2.0: {}
 
   from@0.1.7: {}
 
@@ -15544,14 +15623,6 @@ snapshots:
     transitivePeerDependencies:
       - debug
 
-  neon-testing@2.2.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13):
-    dependencies:
-      '@neondatabase/api-client': 2.2.0
-      vite: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
-      vitest: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
-    transitivePeerDependencies:
-      - debug
-
   node-abi@3.85.0:
     dependencies:
       semver: 7.7.3
@@ -16320,6 +16391,8 @@ snapshots:
       minimist: 1.2.8
       sander: 0.5.1
 
+  sorted-btree@1.8.1: {}
+
   source-map-js@1.2.1: {}
 
   source-map-support@0.5.13:
@@ -16933,7 +17006,7 @@ snapshots:
       vite: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
     optional: true
 
-  vitest@2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jsdom@27.4.0):
+  vitest@2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13(vitest@4.0.13))(happy-dom@20.0.10)(jsdom@27.4.0):
     dependencies:
       '@vitest/expect': 2.1.9
       '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@22.13.0))
