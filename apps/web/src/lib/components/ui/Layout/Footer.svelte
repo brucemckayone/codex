@@ -8,10 +8,11 @@
       &copy; {new Date().getFullYear()} Codex. All rights reserved.
     </p>
 
-    <div class="links">
-      <a href="/privacy" class="footer-link">Privacy</a>
+    <nav class="links" aria-label="Footer">
+      <a href="/about" class="footer-link">About</a>
       <a href="/terms" class="footer-link">Terms</a>
-    </div>
+      <a href="/privacy" class="footer-link">Privacy</a>
+    </nav>
   </PageContainer>
 </footer>
 

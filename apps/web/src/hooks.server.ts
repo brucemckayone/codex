@@ -32,10 +32,11 @@ const sessionHook: Handle = async ({ event, resolve }) => {
       const api = createServerApi(event.platform, event.cookies);
       const data = await api.auth.getSession();
 
-      // BetterAuth returns { user, session } structure
-      event.locals.user = data.user ?? null;
-      event.locals.session = data.session ?? null;
-      event.locals.userId = data.user?.id ?? null;
+      // BetterAuth returns { user, session } on success, or null when
+      // the session cookie is invalid/expired (still HTTP 200)
+      event.locals.user = data?.user ?? null;
+      event.locals.session = data?.session ?? null;
+      event.locals.userId = data?.user?.id ?? null;
     } catch (error) {
       // Auth worker unavailable - log and treat as unauthenticated
       logger.error('Session validation failed', {

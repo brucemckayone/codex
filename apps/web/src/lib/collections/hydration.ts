@@ -11,7 +11,7 @@
  * 4. useLiveQuery finds cached data - no refetch!
  */
 
-import { queryClient } from './index';
+import { queryClient } from './query-client';
 
 /**
  * Collection keys used for hydration

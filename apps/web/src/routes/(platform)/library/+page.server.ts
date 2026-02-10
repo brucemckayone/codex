@@ -7,11 +7,19 @@
 
 import { redirect } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
+import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ platform, cookies, locals }) => {
+export const load: PageServerLoad = async ({
+  platform,
+  cookies,
+  locals,
+  setHeaders,
+}) => {
+  setHeaders(CACHE_HEADERS.PRIVATE);
+
   // Ensure user is authenticated
-  if (!locals.session?.user) {
+  if (!locals.user) {
     redirect(303, '/login?redirect=/library');
   }
 

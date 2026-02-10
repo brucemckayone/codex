@@ -12,6 +12,8 @@ export * as DropdownMenu from './DropdownMenu/index';
 // Feedback
 export { default as ConfirmDialog } from './Feedback/ConfirmDialog.svelte';
 export { default as ErrorBanner } from './Feedback/ErrorBanner.svelte';
+export { default as ErrorBoundary } from './Feedback/ErrorBoundary/ErrorBoundary.svelte';
+export { Spinner } from './Feedback/Spinner/index';
 export { Input } from './Input/index';
 export { Label } from './Label/index';
 // Layout

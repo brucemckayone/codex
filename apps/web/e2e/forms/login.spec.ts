@@ -13,8 +13,8 @@ test.describe('Login Form', () => {
   });
 
   test('displays login form with all required fields', async ({ page }) => {
-    // Check page title (uses paraglide i18n: "Sign In | Revelations")
-    await expect(page).toHaveTitle(/Sign In.*Revelations/i);
+    // Check page title (uses paraglide i18n: "Sign In | Codex")
+    await expect(page).toHaveTitle(/Sign In.*Codex/i);
 
     // Check form fields exist
     await expect(page.locator('input[name="email"]')).toBeVisible();

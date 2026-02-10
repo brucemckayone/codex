@@ -95,8 +95,11 @@ export function createServerApi(
     };
 
     if (sessionCookie) {
+      // Send both our platform cookie name and BetterAuth's internal name.
+      // BetterAuth's get-session handler only looks for 'better-auth.session_token'
+      // regardless of cookie.name config, while other workers use COOKIES.SESSION_NAME.
       (headers as Record<string, string>).Cookie =
-        `${COOKIES.SESSION_NAME}=${sessionCookie}`;
+        `${COOKIES.SESSION_NAME}=${sessionCookie}; better-auth.session_token=${sessionCookie}`;
     }
 
     const response = await fetch(url, {
@@ -147,7 +150,7 @@ export function createServerApi(
       const cookieToUse = customSessionCookie || sessionCookie;
       if (cookieToUse) {
         (headers as Record<string, string>).Cookie =
-          `${COOKIES.SESSION_NAME}=${cookieToUse}`;
+          `${COOKIES.SESSION_NAME}=${cookieToUse}; better-auth.session_token=${cookieToUse}`;
       }
 
       const response = await fetch(url, {
@@ -184,9 +187,9 @@ export function createServerApi(
        * Get current session
        */
       getSession: () =>
-        request<{ user?: UserData; session?: SessionData }>(
+        request<{ user?: UserData; session?: SessionData } | null>(
           'auth',
-          '/api/auth/session'
+          '/api/auth/get-session'
         ),
     },
 

@@ -228,6 +228,22 @@ export type Bindings = {
    * Used by content-api to call media-api internal endpoints
    */
   MEDIA_API_URL?: string;
+
+  // ==========================================================================
+  // Cloudflare Cache Purge
+  // ==========================================================================
+
+  /**
+   * Cloudflare Zone ID for cache purge operations
+   * Only needed by workers that purge CDN cache
+   */
+  CF_ZONE_ID?: string;
+
+  /**
+   * Cloudflare API token with cache purge permissions
+   * Only needed by workers that purge CDN cache
+   */
+  CF_API_TOKEN?: string;
 };
 
 /**

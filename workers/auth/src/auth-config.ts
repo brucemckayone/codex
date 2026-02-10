@@ -11,6 +11,7 @@ import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { sendVerificationEmail } from './email';
 import type { AuthBindings } from './types';
 
 interface AuthConfigOptions {
@@ -87,9 +88,13 @@ export function createAuthInstance(options: AuthConfigOptions) {
             expirationTtl: 300, // 5 minutes
           });
         }
+
+        // Send the actual verification email
+        await sendVerificationEmail(env, user, token);
       },
       autoSignInAfterVerification: true,
       sendOnSignUp: true,
+      sendOnSignIn: true,
     },
     emailAndPassword: {
       enabled: true,

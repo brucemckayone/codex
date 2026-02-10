@@ -13,7 +13,7 @@
  */
 
 import type { R2Bucket } from '@cloudflare/workers-types';
-import { R2Service } from '@codex/cloudflare-clients';
+import { type CachePurgeClient, R2Service } from '@codex/cloudflare-clients';
 import {
   CONTENT_STATUS,
   CONTENT_TYPES,
@@ -66,6 +66,14 @@ import type {
  * - List content with filters
  */
 export class ContentService extends BaseService {
+  private cachePurge?: CachePurgeClient;
+  private webAppUrl?: string;
+
+  setCachePurge(client: CachePurgeClient, webAppUrl: string): void {
+    this.cachePurge = client;
+    this.webAppUrl = webAppUrl;
+  }
+
   /**
    * Create new content
    *
@@ -382,6 +390,17 @@ export class ContentService extends BaseService {
         throw new ContentNotFoundError(id);
       }
 
+      // Fire-and-forget: purge cached content pages after publish
+      if (this.cachePurge && result.slug) {
+        try {
+          await this.cachePurge.purgeByUrls([
+            `${this.webAppUrl}/content/${result.slug}`,
+          ]);
+        } catch (error) {
+          console.error('Cache purge after publish failed:', error);
+        }
+      }
+
       return result;
     } catch (error) {
       if (
@@ -432,6 +451,17 @@ export class ContentService extends BaseService {
 
         return unpublished;
       });
+
+      // Fire-and-forget: purge cached content pages after unpublish (critical for takedowns)
+      if (this.cachePurge && result.slug) {
+        try {
+          await this.cachePurge.purgeByUrls([
+            `${this.webAppUrl}/content/${result.slug}`,
+          ]);
+        } catch (error) {
+          console.error('Cache purge after unpublish failed:', error);
+        }
+      }
 
       return result;
     } catch (error) {

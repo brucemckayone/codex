@@ -17,7 +17,7 @@ import {
   getUserLibrary,
   savePlaybackProgress,
 } from '$lib/remote/library.remote';
-import { queryClient } from './index';
+import { queryClient } from './query-client';
 
 /**
  * Library item type extracted from UserLibraryResponse

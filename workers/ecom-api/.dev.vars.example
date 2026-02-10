@@ -1,42 +1,19 @@
-# Development Environment Variables
+# Ecom API Worker - Development Environment Variables
 # Copy this file to .dev.vars and fill in actual values
-# Never commit .dev.vars to version control
+#
+# Note: DB_METHOD is set to LOCAL_PROXY in wrangler.jsonc,
+# so you need DATABASE_URL_LOCAL_PROXY (not DATABASE_URL)
 
-# =============================================================================
-# Required Variables
-# =============================================================================
-
-# Database (PostgreSQL via Neon)
-# For LOCAL_PROXY mode (local development/E2E tests), set DATABASE_URL_LOCAL_PROXY
-# For PRODUCTION/NEON_BRANCH modes, set DATABASE_URL
-DATABASE_URL=postgresql://user:password@localhost:5432/codex_dev
-DATABASE_URL_LOCAL_PROXY=postgresql://user:password@db.localtest.me:5432/main
-DB_METHOD=LOCAL_PROXY
+# Database (LOCAL_PROXY mode)
+DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
 
 # Stripe (use test mode keys: sk_test_...)
 STRIPE_SECRET_KEY=sk_test_YOUR_TEST_KEY_HERE
 STRIPE_WEBHOOK_SECRET_BOOKING=whsec_YOUR_BOOKING_WEBHOOK_SECRET
 
-# =============================================================================
-# Optional Variables (Future Phases)
-# =============================================================================
-
-# Additional Stripe webhook secrets (not required yet)
-STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_YOUR_PAYMENT_SECRET
-STRIPE_WEBHOOK_SECRET_SUBSCRIPTION=whsec_YOUR_SUBSCRIPTION_SECRET
-STRIPE_WEBHOOK_SECRET_CUSTOMER=whsec_YOUR_CUSTOMER_SECRET
-STRIPE_WEBHOOK_SECRET_CONNECT=whsec_YOUR_CONNECT_SECRET
-STRIPE_WEBHOOK_SECRET_DISPUTE=whsec_YOUR_DISPUTE_SECRET
-
-# =============================================================================
-# CORS Configuration
-# =============================================================================
-
-WEB_APP_URL=http://localhost:3000
-API_URL=http://localhost:8787
-
-# =============================================================================
-# Environment
-# =============================================================================
-
-ENVIRONMENT=development
+# Additional Stripe webhook secrets (future phases, not required yet)
+# STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_YOUR_PAYMENT_SECRET
+# STRIPE_WEBHOOK_SECRET_SUBSCRIPTION=whsec_YOUR_SUBSCRIPTION_SECRET
+# STRIPE_WEBHOOK_SECRET_CUSTOMER=whsec_YOUR_CUSTOMER_SECRET
+# STRIPE_WEBHOOK_SECRET_CONNECT=whsec_YOUR_CONNECT_SECRET
+# STRIPE_WEBHOOK_SECRET_DISPUTE=whsec_YOUR_DISPUTE_SECRET

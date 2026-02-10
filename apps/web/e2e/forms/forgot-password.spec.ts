@@ -13,8 +13,8 @@ test.describe('Forgot Password Form', () => {
   });
 
   test('displays forgot password form with email field', async ({ page }) => {
-    // Check page title (uses paraglide i18n: "Forgot your password? | Revelations")
-    await expect(page).toHaveTitle(/Forgot your password.*Revelations/i);
+    // Check page title (uses paraglide i18n: "Forgot your password? | Codex")
+    await expect(page).toHaveTitle(/Forgot your password.*Codex/i);
 
     // Check form elements exist
     await expect(page.locator('input[name="email"]')).toBeVisible();

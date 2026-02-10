@@ -34,14 +34,14 @@
     align-items: start;
     gap: var(--space-4);
     padding: var(--space-4);
-    background-color: var(--color-primary-50);
-    border: var(--border-width) var(--border-style) var(--color-primary-200);
+    background-color: var(--color-error-50, #fef2f2);
+    border: var(--border-width) var(--border-style) var(--color-error-200, #fecaca);
     border-radius: var(--radius-md);
-    color: var(--color-primary-900);
+    color: var(--color-error-900, #7f1d1d);
   }
 
   .error-icon {
-    color: var(--color-primary-500);
+    color: var(--color-error, #ef4444);
     flex-shrink: 0;
   }
 

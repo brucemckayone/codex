@@ -5,9 +5,10 @@ import {
   MIME_TYPES,
 } from '@codex/constants';
 import { authRegisterSchema } from '@codex/validation';
-import { fail, redirect } from '@sveltejs/kit';
+import { fail, isRedirect, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { serverApiUrl } from '$lib/server/api';
+import { extractSessionToken } from '$lib/server/auth-utils';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ url, locals }) => {
@@ -86,27 +87,24 @@ export const actions: Actions = {
       }
 
       // 3. Set Session Cookie (Auto-login)
-      const setCookie = res.headers.get('set-cookie');
-      if (setCookie) {
-        const sessionMatch = setCookie.match(
-          new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
+      // BetterAuth uses 'better-auth.session_token' as cookie name internally.
+      // Registration with email verification may not return a session.
+      const sessionToken = extractSessionToken(res);
+      if (sessionToken) {
+        const cookieConfig = getCookieConfig(
+          platform?.env,
+          request.headers.get('host') ?? undefined,
+          {
+            maxAge: COOKIES.SESSION_MAX_AGE,
+          }
         );
-        if (sessionMatch) {
-          const cookieConfig = getCookieConfig(
-            platform?.env,
-            request.headers.get('host') ?? undefined,
-            {
-              maxAge: COOKIES.SESSION_MAX_AGE,
-            }
-          );
-          cookies.set(COOKIES.SESSION_NAME, sessionMatch[1], cookieConfig);
-        }
+        cookies.set(COOKIES.SESSION_NAME, sessionToken, cookieConfig);
       }
 
       // 4. Redirect to verify email page (or library if no verification)
       throw redirect(303, '/verify-email');
     } catch (err) {
-      if (err instanceof Response) throw err;
+      if (isRedirect(err)) throw err;
 
       logger.error('Registration error', {
         error: err instanceof Error ? err.message : String(err),

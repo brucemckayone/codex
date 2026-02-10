@@ -30,7 +30,10 @@
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
     "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "API_URL": "http://localhost:8787",
+    "FROM_EMAIL": "noreply@codex.local",
+    "FROM_NAME": "Codex",
+    "USE_MOCK_EMAIL": "true"
   },
 
   // Environment configurations
@@ -43,7 +46,10 @@
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
-        "API_URL": "http://localhost:8787"
+        "API_URL": "http://localhost:8787",
+        "FROM_EMAIL": "noreply@codex.local",
+        "FROM_NAME": "Codex",
+        "USE_MOCK_EMAIL": "true"
       },
       "kv_namespaces": [
         {
@@ -64,7 +70,9 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://codex.revelations.studio",
-        "API_URL": "https://api.revelations.studio"
+        "API_URL": "https://api.revelations.studio",
+        "FROM_EMAIL": "noreply@revelations.studio",
+        "FROM_NAME": "Codex"
       },
       "kv_namespaces": [
         {

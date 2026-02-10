@@ -33,7 +33,14 @@
       "vars": {
         "ENVIRONMENT": "test",
         "AUTH_WORKER_URL": "http://localhost:42069",
-        "API_URL": "http://localhost:8787"
+        "API_URL": "http://localhost:4001",
+        "CONTENT_API_URL": "http://localhost:4001",
+        "ORG_API_URL": "http://localhost:42071",
+        "ECOM_API_URL": "http://localhost:42072",
+        "MEDIA_API_URL": "http://localhost:8788",
+        "IDENTITY_API_URL": "http://localhost:42074",
+        "ADMIN_API_URL": "http://localhost:42073",
+        "NOTIFICATIONS_API_URL": "http://localhost:42075"
       },
       "kv_namespaces": [
         {
@@ -49,9 +56,14 @@
       "vars": {
         "ENVIRONMENT": "production",
         "AUTH_WORKER_URL": "https://auth.revelations.studio",
-        "API_URL": "https://api.revelations.studio",
+        "API_URL": "https://content-api.revelations.studio",
+        "CONTENT_API_URL": "https://content-api.revelations.studio",
         "ORG_API_URL": "https://organization-api.revelations.studio",
-        "ECOM_API_URL": "https://ecom-api.revelations.studio"
+        "ECOM_API_URL": "https://ecom-api.revelations.studio",
+        "MEDIA_API_URL": "https://media-api.revelations.studio",
+        "IDENTITY_API_URL": "https://identity-api.revelations.studio",
+        "ADMIN_API_URL": "https://admin-api.revelations.studio",
+        "NOTIFICATIONS_API_URL": "https://notifications-api.revelations.studio"
       },
       "routes": [
         // Specific routes first (for priority)
@@ -87,9 +99,14 @@
       "vars": {
         "ENVIRONMENT": "staging",
         "AUTH_WORKER_URL": "https://auth-staging.revelations.studio",
-        "API_URL": "https://api-staging.revelations.studio",
+        "API_URL": "https://content-api-staging.revelations.studio",
+        "CONTENT_API_URL": "https://content-api-staging.revelations.studio",
         "ORG_API_URL": "https://organization-api-staging.revelations.studio",
-        "ECOM_API_URL": "https://ecom-api-staging.revelations.studio"
+        "ECOM_API_URL": "https://ecom-api-staging.revelations.studio",
+        "MEDIA_API_URL": "https://media-api-staging.revelations.studio",
+        "IDENTITY_API_URL": "https://identity-api-staging.revelations.studio",
+        "ADMIN_API_URL": "https://admin-api-staging.revelations.studio",
+        "NOTIFICATIONS_API_URL": "https://notifications-api-staging.revelations.studio"
       },
       "routes": [
         // Specific routes first (for priority)

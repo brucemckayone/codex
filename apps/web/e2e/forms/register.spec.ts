@@ -13,8 +13,8 @@ test.describe('Register Form', () => {
   });
 
   test('displays registration form with all fields', async ({ page }) => {
-    // Check page title (uses paraglide i18n: "Create Account | Revelations")
-    await expect(page).toHaveTitle(/Create Account.*Revelations/i);
+    // Check page title (uses paraglide i18n: "Create Account | Codex")
+    await expect(page).toHaveTitle(/Create Account.*Codex/i);
 
     // Check form fields exist
     await expect(page.locator('input[name="name"]')).toBeVisible();

@@ -10,7 +10,7 @@ import { createCollection } from '@tanstack/db';
 import { queryCollectionOptions } from '@tanstack/query-db-collection';
 import { listContent } from '$lib/remote/content.remote';
 import type { ContentWithRelations } from '$lib/types';
-import { queryClient } from './index';
+import { queryClient } from './query-client';
 
 /**
  * Content Collection
