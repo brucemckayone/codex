@@ -154,10 +154,7 @@ def mock_storage_env():
             "R2_ACCESS_KEY_ID": "r2-key",
             "R2_SECRET_ACCESS_KEY": "r2-secret",
             "R2_BUCKET_NAME": "media-bucket",
-            # ASSETS_BUCKET for public CDN thumbnails
-            "ASSETS_R2_ENDPOINT": "https://assets.r2.example.com",
-            "ASSETS_R2_ACCESS_KEY_ID": "assets-key",
-            "ASSETS_R2_SECRET_ACCESS_KEY": "assets-secret",
+            # Assets bucket uses shared R2 credentials
             "ASSETS_BUCKET_NAME": "assets-bucket",
         },
     ):

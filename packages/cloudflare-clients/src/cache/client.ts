@@ -52,11 +52,12 @@ export class CachePurgeClient {
       batches.push(urls.slice(i, i + MAX_URLS_PER_BATCH));
     }
 
-    for (const batch of batches) {
-      try {
-        await this.purgeRequest({ files: batch });
-      } catch (error) {
-        console.error('Cache purge failed:', error);
+    const results = await Promise.allSettled(
+      batches.map((batch) => this.purgeRequest({ files: batch }))
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        console.error('Cache purge failed:', result.reason);
       }
     }
   }
@@ -86,6 +87,7 @@ export class CachePurgeClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
     });
 
     const result = (await response.json()) as CloudflarePurgeResponse;

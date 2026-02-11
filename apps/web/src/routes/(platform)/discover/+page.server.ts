@@ -39,12 +39,14 @@ export const load: PageServerLoad = async ({
     return {
       content: content ?? { data: [], total: 0, page: 1, limit: 20 },
       search,
+      error: false,
     };
   } catch (error) {
     console.error('Failed to load discover content:', error);
     return {
       content: { data: [], total: 0, page: 1, limit: 20 },
       search,
+      error: true,
     };
   }
 };

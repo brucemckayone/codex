@@ -29,11 +29,13 @@ export const load: PageServerLoad = async ({
     const library = await api.access.getUserLibrary();
     return {
       library: library ?? { items: [], total: 0, page: 1, limit: 20 },
+      error: false,
     };
   } catch (error) {
     console.error('Failed to load library:', error);
     return {
       library: { items: [], total: 0, page: 1, limit: 20 },
+      error: true,
     };
   }
 };

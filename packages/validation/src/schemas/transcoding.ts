@@ -85,7 +85,10 @@ export const runpodWebhookOutputSchema = z.object({
   waveformKey: z.string().max(500).optional(),
   waveformImageKey: z.string().max(500).optional(),
 
-  // Multi-size thumbnail variants (keys match THUMBNAIL_SIZES constant)
+  // Multi-size thumbnail variants
+  // Keys MUST match THUMBNAIL_SIZES constant above. If sizes change,
+  // update both this schema and the THUMBNAIL_SIZES array.
+  // Also update: infrastructure/runpod/handler/main.py ALLOWED_THUMBNAIL_SIZES
   thumbnailVariants: z
     .object({
       sm: z.string().max(500),

@@ -12,17 +12,32 @@ import { createEmailProvider } from '@codex/notifications';
 import type { AuthBindings } from './types';
 
 let cachedProvider: EmailProvider | null = null;
+let cachedProviderKey: string | null = null;
+
+/**
+ * Escape HTML special characters to prevent XSS in email templates.
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 /**
  * Get or create the email provider based on worker environment bindings.
- * Cached per-isolate to avoid re-creating the Resend client on every request.
+ * Cached per-isolate, keyed on config to invalidate if env changes between requests.
  */
 export function getEmailProvider(env: AuthBindings): EmailProvider {
-  if (!cachedProvider) {
+  const key = `${env.USE_MOCK_EMAIL}:${env.RESEND_API_KEY}`;
+  if (!cachedProvider || cachedProviderKey !== key) {
     cachedProvider = createEmailProvider({
       useMock: env.USE_MOCK_EMAIL === 'true',
       resendApiKey: env.RESEND_API_KEY,
     });
+    cachedProviderKey = key;
   }
   return cachedProvider;
 }
@@ -36,8 +51,8 @@ export async function sendVerificationEmail(
   token: string
 ): Promise<void> {
   const provider = getEmailProvider(env);
-  const verificationUrl = `${env.WEB_APP_URL}/verify-email?token=${token}`;
-  const userName = user.name || 'there';
+  const verificationUrl = `${env.WEB_APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
+  const userName = escapeHtml(user.name || 'there');
 
   const result = await provider.send(
     {

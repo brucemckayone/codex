@@ -31,9 +31,10 @@
     contentId: string;
     initialProgress?: number;
     poster?: string;
+    captionsSrc?: string;
   }
 
-  const { src, contentId, initialProgress = 0, poster }: Props = $props();
+  const { src, contentId, initialProgress = 0, poster, captionsSrc }: Props = $props();
 
   let videoEl: HTMLVideoElement | undefined = $state();
   let hlsInstance: Hls | null = null;
@@ -158,7 +159,7 @@
         oncanplay={handleCanPlay}
         onerror={handleError}
       >
-        <track kind="captions" />
+        {#if captionsSrc}<track kind="captions" src={captionsSrc} />{/if}
       </video>
 
       <media-loading-indicator slot="centered-chrome" noautohide></media-loading-indicator>

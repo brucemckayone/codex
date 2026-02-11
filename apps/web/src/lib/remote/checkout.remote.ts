@@ -6,7 +6,7 @@
  * Uses `command()` for SPA-style checkout with client-side redirect.
  */
 
-import { redirect } from '@sveltejs/kit';
+import { isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -53,6 +53,9 @@ export const createCheckout = form(
       // Redirect to Stripe Checkout
       redirect(303, result.data.sessionUrl);
     } catch (error) {
+      // SvelteKit redirect() throws - let it propagate
+      if (isRedirect(error)) throw error;
+
       // Return error for form display
       const message =
         error instanceof Error ? error.message : 'Checkout failed';

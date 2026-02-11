@@ -11,6 +11,7 @@
  *   {creatorId}/thumbnails/{mediaId}/auto-generated.jpg - Auto thumbnail
  *   {creatorId}/waveforms/{mediaId}/waveform.json      - Audio waveform data
  *   {creatorId}/waveforms/{mediaId}/waveform.png       - Audio waveform image
+ *   {creatorId}/media-thumbnails/{mediaId}/{size}.webp   - Auto thumbnails (sm/md/lg, in ASSETS_BUCKET)
  */
 
 import type { MediaType } from './types';
@@ -18,7 +19,7 @@ import type { MediaType } from './types';
 // Re-export from canonical source (@codex/validation)
 export type { ThumbnailSize } from '@codex/validation';
 
-import type { ThumbnailSize } from '@codex/validation';
+import { THUMBNAIL_SIZES, type ThumbnailSize } from '@codex/validation';
 
 /**
  * Path configuration constants
@@ -322,6 +323,9 @@ export function getMediaThumbnailUrl(
   size: ThumbnailSize,
   cdnBase: string
 ): string {
+  if (!cdnBase.startsWith('https://')) {
+    throw new Error('cdnBase must use https://');
+  }
   // Normalize: strip trailing slash to prevent double slashes in URL
   const base = cdnBase.endsWith('/') ? cdnBase.slice(0, -1) : cdnBase;
   const key = getMediaThumbnailKey(creatorId, mediaId, size);
@@ -360,6 +364,7 @@ export function getTranscodingOutputKeys(
   hlsMasterKey: string;
   hlsPreviewKey: string;
   thumbnailKey: string | null;
+  thumbnailVariants: Record<ThumbnailSize, string> | null;
   waveformKey: string | null;
   waveformImageKey: string | null;
 } {
@@ -367,10 +372,17 @@ export function getTranscodingOutputKeys(
   const hlsPreviewKey = getHlsPreviewKey(creatorId, mediaId);
 
   if (mediaType === 'video') {
+    const thumbnailVariants = Object.fromEntries(
+      THUMBNAIL_SIZES.map((size) => [
+        size,
+        getMediaThumbnailKey(creatorId, mediaId, size),
+      ])
+    ) as Record<ThumbnailSize, string>;
     return {
       hlsMasterKey,
       hlsPreviewKey,
-      thumbnailKey: getThumbnailKey(creatorId, mediaId),
+      thumbnailKey: thumbnailVariants.lg, // backwards compat
+      thumbnailVariants,
       waveformKey: null,
       waveformImageKey: null,
     };
@@ -381,6 +393,7 @@ export function getTranscodingOutputKeys(
     hlsMasterKey,
     hlsPreviewKey,
     thumbnailKey: null,
+    thumbnailVariants: null,
     waveformKey: getWaveformKey(creatorId, mediaId),
     waveformImageKey: getWaveformImageKey(creatorId, mediaId),
   };
@@ -430,6 +443,8 @@ export function isValidR2Key(r2Key: string): boolean {
     r2Key.includes('//') ||
     r2Key.includes('%2e') ||
     r2Key.includes('%2E') ||
+    r2Key.includes('%2f') ||
+    r2Key.includes('%2F') ||
     r2Key.includes('\\')
   ) {
     return false;

@@ -2,7 +2,7 @@
  * Progress Sync Manager
  *
  * Handles background synchronization of playback progress to the server.
- * Call initProgressSync() once in the root layout.
+ * Call initProgressSync(userId) once in the root layout.
  *
  * Sync triggers:
  * - Every 30 seconds while page is visible
@@ -14,7 +14,7 @@ import { browser } from '$app/environment';
 import { syncProgressToServer } from './progress';
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
-let initialized = false;
+let initializedForUser: string | null = null;
 
 /**
  * Start the sync interval
@@ -53,8 +53,8 @@ function handleVisibilityChange(): void {
  * Handle before unload
  */
 function handleBeforeUnload(): void {
-  // Best-effort sync before page closes
-  // Note: This is not guaranteed to complete for async operations
+  // Note: async operations may not complete during beforeunload.
+  // Consider navigator.sendBeacon() when a dedicated sync endpoint exists.
   syncProgressToServer();
 }
 
@@ -71,14 +71,21 @@ function handleBeforeUnload(): void {
  *   import { initProgressSync } from '$lib/collections/progress-sync';
  *
  *   onMount(() => {
- *     initProgressSync();
+ *     initProgressSync(userId);
  *   });
  * </script>
  * ```
  */
-export function initProgressSync(): void {
-  if (!browser || initialized) return;
-  initialized = true;
+export function initProgressSync(userId: string): void {
+  if (!browser) return;
+  if (initializedForUser === userId) return;
+
+  // Clean up previous user's sync if switching users
+  if (initializedForUser) {
+    cleanupProgressSync();
+  }
+
+  initializedForUser = userId;
 
   // Listen for visibility changes
   document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -104,7 +111,7 @@ export function cleanupProgressSync(): void {
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   window.removeEventListener('beforeunload', handleBeforeUnload);
   stopSync();
-  initialized = false;
+  initializedForUser = null;
 }
 
 /**

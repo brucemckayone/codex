@@ -47,51 +47,53 @@ export type LibraryProgress = NonNullable<LibraryItem['progress']>;
  * </script>
  * ```
  */
-export const libraryCollection = createCollection<LibraryItem, string>(
-  queryCollectionOptions({
-    queryKey: ['library'],
+export const libraryCollection = queryClient
+  ? createCollection<LibraryItem, string>(
+      queryCollectionOptions({
+        queryKey: ['library'],
 
-    // Load via remote function (pass empty object for optional params)
-    queryFn: async () => {
-      const result = await getUserLibrary({});
-      return result?.items ?? [];
-    },
+        // Load via remote function (pass empty object for optional params)
+        queryFn: async () => {
+          const result = await getUserLibrary({});
+          return result?.items ?? [];
+        },
 
-    queryClient,
-    getKey: (item) => item.content.id,
+        queryClient,
+        getKey: (item) => item.content.id,
 
-    /**
-     * Handle optimistic updates
-     * Called when collection.update() is used
-     *
-     * Flow:
-     * 1. UI updates immediately (optimistic)
-     * 2. This handler syncs to server
-     * 3. If error, transaction rolls back automatically
-     */
-    onUpdate: async ({ transaction }) => {
-      const mutation = transaction.mutations[0];
-      if (!mutation) return;
+        /**
+         * Handle optimistic updates
+         * Called when collection.update() is used
+         *
+         * Flow:
+         * 1. UI updates immediately (optimistic)
+         * 2. This handler syncs to server
+         * 3. If error, transaction rolls back automatically
+         */
+        onUpdate: async ({ transaction }) => {
+          const mutation = transaction.mutations[0];
+          if (!mutation) return;
 
-      const { key, modified } = mutation;
+          const { key, modified } = mutation;
 
-      // Only sync progress changes to server
-      if (modified.progress) {
-        try {
-          await savePlaybackProgress({
-            contentId: key as string,
-            positionSeconds: modified.progress.positionSeconds,
-            durationSeconds: modified.progress.durationSeconds,
-          });
-        } catch (error) {
-          // Transaction automatically rolls back on error
-          console.error('Failed to save progress:', error);
-          throw error;
-        }
-      }
-    },
-  })
-);
+          // Only sync progress changes to server
+          if (modified.progress) {
+            try {
+              await savePlaybackProgress({
+                contentId: key as string,
+                positionSeconds: modified.progress.positionSeconds,
+                durationSeconds: modified.progress.durationSeconds,
+              });
+            } catch (error) {
+              // Transaction automatically rolls back on error
+              console.error('Failed to save progress:', error);
+              throw error;
+            }
+          }
+        },
+      })
+    )
+  : undefined;
 
 /**
  * Update playback progress (optimistic)
@@ -123,6 +125,7 @@ export function updateProgress(
   positionSeconds: number,
   durationSeconds: number
 ): void {
+  if (!libraryCollection) return;
   const completed =
     durationSeconds > 0 && positionSeconds / durationSeconds > 0.9;
   const percentComplete =
@@ -151,6 +154,7 @@ export function markAsCompleted(
   contentId: string,
   durationSeconds: number
 ): void {
+  if (!libraryCollection) return;
   libraryCollection.update(contentId, (draft) => {
     draft.progress = {
       positionSeconds: durationSeconds,
@@ -168,6 +172,7 @@ export function markAsCompleted(
  * @param contentId - The content ID to reset
  */
 export function resetProgress(contentId: string): void {
+  if (!libraryCollection) return;
   libraryCollection.update(contentId, (draft) => {
     draft.progress = {
       positionSeconds: 0,

@@ -53,6 +53,8 @@ export {
 // Procedure pattern (tRPC-style)
 export {
   type AuthLevel,
+  // checkOrganizationMembership is re-exported for convenience.
+  // Workers that don't use it will tree-shake it out during bundling.
   checkOrganizationMembership,
   createServiceRegistry,
   enforceIPWhitelist,

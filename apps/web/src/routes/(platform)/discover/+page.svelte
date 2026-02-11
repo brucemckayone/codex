@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import type { PageData } from './$types';
+  import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
 
   const { data }: { data: PageData } = $props();
 
@@ -44,6 +45,10 @@
     />
     <button type="submit" class="search-btn">Search</button>
   </form>
+
+  {#if data.error}
+    <ErrorBanner title="Failed to load content" description="Some content could not be loaded. Please try refreshing the page." />
+  {/if}
 
   <section class="content-grid" aria-label="Content results">
     {#if data.content.data && data.content.data.length > 0}

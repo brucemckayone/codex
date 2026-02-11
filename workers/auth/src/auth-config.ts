@@ -94,10 +94,18 @@ export function createAuthInstance(options: AuthConfigOptions) {
       },
       autoSignInAfterVerification: true,
       sendOnSignUp: true,
+      // Re-sends the verification email when an unverified user attempts sign-in,
+      // giving them another chance to complete verification. Without this, users
+      // who missed the initial email have no self-service path to get a new link.
       sendOnSignIn: true,
     },
     emailAndPassword: {
       enabled: true,
+      // NOTE (security vs UX trade-off): BetterAuth returns a 403 with a specific
+      // "email not verified" message on login, which leaks account existence. We accept
+      // this because: (1) registration already implicitly confirms existence, and
+      // (2) a clear message reduces support burden. If stricter anti-enumeration is
+      // needed, override the BetterAuth error handler to return generic "Invalid credentials".
       requireEmailVerification: true,
       autoSignIn: true,
     },

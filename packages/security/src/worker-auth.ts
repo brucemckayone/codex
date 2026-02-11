@@ -30,6 +30,33 @@ export interface WorkerAuthOptions {
 }
 
 /**
+ * Constant-time string comparison to prevent timing attacks.
+ * Converts both strings to Uint8Array and compares every byte,
+ * ORing differences into an accumulator so the comparison always
+ * takes the same amount of time regardless of where the strings differ.
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+
+  if (bufA.byteLength !== bufB.byteLength) {
+    // Still iterate to avoid leaking length info via timing
+    let diff = 1;
+    for (let i = 0; i < bufA.byteLength; i++) {
+      diff |= (bufA[i] ?? 0) ^ (bufB[i % (bufB.byteLength || 1)] ?? 0);
+    }
+    return false;
+  }
+
+  let diff = 0;
+  for (let i = 0; i < bufA.byteLength; i++) {
+    diff |= (bufA[i] ?? 0) ^ (bufB[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+/**
  * Generate HMAC signature for worker-to-worker communication
  *
  * @param payload - Request body or data to sign
@@ -153,13 +180,13 @@ export function workerAuth(options: WorkerAuthOptions) {
     // Get request body
     const body = await c.req.text();
 
-    // Verify signature
+    // Verify signature using constant-time comparison to prevent timing attacks
     const expectedSignature = await generateWorkerSignature(
       body,
       secret,
       timestamp
     );
-    const isValid = signature === expectedSignature;
+    const isValid = constantTimeEqual(signature, expectedSignature);
 
     if (!isValid) {
       return c.json({ error: 'Invalid signature' }, 401);
