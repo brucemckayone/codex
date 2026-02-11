@@ -54,6 +54,15 @@ async function verifyEmail(
 
 test.describe
   .serial('Auth Flow E2E', () => {
+    test.beforeAll(async ({ request }) => {
+      try {
+        const res = await request.get('http://localhost:42069/health');
+        if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+      } catch {
+        test.skip(true, 'Auth worker not running on port 42069');
+      }
+    });
+
     test('registers a new user and redirects to /verify-email', async ({
       page,
     }) => {
