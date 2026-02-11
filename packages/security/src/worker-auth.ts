@@ -42,9 +42,9 @@ function constantTimeEqual(a: string, b: string): boolean {
 
   if (bufA.byteLength !== bufB.byteLength) {
     // Still iterate to avoid leaking length info via timing
-    let diff = 1;
+    let _diff = 1;
     for (let i = 0; i < bufA.byteLength; i++) {
-      diff |= (bufA[i] ?? 0) ^ (bufB[i % (bufB.byteLength || 1)] ?? 0);
+      _diff |= (bufA[i] ?? 0) ^ (bufB[i % (bufB.byteLength || 1)] ?? 0);
     }
     return false;
   }

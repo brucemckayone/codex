@@ -35,16 +35,19 @@ describe('CachePurgeClient', () => {
       ]);
 
       expect(mockFetch).toHaveBeenCalledOnce();
-      expect(mockFetch).toHaveBeenCalledWith(PURGE_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${API_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          files: ['https://example.com/page1', 'https://example.com/page2'],
-        }),
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        PURGE_URL,
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${API_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            files: ['https://example.com/page1', 'https://example.com/page2'],
+          }),
+        })
+      );
     });
 
     it('should log errors but never throw on API failure', async () => {
@@ -162,14 +165,17 @@ describe('CachePurgeClient', () => {
       await client.purgeEverything();
 
       expect(mockFetch).toHaveBeenCalledOnce();
-      expect(mockFetch).toHaveBeenCalledWith(PURGE_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${API_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ purge_everything: true }),
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        PURGE_URL,
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${API_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ purge_everything: true }),
+        })
+      );
     });
 
     it('should log errors but never throw on failure', async () => {

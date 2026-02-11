@@ -49,7 +49,7 @@ vi.mock('$lib/remote/library.remote', () => ({
 }));
 
 vi.mock('$app/environment', () => ({
-  browser: false,
+  browser: true,
 }));
 
 describe('collections/index', () => {
