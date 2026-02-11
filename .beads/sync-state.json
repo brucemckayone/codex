@@ -1,7 +1,7 @@
 {
-  "last_failure": "2026-02-09T11:27:04.028088Z",
-  "failure_count": 8,
-  "backoff_until": "2026-02-09T11:57:04.028089Z",
+  "last_failure": "2026-02-11T17:20:35.348342Z",
+  "failure_count": 7,
+  "backoff_until": "2026-02-11T17:50:35.348343Z",
   "needs_manual_sync": true,
   "failure_reason": "git pull failed in worktree: exit status 1\nfatal: couldn't find remote ref tools/beads\n"
 }
