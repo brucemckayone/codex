@@ -165,6 +165,34 @@ export type AdminGrantAccessParams = z.infer<
 >;
 
 // ============================================================================
+// Activity Feed Schemas
+// ============================================================================
+
+/**
+ * Activity type enum for the activity feed
+ * Represents the types of activities tracked across the platform
+ */
+export const activityTypeEnum = z.enum(
+  ['purchase', 'content_published', 'member_joined'],
+  {
+    errorMap: () => ({
+      message:
+        'Activity type must be purchase, content_published, or member_joined',
+    }),
+  }
+);
+
+/**
+ * Admin activity feed query parameters
+ * Extends pagination with optional activity type filter
+ */
+export const adminActivityQuerySchema = paginationSchema.extend({
+  type: activityTypeEnum.optional(),
+});
+
+export type AdminActivityQueryInput = z.infer<typeof adminActivityQuerySchema>;
+
+// ============================================================================
 // Re-export Content Status Enum
 // ============================================================================
 

@@ -22,6 +22,7 @@
 import { AUTH_ROLES, type CONTENT_STATUS } from '@codex/constants';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
+  adminActivityQuerySchema,
   adminContentIdParamsSchema,
   adminContentListQuerySchema,
   adminCustomerIdParamsSchema,
@@ -122,6 +123,25 @@ app.get(
       return await ctx.services.adminAnalytics.getTopContent(
         ctx.organizationId,
         ctx.input.query.limit
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/activity
+ * Get recent activity feed for the platform owner's organization
+ * Returns purchases, content published, and member joined events
+ */
+app.get(
+  '/api/admin/activity',
+  procedure({
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    input: { query: adminActivityQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getRecentActivity(
+        ctx.organizationId,
+        ctx.input.query
       );
     },
   })

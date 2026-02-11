@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   index,
   pgEnum,
@@ -181,8 +182,43 @@ export const emailTemplatesRelations = relations(emailTemplates, ({ one }) => ({
   }),
 }));
 
+/**
+ * Notification preferences table
+ * Per-user email notification opt-in/out settings
+ */
+export const notificationPreferences = pgTable('notification_preferences', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  emailMarketing: boolean('email_marketing').notNull().default(true),
+  emailTransactional: boolean('email_transactional').notNull().default(true),
+  emailDigest: boolean('email_digest').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+});
+
+// Relations
+export const notificationPreferencesRelations = relations(
+  notificationPreferences,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [notificationPreferences.userId],
+      references: [users.id],
+    }),
+  })
+);
+
 // Type exports
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type NewEmailTemplate = typeof emailTemplates.$inferInsert;
 export type TemplateScope = (typeof templateScopeEnum.enumValues)[number];
 export type TemplateStatus = (typeof templateStatusEnum.enumValues)[number];
+export type NotificationPreference =
+  typeof notificationPreferences.$inferSelect;
+export type NewNotificationPreference =
+  typeof notificationPreferences.$inferInsert;

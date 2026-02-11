@@ -5,7 +5,7 @@
  * Extends base errors from @codex/service-errors.
  */
 
-import { NotFoundError } from '@codex/service-errors';
+import { BusinessLogicError, NotFoundError } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
 export {
@@ -26,5 +26,17 @@ export {
 export class OrganizationNotFoundError extends NotFoundError {
   constructor(organizationId: string) {
     super('Organization not found', { organizationId });
+  }
+}
+
+export class MemberNotFoundError extends NotFoundError {
+  constructor(userId: string) {
+    super('Member not found', { userId });
+  }
+}
+
+export class LastOwnerError extends BusinessLogicError {
+  constructor() {
+    super('Cannot remove or demote the last owner of the organization');
   }
 }

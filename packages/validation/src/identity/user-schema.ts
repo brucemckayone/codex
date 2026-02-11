@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { createSanitizedStringSchema } from '../primitives';
+
 /**
  * User validation schema
  */
@@ -21,3 +23,26 @@ export const loginSchema = z.object({
 });
 
 export type LoginCredentials = z.infer<typeof loginSchema>;
+
+/**
+ * Update profile schema
+ * Allows partial updates to user profile fields
+ */
+export const updateProfileSchema = z.object({
+  name: createSanitizedStringSchema(1, 255, 'Name').optional(),
+});
+
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
+/**
+ * Update notification preferences schema
+ */
+export const updateNotificationPreferencesSchema = z.object({
+  emailMarketing: z.boolean().optional(),
+  emailTransactional: z.boolean().optional(),
+  emailDigest: z.boolean().optional(),
+});
+
+export type UpdateNotificationPreferencesInput = z.infer<
+  typeof updateNotificationPreferencesSchema
+>;

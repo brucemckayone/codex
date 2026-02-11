@@ -17,7 +17,11 @@ import {
   whereNotDeleted,
   withPagination,
 } from '@codex/database';
-import { organizations } from '@codex/database/schema';
+import {
+  organizationMemberships,
+  organizations,
+  users,
+} from '@codex/database/schema';
 import { BaseService } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
@@ -28,8 +32,15 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq, ilike, or } from 'drizzle-orm';
-import { ConflictError, OrganizationNotFoundError, wrapError } from '../errors';
+import { and, asc, count, desc, eq, ilike, inArray, or } from 'drizzle-orm';
+import {
+  ConflictError,
+  LastOwnerError,
+  MemberNotFoundError,
+  NotFoundError,
+  OrganizationNotFoundError,
+  wrapError,
+} from '../errors';
 import type {
   Organization,
   OrganizationFilters,
@@ -344,6 +355,386 @@ export class OrganizationService extends BaseService {
       return !existing;
     } catch (error) {
       throw wrapError(error, { slug });
+    }
+  }
+
+  /**
+   * Get public creators for an organization by slug
+   *
+   * Returns public-safe creator information (no emails, no internal IDs).
+   * Only active members with owner/admin/creator roles are included.
+   *
+   * @param slug - Organization slug
+   * @returns Array of public creator profiles
+   * @throws {OrganizationNotFoundError} If organization doesn't exist
+   */
+  async getPublicCreators(slug: string): Promise<
+    Array<{
+      name: string;
+      avatarUrl: string | null;
+      role: string;
+      joinedAt: Date;
+    }>
+  > {
+    try {
+      const org = await this.db.query.organizations.findFirst({
+        where: and(
+          eq(organizations.slug, slug.toLowerCase()),
+          whereNotDeleted(organizations)
+        ),
+        columns: { id: true },
+      });
+
+      if (!org) {
+        throw new OrganizationNotFoundError(slug);
+      }
+
+      const members = await this.db
+        .select({
+          name: users.name,
+          avatarUrl: users.avatarUrl,
+          image: users.image,
+          role: organizationMemberships.role,
+          joinedAt: organizationMemberships.createdAt,
+        })
+        .from(organizationMemberships)
+        .innerJoin(users, eq(organizationMemberships.userId, users.id))
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.status, 'active'),
+            inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+          )
+        );
+
+      return members.map((m) => ({
+        name: m.name,
+        avatarUrl: m.avatarUrl ?? m.image ?? null,
+        role: m.role,
+        joinedAt: m.joinedAt,
+      }));
+    } catch (error) {
+      if (error instanceof OrganizationNotFoundError) {
+        throw error;
+      }
+      throw wrapError(error, { slug });
+    }
+  }
+
+  /**
+   * List organization members with pagination and filters
+   *
+   * @param organizationId - Organization ID
+   * @param query - Pagination and filter params
+   * @returns Paginated list of members
+   */
+  async listMembers(
+    organizationId: string,
+    query: {
+      page: number;
+      limit: number;
+      role?: string;
+      status?: string;
+    }
+  ): Promise<
+    PaginatedListResponse<{
+      id: string;
+      userId: string;
+      name: string;
+      email: string;
+      avatarUrl: string | null;
+      role: string;
+      status: string;
+      joinedAt: Date;
+    }>
+  > {
+    try {
+      const { limit, offset } = withPagination({
+        page: query.page,
+        limit: query.limit,
+      });
+
+      const conditions = [
+        eq(organizationMemberships.organizationId, organizationId),
+      ];
+
+      if (query.role) {
+        conditions.push(eq(organizationMemberships.role, query.role));
+      }
+      if (query.status) {
+        conditions.push(eq(organizationMemberships.status, query.status));
+      }
+
+      const members = await this.db
+        .select({
+          id: organizationMemberships.id,
+          userId: organizationMemberships.userId,
+          name: users.name,
+          email: users.email,
+          avatarUrl: users.avatarUrl,
+          image: users.image,
+          role: organizationMemberships.role,
+          status: organizationMemberships.status,
+          joinedAt: organizationMemberships.createdAt,
+        })
+        .from(organizationMemberships)
+        .innerJoin(users, eq(organizationMemberships.userId, users.id))
+        .where(and(...conditions))
+        .limit(limit)
+        .offset(offset)
+        .orderBy(asc(organizationMemberships.createdAt));
+
+      const countResult = await this.db
+        .select({ total: count() })
+        .from(organizationMemberships)
+        .where(and(...conditions));
+
+      const totalRecord = countResult[0];
+      if (!totalRecord) {
+        throw new Error('Failed to get member count');
+      }
+
+      const totalCount = Number(totalRecord.total);
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        items: members.map((m) => ({
+          id: m.id,
+          userId: m.userId,
+          name: m.name,
+          email: m.email,
+          avatarUrl: m.avatarUrl ?? m.image ?? null,
+          role: m.role,
+          status: m.status,
+          joinedAt: m.joinedAt,
+        })),
+        pagination: {
+          page: query.page,
+          limit,
+          total: totalCount,
+          totalPages,
+        },
+      };
+    } catch (error) {
+      throw wrapError(error, { organizationId });
+    }
+  }
+
+  /**
+   * Invite a member to an organization
+   *
+   * @param organizationId - Organization ID
+   * @param input - Invite data (email, role)
+   * @param invitedBy - User ID of the inviter
+   * @returns Created membership
+   */
+  async inviteMember(
+    organizationId: string,
+    input: { email: string; role: string },
+    invitedBy: string
+  ): Promise<{
+    id: string;
+    userId: string;
+    role: string;
+    status: string;
+    joinedAt: Date;
+  }> {
+    try {
+      // Find user by email
+      const user = await this.db.query.users.findFirst({
+        where: eq(users.email, input.email),
+        columns: { id: true },
+      });
+
+      if (!user) {
+        throw new NotFoundError('User not found', { email: input.email });
+      }
+
+      // Check if already a member
+      const existing = await this.db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, user.id)
+        ),
+      });
+
+      if (existing) {
+        throw new ConflictError(
+          'User is already a member of this organization'
+        );
+      }
+
+      const [membership] = await this.db
+        .insert(organizationMemberships)
+        .values({
+          organizationId,
+          userId: user.id,
+          role: input.role,
+          status: 'active',
+          invitedBy,
+        })
+        .returning();
+
+      if (!membership) {
+        throw new Error('Failed to create membership');
+      }
+
+      return {
+        id: membership.id,
+        userId: membership.userId,
+        role: membership.role,
+        status: membership.status,
+        joinedAt: membership.createdAt,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundError || error instanceof ConflictError) {
+        throw error;
+      }
+      throw wrapError(error, { organizationId, email: input.email });
+    }
+  }
+
+  /**
+   * Update a member's role in an organization
+   *
+   * Safety: Cannot demote the last owner.
+   *
+   * @param organizationId - Organization ID
+   * @param userId - User ID to update
+   * @param role - New role
+   * @returns Updated membership
+   */
+  async updateMemberRole(
+    organizationId: string,
+    userId: string,
+    role: string
+  ): Promise<{
+    id: string;
+    userId: string;
+    role: string;
+    status: string;
+    joinedAt: Date;
+  }> {
+    try {
+      const membership = await this.db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, userId)
+        ),
+      });
+
+      if (!membership) {
+        throw new MemberNotFoundError(userId);
+      }
+
+      // Safety: If demoting from owner, check there's at least one other active owner
+      if (membership.role === 'owner' && role !== 'owner') {
+        const ownerCount = await this.db
+          .select({ total: count() })
+          .from(organizationMemberships)
+          .where(
+            and(
+              eq(organizationMemberships.organizationId, organizationId),
+              eq(organizationMemberships.role, 'owner'),
+              eq(organizationMemberships.status, 'active')
+            )
+          );
+
+        const totalOwners = Number(ownerCount[0]?.total ?? 0);
+        if (totalOwners <= 1) {
+          throw new LastOwnerError();
+        }
+      }
+
+      const [updated] = await this.db
+        .update(organizationMemberships)
+        .set({ role, updatedAt: new Date() })
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.userId, userId)
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        throw new MemberNotFoundError(userId);
+      }
+
+      return {
+        id: updated.id,
+        userId: updated.userId,
+        role: updated.role,
+        status: updated.status,
+        joinedAt: updated.createdAt,
+      };
+    } catch (error) {
+      if (
+        error instanceof MemberNotFoundError ||
+        error instanceof LastOwnerError
+      ) {
+        throw error;
+      }
+      throw wrapError(error, { organizationId, userId });
+    }
+  }
+
+  /**
+   * Remove a member from an organization
+   *
+   * Safety: Cannot remove the last owner.
+   *
+   * @param organizationId - Organization ID
+   * @param userId - User ID to remove
+   */
+  async removeMember(organizationId: string, userId: string): Promise<void> {
+    try {
+      const membership = await this.db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, userId)
+        ),
+      });
+
+      if (!membership) {
+        throw new MemberNotFoundError(userId);
+      }
+
+      // Safety: Cannot remove the last owner
+      if (membership.role === 'owner') {
+        const ownerCount = await this.db
+          .select({ total: count() })
+          .from(organizationMemberships)
+          .where(
+            and(
+              eq(organizationMemberships.organizationId, organizationId),
+              eq(organizationMemberships.role, 'owner'),
+              eq(organizationMemberships.status, 'active')
+            )
+          );
+
+        const totalOwners = Number(ownerCount[0]?.total ?? 0);
+        if (totalOwners <= 1) {
+          throw new LastOwnerError();
+        }
+      }
+
+      await this.db
+        .delete(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.userId, userId)
+          )
+        );
+    } catch (error) {
+      if (
+        error instanceof MemberNotFoundError ||
+        error instanceof LastOwnerError
+      ) {
+        throw error;
+      }
+      throw wrapError(error, { organizationId, userId });
     }
   }
 }

@@ -35,6 +35,7 @@ import type {
 } from '@codex/validation';
 import {
   createCheckoutSchema,
+  createPortalSessionSchema,
   getPurchaseSchema,
   purchaseQuerySchema,
 } from '@codex/validation';
@@ -582,6 +583,64 @@ export class PurchaseService extends BaseService {
       }
       // Wrap unknown errors
       throw wrapError(error, { purchaseId, customerId });
+    }
+  }
+
+  /**
+   * Create Stripe Billing Portal session
+   *
+   * Allows customers to manage their billing (view invoices, update payment methods).
+   * Looks up or creates a Stripe customer by email, then creates a portal session.
+   *
+   * @param email - Customer's email address
+   * @param userId - Codex user ID (stored in Stripe customer metadata)
+   * @param returnUrl - URL to redirect to after portal session
+   * @returns Portal session URL
+   * @throws {PaymentProcessingError} If Stripe portal session creation fails
+   */
+  async createPortalSession(
+    email: string,
+    userId: string,
+    returnUrl: string
+  ): Promise<{ url: string }> {
+    const validated = createPortalSessionSchema.parse({ returnUrl });
+
+    try {
+      // Step 1: Look up existing Stripe customer by email
+      const customers = await this.stripe.customers.list({
+        email,
+        limit: 1,
+      });
+
+      let customer = customers.data[0];
+
+      // Step 2: If no customer found, create one
+      if (!customer) {
+        customer = await this.stripe.customers.create({
+          email,
+          metadata: { userId },
+        });
+      }
+
+      // Step 3: Create billing portal session
+      const session = await this.stripe.billingPortal.sessions.create({
+        customer: customer.id,
+        return_url: validated.returnUrl,
+      });
+
+      return { url: session.url };
+    } catch (error) {
+      if (isStripeError(error)) {
+        throw new PaymentProcessingError(
+          'Failed to create billing portal session',
+          {
+            stripeError: error.message,
+            userId,
+          }
+        );
+      }
+
+      throw wrapError(error, { userId });
     }
   }
 }

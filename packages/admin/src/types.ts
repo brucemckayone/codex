@@ -148,6 +148,33 @@ export interface CustomerDetails {
 }
 
 // ============================================================================
+// Activity Feed Types
+// ============================================================================
+
+/**
+ * Single activity feed item
+ */
+export interface ActivityFeedItem {
+  id: string;
+  type: 'purchase' | 'content_published' | 'member_joined';
+  title: string;
+  description: string | null;
+  timestamp: string;
+}
+
+/**
+ * Activity feed response with pagination
+ */
+export interface ActivityFeedResponse {
+  items: ActivityFeedItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+  };
+}
+
+// ============================================================================
 // Re-exports for convenience
 // ============================================================================
 

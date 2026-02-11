@@ -23,6 +23,8 @@ export * from './schemas/access';
 export * from './schemas/file-upload';
 // Notification schemas
 export * from './schemas/notifications';
+// Organization member schemas
+export * from './schemas/organization';
 // Purchase schemas
 export * from './schemas/purchase';
 // Settings schemas

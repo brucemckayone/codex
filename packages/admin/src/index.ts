@@ -45,6 +45,8 @@ export {
 // ============================================================================
 
 export type {
+  ActivityFeedItem,
+  ActivityFeedResponse,
   AdminContentItem,
   AdminContentListOptions,
   AdminContentStatus,

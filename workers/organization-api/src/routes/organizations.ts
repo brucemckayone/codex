@@ -162,6 +162,30 @@ app.get(
 );
 
 /**
+ * GET /api/organizations/public/:slug/creators
+ * Public creators endpoint - no auth required
+ *
+ * Returns public creator profiles for an organization (name, avatar, role, joinedAt).
+ * Only active members with owner/admin/creator roles are included.
+ * No emails or internal user IDs are exposed.
+ *
+ * Returns: Array of { name, avatarUrl, role, joinedAt } (200)
+ * Security: No auth required, API rate limited
+ */
+app.get(
+  '/public/:slug/creators',
+  procedure({
+    policy: { auth: 'none', rateLimit: 'api' },
+    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    handler: async (ctx) => {
+      return await ctx.services.organization.getPublicCreators(
+        ctx.input.params.slug
+      );
+    },
+  })
+);
+
+/**
  * GET /api/organizations/:id
  * Get organization by ID
  *

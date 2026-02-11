@@ -8,9 +8,12 @@
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { schema } from '@codex/database';
 import { BaseService, NotFoundError, wrapError } from '@codex/service-errors';
+import type { AdminActivityQueryInput } from '@codex/validation';
 import { and, countDistinct, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import type {
+  ActivityFeedItem,
+  ActivityFeedResponse,
   CustomerStats,
   DailyRevenue,
   RevenueQueryOptions,
@@ -224,6 +227,121 @@ export class AdminAnalyticsService extends BaseService {
         throw error;
       }
       throw wrapError(error, { organizationId, limit });
+    }
+  }
+
+  /**
+   * Get recent activity feed for an organization
+   *
+   * Returns a unified activity feed combining purchases, content published,
+   * and member joined events. Uses UNION ALL for efficient querying.
+   */
+  async getRecentActivity(
+    organizationId: string,
+    query: AdminActivityQueryInput
+  ): Promise<ActivityFeedResponse> {
+    try {
+      const { page = 1, limit = 20, type } = query;
+      const offset = (page - 1) * limit;
+
+      // Build type filter clause for each subquery
+      const purchaseFilter =
+        !type || type === 'purchase' ? sql`true` : sql`false`;
+      const contentFilter =
+        !type || type === 'content_published' ? sql`true` : sql`false`;
+      const memberFilter =
+        !type || type === 'member_joined' ? sql`true` : sql`false`;
+
+      // UNION ALL query across 3 tables
+      const result = await this.db.execute(sql`
+        WITH activity AS (
+          SELECT
+            p.id::text AS id,
+            'purchase' AS type,
+            COALESCE(u.name, u.email) AS title,
+            c.title AS description,
+            p.created_at AS timestamp
+          FROM purchases p
+          JOIN users u ON p.customer_id = u.id
+          JOIN content c ON p.content_id = c.id
+          WHERE p.organization_id = ${organizationId}
+            AND ${purchaseFilter}
+
+          UNION ALL
+
+          SELECT
+            c.id::text AS id,
+            'content_published' AS type,
+            c.title AS title,
+            COALESCE(u.name, u.email) AS description,
+            c.published_at AS timestamp
+          FROM content c
+          JOIN users u ON c.creator_id = u.id
+          WHERE c.organization_id = ${organizationId}
+            AND c.published_at IS NOT NULL
+            AND c.deleted_at IS NULL
+            AND ${contentFilter}
+
+          UNION ALL
+
+          SELECT
+            om.id::text AS id,
+            'member_joined' AS type,
+            COALESCE(u.name, u.email) AS title,
+            om.role AS description,
+            om.created_at AS timestamp
+          FROM organization_memberships om
+          JOIN users u ON om.user_id = u.id
+          WHERE om.organization_id = ${organizationId}
+            AND ${memberFilter}
+        )
+        SELECT id, type, title, description, timestamp::text
+        FROM activity
+        ORDER BY timestamp DESC
+        LIMIT ${limit}
+        OFFSET ${offset}
+      `);
+
+      // Get total count
+      const countResult = await this.db.execute(sql`
+        SELECT (
+          (SELECT COUNT(*) FROM purchases
+            WHERE organization_id = ${organizationId} AND ${purchaseFilter})
+          +
+          (SELECT COUNT(*) FROM content
+            WHERE organization_id = ${organizationId}
+              AND published_at IS NOT NULL
+              AND deleted_at IS NULL
+              AND ${contentFilter})
+          +
+          (SELECT COUNT(*) FROM organization_memberships
+            WHERE organization_id = ${organizationId} AND ${memberFilter})
+        )::int AS total
+      `);
+
+      const total = Number(
+        (countResult.rows[0] as { total: number })?.total ?? 0
+      );
+
+      const items: ActivityFeedItem[] = result.rows.map(
+        (row: Record<string, unknown>) => ({
+          id: row.id as string,
+          type: row.type as ActivityFeedItem['type'],
+          title: row.title as string,
+          description: (row.description as string) ?? null,
+          timestamp: row.timestamp as string,
+        })
+      );
+
+      return {
+        items,
+        pagination: { page, limit, total },
+      };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+      throw wrapError(error, { organizationId, query });
     }
   }
 }

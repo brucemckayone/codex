@@ -18,7 +18,10 @@
  */
 
 import type { HonoEnv } from '@codex/shared-types';
-import { createCheckoutSchema } from '@codex/validation';
+import {
+  createCheckoutSchema,
+  createPortalSessionSchema,
+} from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
@@ -107,6 +110,39 @@ checkout.post(
         sessionUrl: session.sessionUrl,
         sessionId: session.sessionId,
       };
+    },
+  })
+);
+
+/**
+ * POST /checkout/portal-session
+ *
+ * Create Stripe Billing Portal session for managing subscriptions and payments
+ *
+ * Request Body:
+ * - returnUrl: Redirect URL after portal interaction (whitelisted domains only)
+ *
+ * Response (200):
+ * {
+ *   "data": {
+ *     "url": "https://billing.stripe.com/..."
+ *   }
+ * }
+ */
+checkout.post(
+  '/portal-session',
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'auth',
+    },
+    input: { body: createPortalSessionSchema },
+    handler: async (ctx) => {
+      return await ctx.services.purchase.createPortalSession(
+        ctx.user.email,
+        ctx.user.id,
+        ctx.input.body.returnUrl
+      );
     },
   })
 );
