@@ -41,10 +41,13 @@ function constantTimeEqual(a: string, b: string): boolean {
   const bufB = encoder.encode(b);
 
   if (bufA.byteLength !== bufB.byteLength) {
-    // Still iterate to avoid leaking length info via timing
+    // Iterate max length to avoid leaking length info via timing
     let _diff = 1;
-    for (let i = 0; i < bufA.byteLength; i++) {
-      _diff |= (bufA[i] ?? 0) ^ (bufB[i % (bufB.byteLength || 1)] ?? 0);
+    const maxLen = Math.max(bufA.byteLength, bufB.byteLength);
+    for (let i = 0; i < maxLen; i++) {
+      _diff |=
+        (bufA[i % (bufA.byteLength || 1)] ?? 0) ^
+        (bufB[i % (bufB.byteLength || 1)] ?? 0);
     }
     return false;
   }

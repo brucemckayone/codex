@@ -105,7 +105,7 @@ export function updateLocalProgress(
 /**
  * Get all unsynced progress entries
  */
-function getUnsyncedProgress(): PlaybackProgress[] {
+export function getUnsyncedProgress(): PlaybackProgress[] {
   const all: PlaybackProgress[] = [];
   progressCollection.state.forEach((value) => {
     if (!value.syncedAt) {

@@ -7,8 +7,6 @@
 # Database (LOCAL_PROXY mode)
 DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
 
-<<<<<<< HEAD
-=======
 # CORS URLs
 WEB_APP_URL=http://localhost:3000
 API_URL=http://localhost:8787
@@ -16,6 +14,5 @@ API_URL=http://localhost:8787
 # Environment
 ENVIRONMENT=development
 
->>>>>>> main
 # Worker-to-worker authentication (HMAC)
 WORKER_SHARED_SECRET=your-shared-secret-here

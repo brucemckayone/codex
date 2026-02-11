@@ -11,7 +11,7 @@
  */
 
 import { browser } from '$app/environment';
-import { syncProgressToServer } from './progress';
+import { getUnsyncedProgress, syncProgressToServer } from './progress';
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let initializedForUser: string | null = null;
@@ -51,10 +51,32 @@ function handleVisibilityChange(): void {
 
 /**
  * Handle before unload
+ *
+ * Uses navigator.sendBeacon() for reliable delivery during page unload.
+ * sendBeacon is fire-and-forget and guaranteed to be queued by the browser
+ * even as the page terminates, unlike async fetch which may be cancelled.
  */
 function handleBeforeUnload(): void {
-  // Note: async operations may not complete during beforeunload.
-  // Consider navigator.sendBeacon() when a dedicated sync endpoint exists.
+  const unsynced = getUnsyncedProgress();
+  if (unsynced.length === 0) return;
+
+  const payload = unsynced.map(
+    ({ contentId, positionSeconds, durationSeconds }) => ({
+      contentId,
+      positionSeconds,
+      durationSeconds,
+    })
+  );
+
+  if (navigator.sendBeacon) {
+    const blob = new Blob([JSON.stringify(payload)], {
+      type: 'application/json',
+    });
+    const queued = navigator.sendBeacon('/api/progress-beacon', blob);
+    if (queued) return;
+  }
+
+  // Fallback: attempt async sync (may not complete during unload)
   syncProgressToServer();
 }
 
