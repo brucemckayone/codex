@@ -70,15 +70,27 @@ test.describe('Forgot Password Form', () => {
   });
 
   test('shows loading state during submission', async ({ page }) => {
+    // Wait for hydration so use:enhance is active (otherwise plain form POST)
+    await page.waitForLoadState('networkidle');
+
+    // Intercept the form POST and hold it pending so the request doesn't
+    // hang waiting for the auth worker. We only care about loading state.
+    await page.route('**/forgot-password**', (route) => {
+      if (route.request().method() === 'POST') {
+        return new Promise(() => {});
+      }
+      return route.continue();
+    });
+
     await page.fill('input[name="email"]', 'test@example.com');
 
     const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click({ noWaitAfter: true });
 
-    // Click and the button should show loading state
-    await submitButton.click();
-
-    // Note: The loading state may be very brief, this is a smoke test
-    // that the form handles submission without crashing
+    // Button should enter loading state (aria-busy from Button's {loading} prop)
+    await expect(submitButton).toHaveAttribute('aria-busy', 'true', {
+      timeout: 5000,
+    });
   });
 
   // Note: Success case requires auth backend to be running

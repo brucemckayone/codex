@@ -29,11 +29,7 @@
 <h1>{m.auth_signin_title()}</h1>
 
 <form method="POST" use:enhance={handleSubmit}>
-  {#if form?.emailUnverified}
-    <div role="status">
-      <p>{form.error}</p>
-    </div>
-  {:else if form?.error}
+  {#if form?.error}
     <div role="alert">
       <p>{form.error}</p>
     </div>
