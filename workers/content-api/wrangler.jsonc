@@ -176,4 +176,8 @@
   //   - R2_SECRET_ACCESS_KEY: R2 secret access key
   //   - R2_BUCKET_MEDIA: R2 bucket name for media storage
   //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
+  //
+  // Cache Purge Secrets (set via wrangler CLI):
+  //   wrangler secret put CF_ZONE_ID --env production
+  //   wrangler secret put CF_API_TOKEN --env production
 }

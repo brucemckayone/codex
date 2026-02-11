@@ -38,6 +38,8 @@
     "@tanstack/query-db-collection": "^1.0.22",
     "@tanstack/svelte-db": "^0.1.68",
     "happy-dom": "^20.0.8",
+    "hls.js": "^1.6.15",
+    "media-chrome": "^4.17.2",
     "nanoid": "^5.0.0",
     "zod": "^4.3.5"
   },

@@ -1,34 +1,41 @@
 <script lang="ts">
   /**
-   * Platform layout - for revelations.studio routes
+   * Platform layout - provides PlatformHeader, PageContainer, and Footer
+   * for all routes under the (platform) group.
    */
   import type { Snippet } from 'svelte';
+  import { PlatformHeader } from '$lib/components/layout';
+  import { Footer, PageContainer } from '$lib/components/ui';
+  import type { LayoutUser } from '$lib/types';
   import type { LayoutData } from './$types';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
+
+  const user: LayoutUser | null = data.user
+    ? { name: data.user.name ?? '', email: data.user.email ?? '', image: data.user.image ?? undefined }
+    : null;
 </script>
 
 <div class="platform-layout">
-  <header class="platform-header">
-    <a href="/" class="logo">Revelations</a>
-    <nav class="nav">
-      <a href="/discover">Discover</a>
-      {#if data.user}
-        <a href="/library">Library</a>
-        <a href="/account">Account</a>
-      {:else}
-        <a href="/login">Sign In</a>
-      {/if}
-    </nav>
-  </header>
+  <PlatformHeader {user} />
 
-  <main class="platform-main">
-    {@render children()}
+  <main id="main-content">
+    <PageContainer>
+      {@render children()}
+    </PageContainer>
   </main>
 
-  <footer class="platform-footer">
-    <p>&copy; 2026 Revelations Studio. All rights reserved.</p>
-  </footer>
+  <Footer />
 </div>
 
+<style>
+  .platform-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
 
+  main {
+    flex: 1;
+  }
+</style>

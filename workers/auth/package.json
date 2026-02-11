@@ -17,6 +17,7 @@
   "dependencies": {
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/notifications": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/service-errors": "workspace:*",

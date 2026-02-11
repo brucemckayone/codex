@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { logger } from '$lib/observability';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
+import { extractSessionToken } from '$lib/server/auth-utils';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms (use _password prefix to prevent repopulation)
@@ -74,16 +75,10 @@ function extractAndSetSessionCookie(
   cookies: ReturnType<typeof getRequestEvent>['cookies'],
   isSecure: boolean
 ): boolean {
-  const setCookieHeader = response.headers.get('set-cookie');
-  if (!setCookieHeader) return false;
+  const token = extractSessionToken(response);
+  if (!token) return false;
 
-  // Parse session cookie value from Set-Cookie header
-  const match = setCookieHeader.match(
-    new RegExp(`${COOKIES.SESSION_NAME}=([^;]+)`)
-  );
-  if (!match) return false;
-
-  cookies.set(COOKIES.SESSION_NAME, match[1], {
+  cookies.set(COOKIES.SESSION_NAME, token, {
     path: '/',
     httpOnly: true,
     secure: isSecure,

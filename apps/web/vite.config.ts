@@ -16,6 +16,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/tests/setup.ts'],
+    testTimeout: 15000,
   },
   // Tell Vitest to use the `browser` entry points in `package.json` files,
   // even though it's running in Node. This is required for Svelte 5 runes

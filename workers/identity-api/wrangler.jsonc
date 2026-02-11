@@ -56,7 +56,8 @@
         "DB_METHOD": "LOCAL_PROXY",
         "WEB_APP_URL": "http://localhost:3000",
         "API_URL": "http://localhost:8787",
-        "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio"
+        "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio",
+        "WORKER_SHARED_SECRET": "test-worker-shared-secret"
       },
       "kv_namespaces": [
         {

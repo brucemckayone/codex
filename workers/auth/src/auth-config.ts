@@ -6,11 +6,12 @@
  * session management, and database integration.
  */
 
-import { AUTH_ROLES, COOKIES, ENV_NAMES } from '@codex/constants';
+import { AUTH_ROLES, COOKIES, DOMAINS, ENV_NAMES } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { sendVerificationEmail } from './email';
 import type { AuthBindings } from './types';
 
 interface AuthConfigOptions {
@@ -57,13 +58,16 @@ export function createAuthInstance(options: AuthConfigOptions) {
       },
       // Cross-subdomain authentication support
       // Cookie domain with leading dot allows sharing across all subdomains
-      // Example: .revelations.studio allows yoga-studio.revelations.studio access
       cookie: {
-        name: 'codex-session',
-        domain: '.revelations.studio',
-        sameSite: 'lax', // Changed from strict to support cross-subdomain navigation
-        secure: true, // HTTPS only
-        httpOnly: true, // Prevent JS access
+        name: COOKIES.SESSION_NAME,
+        sameSite: 'lax',
+        httpOnly: true,
+        // Only set domain and secure in non-dev environments
+        // In dev, omit domain (defaults to request origin) and secure (allows HTTP)
+        ...(env.ENVIRONMENT !== ENV_NAMES.DEVELOPMENT &&
+        env.ENVIRONMENT !== ENV_NAMES.TEST
+          ? { domain: `.${DOMAINS.PROD}`, secure: true }
+          : { secure: false }),
       },
     },
     logger: {
@@ -84,12 +88,24 @@ export function createAuthInstance(options: AuthConfigOptions) {
             expirationTtl: 300, // 5 minutes
           });
         }
+
+        // Send the actual verification email
+        await sendVerificationEmail(env, user, token);
       },
       autoSignInAfterVerification: true,
       sendOnSignUp: true,
+      // Re-sends the verification email when an unverified user attempts sign-in,
+      // giving them another chance to complete verification. Without this, users
+      // who missed the initial email have no self-service path to get a new link.
+      sendOnSignIn: true,
     },
     emailAndPassword: {
       enabled: true,
+      // NOTE (security vs UX trade-off): BetterAuth returns a 403 with a specific
+      // "email not verified" message on login, which leaks account existence. We accept
+      // this because: (1) registration already implicitly confirms existence, and
+      // (2) a clear message reduces support burden. If stricter anti-enumeration is
+      // needed, override the BetterAuth error handler to return generic "Invalid credentials".
       requireEmailVerification: true,
       autoSignIn: true,
     },

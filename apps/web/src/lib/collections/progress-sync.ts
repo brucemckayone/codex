@@ -2,7 +2,7 @@
  * Progress Sync Manager
  *
  * Handles background synchronization of playback progress to the server.
- * Call initProgressSync() once in the root layout.
+ * Call initProgressSync(userId) once in the root layout.
  *
  * Sync triggers:
  * - Every 30 seconds while page is visible
@@ -11,10 +11,10 @@
  */
 
 import { browser } from '$app/environment';
-import { syncProgressToServer } from './progress';
+import { getUnsyncedProgress, syncProgressToServer } from './progress';
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
-let initialized = false;
+let initializedForUser: string | null = null;
 
 /**
  * Start the sync interval
@@ -51,10 +51,32 @@ function handleVisibilityChange(): void {
 
 /**
  * Handle before unload
+ *
+ * Uses navigator.sendBeacon() for reliable delivery during page unload.
+ * sendBeacon is fire-and-forget and guaranteed to be queued by the browser
+ * even as the page terminates, unlike async fetch which may be cancelled.
  */
 function handleBeforeUnload(): void {
-  // Best-effort sync before page closes
-  // Note: This is not guaranteed to complete for async operations
+  const unsynced = getUnsyncedProgress();
+  if (unsynced.length === 0) return;
+
+  const payload = unsynced.map(
+    ({ contentId, positionSeconds, durationSeconds }) => ({
+      contentId,
+      positionSeconds,
+      durationSeconds,
+    })
+  );
+
+  if (navigator.sendBeacon) {
+    const blob = new Blob([JSON.stringify(payload)], {
+      type: 'application/json',
+    });
+    const queued = navigator.sendBeacon('/api/progress-beacon', blob);
+    if (queued) return;
+  }
+
+  // Fallback: attempt async sync (may not complete during unload)
   syncProgressToServer();
 }
 
@@ -71,14 +93,21 @@ function handleBeforeUnload(): void {
  *   import { initProgressSync } from '$lib/collections/progress-sync';
  *
  *   onMount(() => {
- *     initProgressSync();
+ *     initProgressSync(userId);
  *   });
  * </script>
  * ```
  */
-export function initProgressSync(): void {
-  if (!browser || initialized) return;
-  initialized = true;
+export function initProgressSync(userId: string): void {
+  if (!browser) return;
+  if (initializedForUser === userId) return;
+
+  // Clean up previous user's sync if switching users
+  if (initializedForUser) {
+    cleanupProgressSync();
+  }
+
+  initializedForUser = userId;
 
   // Listen for visibility changes
   document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -104,7 +133,7 @@ export function cleanupProgressSync(): void {
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   window.removeEventListener('beforeunload', handleBeforeUnload);
   stopSync();
-  initialized = false;
+  initializedForUser = null;
 }
 
 /**

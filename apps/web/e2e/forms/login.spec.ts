@@ -13,8 +13,8 @@ test.describe('Login Form', () => {
   });
 
   test('displays login form with all required fields', async ({ page }) => {
-    // Check page title (uses paraglide i18n: "Sign In | Revelations")
-    await expect(page).toHaveTitle(/Sign In.*Revelations/i);
+    // Check page title (uses paraglide i18n: "Sign In | Codex")
+    await expect(page).toHaveTitle(/Sign In.*Codex/i);
 
     // Check form fields exist
     await expect(page.locator('input[name="email"]')).toBeVisible();
@@ -66,18 +66,29 @@ test.describe('Login Form', () => {
   });
 
   test('shows loading state during form submission', async ({ page }) => {
+    // Wait for hydration so use:enhance is active (otherwise plain form POST)
+    await page.waitForLoadState('networkidle');
+
+    // Intercept the form POST and hold it pending so the request doesn't
+    // hang waiting for the auth worker. We only care about loading state.
+    await page.route('**/login**', (route) => {
+      if (route.request().method() === 'POST') {
+        return new Promise(() => {});
+      }
+      return route.continue();
+    });
+
     // Fill valid form data
     await page.fill('input[name="email"]', 'test@example.com');
     await page.fill('input[name="password"]', 'ValidPass123');
 
-    // Click submit and check loading state appears
     const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click({ noWaitAfter: true });
 
-    // The button text should change to loading indicator
-    await submitButton.click();
-
-    // Check that button shows loading state (Loading... text per the component)
-    // Note: This may be very brief depending on network speed
+    // Button should enter loading state (aria-busy from Button's {loading} prop)
+    await expect(submitButton).toHaveAttribute('aria-busy', 'true', {
+      timeout: 5000,
+    });
   });
 
   test('preserves email value after validation error', async ({ page }) => {

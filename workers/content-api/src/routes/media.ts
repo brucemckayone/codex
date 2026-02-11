@@ -187,24 +187,29 @@ app.post(
         throw new Error('MEDIA_API_URL not configured');
       }
 
-      const response = await workerFetch(
-        `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ creatorId }),
-        },
-        ctx.env.WORKER_SHARED_SECRET || ''
-      );
+      try {
+        const response = await workerFetch(
+          `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ creatorId }),
+          },
+          ctx.env.WORKER_SHARED_SECRET || ''
+        );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Failed to trigger transcoding: ${errorText}`);
-        // Don't fail the request - media is still marked as 'uploaded'
-        // Transcoding can be retried manually
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Failed to trigger transcoding: ${errorText}`);
+          // Don't fail the request - media is still marked as 'uploaded'
+          // Transcoding can be retried manually
+          return { success: true, status: MEDIA_STATUS.UPLOADED };
+        }
+
+        return { success: true, status: MEDIA_STATUS.TRANSCODING };
+      } catch (error) {
+        console.error('Transcoding trigger failed:', error);
         return { success: true, status: MEDIA_STATUS.UPLOADED };
       }
-
-      return { success: true, status: MEDIA_STATUS.TRANSCODING };
     },
   })
 );

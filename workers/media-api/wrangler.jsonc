@@ -84,6 +84,10 @@
         "RUNPOD_WEBHOOK_SECRET": "test-webhook-secret",
         "RUNPOD_API_URL": "http://localhost:4002/internal/mock-runpod",
         "WORKER_SHARED_SECRET": "test-worker-shared-secret",
+        "B2_ENDPOINT": "https://s3.us-west-000.backblazeb2.com",
+        "B2_KEY_ID": "test-b2-key-id",
+        "B2_APP_KEY": "test-b2-app-key",
+        "B2_BUCKET": "test-b2-bucket",
         "DB_METHOD": "LOCAL_PROXY",
         "DATABASE_URL_LOCAL_PROXY": "postgres://postgres:postgres@db.localtest.me:5432/main"
       },

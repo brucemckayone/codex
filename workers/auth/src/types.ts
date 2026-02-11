@@ -29,6 +29,27 @@ export type AuthBindings = SharedBindings & {
    * KV namespace for session caching
    */
   AUTH_SESSION_KV: KVNamespace;
+
+  /**
+   * Resend API key for production email delivery
+   * Set via `wrangler secret put RESEND_API_KEY`
+   */
+  RESEND_API_KEY?: string;
+
+  /**
+   * Sender email address for transactional emails
+   */
+  FROM_EMAIL?: string;
+
+  /**
+   * Sender display name for transactional emails
+   */
+  FROM_NAME?: string;
+
+  /**
+   * When "true", uses ConsoleProvider instead of Resend
+   */
+  USE_MOCK_EMAIL?: string;
 };
 
 /**

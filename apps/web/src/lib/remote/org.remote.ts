@@ -91,20 +91,6 @@ export const getOrgSettings = query(z.string().uuid(), async (orgId) => {
  */
 export const getOrganizationById = query(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
-
-  // Note: This assumes an endpoint exists, otherwise use list with filter
-  const orgApiUrl = serverApiUrl(platform, 'org');
-  const response = await fetch(`${orgApiUrl}/api/organizations/${id}`, {
-    headers: {
-      Cookie: cookies.get('codex-session')
-        ? `codex-session=${cookies.get('codex-session')}`
-        : '',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Organization not found');
-  }
-
-  return response.json();
+  const api = createServerApi(platform, cookies);
+  return api.fetch('org', `/api/organizations/${id}`);
 });

@@ -58,7 +58,7 @@
       />
     </div>
 
-    <Button type="submit" disabled={loading}>
+    <Button type="submit" {loading}>
       {m.auth_reset_password_button()}
     </Button>
   </form>

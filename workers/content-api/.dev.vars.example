@@ -1,8 +1,11 @@
 # Content API Worker - Development Environment Variables
 # Copy this file to .dev.vars and fill in the values
+#
+# Note: DB_METHOD is set to LOCAL_PROXY in wrangler.jsonc,
+# so you need DATABASE_URL_LOCAL_PROXY (not DATABASE_URL)
 
-# Database connection (Neon PostgreSQL)
-DATABASE_URL=postgresql://username:password@host/database
+# Database (LOCAL_PROXY mode)
+DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
 
 # R2 Storage
 R2_ACCOUNT_ID=your-r2-account-id
@@ -10,12 +13,6 @@ R2_ACCESS_KEY_ID=your-r2-access-key-id
 R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
 R2_BUCKET_MEDIA=codex-media-test
 
-# Environment name
-ENVIRONMENT=development
-
-# Database method (use LOCAL for development with direct connection)
-DB_METHOD=LOCAL
-
-# CORS allowed origins
-WEB_APP_URL=http://localhost:3000
-API_URL=http://localhost:8787
+# Stripe (use test mode keys)
+STRIPE_SECRET_KEY=sk_test_YOUR_TEST_KEY_HERE
+STRIPE_WEBHOOK_SECRET_BOOKING=whsec_YOUR_BOOKING_WEBHOOK_SECRET

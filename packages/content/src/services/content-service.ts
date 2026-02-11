@@ -13,7 +13,7 @@
  */
 
 import type { R2Bucket } from '@cloudflare/workers-types';
-import { R2Service } from '@codex/cloudflare-clients';
+import { type CachePurgeClient, R2Service } from '@codex/cloudflare-clients';
 import {
   CONTENT_STATUS,
   CONTENT_TYPES,
@@ -66,6 +66,31 @@ import type {
  * - List content with filters
  */
 export class ContentService extends BaseService {
+  private cachePurge?: CachePurgeClient;
+  private webAppUrl?: string;
+
+  setCachePurge(client: CachePurgeClient, webAppUrl: string): void {
+    if (!webAppUrl) {
+      throw new Error('webAppUrl must be a non-empty string');
+    }
+    this.cachePurge = client;
+    this.webAppUrl = webAppUrl;
+  }
+
+  /**
+   * Purge cached content pages by slug.
+   * Awaited to ensure completion (critical for takedowns/unpublish).
+   * Errors are logged but not rethrown to avoid failing the main operation.
+   */
+  private async purgeContentCache(slug: string): Promise<void> {
+    if (!this.cachePurge || !slug) return;
+    try {
+      await this.cachePurge.purgeByUrls([`${this.webAppUrl}/content/${slug}`]);
+    } catch (error) {
+      console.error('Cache purge failed:', error);
+    }
+  }
+
   /**
    * Create new content
    *
@@ -382,6 +407,9 @@ export class ContentService extends BaseService {
         throw new ContentNotFoundError(id);
       }
 
+      // Purge cached content pages after publish
+      await this.purgeContentCache(result.slug);
+
       return result;
     } catch (error) {
       if (
@@ -432,6 +460,9 @@ export class ContentService extends BaseService {
 
         return unpublished;
       });
+
+      // Purge cached content pages after unpublish (critical for takedowns)
+      await this.purgeContentCache(result.slug);
 
       return result;
     } catch (error) {

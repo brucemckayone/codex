@@ -1,0 +1,166 @@
+/* VideoPlayer Styles
+ *
+ * Uses CSS custom properties from media-chrome for control theming.
+ * Applies design tokens from the project token system.
+ */
+
+.video-player-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: var(--color-neutral-900);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Loading state */
+.video-player-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-neutral-900);
+  z-index: 2;
+}
+
+.video-player-loading-spinner {
+  width: 3rem;
+  height: 3rem;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  animation: vp-spin 0.8s linear infinite;
+}
+
+@keyframes vp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error state */
+.video-player-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  background-color: var(--color-neutral-900);
+  color: var(--color-neutral-300);
+  z-index: 2;
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.video-player-error-icon {
+  width: 3rem;
+  height: 3rem;
+  color: var(--color-error);
+}
+
+.video-player-error-message {
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.5;
+  max-width: 30ch;
+}
+
+.video-player-error-retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.25rem;
+  padding-inline: var(--space-4);
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: 500;
+  color: white;
+  background-color: var(--color-primary-500);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--duration-fast, 100ms) var(--ease-default, ease);
+}
+
+.video-player-error-retry:hover {
+  background-color: var(--color-primary-600);
+}
+
+.video-player-error-retry:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+}
+
+/* Media Chrome theming */
+media-controller {
+  --media-background-color: transparent;
+  --media-control-background: transparent;
+  --media-control-hover-background: rgba(255, 255, 255, 0.1);
+  --media-primary-color: white;
+  --media-secondary-color: rgba(255, 255, 255, 0.8);
+  --media-text-color: white;
+
+  --media-range-track-background: rgba(255, 255, 255, 0.3);
+  --media-range-track-height: 4px;
+  --media-range-track-border-radius: 2px;
+  --media-range-thumb-background: white;
+  --media-range-thumb-width: 12px;
+  --media-range-thumb-height: 12px;
+  --media-range-thumb-border-radius: 50%;
+  --media-range-bar-color: var(--color-primary-500);
+
+  --media-time-range-buffered-color: rgba(255, 255, 255, 0.4);
+
+  --media-control-padding: 0 var(--space-1, 4px);
+  --media-font-size: var(--text-sm, 0.875rem);
+  --media-font-family: var(--font-sans, system-ui, sans-serif);
+
+  width: 100%;
+  height: 100%;
+}
+
+media-controller video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Bottom control bar gradient overlay */
+media-control-bar {
+  --media-control-background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.7) 0%,
+    rgba(0, 0, 0, 0.3) 60%,
+    transparent 100%
+  );
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  padding-top: var(--space-8, 32px);
+}
+
+/* Loading indicator */
+media-loading-indicator {
+  --media-loading-indicator-icon-width: 3rem;
+  --media-loading-indicator-icon-height: 3rem;
+}
+
+/* Responsive: smaller controls on mobile */
+@media (max-width: 640px) {
+  media-controller {
+    --media-font-size: var(--text-xs, 0.75rem);
+    --media-range-thumb-width: 10px;
+    --media-range-thumb-height: 10px;
+  }
+
+  media-control-bar {
+    padding: var(--space-1, 4px) var(--space-2, 8px);
+    padding-top: var(--space-6, 24px);
+  }
+}
+
+/* Hide volume slider on touch devices (they use hardware volume) */
+@media (pointer: coarse) {
+  .video-player-volume-range {
+    display: none;
+  }
+}

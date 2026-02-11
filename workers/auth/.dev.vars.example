@@ -1,15 +1,48 @@
-# Development Environment Variables
+# Auth Worker - Development Environment Variables
 # Copy to .dev.vars and fill in actual values
+#
+# Note: DB_METHOD is set to LOCAL_PROXY in wrangler.jsonc,
+# so you need DATABASE_URL_LOCAL_PROXY (not DATABASE_URL)
 
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/codex_dev
+# Database (LOCAL_PROXY mode)
+DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
 
 # BetterAuth Secret (min 32 characters)
 BETTER_AUTH_SECRET=your-secret-key-min-32-characters-here
 
-# CORS URLs
-WEB_APP_URL=http://localhost:3000
-API_URL=http://localhost:8787
+# ─────────────────────────────────────────────────
+# Email Sending (Verification Emails)
+# ─────────────────────────────────────────────────
+#
+# In dev, USE_MOCK_EMAIL=true is set in wrangler.jsonc,
+# so verification emails are logged to the auth worker terminal.
+# Just copy the verification URL from the console output.
+#
+# For production, set RESEND_API_KEY via wrangler secret:
+#   wrangler secret put RESEND_API_KEY --env production
+#
+# Uncomment to test with real Resend emails locally:
+# RESEND_API_KEY=re_your_api_key_here
 
-# Environment
-ENVIRONMENT=development
+# ─────────────────────────────────────────────────
+# Dev Workflow: Email Verification (Alternative)
+# ─────────────────────────────────────────────────
+#
+# Tokens are also stored in local KV (5min TTL) for E2E tests.
+#
+# Option A: Copy the verification URL from the auth worker terminal output.
+#
+# Option B: Grab the token from KV within 5 minutes of registration:
+#   cd workers/auth
+#   npx wrangler kv key get "verification:YOUR@EMAIL.COM" --binding AUTH_SESSION_KV --local
+#   curl "http://localhost:42069/api/auth/verify-email?token=FULL_TOKEN_HERE"
+#
+# Option C: If the token expired, manually verify in Postgres:
+#   PGPASSWORD=postgres psql -h db.localtest.me -U postgres -d main \
+#     -c "UPDATE users SET email_verified = true WHERE email = 'YOUR@EMAIL.COM';"
+#
+# Option D: Reset and re-register (drops the user):
+#   PGPASSWORD=postgres psql -h db.localtest.me -U postgres -d main \
+#     -c "DELETE FROM accounts WHERE user_id = (SELECT id FROM users WHERE email = 'YOUR@EMAIL.COM');
+#         DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = 'YOUR@EMAIL.COM');
+#         DELETE FROM users WHERE email = 'YOUR@EMAIL.COM';"

@@ -10,7 +10,7 @@ import { createCollection } from '@tanstack/db';
 import { queryCollectionOptions } from '@tanstack/query-db-collection';
 import { listContent } from '$lib/remote/content.remote';
 import type { ContentWithRelations } from '$lib/types';
-import { queryClient } from './index';
+import { queryClient } from './query-client';
 
 /**
  * Content Collection
@@ -30,20 +30,22 @@ import { queryClient } from './index';
  * </script>
  * ```
  */
-export const contentCollection = createCollection<ContentWithRelations, string>(
-  queryCollectionOptions({
-    queryKey: ['content'],
+export const contentCollection = queryClient
+  ? createCollection<ContentWithRelations, string>(
+      queryCollectionOptions({
+        queryKey: ['content'],
 
-    // Load data via remote function
-    queryFn: async () => {
-      const result = await listContent({ status: 'published' });
-      return result?.items ?? [];
-    },
+        // Load data via remote function
+        queryFn: async () => {
+          const result = await listContent({ status: 'published' });
+          return result?.items ?? [];
+        },
 
-    queryClient,
-    getKey: (item) => item.id,
-  })
-);
+        queryClient,
+        getKey: (item) => item.id,
+      })
+    )
+  : undefined;
 
 /**
  * Load content for a specific organization

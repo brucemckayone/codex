@@ -44,7 +44,7 @@ describe('collections/progress-sync', () => {
   it('initProgressSync is safe to call on server (no-op)', async () => {
     const { initProgressSync } = await import('./progress-sync');
     // Should not throw even when browser is false
-    expect(() => initProgressSync()).not.toThrow();
+    expect(() => initProgressSync('test-user-id')).not.toThrow();
   });
 
   it('cleanupProgressSync is safe to call on server (no-op)', async () => {

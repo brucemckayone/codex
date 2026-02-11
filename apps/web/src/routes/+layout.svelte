@@ -1,17 +1,18 @@
 <script lang="ts">
   /**
-   * Root layout - provides user context to all pages
+   * Root layout - thin shell providing global styles, view transitions, and user context.
+   * Each route group (platform, org, creators) owns its own header/footer chrome.
    */
   import type { Snippet } from 'svelte';
   import { onNavigate } from '$app/navigation';
-  import { Footer, Header, PageContainer, Toaster } from '$lib/components/ui';
+  import { Toaster } from '$lib/components/ui';
   import type { LayoutData } from './$types';
   import '../lib/styles/global.css';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
   onNavigate((navigation) => {
-    if (!navigation.to) return; // Ignore hash navigation
+    if (!navigation.to) return;
     if (!document.startViewTransition) return;
 
     return new Promise((resolve) => {
@@ -22,7 +23,6 @@
     });
   });
 
-  // User is available to all child components via data
   const _ = data;
 </script>
 
@@ -32,29 +32,11 @@
 
 <a href="#main-content" class="skip-link">Skip to content</a>
 
-<Header>
-  <a href="/showcase" class="nav-link">Showcase</a>
-</Header>
-
-<main id="main-content">
-  <PageContainer>
-    {@render children()}
-  </PageContainer>
-</main>
-
-<Footer />
+{@render children()}
 
 <Toaster />
 
 <style>
-  .nav-link {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-  .nav-link:hover {
-    color: var(--color-primary-500);
-  }
-
   .skip-link {
     position: absolute;
     top: -100%;

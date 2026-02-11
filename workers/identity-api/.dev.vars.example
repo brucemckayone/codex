@@ -1,8 +1,11 @@
-# Development Environment Variables
+# Identity API Worker - Development Environment Variables
 # Copy to .dev.vars and fill in actual values
+#
+# Note: DB_METHOD is set to LOCAL_PROXY in wrangler.jsonc,
+# so you need DATABASE_URL_LOCAL_PROXY (not DATABASE_URL)
 
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/codex_dev
+# Database (LOCAL_PROXY mode)
+DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
 
 # CORS URLs
 WEB_APP_URL=http://localhost:3000

@@ -13,8 +13,8 @@ test.describe('Register Form', () => {
   });
 
   test('displays registration form with all fields', async ({ page }) => {
-    // Check page title (uses paraglide i18n: "Create Account | Revelations")
-    await expect(page).toHaveTitle(/Create Account.*Revelations/i);
+    // Check page title (uses paraglide i18n: "Create Account | Codex")
+    await expect(page).toHaveTitle(/Create Account.*Codex/i);
 
     // Check form fields exist
     await expect(page.locator('input[name="name"]')).toBeVisible();
@@ -174,20 +174,37 @@ test.describe('Register Form', () => {
   });
 
   test('name field is optional', async ({ page }) => {
+    // Wait for hydration so use:enhance is active (otherwise plain form POST)
+    await page.waitForLoadState('networkidle');
+
+    // Intercept the form POST and hold it pending so the request doesn't
+    // hang waiting for the auth worker. We only care that validation passes.
+    await page.route('**/register**', (route) => {
+      if (route.request().method() === 'POST') {
+        // Never resolve — keeps the request in-flight
+        return new Promise(() => {});
+      }
+      return route.continue();
+    });
+
     // Submit without name (should not cause name validation error)
     await page.fill('input[name="email"]', 'test@example.com');
     await page.fill('input[name="password"]', 'ValidPass123');
     await page.fill('input[name="confirmPassword"]', 'ValidPass123');
-    await page.click('button[type="submit"]');
 
-    // If there's a validation error, it should not be on the name field
+    const submitButton = page.locator('button[type="submit"]');
+    await submitButton.click({ noWaitAfter: true });
+
+    // If name were required, the server action would return a validation
+    // error immediately (before calling the auth worker). The button entering
+    // loading state proves the form submitted without validation errors.
+    await expect(submitButton).toHaveAttribute('aria-busy', 'true', {
+      timeout: 5000,
+    });
+
+    // Name field should have no error
     const nameInput = page.locator('input[name="name"]');
-    // Wait a moment for any potential errors to appear
-    await page.waitForTimeout(500);
-
-    // Name should not have error state (it's optional)
-    const dataError = await nameInput.getAttribute('data-error');
-    expect(dataError).not.toBe('true');
+    await expect(nameInput).toHaveAttribute('data-error', 'false');
   });
 
   test('navigates to login page', async ({ page }) => {

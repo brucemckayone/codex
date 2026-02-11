@@ -178,6 +178,8 @@ export interface CheckSlugResponse {
  * // or if not a member:
  * { role: null, joinedAt: null }
  */
+// Maintenance: role union must match organizationMembers.role column CHECK constraint
+// in packages/database schema. Update both locations if roles change.
 export interface MembershipLookupResponse {
   role: 'owner' | 'admin' | 'creator' | 'subscriber' | 'member' | null;
   joinedAt: string | null;

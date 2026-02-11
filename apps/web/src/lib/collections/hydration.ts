@@ -11,7 +11,7 @@
  * 4. useLiveQuery finds cached data - no refetch!
  */
 
-import { queryClient } from './index';
+import { queryClient } from './query-client';
 
 /**
  * Collection keys used for hydration
@@ -63,6 +63,7 @@ export function hydrateCollection<T>(
   collection: CollectionKey,
   data: T[]
 ): void {
+  if (!queryClient) return;
   const queryKey = COLLECTION_KEYS[collection];
   queryClient.setQueryData(queryKey, data);
 }
@@ -76,6 +77,7 @@ export function hydrateCollection<T>(
  * @returns true if data exists in cache
  */
 export function isCollectionHydrated(collection: CollectionKey): boolean {
+  if (!queryClient) return false;
   const queryKey = COLLECTION_KEYS[collection];
   return queryClient.getQueryData(queryKey) !== undefined;
 }
@@ -93,6 +95,7 @@ export function hydrateIfNeeded<T>(
   collection: CollectionKey,
   data: T[]
 ): boolean {
+  if (!queryClient) return false;
   if (isCollectionHydrated(collection)) {
     return false;
   }
@@ -110,6 +113,7 @@ export function hydrateIfNeeded<T>(
 export async function invalidateCollection(
   collection: CollectionKey
 ): Promise<void> {
+  if (!queryClient) return;
   const queryKey = COLLECTION_KEYS[collection];
   await queryClient.invalidateQueries({ queryKey });
 }

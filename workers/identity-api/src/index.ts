@@ -47,9 +47,6 @@ const app = createWorker({
   },
 });
 
-app.route('/api/identity', identityRoutes);
-app.route('/api/organizations', membershipRoutes);
-
 /**
  * Environment validation
  * Validates required environment variables on first request
@@ -66,6 +63,9 @@ app.use(
 // ============================================================================
 // API Routes
 // ============================================================================
+
+app.route('/api/identity', identityRoutes);
+app.route('/api/organizations', membershipRoutes);
 
 /**
  * Mount user routes

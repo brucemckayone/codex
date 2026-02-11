@@ -7,7 +7,7 @@ import { expect, test } from '@playwright/test';
 test.describe('Homepage', () => {
   test('should load the homepage successfully', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveTitle(/Revelations/);
+    await expect(page).toHaveTitle(/Codex/);
   });
 });
 

@@ -35,6 +35,22 @@ export interface MediaItemWithRelations extends MediaItem {
 }
 
 /**
+ * Shared layout types used across Header, Footer, and Sidebar components.
+ * Single source of truth — imported by all layout components.
+ */
+export interface LayoutUser {
+  name: string;
+  email: string;
+  image?: string;
+}
+
+export interface LayoutOrganization {
+  name: string;
+  slug: string;
+  logoUrl?: string;
+}
+
+/**
  * Organization data for org context (web app extended version)
  * Includes UI-specific fields not present in backend Organization type
  */

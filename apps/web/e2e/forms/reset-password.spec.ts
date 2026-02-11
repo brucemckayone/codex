@@ -168,16 +168,28 @@ test.describe('Reset Password Form', () => {
     });
 
     test('shows loading state during submission', async ({ page }) => {
+      // Wait for hydration so use:enhance is active (otherwise plain form POST)
+      await page.waitForLoadState('networkidle');
+
+      // Intercept the form POST so it stays in-flight (no auth worker needed).
+      // Use ** suffix to match URLs with query params (?token=...).
+      await page.route('**/reset-password**', (route) => {
+        if (route.request().method() === 'POST') {
+          return new Promise(() => {});
+        }
+        return route.continue();
+      });
+
       await page.fill('input[name="password"]', 'ValidPass123');
       await page.fill('input[name="confirmPassword"]', 'ValidPass123');
 
       const submitButton = page.locator('button[type="submit"]');
 
-      // Click to submit - button should show loading/disabled state
-      await submitButton.click();
-
-      // The button should be disabled during loading
-      // Note: This depends on the actual loading state implementation
+      // Click and verify button enters loading state (aria-busy from Button's {loading} prop)
+      await submitButton.click({ noWaitAfter: true });
+      await expect(submitButton).toHaveAttribute('aria-busy', 'true', {
+        timeout: 5000,
+      });
     });
 
     // Note: Success case requires valid token and auth backend

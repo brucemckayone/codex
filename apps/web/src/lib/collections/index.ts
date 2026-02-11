@@ -10,30 +10,6 @@
  * - useLiveQuery: Reactive SQL-like queries over collections
  */
 
-import { QueryClient } from '@tanstack/query-core';
-
-/**
- * Shared QueryClient for all TanStack DB collections
- *
- * This is the central cache for all collection data.
- * Collections use this to coordinate caching and invalidation.
- */
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      // Data considered fresh for 5 minutes
-      staleTime: 1000 * 60 * 5,
-
-      // Keep inactive data in cache for 30 minutes
-      gcTime: 1000 * 60 * 30,
-
-      // Retry failed requests 3 times with exponential backoff
-      retry: 3,
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-    },
-  },
-});
-
 // Re-export TanStack DB utilities for convenient imports
 export {
   and,
@@ -48,7 +24,6 @@ export {
 } from '@tanstack/db';
 export { queryCollectionOptions } from '@tanstack/query-db-collection';
 export { useLiveQuery } from '@tanstack/svelte-db';
-
 // Collection exports
 export {
   contentCollection,
@@ -87,3 +62,6 @@ export {
   forceSync,
   initProgressSync,
 } from './progress-sync';
+// QueryClient is defined in ./query-client.ts to avoid circular dependencies.
+// Collections import it directly from there; we re-export for external consumers.
+export { queryClient } from './query-client';

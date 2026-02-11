@@ -794,22 +794,12 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "R2 credentials not configured in environment. Add secrets in RunPod console."
         )
 
-    # Read ASSETS_BUCKET credentials from environment (for public CDN assets)
-    assets_endpoint = os.environ.get("ASSETS_R2_ENDPOINT")
-    assets_access_key_id = os.environ.get("ASSETS_R2_ACCESS_KEY_ID")
-    assets_secret_access_key = os.environ.get("ASSETS_R2_SECRET_ACCESS_KEY")
+    # Read ASSETS_BUCKET name from environment (uses shared R2 credentials)
     assets_bucket_name = os.environ.get("ASSETS_BUCKET_NAME")
 
-    if not all(
-        [
-            assets_endpoint,
-            assets_access_key_id,
-            assets_secret_access_key,
-            assets_bucket_name,
-        ]
-    ):
+    if not assets_bucket_name:
         raise ValueError(
-            "ASSETS_BUCKET credentials not configured in environment. Add secrets in RunPod console."
+            "ASSETS_BUCKET_NAME not configured in environment. Add secret in RunPod console."
         )
 
     # Initialize storage clients
@@ -823,10 +813,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         b2_access_key_id,
         b2_secret_access_key,
     )
+    # Assets bucket uses shared R2 credentials (same account, different bucket)
     assets_client = create_s3_client(
-        assets_endpoint,
-        assets_access_key_id,
-        assets_secret_access_key,
+        r2_endpoint,
+        r2_access_key_id,
+        r2_secret_access_key,
     )
 
     # Check GPU availability

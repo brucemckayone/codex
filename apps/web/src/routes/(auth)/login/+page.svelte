@@ -1,5 +1,6 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { goto } from '$app/navigation';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import Input from '$lib/components/ui/Input/Input.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
@@ -10,15 +11,19 @@
 
   function handleSubmit() {
     loading = true;
-    return async ({ update }) => {
+    return async ({ result, update }) => {
       loading = false;
-      await update();
+      if (result.type === 'redirect') {
+        await goto(result.location);
+      } else {
+        await update();
+      }
     };
   }
 </script>
 
 <svelte:head>
-  <title>{m.auth_signin_title()} | Revelations</title>
+  <title>{m.auth_signin_title()} | Codex</title>
 </svelte:head>
 
 <h1>{m.auth_signin_title()}</h1>
