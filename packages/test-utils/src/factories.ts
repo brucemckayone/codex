@@ -37,6 +37,7 @@ import type {
   NewContent,
   NewMediaItem,
   NewOrganization,
+  NewOrganizationMembership,
   Organization,
 } from '@codex/database/schema';
 
@@ -102,6 +103,42 @@ export function createTestOrganization(
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    ...overrides,
+  };
+}
+
+/**
+ * Create test organization membership INPUT (NewOrganizationMembership type - for database insertion)
+ *
+ * @param organizationId - Organization ID (required)
+ * @param userId - User ID (required)
+ * @param overrides - Partial membership data to override defaults
+ * @returns NewOrganizationMembership object ready for database insertion
+ *
+ * @example
+ * ```typescript
+ * // For basic member
+ * const membership = createTestMembershipInput(orgId, userId);
+ * await db.insert(organizationMemberships).values(membership);
+ *
+ * // For admin with specific inviter
+ * const adminMembership = createTestMembershipInput(orgId, userId, {
+ *   role: 'admin',
+ *   invitedBy: inviterId
+ * });
+ * ```
+ */
+export function createTestMembershipInput(
+  organizationId: string,
+  userId: string,
+  overrides: Partial<NewOrganizationMembership> = {}
+): NewOrganizationMembership {
+  return {
+    organizationId,
+    userId,
+    role: 'member',
+    status: 'active',
+    invitedBy: null,
     ...overrides,
   };
 }

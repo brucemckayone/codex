@@ -521,6 +521,46 @@ export class OrganizationService extends BaseService {
   }
 
   /**
+   * Get the current user's membership in an organization
+   *
+   * Returns the user's role and joined date for the specified organization.
+   * Returns null for role/joinedAt if not a member (graceful degradation).
+   * Does not throw errors for "not found" - this is intentional for frontend convenience.
+   *
+   * @param organizationId - Organization ID
+   * @param userId - User ID to check membership for
+   * @returns Membership lookup response with role and joinedAt (both null if not a member)
+   */
+  async getMyMembership(
+    organizationId: string,
+    userId: string
+  ): Promise<{
+    role: string | null;
+    joinedAt: string | null;
+  }> {
+    try {
+      const membership = await this.db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, 'active')
+        ),
+        columns: {
+          role: true,
+          createdAt: true,
+        },
+      });
+
+      return {
+        role: membership?.role ?? null,
+        joinedAt: membership?.createdAt.toISOString() ?? null,
+      };
+    } catch (error) {
+      throw wrapError(error, { organizationId, userId });
+    }
+  }
+
+  /**
    * Invite a member to an organization
    *
    * @param organizationId - Organization ID

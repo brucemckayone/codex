@@ -129,4 +129,27 @@ app.delete(
   })
 );
 
+/**
+ * GET /api/organizations/:id/members/my-membership
+ * Get the current user's membership in the organization
+ *
+ * Returns: { role: string | null, joinedAt: string | null }
+ * Security: Authenticated, org membership NOT required (allows non-members to check)
+ */
+app.get(
+  '/my-membership',
+  procedure({
+    policy: { auth: 'required' }, // Note: NO requireOrgMembership - allows non-members to check
+    input: {
+      params: z.object({ id: uuidSchema }),
+    },
+    handler: async (ctx) => {
+      return await ctx.services.organization.getMyMembership(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+    },
+  })
+);
+
 export default app;

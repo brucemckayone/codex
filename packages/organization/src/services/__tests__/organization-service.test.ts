@@ -18,16 +18,24 @@
  * - Tests are fully isolated and idempotent
  */
 
+import * as schema from '@codex/database/schema';
 import {
   createUniqueSlug,
   type Database,
+  seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ConflictError, OrganizationNotFoundError } from '../../errors';
+import {
+  ConflictError,
+  LastOwnerError,
+  MemberNotFoundError,
+  NotFoundError,
+  OrganizationNotFoundError,
+} from '../../errors';
 import { OrganizationService } from '../organization-service';
 
 // Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
@@ -546,6 +554,396 @@ describe('OrganizationService', () => {
       expect(ids1).toHaveLength(3);
       expect(ids1).toEqual(ids2);
       expect(ids2).toEqual(ids3);
+    });
+  });
+
+  /**
+   * Member Management Tests
+   *
+   * Tests for organization member CRUD operations:
+   * - listMembers: Paginated member listing with filters
+   * - inviteMember: Adding users to organizations
+   * - updateMemberRole: Changing member roles with safety checks
+   * - removeMember: Removing members with safety checks
+   */
+  describe('member management', () => {
+    let testOrgId: string;
+    let testUserIds: string[];
+    let inviterUserId: string;
+
+    beforeEach(async () => {
+      // Create test organization
+      const org = await service.create({
+        name: `Test Org ${Date.now()}`,
+        slug: createUniqueSlug('test-org'),
+      });
+      testOrgId = org.id;
+
+      // Create test users (need real users for membership operations)
+      testUserIds = await seedTestUsers(db, 4);
+      inviterUserId = testUserIds[0];
+
+      // Add inviter as owner of the organization
+      await db.insert(schema.organizationMemberships).values({
+        organizationId: testOrgId,
+        userId: inviterUserId,
+        role: 'owner',
+        status: 'active',
+        invitedBy: null,
+      });
+    });
+
+    describe('listMembers', () => {
+      beforeEach(async () => {
+        // Add initial members to organization
+        await db.insert(schema.organizationMemberships).values([
+          {
+            organizationId: testOrgId,
+            userId: testUserIds[1],
+            role: 'admin',
+            status: 'active',
+            invitedBy: inviterUserId,
+          },
+          {
+            organizationId: testOrgId,
+            userId: testUserIds[2],
+            role: 'member',
+            status: 'active',
+            invitedBy: inviterUserId,
+          },
+          {
+            organizationId: testOrgId,
+            userId: testUserIds[3],
+            role: 'member',
+            status: 'inactive',
+            invitedBy: inviterUserId,
+          },
+        ]);
+      });
+
+      it('should return paginated list of members', async () => {
+        const result = await service.listMembers(testOrgId, {
+          page: 1,
+          limit: 10,
+        });
+
+        expect(result.items).toHaveLength(4); // owner + admin + 2 members
+        expect(result.pagination.page).toBe(1);
+        expect(result.pagination.limit).toBe(10);
+        expect(result.pagination.total).toBe(4);
+        expect(result.pagination.totalPages).toBe(1);
+      });
+
+      it('should filter members by role', async () => {
+        const result = await service.listMembers(testOrgId, {
+          page: 1,
+          limit: 10,
+          role: 'admin',
+        });
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0].role).toBe('admin');
+      });
+
+      it('should filter members by status', async () => {
+        const result = await service.listMembers(testOrgId, {
+          page: 1,
+          limit: 10,
+          status: 'active',
+        });
+
+        expect(result.items).toHaveLength(3); // owner + admin + active member
+        expect(result.items.every((m) => m.status === 'active')).toBe(true);
+      });
+
+      it('should paginate correctly with small page size', async () => {
+        const result = await service.listMembers(testOrgId, {
+          page: 1,
+          limit: 2,
+        });
+
+        expect(result.items).toHaveLength(2);
+        expect(result.pagination.totalPages).toBe(2);
+        expect(result.pagination.page).toBe(1);
+      });
+
+      it('should return empty list for organization with no members', async () => {
+        const emptyOrg = await service.create({
+          name: `Empty Org ${Date.now()}`,
+          slug: createUniqueSlug('empty-org'),
+        });
+
+        const result = await service.listMembers(emptyOrg.id, {
+          page: 1,
+          limit: 10,
+        });
+
+        expect(result.items).toHaveLength(0);
+        expect(result.pagination.total).toBe(0);
+      });
+
+      it('should include user details in response', async () => {
+        const result = await service.listMembers(testOrgId, {
+          page: 1,
+          limit: 10,
+        });
+
+        expect(result.items[0]).toHaveProperty('userId');
+        expect(result.items[0]).toHaveProperty('name');
+        expect(result.items[0]).toHaveProperty('email');
+        expect(result.items[0]).toHaveProperty('avatarUrl');
+        expect(result.items[0]).toHaveProperty('role');
+        expect(result.items[0]).toHaveProperty('status');
+        expect(result.items[0]).toHaveProperty('joinedAt');
+      });
+    });
+
+    describe('inviteMember', () => {
+      // Helper to get user email
+      async function getUserEmail(userId: string): Promise<string> {
+        const user = await db.query.users.findFirst({
+          where: (users, { eq }) => eq(users.id, userId),
+          columns: { email: true },
+        });
+        if (!user) {
+          throw new Error(`User not found: ${userId}`);
+        }
+        return user.email;
+      }
+
+      let newUserId: string;
+
+      beforeEach(async () => {
+        // Create a user to invite
+        [newUserId] = await seedTestUsers(db, 1);
+      });
+
+      it('should create membership with valid email', async () => {
+        const email = await getUserEmail(newUserId);
+
+        const result = await service.inviteMember(
+          testOrgId,
+          { email, role: 'member' },
+          inviterUserId
+        );
+
+        expect(result.userId).toBe(newUserId);
+        expect(result.role).toBe('member');
+        expect(result.status).toBe('active');
+        expect(result.joinedAt).toBeInstanceOf(Date);
+        expect(result.id).toBeDefined();
+      });
+
+      it('should set role correctly', async () => {
+        const email = await getUserEmail(newUserId);
+
+        const result = await service.inviteMember(
+          testOrgId,
+          { email, role: 'admin' },
+          inviterUserId
+        );
+
+        expect(result.role).toBe('admin');
+      });
+
+      it('should set status to active by default', async () => {
+        const email = await getUserEmail(newUserId);
+
+        const result = await service.inviteMember(
+          testOrgId,
+          { email, role: 'creator' },
+          inviterUserId
+        );
+
+        expect(result.status).toBe('active');
+      });
+
+      it('should throw NotFoundError for non-existent user', async () => {
+        await expect(
+          service.inviteMember(
+            testOrgId,
+            { email: 'nonexistent@example.com', role: 'member' },
+            inviterUserId
+          )
+        ).rejects.toThrow(NotFoundError);
+      });
+
+      it('should throw ConflictError for duplicate member', async () => {
+        const email = await getUserEmail(testUserIds[1]);
+
+        // First invite should succeed
+        await service.inviteMember(
+          testOrgId,
+          { email, role: 'member' },
+          inviterUserId
+        );
+
+        // Second invite should fail
+        await expect(
+          service.inviteMember(
+            testOrgId,
+            { email, role: 'admin' },
+            inviterUserId
+          )
+        ).rejects.toThrow(ConflictError);
+      });
+    });
+
+    describe('updateMemberRole', () => {
+      beforeEach(async () => {
+        // Add a test member
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: testOrgId,
+          userId: testUserIds[1],
+          role: 'member',
+          status: 'active',
+          invitedBy: inviterUserId,
+        });
+      });
+
+      it('should update member role', async () => {
+        const result = await service.updateMemberRole(
+          testOrgId,
+          testUserIds[1],
+          'admin'
+        );
+
+        expect(result.userId).toBe(testUserIds[1]);
+        expect(result.role).toBe('admin');
+        expect(result.status).toBe('active');
+      });
+
+      it('should promote member to owner', async () => {
+        const result = await service.updateMemberRole(
+          testOrgId,
+          testUserIds[1],
+          'owner'
+        );
+
+        expect(result.role).toBe('owner');
+      });
+
+      it('should throw MemberNotFoundError for non-existent member', async () => {
+        await expect(
+          service.updateMemberRole(testOrgId, 'nonexistent-user-id', 'admin')
+        ).rejects.toThrow(MemberNotFoundError);
+      });
+
+      it('should throw LastOwnerError when demoting last owner', async () => {
+        // Try to demote the only owner
+        await expect(
+          service.updateMemberRole(testOrgId, inviterUserId, 'admin')
+        ).rejects.toThrow(LastOwnerError);
+      });
+
+      it('should allow demotion when multiple owners exist', async () => {
+        // Promote another user to owner first
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: testOrgId,
+          userId: testUserIds[2],
+          role: 'owner',
+          status: 'active',
+          invitedBy: inviterUserId,
+        });
+
+        // Now we can demote the first owner
+        const result = await service.updateMemberRole(
+          testOrgId,
+          inviterUserId,
+          'admin'
+        );
+
+        expect(result.role).toBe('admin');
+      });
+    });
+
+    describe('removeMember', () => {
+      beforeEach(async () => {
+        // Add test members
+        await db.insert(schema.organizationMemberships).values([
+          {
+            organizationId: testOrgId,
+            userId: testUserIds[1],
+            role: 'admin',
+            status: 'active',
+            invitedBy: inviterUserId,
+          },
+          {
+            organizationId: testOrgId,
+            userId: testUserIds[2],
+            role: 'member',
+            status: 'active',
+            invitedBy: inviterUserId,
+          },
+        ]);
+      });
+
+      it('should remove member from organization', async () => {
+        await service.removeMember(testOrgId, testUserIds[1]);
+
+        // Verify member is removed
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, testOrgId),
+              eq(memberships.userId, testUserIds[1])
+            ),
+        });
+
+        expect(membership).toBeUndefined();
+      });
+
+      it('should throw MemberNotFoundError for non-existent member', async () => {
+        await expect(
+          service.removeMember(testOrgId, 'nonexistent-user-id')
+        ).rejects.toThrow(MemberNotFoundError);
+      });
+
+      it('should throw LastOwnerError when removing last owner', async () => {
+        await expect(
+          service.removeMember(testOrgId, inviterUserId)
+        ).rejects.toThrow(LastOwnerError);
+      });
+
+      it('should allow removing owner when multiple owners exist', async () => {
+        // Add another owner
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: testOrgId,
+          userId: testUserIds[1],
+          role: 'owner',
+          status: 'active',
+          invitedBy: inviterUserId,
+        });
+
+        // Now we can remove the first owner
+        await service.removeMember(testOrgId, inviterUserId);
+
+        // Verify removal
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, testOrgId),
+              eq(memberships.userId, inviterUserId)
+            ),
+        });
+
+        expect(membership).toBeUndefined();
+      });
+
+      it('should allow removing non-owner members', async () => {
+        await service.removeMember(testOrgId, testUserIds[2]);
+
+        // Verify removal
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, testOrgId),
+              eq(memberships.userId, testUserIds[2])
+            ),
+        });
+
+        expect(membership).toBeUndefined();
+      });
     });
   });
 });

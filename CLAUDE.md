@@ -3,6 +3,9 @@
 Serverless content streaming on Cloudflare Workers.
 **Structure**: Workers (API) → Service Layer (Logic) → Foundation (Infra) → External (Neon, R2, KV, Stripe).
 
+# IMPORTANT WHEN WORKING WITH BEADS TASK MANAGEMENT
+!!!IMPORTANT!!! when working with beads you must ensure that you have a full understanding of how the tasks fit into the codebase as a whole when making changes ensure that we are working to the established patterns and using the existing packages here required. Ensure that we are following the correct statemanagement patterns etc.
+
 ## Navigation
 | Task | Path |
 |---|---|
@@ -95,3 +98,4 @@ Serverless content streaming on Cloudflare Workers.
   - **Soft Delete**: `deletedAt`.
   - **Errors**: Throw typed errors; Worker maps to HTTP.
   - **Env**: Shared bindings in `shared-types`.
+
