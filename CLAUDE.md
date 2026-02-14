@@ -48,6 +48,44 @@ Serverless content streaming on Cloudflare Workers.
 - **@codex/test-utils**: DB setup, Seeders.
 - **@codex/platform-settings**: Settings/Flags.
 
+## Common Developer Tasks
+
+### Adding a New API Endpoint
+1. Define Zod schema → `packages/validation/src/[domain].ts`
+2. Add service method → `packages/[service]/src/services/*.service.ts` (extend BaseService)
+3. Create worker route → `workers/[worker]/src/routes/*.ts` (use procedure())
+4. **Always:** Scope by creatorId/orgId, validate input, use transactions for multi-step
+
+### Implementing Content/Media Features
+- Content lifecycle → `@codex/content` ContentService
+- Media upload/transcode → `@codex/content` MediaItemService
+- Streaming URLs → `@codex/access` ContentAccessService (signed R2 URLs)
+- **Reference:** `/packages/content/src/services/content-service.ts:1-100`
+
+### Handling Authentication/Authorization
+- Session validation → Use `procedure({ policy: { auth: 'required' } })`
+- Role checks → `policy: { roles: ['creator', 'admin'] }`
+- Worker-to-worker → `policy: { auth: 'worker' }` (HMAC)
+- **Reference:** `/packages/worker-utils/src/procedure/procedure.ts:1-80`
+
+### Working with Database
+- Simple queries → `dbHttp` (workers)
+- Transactions → `dbWs` (tests/dev), wrap multi-step in `db.transaction()`
+- Scoping → **ALWAYS** use `scopedNotDeleted(table, creatorId)` or `withCreatorScope()`
+- **Reference:** `/packages/database/CLAUDE.md`, `/packages/content/src/services/content-service.ts`
+
+### Testing
+- Unit tests → `@codex/test-utils` factories, `setupTestDatabase()`
+- Integration tests → Use `withNeonTestBranch()` (CI), dbWs for transactions
+- Mocking → Factories in `@codex/test-utils/src/factories.ts`
+- **Reference:** `/packages/organization/src/services/__tests__/organization-service.test.ts`
+
+### Handling SVG/Media
+- SVG uploads → Validate with `@codex/validation` `sanitizeSvgContent()` (XSS prevention)
+- Image processing → `@codex/image-processing` ImageProcessingService
+- R2 uploads → `@codex/cloudflare-clients` R2Service
+- **Reference:** `/packages/validation/src/primitives.ts:sanitizeSvgContent`
+
 ## Development
 - **Commands**: `pnpm test`, `pnpm build`, `pnpm typecheck`, `pnpm db:migrate`.
 - **Dev**: `cd workers/auth && pnpm dev`.
