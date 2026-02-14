@@ -185,3 +185,23 @@ export type CheckoutSessionMetadata = z.infer<
 export type CreatePortalSessionInput = z.infer<
   typeof createPortalSessionSchema
 >;
+
+/**
+ * Verify Checkout Session Schema
+ *
+ * Used for GET /api/checkout/verify to check Stripe session status
+ *
+ * Validates:
+ * - session_id: Stripe checkout session ID (non-empty string)
+ */
+export const verifyCheckoutSessionSchema = z.object({
+  session_id: z.string().min(1),
+});
+
+/**
+ * Type inference for verifyCheckoutSessionSchema
+ * Single source of truth for TypeScript types
+ */
+export type VerifyCheckoutSessionInput = z.infer<
+  typeof verifyCheckoutSessionSchema
+>;

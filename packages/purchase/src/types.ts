@@ -57,3 +57,40 @@ export interface CompletePurchaseMetadata {
   /** Currency code (default: 'usd') */
   currency?: string;
 }
+
+/**
+ * Checkout session verification result
+ *
+ * Session status values from Stripe API (2025):
+ * - open: Session created, not yet completed, can expire
+ * - complete: Payment processing finished successfully
+ * - expired: Session expired, customer cannot complete
+ *
+ * Source: Stripe API docs - https://docs.stripe.com/api/checkout/sessions/object
+ */
+export interface CheckoutSessionVerifyResult {
+  /** Stripe session status: open | complete | expired */
+  sessionStatus: 'complete' | 'expired' | 'open';
+  /** Purchase record (if payment completed) */
+  purchase?: {
+    /** Purchase record ID */
+    id: string;
+    /** Content ID purchased */
+    contentId: string;
+    /** Amount paid in cents */
+    amountPaidCents: number;
+    /** ISO 8601 timestamp of purchase */
+    purchasedAt: string;
+  };
+  /** Content details (for success page display) */
+  content?: {
+    /** Content ID */
+    id: string;
+    /** Content title */
+    title: string;
+    /** Thumbnail URL (optional) */
+    thumbnailUrl?: string;
+    /** Content type (video, audio, etc.) */
+    contentType: string;
+  };
+}

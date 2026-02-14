@@ -65,6 +65,7 @@ function isStripeError(error: unknown): error is Error & { type: string } {
 
 import type {
   CheckoutSessionResult,
+  CheckoutSessionVerifyResult,
   CompletePurchaseMetadata,
   Purchase,
   PurchaseWithContent,
@@ -583,6 +584,139 @@ export class PurchaseService extends BaseService {
       }
       // Wrap unknown errors
       throw wrapError(error, { purchaseId, customerId });
+    }
+  }
+
+  /**
+   * Verify Stripe checkout session status
+   *
+   * Queries Stripe API for session details and checks for completed purchase.
+   * Used by success page to show purchase confirmation.
+   *
+   * Stripe API Best Practices (2025):
+   * - Use stripe.checkout.sessions.retrieve() with session ID
+   * - Session.status can be: 'open' | 'complete' | 'expired'
+   * - Session.payment_intent contains payment intent ID when complete
+   * - Session.metadata.customer_id contains our customerId (set during createCheckoutSession)
+   * - Handle StripeInvalidRequestError for invalid session IDs (404)
+   *
+   * Security:
+   * - Validates session belongs to authenticated user (metadata.customer_id)
+   * - Returns 403 if session exists but belongs to different user
+   *
+   * @param sessionId - Stripe checkout session ID (cs_xxx format)
+   * @param customerId - Authenticated user ID (for ownership check)
+   * @returns Session status with optional purchase and content details
+   * @throws {PaymentProcessingError} If Stripe API fails
+   * @throws {ForbiddenError} If session belongs to different user
+   *
+   * @example
+   * const result = await purchaseService.verifyCheckoutSession('cs_xxx', 'user-123');
+   * // Returns: { sessionStatus: 'complete', purchase: {...}, content: {...} }
+   */
+  async verifyCheckoutSession(
+    sessionId: string,
+    customerId: string
+  ): Promise<CheckoutSessionVerifyResult> {
+    try {
+      // Query Stripe API for session details
+      const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+
+      // Verify session belongs to user (metadata.customer_id)
+      // Note: We set customer_id in metadata during createCheckoutSession (line 226)
+      if (session.metadata?.customer_id !== customerId) {
+        throw new ForbiddenError(
+          'Checkout session does not belong to authenticated user',
+          {
+            sessionId,
+          }
+        );
+      }
+
+      const result: CheckoutSessionVerifyResult = {
+        // Stripe API may return null for status, default to 'open' for safety
+        sessionStatus:
+          (session.status as 'complete' | 'expired' | 'open') ?? 'open',
+      };
+
+      // If payment complete, query purchase record with content join
+      // payment_intent is only present when session status is 'complete'
+      if (result.sessionStatus === 'complete' && session.payment_intent) {
+        const purchase = await this.db.query.purchases.findFirst({
+          where: eq(
+            purchases.stripePaymentIntentId,
+            session.payment_intent as string
+          ),
+          with: {
+            content: {
+              columns: {
+                id: true,
+                title: true,
+                thumbnailUrl: true,
+                contentType: true,
+              },
+            },
+          },
+        });
+
+        if (purchase?.purchasedAt) {
+          result.purchase = {
+            id: purchase.id,
+            contentId: purchase.contentId,
+            amountPaidCents: purchase.amountPaidCents,
+            purchasedAt: purchase.purchasedAt.toISOString(),
+          };
+          result.content = {
+            id: purchase.content.id,
+            title: purchase.content.title,
+            thumbnailUrl: purchase.content.thumbnailUrl ?? undefined,
+            contentType: purchase.content.contentType,
+          };
+        }
+      }
+
+      return result;
+    } catch (error) {
+      // Re-throw ForbiddenError
+      if (error instanceof ForbiddenError) {
+        throw error;
+      }
+
+      // Stripe-specific error handling (2025 patterns)
+      // StripeInvalidRequestError: Invalid session ID (404)
+      // StripeConnectionError: Network failure (500)
+      // StripeAPIError: Other Stripe errors
+      if (
+        error instanceof Error &&
+        'type' in error &&
+        error.type === 'StripeInvalidRequestError'
+      ) {
+        throw new PaymentProcessingError('Checkout session not found', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+
+      if (
+        error instanceof Error &&
+        'type' in error &&
+        error.type === 'StripeConnectionError'
+      ) {
+        throw new PaymentProcessingError('Failed to connect to Stripe API', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+
+      // Wrap other Stripe errors
+      if (isStripeError(error)) {
+        throw new PaymentProcessingError('Failed to verify checkout session', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+
+      throw wrapError(error, { sessionId, customerId });
     }
   }
 
