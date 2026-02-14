@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { createSanitizedStringSchema } from '../primitives';
+import { createSanitizedStringSchema, emailSchema } from '../primitives';
 
 /**
  * User validation schema
@@ -27,9 +27,13 @@ export type LoginCredentials = z.infer<typeof loginSchema>;
 /**
  * Update profile schema
  * Allows partial updates to user profile fields
+ *
+ * - displayName: User's display name (maps to users.name column)
+ * - email: User's email address (requires re-verification when changed)
  */
 export const updateProfileSchema = z.object({
-  name: createSanitizedStringSchema(1, 255, 'Name').optional(),
+  displayName: createSanitizedStringSchema(1, 255, 'Display name').optional(),
+  email: emailSchema.optional(),
 });
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

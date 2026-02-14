@@ -62,14 +62,22 @@ export class IdentityService extends BaseService {
   /**
    * Get the authenticated user's membership in an organization
    *
+   * Returns the user's role, status, and joined date for the specified organization.
+   * Returns null for role/status/joinedAt if not a member (graceful degradation).
+   * Does not throw errors for "not found" - this is intentional for frontend convenience.
+   *
    * @param orgId - Organization ID
    * @param userId - Authenticated user ID
-   * @returns Membership info or null if not a member
+   * @returns Membership lookup response with role, status, and joinedAt (all null if not a member)
    */
   async getMyMembership(
     orgId: string,
     userId: string
-  ): Promise<{ role: string; status: string; joinedAt: string } | null> {
+  ): Promise<{
+    role: string | null;
+    status: string | null;
+    joinedAt: string | null;
+  }> {
     try {
       const membership = await this.db.query.organizationMemberships.findFirst({
         where: and(
@@ -79,7 +87,11 @@ export class IdentityService extends BaseService {
       });
 
       if (!membership) {
-        return null;
+        return {
+          role: null,
+          status: null,
+          joinedAt: null,
+        };
       }
 
       return {
@@ -96,22 +108,44 @@ export class IdentityService extends BaseService {
    * Update user profile
    *
    * @param userId - User ID
-   * @param input - Profile fields to update
+   * @param input - Profile fields to update (displayName maps to name, email requires re-verification)
    * @returns Updated user data
    */
   async updateProfile(
     userId: string,
-    input: { name?: string }
+    input: { displayName?: string; email?: string }
   ): Promise<{
     id: string;
     name: string;
     email: string;
+    emailVerified: boolean;
     image: string | null;
   }> {
     try {
-      const updateData: Partial<{ name: string }> = {};
-      if (input.name !== undefined) {
-        updateData.name = input.name;
+      // First, fetch the current user to check if email is changing
+      const existing = await this.db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+
+      if (!existing) {
+        throw new UserNotFoundError(userId);
+      }
+
+      const updateData: Partial<{
+        name: string;
+        email: string;
+        emailVerified: boolean;
+      }> = {};
+
+      // displayName maps to the 'name' column in the database
+      if (input.displayName !== undefined) {
+        updateData.name = input.displayName;
+      }
+
+      // If email is being changed, mark it as unverified (requires re-verification)
+      if (input.email !== undefined && input.email !== existing.email) {
+        updateData.email = input.email;
+        updateData.emailVerified = false;
       }
 
       const [updated] = await this.db
@@ -128,6 +162,7 @@ export class IdentityService extends BaseService {
         id: updated.id,
         name: updated.name,
         email: updated.email,
+        emailVerified: updated.emailVerified,
         image: updated.image,
       };
     } catch (error) {

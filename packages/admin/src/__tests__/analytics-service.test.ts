@@ -18,6 +18,7 @@ import { PURCHASE_STATUS } from '@codex/constants';
 import {
   content as contentTable,
   mediaItems,
+  organizationMemberships,
   organizations,
   purchases,
 } from '@codex/database/schema';
@@ -30,6 +31,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import { AdminAnalyticsService } from '../services/analytics-service';
@@ -647,5 +649,553 @@ describe('AdminAnalyticsService', () => {
 
     // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
     // Service trusts that organizationId is valid when passed from authenticated context
+  });
+
+  describe('getRecentActivity', () => {
+    it('should return empty activity feed for organization with no activity', async () => {
+      const [emptyOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const result = await service.getRecentActivity(emptyOrg.id, {});
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination.total).toBe(0);
+      expect(result.pagination.page).toBe(1);
+      expect(result.pagination.limit).toBe(20);
+    });
+
+    it('should return combined feed with purchases, content_published, and member_joined', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      // Create additional users for different activity types
+      const [memberUser] = await seedTestUsers(db, 1);
+
+      // Create media and content for purchase activity
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [testContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Test Content for Activity',
+          slug: createUniqueSlug('activity-content'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: new Date(),
+        })
+        .returning();
+
+      // Create a purchase
+      await db.insert(purchases).values({
+        customerId,
+        contentId: testContent.id,
+        organizationId: testOrg.id,
+        amountPaidCents: 1000,
+        platformFeeCents: 100,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 900,
+        stripePaymentIntentId: `pi_activity_${Date.now()}`,
+        status: PURCHASE_STATUS.COMPLETED,
+        purchasedAt: new Date(),
+      });
+
+      // Create a membership (member_joined activity)
+      await db.insert(organizationMemberships).values({
+        organizationId: testOrg.id,
+        userId: memberUser,
+        role: 'member',
+        status: 'active',
+        invitedBy: creatorId,
+      });
+
+      const result = await service.getRecentActivity(testOrg.id, {});
+
+      // Should have 3 items: purchase, content_published, member_joined
+      expect(result.items).toHaveLength(3);
+      expect(result.pagination.total).toBe(3);
+
+      // Check all activity types are present
+      const activityTypes = result.items.map((item) => item.type);
+      expect(activityTypes).toContain('purchase');
+      expect(activityTypes).toContain('content_published');
+      expect(activityTypes).toContain('member_joined');
+
+      // Items should be sorted by timestamp DESC (most recent first)
+      const timestamps = result.items.map((item) =>
+        new Date(item.timestamp).getTime()
+      );
+      for (let i = 1; i < timestamps.length; i++) {
+        expect(timestamps[i - 1]).toBeGreaterThanOrEqual(timestamps[i]);
+      }
+    });
+
+    it('should support pagination', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      // Create media and content
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      // Create multiple published content items
+      for (let i = 0; i < 5; i++) {
+        const [contentItem] = await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: `Content ${i}`,
+            slug: createUniqueSlug(`content-${i}`),
+            contentType: 'video',
+            status: 'published',
+            visibility: 'purchased_only',
+            priceCents: 100,
+            publishedAt: new Date(),
+          })
+          .returning();
+
+        await db.insert(purchases).values({
+          customerId,
+          contentId: contentItem.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 100,
+          platformFeeCents: 10,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 90,
+          stripePaymentIntentId: `pi_page_${Date.now()}_${i}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+        });
+      }
+
+      // Test page 1 with limit 3
+      const page1 = await service.getRecentActivity(testOrg.id, {
+        page: 1,
+        limit: 3,
+      });
+
+      expect(page1.items).toHaveLength(3);
+      expect(page1.pagination.page).toBe(1);
+      expect(page1.pagination.limit).toBe(3);
+      expect(page1.pagination.total).toBe(10); // 5 content + 5 purchases
+
+      // Test page 2
+      const page2 = await service.getRecentActivity(testOrg.id, {
+        page: 2,
+        limit: 3,
+      });
+
+      expect(page2.items).toHaveLength(3);
+      expect(page2.pagination.page).toBe(2);
+      expect(page2.pagination.total).toBe(10);
+
+      // Items should be different between pages
+      const page1Ids = page1.items.map((item) => item.id);
+      const page2Ids = page2.items.map((item) => item.id);
+      const intersection = page1Ids.filter((id) => page2Ids.includes(id));
+      expect(intersection).toHaveLength(0);
+    });
+
+    it('should filter by activity type: purchase', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [testContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Test Content',
+          slug: createUniqueSlug('filter-purchase'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: new Date(),
+        })
+        .returning();
+
+      // Create purchase
+      await db.insert(purchases).values({
+        customerId,
+        contentId: testContent.id,
+        organizationId: testOrg.id,
+        amountPaidCents: 1000,
+        platformFeeCents: 100,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 900,
+        stripePaymentIntentId: `pi_filter_${Date.now()}`,
+        status: PURCHASE_STATUS.COMPLETED,
+        purchasedAt: new Date(),
+      });
+
+      const result = await service.getRecentActivity(testOrg.id, {
+        type: 'purchase',
+      });
+
+      // Should only return purchase type (content_published excluded, member_joined excluded)
+      expect(result.items.length).toBeGreaterThan(0);
+      expect(result.items.every((item) => item.type === 'purchase')).toBe(true);
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('should filter by activity type: content_published', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      // Create published content
+      await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Published Content',
+          slug: createUniqueSlug('filter-published'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: new Date(),
+        })
+        .returning();
+
+      // Create draft content (should NOT appear in feed)
+      await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Draft Content',
+          slug: createUniqueSlug('draft-content'),
+          contentType: 'video',
+          status: 'draft',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: null,
+        })
+        .returning();
+
+      const result = await service.getRecentActivity(testOrg.id, {
+        type: 'content_published',
+      });
+
+      // Should only return content_published type
+      expect(result.items.length).toBeGreaterThan(0);
+      expect(
+        result.items.every((item) => item.type === 'content_published')
+      ).toBe(true);
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('should filter by activity type: member_joined', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [memberUser] = await seedTestUsers(db, 1);
+
+      // Create membership
+      await db.insert(organizationMemberships).values({
+        organizationId: testOrg.id,
+        userId: memberUser,
+        role: 'member',
+        status: 'active',
+        invitedBy: creatorId,
+      });
+
+      const result = await service.getRecentActivity(testOrg.id, {
+        type: 'member_joined',
+      });
+
+      // Should only return member_joined type
+      expect(result.items.length).toBeGreaterThan(0);
+      expect(result.items.every((item) => item.type === 'member_joined')).toBe(
+        true
+      );
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('should exclude deleted content from activity feed', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      // Create published content then delete it
+      const [deletedContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Deleted Content',
+          slug: createUniqueSlug('deleted-content'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: new Date(),
+        })
+        .returning();
+
+      // Create active content
+      await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Active Content',
+          slug: createUniqueSlug('active-content'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: new Date(),
+        })
+        .returning();
+
+      // Soft delete the content
+      await db
+        .update(contentTable)
+        .set({ deletedAt: new Date() })
+        .where(eq(contentTable.id, deletedContent.id));
+
+      const result = await service.getRecentActivity(testOrg.id, {
+        type: 'content_published',
+      });
+
+      // Should only return active content (deleted content excluded)
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].title).toBe('Active Content');
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('should sort activity by timestamp DESC', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const now = Date.now();
+
+      // Create content at different times
+      const oneHourAgo = new Date(now - 60 * 60 * 1000);
+      const twoHoursAgo = new Date(now - 2 * 60 * 60 * 1000);
+
+      const [oldContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Old Content',
+          slug: createUniqueSlug('old-content'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: twoHoursAgo,
+        })
+        .returning();
+
+      const [newContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'New Content',
+          slug: createUniqueSlug('new-content'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+          publishedAt: oneHourAgo,
+        })
+        .returning();
+
+      // Create purchase at a specific time
+      await db.insert(purchases).values({
+        customerId,
+        contentId: newContent.id,
+        organizationId: testOrg.id,
+        amountPaidCents: 1000,
+        platformFeeCents: 100,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 900,
+        stripePaymentIntentId: `pi_sort_${Date.now()}`,
+        status: PURCHASE_STATUS.COMPLETED,
+        purchasedAt: new Date(now), // Most recent
+      });
+
+      const result = await service.getRecentActivity(testOrg.id, {});
+
+      expect(result.items).toHaveLength(3);
+
+      // Most recent should be first
+      expect(result.items[0].type).toBe('purchase');
+      expect(result.items[0].timestamp).toBeDefined();
+    });
+
+    it('should correctly count total items across all activity types', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      // Create 2 published content
+      for (let i = 0; i < 2; i++) {
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: `Content ${i}`,
+            slug: createUniqueSlug(`count-content-${i}`),
+            contentType: 'video',
+            status: 'published',
+            visibility: 'purchased_only',
+            priceCents: 1000,
+            publishedAt: new Date(),
+          })
+          .returning();
+      }
+
+      // Create 3 purchases
+      for (let i = 0; i < 3; i++) {
+        const [contentItem] = await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: `Purchase Content ${i}`,
+            slug: createUniqueSlug(`purchase-content-${i}`),
+            contentType: 'video',
+            status: 'published',
+            visibility: 'purchased_only',
+            priceCents: 1000,
+            publishedAt: new Date(),
+          })
+          .returning();
+
+        await db.insert(purchases).values({
+          customerId,
+          contentId: contentItem.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 1000,
+          platformFeeCents: 100,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 900,
+          stripePaymentIntentId: `pi_count_${Date.now()}_${i}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+        });
+      }
+
+      // Create 1 membership
+      const [memberUser] = await seedTestUsers(db, 1);
+      await db.insert(organizationMemberships).values({
+        organizationId: testOrg.id,
+        userId: memberUser,
+        role: 'member',
+        status: 'active',
+        invitedBy: creatorId,
+      });
+
+      // Total should be 2 (content) + 3 (purchases) + 1 (membership) = 6
+      const result = await service.getRecentActivity(testOrg.id, {
+        limit: 100, // Get all items
+      });
+
+      expect(result.pagination.total).toBe(6);
+    });
   });
 });

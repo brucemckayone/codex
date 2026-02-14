@@ -57,12 +57,12 @@ app.get(
  *
  * Body: { email, role }
  * Returns: Created membership (201)
- * Security: Authenticated, org membership required
+ * Security: Authenticated, org management (owner/admin) required
  */
 app.post(
   '/invite',
   procedure({
-    policy: { auth: 'required', requireOrgMembership: true },
+    policy: { auth: 'required', requireOrgManagement: true },
     input: {
       params: z.object({ id: uuidSchema }),
       body: inviteMemberSchema,
@@ -84,12 +84,12 @@ app.post(
  *
  * Body: { role }
  * Returns: Updated membership (200)
- * Security: Authenticated, org membership required
+ * Security: Authenticated, org management (owner/admin) required
  */
 app.patch(
   '/:userId',
   procedure({
-    policy: { auth: 'required', requireOrgMembership: true },
+    policy: { auth: 'required', requireOrgManagement: true },
     input: {
       params: z.object({ id: uuidSchema, userId: z.string().min(1) }),
       body: updateMemberRoleSchema,
@@ -109,12 +109,12 @@ app.patch(
  * Remove a member from the organization
  *
  * Returns: 204 No Content
- * Security: Authenticated, org membership required
+ * Security: Authenticated, org management (owner/admin) required
  */
 app.delete(
   '/:userId',
   procedure({
-    policy: { auth: 'required', requireOrgMembership: true },
+    policy: { auth: 'required', requireOrgManagement: true },
     input: {
       params: z.object({ id: uuidSchema, userId: z.string().min(1) }),
     },

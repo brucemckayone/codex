@@ -18,6 +18,7 @@ export type {
   DeleteOrganizationResponse,
   FeatureSettingsResponse,
   MembershipLookupResponse,
+  MyMembershipResponse,
   PaginatedListResponse,
   PaginationMetadata,
   PlaybackProgressResponse,

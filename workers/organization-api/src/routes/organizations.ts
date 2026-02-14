@@ -2,13 +2,15 @@
  * Organization Management Endpoints
  *
  * RESTful API for managing organizations.
- * All routes require authentication (except public branding endpoint).
+ * All routes require authentication (except public branding and members endpoints).
  *
  * Endpoints:
  * - POST   /api/organizations           - Create organization
  * - GET    /api/organizations/:id       - Get by ID
  * - GET    /api/organizations/slug/:slug - Get by slug
  * - GET    /api/organizations/public/:slug - Get public branding (no auth)
+ * - GET    /api/organizations/public/:slug/creators - Get public creators (no auth)
+ * - GET    /api/organizations/public/:slug/members - Get public members (no auth)
  * - PATCH  /api/organizations/:id       - Update organization
  * - GET    /api/organizations           - List with filters
  * - DELETE /api/organizations/:id       - Soft delete
@@ -165,21 +167,77 @@ app.get(
  * GET /api/organizations/public/:slug/creators
  * Public creators endpoint - no auth required
  *
- * Returns public creator profiles for an organization (name, avatar, role, joinedAt).
+ * Returns paginated public creator profiles for an organization.
+ * Includes name, avatar, role, joinedAt, and published content count.
  * Only active members with owner/admin/creator roles are included.
  * No emails or internal user IDs are exposed.
  *
- * Returns: Array of { name, avatarUrl, role, joinedAt } (200)
+ * Query Params:
+ * - page: Page number (default: 1, min: 1)
+ * - limit: Items per page (default: 20, min: 1, max: 100)
+ *
+ * Returns: PaginatedListResponse<{ name, avatarUrl, role, joinedAt, contentCount }> (200)
  * Security: No auth required, API rate limited
  */
 app.get(
   '/public/:slug/creators',
   procedure({
     policy: { auth: 'none', rateLimit: 'api' },
-    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    input: {
+      params: z.object({ slug: createSlugSchema(255) }),
+      query: z
+        .object({
+          page: z.coerce.number().min(1).default(1),
+          limit: z.coerce.number().min(1).max(100).default(20),
+        })
+        .optional(),
+    },
     handler: async (ctx) => {
       return await ctx.services.organization.getPublicCreators(
-        ctx.input.params.slug
+        ctx.input.params.slug,
+        ctx.input.query ?? { page: 1, limit: 20 }
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/organizations/public/:slug/members
+ * Public members endpoint - no auth required
+ *
+ * Returns paginated public member profiles for an organization.
+ * Includes name, avatar, role, and joinedAt.
+ * Only active members are included (all roles: owner, admin, creator, subscriber, member).
+ * No emails or internal user IDs are exposed.
+ *
+ * Query Params:
+ * - page: Page number (default: 1, min: 1)
+ * - limit: Items per page (default: 20, min: 1, max: 100)
+ * - role: Optional filter by role (owner, admin, creator, subscriber, member)
+ *
+ * Returns: PaginatedListResponse<{ name, avatarUrl, role, joinedAt }> (200)
+ * Security: No auth required, API rate limited
+ */
+app.get(
+  '/public/:slug/members',
+  procedure({
+    policy: { auth: 'none', rateLimit: 'api' },
+    input: {
+      params: z.object({ slug: createSlugSchema(255) }),
+      query: z
+        .object({
+          page: z.coerce.number().min(1).default(1),
+          limit: z.coerce.number().min(1).max(100).default(20),
+          role: z
+            .enum(['owner', 'admin', 'creator', 'subscriber', 'member'])
+            .optional(),
+        })
+        .optional(),
+    },
+    handler: async (ctx) => {
+      return await ctx.services.organization.getPublicMembers(
+        ctx.input.params.slug,
+        ctx.input.query ?? { page: 1, limit: 20 }
       );
     },
   })

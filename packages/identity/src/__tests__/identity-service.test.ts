@@ -24,6 +24,9 @@ const mockDb = {
   update: vi.fn(),
 } as unknown as Database;
 
+// Mock returning function for the update chain
+const mockReturning = vi.fn();
+
 // Mock R2Service
 const mockR2Service = {
   put: vi.fn().mockResolvedValue(undefined),
@@ -68,6 +71,10 @@ describe('IdentityService', () => {
     mockUpdateSet.mockReturnValue({
       where: mockUpdateWhere,
     });
+    mockUpdateWhere.mockReturnValue({
+      returning: mockReturning,
+    });
+    mockReturning.mockResolvedValue([{ id: 'user-123' }]); // Default
 
     service = new IdentityService({
       db: mockDb,
@@ -123,6 +130,229 @@ describe('IdentityService', () => {
 
       expect(mockProcessUserAvatar).not.toHaveBeenCalled();
       expect(mockDb.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateProfile', () => {
+    const userId = 'user-123';
+
+    it('should update displayName (name field)', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Old Name',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+      };
+
+      // Mock existing user
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      // Mock update result
+      const updatedUser = {
+        ...existingUser,
+        name: 'New Display Name',
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        displayName: 'New Display Name',
+      });
+
+      // Verify user was fetched
+      expect(mockDb.query.users.findFirst).toHaveBeenCalled();
+
+      // Verify update was called with correct data (name maps to displayName)
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'New Display Name' })
+      );
+
+      // Verify result
+      expect(result).toEqual({
+        id: userId,
+        name: 'New Display Name',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+      });
+    });
+
+    it('should update email and set emailVerified to false', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'old@example.com',
+        emailVerified: true,
+        image: null,
+      };
+
+      // Mock existing user
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      // Mock update result
+      const updatedUser = {
+        ...existingUser,
+        email: 'new@example.com',
+        emailVerified: false,
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        email: 'new@example.com',
+      });
+
+      // Verify update was called with new email and emailVerified set to false
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'new@example.com',
+          emailVerified: false,
+        })
+      );
+
+      // Verify result
+      expect(result).toEqual({
+        id: userId,
+        name: 'Test User',
+        email: 'new@example.com',
+        emailVerified: false,
+        image: null,
+      });
+    });
+
+    it('should update both displayName and email together', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Old Name',
+        email: 'old@example.com',
+        emailVerified: true,
+        image: null,
+      };
+
+      // Mock existing user
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      // Mock update result
+      const updatedUser = {
+        ...existingUser,
+        name: 'New Name',
+        email: 'new@example.com',
+        emailVerified: false,
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        displayName: 'New Name',
+        email: 'new@example.com',
+      });
+
+      // Verify update was called with both fields
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'New Name',
+          email: 'new@example.com',
+          emailVerified: false,
+        })
+      );
+
+      // Verify result
+      expect(result).toEqual({
+        id: userId,
+        name: 'New Name',
+        email: 'new@example.com',
+        emailVerified: false,
+        image: null,
+      });
+    });
+
+    it('should not set emailVerified to false if email is unchanged', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'same@example.com',
+        emailVerified: true,
+        image: null,
+      };
+
+      // Mock existing user
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      // Mock update result - emailVerified should remain true
+      const updatedUser = {
+        ...existingUser,
+        name: 'Updated Name',
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      await service.updateProfile(userId, {
+        displayName: 'Updated Name',
+        email: 'same@example.com', // Same email
+      });
+
+      // Verify update was called with only name, not email
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Updated Name',
+        })
+      );
+
+      // emailVerified should not be in the update set
+      const updateCallArg = mockUpdateSet.mock.calls[0][0];
+      expect(updateCallArg).not.toHaveProperty('email');
+      expect(updateCallArg).not.toHaveProperty('emailVerified');
+    });
+
+    it('should throw UserNotFoundError if user does not exist', async () => {
+      // Mock user not found
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(undefined);
+
+      await expect(
+        service.updateProfile(userId, { displayName: 'New Name' })
+      ).rejects.toThrow(UserNotFoundError);
+
+      // Update should not be called
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it('should handle empty update object', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+      };
+
+      // Mock existing user
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      // Mock update result - no changes
+      mockReturning.mockResolvedValue([existingUser]);
+
+      const result = await service.updateProfile(userId, {});
+
+      // Verify update was called with empty object (no-op update)
+      expect(mockUpdateSet).toHaveBeenCalledWith({});
+
+      // Verify result unchanged
+      expect(result).toEqual({
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+      });
     });
   });
 });

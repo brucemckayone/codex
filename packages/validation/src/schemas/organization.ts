@@ -43,3 +43,15 @@ export const listMembersQuerySchema = paginationSchema.extend({
 });
 
 export type ListMembersQueryInput = z.infer<typeof listMembersQuerySchema>;
+
+/**
+ * Schema for public members query parameters
+ * Extends pagination with optional role filter for public endpoint
+ */
+export const publicMembersQuerySchema = paginationSchema.extend({
+  role: z
+    .enum(['owner', 'admin', 'creator', 'subscriber', 'member'])
+    .optional(),
+});
+
+export type PublicMembersQueryInput = z.infer<typeof publicMembersQuerySchema>;

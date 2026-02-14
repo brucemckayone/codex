@@ -192,6 +192,30 @@ export const adminActivityQuerySchema = paginationSchema.extend({
 
 export type AdminActivityQueryInput = z.infer<typeof adminActivityQuerySchema>;
 
+/**
+ * Organization ID path parameter schema
+ * Used for organization-scoped admin endpoints
+ * Validates UUID format for organizationId
+ */
+export const adminOrganizationIdParamsSchema = z.object({
+  orgId: uuidSchema,
+});
+
+export type AdminOrganizationIdParams = z.infer<
+  typeof adminOrganizationIdParamsSchema
+>;
+
+/**
+ * Organization activity feed query parameters
+ * Combines organizationId path params with activity query params
+ * For GET /api/admin/:orgId/activity endpoint
+ */
+export const adminOrganizationActivityQuerySchema = adminActivityQuerySchema;
+
+export type AdminOrganizationActivityQueryInput = z.infer<
+  typeof adminOrganizationActivityQuerySchema
+>;
+
 // ============================================================================
 // Re-export Content Status Enum
 // ============================================================================

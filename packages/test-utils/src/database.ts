@@ -315,15 +315,31 @@ export async function seedTestUsers(
   db: Database,
   count: number = 1
 ): Promise<string[]> {
-  const users: { id: string; email: string; name: string }[] = [];
+  const users: {
+    id: string;
+    name: string;
+    email: string;
+    emailVerified: boolean;
+    image: string | null;
+    avatarUrl: string | null;
+    role: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }[] = [];
 
   for (let i = 0; i < count; i++) {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 7);
     users.push({
       id: `test-user-${timestamp}-${random}`,
-      email: `test-${timestamp}-${random}@example.com`,
       name: `Test User ${i + 1}`,
+      email: `test-${timestamp}-${random}@example.com`,
+      emailVerified: true,
+      image: null,
+      avatarUrl: null,
+      role: 'customer',
+      createdAt: new Date(timestamp),
+      updatedAt: new Date(timestamp),
     });
   }
 

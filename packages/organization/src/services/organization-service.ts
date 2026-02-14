@@ -18,6 +18,7 @@ import {
   withPagination,
 } from '@codex/database';
 import {
+  content,
   organizationMemberships,
   organizations,
   users,
@@ -32,7 +33,17 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq, ilike, inArray, or } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  or,
+} from 'drizzle-orm';
 import {
   ConflictError,
   LastOwnerError,
@@ -365,17 +376,25 @@ export class OrganizationService extends BaseService {
    * Only active members with owner/admin/creator roles are included.
    *
    * @param slug - Organization slug
-   * @returns Array of public creator profiles
+   * @param pagination - Optional pagination params { page, limit }
+   * @returns Paginated list of public creator profiles with content counts
    * @throws {OrganizationNotFoundError} If organization doesn't exist
    */
-  async getPublicCreators(slug: string): Promise<
-    Array<{
+  async getPublicCreators(
+    slug: string,
+    pagination?: { page: number; limit: number }
+  ): Promise<
+    PaginatedListResponse<{
       name: string;
       avatarUrl: string | null;
       role: string;
-      joinedAt: Date;
+      joinedAt: string;
+      contentCount: number;
     }>
   > {
+    const { page = 1, limit = PAGINATION.DEFAULT } = pagination ?? {};
+    const { limit: queryLimit, offset } = withPagination({ page, limit });
+
     try {
       const org = await this.db.query.organizations.findFirst({
         where: and(
@@ -389,16 +408,10 @@ export class OrganizationService extends BaseService {
         throw new OrganizationNotFoundError(slug);
       }
 
-      const members = await this.db
-        .select({
-          name: users.name,
-          avatarUrl: users.avatarUrl,
-          image: users.image,
-          role: organizationMemberships.role,
-          joinedAt: organizationMemberships.createdAt,
-        })
+      // Get total count for pagination
+      const countResult = await this.db
+        .select({ totalCount: count() })
         .from(organizationMemberships)
-        .innerJoin(users, eq(organizationMemberships.userId, users.id))
         .where(
           and(
             eq(organizationMemberships.organizationId, org.id),
@@ -407,12 +420,67 @@ export class OrganizationService extends BaseService {
           )
         );
 
-      return members.map((m) => ({
-        name: m.name,
-        avatarUrl: m.avatarUrl ?? m.image ?? null,
-        role: m.role,
-        joinedAt: m.joinedAt,
-      }));
+      const totalCount = countResult[0]?.totalCount ?? 0;
+
+      // Get members with content count
+      const members = await this.db
+        .select({
+          name: users.name,
+          avatarUrl: users.avatarUrl,
+          image: users.image,
+          role: organizationMemberships.role,
+          joinedAt: organizationMemberships.createdAt,
+          contentCount: count(content.id),
+        })
+        .from(organizationMemberships)
+        .innerJoin(users, eq(organizationMemberships.userId, users.id))
+        .leftJoin(
+          content,
+          and(
+            eq(content.creatorId, users.id),
+            eq(content.organizationId, org.id),
+            eq(content.status, 'published'),
+            eq(content.visibility, 'public'),
+            isNull(content.deletedAt)
+          )
+        )
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.status, 'active'),
+            inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+          )
+        )
+        .groupBy(
+          users.id,
+          organizationMemberships.id,
+          users.name,
+          users.avatarUrl,
+          users.image,
+          organizationMemberships.role,
+          organizationMemberships.createdAt
+        )
+        .orderBy(asc(organizationMemberships.createdAt))
+        .limit(queryLimit)
+        .offset(offset);
+
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        items: members.map((m) => ({
+          name: m.name,
+          avatarUrl: m.avatarUrl ?? m.image ?? null,
+          role: m.role,
+          joinedAt: m.joinedAt.toISOString(),
+          contentCount: Number(m.contentCount ?? 0),
+        })),
+        pagination: {
+          page,
+          limit,
+          total: totalCount,
+          totalPages,
+        },
+      };
     } catch (error) {
       if (error instanceof OrganizationNotFoundError) {
         throw error;
@@ -775,6 +843,102 @@ export class OrganizationService extends BaseService {
         throw error;
       }
       throw wrapError(error, { organizationId, userId });
+    }
+  }
+
+  /**
+   * Get public members for an organization by slug
+   *
+   * Returns public-safe member information (no emails, no internal IDs).
+   * Only active members are included.
+   *
+   * @param slug - Organization slug
+   * @param query - Optional query params { page, limit, role }
+   * @returns Paginated list of public member profiles
+   * @throws {OrganizationNotFoundError} If organization doesn't exist
+   */
+  async getPublicMembers(
+    slug: string,
+    query?: { page: number; limit: number; role?: string }
+  ): Promise<
+    PaginatedListResponse<{
+      name: string;
+      avatarUrl: string | null;
+      role: string;
+      joinedAt: string;
+    }>
+  > {
+    const { page = 1, limit = PAGINATION.DEFAULT } = query ?? {};
+    const { limit: queryLimit, offset } = withPagination({ page, limit });
+
+    try {
+      const org = await this.db.query.organizations.findFirst({
+        where: and(
+          eq(organizations.slug, slug.toLowerCase()),
+          whereNotDeleted(organizations)
+        ),
+        columns: { id: true },
+      });
+
+      if (!org) {
+        throw new OrganizationNotFoundError(slug);
+      }
+
+      // Build conditions for filtering
+      const conditions = [
+        eq(organizationMemberships.organizationId, org.id),
+        eq(organizationMemberships.status, 'active'),
+      ];
+
+      if (query?.role) {
+        conditions.push(eq(organizationMemberships.role, query.role));
+      }
+
+      // Get total count for pagination
+      const countResult = await this.db
+        .select({ totalCount: count() })
+        .from(organizationMemberships)
+        .where(and(...conditions));
+
+      const totalCount = countResult[0]?.totalCount ?? 0;
+
+      // Get members with public info only (no emails)
+      const members = await this.db
+        .select({
+          name: users.name,
+          avatarUrl: users.avatarUrl,
+          image: users.image,
+          role: organizationMemberships.role,
+          joinedAt: organizationMemberships.createdAt,
+        })
+        .from(organizationMemberships)
+        .innerJoin(users, eq(organizationMemberships.userId, users.id))
+        .where(and(...conditions))
+        .orderBy(asc(organizationMemberships.createdAt))
+        .limit(queryLimit)
+        .offset(offset);
+
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        items: members.map((m) => ({
+          name: m.name,
+          avatarUrl: m.avatarUrl ?? m.image ?? null,
+          role: m.role,
+          joinedAt: m.joinedAt.toISOString(),
+        })),
+        pagination: {
+          page,
+          limit,
+          total: totalCount,
+          totalPages,
+        },
+      };
+    } catch (error) {
+      if (error instanceof OrganizationNotFoundError) {
+        throw error;
+      }
+      throw wrapError(error, { slug });
     }
   }
 }

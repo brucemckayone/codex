@@ -6,7 +6,12 @@
 
 // Branding Cache
 export { BrandingCache } from './branding-cache';
-
+// Notification Preferences Service
+export {
+  NotificationPreferencesService,
+  type NotificationPreferencesServiceConfig,
+  type UserNotificationPreferences,
+} from './notification-preferences-service';
 // Notifications Service
 export { NotificationsService } from './notifications-service';
 // Template Service
@@ -24,6 +29,7 @@ declare module '@codex/shared-types' {
     services?: {
       templates?: import('./template-service').TemplateService;
       notifications?: import('./notifications-service').NotificationsService;
+      preferences?: import('./notification-preferences-service').NotificationPreferencesService;
     };
   }
 }

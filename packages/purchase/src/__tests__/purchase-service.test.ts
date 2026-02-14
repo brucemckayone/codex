@@ -929,4 +929,163 @@ describe('PurchaseService Integration', () => {
       ).rejects.toThrow(PurchaseNotFoundError);
     });
   });
+
+  describe('createPortalSession', () => {
+    it('creates billing portal session for existing Stripe customer', async () => {
+      const portalUrl = 'https://billing.stripe.com/session/test_123';
+
+      // Mock Stripe customer list to return existing customer
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockResolvedValue({
+        data: [
+          {
+            id: 'cus_existing_123',
+            email: 'test@example.com',
+            metadata: { userId },
+          },
+        ],
+        has_more: false,
+      });
+
+      // Mock portal session creation
+      vi.mocked(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        url: portalUrl,
+      } as Stripe.BillingPortal.Session);
+
+      const result = await purchaseService.createPortalSession(
+        'test@example.com',
+        userId,
+        'http://localhost:3000/settings'
+      );
+
+      expect(result.url).toBe(portalUrl);
+
+      // Verify customer list was called
+      expect(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'test@example.com',
+          limit: 1,
+        })
+      );
+
+      // Verify portal session was created
+      expect(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: 'cus_existing_123',
+          return_url: 'http://localhost:3000/settings',
+        })
+      );
+    });
+
+    it('creates new Stripe customer if none exists', async () => {
+      const portalUrl = 'https://billing.stripe.com/session/test_456';
+
+      // Mock Stripe customer list to return empty
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockResolvedValue({
+        data: [],
+        has_more: false,
+      });
+
+      // Mock customer creation
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        id: 'cus_new_789',
+        email: 'newuser@example.com',
+        metadata: { userId: otherUserId },
+      });
+
+      // Mock portal session creation
+      vi.mocked(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        url: portalUrl,
+      } as Stripe.BillingPortal.Session);
+
+      const result = await purchaseService.createPortalSession(
+        'newuser@example.com',
+        otherUserId,
+        'http://localhost:3000/settings'
+      );
+
+      expect(result.url).toBe(portalUrl);
+
+      // Verify new customer was created
+      expect(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'newuser@example.com',
+          metadata: { userId: otherUserId },
+        })
+      );
+
+      // Verify portal session was created with new customer ID
+      expect(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: 'cus_new_789',
+          return_url: 'http://localhost:3000/settings',
+        })
+      );
+    });
+
+    it('throws PaymentProcessingError on Stripe API failure', async () => {
+      // Mock Stripe to throw error
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockRejectedValue(new Error('Stripe API error'));
+
+      await expect(
+        purchaseService.createPortalSession(
+          'test@example.com',
+          userId,
+          'http://localhost:3000/settings'
+        )
+      ).rejects.toThrow(PaymentProcessingError);
+    });
+
+    it('validates return URL with domain whitelist', async () => {
+      // Mock successful response
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockResolvedValue({
+        data: [],
+        has_more: false,
+      });
+
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        id: 'cus_new_789',
+        email: 'newuser@example.com',
+        metadata: { userId: otherUserId },
+      });
+
+      vi.mocked(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        url: 'https://billing.stripe.com/session/test_789',
+      } as Stripe.BillingPortal.Session);
+
+      // Valid URL (localhost is whitelisted)
+      await expect(
+        purchaseService.createPortalSession(
+          'newuser@example.com',
+          otherUserId,
+          'http://localhost:3000/settings'
+        )
+      ).resolves.toBeDefined();
+    });
+  });
 });
