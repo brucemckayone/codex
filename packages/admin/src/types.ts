@@ -79,6 +79,28 @@ export interface RevenueQueryOptions {
   endDate?: Date;
 }
 
+/**
+ * Dashboard stats - combined metrics for studio overview
+ * Includes revenue, customer, and top content data for dashboard view
+ */
+export interface DashboardStats {
+  /** Revenue metrics and daily breakdown */
+  revenue: RevenueStats;
+  /** Customer counts and new customer metrics */
+  customers: CustomerStats;
+  /** Top performing content by revenue */
+  topContent: TopContentItem[];
+}
+
+/**
+ * Dashboard stats query options
+ */
+export interface DashboardStatsOptions {
+  startDate?: Date;
+  endDate?: Date;
+  topContentLimit?: number;
+}
+
 // ============================================================================
 // Content Management Types
 // ============================================================================

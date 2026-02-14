@@ -83,6 +83,52 @@ export type AdminTopContentQueryInput = z.infer<
   typeof adminTopContentQuerySchema
 >;
 
+/**
+ * Dashboard stats query parameters
+ * Combines revenue date range filter with top content limit
+ */
+export const adminDashboardStatsQuerySchema = z
+  .object({
+    startDate: isoDateSchema.optional(),
+    endDate: isoDateSchema.optional(),
+    limit: z.coerce
+      .number()
+      .int({ message: 'Limit must be a whole number' })
+      .min(1, { message: 'Limit must be at least 1' })
+      .max(100, { message: 'Limit must be 100 or less' })
+      .default(10),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        return data.startDate <= data.endDate;
+      }
+      return true;
+    },
+    {
+      message: 'Start date must be before or equal to end date',
+      path: ['startDate'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        const diffMs = data.endDate.getTime() - data.startDate.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        return diffDays <= MAX_DATE_RANGE_DAYS;
+      }
+      return true;
+    },
+    {
+      message: `Date range cannot exceed ${MAX_DATE_RANGE_DAYS} days`,
+      path: ['endDate'],
+    }
+  );
+
+export type AdminDashboardStatsQueryInput = z.infer<
+  typeof adminDashboardStatsQuerySchema
+>;
+
 // ============================================================================
 // Content Management Schemas
 // ============================================================================

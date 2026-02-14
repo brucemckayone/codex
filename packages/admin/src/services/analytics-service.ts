@@ -16,6 +16,8 @@ import type {
   ActivityFeedResponse,
   CustomerStats,
   DailyRevenue,
+  DashboardStats,
+  DashboardStatsOptions,
   RevenueQueryOptions,
   RevenueStats,
   TopContentItem,
@@ -342,6 +344,43 @@ export class AdminAnalyticsService extends BaseService {
         throw error;
       }
       throw wrapError(error, { organizationId, query });
+    }
+  }
+
+  /**
+   * Get combined dashboard statistics
+   *
+   * Returns revenue, customer, and top content data in a single call.
+   * Uses existing methods to avoid SQL duplication.
+   */
+  async getDashboardStats(
+    organizationId: string,
+    options?: DashboardStatsOptions
+  ): Promise<DashboardStats> {
+    try {
+      // Execute all three queries in parallel for efficiency
+      const [revenue, customers, topContent] = await Promise.all([
+        this.getRevenueStats(organizationId, {
+          startDate: options?.startDate,
+          endDate: options?.endDate,
+        }),
+        this.getCustomerStats(organizationId),
+        this.getTopContent(
+          organizationId,
+          options?.topContentLimit ?? DEFAULT_TOP_CONTENT_LIMIT
+        ),
+      ]);
+
+      return {
+        revenue,
+        customers,
+        topContent,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+      throw wrapError(error, { organizationId, options });
     }
   }
 }

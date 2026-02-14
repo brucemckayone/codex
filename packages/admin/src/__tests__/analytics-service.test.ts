@@ -35,6 +35,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import { AdminAnalyticsService } from '../services/analytics-service';
+import { DashboardStats, type DashboardStatsOptions } from '../types';
 
 describe('AdminAnalyticsService', () => {
   let db: Database;
@@ -649,6 +650,222 @@ describe('AdminAnalyticsService', () => {
 
     // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
     // Service trusts that organizationId is valid when passed from authenticated context
+  });
+
+  describe('getDashboardStats', () => {
+    it('should return zero stats for organization with no data', async () => {
+      const [emptyOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const stats = await service.getDashboardStats(emptyOrg.id);
+
+      expect(stats.revenue.totalRevenueCents).toBe(0);
+      expect(stats.revenue.totalPurchases).toBe(0);
+      expect(stats.customers.totalCustomers).toBe(0);
+      expect(stats.customers.newCustomersLast30Days).toBe(0);
+      expect(stats.topContent).toEqual([]);
+    });
+
+    it('should return combined stats for organization with data', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [testContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Dashboard Test Content',
+          slug: createUniqueSlug('dashboard-test'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1000,
+        })
+        .returning();
+
+      // Create purchases
+      await db.insert(purchases).values([
+        {
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 1000,
+          platformFeeCents: 100,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 900,
+          stripePaymentIntentId: `pi_dashboard_${Date.now()}_1`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+        },
+        {
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 1000,
+          platformFeeCents: 100,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 900,
+          stripePaymentIntentId: `pi_dashboard_${Date.now()}_2`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+        },
+      ]);
+
+      const stats = await service.getDashboardStats(testOrg.id);
+
+      // Verify all three data sections are present
+      expect(stats.revenue.totalRevenueCents).toBe(2000);
+      expect(stats.revenue.totalPurchases).toBe(2);
+      expect(stats.customers.totalCustomers).toBe(1);
+      expect(stats.customers.newCustomersLast30Days).toBe(1);
+      expect(stats.topContent).toHaveLength(1);
+      expect(stats.topContent[0].contentId).toBe(testContent.id);
+    });
+
+    it('should respect date range filter for revenue', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [testContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Date Filter Dashboard Test',
+          slug: createUniqueSlug('dashboard-date-filter'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 500,
+        })
+        .returning();
+
+      const now = new Date();
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      // Create purchase today
+      await db.insert(purchases).values({
+        customerId,
+        contentId: testContent.id,
+        organizationId: testOrg.id,
+        amountPaidCents: 500,
+        platformFeeCents: 50,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 450,
+        stripePaymentIntentId: `pi_dashboard_date_${Date.now()}`,
+        status: PURCHASE_STATUS.COMPLETED,
+        purchasedAt: now,
+      });
+
+      // Filter from yesterday to today
+      const stats = await service.getDashboardStats(testOrg.id, {
+        startDate: yesterday,
+        endDate: now,
+      });
+
+      // Revenue stats should be filtered
+      expect(stats.revenue.totalRevenueCents).toBe(500);
+      // Customer and top content unaffected by date filter
+      expect(stats.customers.totalCustomers).toBe(1);
+      expect(stats.topContent).toHaveLength(1);
+    });
+
+    it('should respect top content limit parameter', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      // Create 5 content items with purchases
+      for (let i = 0; i < 5; i++) {
+        const [c] = await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: `Dashboard Content ${i}`,
+            slug: createUniqueSlug(`dashboard-limit-${i}`),
+            contentType: 'video',
+            status: 'published',
+            visibility: 'purchased_only',
+            priceCents: (i + 1) * 100,
+          })
+          .returning();
+
+        await db.insert(purchases).values({
+          customerId,
+          contentId: c.id,
+          organizationId: testOrg.id,
+          amountPaidCents: (i + 1) * 100,
+          platformFeeCents: (i + 1) * 10,
+          organizationFeeCents: 0,
+          creatorPayoutCents: (i + 1) * 90,
+          stripePaymentIntentId: `pi_dash_limit_${Date.now()}_${i}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+        });
+      }
+
+      const stats = await service.getDashboardStats(testOrg.id, {
+        topContentLimit: 3,
+      });
+
+      expect(stats.topContent).toHaveLength(3);
+    });
+
+    it('should use default limit when topContentLimit not provided', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const stats = await service.getDashboardStats(testOrg.id);
+
+      // Default limit is applied in getTopContent via DEFAULT_TOP_CONTENT_LIMIT
+      // This just verifies the method handles undefined correctly
+      expect(stats.topContent).toEqual([]);
+    });
   });
 
   describe('getRecentActivity', () => {

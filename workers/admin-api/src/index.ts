@@ -27,6 +27,7 @@ import {
   adminContentListQuerySchema,
   adminCustomerIdParamsSchema,
   adminCustomerListQuerySchema,
+  adminDashboardStatsQuerySchema,
   adminGrantAccessParamsSchema,
   adminRevenueQuerySchema,
   adminTopContentQuerySchema,
@@ -123,6 +124,24 @@ app.get(
       return await ctx.services.adminAnalytics.getTopContent(
         ctx.organizationId,
         ctx.input.query.limit
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/analytics/dashboard-stats
+ * Get combined dashboard statistics for platform owner's organization
+ */
+app.get(
+  '/api/admin/analytics/dashboard-stats',
+  procedure({
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    input: { query: adminDashboardStatsQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getDashboardStats(
+        ctx.organizationId,
+        ctx.input.query
       );
     },
   })
