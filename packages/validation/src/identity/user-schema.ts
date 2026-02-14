@@ -38,15 +38,5 @@ export const updateProfileSchema = z.object({
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
-/**
- * Update notification preferences schema
- */
-export const updateNotificationPreferencesSchema = z.object({
-  emailMarketing: z.boolean().optional(),
-  emailTransactional: z.boolean().optional(),
-  emailDigest: z.boolean().optional(),
-});
-
-export type UpdateNotificationPreferencesInput = z.infer<
-  typeof updateNotificationPreferencesSchema
->;
+// Notification preferences schema is exported from './schemas/notifications.ts
+// to avoid duplicate exports

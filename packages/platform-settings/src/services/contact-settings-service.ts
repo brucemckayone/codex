@@ -49,6 +49,11 @@ export class ContactSettingsService extends BaseService {
         supportEmail: schema.contactSettings.supportEmail,
         contactUrl: schema.contactSettings.contactUrl,
         timezone: schema.contactSettings.timezone,
+        // Social media URLs
+        twitterUrl: schema.contactSettings.twitterUrl,
+        youtubeUrl: schema.contactSettings.youtubeUrl,
+        instagramUrl: schema.contactSettings.instagramUrl,
+        tiktokUrl: schema.contactSettings.tiktokUrl,
       })
       .from(schema.contactSettings)
       .where(eq(schema.contactSettings.organizationId, this.organizationId))
@@ -67,6 +72,11 @@ export class ContactSettingsService extends BaseService {
       supportEmail: row.supportEmail,
       contactUrl: row.contactUrl,
       timezone: row.timezone,
+      // Social media URLs
+      twitterUrl: row.twitterUrl,
+      youtubeUrl: row.youtubeUrl,
+      instagramUrl: row.instagramUrl,
+      tiktokUrl: row.tiktokUrl,
     };
   }
 
@@ -92,6 +102,19 @@ export class ContactSettingsService extends BaseService {
     if (input.timezone !== undefined) {
       updateValues.timezone = input.timezone;
     }
+    // Social media URLs
+    if (input.twitterUrl !== undefined) {
+      updateValues.twitterUrl = input.twitterUrl;
+    }
+    if (input.youtubeUrl !== undefined) {
+      updateValues.youtubeUrl = input.youtubeUrl;
+    }
+    if (input.instagramUrl !== undefined) {
+      updateValues.instagramUrl = input.instagramUrl;
+    }
+    if (input.tiktokUrl !== undefined) {
+      updateValues.tiktokUrl = input.tiktokUrl;
+    }
 
     // If no updates, just return current state
     if (Object.keys(updateValues).length === 0) {
@@ -107,6 +130,11 @@ export class ContactSettingsService extends BaseService {
         supportEmail: input.supportEmail ?? DEFAULT_CONTACT.supportEmail,
         contactUrl: input.contactUrl ?? DEFAULT_CONTACT.contactUrl,
         timezone: input.timezone ?? DEFAULT_CONTACT.timezone,
+        // Social media URLs
+        twitterUrl: input.twitterUrl ?? DEFAULT_CONTACT.twitterUrl,
+        youtubeUrl: input.youtubeUrl ?? DEFAULT_CONTACT.youtubeUrl,
+        instagramUrl: input.instagramUrl ?? DEFAULT_CONTACT.instagramUrl,
+        tiktokUrl: input.tiktokUrl ?? DEFAULT_CONTACT.tiktokUrl,
       })
       .onConflictDoUpdate({
         target: schema.contactSettings.organizationId,
@@ -131,6 +159,11 @@ export class ContactSettingsService extends BaseService {
       supportEmail: row.supportEmail,
       contactUrl: row.contactUrl,
       timezone: row.timezone,
+      // Social media URLs
+      twitterUrl: row.twitterUrl,
+      youtubeUrl: row.youtubeUrl,
+      instagramUrl: row.instagramUrl,
+      tiktokUrl: row.tiktokUrl,
     };
   }
 

@@ -88,6 +88,12 @@ export const contactSettings = pgTable(
     contactUrl: text('contact_url'),
     timezone: varchar('timezone', { length: 100 }).notNull().default('UTC'),
 
+    // Social media URLs (optional)
+    twitterUrl: text('twitter_url'),
+    youtubeUrl: text('youtube_url'),
+    instagramUrl: text('instagram_url'),
+    tiktokUrl: text('tiktok_url'),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

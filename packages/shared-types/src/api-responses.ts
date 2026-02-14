@@ -220,6 +220,11 @@ export interface ContactSettingsResponse {
   supportEmail: string;
   contactUrl: string | null;
   timezone: string;
+  // Social media URLs
+  twitterUrl: string | null;
+  youtubeUrl: string | null;
+  instagramUrl: string | null;
+  tiktokUrl: string | null;
 }
 
 /**
