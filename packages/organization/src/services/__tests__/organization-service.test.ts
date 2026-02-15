@@ -567,9 +567,9 @@ describe('OrganizationService', () => {
    * - removeMember: Removing members with safety checks
    */
   describe('member management', () => {
-    let testOrgId: string;
-    let testUserIds: string[];
-    let inviterUserId: string;
+    let memberMgmtTestOrgId: string;
+    let memberMgmtTestUserIds: string[];
+    let memberMgmtInviterUserId: string;
 
     beforeEach(async () => {
       // Create test organization
@@ -577,16 +577,16 @@ describe('OrganizationService', () => {
         name: `Test Org ${Date.now()}`,
         slug: createUniqueSlug('test-org'),
       });
-      testOrgId = org.id;
+      memberMgmtTestOrgId = org.id;
 
       // Create test users (need real users for membership operations)
-      testUserIds = await seedTestUsers(db, 4);
-      inviterUserId = testUserIds[0];
+      memberMgmtTestUserIds = await seedTestUsers(db, 4);
+      memberMgmtInviterUserId = memberMgmtTestUserIds[0];
 
       // Add inviter as owner of the organization
       await db.insert(schema.organizationMemberships).values({
-        organization_id: testOrgId,
-        user_id: inviterUserId,
+        organizationId: memberMgmtTestOrgId,
+        userId: memberMgmtInviterUserId,
         role: 'owner',
         status: 'active',
         invitedBy: null,
@@ -598,31 +598,31 @@ describe('OrganizationService', () => {
         // Add initial members to organization
         await db.insert(schema.organizationMemberships).values([
           {
-            organization_id: testOrgId,
-            user_id: testUserIds[1],
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[1],
             role: 'admin',
             status: 'active',
-            invited_by: inviterUserId,
+            invitedBy: memberMgmtInviterUserId,
           },
           {
-            organization_id: testOrgId,
-            user_id: testUserIds[2],
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[2],
             role: 'member',
             status: 'active',
-            invited_by: inviterUserId,
+            invitedBy: memberMgmtInviterUserId,
           },
           {
-            organization_id: testOrgId,
-            user_id: testUserIds[3],
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[3],
             role: 'member',
             status: 'inactive',
-            invited_by: inviterUserId,
+            invitedBy: memberMgmtInviterUserId,
           },
         ]);
       });
 
       it('should return paginated list of members', async () => {
-        const result = await service.listMembers(testOrgId, {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
           page: 1,
           limit: 10,
         });
@@ -635,7 +635,7 @@ describe('OrganizationService', () => {
       });
 
       it('should filter members by role', async () => {
-        const result = await service.listMembers(testOrgId, {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
           page: 1,
           limit: 10,
           role: 'admin',
@@ -646,7 +646,7 @@ describe('OrganizationService', () => {
       });
 
       it('should filter members by status', async () => {
-        const result = await service.listMembers(testOrgId, {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
           page: 1,
           limit: 10,
           status: 'active',
@@ -657,7 +657,7 @@ describe('OrganizationService', () => {
       });
 
       it('should paginate correctly with small page size', async () => {
-        const result = await service.listMembers(testOrgId, {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
           page: 1,
           limit: 2,
         });
@@ -683,7 +683,7 @@ describe('OrganizationService', () => {
       });
 
       it('should include user details in response', async () => {
-        const result = await service.listMembers(testOrgId, {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
           page: 1,
           limit: 10,
         });
@@ -722,9 +722,9 @@ describe('OrganizationService', () => {
         const email = await getUserEmail(newUserId);
 
         const result = await service.inviteMember(
-          testOrgId,
+          memberMgmtTestOrgId,
           { email, role: 'member' },
-          inviterUserId
+          memberMgmtInviterUserId
         );
 
         expect(result.userId).toBe(newUserId);
@@ -738,9 +738,9 @@ describe('OrganizationService', () => {
         const email = await getUserEmail(newUserId);
 
         const result = await service.inviteMember(
-          testOrgId,
+          memberMgmtTestOrgId,
           { email, role: 'admin' },
-          inviterUserId
+          memberMgmtInviterUserId
         );
 
         expect(result.role).toBe('admin');
@@ -750,9 +750,9 @@ describe('OrganizationService', () => {
         const email = await getUserEmail(newUserId);
 
         const result = await service.inviteMember(
-          testOrgId,
+          memberMgmtTestOrgId,
           { email, role: 'creator' },
-          inviterUserId
+          memberMgmtInviterUserId
         );
 
         expect(result.status).toBe('active');
@@ -761,29 +761,29 @@ describe('OrganizationService', () => {
       it('should throw NotFoundError for non-existent user', async () => {
         await expect(
           service.inviteMember(
-            testOrgId,
+            memberMgmtTestOrgId,
             { email: 'nonexistent@example.com', role: 'member' },
-            inviterUserId
+            memberMgmtInviterUserId
           )
         ).rejects.toThrow(NotFoundError);
       });
 
       it('should throw ConflictError for duplicate member', async () => {
-        const email = await getUserEmail(testUserIds[1]);
+        const email = await getUserEmail(memberMgmtTestUserIds[1]);
 
         // First invite should succeed
         await service.inviteMember(
-          testOrgId,
+          memberMgmtTestOrgId,
           { email, role: 'member' },
-          inviterUserId
+          memberMgmtInviterUserId
         );
 
         // Second invite should fail
         await expect(
           service.inviteMember(
-            testOrgId,
+            memberMgmtTestOrgId,
             { email, role: 'admin' },
-            inviterUserId
+            memberMgmtInviterUserId
           )
         ).rejects.toThrow(ConflictError);
       });
@@ -793,30 +793,30 @@ describe('OrganizationService', () => {
       beforeEach(async () => {
         // Add a test member
         await db.insert(schema.organizationMemberships).values({
-          organization_id: testOrgId,
-          user_id: testUserIds[1],
+          organizationId: memberMgmtTestOrgId,
+          userId: memberMgmtTestUserIds[1],
           role: 'member',
           status: 'active',
-          invited_by: inviterUserId,
+          invitedBy: memberMgmtInviterUserId,
         });
       });
 
       it('should update member role', async () => {
         const result = await service.updateMemberRole(
-          testOrgId,
-          testUserIds[1],
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[1],
           'admin'
         );
 
-        expect(result.userId).toBe(testUserIds[1]);
+        expect(result.userId).toBe(memberMgmtTestUserIds[1]);
         expect(result.role).toBe('admin');
         expect(result.status).toBe('active');
       });
 
       it('should promote member to owner', async () => {
         const result = await service.updateMemberRole(
-          testOrgId,
-          testUserIds[1],
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[1],
           'owner'
         );
 
@@ -825,31 +825,39 @@ describe('OrganizationService', () => {
 
       it('should throw MemberNotFoundError for non-existent member', async () => {
         await expect(
-          service.updateMemberRole(testOrgId, 'nonexistent-user-id', 'admin')
+          service.updateMemberRole(
+            memberMgmtTestOrgId,
+            'nonexistent-user-id',
+            'admin'
+          )
         ).rejects.toThrow(MemberNotFoundError);
       });
 
       it('should throw LastOwnerError when demoting last owner', async () => {
         // Try to demote the only owner
         await expect(
-          service.updateMemberRole(testOrgId, inviterUserId, 'admin')
+          service.updateMemberRole(
+            memberMgmtTestOrgId,
+            memberMgmtInviterUserId,
+            'admin'
+          )
         ).rejects.toThrow(LastOwnerError);
       });
 
       it('should allow demotion when multiple owners exist', async () => {
         // Promote another user to owner first
         await db.insert(schema.organizationMemberships).values({
-          organization_id: testOrgId,
-          user_id: testUserIds[2],
+          organizationId: memberMgmtTestOrgId,
+          userId: memberMgmtTestUserIds[2],
           role: 'owner',
           status: 'active',
-          invited_by: inviterUserId,
+          invitedBy: memberMgmtInviterUserId,
         });
 
         // Now we can demote the first owner
         const result = await service.updateMemberRole(
-          testOrgId,
-          inviterUserId,
+          memberMgmtTestOrgId,
+          memberMgmtInviterUserId,
           'admin'
         );
 
@@ -862,31 +870,34 @@ describe('OrganizationService', () => {
         // Add test members
         await db.insert(schema.organizationMemberships).values([
           {
-            organization_id: testOrgId,
-            user_id: testUserIds[1],
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[1],
             role: 'admin',
             status: 'active',
-            invited_by: inviterUserId,
+            invitedBy: memberMgmtInviterUserId,
           },
           {
-            organization_id: testOrgId,
-            user_id: testUserIds[2],
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[2],
             role: 'member',
             status: 'active',
-            invited_by: inviterUserId,
+            invitedBy: memberMgmtInviterUserId,
           },
         ]);
       });
 
       it('should remove member from organization', async () => {
-        await service.removeMember(testOrgId, testUserIds[1]);
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[1]
+        );
 
         // Verify member is removed
         const membership = await db.query.organizationMemberships.findFirst({
           where: (memberships, { and, eq }) =>
             and(
-              eq(memberships.organizationId, testOrgId),
-              eq(memberships.userId, testUserIds[1])
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, memberMgmtTestUserIds[1])
             ),
         });
 
@@ -895,35 +906,38 @@ describe('OrganizationService', () => {
 
       it('should throw MemberNotFoundError for non-existent member', async () => {
         await expect(
-          service.removeMember(testOrgId, 'nonexistent-user-id')
+          service.removeMember(memberMgmtTestOrgId, 'nonexistent-user-id')
         ).rejects.toThrow(MemberNotFoundError);
       });
 
       it('should throw LastOwnerError when removing last owner', async () => {
         await expect(
-          service.removeMember(testOrgId, inviterUserId)
+          service.removeMember(memberMgmtTestOrgId, memberMgmtInviterUserId)
         ).rejects.toThrow(LastOwnerError);
       });
 
       it('should allow removing owner when multiple owners exist', async () => {
-        // Add another owner
+        // Add another owner using user [3] which isn't already a member
         await db.insert(schema.organizationMemberships).values({
-          organization_id: testOrgId,
-          user_id: testUserIds[1],
+          organizationId: memberMgmtTestOrgId,
+          userId: memberMgmtTestUserIds[3],
           role: 'owner',
           status: 'active',
-          invited_by: inviterUserId,
+          invitedBy: memberMgmtInviterUserId,
         });
 
         // Now we can remove the first owner
-        await service.removeMember(testOrgId, inviterUserId);
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtInviterUserId
+        );
 
         // Verify removal
         const membership = await db.query.organizationMemberships.findFirst({
           where: (memberships, { and, eq }) =>
             and(
-              eq(memberships.organizationId, testOrgId),
-              eq(memberships.userId, inviterUserId)
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, memberMgmtInviterUserId)
             ),
         });
 
@@ -931,14 +945,17 @@ describe('OrganizationService', () => {
       });
 
       it('should allow removing non-owner members', async () => {
-        await service.removeMember(testOrgId, testUserIds[2]);
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[2]
+        );
 
         // Verify removal
         const membership = await db.query.organizationMemberships.findFirst({
           where: (memberships, { and, eq }) =>
             and(
-              eq(memberships.organizationId, testOrgId),
-              eq(memberships.userId, testUserIds[2])
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, memberMgmtTestUserIds[2])
             ),
         });
 
@@ -948,52 +965,52 @@ describe('OrganizationService', () => {
   });
 
   describe('getPublicCreators', () => {
-    let testOrgId: string;
-    let testOrgSlug: string;
-    const testUserIds: string[] = [];
+    let creatorsTestOrgId: string;
+    let creatorsTestOrgSlug: string;
+    const creatorsTestUserIds: string[] = [];
 
     beforeAll(async () => {
       // Create test users
-      const users = await seedTestUsers(db, 5);
-      testUserIds.push(...users.map((u) => u.id));
+      const userIds = await seedTestUsers(db, 5);
+      creatorsTestUserIds.push(...userIds);
 
       // Create test organization
       const org = await service.create({
         name: 'Test Creators Org',
         slug: createUniqueSlug('test-creators'),
       });
-      testOrgId = org.id;
-      testOrgSlug = org.slug;
+      creatorsTestOrgId = org.id;
+      creatorsTestOrgSlug = org.slug;
 
       // Add users as members with different roles
       await db.insert(schema.organizationMemberships).values([
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[0],
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[0],
           role: 'owner',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[1],
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[1],
           role: 'admin',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[2],
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[2],
           role: 'creator',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[3],
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[3],
           role: 'subscriber',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[4],
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[4],
           role: 'creator',
           status: 'inactive',
         },
@@ -1002,8 +1019,8 @@ describe('OrganizationService', () => {
       // Add some published content for testing contentCount
       await db.insert(schema.content).values([
         {
-          creatorId: testUserIds[0],
-          organization_id: testOrgId,
+          creatorId: creatorsTestUserIds[0],
+          organizationId: creatorsTestOrgId,
           title: 'Published Content 1',
           slug: `pub-content-${Date.now()}-1`,
           contentType: 'video',
@@ -1011,8 +1028,8 @@ describe('OrganizationService', () => {
           visibility: 'public',
         },
         {
-          creatorId: testUserIds[0],
-          organization_id: testOrgId,
+          creatorId: creatorsTestUserIds[0],
+          organizationId: creatorsTestOrgId,
           title: 'Published Content 2',
           slug: `pub-content-${Date.now()}-2`,
           contentType: 'video',
@@ -1020,8 +1037,8 @@ describe('OrganizationService', () => {
           visibility: 'public',
         },
         {
-          creatorId: testUserIds[1],
-          organization_id: testOrgId,
+          creatorId: creatorsTestUserIds[1],
+          organizationId: creatorsTestOrgId,
           title: 'Admin Published Content',
           slug: `pub-content-${Date.now()}-3`,
           contentType: 'video',
@@ -1030,8 +1047,8 @@ describe('OrganizationService', () => {
         },
         // Draft content should not count
         {
-          creatorId: testUserIds[2],
-          organization_id: testOrgId,
+          creatorId: creatorsTestUserIds[2],
+          organizationId: creatorsTestOrgId,
           title: 'Draft Content',
           slug: `draft-content-${Date.now()}`,
           contentType: 'video',
@@ -1040,8 +1057,8 @@ describe('OrganizationService', () => {
         },
         // Private content should not count
         {
-          creatorId: testUserIds[2],
-          organization_id: testOrgId,
+          creatorId: creatorsTestUserIds[2],
+          organizationId: creatorsTestOrgId,
           title: 'Private Content',
           slug: `private-content-${Date.now()}`,
           contentType: 'video',
@@ -1052,7 +1069,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return paginated creators for organization', async () => {
-      const result = await service.getPublicCreators(testOrgSlug, {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug, {
         page: 1,
         limit: 10,
       });
@@ -1064,7 +1081,7 @@ describe('OrganizationService', () => {
     });
 
     it('should only include active members with owner/admin/creator roles', async () => {
-      const result = await service.getPublicCreators(testOrgSlug);
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
 
       // Should include owner, admin, and active creator (3 people)
       // Should exclude subscriber and inactive member
@@ -1076,7 +1093,7 @@ describe('OrganizationService', () => {
     });
 
     it('should include contentCount for each creator', async () => {
-      const result = await service.getPublicCreators(testOrgSlug);
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
 
       expect(
         result.items.every((item) => typeof item.contentCount === 'number')
@@ -1098,7 +1115,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return ISO date string for joinedAt', async () => {
-      const result = await service.getPublicCreators(testOrgSlug);
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
 
       expect(
         result.items.every((item) => typeof item.joinedAt === 'string')
@@ -1108,7 +1125,7 @@ describe('OrganizationService', () => {
     });
 
     it('should support pagination', async () => {
-      const page1 = await service.getPublicCreators(testOrgSlug, {
+      const page1 = await service.getPublicCreators(creatorsTestOrgSlug, {
         page: 1,
         limit: 2,
       });
@@ -1121,7 +1138,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return correct pagination metadata', async () => {
-      const result = await service.getPublicCreators(testOrgSlug, {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug, {
         page: 1,
         limit: 2,
       });
@@ -1135,7 +1152,7 @@ describe('OrganizationService', () => {
     });
 
     it('should use default pagination when not provided', async () => {
-      const result = await service.getPublicCreators(testOrgSlug);
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
 
       expect(result.pagination.page).toBe(1);
       expect(result.pagination.limit).toBe(20); // PAGINATION.DEFAULT_LIMIT
@@ -1148,7 +1165,7 @@ describe('OrganizationService', () => {
     });
 
     it('should not include emails or internal IDs', async () => {
-      const result = await service.getPublicCreators(testOrgSlug);
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
 
       expect(result.items.every((item) => !('email' in item))).toBe(true);
       expect(result.items.every((item) => !('id' in item))).toBe(true);
@@ -1156,7 +1173,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return creators ordered by joinedAt', async () => {
-      const result = await service.getPublicCreators(testOrgSlug);
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
 
       // Verify we have items and they're ordered by joinedAt (ascending)
       expect(result.items.length).toBeGreaterThan(0);
@@ -1169,58 +1186,58 @@ describe('OrganizationService', () => {
   });
 
   describe('getPublicMembers', () => {
-    let testOrgId: string;
-    let testOrgSlug: string;
-    const testUserIds: string[] = [];
+    let membersTestOrgId: string;
+    let membersTestOrgSlug: string;
+    const membersTestUserIds: string[] = [];
 
     beforeAll(async () => {
       // Create test users
-      const users = await seedTestUsers(db, 6);
-      testUserIds.push(...users.map((u) => u.id));
+      const userIds = await seedTestUsers(db, 6);
+      membersTestUserIds.push(...userIds);
 
       // Create test organization
       const org = await service.create({
         name: 'Test Members Org',
         slug: createUniqueSlug('test-members'),
       });
-      testOrgId = org.id;
-      testOrgSlug = org.slug;
+      membersTestOrgId = org.id;
+      membersTestOrgSlug = org.slug;
 
       // Add users as members with different roles
       await db.insert(schema.organizationMemberships).values([
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[0],
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[0],
           role: 'owner',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[1],
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[1],
           role: 'admin',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[2],
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[2],
           role: 'creator',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[3],
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[3],
           role: 'subscriber',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[4],
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[4],
           role: 'member',
           status: 'active',
         },
         {
-          organization_id: testOrgId,
-          user_id: testUserIds[5],
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[5],
           role: 'member',
           status: 'inactive',
         },
@@ -1228,7 +1245,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return paginated members for organization', async () => {
-      const result = await service.getPublicMembers(testOrgSlug, {
+      const result = await service.getPublicMembers(membersTestOrgSlug, {
         page: 1,
         limit: 10,
       });
@@ -1240,7 +1257,7 @@ describe('OrganizationService', () => {
     });
 
     it('should only include active members (all roles)', async () => {
-      const result = await service.getPublicMembers(testOrgSlug);
+      const result = await service.getPublicMembers(membersTestOrgSlug);
 
       // Should include all active roles (owner, admin, creator, subscriber, member)
       // Should exclude inactive member
@@ -1253,7 +1270,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return public-safe fields only (no emails, no internal IDs)', async () => {
-      const result = await service.getPublicMembers(testOrgSlug);
+      const result = await service.getPublicMembers(membersTestOrgSlug);
 
       expect(result.items.every((item) => !('email' in item))).toBe(true);
       expect(result.items.every((item) => !('id' in item))).toBe(true);
@@ -1264,7 +1281,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return required fields (name, avatarUrl, role, joinedAt)', async () => {
-      const result = await service.getPublicMembers(testOrgSlug);
+      const result = await service.getPublicMembers(membersTestOrgSlug);
 
       expect(result.items.every((item) => typeof item.name === 'string')).toBe(
         true
@@ -1284,7 +1301,7 @@ describe('OrganizationService', () => {
     });
 
     it('should support pagination', async () => {
-      const page1 = await service.getPublicMembers(testOrgSlug, {
+      const page1 = await service.getPublicMembers(membersTestOrgSlug, {
         page: 1,
         limit: 2,
       });
@@ -1297,7 +1314,7 @@ describe('OrganizationService', () => {
     });
 
     it('should filter by role when provided', async () => {
-      const result = await service.getPublicMembers(testOrgSlug, {
+      const result = await service.getPublicMembers(membersTestOrgSlug, {
         page: 1,
         limit: 10,
         role: 'subscriber',
@@ -1309,7 +1326,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return correct pagination metadata', async () => {
-      const result = await service.getPublicMembers(testOrgSlug, {
+      const result = await service.getPublicMembers(membersTestOrgSlug, {
         page: 1,
         limit: 2,
       });
@@ -1323,7 +1340,7 @@ describe('OrganizationService', () => {
     });
 
     it('should use default pagination when not provided', async () => {
-      const result = await service.getPublicMembers(testOrgSlug);
+      const result = await service.getPublicMembers(membersTestOrgSlug);
 
       expect(result.pagination.page).toBe(1);
       expect(result.pagination.limit).toBe(20); // PAGINATION.DEFAULT_LIMIT
@@ -1336,7 +1353,7 @@ describe('OrganizationService', () => {
     });
 
     it('should return members ordered by joinedAt', async () => {
-      const result = await service.getPublicMembers(testOrgSlug);
+      const result = await service.getPublicMembers(membersTestOrgSlug);
 
       // Verify we have items and they're ordered by joinedAt (ascending)
       expect(result.items.length).toBeGreaterThan(0);

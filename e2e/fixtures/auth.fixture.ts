@@ -42,8 +42,17 @@ export const authFixture = {
     );
 
     if (!registerResponse.ok) {
-      const error = await registerResponse.json();
-      throw new Error(`Registration failed: ${JSON.stringify(error)}`);
+      const errorText = await registerResponse.text();
+      let errorMsg = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMsg = JSON.stringify(errorJson);
+      } catch {
+        errorMsg = errorText.slice(0, 200);
+      }
+      throw new Error(
+        `Registration failed (${registerResponse.status}): ${errorMsg}`
+      );
     }
 
     // Step 2: Get verification token from test endpoint
@@ -68,15 +77,30 @@ export const authFixture = {
 
     // Verification returns 302 redirect with Set-Cookie header
     if (verifyResponse.status !== 302 && !verifyResponse.ok) {
-      const error = await verifyResponse.json();
-      throw new Error(`Email verification failed: ${JSON.stringify(error)}`);
+      const errorText = await verifyResponse.text();
+      let errorMsg = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMsg = JSON.stringify(errorJson);
+      } catch {
+        errorMsg = errorText.slice(0, 200);
+      }
+      throw new Error(
+        `Email verification failed (${verifyResponse.status}): ${errorMsg}`
+      );
     }
 
     // Session cookie is set in verify-email response (autoSignInAfterVerification: true)
     const verifyCookie = verifyResponse.headers.get('set-cookie');
 
+    // Check if BetterAuth session cookie was set
+    const hasSessionCookie =
+      verifyCookie &&
+      (verifyCookie.includes('better-auth.session_token') ||
+        verifyCookie.includes('codex-session'));
+
     // If no cookie from verification, we need to explicitly sign in
-    if (!verifyCookie || !verifyCookie.includes('codex-session')) {
+    if (!hasSessionCookie) {
       // Fallback: explicit sign-in
       const loginResponse = await httpClient.post(
         `${WORKER_URLS.auth}/api/auth/sign-in/email`,
@@ -92,9 +116,18 @@ export const authFixture = {
       );
 
       if (!loginResponse.ok) {
-        const error = await loginResponse.json();
+        const errorText = await loginResponse.text();
+        let errorMsg = errorText;
+        // Try to parse as JSON, fall back to text if HTML
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMsg = JSON.stringify(errorJson);
+        } catch {
+          // Error text is likely HTML, use first 200 chars
+          errorMsg = errorText.slice(0, 200);
+        }
         throw new Error(
-          `Login after verification failed: ${JSON.stringify(error)}`
+          `Login after verification failed (${loginResponse.status}): ${errorMsg}`
         );
       }
 

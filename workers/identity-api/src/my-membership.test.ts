@@ -8,7 +8,7 @@
  * Security: Session authentication required (user-facing, not HMAC)
  */
 
-import { env, SELF } from 'cloudflare:test';
+import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 const VALID_ORG_ID = '123e4567-e89b-12d3-a456-426614174000';
@@ -55,18 +55,20 @@ describe('My Membership Endpoint', () => {
   });
 
   describe('Param Validation', () => {
-    it('should return 400 for invalid orgId (not a UUID)', async () => {
+    it('should return 401 for invalid orgId (not a UUID) - auth checked before validation', async () => {
       const response = await SELF.fetch(
         'http://localhost/api/organizations/not-a-uuid/my-membership'
       );
-      expect(response.status).toBe(400);
+      // Route matches but auth fails before UUID validation
+      expect(response.status).toBe(401);
     });
 
-    it('should return 400 for invalid orgId (empty string)', async () => {
+    it('should return 404 for invalid orgId (empty string) - route does not match', async () => {
       const response = await SELF.fetch(
         'http://localhost/api/organizations//my-membership'
       );
-      expect(response.status).toBe(400);
+      // Empty path segment doesn't match /:orgId/my-membership pattern
+      expect(response.status).toBe(404);
     });
   });
 

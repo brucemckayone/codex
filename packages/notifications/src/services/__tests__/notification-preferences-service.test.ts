@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationPreferencesService } from '../notification-preferences-service';
 
-// Mock DB
+// Mock DB - properly typed to match NotificationPreferencesServiceConfig
 const mockDb = {
   query: {
     notificationPreferences: {
@@ -19,7 +19,13 @@ const mockDb = {
   values: vi.fn().mockReturnThis(),
   returning: vi.fn().mockReturnThis(),
   where: vi.fn().mockReturnThis(),
+  select: vi.fn().mockReturnThis(),
+  delete: vi.fn().mockReturnThis(),
 };
+
+// Mock the database module before importing service
+vi.mock('@codex/database', () => ({ schema: mockDb }));
+vi.unmock('@codex/database');
 
 describe('NotificationPreferencesService', () => {
   let service: NotificationPreferencesService;
@@ -27,7 +33,7 @@ describe('NotificationPreferencesService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     service = new NotificationPreferencesService({
-      db: mockDb as any,
+      db: mockDb,
       environment: 'test',
     });
   });

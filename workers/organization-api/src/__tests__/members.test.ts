@@ -46,7 +46,7 @@ class LastOwnerError extends Error {
 }
 
 class MemberNotFoundError extends Error {
-  constructor(userId: string) {
+  constructor(_userId: string) {
     super('Member not found');
     this.name = 'MemberNotFoundError';
   }

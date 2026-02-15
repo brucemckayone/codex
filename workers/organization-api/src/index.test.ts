@@ -101,24 +101,22 @@ describe('Organization API Worker', () => {
       expect([404, 500]).toContain(response.status);
     });
 
-    it('should return 500 for invalid page (db unavailable prevents 400)', async () => {
+    it('should return 400 for invalid page (query validation)', async () => {
       const response = await SELF.fetch(
         'http://localhost/api/organizations/public/test-org/creators?page=0'
       );
 
-      // In test environment without DB, we get 500 instead of 400
-      // In production with DB, this would return 400 for invalid input
-      expect(response.status).toBe(500);
+      // Query validation catches page < 1 and returns 400
+      expect(response.status).toBe(400);
     });
 
-    it('should return 500 for invalid limit (db unavailable prevents 400)', async () => {
+    it('should return 400 for invalid limit (query validation)', async () => {
       const response = await SELF.fetch(
         'http://localhost/api/organizations/public/test-org/creators?limit=101'
       );
 
-      // In test environment without DB, we get 500 instead of 400
-      // In production with DB, this would return 400 for invalid input
-      expect(response.status).toBe(500);
+      // Query validation catches limit > 100 and returns 400
+      expect(response.status).toBe(400);
     });
 
     it('should use default pagination when query params omitted', async () => {

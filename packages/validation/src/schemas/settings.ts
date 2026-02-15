@@ -127,11 +127,11 @@ export const contactSettingsSchema = z.object({
   supportEmail: z.string(),
   contactUrl: z.string().nullable(),
   timezone: z.string(),
-  // Social media URLs (nullable)
-  twitterUrl: z.string().nullable(),
-  youtubeUrl: z.string().nullable(),
-  instagramUrl: z.string().nullable(),
-  tiktokUrl: z.string().nullable(),
+  // Social media URLs (optional and nullable)
+  twitterUrl: z.string().nullable().optional(),
+  youtubeUrl: z.string().nullable().optional(),
+  instagramUrl: z.string().nullable().optional(),
+  tiktokUrl: z.string().nullable().optional(),
 });
 
 /**

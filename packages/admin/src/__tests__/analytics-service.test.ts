@@ -35,7 +35,6 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import { AdminAnalyticsService } from '../services/analytics-service';
-import { DashboardStats, type DashboardStatsOptions } from '../types';
 
 describe('AdminAnalyticsService', () => {
   let db: Database;
@@ -1275,7 +1274,7 @@ describe('AdminAnalyticsService', () => {
       const oneHourAgo = new Date(now - 60 * 60 * 1000);
       const twoHoursAgo = new Date(now - 2 * 60 * 60 * 1000);
 
-      const [oldContent] = await db
+      await db
         .insert(contentTable)
         .values({
           creatorId,
@@ -1346,7 +1345,7 @@ describe('AdminAnalyticsService', () => {
         )
         .returning();
 
-      // Create 2 published content
+      // Create 2 published content (non-purchase)
       for (let i = 0; i < 2; i++) {
         await db
           .insert(contentTable)
@@ -1407,12 +1406,12 @@ describe('AdminAnalyticsService', () => {
         invitedBy: creatorId,
       });
 
-      // Total should be 2 (content) + 3 (purchases) + 1 (membership) = 6
+      // Total should be 5 (2 content + 3 content from purchase loop) + 3 (purchases) + 1 (membership) = 9
       const result = await service.getRecentActivity(testOrg.id, {
         limit: 100, // Get all items
       });
 
-      expect(result.pagination.total).toBe(6);
+      expect(result.pagination.total).toBe(9);
     });
   });
 });

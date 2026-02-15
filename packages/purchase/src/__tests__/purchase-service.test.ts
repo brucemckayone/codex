@@ -33,6 +33,7 @@ import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
   ForbiddenError,
+  PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
@@ -83,6 +84,15 @@ describe('PurchaseService Integration', () => {
       },
       paymentIntents: {
         retrieve: vi.fn(),
+      },
+      customers: {
+        list: vi.fn(),
+        create: vi.fn(),
+      },
+      billingPortal: {
+        sessions: {
+          create: vi.fn(),
+        },
       },
     } as unknown as Stripe;
 
@@ -1042,9 +1052,14 @@ describe('PurchaseService Integration', () => {
 
     it('throws PaymentProcessingError on Stripe API failure', async () => {
       // Mock Stripe to throw error
+      const stripeError = new Error('Stripe API error') as Error & {
+        type: string;
+      };
+      stripeError.type = 'StripeAPIError';
+
       vi.mocked(
         (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockRejectedValue(new Error('Stripe API error'));
+      ).mockRejectedValue(stripeError);
 
       await expect(
         purchaseService.createPortalSession(

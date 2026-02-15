@@ -409,6 +409,10 @@ describe('default constants', () => {
       supportEmail: 'support@example.com',
       contactUrl: null,
       timezone: 'UTC',
+      twitterUrl: null,
+      youtubeUrl: null,
+      instagramUrl: null,
+      tiktokUrl: null,
     });
     expect(contactSettingsSchema.parse(DEFAULT_CONTACT)).toEqual(
       DEFAULT_CONTACT
