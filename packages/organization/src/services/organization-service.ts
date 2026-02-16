@@ -176,7 +176,7 @@ export class OrganizationService extends BaseService {
     const validated = updateOrganizationSchema.parse(input);
 
     try {
-      const result = await this.db.transaction(async (tx) => {
+      return await this.db.transaction(async (tx) => {
         // Verify organization exists
         const existing = await tx.query.organizations.findFirst({
           where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
@@ -202,12 +202,6 @@ export class OrganizationService extends BaseService {
 
         return updated;
       });
-
-      if (!result) {
-        throw new OrganizationNotFoundError(id);
-      }
-
-      return result;
     } catch (error) {
       if (error instanceof OrganizationNotFoundError) {
         throw error;

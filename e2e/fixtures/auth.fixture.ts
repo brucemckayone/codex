@@ -101,19 +101,52 @@ export const authFixture = {
 
     // If no cookie from verification, we need to explicitly sign in
     if (!hasSessionCookie) {
-      // Fallback: explicit sign-in
-      const loginResponse = await httpClient.post(
-        `${WORKER_URLS.auth}/api/auth/sign-in/email`,
-        {
-          data: {
-            email: data.email,
-            password: data.password,
-          },
-          headers: {
-            Origin: WORKER_URLS.auth,
-          },
+      // Fallback: explicit sign-in with retry for worker restarts
+      let loginResponse: Response | null = null;
+      let lastError: Error | null = null;
+      const maxRetries = 3;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          loginResponse = await httpClient.post(
+            `${WORKER_URLS.auth}/api/auth/sign-in/email`,
+            {
+              data: {
+                email: data.email,
+                password: data.password,
+              },
+              headers: {
+                Origin: WORKER_URLS.auth,
+              },
+            }
+          );
+
+          // Break on success or non-503 errors
+          if (loginResponse.ok || loginResponse.status !== 503) {
+            break;
+          }
+
+          // Retry on 503 (worker restart)
+          if (attempt < maxRetries) {
+            console.log(
+              `[DEBUG] Got 503, retrying sign-in (${attempt}/${maxRetries})...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          }
+        } catch (error) {
+          lastError = error as Error;
+          if (attempt < maxRetries) {
+            console.log(
+              `[DEBUG] Sign-in error, retrying (${attempt}/${maxRetries})...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          }
         }
-      );
+      }
+
+      if (!loginResponse) {
+        throw lastError || new Error('Sign-in failed: no response received');
+      }
 
       if (!loginResponse.ok) {
         const errorText = await loginResponse.text();

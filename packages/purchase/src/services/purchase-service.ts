@@ -146,6 +146,7 @@ export class PurchaseService extends BaseService {
         });
       }
 
+      // Phase 1: Paid content must belong to an organization
       if (contentRecord.organizationId == null) {
         throw new ContentNotPurchasableError(
           validated.contentId,
@@ -173,18 +174,6 @@ export class PurchaseService extends BaseService {
         throw new ContentNotPurchasableError(validated.contentId, 'free', {
           priceCents: contentRecord.priceCents,
         });
-      }
-
-      // Phase 1: Paid content must belong to an organization
-      if (!contentRecord.organizationId) {
-        throw new ContentNotPurchasableError(
-          validated.contentId,
-          'not_published',
-          {
-            reason:
-              'Content must belong to an organization to be purchasable (Phase 1)',
-          }
-        );
       }
 
       // Step 2: Check for existing purchase
@@ -622,9 +611,9 @@ export class PurchaseService extends BaseService {
       // Query Stripe API for session details
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
 
-      // Verify session belongs to user (metadata.customer_id)
-      // Note: We set customer_id in metadata during createCheckoutSession (line 226)
-      if (session.metadata?.customer_id !== customerId) {
+      // Verify session belongs to user (metadata.customerId)
+      // Note: We set customerId in metadata during createCheckoutSession (line 227)
+      if (session.metadata?.customerId !== customerId) {
         throw new ForbiddenError(
           'Checkout session does not belong to authenticated user',
           {
