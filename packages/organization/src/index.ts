@@ -89,6 +89,8 @@ export {
   IdentityServiceError,
   InternalServiceError,
   isIdentityServiceError,
+  LastOwnerError,
+  MemberNotFoundError,
   NotFoundError,
   OrganizationNotFoundError,
   ValidationError,

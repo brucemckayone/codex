@@ -84,6 +84,11 @@ export const updateContactSchema = z.object({
   supportEmail: z.string().email('Invalid email format').optional(),
   contactUrl: urlSchema.nullable().optional(),
   timezone: timezoneSchema.optional(),
+  // Social media URLs (optional, nullable)
+  twitterUrl: urlSchema.nullable().optional(),
+  youtubeUrl: urlSchema.nullable().optional(),
+  instagramUrl: urlSchema.nullable().optional(),
+  tiktokUrl: urlSchema.nullable().optional(),
 });
 
 export type UpdateContactInput = z.infer<typeof updateContactSchema>;
@@ -122,6 +127,11 @@ export const contactSettingsSchema = z.object({
   supportEmail: z.string(),
   contactUrl: z.string().nullable(),
   timezone: z.string(),
+  // Social media URLs (optional and nullable)
+  twitterUrl: z.string().nullable().optional(),
+  youtubeUrl: z.string().nullable().optional(),
+  instagramUrl: z.string().nullable().optional(),
+  tiktokUrl: z.string().nullable().optional(),
 });
 
 /**
@@ -163,6 +173,11 @@ export const DEFAULT_CONTACT: ContactSettingsResponse = {
   supportEmail: 'support@example.com',
   contactUrl: null,
   timezone: 'UTC',
+  // Social media URLs (null by default)
+  twitterUrl: null,
+  youtubeUrl: null,
+  instagramUrl: null,
+  tiktokUrl: null,
 } as const;
 
 /**

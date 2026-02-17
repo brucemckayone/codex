@@ -187,3 +187,20 @@ export const templateDataSchemas = {
 
 // Type for template data keys (enables compile-time checking)
 export type TemplateDataKey = keyof typeof templateDataSchemas;
+
+// ============================================
+// Notification Preferences Schemas
+// ============================================
+
+/**
+ * Update notification preferences schema
+ * All fields are optional - only include fields to update
+ */
+export const updateNotificationPreferencesSchema = z.object({
+  emailMarketing: z.boolean().optional(),
+  emailTransactional: z.boolean().optional(),
+  emailDigest: z.boolean().optional(),
+});
+export type UpdateNotificationPreferencesInput = z.infer<
+  typeof updateNotificationPreferencesSchema
+>;

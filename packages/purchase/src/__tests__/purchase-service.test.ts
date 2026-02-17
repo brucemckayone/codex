@@ -33,6 +33,7 @@ import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
   ForbiddenError,
+  PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
@@ -79,10 +80,20 @@ describe('PurchaseService Integration', () => {
       checkout: {
         sessions: {
           create: vi.fn(),
+          retrieve: vi.fn(), // For verifyCheckoutSession
         },
       },
       paymentIntents: {
         retrieve: vi.fn(),
+      },
+      customers: {
+        list: vi.fn(),
+        create: vi.fn(),
+      },
+      billingPortal: {
+        sessions: {
+          create: vi.fn(),
+        },
       },
     } as unknown as Stripe;
 
@@ -927,6 +938,471 @@ describe('PurchaseService Integration', () => {
           otherUserId
         )
       ).rejects.toThrow(PurchaseNotFoundError);
+    });
+  });
+
+  describe('createPortalSession', () => {
+    it('creates billing portal session for existing Stripe customer', async () => {
+      const portalUrl = 'https://billing.stripe.com/session/test_123';
+
+      // Mock Stripe customer list to return existing customer
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockResolvedValue({
+        data: [
+          {
+            id: 'cus_existing_123',
+            email: 'test@example.com',
+            metadata: { userId },
+          },
+        ],
+        has_more: false,
+      });
+
+      // Mock portal session creation
+      vi.mocked(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        url: portalUrl,
+      } as Stripe.BillingPortal.Session);
+
+      const result = await purchaseService.createPortalSession(
+        'test@example.com',
+        userId,
+        'http://localhost:3000/settings'
+      );
+
+      expect(result.url).toBe(portalUrl);
+
+      // Verify customer list was called
+      expect(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'test@example.com',
+          limit: 1,
+        })
+      );
+
+      // Verify portal session was created
+      expect(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: 'cus_existing_123',
+          return_url: 'http://localhost:3000/settings',
+        })
+      );
+    });
+
+    it('creates new Stripe customer if none exists', async () => {
+      const portalUrl = 'https://billing.stripe.com/session/test_456';
+
+      // Mock Stripe customer list to return empty
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockResolvedValue({
+        data: [],
+        has_more: false,
+      });
+
+      // Mock customer creation
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        id: 'cus_new_789',
+        email: 'newuser@example.com',
+        metadata: { userId: otherUserId },
+      });
+
+      // Mock portal session creation
+      vi.mocked(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        url: portalUrl,
+      } as Stripe.BillingPortal.Session);
+
+      const result = await purchaseService.createPortalSession(
+        'newuser@example.com',
+        otherUserId,
+        'http://localhost:3000/settings'
+      );
+
+      expect(result.url).toBe(portalUrl);
+
+      // Verify new customer was created
+      expect(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'newuser@example.com',
+          metadata: { userId: otherUserId },
+        })
+      );
+
+      // Verify portal session was created with new customer ID
+      expect(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: 'cus_new_789',
+          return_url: 'http://localhost:3000/settings',
+        })
+      );
+    });
+
+    it('throws PaymentProcessingError on Stripe API failure', async () => {
+      // Mock Stripe to throw error
+      const stripeError = new Error('Stripe API error') as Error & {
+        type: string;
+      };
+      stripeError.type = 'StripeAPIError';
+
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockRejectedValue(stripeError);
+
+      await expect(
+        purchaseService.createPortalSession(
+          'test@example.com',
+          userId,
+          'http://localhost:3000/settings'
+        )
+      ).rejects.toThrow(PaymentProcessingError);
+    });
+
+    it('validates return URL with domain whitelist', async () => {
+      // Mock successful response
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockResolvedValue({
+        data: [],
+        has_more: false,
+      });
+
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        id: 'cus_new_789',
+        email: 'newuser@example.com',
+        metadata: { userId: otherUserId },
+      });
+
+      vi.mocked(
+        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        url: 'https://billing.stripe.com/session/test_789',
+      } as Stripe.BillingPortal.Session);
+
+      // Valid URL (localhost is whitelisted)
+      await expect(
+        purchaseService.createPortalSession(
+          'newuser@example.com',
+          otherUserId,
+          'http://localhost:3000/settings'
+        )
+      ).resolves.toBeDefined();
+    });
+  });
+
+  /**
+   * verifyCheckoutSession Tests
+   *
+   * Critical security endpoint - verifies Stripe checkout session status
+   * and ensures session belongs to authenticated user.
+   */
+  describe('verifyCheckoutSession', () => {
+    let verifyUserId: string;
+    let verifyOtherUserId: string;
+    let verifyOrgId: string;
+    let verifyContentId: string;
+    let sessionId: string;
+
+    beforeAll(async () => {
+      // Setup: Create separate users and organization for verify tests
+      const userIds = await seedTestUsers(db, 2);
+      [verifyUserId, verifyOtherUserId] = userIds;
+
+      // Create organization
+      const [org] = await db
+        .insert(organizations)
+        .values({
+          name: 'Verify Test Org',
+          slug: createUniqueSlug('verify-test-org'),
+          ownerId: verifyUserId,
+        })
+        .returning();
+
+      if (!org) throw new Error('Failed to create verify test organization');
+      verifyOrgId = org.id;
+
+      // Create content
+      const media = await mediaService.create(
+        {
+          title: 'Verify Test Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/verify-test.mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        verifyUserId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/verify-test/master.m3u8',
+          thumbnailKey: 'thumbnails/verify-test.jpg',
+          durationSeconds: 60,
+        },
+        verifyUserId
+      );
+
+      const content = await contentService.create(
+        {
+          organizationId: verifyOrgId,
+          title: 'Verify Test Content',
+          slug: createUniqueSlug('verify-test-content'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          priceCents: 999,
+        },
+        verifyUserId
+      );
+      verifyContentId = content.id;
+
+      // Add retrieve method to mock Stripe
+      vi.mocked(mockStripe.checkout.sessions).retrieve = vi.fn();
+
+      sessionId = 'cs_test_verify_session';
+      const paymentIntentId = 'pi_test_verify_intent';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: sessionId,
+        status: 'complete',
+        payment_intent: paymentIntentId,
+        metadata: {
+          contentId: verifyContentId,
+          customerId: verifyUserId, // Must match the key used in createCheckoutSession
+          organizationId: verifyOrgId,
+          creatorId: verifyUserId,
+        },
+      } as Stripe.Checkout.Session);
+    });
+
+    it('should return session status when session belongs to user', async () => {
+      const result = await purchaseService.verifyCheckoutSession(
+        sessionId,
+        verifyUserId
+      );
+
+      expect(result).toEqual({
+        sessionStatus: 'complete',
+        purchase: undefined, // No purchase record yet
+        content: undefined,
+      });
+    });
+
+    it('should include purchase and content when purchase exists', async () => {
+      const paymentIntentId = 'pi_test_verify_with_purchase';
+
+      // Create purchase via service
+      await purchaseService.completePurchase(paymentIntentId, {
+        customerId: verifyUserId,
+        contentId: verifyContentId,
+        organizationId: verifyOrgId,
+        amountPaidCents: 999,
+        currency: 'usd',
+      });
+
+      // Mock retrieve to return session with this payment intent
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: sessionId,
+        status: 'complete',
+        payment_intent: paymentIntentId,
+        metadata: {
+          contentId: verifyContentId,
+          customerId: verifyUserId,
+          organizationId: verifyOrgId,
+          creatorId: verifyUserId,
+        },
+      } as Stripe.Checkout.Session);
+
+      const result = await purchaseService.verifyCheckoutSession(
+        sessionId,
+        verifyUserId
+      );
+
+      expect(result.sessionStatus).toBe('complete');
+      expect(result.purchase).toBeDefined();
+      expect(result.purchase?.contentId).toBe(verifyContentId);
+      expect(result.purchase?.amountPaidCents).toBe(999);
+      expect(result.content).toBeDefined();
+      expect(result.content?.id).toBe(verifyContentId);
+    });
+
+    it('should return open status for incomplete sessions', async () => {
+      const openSessionId = 'cs_test_open_session';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: openSessionId,
+        status: 'open',
+        payment_intent: null,
+        metadata: {
+          contentId: verifyContentId,
+          customerId: verifyUserId,
+        },
+      } as Stripe.Checkout.Session);
+
+      const result = await purchaseService.verifyCheckoutSession(
+        openSessionId,
+        verifyUserId
+      );
+
+      expect(result.sessionStatus).toBe('open');
+      expect(result.purchase).toBeUndefined();
+      expect(result.content).toBeUndefined();
+    });
+
+    it('should return expired status for expired sessions', async () => {
+      const expiredSessionId = 'cs_test_expired_session';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: expiredSessionId,
+        status: 'expired',
+        payment_intent: null,
+        metadata: {
+          contentId: verifyContentId,
+          customerId: verifyUserId,
+        },
+      } as Stripe.Checkout.Session);
+
+      const result = await purchaseService.verifyCheckoutSession(
+        expiredSessionId,
+        verifyUserId
+      );
+
+      expect(result.sessionStatus).toBe('expired');
+    });
+
+    it('should throw ForbiddenError when session belongs to different user', async () => {
+      const otherUserSessionId = 'cs_test_other_user_session';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: otherUserSessionId,
+        status: 'complete',
+        payment_intent: 'pi_other_user',
+        metadata: {
+          contentId: verifyContentId,
+          customerId: verifyOtherUserId, // Different user!
+          organizationId: verifyOrgId,
+          creatorId: verifyUserId,
+        },
+      } as Stripe.Checkout.Session);
+
+      await expect(
+        purchaseService.verifyCheckoutSession(otherUserSessionId, verifyUserId)
+      ).rejects.toThrow(ForbiddenError);
+
+      await expect(
+        purchaseService.verifyCheckoutSession(otherUserSessionId, verifyUserId)
+      ).rejects.toThrow('does not belong to authenticated user');
+    });
+
+    it('should throw PaymentProcessingError for invalid session ID', async () => {
+      const invalidSessionId = 'cs_invalid_session';
+
+      const stripeError = new Error('Invalid API key') as Error & {
+        type?: string;
+      };
+      stripeError.type = 'StripeInvalidRequestError';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockRejectedValue(
+        stripeError
+      );
+
+      await expect(
+        purchaseService.verifyCheckoutSession(invalidSessionId, verifyUserId)
+      ).rejects.toThrow(PaymentProcessingError);
+    });
+
+    it('should handle metadata key correctly - camelCase customerId', async () => {
+      // CRITICAL TEST: Ensures metadata key consistency between create and verify
+      // The bug was using customer_id (snake_case) in verify but customerId (camelCase) in create
+      const camelCaseSessionId = 'cs_test_camelcase_metadata';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: camelCaseSessionId,
+        status: 'complete',
+        payment_intent: 'pi_camelcase',
+        metadata: {
+          contentId: verifyContentId,
+          customerId: verifyUserId, // camelCase - must match createCheckoutSession
+          organizationId: verifyOrgId,
+          creatorId: verifyUserId,
+        },
+      } as Stripe.Checkout.Session);
+
+      // Should NOT throw ForbiddenError
+      const result = await purchaseService.verifyCheckoutSession(
+        camelCaseSessionId,
+        verifyUserId
+      );
+
+      expect(result.sessionStatus).toBe('complete');
+    });
+
+    it('should reject session with snake_case customer_id key', async () => {
+      // This test documents the expected failure if using snake_case
+      // If this test passes (doesn't throw), it means the verify function
+      // is incorrectly accepting snake_case metadata
+      const snakeCaseSessionId = 'cs_test_snakecase_metadata';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: snakeCaseSessionId,
+        status: 'complete',
+        payment_intent: 'pi_snakecase',
+        metadata: {
+          contentId: verifyContentId,
+          customer_id: verifyUserId, // snake_case - should NOT be accepted
+          organizationId: verifyOrgId,
+          creatorId: verifyUserId,
+        },
+      } as Stripe.Checkout.Session);
+
+      // With correct implementation, customer_id (undefined) !== userId
+      // so this should throw ForbiddenError
+      await expect(
+        purchaseService.verifyCheckoutSession(snakeCaseSessionId, verifyUserId)
+      ).rejects.toThrow(ForbiddenError);
+    });
+
+    it('should throw PaymentProcessingError on Stripe connection error', async () => {
+      const connectionErrorSessionId = 'cs_test_connection_error';
+
+      const connectionError = new Error('Connection error') as Error & {
+        type?: string;
+      };
+      connectionError.type = 'StripeConnectionError';
+
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockRejectedValue(
+        connectionError
+      );
+
+      await expect(
+        purchaseService.verifyCheckoutSession(
+          connectionErrorSessionId,
+          verifyUserId
+        )
+      ).rejects.toThrow(PaymentProcessingError);
+
+      await expect(
+        purchaseService.verifyCheckoutSession(
+          connectionErrorSessionId,
+          verifyUserId
+        )
+      ).rejects.toThrow('Failed to connect to Stripe API');
     });
   });
 });

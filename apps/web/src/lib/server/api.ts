@@ -18,6 +18,7 @@ import {
 import type {
   AllSettingsResponse,
   PaginatedListResponse,
+  PaginationMetadata,
   PlaybackProgressResponse,
   SessionData,
   SingleItemResponse,
@@ -346,6 +347,88 @@ export function createServerApi(
             body: JSON.stringify(data),
           }
         ),
+    },
+
+    /**
+     * Analytics endpoints (Admin API)
+     */
+
+    /**
+     * Get revenue stats
+     * Returns { totalRevenueCents, totalPurchases, averageOrderValueCents, ... }
+     */
+    analytics: {
+      getRevenue: (params?: URLSearchParams) =>
+        request<{
+          totalRevenueCents: number;
+          totalPurchases: number;
+          averageOrderValueCents: number;
+          platformFeeCents: number;
+          organizationFeeCents: number;
+          creatorPayoutCents: number;
+          revenueByDay: Array<{
+            date: string;
+            revenueCents: number;
+            purchaseCount: number;
+          }>;
+        }>(
+          'admin',
+          `/api/admin/analytics/revenue${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get top content by revenue
+       * Returns array of { contentId, contentTitle, revenueCents, purchaseCount }
+       */
+      getTopContent: (params?: URLSearchParams) =>
+        request<
+          Array<{
+            contentId: string;
+            contentTitle: string;
+            revenueCents: number;
+            purchaseCount: number;
+          }>
+        >(
+          'admin',
+          `/api/admin/analytics/top-content${params ? `?${params}` : ''}`
+        ),
+    },
+
+    /**
+     * Admin endpoints
+     */
+    admin: {
+      /**
+       * Get customers list
+       * Returns PaginatedListResponse with customer items
+       */
+      getCustomers: (params?: URLSearchParams) =>
+        request<
+          PaginatedListResponse<{
+            userId: string;
+            email: string;
+            name: string | null;
+            createdAt: string;
+            totalPurchases: number;
+            totalSpentCents: number;
+          }>
+        >('admin', `/api/admin/customers${params ? `?${params}` : ''}`),
+
+      /**
+       * Get activity feed
+       * Returns { items: [...], pagination: {...} }
+       */
+      getActivity: (params?: URLSearchParams) =>
+        request<{
+          items: Array<{
+            id: string;
+            type: 'purchase' | 'content_published' | 'member_joined';
+            title: string;
+            description: string | null;
+            timestamp: string;
+          }>;
+          pagination: PaginationMetadata;
+        }>('admin', `/api/admin/activity${params ? `?${params}` : ''}`),
     },
   };
 }

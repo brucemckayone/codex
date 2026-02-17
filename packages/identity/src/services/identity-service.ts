@@ -1,11 +1,15 @@
 import type { R2Service } from '@codex/cloudflare-clients';
-import { users } from '@codex/database/schema';
+import {
+  notificationPreferences,
+  organizationMemberships,
+  users,
+} from '@codex/database/schema';
 import {
   type ImageProcessingResult,
   ImageProcessingService,
 } from '@codex/image-processing';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import { UserNotFoundError } from '../errors';
 
@@ -53,5 +57,224 @@ export class IdentityService extends BaseService {
 
     // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
     return await imageService.processUserAvatar(userId, file);
+  }
+
+  /**
+   * Get the authenticated user's membership in an organization
+   *
+   * Returns the user's role, status, and joined date for the specified organization.
+   * Returns null for role/status/joinedAt if not a member (graceful degradation).
+   * Does not throw errors for "not found" - this is intentional for frontend convenience.
+   *
+   * @param orgId - Organization ID
+   * @param userId - Authenticated user ID
+   * @returns Membership lookup response with role, status, and joinedAt (all null if not a member)
+   */
+  async getMyMembership(
+    orgId: string,
+    userId: string
+  ): Promise<{
+    role: string | null;
+    status: string | null;
+    joinedAt: string | null;
+  }> {
+    try {
+      const membership = await this.db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(organizationMemberships.organizationId, orgId),
+          eq(organizationMemberships.userId, userId)
+        ),
+      });
+
+      if (!membership) {
+        return {
+          role: null,
+          status: null,
+          joinedAt: null,
+        };
+      }
+
+      return {
+        role: membership.role,
+        status: membership.status,
+        joinedAt: membership.createdAt.toISOString(),
+      };
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.getMyMembership');
+    }
+  }
+
+  /**
+   * Update user profile
+   *
+   * @param userId - User ID
+   * @param input - Profile fields to update (displayName maps to name, email requires re-verification)
+   * @returns Updated user data
+   */
+  async updateProfile(
+    userId: string,
+    input: { displayName?: string; email?: string }
+  ): Promise<{
+    id: string;
+    name: string;
+    email: string;
+    emailVerified: boolean;
+    image: string | null;
+  }> {
+    try {
+      // First, fetch the current user to check if email is changing
+      const existing = await this.db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+
+      if (!existing) {
+        throw new UserNotFoundError(userId);
+      }
+
+      const updateData: Partial<{
+        name: string;
+        email: string;
+        emailVerified: boolean;
+      }> = {};
+
+      // displayName maps to the 'name' column in the database
+      if (input.displayName !== undefined) {
+        updateData.name = input.displayName;
+      }
+
+      // If email is being changed, mark it as unverified (requires re-verification)
+      if (input.email !== undefined && input.email !== existing.email) {
+        updateData.email = input.email;
+        updateData.emailVerified = false;
+      }
+
+      const [updated] = await this.db
+        .update(users)
+        .set(updateData)
+        .where(eq(users.id, userId))
+        .returning();
+
+      if (!updated) {
+        throw new UserNotFoundError(userId);
+      }
+
+      return {
+        id: updated.id,
+        name: updated.name,
+        email: updated.email,
+        emailVerified: updated.emailVerified,
+        image: updated.image,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.updateProfile');
+    }
+  }
+
+  /**
+   * Get notification preferences for a user (upserts defaults on first access)
+   *
+   * @param userId - User ID
+   * @returns Notification preferences
+   */
+  async getNotificationPreferences(userId: string): Promise<{
+    emailMarketing: boolean;
+    emailTransactional: boolean;
+    emailDigest: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
+    try {
+      // Upsert: insert defaults if not exists, return existing if present
+      const [prefs] = await this.db
+        .insert(notificationPreferences)
+        .values({ userId })
+        .onConflictDoUpdate({
+          target: notificationPreferences.userId,
+          set: { userId }, // no-op update to return the row
+        })
+        .returning();
+
+      return {
+        emailMarketing: prefs.emailMarketing,
+        emailTransactional: prefs.emailTransactional,
+        emailDigest: prefs.emailDigest,
+        createdAt: prefs.createdAt,
+        updatedAt: prefs.updatedAt,
+      };
+    } catch (error) {
+      throw this.handleError(
+        error,
+        'IdentityService.getNotificationPreferences'
+      );
+    }
+  }
+
+  /**
+   * Update notification preferences for a user
+   *
+   * @param userId - User ID
+   * @param input - Preference fields to update
+   * @returns Updated notification preferences
+   */
+  async updateNotificationPreferences(
+    userId: string,
+    input: {
+      emailMarketing?: boolean;
+      emailTransactional?: boolean;
+      emailDigest?: boolean;
+    }
+  ): Promise<{
+    emailMarketing: boolean;
+    emailTransactional: boolean;
+    emailDigest: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
+    try {
+      // Upsert: insert with provided values or update existing
+      const [prefs] = await this.db
+        .insert(notificationPreferences)
+        .values({
+          userId,
+          ...(input.emailMarketing !== undefined && {
+            emailMarketing: input.emailMarketing,
+          }),
+          ...(input.emailTransactional !== undefined && {
+            emailTransactional: input.emailTransactional,
+          }),
+          ...(input.emailDigest !== undefined && {
+            emailDigest: input.emailDigest,
+          }),
+        })
+        .onConflictDoUpdate({
+          target: notificationPreferences.userId,
+          set: {
+            ...(input.emailMarketing !== undefined && {
+              emailMarketing: input.emailMarketing,
+            }),
+            ...(input.emailTransactional !== undefined && {
+              emailTransactional: input.emailTransactional,
+            }),
+            ...(input.emailDigest !== undefined && {
+              emailDigest: input.emailDigest,
+            }),
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      return {
+        emailMarketing: prefs.emailMarketing,
+        emailTransactional: prefs.emailTransactional,
+        emailDigest: prefs.emailDigest,
+        createdAt: prefs.createdAt,
+        updatedAt: prefs.updatedAt,
+      };
+    } catch (error) {
+      throw this.handleError(
+        error,
+        'IdentityService.updateNotificationPreferences'
+      );
+    }
   }
 }

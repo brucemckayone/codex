@@ -24,6 +24,7 @@ import { IdentityService } from '@codex/identity';
 import { ImageProcessingService } from '@codex/image-processing';
 import {
   createEmailProvider,
+  NotificationPreferencesService,
   NotificationsService,
   TemplateService,
 } from '@codex/notifications';
@@ -88,6 +89,7 @@ export function createServiceRegistry(
   let _adminCustomer: AdminCustomerManagementService | undefined;
   let _templates: TemplateService | undefined;
   let _notifications: NotificationsService | undefined;
+  let _preferences: NotificationPreferencesService | undefined;
   let _images: ImageProcessingService | undefined;
   let _identity: IdentityService | undefined;
 
@@ -362,6 +364,16 @@ export function createServiceRegistry(
         });
       }
       return _notifications;
+    },
+
+    get preferences() {
+      if (!_preferences) {
+        _preferences = new NotificationPreferencesService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _preferences;
     },
 
     // ========================================================================

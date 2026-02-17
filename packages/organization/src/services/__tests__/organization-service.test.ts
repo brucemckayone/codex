@@ -18,16 +18,24 @@
  * - Tests are fully isolated and idempotent
  */
 
+import * as schema from '@codex/database/schema';
 import {
   createUniqueSlug,
   type Database,
+  seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ConflictError, OrganizationNotFoundError } from '../../errors';
+import {
+  ConflictError,
+  LastOwnerError,
+  MemberNotFoundError,
+  NotFoundError,
+  OrganizationNotFoundError,
+} from '../../errors';
 import { OrganizationService } from '../organization-service';
 
 // Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
@@ -546,6 +554,827 @@ describe('OrganizationService', () => {
       expect(ids1).toHaveLength(3);
       expect(ids1).toEqual(ids2);
       expect(ids2).toEqual(ids3);
+    });
+  });
+
+  /**
+   * Member Management Tests
+   *
+   * Tests for organization member CRUD operations:
+   * - listMembers: Paginated member listing with filters
+   * - inviteMember: Adding users to organizations
+   * - updateMemberRole: Changing member roles with safety checks
+   * - removeMember: Removing members with safety checks
+   */
+  describe('member management', () => {
+    let memberMgmtTestOrgId: string;
+    let memberMgmtTestUserIds: string[];
+    let memberMgmtInviterUserId: string;
+
+    beforeEach(async () => {
+      // Create test organization
+      const org = await service.create({
+        name: `Test Org ${Date.now()}`,
+        slug: createUniqueSlug('test-org'),
+      });
+      memberMgmtTestOrgId = org.id;
+
+      // Create test users (need real users for membership operations)
+      memberMgmtTestUserIds = await seedTestUsers(db, 4);
+      memberMgmtInviterUserId = memberMgmtTestUserIds[0];
+
+      // Add inviter as owner of the organization
+      await db.insert(schema.organizationMemberships).values({
+        organizationId: memberMgmtTestOrgId,
+        userId: memberMgmtInviterUserId,
+        role: 'owner',
+        status: 'active',
+        invitedBy: null,
+      });
+    });
+
+    describe('listMembers', () => {
+      beforeEach(async () => {
+        // Add initial members to organization
+        await db.insert(schema.organizationMemberships).values([
+          {
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[1],
+            role: 'admin',
+            status: 'active',
+            invitedBy: memberMgmtInviterUserId,
+          },
+          {
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[2],
+            role: 'member',
+            status: 'active',
+            invitedBy: memberMgmtInviterUserId,
+          },
+          {
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[3],
+            role: 'member',
+            status: 'inactive',
+            invitedBy: memberMgmtInviterUserId,
+          },
+        ]);
+      });
+
+      it('should return paginated list of members', async () => {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 10,
+        });
+
+        expect(result.items).toHaveLength(4); // owner + admin + 2 members
+        expect(result.pagination.page).toBe(1);
+        expect(result.pagination.limit).toBe(10);
+        expect(result.pagination.total).toBe(4);
+        expect(result.pagination.totalPages).toBe(1);
+      });
+
+      it('should filter members by role', async () => {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 10,
+          role: 'admin',
+        });
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0].role).toBe('admin');
+      });
+
+      it('should filter members by status', async () => {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 10,
+          status: 'active',
+        });
+
+        expect(result.items).toHaveLength(3); // owner + admin + active member
+        expect(result.items.every((m) => m.status === 'active')).toBe(true);
+      });
+
+      it('should paginate correctly with small page size', async () => {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 2,
+        });
+
+        expect(result.items).toHaveLength(2);
+        expect(result.pagination.totalPages).toBe(2);
+        expect(result.pagination.page).toBe(1);
+      });
+
+      it('should return empty list for organization with no members', async () => {
+        const emptyOrg = await service.create({
+          name: `Empty Org ${Date.now()}`,
+          slug: createUniqueSlug('empty-org'),
+        });
+
+        const result = await service.listMembers(emptyOrg.id, {
+          page: 1,
+          limit: 10,
+        });
+
+        expect(result.items).toHaveLength(0);
+        expect(result.pagination.total).toBe(0);
+      });
+
+      it('should include user details in response', async () => {
+        const result = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 10,
+        });
+
+        expect(result.items[0]).toHaveProperty('userId');
+        expect(result.items[0]).toHaveProperty('name');
+        expect(result.items[0]).toHaveProperty('email');
+        expect(result.items[0]).toHaveProperty('avatarUrl');
+        expect(result.items[0]).toHaveProperty('role');
+        expect(result.items[0]).toHaveProperty('status');
+        expect(result.items[0]).toHaveProperty('joinedAt');
+      });
+    });
+
+    describe('inviteMember', () => {
+      // Helper to get user email
+      async function getUserEmail(userId: string): Promise<string> {
+        const user = await db.query.users.findFirst({
+          where: (users, { eq }) => eq(users.id, userId),
+          columns: { email: true },
+        });
+        if (!user) {
+          throw new Error(`User not found: ${userId}`);
+        }
+        return user.email;
+      }
+
+      let newUserId: string;
+
+      beforeEach(async () => {
+        // Create a user to invite
+        [newUserId] = await seedTestUsers(db, 1);
+      });
+
+      it('should create membership with valid email', async () => {
+        const email = await getUserEmail(newUserId);
+
+        const result = await service.inviteMember(
+          memberMgmtTestOrgId,
+          { email, role: 'member' },
+          memberMgmtInviterUserId
+        );
+
+        expect(result.userId).toBe(newUserId);
+        expect(result.role).toBe('member');
+        expect(result.status).toBe('active');
+        expect(result.joinedAt).toBeInstanceOf(Date);
+        expect(result.id).toBeDefined();
+      });
+
+      it('should set role correctly', async () => {
+        const email = await getUserEmail(newUserId);
+
+        const result = await service.inviteMember(
+          memberMgmtTestOrgId,
+          { email, role: 'admin' },
+          memberMgmtInviterUserId
+        );
+
+        expect(result.role).toBe('admin');
+      });
+
+      it('should set status to active by default', async () => {
+        const email = await getUserEmail(newUserId);
+
+        const result = await service.inviteMember(
+          memberMgmtTestOrgId,
+          { email, role: 'creator' },
+          memberMgmtInviterUserId
+        );
+
+        expect(result.status).toBe('active');
+      });
+
+      it('should throw NotFoundError for non-existent user', async () => {
+        await expect(
+          service.inviteMember(
+            memberMgmtTestOrgId,
+            { email: 'nonexistent@example.com', role: 'member' },
+            memberMgmtInviterUserId
+          )
+        ).rejects.toThrow(NotFoundError);
+      });
+
+      it('should throw ConflictError for duplicate member', async () => {
+        const email = await getUserEmail(memberMgmtTestUserIds[1]);
+
+        // First invite should succeed
+        await service.inviteMember(
+          memberMgmtTestOrgId,
+          { email, role: 'member' },
+          memberMgmtInviterUserId
+        );
+
+        // Second invite should fail
+        await expect(
+          service.inviteMember(
+            memberMgmtTestOrgId,
+            { email, role: 'admin' },
+            memberMgmtInviterUserId
+          )
+        ).rejects.toThrow(ConflictError);
+      });
+    });
+
+    describe('updateMemberRole', () => {
+      beforeEach(async () => {
+        // Add a test member
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: memberMgmtTestOrgId,
+          userId: memberMgmtTestUserIds[1],
+          role: 'member',
+          status: 'active',
+          invitedBy: memberMgmtInviterUserId,
+        });
+      });
+
+      it('should update member role', async () => {
+        const result = await service.updateMemberRole(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[1],
+          'admin'
+        );
+
+        expect(result.userId).toBe(memberMgmtTestUserIds[1]);
+        expect(result.role).toBe('admin');
+        expect(result.status).toBe('active');
+      });
+
+      it('should promote member to owner', async () => {
+        const result = await service.updateMemberRole(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[1],
+          'owner'
+        );
+
+        expect(result.role).toBe('owner');
+      });
+
+      it('should throw MemberNotFoundError for non-existent member', async () => {
+        await expect(
+          service.updateMemberRole(
+            memberMgmtTestOrgId,
+            'nonexistent-user-id',
+            'admin'
+          )
+        ).rejects.toThrow(MemberNotFoundError);
+      });
+
+      it('should throw LastOwnerError when demoting last owner', async () => {
+        // Try to demote the only owner
+        await expect(
+          service.updateMemberRole(
+            memberMgmtTestOrgId,
+            memberMgmtInviterUserId,
+            'admin'
+          )
+        ).rejects.toThrow(LastOwnerError);
+      });
+
+      it('should allow demotion when multiple owners exist', async () => {
+        // Promote another user to owner first
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: memberMgmtTestOrgId,
+          userId: memberMgmtTestUserIds[2],
+          role: 'owner',
+          status: 'active',
+          invitedBy: memberMgmtInviterUserId,
+        });
+
+        // Now we can demote the first owner
+        const result = await service.updateMemberRole(
+          memberMgmtTestOrgId,
+          memberMgmtInviterUserId,
+          'admin'
+        );
+
+        expect(result.role).toBe('admin');
+      });
+    });
+
+    describe('removeMember', () => {
+      beforeEach(async () => {
+        // Add test members
+        await db.insert(schema.organizationMemberships).values([
+          {
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[1],
+            role: 'admin',
+            status: 'active',
+            invitedBy: memberMgmtInviterUserId,
+          },
+          {
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[2],
+            role: 'member',
+            status: 'active',
+            invitedBy: memberMgmtInviterUserId,
+          },
+        ]);
+      });
+
+      it('should remove member from organization', async () => {
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[1]
+        );
+
+        // Verify member is removed
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, memberMgmtTestUserIds[1])
+            ),
+        });
+
+        expect(membership).toBeUndefined();
+      });
+
+      it('should throw MemberNotFoundError for non-existent member', async () => {
+        await expect(
+          service.removeMember(memberMgmtTestOrgId, 'nonexistent-user-id')
+        ).rejects.toThrow(MemberNotFoundError);
+      });
+
+      it('should throw LastOwnerError when removing last owner', async () => {
+        await expect(
+          service.removeMember(memberMgmtTestOrgId, memberMgmtInviterUserId)
+        ).rejects.toThrow(LastOwnerError);
+      });
+
+      it('should allow removing owner when multiple owners exist', async () => {
+        // Add another owner using user [3] which isn't already a member
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: memberMgmtTestOrgId,
+          userId: memberMgmtTestUserIds[3],
+          role: 'owner',
+          status: 'active',
+          invitedBy: memberMgmtInviterUserId,
+        });
+
+        // Now we can remove the first owner
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtInviterUserId
+        );
+
+        // Verify removal
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, memberMgmtInviterUserId)
+            ),
+        });
+
+        expect(membership).toBeUndefined();
+      });
+
+      it('should allow removing non-owner members', async () => {
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[2]
+        );
+
+        // Verify removal
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, memberMgmtTestUserIds[2])
+            ),
+        });
+
+        expect(membership).toBeUndefined();
+      });
+    });
+  });
+
+  describe('getPublicCreators', () => {
+    let creatorsTestOrgId: string;
+    let creatorsTestOrgSlug: string;
+    const creatorsTestUserIds: string[] = [];
+
+    beforeAll(async () => {
+      // Create test users
+      const userIds = await seedTestUsers(db, 5);
+      creatorsTestUserIds.push(...userIds);
+
+      // Create test organization
+      const org = await service.create({
+        name: 'Test Creators Org',
+        slug: createUniqueSlug('test-creators'),
+      });
+      creatorsTestOrgId = org.id;
+      creatorsTestOrgSlug = org.slug;
+
+      // Add users as members with different roles
+      await db.insert(schema.organizationMemberships).values([
+        {
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[0],
+          role: 'owner',
+          status: 'active',
+        },
+        {
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[1],
+          role: 'admin',
+          status: 'active',
+        },
+        {
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[2],
+          role: 'creator',
+          status: 'active',
+        },
+        {
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[3],
+          role: 'subscriber',
+          status: 'active',
+        },
+        {
+          organizationId: creatorsTestOrgId,
+          userId: creatorsTestUserIds[4],
+          role: 'creator',
+          status: 'inactive',
+        },
+      ]);
+
+      // Add some published content for testing contentCount
+      await db.insert(schema.content).values([
+        {
+          creatorId: creatorsTestUserIds[0],
+          organizationId: creatorsTestOrgId,
+          title: 'Published Content 1',
+          slug: `pub-content-${Date.now()}-1`,
+          contentType: 'video',
+          status: 'published',
+          visibility: 'public',
+        },
+        {
+          creatorId: creatorsTestUserIds[0],
+          organizationId: creatorsTestOrgId,
+          title: 'Published Content 2',
+          slug: `pub-content-${Date.now()}-2`,
+          contentType: 'video',
+          status: 'published',
+          visibility: 'public',
+        },
+        {
+          creatorId: creatorsTestUserIds[1],
+          organizationId: creatorsTestOrgId,
+          title: 'Admin Published Content',
+          slug: `pub-content-${Date.now()}-3`,
+          contentType: 'video',
+          status: 'published',
+          visibility: 'public',
+        },
+        // Draft content should not count
+        {
+          creatorId: creatorsTestUserIds[2],
+          organizationId: creatorsTestOrgId,
+          title: 'Draft Content',
+          slug: `draft-content-${Date.now()}`,
+          contentType: 'video',
+          status: 'draft',
+          visibility: 'public',
+        },
+        // Private content should not count
+        {
+          creatorId: creatorsTestUserIds[2],
+          organizationId: creatorsTestOrgId,
+          title: 'Private Content',
+          slug: `private-content-${Date.now()}`,
+          contentType: 'video',
+          status: 'published',
+          visibility: 'private',
+        },
+      ]);
+    });
+
+    it('should return paginated creators for organization', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug, {
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.items).toBeDefined();
+      expect(result.pagination).toBeDefined();
+      expect(result.pagination.page).toBe(1);
+      expect(result.pagination.limit).toBe(10);
+    });
+
+    it('should only include active members with owner/admin/creator roles', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      // Should include owner, admin, and active creator (3 people)
+      // Should exclude subscriber and inactive member
+      expect(result.items).toHaveLength(3);
+      expect(result.items.some((m) => m.role === 'owner')).toBe(true);
+      expect(result.items.some((m) => m.role === 'admin')).toBe(true);
+      expect(result.items.some((m) => m.role === 'creator')).toBe(true);
+      expect(result.items.every((m) => m.role !== 'subscriber')).toBe(true);
+    });
+
+    it('should include contentCount for each creator', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      expect(
+        result.items.every((item) => typeof item.contentCount === 'number')
+      ).toBe(true);
+
+      // Owner should have 2 published content items
+      const owner = result.items.find((m) => m.role === 'owner');
+      expect(owner?.contentCount).toBe(2);
+
+      // Admin should have 1 published content item
+      const admin = result.items.find((m) => m.role === 'admin');
+      expect(admin?.contentCount).toBe(1);
+
+      // Creator with no published content should have 0
+      const creator = result.items.find(
+        (m) => m.role === 'creator' && m.contentCount === 0
+      );
+      expect(creator).toBeDefined();
+    });
+
+    it('should return ISO date string for joinedAt', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      expect(
+        result.items.every((item) => typeof item.joinedAt === 'string')
+      ).toBe(true);
+      // Should be a valid ISO date string
+      expect(() => new Date(result.items[0].joinedAt)).not.toThrow();
+    });
+
+    it('should support pagination', async () => {
+      const page1 = await service.getPublicCreators(creatorsTestOrgSlug, {
+        page: 1,
+        limit: 2,
+      });
+
+      expect(page1.items).toHaveLength(2);
+      expect(page1.pagination.page).toBe(1);
+      expect(page1.pagination.limit).toBe(2);
+      expect(page1.pagination.total).toBe(3);
+      expect(page1.pagination.totalPages).toBe(2);
+    });
+
+    it('should return correct pagination metadata', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug, {
+        page: 1,
+        limit: 2,
+      });
+
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+    });
+
+    it('should use default pagination when not provided', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      expect(result.pagination.page).toBe(1);
+      expect(result.pagination.limit).toBe(20); // PAGINATION.DEFAULT_LIMIT
+    });
+
+    it('should throw OrganizationNotFoundError for non-existent org', async () => {
+      await expect(
+        service.getPublicCreators('non-existent-org-slug')
+      ).rejects.toThrow(OrganizationNotFoundError);
+    });
+
+    it('should not include emails or internal IDs', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      expect(result.items.every((item) => !('email' in item))).toBe(true);
+      expect(result.items.every((item) => !('id' in item))).toBe(true);
+      expect(result.items.every((item) => !('userId' in item))).toBe(true);
+    });
+
+    it('should return creators ordered by joinedAt', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      // Verify we have items and they're ordered by joinedAt (ascending)
+      expect(result.items.length).toBeGreaterThan(0);
+      const joinedAtDates = result.items.map((i) =>
+        new Date(i.joinedAt).getTime()
+      );
+      const sortedDates = [...joinedAtDates].sort((a, b) => a - b);
+      expect(joinedAtDates).toEqual(sortedDates);
+    });
+  });
+
+  describe('getPublicMembers', () => {
+    let membersTestOrgId: string;
+    let membersTestOrgSlug: string;
+    const membersTestUserIds: string[] = [];
+
+    beforeAll(async () => {
+      // Create test users
+      const userIds = await seedTestUsers(db, 6);
+      membersTestUserIds.push(...userIds);
+
+      // Create test organization
+      const org = await service.create({
+        name: 'Test Members Org',
+        slug: createUniqueSlug('test-members'),
+      });
+      membersTestOrgId = org.id;
+      membersTestOrgSlug = org.slug;
+
+      // Add users as members with different roles
+      await db.insert(schema.organizationMemberships).values([
+        {
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[0],
+          role: 'owner',
+          status: 'active',
+        },
+        {
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[1],
+          role: 'admin',
+          status: 'active',
+        },
+        {
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[2],
+          role: 'creator',
+          status: 'active',
+        },
+        {
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[3],
+          role: 'subscriber',
+          status: 'active',
+        },
+        {
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[4],
+          role: 'member',
+          status: 'active',
+        },
+        {
+          organizationId: membersTestOrgId,
+          userId: membersTestUserIds[5],
+          role: 'member',
+          status: 'inactive',
+        },
+      ]);
+    });
+
+    it('should return paginated members for organization', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug, {
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.items).toBeDefined();
+      expect(result.pagination).toBeDefined();
+      expect(result.pagination.page).toBe(1);
+      expect(result.pagination.limit).toBe(10);
+    });
+
+    it('should only include active members (all roles)', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug);
+
+      // Should include all active roles (owner, admin, creator, subscriber, member)
+      // Should exclude inactive member
+      expect(result.items).toHaveLength(5);
+      expect(result.items.some((m) => m.role === 'owner')).toBe(true);
+      expect(result.items.some((m) => m.role === 'admin')).toBe(true);
+      expect(result.items.some((m) => m.role === 'creator')).toBe(true);
+      expect(result.items.some((m) => m.role === 'subscriber')).toBe(true);
+      expect(result.items.some((m) => m.role === 'member')).toBe(true);
+    });
+
+    it('should return public-safe fields only (no emails, no internal IDs)', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug);
+
+      expect(result.items.every((item) => !('email' in item))).toBe(true);
+      expect(result.items.every((item) => !('id' in item))).toBe(true);
+      expect(result.items.every((item) => !('userId' in item))).toBe(true);
+      expect(result.items.every((item) => !('contentCount' in item))).toBe(
+        true
+      );
+    });
+
+    it('should return required fields (name, avatarUrl, role, joinedAt)', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug);
+
+      expect(result.items.every((item) => typeof item.name === 'string')).toBe(
+        true
+      );
+      expect(result.items.every((item) => typeof item.role === 'string')).toBe(
+        true
+      );
+      expect(
+        result.items.every((item) => typeof item.joinedAt === 'string')
+      ).toBe(true);
+      expect(
+        result.items.every(
+          (item) =>
+            item.avatarUrl === null || typeof item.avatarUrl === 'string'
+        )
+      ).toBe(true);
+    });
+
+    it('should support pagination', async () => {
+      const page1 = await service.getPublicMembers(membersTestOrgSlug, {
+        page: 1,
+        limit: 2,
+      });
+
+      expect(page1.items).toHaveLength(2);
+      expect(page1.pagination.page).toBe(1);
+      expect(page1.pagination.limit).toBe(2);
+      expect(page1.pagination.total).toBe(5);
+      expect(page1.pagination.totalPages).toBe(3);
+    });
+
+    it('should filter by role when provided', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug, {
+        page: 1,
+        limit: 10,
+        role: 'subscriber',
+      });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].role).toBe('subscriber');
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('should return correct pagination metadata', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug, {
+        page: 1,
+        limit: 2,
+      });
+
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 2,
+        total: 5,
+        totalPages: 3,
+      });
+    });
+
+    it('should use default pagination when not provided', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug);
+
+      expect(result.pagination.page).toBe(1);
+      expect(result.pagination.limit).toBe(20); // PAGINATION.DEFAULT_LIMIT
+    });
+
+    it('should throw OrganizationNotFoundError for non-existent org', async () => {
+      await expect(
+        service.getPublicMembers('non-existent-org-slug')
+      ).rejects.toThrow(OrganizationNotFoundError);
+    });
+
+    it('should return members ordered by joinedAt', async () => {
+      const result = await service.getPublicMembers(membersTestOrgSlug);
+
+      // Verify we have items and they're ordered by joinedAt (ascending)
+      expect(result.items.length).toBeGreaterThan(0);
+      const joinedAtDates = result.items.map((i) =>
+        new Date(i.joinedAt).getTime()
+      );
+      const sortedDates = [...joinedAtDates].sort((a, b) => a - b);
+      expect(joinedAtDates).toEqual(sortedDates);
+    });
+
+    it('should handle empty organization (no members)', async () => {
+      const emptyOrg = await service.create({
+        name: 'Empty Org',
+        slug: createUniqueSlug('empty-org-members'),
+      });
+
+      const result = await service.getPublicMembers(emptyOrg.slug);
+
+      expect(result.items).toHaveLength(0);
+      expect(result.pagination.total).toBe(0);
+      expect(result.pagination.totalPages).toBe(0);
     });
   });
 });

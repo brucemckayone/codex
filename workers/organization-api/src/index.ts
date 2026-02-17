@@ -31,6 +31,7 @@ import {
 } from '@codex/worker-utils';
 
 // Import route modules
+import memberRoutes from './routes/members';
 import organizationRoutes from './routes/organizations';
 import settingsRoutes from './routes/settings';
 
@@ -80,6 +81,9 @@ app.use(
  * All routes inherit authentication from createWorker middleware
  */
 app.route('/api/organizations', organizationRoutes);
+
+// Mount member routes under /api/organizations/:id/members
+app.route('/api/organizations/:id/members', memberRoutes);
 
 // Mount settings routes under /api/organizations/:id/settings
 // Settings are nested under organization to scope them properly

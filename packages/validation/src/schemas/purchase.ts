@@ -152,6 +152,21 @@ export const checkoutSessionMetadataSchema = z.object({
   organizationId: uuidSchema.nullable().default(null),
 });
 
+/**
+ * Create Portal Session Schema
+ *
+ * Used for POST /checkout/portal-session to create a Stripe billing portal session
+ *
+ * Security:
+ * - returnUrl: Uses checkout redirect URL validator (whitelisted domains only)
+ *
+ * Validates:
+ * - returnUrl: Redirect URL after portal interaction (whitelisted domains only)
+ */
+export const createPortalSessionSchema = z.object({
+  returnUrl: checkoutRedirectUrlSchema,
+});
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -166,4 +181,27 @@ export type PurchaseQueryInput = z.infer<typeof purchaseQuerySchema>;
 export type GetPurchaseInput = z.infer<typeof getPurchaseSchema>;
 export type CheckoutSessionMetadata = z.infer<
   typeof checkoutSessionMetadataSchema
+>;
+export type CreatePortalSessionInput = z.infer<
+  typeof createPortalSessionSchema
+>;
+
+/**
+ * Verify Checkout Session Schema
+ *
+ * Used for GET /api/checkout/verify to check Stripe session status
+ *
+ * Validates:
+ * - session_id: Stripe checkout session ID (non-empty string)
+ */
+export const verifyCheckoutSessionSchema = z.object({
+  session_id: z.string().min(1),
+});
+
+/**
+ * Type inference for verifyCheckoutSessionSchema
+ * Single source of truth for TypeScript types
+ */
+export type VerifyCheckoutSessionInput = z.infer<
+  typeof verifyCheckoutSessionSchema
 >;

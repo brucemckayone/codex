@@ -83,6 +83,52 @@ export type AdminTopContentQueryInput = z.infer<
   typeof adminTopContentQuerySchema
 >;
 
+/**
+ * Dashboard stats query parameters
+ * Combines revenue date range filter with top content limit
+ */
+export const adminDashboardStatsQuerySchema = z
+  .object({
+    startDate: isoDateSchema.optional(),
+    endDate: isoDateSchema.optional(),
+    limit: z.coerce
+      .number()
+      .int({ message: 'Limit must be a whole number' })
+      .min(1, { message: 'Limit must be at least 1' })
+      .max(100, { message: 'Limit must be 100 or less' })
+      .default(10),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        return data.startDate <= data.endDate;
+      }
+      return true;
+    },
+    {
+      message: 'Start date must be before or equal to end date',
+      path: ['startDate'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        const diffMs = data.endDate.getTime() - data.startDate.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        return diffDays <= MAX_DATE_RANGE_DAYS;
+      }
+      return true;
+    },
+    {
+      message: `Date range cannot exceed ${MAX_DATE_RANGE_DAYS} days`,
+      path: ['endDate'],
+    }
+  );
+
+export type AdminDashboardStatsQueryInput = z.infer<
+  typeof adminDashboardStatsQuerySchema
+>;
+
 // ============================================================================
 // Content Management Schemas
 // ============================================================================
@@ -162,6 +208,58 @@ export const adminGrantAccessParamsSchema = z.object({
 
 export type AdminGrantAccessParams = z.infer<
   typeof adminGrantAccessParamsSchema
+>;
+
+// ============================================================================
+// Activity Feed Schemas
+// ============================================================================
+
+/**
+ * Activity type enum for the activity feed
+ * Represents the types of activities tracked across the platform
+ */
+export const activityTypeEnum = z.enum(
+  ['purchase', 'content_published', 'member_joined'],
+  {
+    errorMap: () => ({
+      message:
+        'Activity type must be purchase, content_published, or member_joined',
+    }),
+  }
+);
+
+/**
+ * Admin activity feed query parameters
+ * Extends pagination with optional activity type filter
+ */
+export const adminActivityQuerySchema = paginationSchema.extend({
+  type: activityTypeEnum.optional(),
+});
+
+export type AdminActivityQueryInput = z.infer<typeof adminActivityQuerySchema>;
+
+/**
+ * Organization ID path parameter schema
+ * Used for organization-scoped admin endpoints
+ * Validates UUID format for organizationId
+ */
+export const adminOrganizationIdParamsSchema = z.object({
+  orgId: uuidSchema,
+});
+
+export type AdminOrganizationIdParams = z.infer<
+  typeof adminOrganizationIdParamsSchema
+>;
+
+/**
+ * Organization activity feed query parameters
+ * Combines organizationId path params with activity query params
+ * For GET /api/admin/:orgId/activity endpoint
+ */
+export const adminOrganizationActivityQuerySchema = adminActivityQuerySchema;
+
+export type AdminOrganizationActivityQueryInput = z.infer<
+  typeof adminOrganizationActivityQuerySchema
 >;
 
 // ============================================================================

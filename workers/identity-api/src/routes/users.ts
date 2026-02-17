@@ -13,6 +13,10 @@ import {
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
+import {
+  updateNotificationPreferencesSchema,
+  updateProfileSchema,
+} from '@codex/validation';
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
@@ -73,6 +77,65 @@ app.delete(
       await ctx.services.imageProcessing.deleteUserAvatar(ctx.user.id);
 
       return null;
+    },
+  })
+);
+
+/**
+ * PATCH /api/user/profile
+ * Update authenticated user's profile
+ *
+ * Security: Authenticated user only
+ */
+app.patch(
+  '/profile',
+  procedure({
+    policy: { auth: 'required' },
+    input: { body: updateProfileSchema },
+    handler: async (ctx) => {
+      return await ctx.services.identity.updateProfile(
+        ctx.user.id,
+        ctx.input.body
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/user/notification-preferences
+ * Get authenticated user's notification preferences
+ * Upserts default preferences on first access
+ *
+ * Security: Authenticated user only
+ */
+app.get(
+  '/notification-preferences',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx) => {
+      return await ctx.services.identity.getNotificationPreferences(
+        ctx.user.id
+      );
+    },
+  })
+);
+
+/**
+ * PUT /api/user/notification-preferences
+ * Update authenticated user's notification preferences
+ *
+ * Security: Authenticated user only
+ */
+app.put(
+  '/notification-preferences',
+  procedure({
+    policy: { auth: 'required' },
+    input: { body: updateNotificationPreferencesSchema },
+    handler: async (ctx) => {
+      return await ctx.services.identity.updateNotificationPreferences(
+        ctx.user.id,
+        ctx.input.body
+      );
     },
   })
 );

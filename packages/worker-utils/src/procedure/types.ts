@@ -19,6 +19,7 @@ import type { ContentService, MediaItemService } from '@codex/content';
 import type { IdentityService } from '@codex/identity';
 import type { ImageProcessingService } from '@codex/image-processing';
 import type {
+  NotificationPreferencesService,
   NotificationsService,
   TemplateService,
 } from '@codex/notifications';
@@ -134,6 +135,7 @@ export interface ServiceRegistry {
   // Notification domain
   templates: TemplateService;
   notifications: NotificationsService;
+  preferences: NotificationPreferencesService;
 
   // Identity domain
   identity: IdentityService;

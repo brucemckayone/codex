@@ -56,4 +56,28 @@ app.get(
   })
 );
 
+/**
+ * GET /:orgId/my-membership
+ * Get the authenticated user's own membership in an organization
+ *
+ * Returns { role, status, joinedAt } if member, or null if not.
+ */
+app.get(
+  '/:orgId/my-membership',
+  procedure({
+    policy: { auth: 'required' },
+    input: {
+      params: z.object({
+        orgId: uuidSchema,
+      }),
+    },
+    handler: async (ctx) => {
+      return await ctx.services.identity.getMyMembership(
+        ctx.input.params.orgId,
+        ctx.user.id
+      );
+    },
+  })
+);
+
 export default app;

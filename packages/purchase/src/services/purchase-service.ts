@@ -35,6 +35,7 @@ import type {
 } from '@codex/validation';
 import {
   createCheckoutSchema,
+  createPortalSessionSchema,
   getPurchaseSchema,
   purchaseQuerySchema,
 } from '@codex/validation';
@@ -64,6 +65,7 @@ function isStripeError(error: unknown): error is Error & { type: string } {
 
 import type {
   CheckoutSessionResult,
+  CheckoutSessionVerifyResult,
   CompletePurchaseMetadata,
   Purchase,
   PurchaseWithContent,
@@ -144,6 +146,7 @@ export class PurchaseService extends BaseService {
         });
       }
 
+      // Phase 1: Paid content must belong to an organization
       if (contentRecord.organizationId == null) {
         throw new ContentNotPurchasableError(
           validated.contentId,
@@ -171,18 +174,6 @@ export class PurchaseService extends BaseService {
         throw new ContentNotPurchasableError(validated.contentId, 'free', {
           priceCents: contentRecord.priceCents,
         });
-      }
-
-      // Phase 1: Paid content must belong to an organization
-      if (!contentRecord.organizationId) {
-        throw new ContentNotPurchasableError(
-          validated.contentId,
-          'not_published',
-          {
-            reason:
-              'Content must belong to an organization to be purchasable (Phase 1)',
-          }
-        );
       }
 
       // Step 2: Check for existing purchase
@@ -582,6 +573,197 @@ export class PurchaseService extends BaseService {
       }
       // Wrap unknown errors
       throw wrapError(error, { purchaseId, customerId });
+    }
+  }
+
+  /**
+   * Verify Stripe checkout session status
+   *
+   * Queries Stripe API for session details and checks for completed purchase.
+   * Used by success page to show purchase confirmation.
+   *
+   * Stripe API Best Practices (2025):
+   * - Use stripe.checkout.sessions.retrieve() with session ID
+   * - Session.status can be: 'open' | 'complete' | 'expired'
+   * - Session.payment_intent contains payment intent ID when complete
+   * - Session.metadata.customer_id contains our customerId (set during createCheckoutSession)
+   * - Handle StripeInvalidRequestError for invalid session IDs (404)
+   *
+   * Security:
+   * - Validates session belongs to authenticated user (metadata.customer_id)
+   * - Returns 403 if session exists but belongs to different user
+   *
+   * @param sessionId - Stripe checkout session ID (cs_xxx format)
+   * @param customerId - Authenticated user ID (for ownership check)
+   * @returns Session status with optional purchase and content details
+   * @throws {PaymentProcessingError} If Stripe API fails
+   * @throws {ForbiddenError} If session belongs to different user
+   *
+   * @example
+   * const result = await purchaseService.verifyCheckoutSession('cs_xxx', 'user-123');
+   * // Returns: { sessionStatus: 'complete', purchase: {...}, content: {...} }
+   */
+  async verifyCheckoutSession(
+    sessionId: string,
+    customerId: string
+  ): Promise<CheckoutSessionVerifyResult> {
+    try {
+      // Query Stripe API for session details
+      const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+
+      // Verify session belongs to user (metadata.customerId)
+      // Note: We set customerId in metadata during createCheckoutSession (line 227)
+      if (session.metadata?.customerId !== customerId) {
+        throw new ForbiddenError(
+          'Checkout session does not belong to authenticated user',
+          {
+            sessionId,
+          }
+        );
+      }
+
+      const result: CheckoutSessionVerifyResult = {
+        // Stripe API may return null for status, default to 'open' for safety
+        sessionStatus:
+          (session.status as 'complete' | 'expired' | 'open') ?? 'open',
+      };
+
+      // If payment complete, query purchase record with content join
+      // payment_intent is only present when session status is 'complete'
+      if (result.sessionStatus === 'complete' && session.payment_intent) {
+        const purchase = await this.db.query.purchases.findFirst({
+          where: eq(
+            purchases.stripePaymentIntentId,
+            session.payment_intent as string
+          ),
+          with: {
+            content: {
+              columns: {
+                id: true,
+                title: true,
+                thumbnailUrl: true,
+                contentType: true,
+              },
+            },
+          },
+        });
+
+        if (purchase?.purchasedAt) {
+          result.purchase = {
+            id: purchase.id,
+            contentId: purchase.contentId,
+            amountPaidCents: purchase.amountPaidCents,
+            purchasedAt: purchase.purchasedAt.toISOString(),
+          };
+          result.content = {
+            id: purchase.content.id,
+            title: purchase.content.title,
+            thumbnailUrl: purchase.content.thumbnailUrl ?? undefined,
+            contentType: purchase.content.contentType,
+          };
+        }
+      }
+
+      return result;
+    } catch (error) {
+      // Re-throw ForbiddenError
+      if (error instanceof ForbiddenError) {
+        throw error;
+      }
+
+      // Stripe-specific error handling (2025 patterns)
+      // StripeInvalidRequestError: Invalid session ID (404)
+      // StripeConnectionError: Network failure (500)
+      // StripeAPIError: Other Stripe errors
+      if (
+        error instanceof Error &&
+        'type' in error &&
+        error.type === 'StripeInvalidRequestError'
+      ) {
+        throw new PaymentProcessingError('Checkout session not found', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+
+      if (
+        error instanceof Error &&
+        'type' in error &&
+        error.type === 'StripeConnectionError'
+      ) {
+        throw new PaymentProcessingError('Failed to connect to Stripe API', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+
+      // Wrap other Stripe errors
+      if (isStripeError(error)) {
+        throw new PaymentProcessingError('Failed to verify checkout session', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+
+      throw wrapError(error, { sessionId, customerId });
+    }
+  }
+
+  /**
+   * Create Stripe Billing Portal session
+   *
+   * Allows customers to manage their billing (view invoices, update payment methods).
+   * Looks up or creates a Stripe customer by email, then creates a portal session.
+   *
+   * @param email - Customer's email address
+   * @param userId - Codex user ID (stored in Stripe customer metadata)
+   * @param returnUrl - URL to redirect to after portal session
+   * @returns Portal session URL
+   * @throws {PaymentProcessingError} If Stripe portal session creation fails
+   */
+  async createPortalSession(
+    email: string,
+    userId: string,
+    returnUrl: string
+  ): Promise<{ url: string }> {
+    const validated = createPortalSessionSchema.parse({ returnUrl });
+
+    try {
+      // Step 1: Look up existing Stripe customer by email
+      const customers = await this.stripe.customers.list({
+        email,
+        limit: 1,
+      });
+
+      let customer = customers.data[0];
+
+      // Step 2: If no customer found, create one
+      if (!customer) {
+        customer = await this.stripe.customers.create({
+          email,
+          metadata: { userId },
+        });
+      }
+
+      // Step 3: Create billing portal session
+      const session = await this.stripe.billingPortal.sessions.create({
+        customer: customer.id,
+        return_url: validated.returnUrl,
+      });
+
+      return { url: session.url };
+    } catch (error) {
+      if (isStripeError(error)) {
+        throw new PaymentProcessingError(
+          'Failed to create billing portal session',
+          {
+            stripeError: error.message,
+            userId,
+          }
+        );
+      }
+
+      throw wrapError(error, { userId });
     }
   }
 }

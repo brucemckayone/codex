@@ -185,6 +185,21 @@ export interface MembershipLookupResponse {
   joinedAt: string | null;
 }
 
+/**
+ * Response for GET /api/organizations/:orgId/my-membership
+ * Returns the authenticated user's own membership in an organization
+ * Includes status field to show if membership is active, invited, or inactive
+ * @example
+ * { role: "admin", status: "active", joinedAt: "2025-06-15T10:30:00.000Z" }
+ * // or if not a member:
+ * { role: null, status: null, joinedAt: null }
+ */
+export interface MyMembershipResponse {
+  role: 'owner' | 'admin' | 'creator' | 'subscriber' | 'member' | null;
+  status: 'active' | 'inactive' | 'invited' | null;
+  joinedAt: string | null;
+}
+
 // ============================================================================
 // Settings Response Types
 // ============================================================================
@@ -205,6 +220,11 @@ export interface ContactSettingsResponse {
   supportEmail: string;
   contactUrl: string | null;
   timezone: string;
+  // Social media URLs
+  twitterUrl: string | null;
+  youtubeUrl: string | null;
+  instagramUrl: string | null;
+  tiktokUrl: string | null;
 }
 
 /**

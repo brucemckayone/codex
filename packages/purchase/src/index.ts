@@ -74,6 +74,7 @@ export { createStripeClient, verifyWebhookSignature } from './stripe-client';
 // Types
 export type {
   CheckoutSessionResult,
+  CheckoutSessionVerifyResult,
   CompletePurchaseMetadata,
   NewPurchaseInput,
   Purchase,

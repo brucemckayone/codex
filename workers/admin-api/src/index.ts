@@ -22,10 +22,12 @@
 import { AUTH_ROLES, type CONTENT_STATUS } from '@codex/constants';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
+  adminActivityQuerySchema,
   adminContentIdParamsSchema,
   adminContentListQuerySchema,
   adminCustomerIdParamsSchema,
   adminCustomerListQuerySchema,
+  adminDashboardStatsQuerySchema,
   adminGrantAccessParamsSchema,
   adminRevenueQuerySchema,
   adminTopContentQuerySchema,
@@ -122,6 +124,43 @@ app.get(
       return await ctx.services.adminAnalytics.getTopContent(
         ctx.organizationId,
         ctx.input.query.limit
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/analytics/dashboard-stats
+ * Get combined dashboard statistics for platform owner's organization
+ */
+app.get(
+  '/api/admin/analytics/dashboard-stats',
+  procedure({
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    input: { query: adminDashboardStatsQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getDashboardStats(
+        ctx.organizationId,
+        ctx.input.query
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/activity
+ * Get recent activity feed for the platform owner's organization
+ * Returns purchases, content published, and member joined events
+ */
+app.get(
+  '/api/admin/activity',
+  procedure({
+    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    input: { query: adminActivityQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getRecentActivity(
+        ctx.organizationId,
+        ctx.input.query
       );
     },
   })
