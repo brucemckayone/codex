@@ -36,29 +36,54 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
+  // Build URLSearchParams for each endpoint
+  const searchParamsRev = new URLSearchParams();
+  searchParamsRev.set('organizationId', orgId);
+
+  const searchParamsCust = new URLSearchParams();
+  searchParamsCust.set('organizationId', orgId);
+  searchParamsCust.set('limit', '1');
+
+  const searchParamsContent = new URLSearchParams();
+  searchParamsContent.set('organizationId', orgId);
+  searchParamsContent.set('limit', '100');
+
   // Fetch all stats in parallel for optimal performance
   const [revenue, customers, topContent] = await Promise.all([
-    api.analytics.getRevenue({ organizationId: orgId }),
-    api.admin.getCustomers({ organizationId: orgId, limit: 1 }),
-    api.analytics.getTopContent({ organizationId: orgId, limit: 1 }),
+    api.analytics.getRevenue(searchParamsRev),
+    api.admin.getCustomers(searchParamsCust),
+    api.analytics.getTopContent(searchParamsContent),
   ]);
+
+  // Calculate change percentages from revenueByDay data
+  const revenueByDay = revenue?.revenueByDay ?? [];
+  const recentRevenue = revenueByDay
+    .slice(0, 7)
+    .reduce((sum, day) => sum + day.revenueCents, 0);
+  const previousRevenue = revenueByDay
+    .slice(7, 14)
+    .reduce((sum, day) => sum + day.revenueCents, 0);
+  const revenueChange =
+    previousRevenue > 0
+      ? Math.round(((recentRevenue - previousRevenue) / previousRevenue) * 100)
+      : 0;
 
   return {
     revenue: {
       value: revenue?.totalRevenueCents ?? 0,
-      change: revenue?.monthOverMonthChangePercent ?? 0,
+      change: revenueChange,
     },
     customers: {
       value: customers?.pagination?.total ?? 0,
-      change: customers?.monthOverMonthChangePercent ?? 0,
+      change: 0, // Change not provided by API
     },
     contentCount: {
-      value: topContent?.pagination?.total ?? 0,
+      value: topContent?.length ?? 0,
       change: 0, // Content count change not provided by API
     },
     views: {
-      value: revenue?.totalViews ?? 0,
-      change: revenue?.viewsMonthOverMonthChangePercent ?? 0,
+      value: 0, // Views not tracked by current API
+      change: 0,
     },
   };
 });
