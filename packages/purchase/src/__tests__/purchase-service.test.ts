@@ -1173,7 +1173,7 @@ describe('PurchaseService Integration', () => {
       verifyContentId = content.id;
 
       // Add retrieve method to mock Stripe
-      (mockStripe.checkout.sessions as any).retrieve = vi.fn();
+      vi.mocked(mockStripe.checkout.sessions).retrieve = vi.fn();
 
       sessionId = 'cs_test_verify_session';
       const paymentIntentId = 'pi_test_verify_intent';

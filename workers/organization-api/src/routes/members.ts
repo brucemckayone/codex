@@ -18,6 +18,7 @@ import {
   inviteMemberSchema,
   listMembersQuerySchema,
   updateMemberRoleSchema,
+  userIdSchema,
   uuidSchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
@@ -91,7 +92,7 @@ app.patch(
   procedure({
     policy: { auth: 'required', requireOrgManagement: true },
     input: {
-      params: z.object({ id: uuidSchema, userId: z.string().min(1) }),
+      params: z.object({ id: uuidSchema, userId: userIdSchema }),
       body: updateMemberRoleSchema,
     },
     handler: async (ctx) => {
@@ -116,7 +117,7 @@ app.delete(
   procedure({
     policy: { auth: 'required', requireOrgManagement: true },
     input: {
-      params: z.object({ id: uuidSchema, userId: z.string().min(1) }),
+      params: z.object({ id: uuidSchema, userId: userIdSchema }),
     },
     successStatus: 204,
     handler: async (ctx) => {

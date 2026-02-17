@@ -12,7 +12,11 @@ import type {
   NewNotificationPreference,
   NotificationPreference,
 } from '@codex/database/schema';
-import { BaseService, NotFoundError } from '@codex/service-errors';
+import {
+  BaseService,
+  InternalServiceError,
+  NotFoundError,
+} from '@codex/service-errors';
 import type { UpdateNotificationPreferencesInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 
@@ -158,7 +162,12 @@ export class NotificationPreferencesService extends BaseService {
       .returning();
 
     if (!created) {
-      throw new Error('Failed to create notification preferences');
+      throw new InternalServiceError(
+        'Failed to create notification preferences',
+        {
+          userId,
+        }
+      );
     }
 
     this.obs.info('Default notification preferences created', { userId });
@@ -193,7 +202,12 @@ export class NotificationPreferencesService extends BaseService {
       .returning();
 
     if (!created) {
-      throw new Error('Failed to create notification preferences');
+      throw new InternalServiceError(
+        'Failed to create notification preferences',
+        {
+          userId,
+        }
+      );
     }
 
     this.obs.info('Notification preferences created', {

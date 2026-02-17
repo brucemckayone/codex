@@ -23,7 +23,7 @@ import {
   organizations,
   users,
 } from '@codex/database/schema';
-import { BaseService } from '@codex/service-errors';
+import { BaseService, InternalServiceError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CreateOrganizationInput,
@@ -641,9 +641,9 @@ export class OrganizationService extends BaseService {
     status: string;
     joinedAt: Date;
   }> {
-    try {
+    return await this.db.transaction(async (tx) => {
       // Find user by email
-      const user = await this.db.query.users.findFirst({
+      const user = await tx.query.users.findFirst({
         where: eq(users.email, input.email),
         columns: { id: true },
       });
@@ -653,7 +653,7 @@ export class OrganizationService extends BaseService {
       }
 
       // Check if already a member
-      const existing = await this.db.query.organizationMemberships.findFirst({
+      const existing = await tx.query.organizationMemberships.findFirst({
         where: and(
           eq(organizationMemberships.organizationId, organizationId),
           eq(organizationMemberships.userId, user.id)
@@ -666,7 +666,7 @@ export class OrganizationService extends BaseService {
         );
       }
 
-      const [membership] = await this.db
+      const [membership] = await tx
         .insert(organizationMemberships)
         .values({
           organizationId,
@@ -678,7 +678,10 @@ export class OrganizationService extends BaseService {
         .returning();
 
       if (!membership) {
-        throw new Error('Failed to create membership');
+        throw new InternalServiceError('Failed to create membership', {
+          organizationId,
+          userId: user.id,
+        });
       }
 
       return {
@@ -688,12 +691,7 @@ export class OrganizationService extends BaseService {
         status: membership.status,
         joinedAt: membership.createdAt,
       };
-    } catch (error) {
-      if (error instanceof NotFoundError || error instanceof ConflictError) {
-        throw error;
-      }
-      throw wrapError(error, { organizationId, email: input.email });
-    }
+    });
   }
 
   /**
@@ -717,8 +715,8 @@ export class OrganizationService extends BaseService {
     status: string;
     joinedAt: Date;
   }> {
-    try {
-      const membership = await this.db.query.organizationMemberships.findFirst({
+    return await this.db.transaction(async (tx) => {
+      const membership = await tx.query.organizationMemberships.findFirst({
         where: and(
           eq(organizationMemberships.organizationId, organizationId),
           eq(organizationMemberships.userId, userId)
@@ -731,7 +729,7 @@ export class OrganizationService extends BaseService {
 
       // Safety: If demoting from owner, check there's at least one other active owner
       if (membership.role === 'owner' && role !== 'owner') {
-        const ownerCount = await this.db
+        const ownerCount = await tx
           .select({ total: count() })
           .from(organizationMemberships)
           .where(
@@ -748,7 +746,7 @@ export class OrganizationService extends BaseService {
         }
       }
 
-      const [updated] = await this.db
+      const [updated] = await tx
         .update(organizationMemberships)
         .set({ role, updatedAt: new Date() })
         .where(
@@ -770,15 +768,7 @@ export class OrganizationService extends BaseService {
         status: updated.status,
         joinedAt: updated.createdAt,
       };
-    } catch (error) {
-      if (
-        error instanceof MemberNotFoundError ||
-        error instanceof LastOwnerError
-      ) {
-        throw error;
-      }
-      throw wrapError(error, { organizationId, userId });
-    }
+    });
   }
 
   /**
@@ -790,8 +780,8 @@ export class OrganizationService extends BaseService {
    * @param userId - User ID to remove
    */
   async removeMember(organizationId: string, userId: string): Promise<void> {
-    try {
-      const membership = await this.db.query.organizationMemberships.findFirst({
+    return await this.db.transaction(async (tx) => {
+      const membership = await tx.query.organizationMemberships.findFirst({
         where: and(
           eq(organizationMemberships.organizationId, organizationId),
           eq(organizationMemberships.userId, userId)
@@ -804,7 +794,7 @@ export class OrganizationService extends BaseService {
 
       // Safety: Cannot remove the last owner
       if (membership.role === 'owner') {
-        const ownerCount = await this.db
+        const ownerCount = await tx
           .select({ total: count() })
           .from(organizationMemberships)
           .where(
@@ -821,7 +811,7 @@ export class OrganizationService extends BaseService {
         }
       }
 
-      await this.db
+      await tx
         .delete(organizationMemberships)
         .where(
           and(
@@ -829,15 +819,7 @@ export class OrganizationService extends BaseService {
             eq(organizationMemberships.userId, userId)
           )
         );
-    } catch (error) {
-      if (
-        error instanceof MemberNotFoundError ||
-        error instanceof LastOwnerError
-      ) {
-        throw error;
-      }
-      throw wrapError(error, { organizationId, userId });
-    }
+    });
   }
 
   /**

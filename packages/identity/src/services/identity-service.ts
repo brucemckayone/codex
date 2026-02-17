@@ -100,7 +100,7 @@ export class IdentityService extends BaseService {
         joinedAt: membership.createdAt.toISOString(),
       };
     } catch (error) {
-      this.handleError(error, 'IdentityService.getMyMembership');
+      throw this.handleError(error, 'IdentityService.getMyMembership');
     }
   }
 
@@ -166,7 +166,7 @@ export class IdentityService extends BaseService {
         image: updated.image,
       };
     } catch (error) {
-      this.handleError(error, 'IdentityService.updateProfile');
+      throw this.handleError(error, 'IdentityService.updateProfile');
     }
   }
 
@@ -202,7 +202,10 @@ export class IdentityService extends BaseService {
         updatedAt: prefs.updatedAt,
       };
     } catch (error) {
-      this.handleError(error, 'IdentityService.getNotificationPreferences');
+      throw this.handleError(
+        error,
+        'IdentityService.getNotificationPreferences'
+      );
     }
   }
 
@@ -268,7 +271,10 @@ export class IdentityService extends BaseService {
         updatedAt: prefs.updatedAt,
       };
     } catch (error) {
-      this.handleError(error, 'IdentityService.updateNotificationPreferences');
+      throw this.handleError(
+        error,
+        'IdentityService.updateNotificationPreferences'
+      );
     }
   }
 }
