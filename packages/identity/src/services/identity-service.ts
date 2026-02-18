@@ -9,7 +9,7 @@ import {
   ImageProcessingService,
 } from '@codex/image-processing';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 
 import { UserNotFoundError, UsernameTakenError } from '../errors';
 
@@ -181,13 +181,17 @@ export class IdentityService extends BaseService {
         input.username !== existing.username
       ) {
         if (input.username !== null) {
-          // Check if username is already taken by another user
-          // We need: username = input.username AND id != userId
+          // Check if username is already taken by another ACTIVE user
+          // We need: username = input.username AND id != userId AND deletedAt IS NULL
           const otherUserWithUsername = await this.db.query.users.findFirst({
-            where: and(eq(users.username, input.username)),
+            where: and(
+              eq(users.username, input.username),
+              ne(users.id, userId),
+              isNull(users.deletedAt) // Exclude soft-deleted users
+            ),
           });
 
-          if (otherUserWithUsername && otherUserWithUsername.id !== userId) {
+          if (otherUserWithUsername) {
             throw new UsernameTakenError(input.username);
           }
 

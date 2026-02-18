@@ -31,6 +31,8 @@ export const users = pgTable('users', {
   bio: text('bio'),
   /** Social media and website links for creator profile */
   socialLinks: jsonb('social_links').$type<SocialLinks>(),
+  /** Soft delete timestamp - null means account is active */
+  deletedAt: timestamp('deleted_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()

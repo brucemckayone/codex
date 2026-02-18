@@ -373,15 +373,22 @@ describe('IdentityService', () => {
         username: null,
         bio: null,
         socialLinks: null,
+        deletedAt: null,
       };
 
+      // Track the call count to differentiate the initial user fetch from the uniqueness check
+      let callCount = 0;
       (
         mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(existingUser);
-      // No other user has this username
-      (mockDb.query.users.findFirst as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(existingUser)
-        .mockResolvedValueOnce(null);
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check - no conflict
+        return Promise.resolve(null);
+      });
 
       const updatedUser = {
         ...existingUser,
@@ -416,6 +423,7 @@ describe('IdentityService', () => {
         username: null,
         bio: null,
         socialLinks: null,
+        deletedAt: null,
       };
 
       const otherUser = {
@@ -427,13 +435,22 @@ describe('IdentityService', () => {
         username: 'takenusername',
         bio: null,
         socialLinks: null,
+        deletedAt: null,
       };
 
-      // First call returns the current user (for the initial fetch)
-      // Second call returns another user with the same username (conflict check)
-      (mockDb.query.users.findFirst as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(existingUser)
-        .mockResolvedValueOnce(otherUser);
+      // Track the call count to differentiate the initial user fetch from the uniqueness check
+      let callCount = 0;
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check returns another user with the username
+        return Promise.resolve(otherUser);
+      });
 
       await expect(
         service.updateProfile(userId, { username: 'takenusername' })
@@ -450,6 +467,7 @@ describe('IdentityService', () => {
         username: 'oldusername',
         bio: null,
         socialLinks: null,
+        deletedAt: null,
       };
 
       (
@@ -478,6 +496,58 @@ describe('IdentityService', () => {
       );
     });
 
+    it('should allow username reuse after soft-delete', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+        username: null,
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      // Track the call count to differentiate calls
+      let callCount = 0;
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check returns null
+        // (simulating that the DB filtered out soft-deleted users with isNull(deletedAt))
+        return Promise.resolve(null);
+      });
+
+      const updatedUser = {
+        ...existingUser,
+        username: 'reusableusername',
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        username: 'reusableusername',
+      });
+
+      // Should succeed - username can be reused from soft-deleted user
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          username: 'reusableusername',
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: userId,
+          username: 'reusableusername',
+        })
+      );
+    });
+
     it('should update bio', async () => {
       const existingUser = {
         id: userId,
@@ -488,6 +558,7 @@ describe('IdentityService', () => {
         username: null,
         bio: null,
         socialLinks: null,
+        deletedAt: null,
       };
 
       (
@@ -526,6 +597,7 @@ describe('IdentityService', () => {
         username: null,
         bio: null,
         socialLinks: null,
+        deletedAt: null,
       };
 
       (
@@ -569,15 +641,22 @@ describe('IdentityService', () => {
         username: null,
         bio: null,
         socialLinks: null,
+        deletedAt: null,
       };
 
+      // Track the call count to differentiate the initial user fetch from the uniqueness check
+      let callCount = 0;
       (
         mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
-      ).mockResolvedValue(existingUser);
-      // No username conflict
-      (mockDb.query.users.findFirst as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce(existingUser)
-        .mockResolvedValueOnce(null);
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check - no conflict
+        return Promise.resolve(null);
+      });
 
       const socialLinksInput = {
         website: 'https://example.com',
