@@ -1205,7 +1205,7 @@ describe('PurchaseService Integration', () => {
     });
 
     it('should include purchase and content when purchase exists', async () => {
-      const paymentIntentId = 'pi_test_verify_with_purchase';
+      const paymentIntentId = `pi_test_verify_with_purchase_${Date.now()}`;
 
       // Create purchase via service
       await purchaseService.completePurchase(paymentIntentId, {
