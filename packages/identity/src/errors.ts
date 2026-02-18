@@ -17,3 +17,9 @@ export class OrganizationSlugConflictError extends ConflictError {
     super('Organization slug already exists', { slug });
   }
 }
+
+export class UsernameTakenError extends ConflictError {
+  constructor(username: string) {
+    super('Username already taken', { username });
+  }
+}

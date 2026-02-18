@@ -9,9 +9,9 @@ import {
   ImageProcessingService,
 } from '@codex/image-processing';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 
-import { UserNotFoundError } from '../errors';
+import { UserNotFoundError, UsernameTakenError } from '../errors';
 
 export interface IdentityServiceConfig extends ServiceConfig {
   r2Service: R2Service;
@@ -108,21 +108,40 @@ export class IdentityService extends BaseService {
    * Update user profile
    *
    * @param userId - User ID
-   * @param input - Profile fields to update (displayName maps to name, email requires re-verification)
+   * @param input - Profile fields to update (displayName maps to name, email requires re-verification, username/bio/socialLinks for creator profile)
    * @returns Updated user data
    */
   async updateProfile(
     userId: string,
-    input: { displayName?: string; email?: string }
+    input: {
+      displayName?: string;
+      email?: string;
+      username?: string | null;
+      bio?: string | null;
+      socialLinks?: {
+        website?: string;
+        twitter?: string;
+        youtube?: string;
+        instagram?: string;
+      } | null;
+    }
   ): Promise<{
     id: string;
     name: string;
     email: string;
     emailVerified: boolean;
     image: string | null;
+    username: string | null;
+    bio: string | null;
+    socialLinks: {
+      website?: string;
+      twitter?: string;
+      youtube?: string;
+      instagram?: string;
+    } | null;
   }> {
     try {
-      // First, fetch the current user to check if email is changing
+      // First, fetch the current user to check if email or username is changing
       const existing = await this.db.query.users.findFirst({
         where: eq(users.id, userId),
       });
@@ -135,6 +154,14 @@ export class IdentityService extends BaseService {
         name: string;
         email: string;
         emailVerified: boolean;
+        username: string | null;
+        bio: string | null;
+        socialLinks: {
+          website?: string;
+          twitter?: string;
+          youtube?: string;
+          instagram?: string;
+        } | null;
       }> = {};
 
       // displayName maps to the 'name' column in the database
@@ -146,6 +173,40 @@ export class IdentityService extends BaseService {
       if (input.email !== undefined && input.email !== existing.email) {
         updateData.email = input.email;
         updateData.emailVerified = false;
+      }
+
+      // Username uniqueness check (if changing to a new non-null username)
+      if (
+        input.username !== undefined &&
+        input.username !== existing.username
+      ) {
+        if (input.username !== null) {
+          // Check if username is already taken by another user
+          // We need: username = input.username AND id != userId
+          const otherUserWithUsername = await this.db.query.users.findFirst({
+            where: and(eq(users.username, input.username)),
+          });
+
+          if (otherUserWithUsername && otherUserWithUsername.id !== userId) {
+            throw new UsernameTakenError(input.username);
+          }
+
+          this.obs.info('Username update', {
+            userId,
+            username: input.username,
+          });
+        }
+        updateData.username = input.username;
+      }
+
+      // Bio update (can be set to a string or null to clear)
+      if (input.bio !== undefined) {
+        updateData.bio = input.bio;
+      }
+
+      // Social links update (can be set to an object or null to clear)
+      if (input.socialLinks !== undefined) {
+        updateData.socialLinks = input.socialLinks;
       }
 
       const [updated] = await this.db
@@ -164,6 +225,9 @@ export class IdentityService extends BaseService {
         email: updated.email,
         emailVerified: updated.emailVerified,
         image: updated.image,
+        username: updated.username ?? null,
+        bio: updated.bio ?? null,
+        socialLinks: updated.socialLinks ?? null,
       };
     } catch (error) {
       throw this.handleError(error, 'IdentityService.updateProfile');

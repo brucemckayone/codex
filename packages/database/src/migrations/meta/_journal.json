@@ -218,6 +218,13 @@
       "when": 1771111245266,
       "tag": "0030_nostalgic_lady_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1771404831672,
+      "tag": "0031_tense_loners",
+      "breakpoints": true
     }
   ]
 }

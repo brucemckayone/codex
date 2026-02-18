@@ -4,7 +4,17 @@
  * This is the foundational user table referenced by all other schemas.
  * Separated from auth.ts to maintain clean identity/auth separation.
  */
-import { boolean, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { boolean, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+
+/**
+ * Social links type for user profiles
+ */
+export type SocialLinks = {
+  website?: string;
+  twitter?: string;
+  youtube?: string;
+  instagram?: string;
+};
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -15,6 +25,12 @@ export const users = pgTable('users', {
   /** Custom uploaded avatar URL (R2 base path). Falls back to `image` if null. */
   avatarUrl: text('avatar_url'),
   role: text('role').default('customer').notNull(),
+  /** Unique username for creator profile URLs (e.g., codex.platform/u/username) */
+  username: text('username').unique(),
+  /** User biography/bio for creator profile */
+  bio: text('bio'),
+  /** Social media and website links for creator profile */
+  socialLinks: jsonb('social_links').$type<SocialLinks>(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()

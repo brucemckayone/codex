@@ -567,6 +567,9 @@ export class ContentService extends BaseService {
           );
         }
       }
+      if (filters.creatorId) {
+        whereConditions.push(eq(content.creatorId, filters.creatorId));
+      }
       if (filters.search) {
         const searchCondition = or(
           ilike(content.title, `%${filters.search}%`),
