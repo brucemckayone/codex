@@ -13,6 +13,8 @@
 @import './tokens/materials.css';
 @import './tokens/z-index.css';
 @import './tokens/motion.css';
+@import './tokens/layout.css';
+@import './tokens/opacity.css';
 
 /* Themes */
 @import './themes/light.css';

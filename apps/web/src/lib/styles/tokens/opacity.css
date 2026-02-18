@@ -1,0 +1,40 @@
+/**
+ * Opacity Tokens
+ * Opacity values for use with hsl() color notation: hsl(0 0% 0% / var(--opacity-50))
+ * Using hsl() with opacity tokens provides better dark mode support than rgba()
+ */
+
+:root {
+  /* ========================================
+   * OPACITY SCALE
+   * ======================================== */
+  --opacity-0: 0;
+  --opacity-10: 0.1;
+  --opacity-20: 0.2;
+  --opacity-30: 0.3;
+  --opacity-40: 0.4;
+  --opacity-50: 0.5;
+  --opacity-60: 0.6;
+  --opacity-70: 0.7;
+  --opacity-80: 0.8;
+  --opacity-90: 0.9;
+  --opacity-100: 1;
+
+  /* ========================================
+   * VIDEO PLAYER OPACITY TOKENS
+   * ========================================
+   * Semantic opacity values for Media Chrome controls
+   */
+  --media-loading-spinner-bg: var(--opacity-20);
+  --media-loading-spinner-fg: var(--opacity-80);
+
+  /* Control hover/background states */
+  --media-control-hover-opacity: var(--opacity-10);
+  --media-control-secondary-opacity: var(--opacity-80);
+  --media-range-track-opacity: var(--opacity-30);
+  --media-range-buffered-opacity: var(--opacity-40);
+
+  /* Control bar gradient overlay */
+  --media-overlay-bottom-opacity: var(--opacity-70);
+  --media-overlay-mid-opacity: var(--opacity-30);
+}
