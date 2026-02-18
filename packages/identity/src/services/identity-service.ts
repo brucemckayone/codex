@@ -10,7 +10,7 @@ import {
   ImageProcessingService,
 } from '@codex/image-processing';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 
 import { UserNotFoundError, UsernameTakenError } from '../errors';
 
