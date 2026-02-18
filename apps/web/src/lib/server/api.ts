@@ -20,6 +20,7 @@ import type {
   AllSettingsResponse,
   AvatarUploadResponse,
   CustomerListItem,
+  MyMembershipResponse,
   NotificationPreferencesResponse,
   PaginatedListResponse,
   PlaybackProgressResponse,
@@ -444,6 +445,29 @@ export function createServerApi(
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
+
+      /**
+       * Get current user's membership in an organization
+       *
+       * Returns the authenticated user's role and status within the org.
+       * Used for access control and role-based UI rendering.
+       *
+       * @param id - Organization UUID
+       * @returns Membership data with role, status, and joinedAt timestamp
+       *
+       * @example
+       * ```typescript
+       * const membership = await api.org.getMyMembership(orgId);
+       * if (membership?.role === 'admin') {
+       *   // Show admin controls
+       * }
+       * ```
+       */
+      getMyMembership: (id: string) =>
+        request<MyMembershipResponse>(
+          'org',
+          `/api/organizations/${id}/members/my-membership`
+        ),
     },
 
     /**
