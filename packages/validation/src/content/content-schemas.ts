@@ -413,6 +413,7 @@ export const contentQuerySchema = paginationSchema.extend({
   visibility: visibilityEnum.optional(),
   category: z.string().max(100).optional(),
   organizationId: uuidSchema.optional(),
+  creatorId: uuidSchema.optional(),
 
   // Search
   search: z.string().max(255).optional(),

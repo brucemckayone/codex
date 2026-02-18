@@ -63,6 +63,7 @@ export interface ContentFilters {
   visibility?: 'public' | 'private' | 'members_only' | 'purchased_only';
   category?: string;
   organizationId?: string | null;
+  creatorId?: string;
   search?: string;
   sortBy?:
     | 'createdAt'

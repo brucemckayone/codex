@@ -512,6 +512,7 @@ describe('Query Schemas', () => {
         visibility: 'public' as const,
         category: 'Programming',
         organizationId: '123e4567-e89b-12d3-a456-426614174000',
+        creatorId: '123e4567-e89b-12d3-a456-426614174001',
         search: 'typescript tutorial',
         sortBy: 'publishedAt' as const,
         sortOrder: 'asc' as const,
@@ -519,6 +520,21 @@ describe('Query Schemas', () => {
 
       const result = contentQuerySchema.parse(query);
       expect(result).toEqual(query);
+    });
+
+    it('should validate with creatorId filter', () => {
+      const query = {
+        creatorId: '123e4567-e89b-12d3-a456-426614174001',
+      };
+
+      const result = contentQuerySchema.parse(query);
+      expect(result.creatorId).toBe('123e4567-e89b-12d3-a456-426614174001');
+    });
+
+    it('should reject invalid creatorId format', () => {
+      expect(() =>
+        contentQuerySchema.parse({ creatorId: 'not-a-uuid' })
+      ).toThrow('Invalid ID format');
     });
 
     it('should reject page less than 1', () => {

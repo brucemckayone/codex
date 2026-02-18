@@ -1,6 +1,43 @@
 import { z } from 'zod';
 
-import { createSanitizedStringSchema, emailSchema } from '../primitives';
+import {
+  createOptionalTextSchema,
+  createSanitizedStringSchema,
+  createSlugSchema,
+  emailSchema,
+  urlSchema,
+} from '../primitives';
+
+/**
+ * Username validation schema
+ * - Used for creator profile URLs (e.g., codex.platform/u/username)
+ * - Must be slug-safe (lowercase alphanumeric + hyphens)
+ * - Maximum 50 characters
+ */
+export const usernameSchema = createSlugSchema(50);
+
+/**
+ * Bio validation schema
+ * - Optional user biography/bio for creator profile
+ * - Maximum 500 characters
+ */
+export const bioSchema = createOptionalTextSchema(500, 'Bio');
+
+/**
+ * Social links validation schema
+ * - Optional social media and website links for creator profile
+ * - All URLs must be HTTP/HTTPS
+ */
+export const socialLinksSchema = z
+  .object({
+    website: urlSchema.optional(),
+    twitter: urlSchema.optional(),
+    youtube: urlSchema.optional(),
+    instagram: urlSchema.optional(),
+  })
+  .optional();
+
+export type SocialLinks = z.infer<typeof socialLinksSchema>;
 
 /**
  * User validation schema
@@ -30,10 +67,16 @@ export type LoginCredentials = z.infer<typeof loginSchema>;
  *
  * - displayName: User's display name (maps to users.name column)
  * - email: User's email address (requires re-verification when changed)
+ * - username: Unique username for creator profile URLs
+ * - bio: User biography for creator profile
+ * - socialLinks: Social media and website links
  */
 export const updateProfileSchema = z.object({
   displayName: createSanitizedStringSchema(1, 255, 'Display name').optional(),
   email: emailSchema.optional(),
+  username: usernameSchema.optional(),
+  bio: bioSchema,
+  socialLinks: socialLinksSchema,
 });
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

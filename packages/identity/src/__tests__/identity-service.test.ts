@@ -2,7 +2,7 @@ import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
 import type { ImageProcessingResult } from '@codex/image-processing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { UserNotFoundError } from '../errors';
+import { UserNotFoundError, UsernameTakenError } from '../errors';
 import { IdentityService } from '../services/identity-service';
 
 /**
@@ -169,14 +169,16 @@ describe('IdentityService', () => {
         expect.objectContaining({ name: 'New Display Name' })
       );
 
-      // Verify result
-      expect(result).toEqual({
-        id: userId,
-        name: 'New Display Name',
-        email: 'user@example.com',
-        emailVerified: true,
-        image: null,
-      });
+      // Verify result (use objectContaining for resilience against new fields)
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: userId,
+          name: 'New Display Name',
+          email: 'user@example.com',
+          emailVerified: true,
+          image: null,
+        })
+      );
     });
 
     it('should update email and set emailVerified to false', async () => {
@@ -214,13 +216,15 @@ describe('IdentityService', () => {
       );
 
       // Verify result
-      expect(result).toEqual({
-        id: userId,
-        name: 'Test User',
-        email: 'new@example.com',
-        emailVerified: false,
-        image: null,
-      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: userId,
+          name: 'Test User',
+          email: 'new@example.com',
+          emailVerified: false,
+          image: null,
+        })
+      );
     });
 
     it('should update both displayName and email together', async () => {
@@ -261,13 +265,15 @@ describe('IdentityService', () => {
       );
 
       // Verify result
-      expect(result).toEqual({
-        id: userId,
-        name: 'New Name',
-        email: 'new@example.com',
-        emailVerified: false,
-        image: null,
-      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: userId,
+          name: 'New Name',
+          email: 'new@example.com',
+          emailVerified: false,
+          image: null,
+        })
+      );
     });
 
     it('should not set emailVerified to false if email is unchanged', async () => {
@@ -346,13 +352,345 @@ describe('IdentityService', () => {
       expect(mockUpdateSet).toHaveBeenCalledWith({});
 
       // Verify result unchanged
-      expect(result).toEqual({
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: userId,
+          name: 'Test User',
+          email: 'user@example.com',
+          emailVerified: true,
+          image: null,
+        })
+      );
+    });
+
+    it('should update username', async () => {
+      const existingUser = {
         id: userId,
         name: 'Test User',
         email: 'user@example.com',
         emailVerified: true,
         image: null,
+        username: null,
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      // Track the call count to differentiate the initial user fetch from the uniqueness check
+      let callCount = 0;
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check - no conflict
+        return Promise.resolve(null);
       });
+
+      const updatedUser = {
+        ...existingUser,
+        username: 'testuser',
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        username: 'testuser',
+      });
+
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          username: 'testuser',
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: userId,
+          username: 'testuser',
+        })
+      );
+    });
+
+    it('should throw UsernameTakenError if username is taken', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+        username: null,
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      const otherUser = {
+        id: 'other-user-id',
+        name: 'Other User',
+        email: 'other@example.com',
+        emailVerified: true,
+        image: null,
+        username: 'takenusername',
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      // Track the call count to differentiate the initial user fetch from the uniqueness check
+      let callCount = 0;
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check returns another user with the username
+        return Promise.resolve(otherUser);
+      });
+
+      await expect(
+        service.updateProfile(userId, { username: 'takenusername' })
+      ).rejects.toThrow(UsernameTakenError);
+    });
+
+    it('should clear username by setting to null', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+        username: 'oldusername',
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      const updatedUser = {
+        ...existingUser,
+        username: null,
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        username: null,
+      });
+
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          username: null,
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          username: null,
+        })
+      );
+    });
+
+    it('should allow username reuse after soft-delete', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+        username: null,
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      // Track the call count to differentiate calls
+      let callCount = 0;
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check returns null
+        // (simulating that the DB filtered out soft-deleted users with isNull(deletedAt))
+        return Promise.resolve(null);
+      });
+
+      const updatedUser = {
+        ...existingUser,
+        username: 'reusableusername',
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        username: 'reusableusername',
+      });
+
+      // Should succeed - username can be reused from soft-deleted user
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          username: 'reusableusername',
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: userId,
+          username: 'reusableusername',
+        })
+      );
+    });
+
+    it('should update bio', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+        username: null,
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      const updatedUser = {
+        ...existingUser,
+        bio: 'This is my bio',
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        bio: 'This is my bio',
+      });
+
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bio: 'This is my bio',
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          bio: 'This is my bio',
+        })
+      );
+    });
+
+    it('should update socialLinks', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+        username: null,
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(existingUser);
+
+      const socialLinksInput = {
+        website: 'https://example.com',
+        twitter: 'https://twitter.com/testuser',
+      };
+
+      const updatedUser = {
+        ...existingUser,
+        socialLinks: socialLinksInput,
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        socialLinks: socialLinksInput,
+      });
+
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          socialLinks: socialLinksInput,
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          socialLinks: socialLinksInput,
+        })
+      );
+    });
+
+    it('should update all new fields together', async () => {
+      const existingUser = {
+        id: userId,
+        name: 'Test User',
+        email: 'user@example.com',
+        emailVerified: true,
+        image: null,
+        username: null,
+        bio: null,
+        socialLinks: null,
+        deletedAt: null,
+      };
+
+      // Track the call count to differentiate the initial user fetch from the uniqueness check
+      let callCount = 0;
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => {
+        callCount++;
+        // First call: fetch existing user
+        if (callCount === 1) {
+          return Promise.resolve(existingUser);
+        }
+        // Second call: uniqueness check - no conflict
+        return Promise.resolve(null);
+      });
+
+      const socialLinksInput = {
+        website: 'https://example.com',
+        twitter: 'https://twitter.com/testuser',
+      };
+
+      const updatedUser = {
+        ...existingUser,
+        username: 'testuser',
+        bio: 'Creator of things',
+        socialLinks: socialLinksInput,
+      };
+      mockReturning.mockResolvedValue([updatedUser]);
+
+      const result = await service.updateProfile(userId, {
+        username: 'testuser',
+        bio: 'Creator of things',
+        socialLinks: socialLinksInput,
+      });
+
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          username: 'testuser',
+          bio: 'Creator of things',
+          socialLinks: socialLinksInput,
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          username: 'testuser',
+          bio: 'Creator of things',
+          socialLinks: socialLinksInput,
+        })
+      );
     });
   });
 });
