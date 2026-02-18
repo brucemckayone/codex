@@ -251,3 +251,149 @@ export interface PublicBrandingResponse {
   logoUrl: string | null;
   primaryColorHex: string;
 }
+
+// ============================================================================
+// User/Account Response Types
+// ============================================================================
+
+/**
+ * Response for POST /api/user/avatar
+ * Returns the uploaded avatar URL and metadata
+ * @example
+ * {
+ *   data: {
+ *     avatarUrl: "https://...",
+ *     size: 123456,
+ *     mimeType: "image/jpeg"
+ *   }
+ * }
+ */
+export interface AvatarUploadResponse {
+  data: {
+    avatarUrl: string;
+    size: number;
+    mimeType: string;
+  };
+}
+
+// ============================================================================
+// Account Response Types
+// ============================================================================
+
+/**
+ * Response for GET/PUT /api/user/notification-preferences
+ * User's email notification preferences
+ * @example
+ * {
+ *   emailMarketing: true,
+ *   emailTransactional: true,
+ *   emailDigest: false
+ * }
+ */
+export interface NotificationPreferencesResponse {
+  emailMarketing: boolean;
+  emailTransactional: boolean;
+  emailDigest: boolean;
+}
+
+// ============================================================================
+// Analytics Response Types
+// ============================================================================
+
+/**
+ * Revenue data point for a specific day
+ */
+export interface RevenueByDay {
+  date: string;
+  revenueCents: number;
+  purchaseCount: number;
+}
+
+/**
+ * Response for GET /api/admin/analytics/revenue
+ * Returns revenue statistics broken down by fee distribution and daily revenue
+ * @example
+ * {
+ *   totalRevenueCents: 150000,
+ *   totalPurchases: 45,
+ *   averageOrderValueCents: 3333,
+ *   platformFeeCents: 15000,
+ *   organizationFeeCents: 7500,
+ *   creatorPayoutCents: 127500,
+ *   revenueByDay: [{ date: "2025-01-01", revenueCents: 5000, purchaseCount: 2 }]
+ * }
+ */
+export interface RevenueAnalyticsResponse {
+  totalRevenueCents: number;
+  totalPurchases: number;
+  averageOrderValueCents: number;
+  platformFeeCents: number;
+  organizationFeeCents: number;
+  creatorPayoutCents: number;
+  revenueByDay: RevenueByDay[];
+}
+
+/**
+ * Response for GET /api/admin/analytics/top-content
+ * Returns list of top-performing content by revenue
+ * @example
+ * [
+ *   { contentId: "abc-123", contentTitle: "My Video", revenueCents: 5000, purchaseCount: 10 }
+ * ]
+ */
+export type TopContentAnalyticsResponse = Array<{
+  contentId: string;
+  contentTitle: string;
+  revenueCents: number;
+  purchaseCount: number;
+}>;
+
+// ============================================================================
+// Admin Response Types
+// ============================================================================
+
+/**
+ * Customer list item for admin dashboard
+ * Used in PaginatedListResponse<CustomerListItem>
+ */
+export interface CustomerListItem {
+  userId: string;
+  email: string;
+  name: string | null;
+  createdAt: string;
+  totalPurchases: number;
+  totalSpentCents: number;
+}
+
+/**
+ * Activity feed item type
+ */
+export type ActivityItemType =
+  | 'purchase'
+  | 'content_published'
+  | 'member_joined';
+
+/**
+ * Individual activity feed item
+ */
+export interface ActivityItem {
+  id: string;
+  type: ActivityItemType;
+  title: string;
+  description: string | null;
+  timestamp: string;
+}
+
+/**
+ * Response for GET /api/admin/activity
+ * Returns paginated activity feed
+ * @example
+ * {
+ *   items: [{ id: "1", type: "purchase", title: "New Purchase", description: null, timestamp: "..." }],
+ *   pagination: { page: 1, limit: 20, total: 100, totalPages: 5 }
+ * }
+ */
+export interface ActivityFeedResponse {
+  items: ActivityItem[];
+  pagination: PaginationMetadata;
+}

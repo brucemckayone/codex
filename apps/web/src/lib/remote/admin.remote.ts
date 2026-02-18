@@ -218,7 +218,7 @@ export const getCustomers = query(customersQuerySchema, async (params) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const activityFeedQuerySchema = z.object({
-  organizationId: z.string().uuid().optional(),
+  organizationId: z.uuid().optional(),
   page: z.coerce.number().min(1).optional().default(1),
   limit: z.coerce.number().min(1).max(100).optional().default(10),
   type: z

@@ -16,18 +16,27 @@ import {
   type ServiceName,
 } from '@codex/constants';
 import type {
+  ActivityFeedResponse,
   AllSettingsResponse,
+  AvatarUploadResponse,
+  CustomerListItem,
+  NotificationPreferencesResponse,
   PaginatedListResponse,
-  PaginationMetadata,
   PlaybackProgressResponse,
+  RevenueAnalyticsResponse,
   SessionData,
   SingleItemResponse,
   StreamingUrlResponse,
+  TopContentAnalyticsResponse,
   UpdatePlaybackProgressResponse,
   UserData,
   UserLibraryResponse,
 } from '@codex/shared-types';
-import type { CreateCheckoutInput } from '@codex/validation';
+import type {
+  CreateCheckoutInput,
+  UpdateNotificationPreferencesInput,
+  UpdateProfileInput,
+} from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 // Import local types that extend DB types with relations
@@ -195,11 +204,87 @@ export function createServerApi(
     },
 
     /**
+     * Account endpoints
+     */
+    account: {
+      /**
+       * Get user profile
+       */
+      getProfile: () =>
+        request<SingleItemResponse<UserData>>('identity', '/api/user/profile'),
+
+      /**
+       * Update user profile
+       */
+      updateProfile: (data: UpdateProfileInput) =>
+        request<SingleItemResponse<UserData>>('identity', '/api/user/profile', {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Get notification preferences
+       */
+      getNotificationPreferences: () =>
+        request<NotificationPreferencesResponse>(
+          'identity',
+          '/api/user/notification-preferences'
+        ),
+
+      /**
+       * Update notification preferences
+       */
+      updateNotificationPreferences: (
+        data: UpdateNotificationPreferencesInput
+      ) =>
+        request<NotificationPreferencesResponse>(
+          'identity',
+          '/api/user/notification-preferences',
+          {
+            method: 'PUT',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * Upload avatar (multipart - handled differently from request())
+       * Use direct fetch with FormData instead of request()
+       */
+      uploadAvatar: (file: File): Promise<AvatarUploadResponse> => {
+        const url = `${serverApiUrl(platform, 'identity')}/api/user/avatar`;
+        const formData = new FormData();
+        formData.append('avatar', file);
+
+        return fetch(url, {
+          method: 'POST',
+          headers: sessionCookie
+            ? { Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}` }
+            : {},
+          body: formData,
+        }).then(async (res) => {
+          if (!res.ok) throw new ApiError(res.status, 'Upload failed');
+          return res.json() as Promise<AvatarUploadResponse>;
+        });
+      },
+
+      /**
+       * Delete avatar
+       */
+      deleteAvatar: () =>
+        request<void>('identity', '/api/user/avatar', {
+          method: 'DELETE',
+        }),
+    },
+
+    /**
      * Content endpoints
      */
     content: {
       /**
        * Get content by ID
+       *
+       * @param id - Content UUID
+       * @returns Single content item with relations (media, organization, etc.)
        */
       get: (id: string) =>
         request<SingleItemResponse<ContentWithRelations>>(
@@ -208,7 +293,31 @@ export function createServerApi(
         ),
 
       /**
-       * List content with optional filters
+       * List content with pagination and filtering
+       *
+       * Query parameters (from ContentQueryInput):
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       * - status: 'draft' | 'published' | 'archived' (optional)
+       * - contentType: 'video' | 'audio' | 'written' (optional)
+       * - visibility: 'public' | 'private' | 'members_only' | 'purchased_only' (optional)
+       * - category: string filter (max 100 chars, optional)
+       * - organizationId: UUID filter (optional)
+       * - creatorId: UUID filter (optional)
+       * - search: text search (max 255 chars, optional)
+       * - sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount' (default: 'createdAt')
+       * - sortOrder: 'asc' | 'desc' (default: 'desc')
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('status', 'published');
+       * params.set('page', '1');
+       * params.set('limit', '20');
+       * const content = await api.content.list(params);
+       * ```
+       *
+       * @see {@link ContentQueryInput}
        */
       list: (params?: URLSearchParams) =>
         request<PaginatedListResponse<ContentWithRelations>>(
@@ -288,6 +397,12 @@ export function createServerApi(
 
       /**
        * Get user library (purchased + free content)
+       *
+       * Query parameters (standard pagination):
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       *
+       * @see {@link PaginationInput}
        */
       getUserLibrary: (params?: URLSearchParams) =>
         request<UserLibraryResponse>(
@@ -358,20 +473,27 @@ export function createServerApi(
      * Returns { totalRevenueCents, totalPurchases, averageOrderValueCents, ... }
      */
     analytics: {
+      /**
+       * Get revenue statistics
+       *
+       * Query parameters (from AdminRevenueQueryInput):
+       * - startDate: ISO date string, e.g., '2025-01-01' (optional)
+       * - endDate: ISO date string, e.g., '2025-01-31' (optional)
+       *
+       * Note: Maximum date range is 365 days (enforced by backend).
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('startDate', '2025-01-01');
+       * params.set('endDate', '2025-01-31');
+       * const revenue = await api.analytics.getRevenue(params);
+       * ```
+       *
+       * @see {@link AdminRevenueQueryInput}
+       */
       getRevenue: (params?: URLSearchParams) =>
-        request<{
-          totalRevenueCents: number;
-          totalPurchases: number;
-          averageOrderValueCents: number;
-          platformFeeCents: number;
-          organizationFeeCents: number;
-          creatorPayoutCents: number;
-          revenueByDay: Array<{
-            date: string;
-            revenueCents: number;
-            purchaseCount: number;
-          }>;
-        }>(
+        request<RevenueAnalyticsResponse>(
           'admin',
           `/api/admin/analytics/revenue${params ? `?${params}` : ''}`
         ),
@@ -379,16 +501,21 @@ export function createServerApi(
       /**
        * Get top content by revenue
        * Returns array of { contentId, contentTitle, revenueCents, purchaseCount }
+       *
+       * Query parameters (from AdminTopContentQueryInput):
+       * - limit: number of items to return (1-100, default: 10)
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('limit', '20');
+       * const topContent = await api.analytics.getTopContent(params);
+       * ```
+       *
+       * @see {@link AdminTopContentQueryInput}
        */
       getTopContent: (params?: URLSearchParams) =>
-        request<
-          Array<{
-            contentId: string;
-            contentTitle: string;
-            revenueCents: number;
-            purchaseCount: number;
-          }>
-        >(
+        request<TopContentAnalyticsResponse>(
           'admin',
           `/api/admin/analytics/top-content${params ? `?${params}` : ''}`
         ),
@@ -401,34 +528,51 @@ export function createServerApi(
       /**
        * Get customers list
        * Returns PaginatedListResponse with customer items
+       *
+       * Query parameters (standard pagination):
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('page', '2');
+       * params.set('limit', '50');
+       * const customers = await api.admin.getCustomers(params);
+       * ```
+       *
+       * @see {@link AdminCustomerListQueryInput}
        */
       getCustomers: (params?: URLSearchParams) =>
-        request<
-          PaginatedListResponse<{
-            userId: string;
-            email: string;
-            name: string | null;
-            createdAt: string;
-            totalPurchases: number;
-            totalSpentCents: number;
-          }>
-        >('admin', `/api/admin/customers${params ? `?${params}` : ''}`),
+        request<PaginatedListResponse<CustomerListItem>>(
+          'admin',
+          `/api/admin/customers${params ? `?${params}` : ''}`
+        ),
 
       /**
        * Get activity feed
        * Returns { items: [...], pagination: {...} }
+       *
+       * Query parameters (from AdminActivityQueryInput):
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       * - type: 'purchase' | 'content_published' | 'member_joined' (optional)
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('type', 'purchase');
+       * params.set('limit', '10');
+       * const activity = await api.admin.getActivity(params);
+       * ```
+       *
+       * @see {@link AdminActivityQueryInput}
        */
       getActivity: (params?: URLSearchParams) =>
-        request<{
-          items: Array<{
-            id: string;
-            type: 'purchase' | 'content_published' | 'member_joined';
-            title: string;
-            description: string | null;
-            timestamp: string;
-          }>;
-          pagination: PaginationMetadata;
-        }>('admin', `/api/admin/activity${params ? `?${params}` : ''}`),
+        request<ActivityFeedResponse>(
+          'admin',
+          `/api/admin/activity${params ? `?${params}` : ''}`
+        ),
     },
   };
 }
