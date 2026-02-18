@@ -5,6 +5,7 @@
  * Supports both authenticated (full data) and unauthenticated (public branding) queries.
  */
 
+import type { MyMembershipResponse } from '@codex/shared-types';
 import { z } from 'zod';
 import { getRequestEvent, query } from '$app/server';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
@@ -94,3 +95,36 @@ export const getOrganizationById = query(z.string().uuid(), async (id) => {
   const api = createServerApi(platform, cookies);
   return api.fetch('org', `/api/organizations/${id}`);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// My Membership
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get current user's membership in an organization
+ *
+ * Returns the authenticated user's role, status, and joined date.
+ * Used for access control checks and role-based UI rendering.
+ *
+ * Role values: 'owner' | 'admin' | 'creator' | 'subscriber' | 'member' | null
+ * Status values: 'active' | 'inactive' | 'invited' | null
+ *
+ * Usage:
+ * ```svelte
+ * {#await getMyMembership(orgId)}
+ *   <LoadingSpinner />
+ * {:then membership}
+ *   {#if membership?.role === 'admin' || membership?.role === 'owner'}
+ *     <AdminPanel />
+ *   {/if}
+ * {/await}
+ * ```
+ */
+export const getMyMembership = query(
+  z.uuid(),
+  async (orgId): Promise<MyMembershipResponse> => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.getMyMembership(orgId);
+  }
+);
