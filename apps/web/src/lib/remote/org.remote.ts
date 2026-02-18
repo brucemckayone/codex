@@ -5,6 +5,7 @@
  * Supports both authenticated (full data) and unauthenticated (public branding) queries.
  */
 
+import type { OrganizationWithRole } from '@codex/shared-types';
 import { z } from 'zod';
 import { getRequestEvent, query } from '$app/server';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
@@ -94,3 +95,37 @@ export const getOrganizationById = query(z.string().uuid(), async (id) => {
   const api = createServerApi(platform, cookies);
   return api.fetch('org', `/api/organizations/${id}`);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// My Organizations
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get current user's organizations
+ *
+ * Returns array of organizations where user is an active member.
+ * Used for StudioSwitcher dropdown.
+ */
+export const getMyOrganizations = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.org.getMyOrganizations();
+}) as unknown as () => Promise<OrganizationWithRole[] | null>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// My Membership
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get user's membership in an organization
+ *
+ * @param orgId - Organization UUID
+ * @returns Membership with role and joinedAt (null if not a member)
+ */
+export const getMyMembership = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.org.getMyMembership(orgId);
+}) as unknown as (
+  orgId: string
+) => Promise<{ role: string | null; joinedAt: string | null }>;

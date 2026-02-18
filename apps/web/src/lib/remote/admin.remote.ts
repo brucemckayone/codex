@@ -78,7 +78,7 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
       change: 0, // Change not provided by API
     },
     contentCount: {
-      value: topContent?.length ?? 0,
+      value: topContent?.pagination?.total ?? 0,
       change: 0, // Content count change not provided by API
     },
     views: {

@@ -623,6 +623,72 @@ export class OrganizationService extends BaseService {
   }
 
   /**
+   * Get all organizations for a user
+   *
+   * Returns organizations where user has an active membership.
+   * Results ordered by organization name.
+   *
+   * @param userId - User ID
+   * @returns Array of organizations with user's role
+   */
+  async getUserOrganizations(userId: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      slug: string;
+      logoUrl: string | null;
+      role: string;
+    }>
+  > {
+    try {
+      const memberships = await this.db.query.organizationMemberships.findMany({
+        where: and(
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, 'active')
+        ),
+        with: {
+          organization: {
+            columns: {
+              id: true,
+              name: true,
+              slug: true,
+              logoUrl: true,
+              deletedAt: true,
+            },
+          },
+        },
+        columns: {
+          role: true,
+        },
+      });
+
+      return memberships
+        .filter((m) => m.organization && !m.organization.deletedAt)
+        .map((m) => ({
+          id: m.organization?.id,
+          name: m.organization?.name,
+          slug: m.organization?.slug,
+          logoUrl: m.organization?.logoUrl,
+          role: m.role,
+        }))
+        .filter(
+          (
+            m
+          ): m is {
+            id: string;
+            name: string;
+            slug: string;
+            logoUrl: string | null;
+            role: string;
+          } => m.id !== undefined
+        )
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      throw wrapError(error, { userId });
+    }
+  }
+
+  /**
    * Invite a member to an organization
    *
    * @param organizationId - Organization ID

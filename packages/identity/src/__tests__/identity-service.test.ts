@@ -787,8 +787,8 @@ describe('IdentityService', () => {
 
       // Spy on the service's db.insert method
       const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+        .spyOn(service.db, 'insert')
+        .mockReturnValue(mockValues as unknown as typeof mockDb.insert);
 
       const result = await service.getNotificationPreferences(userId);
 
@@ -824,8 +824,8 @@ describe('IdentityService', () => {
 
       // Spy on the service's db.insert method
       const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+        .spyOn(service.db, 'insert')
+        .mockReturnValue(mockValues as unknown as typeof mockDb.insert);
 
       const result = await service.getNotificationPreferences(userId);
 
@@ -865,8 +865,8 @@ describe('IdentityService', () => {
 
       // Spy on the service's db.insert method
       const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+        .spyOn(service.db, 'insert')
+        .mockReturnValue(mockValues as unknown as typeof mockDb.insert);
 
       const result = await service.updateNotificationPreferences(userId, {
         emailMarketing: false,
@@ -904,8 +904,8 @@ describe('IdentityService', () => {
 
       // Spy on the service's db.insert method
       const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+        .spyOn(service.db, 'insert')
+        .mockReturnValue(mockValues as unknown as typeof mockDb.insert);
 
       const result = await service.updateNotificationPreferences(userId, {
         emailMarketing: false,
@@ -941,8 +941,8 @@ describe('IdentityService', () => {
 
       // Spy on the service's db.insert method
       const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+        .spyOn(service.db, 'insert')
+        .mockReturnValue(mockValues as unknown as typeof mockDb.insert);
 
       // Update only emailMarketing
       const result = await service.updateNotificationPreferences(userId, {

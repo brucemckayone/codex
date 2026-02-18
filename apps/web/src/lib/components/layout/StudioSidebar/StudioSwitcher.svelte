@@ -40,7 +40,7 @@
     {#if orgs.length > 0}
       <DropdownMenuSeparator />
       {#each orgs as orgItem}
-        <a href="/studio/org/{orgItem.slug}">
+        <a href="/{orgItem.slug}/studio">
           <DropdownMenuItem>
             <span class="item-content">
               {#if orgItem.logoUrl}

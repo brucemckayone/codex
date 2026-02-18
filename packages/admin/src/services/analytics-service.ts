@@ -8,6 +8,10 @@
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { schema } from '@codex/database';
 import { BaseService, NotFoundError, wrapError } from '@codex/service-errors';
+import type {
+  PaginatedListResponse,
+  PaginationMetadata,
+} from '@codex/shared-types';
 import type { AdminActivityQueryInput } from '@codex/validation';
 import { and, countDistinct, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
@@ -188,11 +192,12 @@ export class AdminAnalyticsService extends BaseService {
    * Get top content by revenue
    *
    * Returns content ranked by total revenue from completed purchases.
+   * Response is wrapped in PaginatedListResponse for consistency with other list endpoints.
    */
   async getTopContent(
     organizationId: string,
     limit = DEFAULT_TOP_CONTENT_LIMIT
-  ): Promise<TopContentItem[]> {
+  ): Promise<PaginatedListResponse<TopContentItem>> {
     try {
       // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       // Get top content by revenue with JOIN to content table
@@ -218,12 +223,24 @@ export class AdminAnalyticsService extends BaseService {
         .orderBy(desc(sql`SUM(${schema.purchases.amountPaidCents})`))
         .limit(limit);
 
-      return result.map((row) => ({
+      const items: TopContentItem[] = result.map((row) => ({
         contentId: row.contentId,
         contentTitle: row.contentTitle,
         revenueCents: row.revenueCents,
         purchaseCount: row.purchaseCount,
       }));
+
+      // Build pagination metadata
+      // Since this is a "top N" query without true pagination, we return page 1
+      // with the actual count as total (indicating this is the full result set)
+      const pagination: PaginationMetadata = {
+        page: 1,
+        limit,
+        total: items.length,
+        totalPages: 1,
+      };
+
+      return { items, pagination };
     } catch (error) {
       if (error instanceof NotFoundError) {
         throw error;

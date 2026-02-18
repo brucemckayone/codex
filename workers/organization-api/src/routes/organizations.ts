@@ -128,6 +128,23 @@ app.get(
 );
 
 /**
+ * GET /api/organizations/my-organizations
+ * Get current user's organizations
+ *
+ * Returns: Array of organizations with user's role (200)
+ * Security: Authenticated users only
+ */
+app.get(
+  '/my-organizations',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx) => {
+      return await ctx.services.organization.getUserOrganizations(ctx.user.id);
+    },
+  })
+);
+
+/**
  * GET /api/organizations/public/:slug
  * Public branding endpoint - no auth required
  *

@@ -21,6 +21,7 @@ import type {
   AvatarUploadResponse,
   CustomerListItem,
   NotificationPreferencesResponse,
+  OrganizationWithRole,
   PaginatedListResponse,
   PlaybackProgressResponse,
   RevenueAnalyticsResponse,
@@ -444,6 +445,24 @@ export function createServerApi(
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
+
+      /**
+       * Get current user's organizations
+       */
+      getMyOrganizations: () =>
+        request<OrganizationWithRole[]>(
+          'org',
+          '/api/organizations/my-organizations'
+        ),
+
+      /**
+       * Get user's membership in an organization
+       */
+      getMyMembership: (id: string) =>
+        request<{ role: string | null; joinedAt: string | null }>(
+          'org',
+          `/api/organizations/${id}/members/my-membership`
+        ),
     },
 
     /**
