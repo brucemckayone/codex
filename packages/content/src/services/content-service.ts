@@ -42,9 +42,11 @@ import {
   BusinessLogicError,
   ContentNotFoundError,
   ContentTypeMismatchError,
+  InternalServiceError,
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
+  ValidationError,
   wrapError,
 } from '../errors';
 import type {
@@ -71,7 +73,10 @@ export class ContentService extends BaseService {
 
   setCachePurge(client: CachePurgeClient, webAppUrl: string): void {
     if (!webAppUrl) {
-      throw new Error('webAppUrl must be a non-empty string');
+      throw new ValidationError('webAppUrl must be a non-empty string', {
+        field: 'webAppUrl',
+        providedValue: webAppUrl,
+      });
     }
     this.cachePurge = client;
     this.webAppUrl = webAppUrl;
@@ -154,14 +159,23 @@ export class ContentService extends BaseService {
           .returning();
 
         if (!newContent) {
-          throw new Error('Failed to create content');
+          throw new InternalServiceError('Failed to create content', {
+            creatorId,
+            organizationId: validated.organizationId,
+          });
         }
 
         return newContent;
       });
 
       if (!result) {
-        throw new Error('Failed to create content');
+        throw new InternalServiceError(
+          'Failed to create content after transaction',
+          {
+            creatorId,
+            organizationId: validated.organizationId,
+          }
+        );
       }
 
       return result;

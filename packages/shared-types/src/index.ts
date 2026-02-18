@@ -9,22 +9,49 @@
  * to avoid circular dependencies.
  */
 
+// API query parameter types (for documentation - see api-queries.ts)
+export type {
+  AdminActivityQueryInput,
+  AdminContentListQueryInput,
+  AdminCustomerListQueryInput,
+  AdminDashboardStatsQueryInput,
+  AdminRevenueQueryInput,
+  AdminTopContentQueryInput,
+  ContentQueryInput,
+  ListMembersQueryInput,
+  ListTemplatesQuery,
+  MediaQueryInput,
+  OrganizationQueryInput,
+  PaginationInput,
+  PublicMembersQueryInput,
+  PurchaseQueryInput,
+} from './api-queries';
+
 // API response types (generic wrappers and non-entity-specific types)
 export type {
+  ActivityFeedResponse,
+  ActivityItem,
+  ActivityItemType,
   AllSettingsResponse,
+  AvatarUploadResponse,
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
+  CustomerListItem,
   DeleteOrganizationResponse,
   FeatureSettingsResponse,
   MembershipLookupResponse,
   MyMembershipResponse,
+  NotificationPreferencesResponse,
   PaginatedListResponse,
   PaginationMetadata,
   PlaybackProgressResponse,
   PublicBrandingResponse,
+  RevenueAnalyticsResponse,
+  RevenueByDay,
   SingleItemResponse,
   StreamingUrlResponse,
+  TopContentAnalyticsResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
 } from './api-responses';

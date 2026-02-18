@@ -1,4 +1,5 @@
 import type { R2Service } from '@codex/cloudflare-clients';
+import { whereNotDeleted } from '@codex/database';
 import {
   notificationPreferences,
   organizationMemberships,
@@ -9,7 +10,7 @@ import {
   ImageProcessingService,
 } from '@codex/image-processing';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 
 import { UserNotFoundError, UsernameTakenError } from '../errors';
 
@@ -40,7 +41,7 @@ export class IdentityService extends BaseService {
     file: File
   ): Promise<ImageProcessingResult> {
     const existing = await this.db.query.users.findFirst({
-      where: eq(users.id, userId),
+      where: and(eq(users.id, userId), whereNotDeleted(users)),
     });
 
     if (!existing) {
@@ -143,7 +144,7 @@ export class IdentityService extends BaseService {
     try {
       // First, fetch the current user to check if email or username is changing
       const existing = await this.db.query.users.findFirst({
-        where: eq(users.id, userId),
+        where: and(eq(users.id, userId), whereNotDeleted(users)),
       });
 
       if (!existing) {
@@ -187,7 +188,7 @@ export class IdentityService extends BaseService {
             where: and(
               eq(users.username, input.username),
               ne(users.id, userId),
-              isNull(users.deletedAt) // Exclude soft-deleted users
+              whereNotDeleted(users) // Exclude soft-deleted users
             ),
           });
 
@@ -216,7 +217,7 @@ export class IdentityService extends BaseService {
       const [updated] = await this.db
         .update(users)
         .set(updateData)
-        .where(eq(users.id, userId))
+        .where(and(eq(users.id, userId), whereNotDeleted(users)))
         .returning();
 
       if (!updated) {

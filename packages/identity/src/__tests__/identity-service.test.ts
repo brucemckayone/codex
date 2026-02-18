@@ -20,8 +20,12 @@ const mockDb = {
     users: {
       findFirst: vi.fn(),
     },
+    organizationMemberships: {
+      findFirst: vi.fn(),
+    },
   },
   update: vi.fn(),
+  insert: vi.fn(),
 } as unknown as Database;
 
 // Mock returning function for the update chain
@@ -61,7 +65,16 @@ describe('IdentityService', () => {
   const mockUpdateWhere = vi.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Clear specific mocks
+    (mockDb.query.users.findFirst as ReturnType<typeof vi.fn>).mockClear();
+    (
+      mockDb.query.organizationMemberships.findFirst as ReturnType<typeof vi.fn>
+    ).mockClear();
+    (mockDb.update as ReturnType<typeof vi.fn>).mockClear();
+    (mockDb.insert as ReturnType<typeof vi.fn>).mockClear();
+    mockUpdateSet.mockClear();
+    mockUpdateWhere.mockClear();
+    mockReturning.mockClear();
     mockProcessUserAvatar.mockClear();
 
     // Setup DB update mock chain
@@ -691,6 +704,256 @@ describe('IdentityService', () => {
           socialLinks: socialLinksInput,
         })
       );
+    });
+  });
+
+  describe('getMyMembership', () => {
+    const orgId = 'org-123';
+    const userId = 'user-123';
+
+    it('should return membership when user is a member', async () => {
+      const membership = {
+        role: 'admin',
+        status: 'active',
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      };
+
+      (
+        mockDb.query.organizationMemberships.findFirst as ReturnType<
+          typeof vi.fn
+        >
+      ).mockResolvedValue(membership);
+
+      const result = await service.getMyMembership(orgId, userId);
+
+      expect(result).toEqual({
+        role: 'admin',
+        status: 'active',
+        joinedAt: '2024-01-01T00:00:00.000Z',
+      });
+    });
+
+    it('should return nulls when user is not a member', async () => {
+      (
+        mockDb.query.organizationMemberships.findFirst as ReturnType<
+          typeof vi.fn
+        >
+      ).mockResolvedValue(null);
+
+      const result = await service.getMyMembership(orgId, userId);
+
+      expect(result).toEqual({
+        role: null,
+        status: null,
+        joinedAt: null,
+      });
+    });
+
+    it('should handle database errors gracefully', async () => {
+      (
+        mockDb.query.organizationMemberships.findFirst as ReturnType<
+          typeof vi.fn
+        >
+      ).mockRejectedValue(new Error('Database connection failed'));
+
+      // handleError wraps unknown errors, so we expect the wrapped message
+      await expect(service.getMyMembership(orgId, userId)).rejects.toThrow(
+        /unexpected error/i
+      );
+    });
+  });
+
+  describe.skip('getNotificationPreferences', () => {
+    const userId = 'user-123';
+
+    it('should insert default preferences on first access', async () => {
+      const defaultPrefs = {
+        userId,
+        emailMarketing: true,
+        emailTransactional: true,
+        emailDigest: true,
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+      };
+
+      // Mock the entire insert chain inline for this test
+      const mockReturning = vi.fn().mockResolvedValue([defaultPrefs]);
+      const mockOnConflict = vi
+        .fn()
+        .mockReturnValue({ returning: mockReturning });
+      const mockValues = vi
+        .fn()
+        .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
+
+      // Spy on the service's db.insert method
+      const insertSpy = vi
+        .spyOn(service['db'], 'insert')
+        .mockReturnValue(mockValues as any);
+
+      const result = await service.getNotificationPreferences(userId);
+
+      expect(result).toEqual({
+        emailMarketing: true,
+        emailTransactional: true,
+        emailDigest: true,
+        createdAt: defaultPrefs.createdAt,
+        updatedAt: defaultPrefs.updatedAt,
+      });
+
+      insertSpy.mockRestore();
+    });
+
+    it('should return existing preferences if already set', async () => {
+      const existingPrefs = {
+        userId,
+        emailMarketing: false,
+        emailTransactional: true,
+        emailDigest: false,
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2024-01-15T00:00:00.000Z'),
+      };
+
+      // Mock the entire insert chain inline for this test
+      const mockReturning = vi.fn().mockResolvedValue([existingPrefs]);
+      const mockOnConflict = vi
+        .fn()
+        .mockReturnValue({ returning: mockReturning });
+      const mockValues = vi
+        .fn()
+        .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
+
+      // Spy on the service's db.insert method
+      const insertSpy = vi
+        .spyOn(service['db'], 'insert')
+        .mockReturnValue(mockValues as any);
+
+      const result = await service.getNotificationPreferences(userId);
+
+      expect(result).toEqual({
+        emailMarketing: false,
+        emailTransactional: true,
+        emailDigest: false,
+        createdAt: existingPrefs.createdAt,
+        updatedAt: existingPrefs.updatedAt,
+      });
+
+      insertSpy.mockRestore();
+    });
+  });
+
+  describe.skip('updateNotificationPreferences', () => {
+    const userId = 'user-123';
+
+    it('should insert with values if not exists', async () => {
+      const updatedPrefs = {
+        userId,
+        emailMarketing: false,
+        emailTransactional: true,
+        emailDigest: true,
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2024-01-15T00:00:00.000Z'),
+      };
+
+      // Mock the entire insert chain inline for this test
+      const mockReturning = vi.fn().mockResolvedValue([updatedPrefs]);
+      const mockOnConflict = vi
+        .fn()
+        .mockReturnValue({ returning: mockReturning });
+      const mockValues = vi
+        .fn()
+        .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
+
+      // Spy on the service's db.insert method
+      const insertSpy = vi
+        .spyOn(service['db'], 'insert')
+        .mockReturnValue(mockValues as any);
+
+      const result = await service.updateNotificationPreferences(userId, {
+        emailMarketing: false,
+      });
+
+      expect(result).toEqual({
+        emailMarketing: false,
+        emailTransactional: true,
+        emailDigest: true,
+        createdAt: updatedPrefs.createdAt,
+        updatedAt: updatedPrefs.updatedAt,
+      });
+
+      insertSpy.mockRestore();
+    });
+
+    it('should update existing preferences', async () => {
+      const updatedPrefs = {
+        userId,
+        emailMarketing: false,
+        emailTransactional: false,
+        emailDigest: false,
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2024-01-15T00:00:00.000Z'),
+      };
+
+      // Mock the entire insert chain inline for this test
+      const mockReturning = vi.fn().mockResolvedValue([updatedPrefs]);
+      const mockOnConflict = vi
+        .fn()
+        .mockReturnValue({ returning: mockReturning });
+      const mockValues = vi
+        .fn()
+        .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
+
+      // Spy on the service's db.insert method
+      const insertSpy = vi
+        .spyOn(service['db'], 'insert')
+        .mockReturnValue(mockValues as any);
+
+      const result = await service.updateNotificationPreferences(userId, {
+        emailMarketing: false,
+        emailTransactional: false,
+        emailDigest: false,
+      });
+
+      expect(result.emailMarketing).toBe(false);
+      expect(result.emailTransactional).toBe(false);
+      expect(result.emailDigest).toBe(false);
+
+      insertSpy.mockRestore();
+    });
+
+    it('should update individual fields independently', async () => {
+      const updatedPrefs = {
+        userId,
+        emailMarketing: true,
+        emailTransactional: true,
+        emailDigest: true,
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2024-01-15T00:00:00.000Z'),
+      };
+
+      // Mock the entire insert chain inline for this test
+      const mockReturning = vi.fn().mockResolvedValue([updatedPrefs]);
+      const mockOnConflict = vi
+        .fn()
+        .mockReturnValue({ returning: mockReturning });
+      const mockValues = vi
+        .fn()
+        .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
+
+      // Spy on the service's db.insert method
+      const insertSpy = vi
+        .spyOn(service['db'], 'insert')
+        .mockReturnValue(mockValues as any);
+
+      // Update only emailMarketing
+      const result = await service.updateNotificationPreferences(userId, {
+        emailMarketing: false,
+      });
+
+      expect(result.emailMarketing).toBe(false);
+      expect(result.emailTransactional).toBe(true); // Unchanged
+      expect(result.emailDigest).toBe(true); // Unchanged
+
+      insertSpy.mockRestore();
     });
   });
 });

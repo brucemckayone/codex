@@ -1,0 +1,290 @@
+/**
+ * Account Remote Functions
+ *
+ * Server-side functions for account settings using SvelteKit Remote Functions.
+ * Uses `form()` for progressive enhancement - works without JS, enhances with JS.
+ *
+ * References:
+ * - Pattern: apps/web/src/lib/remote/auth.remote.ts
+ * - Backend: workers/identity-api/src/routes/users.ts
+ */
+
+import type { AvatarUploadResponse } from '@codex/shared-types';
+import { z } from 'zod';
+import { form, getRequestEvent, query } from '$app/server';
+import { createServerApi } from '$lib/server/api';
+import { ApiError } from '$lib/server/errors';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schemas for forms
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Profile update form schema
+ * Uses _ prefix for fields that shouldn't be repopulated on error (none here, but pattern)
+ */
+const updateProfileFormSchema = z.object({
+  displayName: z
+    .string()
+    .min(1, 'Display name is required')
+    .max(255)
+    .optional(),
+  username: z
+    .string()
+    .min(2, 'Username must be at least 2 characters')
+    .max(50, 'Username must be at most 50 characters')
+    .regex(
+      /^[a-z0-9-]+$/,
+      'Username must be lowercase letters, numbers, and hyphens'
+    )
+    .optional(),
+  bio: z.string().max(500).optional(),
+  website: z.string().url('Invalid website URL').optional(),
+  twitter: z.string().url('Invalid Twitter URL').optional(),
+  youtube: z.string().url('Invalid YouTube URL').optional(),
+  instagram: z.string().url('Invalid Instagram URL').optional(),
+});
+
+const updateNotificationsFormSchema = z.object({
+  emailMarketing: z.boolean(),
+  emailTransactional: z.boolean(),
+  emailDigest: z.boolean(),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Profile Update Form
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Profile update form with progressive enhancement
+ *
+ * Usage in Svelte:
+ * ```svelte
+ * <form {...updateProfileForm}>
+ *   <input {...updateProfileForm.fields.displayName.as('text')} />
+ *   <button disabled={updateProfileForm.pending}>Save</button>
+ * </form>
+ * ```
+ */
+export const updateProfileForm = form(
+  updateProfileFormSchema,
+  async ({
+    displayName,
+    username,
+    bio,
+    website,
+    twitter,
+    youtube,
+    instagram,
+  }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    try {
+      const response = await api.account.updateProfile({
+        displayName,
+        username,
+        bio,
+        socialLinks: {
+          website: website || undefined,
+          twitter: twitter || undefined,
+          youtube: youtube || undefined,
+          instagram: instagram || undefined,
+        },
+      });
+
+      return {
+        success: true,
+        data: response.data,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : 'Failed to update profile',
+      };
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notification Preferences Form
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Notification preferences update form
+ *
+ * Usage in Svelte:
+ * ```svelte
+ * <form {...updateNotificationsForm}>
+ *   <input type="checkbox" {...updateNotificationsForm.fields.emailMarketing.as('checkbox')} />
+ *   <button disabled={updateNotificationsForm.pending}>Save</button>
+ * </form>
+ * ```
+ */
+export const updateNotificationsForm = form(
+  updateNotificationsFormSchema,
+  async ({ emailMarketing, emailTransactional, emailDigest }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    try {
+      const response = await api.account.updateNotificationPreferences({
+        emailMarketing,
+        emailTransactional,
+        emailDigest,
+      });
+
+      return {
+        success: true,
+        data: response,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to update preferences',
+      };
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Profile Query
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get user profile (for components)
+ *
+ * Usage:
+ * ```svelte
+ * {#await getProfile()}
+ *   <p>Loading...</p>
+ * {:then profile}
+ *   {#if profile}
+ *     <p>Welcome, {profile.name}</p>
+ *   {/if}
+ * {/await}
+ * ```
+ */
+export const getProfile = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  try {
+    const response = await api.account.getProfile();
+    return response.data;
+  } catch {
+    return null;
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notification Preferences Query
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get notification preferences
+ *
+ * Usage:
+ * ```svelte
+ * {#await getNotificationPreferences()}
+ *   <p>Loading...</p>
+ * {:then prefs}
+ *   <input type="checkbox" checked={prefs?.emailMarketing} />
+ * {/await}
+ * ```
+ */
+export const getNotificationPreferences = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  try {
+    return await api.account.getNotificationPreferences();
+  } catch {
+    // Return defaults if not set
+    return {
+      emailMarketing: false,
+      emailTransactional: true,
+      emailDigest: false,
+    };
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Avatar Upload Command
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Upload avatar command
+ *
+ * Usage:
+ * ```svelte
+ * <input type="file" accept="image/*" onchange={(e) => uploadAvatar(e.target.files[0])} />
+ * ```
+ */
+export async function uploadAvatar(file: File): Promise<{
+  success: boolean;
+  data?: AvatarUploadResponse['data'];
+  error?: string;
+}> {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  try {
+    const result = await api.account.uploadAvatar(file);
+    return {
+      success: true,
+      data: result.data,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : 'Failed to upload avatar',
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Avatar Delete Command
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Delete avatar command
+ *
+ * Usage:
+ * ```svelte
+ * <button onclick={() => deleteAvatar()}>Remove Avatar</button>
+ * ```
+ */
+export async function deleteAvatar(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  try {
+    await api.account.deleteAvatar();
+    return {
+      success: true,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : 'Failed to delete avatar',
+    };
+  }
+}
