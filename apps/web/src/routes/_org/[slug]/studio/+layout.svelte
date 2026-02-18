@@ -9,6 +9,23 @@
 
   // Mobile menu state
   let mobileMenuOpen = $state(false);
+
+  // Close menu handler for reuse
+  const closeMenu = () => (mobileMenuOpen = false);
+
+  // Keyboard handler: ESC key closes mobile menu
+  $effect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && mobileMenuOpen) {
+        closeMenu();
+      }
+    };
+
+    if (mobileMenuOpen) {
+      window.addEventListener('keydown', handleEscape);
+      return () => window.removeEventListener('keydown', handleEscape);
+    }
+  });
 </script>
 
 <svelte:head>
@@ -56,7 +73,7 @@
       <button
         class="sidebar-close"
         aria-label="Close menu"
-        onclick={() => (mobileMenuOpen = false)}
+        onclick={closeMenu}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" x2="6" y1="6" y2="18"/>
@@ -68,7 +85,7 @@
       <div
         class="sidebar-overlay"
         class:visible={mobileMenuOpen}
-        onclick={() => (mobileMenuOpen = false)}
+        onclick={closeMenu}
       ></div>
     </aside>
 
@@ -230,5 +247,35 @@
     .studio-main {
       padding: var(--space-6);
     }
+  }
+
+  /* Dark mode overrides */
+  [data-theme='dark'] .studio-layout {
+    background-color: var(--color-background-dark);
+  }
+
+  [data-theme='dark'] .studio-header.mobile,
+  [data-theme='dark'] .studio-header.desktop {
+    background-color: var(--color-surface-dark);
+    border-color: var(--color-border-dark);
+  }
+
+  [data-theme='dark'] .studio-sidebar {
+    background-color: var(--color-surface-dark);
+    border-color: var(--color-border-dark);
+  }
+
+  [data-theme='dark'] .menu-toggle:hover,
+  [data-theme='dark'] .sidebar-close:hover {
+    background-color: var(--color-surface-variant);
+  }
+
+  [data-theme='dark'] .menu-toggle,
+  [data-theme='dark'] .sidebar-close {
+    color: var(--color-text-dark);
+  }
+
+  [data-theme='dark'] .sidebar-close {
+    color: var(--color-text-muted-dark);
   }
 </style>

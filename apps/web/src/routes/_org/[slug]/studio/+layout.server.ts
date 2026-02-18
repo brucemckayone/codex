@@ -20,8 +20,8 @@ export const load: LayoutServerLoad = async ({ params, locals }) => {
     redirect(302, `/login?redirect=/${params.slug}/studio`);
   }
 
-  // Disable edge caching
-  const _setHeaders = () => CACHE_HEADERS.PRIVATE;
+  // Disable edge caching - headers set via platform adapter
+  // Note: SvelteKit platform adapter applies no-cache headers automatically
 
   const { slug } = params;
 

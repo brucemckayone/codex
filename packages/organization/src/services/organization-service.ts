@@ -266,7 +266,6 @@ export class OrganizationService extends BaseService {
   async list(
     filters: OrganizationFilters = {},
     pagination: PaginationParams = { page: 1, limit: PAGINATION.DEFAULT }
-    //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedListResponse<Organization>> {
     try {
       const { limit, offset } = withPagination(pagination);
@@ -662,26 +661,22 @@ export class OrganizationService extends BaseService {
         },
       });
 
+      // Filter to active memberships with non-deleted orgs, then map to return type
       return memberships
-        .filter((m) => m.organization && !m.organization.deletedAt)
-        .map((m) => ({
-          id: m.organization?.id,
-          name: m.organization?.name,
-          slug: m.organization?.slug,
-          logoUrl: m.organization?.logoUrl,
-          role: m.role,
-        }))
         .filter(
           (
             m
-          ): m is {
-            id: string;
-            name: string;
-            slug: string;
-            logoUrl: string | null;
-            role: string;
-          } => m.id !== undefined
+          ): m is typeof m & {
+            organization: NonNullable<typeof m.organization>;
+          } => m.organization !== null && m.organization.deletedAt === null
         )
+        .map(({ organization, role }) => ({
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          logoUrl: organization.logoUrl,
+          role,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name));
     } catch (error) {
       throw wrapError(error, { userId });
