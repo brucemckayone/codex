@@ -111,7 +111,7 @@
 
 <style>
   .sidebar {
-    width: 240px;
+    width: var(--sidebar-width);
     height: 100%;
     background-color: var(--color-surface);
     border-right: var(--border-width) var(--border-style) var(--color-border);
@@ -121,7 +121,7 @@
     display: none;
   }
 
-  @media (min-width: 768px) {
+  @media (min-width: var(--breakpoint-md)) {
     .sidebar {
       display: block;
     }

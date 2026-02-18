@@ -1,0 +1,27 @@
+/**
+ * Layout Tokens
+ * Layout-specific design tokens for containers, sidebars, and breakpoints
+ */
+
+:root {
+  /* ========================================
+   * BREAKPOINT TOKENS
+   * ========================================
+   * Use in @media queries as: @media (min-width: var(--breakpoint-md))
+   * These match the breakpoint primitives defined in theme/tokens/primitives.css
+   */
+  --breakpoint-sm: 40rem;   /* 640px */
+  --breakpoint-md: 48rem;   /* 768px */
+  --breakpoint-lg: 64rem;   /* 1024px */
+  --breakpoint-xl: 80rem;   /* 1280px */
+  --breakpoint-2xl: 96rem;  /* 1536px */
+
+  /* ========================================
+   * CONTAINER WIDTHS
+   * ======================================== */
+  --container-sm: var(--breakpoint-sm);
+  --container-md: var(--breakpoint-md);
+  --container-lg: var(--breakpoint-lg);
+  --container-xl: var(--breakpoint-xl);
+  --container-max: 80rem;    /* 1280px max content width */
+}
