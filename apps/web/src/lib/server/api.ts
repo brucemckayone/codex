@@ -20,6 +20,7 @@ import type {
   AllSettingsResponse,
   AvatarUploadResponse,
   CustomerListItem,
+  MyMembershipResponse,
   NotificationPreferencesResponse,
   OrganizationWithRole,
   PaginatedListResponse,
@@ -447,6 +448,7 @@ export function createServerApi(
         }),
 
       /**
+<<<<<<< feat/studio-layout-shell
        * Get current user's organizations
        */
       getMyOrganizations: () =>
@@ -460,6 +462,26 @@ export function createServerApi(
        */
       getMyMembership: (id: string) =>
         request<{ role: string | null; joinedAt: string | null }>(
+=======
+       * Get current user's membership in an organization
+       *
+       * Returns the authenticated user's role and status within the org.
+       * Used for access control and role-based UI rendering.
+       *
+       * @param id - Organization UUID
+       * @returns Membership data with role, status, and joinedAt timestamp
+       *
+       * @example
+       * ```typescript
+       * const membership = await api.org.getMyMembership(orgId);
+       * if (membership?.role === 'admin') {
+       *   // Show admin controls
+       * }
+       * ```
+       */
+      getMyMembership: (id: string) =>
+        request<MyMembershipResponse>(
+>>>>>>> main
           'org',
           `/api/organizations/${id}/members/my-membership`
         ),
