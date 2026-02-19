@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import * as m from '$lib/paraglide/messages';
+  import * as m from '$paraglide/messages';
 
   const orgSlug = $page.params.slug;
 </script>

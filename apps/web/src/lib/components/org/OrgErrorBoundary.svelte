@@ -8,7 +8,7 @@
 -->
 <script lang="ts">
   import { page } from '$app/stores';
-  import * as m from '$lib/paraglide/messages';
+  import * as m from '$paraglide/messages';
   import type { OrganizationData } from '$lib/types';
 
   const { org }: { org?: OrganizationData | null } = $props();

@@ -14,7 +14,7 @@
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import StudioSwitcher from '$lib/components/layout/StudioSidebar/StudioSwitcher.svelte';
   import type { LayoutData } from './$types';
-  import * as m from '$lib/paraglide/messages';
+  import * as m from '$paraglide/messages';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
