@@ -11,7 +11,6 @@ import {
   getMyOrganizations,
   getOrganization,
 } from '$lib/remote/org.remote';
-import { CACHE_HEADERS } from '$lib/server/cache';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ params, locals }) => {

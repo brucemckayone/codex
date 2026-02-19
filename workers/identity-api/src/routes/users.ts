@@ -82,6 +82,22 @@ app.delete(
 );
 
 /**
+ * GET /api/user/profile
+ * Get authenticated user's profile
+ *
+ * Security: Authenticated user only
+ */
+app.get(
+  '/profile',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx) => {
+      return await ctx.services.identity.getProfile(ctx.user.id);
+    },
+  })
+);
+
+/**
  * PATCH /api/user/profile
  * Update authenticated user's profile
  *

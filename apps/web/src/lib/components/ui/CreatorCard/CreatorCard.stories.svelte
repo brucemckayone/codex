@@ -1,0 +1,60 @@
+<script module>
+  import { CreatorCard } from './';
+</script>
+
+<Story name="Default Creator Card">
+  <Template>
+    <CreatorCard
+      username="johndoe"
+      displayName="John Doe"
+      avatar="https://picsum.photos/100/100"
+      bio="Software developer and content creator. Love building things and sharing knowledge."
+      contentCount={42}
+      socialLinks={{
+        website: "https://johndoe.com",
+        twitter: "https://twitter.com/johndoe",
+        youtube: "https://youtube.com/@johndoe"
+      }}
+    />
+  </Template>
+</Story>
+
+<Story name="Compact Creator Card">
+  <Template>
+    <CreatorCard
+      variant="compact"
+      username="janedoe"
+      displayName="Jane Doe"
+      avatar="https://picsum.photos/100/100"
+      contentCount={15}
+    />
+  </Template>
+</Story>
+
+<Story name="Without Avatar">
+  <Template>
+    <CreatorCard
+      username="creator"
+      displayName="AC"
+      bio="Just getting started on my creator journey."
+      contentCount={0}
+    />
+  </Template>
+</Story>
+
+<Story name="All Social Links">
+  <Template>
+    <CreatorCard
+      username="supercreator"
+      displayName="Super Creator"
+      bio="I'm everywhere on the internet!"
+      contentCount={100}
+      socialLinks={{
+        website: "https://example.com",
+        twitter: "https://twitter.com/supercreator",
+        youtube: "https://youtube.com/@supercreator",
+        instagram: "https://instagram.com/supercreator"
+      }}
+    />
+  </Template>
+</Story>

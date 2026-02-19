@@ -1,9 +1,20 @@
+<!--
+  @component StudioLayout
+
+  The main layout shell for the Studio interface within an organization context.
+  Provides responsive navigation with a mobile header, collapsible sidebar,
+  and main content area.
+
+  @prop {LayoutData} data - Server-loaded data containing org info, user role, and organizations list
+  @prop {Snippet} children - Child route content to render in the main area
+-->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { page } from '$app/stores';
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import StudioSwitcher from '$lib/components/layout/StudioSidebar/StudioSwitcher.svelte';
   import type { LayoutData } from './$types';
+  import * as m from '$lib/paraglide/messages';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
@@ -38,7 +49,7 @@
     <div class="header-content">
       <button
         class="menu-toggle"
-        aria-label="Toggle menu"
+        aria-label={m.studio_toggle_menu()}
         aria-expanded={mobileMenuOpen}
         onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
       >
@@ -72,7 +83,7 @@
       <!-- Mobile close button -->
       <button
         class="sidebar-close"
-        aria-label="Close menu"
+        aria-label={m.studio_close_menu()}
         onclick={closeMenu}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -213,8 +224,8 @@
     overflow-y: auto;
   }
 
-  /* Desktop styles */
-  @media (min-width: 768px) {
+  /* Desktop breakpoint: aligns with --breakpoint-lg (1024px) for sidebar visibility */
+  @media (min-width: var(--breakpoint-lg)) {
     .studio-header.mobile {
       display: none;
     }

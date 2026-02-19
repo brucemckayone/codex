@@ -61,6 +61,51 @@ export class IdentityService extends BaseService {
   }
 
   /**
+   * Get user profile
+   *
+   * @param userId - User ID
+   * @returns User profile data
+   */
+  async getProfile(userId: string): Promise<{
+    id: string;
+    name: string;
+    email: string;
+    emailVerified: boolean;
+    image: string | null;
+    username: string | null;
+    bio: string | null;
+    socialLinks: {
+      website?: string;
+      twitter?: string;
+      youtube?: string;
+      instagram?: string;
+    } | null;
+  }> {
+    try {
+      const user = await this.db.query.users.findFirst({
+        where: and(eq(users.id, userId), whereNotDeleted(users)),
+      });
+
+      if (!user) {
+        throw new UserNotFoundError(userId);
+      }
+
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        emailVerified: user.emailVerified,
+        image: user.image,
+        username: user.username ?? null,
+        bio: user.bio ?? null,
+        socialLinks: user.socialLinks ?? null,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.getProfile');
+    }
+  }
+
+  /**
    * Get the authenticated user's membership in an organization
    *
    * Returns the user's role, status, and joined date for the specified organization.
