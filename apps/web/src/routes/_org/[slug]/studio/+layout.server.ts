@@ -36,9 +36,9 @@ export const load: LayoutServerLoad = async ({ params, locals }) => {
   const membership = await getMyMembership(org.id);
   const { role, joinedAt } = membership;
 
-  // Membership gate: must be an active member
-  if (!role) {
-    redirect(302, `/join/${slug}`);
+  // Membership gate: must be creator, admin, or owner (members cannot access studio)
+  if (!role || role === 'member') {
+    redirect(302, `/${slug}?error=access_denied`);
   }
 
   // Load all user's organizations for switcher
