@@ -9,7 +9,11 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import type { AvatarUploadResponse } from '@codex/shared-types';
+import type {
+  AvatarUploadResponse,
+  PaginatedListResponse,
+  PurchaseListItem,
+} from '@codex/shared-types';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -288,3 +292,65 @@ export async function deleteAvatar(): Promise<{
     };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Purchase History Query
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Purchase history query schema
+ *
+ * Validates parameters for fetching user's purchase history.
+ * Extends standard pagination with optional status and contentId filters.
+ */
+const purchaseHistoryQuerySchema = z.object({
+  page: z.coerce.number().min(1).optional().default(1),
+  limit: z.coerce.number().min(1).max(100).optional().default(20),
+  status: z.enum(['pending', 'completed', 'refunded', 'failed']).optional(),
+  contentId: z.string().uuid().optional(),
+});
+
+/**
+ * Get purchase history
+ *
+ * Fetches the authenticated user's purchase history with pagination and optional filtering.
+ * Returns a paginated list of purchases including associated content details.
+ *
+ * Query parameters:
+ * - page: number (default: 1, min: 1)
+ * - limit: number (default: 20, min: 1, max: 100)
+ * - status: Optional filter by purchase status ('pending' | 'completed' | 'refunded' | 'failed')
+ * - contentId: Optional filter by content UUID
+ *
+ * Usage:
+ * ```svelte
+ * <script>
+ *   import { getPurchaseHistory } from '$lib/remote/account.remote';
+ *
+ *   const purchases = await getPurchaseHistory({ page: 1, limit: 20, status: 'completed' });
+ * </script>
+ *
+ * {#each purchases.items as purchase}
+ *   <PurchaseCard {purchase} />
+ * {/each}
+ *
+ * <Pagination pagination={purchases.pagination} />
+ * ```
+ */
+export const getPurchaseHistory = query(
+  purchaseHistoryQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(params.page));
+    searchParams.set('limit', String(params.limit));
+    if (params.status) searchParams.set('status', params.status);
+    if (params.contentId) searchParams.set('contentId', params.contentId);
+
+    return api.account.getPurchaseHistory(
+      searchParams.toString() ? searchParams : undefined
+    );
+  }
+);
