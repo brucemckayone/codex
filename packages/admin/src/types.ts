@@ -88,8 +88,8 @@ export interface DashboardStats {
   revenue: RevenueStats;
   /** Customer counts and new customer metrics */
   customers: CustomerStats;
-  /** Top performing content by revenue */
-  topContent: TopContentItem[];
+  /** Top performing content by revenue (paginated response for consistency) */
+  topContent: PaginatedListResponse<TopContentItem>;
 }
 
 /**

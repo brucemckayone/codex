@@ -187,6 +187,7 @@ export const adminFixture = {
 
   /**
    * GET /api/admin/analytics/top-content
+   * Returns paginated response, extracts items array for backward compatibility
    */
   async getTopContent(
     cookie: string,
@@ -208,7 +209,8 @@ export const adminFixture = {
     }
 
     const body = await response.json();
-    return body.data;
+    // API now returns PaginatedListResponse<TopContentItem>
+    return body.data?.items ?? [];
   },
 
   // ============================================================================

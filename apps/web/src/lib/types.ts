@@ -9,6 +9,7 @@
 // Re-export commonly used types for convenience
 export type {
   CheckoutResponse,
+  OrganizationWithRole,
   ProgressData,
   SessionData,
   UserData,

@@ -266,7 +266,6 @@ export class OrganizationService extends BaseService {
   async list(
     filters: OrganizationFilters = {},
     pagination: PaginationParams = { page: 1, limit: PAGINATION.DEFAULT }
-    //TODO: seems like we have paginiation types that could be better placed in some sort of shared types folder or better yet defined in the zod validation
   ): Promise<PaginatedListResponse<Organization>> {
     try {
       const { limit, offset } = withPagination(pagination);
@@ -619,6 +618,68 @@ export class OrganizationService extends BaseService {
       };
     } catch (error) {
       throw wrapError(error, { organizationId, userId });
+    }
+  }
+
+  /**
+   * Get all organizations for a user
+   *
+   * Returns organizations where user has an active membership.
+   * Results ordered by organization name.
+   *
+   * @param userId - User ID
+   * @returns Array of organizations with user's role
+   */
+  async getUserOrganizations(userId: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      slug: string;
+      logoUrl: string | null;
+      role: string;
+    }>
+  > {
+    try {
+      const memberships = await this.db.query.organizationMemberships.findMany({
+        where: and(
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, 'active')
+        ),
+        with: {
+          organization: {
+            columns: {
+              id: true,
+              name: true,
+              slug: true,
+              logoUrl: true,
+              deletedAt: true,
+            },
+          },
+        },
+        columns: {
+          role: true,
+        },
+      });
+
+      // Filter to active memberships with non-deleted orgs, then map to return type
+      return memberships
+        .filter(
+          (
+            m
+          ): m is typeof m & {
+            organization: NonNullable<typeof m.organization>;
+          } => m.organization !== null && m.organization.deletedAt === null
+        )
+        .map(({ organization, role }) => ({
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          logoUrl: organization.logoUrl,
+          role,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      throw wrapError(error, { userId });
     }
   }
 

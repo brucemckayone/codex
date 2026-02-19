@@ -21,7 +21,8 @@ import { createServerApi } from '$lib/server/api';
 /**
  * Dashboard statistics combining revenue, customers, and content metrics
  *
- * Uses Promise.all() to fetch multiple endpoints in parallel for optimal performance.
+ * Uses Promise.allSettled() for graceful degradation - if one endpoint fails,
+ * others still return data. Errors are logged for monitoring.
  *
  * Usage in Svelte:
  * ```svelte
@@ -48,12 +49,30 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
   searchParamsContent.set('organizationId', orgId);
   searchParamsContent.set('limit', '100');
 
-  // Fetch all stats in parallel for optimal performance
-  const [revenue, customers, topContent] = await Promise.all([
+  // Fetch all stats in parallel with graceful degradation
+  // Using allSettled ensures partial failures don't break the entire dashboard
+  const results = await Promise.allSettled([
     api.analytics.getRevenue(searchParamsRev),
     api.admin.getCustomers(searchParamsCust),
     api.analytics.getTopContent(searchParamsContent),
   ]);
+
+  // Extract results with fallbacks, log errors for monitoring
+  const revenue = results[0].status === 'fulfilled' ? results[0].value : null;
+  const customers = results[1].status === 'fulfilled' ? results[1].value : null;
+  const topContent =
+    results[2].status === 'fulfilled' ? results[2].value : null;
+
+  // Log any failures for monitoring/alerting
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      const endpointNames = ['revenue', 'customers', 'topContent'] as const;
+      console.error(
+        `[Dashboard] Failed to fetch ${endpointNames[i]}:`,
+        result.reason
+      );
+    }
+  });
 
   // Calculate change percentages from revenueByDay data
   const revenueByDay = revenue?.revenueByDay ?? [];
@@ -78,7 +97,7 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
       change: 0, // Change not provided by API
     },
     contentCount: {
-      value: topContent?.length ?? 0,
+      value: topContent?.pagination?.total ?? 0,
       change: 0, // Content count change not provided by API
     },
     views: {

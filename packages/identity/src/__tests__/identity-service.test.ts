@@ -785,10 +785,8 @@ describe('IdentityService', () => {
         .fn()
         .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
 
-      // Spy on the service's db.insert method
-      const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+      // Directly mock db.insert (same pattern as db.update in lines 80-90)
+      (mockDb.insert as ReturnType<typeof vi.fn>).mockReturnValue(mockValues);
 
       const result = await service.getNotificationPreferences(userId);
 
@@ -799,8 +797,6 @@ describe('IdentityService', () => {
         createdAt: defaultPrefs.createdAt,
         updatedAt: defaultPrefs.updatedAt,
       });
-
-      insertSpy.mockRestore();
     });
 
     it('should return existing preferences if already set', async () => {
@@ -822,10 +818,8 @@ describe('IdentityService', () => {
         .fn()
         .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
 
-      // Spy on the service's db.insert method
-      const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+      // Directly mock db.insert (same pattern as db.update in lines 80-90)
+      (mockDb.insert as ReturnType<typeof vi.fn>).mockReturnValue(mockValues);
 
       const result = await service.getNotificationPreferences(userId);
 
@@ -836,8 +830,6 @@ describe('IdentityService', () => {
         createdAt: existingPrefs.createdAt,
         updatedAt: existingPrefs.updatedAt,
       });
-
-      insertSpy.mockRestore();
     });
   });
 
@@ -863,10 +855,8 @@ describe('IdentityService', () => {
         .fn()
         .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
 
-      // Spy on the service's db.insert method
-      const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+      // Directly mock db.insert (same pattern as db.update in lines 80-90)
+      (mockDb.insert as ReturnType<typeof vi.fn>).mockReturnValue(mockValues);
 
       const result = await service.updateNotificationPreferences(userId, {
         emailMarketing: false,
@@ -879,8 +869,6 @@ describe('IdentityService', () => {
         createdAt: updatedPrefs.createdAt,
         updatedAt: updatedPrefs.updatedAt,
       });
-
-      insertSpy.mockRestore();
     });
 
     it('should update existing preferences', async () => {
@@ -902,10 +890,8 @@ describe('IdentityService', () => {
         .fn()
         .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
 
-      // Spy on the service's db.insert method
-      const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+      // Directly mock db.insert (same pattern as db.update in lines 80-90)
+      (mockDb.insert as ReturnType<typeof vi.fn>).mockReturnValue(mockValues);
 
       const result = await service.updateNotificationPreferences(userId, {
         emailMarketing: false,
@@ -916,8 +902,6 @@ describe('IdentityService', () => {
       expect(result.emailMarketing).toBe(false);
       expect(result.emailTransactional).toBe(false);
       expect(result.emailDigest).toBe(false);
-
-      insertSpy.mockRestore();
     });
 
     it('should update individual fields independently', async () => {
@@ -939,10 +923,8 @@ describe('IdentityService', () => {
         .fn()
         .mockReturnValue({ onConflictDoUpdate: mockOnConflict });
 
-      // Spy on the service's db.insert method
-      const insertSpy = vi
-        .spyOn(service['db'], 'insert')
-        .mockReturnValue(mockValues as any);
+      // Directly mock db.insert (same pattern as db.update in lines 80-90)
+      (mockDb.insert as ReturnType<typeof vi.fn>).mockReturnValue(mockValues);
 
       // Update only emailMarketing
       const result = await service.updateNotificationPreferences(userId, {
@@ -952,8 +934,6 @@ describe('IdentityService', () => {
       expect(result.emailMarketing).toBe(false);
       expect(result.emailTransactional).toBe(true); // Unchanged
       expect(result.emailDigest).toBe(true); // Unchanged
-
-      insertSpy.mockRestore();
     });
   });
 });

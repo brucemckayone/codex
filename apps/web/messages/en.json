@@ -74,5 +74,15 @@
   "account_error_not_found": "Account not found",
   "account_error_unauthorized": "You must be signed in to access this page",
   "account_error_forbidden": "You don't have permission to access this page",
-  "account_error_server_error": "Something went wrong. Please try again later."
+  "account_error_server_error": "Something went wrong. Please try again later.",
+  "studio_toggle_menu": "Toggle menu",
+  "studio_close_menu": "Close menu",
+  "studio_error_title": "Studio Error",
+  "studio_error_description": "Something went wrong in the Studio. Please try again.",
+  "studio_error_back_to_org": "Back to Organization",
+  "studio_switcher_personal": "Personal",
+  "studio_switcher_organization": "Organization",
+  "studio_switcher_personal_studio": "Personal Studio",
+  "studio_access_denied": "Insufficient permissions",
+  "studio_access_denied_description": "You don't have permission to access the Studio."
 }

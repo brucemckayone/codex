@@ -200,6 +200,18 @@ export interface MyMembershipResponse {
   joinedAt: string | null;
 }
 
+/**
+ * Organization with user's role
+ * Used in my-organizations list response
+ */
+export interface OrganizationWithRole {
+  id: string;
+  name: string;
+  slug: string;
+  logoUrl: string | null;
+  role: 'owner' | 'admin' | 'creator' | 'subscriber' | 'member';
+}
+
 // ============================================================================
 // Settings Response Types
 // ============================================================================
@@ -281,6 +293,37 @@ export interface AvatarUploadResponse {
 // ============================================================================
 
 /**
+ * Response for GET /api/user/profile
+ * User's profile information including creator profile fields
+ * @example
+ * {
+ *   id: "123e4567-e89b-12d3-a456-426614174000",
+ *   name: "Jane Creator",
+ *   email: "jane@example.com",
+ *   emailVerified: true,
+ *   image: "https://...",
+ *   username: "janecreator",
+ *   bio: "Video creator and educator",
+ *   socialLinks: { website: "https://jane.com", twitter: "@janecreator" }
+ * }
+ */
+export interface UserProfileResponse {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  image: string | null;
+  username: string | null;
+  bio: string | null;
+  socialLinks: {
+    website?: string;
+    twitter?: string;
+    youtube?: string;
+    instagram?: string;
+  } | null;
+}
+
+/**
  * Response for GET/PUT /api/user/notification-preferences
  * User's email notification preferences
  * @example
@@ -335,13 +378,16 @@ export interface RevenueAnalyticsResponse {
 
 /**
  * Response for GET /api/admin/analytics/top-content
- * Returns list of top-performing content by revenue
+ * Returns paginated list of top-performing content by revenue
  * @example
- * [
- *   { contentId: "abc-123", contentTitle: "My Video", revenueCents: 5000, purchaseCount: 10 }
- * ]
+ * {
+ *   items: [
+ *     { contentId: "abc-123", contentTitle: "My Video", revenueCents: 5000, purchaseCount: 10 }
+ *   ],
+ *   pagination: { page: 1, limit: 10, total: 10, totalPages: 1 }
+ * }
  */
-export type TopContentAnalyticsResponse = Array<{
+export type TopContentAnalyticsResponse = PaginatedListResponse<{
   contentId: string;
   contentTitle: string;
   revenueCents: number;

@@ -505,7 +505,8 @@ describe('AdminAnalyticsService', () => {
 
       const topContent = await service.getTopContent(emptyOrg.id);
 
-      expect(topContent).toEqual([]);
+      expect(topContent.items).toEqual([]);
+      expect(topContent.pagination.total).toBe(0);
     });
 
     it('should rank content by revenue in descending order', async () => {
@@ -588,11 +589,11 @@ describe('AdminAnalyticsService', () => {
         DEFAULT_TOP_CONTENT_LIMIT
       );
 
-      expect(topContent).toHaveLength(2);
-      expect(topContent[0].contentId).toBe(highRevenue.id);
-      expect(topContent[0].revenueCents).toBe(5000);
-      expect(topContent[1].contentId).toBe(lowRevenue.id);
-      expect(topContent[1].revenueCents).toBe(100);
+      expect(topContent.items).toHaveLength(2);
+      expect(topContent.items[0].contentId).toBe(highRevenue.id);
+      expect(topContent.items[0].revenueCents).toBe(5000);
+      expect(topContent.items[1].contentId).toBe(lowRevenue.id);
+      expect(topContent.items[1].revenueCents).toBe(100);
     });
 
     it('should respect limit parameter', async () => {
@@ -644,7 +645,7 @@ describe('AdminAnalyticsService', () => {
 
       const topContent = await service.getTopContent(testOrg.id, 3);
 
-      expect(topContent).toHaveLength(3);
+      expect(topContent.items).toHaveLength(3);
     });
 
     // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
@@ -664,7 +665,8 @@ describe('AdminAnalyticsService', () => {
       expect(stats.revenue.totalPurchases).toBe(0);
       expect(stats.customers.totalCustomers).toBe(0);
       expect(stats.customers.newCustomersLast30Days).toBe(0);
-      expect(stats.topContent).toEqual([]);
+      expect(stats.topContent.items).toEqual([]);
+      expect(stats.topContent.pagination.total).toBe(0);
     });
 
     it('should return combined stats for organization with data', async () => {
@@ -733,8 +735,8 @@ describe('AdminAnalyticsService', () => {
       expect(stats.revenue.totalPurchases).toBe(2);
       expect(stats.customers.totalCustomers).toBe(1);
       expect(stats.customers.newCustomersLast30Days).toBe(1);
-      expect(stats.topContent).toHaveLength(1);
-      expect(stats.topContent[0].contentId).toBe(testContent.id);
+      expect(stats.topContent.items).toHaveLength(1);
+      expect(stats.topContent.items[0].contentId).toBe(testContent.id);
     });
 
     it('should respect date range filter for revenue', async () => {
@@ -796,7 +798,7 @@ describe('AdminAnalyticsService', () => {
       expect(stats.revenue.totalRevenueCents).toBe(500);
       // Customer and top content unaffected by date filter
       expect(stats.customers.totalCustomers).toBe(1);
-      expect(stats.topContent).toHaveLength(1);
+      expect(stats.topContent.items).toHaveLength(1);
     });
 
     it('should respect top content limit parameter', async () => {
@@ -850,7 +852,7 @@ describe('AdminAnalyticsService', () => {
         topContentLimit: 3,
       });
 
-      expect(stats.topContent).toHaveLength(3);
+      expect(stats.topContent.items).toHaveLength(3);
     });
 
     it('should use default limit when topContentLimit not provided', async () => {
@@ -863,7 +865,8 @@ describe('AdminAnalyticsService', () => {
 
       // Default limit is applied in getTopContent via DEFAULT_TOP_CONTENT_LIMIT
       // This just verifies the method handles undefined correctly
-      expect(stats.topContent).toEqual([]);
+      expect(stats.topContent.items).toEqual([]);
+      expect(stats.topContent.pagination.total).toBe(0);
     });
   });
 

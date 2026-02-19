@@ -5,6 +5,7 @@
   import DropdownMenuContent from '$lib/components/ui/DropdownMenu/DropdownMenuContent.svelte';
   import DropdownMenuItem from '$lib/components/ui/DropdownMenu/DropdownMenuItem.svelte';
   import DropdownMenuSeparator from '$lib/components/ui/DropdownMenu/DropdownMenuSeparator.svelte';
+  import * as m from '$paraglide/messages';
 
   interface Props {
     currentContext: 'personal' | 'org';
@@ -14,7 +15,9 @@
   const { currentContext, orgs }: Props = $props();
 
   const label = $derived(
-    currentContext === 'personal' ? 'Personal' : 'Organization'
+    currentContext === 'personal'
+      ? m.studio_switcher_personal()
+      : m.studio_switcher_organization()
   );
 </script>
 
@@ -29,7 +32,7 @@
       <DropdownMenuItem>
         <span class="item-content">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          Personal Studio
+          {m.studio_switcher_personal_studio()}
         </span>
         {#if currentContext === 'personal'}
           <svg class="check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
@@ -40,7 +43,7 @@
     {#if orgs.length > 0}
       <DropdownMenuSeparator />
       {#each orgs as orgItem}
-        <a href="/studio/org/{orgItem.slug}">
+        <a href="/{orgItem.slug}/studio">
           <DropdownMenuItem>
             <span class="item-content">
               {#if orgItem.logoUrl}

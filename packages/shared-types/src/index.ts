@@ -43,6 +43,7 @@ export type {
   MembershipLookupResponse,
   MyMembershipResponse,
   NotificationPreferencesResponse,
+  OrganizationWithRole,
   PaginatedListResponse,
   PaginationMetadata,
   PlaybackProgressResponse,
