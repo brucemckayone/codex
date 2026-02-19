@@ -448,7 +448,6 @@ export function createServerApi(
         }),
 
       /**
-<<<<<<< feat/studio-layout-shell
        * Get current user's organizations
        */
       getMyOrganizations: () =>
@@ -458,11 +457,6 @@ export function createServerApi(
         ),
 
       /**
-       * Get user's membership in an organization
-       */
-      getMyMembership: (id: string) =>
-        request<{ role: string | null; joinedAt: string | null }>(
-=======
        * Get current user's membership in an organization
        *
        * Returns the authenticated user's role and status within the org.
@@ -481,7 +475,6 @@ export function createServerApi(
        */
       getMyMembership: (id: string) =>
         request<MyMembershipResponse>(
->>>>>>> main
           'org',
           `/api/organizations/${id}/members/my-membership`
         ),
