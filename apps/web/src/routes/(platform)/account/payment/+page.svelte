@@ -47,7 +47,7 @@
 			case 'refunded':
 				return m.account_payments_status_refunded();
 			default:
-				return status;
+				return m.account_payments_status_unknown();
 		}
 	}
 

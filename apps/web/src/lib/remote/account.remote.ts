@@ -218,82 +218,6 @@ export const getNotificationPreferences = query(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Avatar Upload Command
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Upload avatar command
- *
- * Usage:
- * ```svelte
- * <input type="file" accept="image/*" onchange={(e) => uploadAvatar(e.target.files[0])} />
- * ```
- */
-export async function uploadAvatar(file: File): Promise<{
-  success: boolean;
-  data?: AvatarUploadResponse['data'];
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-
-  try {
-    const result = await api.account.uploadAvatar(file);
-    return {
-      success: true,
-      data: result.data,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to upload avatar',
-    };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Avatar Delete Command
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Delete avatar command
- *
- * Usage:
- * ```svelte
- * <button onclick={() => deleteAvatar()}>Remove Avatar</button>
- * ```
- */
-export async function deleteAvatar(): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-
-  try {
-    await api.account.deleteAvatar();
-    return {
-      success: true,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to delete avatar',
-    };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Purchase History Query
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -306,7 +230,7 @@ export async function deleteAvatar(): Promise<{
 const purchaseHistoryQuerySchema = z.object({
   page: z.coerce.number().min(1).optional().default(1),
   limit: z.coerce.number().min(1).max(100).optional().default(20),
-  status: z.enum(['pending', 'completed', 'refunded', 'failed']).optional(),
+  status: z.enum(['pending', 'complete', 'refunded', 'failed']).optional(),
   contentId: z.string().uuid().optional(),
 });
 
@@ -319,7 +243,7 @@ const purchaseHistoryQuerySchema = z.object({
  * Query parameters:
  * - page: number (default: 1, min: 1)
  * - limit: number (default: 20, min: 1, max: 100)
- * - status: Optional filter by purchase status ('pending' | 'completed' | 'refunded' | 'failed')
+ * - status: Optional filter by purchase status ('pending' | 'complete' | 'refunded' | 'failed')
  * - contentId: Optional filter by content UUID
  *
  * Usage:

@@ -40,7 +40,8 @@ export const load: PageServerLoad = async ({
       },
     };
   } catch (error) {
-    // Return empty state on error
+    // Log error for debugging but return empty state for graceful degradation
+    console.error('Failed to load purchase history:', error);
     return {
       purchases: {
         items: [],
