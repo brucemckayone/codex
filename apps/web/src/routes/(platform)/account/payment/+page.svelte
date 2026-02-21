@@ -372,12 +372,68 @@
 	}
 
 	/* Dark mode */
-	:global([data-theme='dark']) .filter-list a.active {
-		background-color: var(--color-primary-900);
-		color: var(--color-primary-300);
+	[data-theme='dark'] .payment h1 {
+		color: var(--color-text-primary);
 	}
 
-	:global([data-theme='dark']) .discover-link:hover {
-		background-color: var(--color-primary-900);
+	[data-theme='dark'] .description {
+		color: var(--color-text-secondary);
+	}
+
+	[data-theme='dark'] .settings-card,
+	[data-theme='dark'] .history-card {
+		background-color: var(--color-surface);
+		border-color: var(--color-border);
+	}
+
+	[data-theme='dark'] .settings-card h2,
+	[data-theme='dark'] .history-header h2 {
+		color: var(--color-text-primary);
+	}
+
+	[data-theme='dark'] .placeholder {
+		color: var(--color-text-secondary);
+	}
+
+	[data-theme='dark'] .filter-list a {
+		color: var(--color-text-secondary);
+	}
+
+	[data-theme='dark'] .filter-list a:hover {
+		background-color: var(--color-surface-secondary);
+		color: var(--color-text-primary);
+	}
+
+	[data-theme='dark'] .filter-list a.active {
+		background-color: var(--color-brand-primary-subtle);
+		color: var(--color-interactive);
+	}
+
+	[data-theme='dark'] :global(.date-cell),
+	[data-theme='dark'] :global(.content-cell),
+	[data-theme='dark'] :global(.amount-cell),
+	[data-theme='dark'] :global(.status-cell) {
+		color: var(--color-text-primary);
+	}
+
+	[data-theme='dark'] :global(.date-cell) {
+		color: var(--color-text-secondary);
+	}
+
+	[data-theme='dark'] .empty-state p {
+		color: var(--color-text-secondary);
+	}
+
+	[data-theme='dark'] .discover-link {
+		color: var(--color-interactive);
+	}
+
+	[data-theme='dark'] .discover-link:hover {
+		background-color: var(--color-brand-primary-subtle);
+		color: var(--color-interactive-hover);
+	}
+
+	[data-theme='dark'] .pagination-wrapper {
+		border-color: var(--color-border);
 	}
 </style>

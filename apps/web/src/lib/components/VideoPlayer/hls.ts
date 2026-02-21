@@ -19,6 +19,9 @@ export interface HlsPlayerOptions {
   onError?: (message: string) => void;
 }
 
+// Re-export Hls type for consumers
+export type { default as Hls } from 'hls.js';
+
 /**
  * Check if the browser supports native HLS playback (Safari, iOS)
  */

@@ -3,6 +3,7 @@
 
   Displays a content item with thumbnail, title, description, and creator info.
   Supports video, audio, and article content types with duration display.
+  Optionally shows progress bar and price badge.
 
   @prop {string} id - Unique content identifier
   @prop {string} title - Content title
@@ -14,12 +15,27 @@
   @prop {Snippet} actions - Action buttons snippet
   @prop {string} href - Link URL
   @prop {boolean} loading - Show loading state
+  @prop {LibraryProgress | null} progress - Playback progress data
+  @prop {{ amountCents: number; currency?: string } | null} price - Price data for purchase badges
+
+  @example
+  <ContentCard
+    id="123"
+    title="My Video"
+    thumbnail="/thumb.jpg"
+    contentType="video"
+    duration={1800}
+    progress={{ positionSeconds: 900, durationSeconds: 1800, completed: false }}
+    href="/content/123"
+  />
 -->
 <script lang="ts">
-  import type { Snippet, HTMLAttributes } from 'svelte/elements';
+  import type { Snippet } from 'svelte';
+  import type { HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
-  import { Avatar } from '../Avatar';
+  import * as Avatar from '../Avatar';
   import { Skeleton } from '../Skeleton';
+  import type { LibraryProgress, PriceInfo } from './types';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     id: string;
@@ -36,6 +52,8 @@
     actions?: Snippet;
     href?: string;
     loading?: boolean;
+    progress?: LibraryProgress | null;
+    price?: PriceInfo | null;
   }
 
   const {
@@ -49,9 +67,27 @@
     actions,
     href = '#',
     loading = false,
+    progress = null,
+    price = null,
     class: className,
     ...rest
   }: Props = $props();
+
+  const progressPercent = $derived(
+    progress && progress.durationSeconds && progress.durationSeconds > 0
+      ? (progress.percentComplete ?? 0)
+      : 0
+  );
+
+  function formatPrice(cents: number, currency: string = 'USD'): string {
+    const formatter = new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency: currency === 'GBP' ? 'GBP' : 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    });
+    return formatter.format(cents / 100);
+  }
 
   function formatDuration(seconds: number): string {
     if (seconds < 60) return `${seconds}s`;
@@ -74,9 +110,9 @@
       <Skeleton height="100%" />
     </div>
     <div class="content-card__body">
-      <Skeleton width="75%" height="1.5rem" />
-      <Skeleton width="50%" height="1rem" />
-      <Skeleton width="60%" height="1rem" />
+      <Skeleton width="75%" height="var(--text-lg)" />
+      <Skeleton width="50%" height="var(--text-base)" />
+      <Skeleton width="60%" height="var(--text-base)" />
     </div>
   {:else}
     <a href={href} class="content-card__link">
@@ -122,12 +158,33 @@
       {/if}
 
       <span class="content-card__type">{contentTypeLabels[contentType]}</span>
+
+      {#if price}
+        <span class="content-card__price" aria-label="Price: {formatPrice(price.amountCents, price.currency)}">
+          {formatPrice(price.amountCents, price.currency)}
+        </span>
+      {/if}
+
+      {#if progress && progressPercent > 0 && !progress.completed}
+        <div class="content-card__progress-track" aria-label="{progressPercent}% complete">
+          <div class="content-card__progress-fill" style="width: {progressPercent}%"></div>
+        </div>
+      {/if}
     </div>
 
     <div class="content-card__body">
       <h3 class="content-card__title">
         <a href={href}>{title}</a>
       </h3>
+
+      {#if progress && progressPercent > 0 && !progress.completed}
+        <div class="content-card__progress-info">
+          <span class="content-card__progress-percent">{progressPercent}%</span>
+          <span class="content-card__progress-time">
+            {Math.floor((progress.positionSeconds ?? 0) / 60)}m / {Math.floor((progress.durationSeconds ?? 0) / 60)}m
+          </span>
+        </div>
+      {/if}
 
       {#if description}
         <p class="content-card__description">{description}</p>
@@ -136,11 +193,14 @@
       {#if creator}
         <div class="content-card__creator">
           <a href={profileHref} class="content-card__creator-link">
-            <Avatar
-              src={creator.avatar}
-              fallback={creator.displayName?.charAt(0).toUpperCase() ?? '?'}
-              size="sm"
-            />
+            <Avatar.Root>
+              {#if creator.avatar}
+                <Avatar.Image src={creator.avatar} alt="" />
+              {/if}
+              <Avatar.Fallback>
+                {creator.displayName?.charAt(0).toUpperCase() ?? '?'}
+              </Avatar.Fallback>
+            </Avatar.Root>
             <span class="content-card__creator-name">
               {creator.displayName ?? creator.username ?? '?'}
             </span>
@@ -226,8 +286,8 @@
     bottom: var(--space-2);
     right: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: rgba(0, 0, 0, 0.75);
-    color: #ffffff;
+    background: var(--color-surface-overlay);
+    color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
@@ -238,12 +298,56 @@
     top: var(--space-2);
     left: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: rgba(0, 0, 0, 0.6);
-    color: #ffffff;
+    background: hsl(0 0% 0% / 0.6);
+    color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
     text-transform: uppercase;
+  }
+
+  .content-card__price {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    background: var(--color-primary-500);
+    color: #ffffff;
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    border-radius: var(--radius-sm);
+  }
+
+  .content-card__progress-track {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: hsl(0 0% 0% / 0.5);
+  }
+
+  .content-card__progress-fill {
+    height: 100%;
+    background: var(--color-primary-500);
+    transition: width var(--duration-medium) var(--ease-out);
+  }
+
+  .content-card__progress-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-1) 0;
+    font-size: var(--text-xs);
+  }
+
+  .content-card__progress-percent {
+    font-weight: var(--font-semibold);
+    color: var(--color-primary-600);
+  }
+
+  .content-card__progress-time {
+    color: var(--color-text-secondary);
   }
 
   .content-card__body {
@@ -258,7 +362,7 @@
     margin: 0;
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
-    line-height: 1.4;
+    line-height: var(--leading-tight);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -280,7 +384,7 @@
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    line-height: 1.5;
+    line-height: var(--leading-normal);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -319,25 +423,55 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .content-card {
+  :global([data-theme='dark']) .content-card {
     background: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .content-card:hover {
+  :global([data-theme='dark']) .content-card:hover {
     border-color: var(--color-border-hover-dark);
   }
 
-  [data-theme='dark'] .content-card__placeholder {
+  :global([data-theme='dark']) .content-card__placeholder {
     background: var(--color-neutral-800);
   }
 
-  [data-theme='dark'] .content-card__description,
-  [data-theme='dark'] .content-card__creator-name {
+  :global([data-theme='dark']) .content-card__description,
+  :global([data-theme='dark']) .content-card__creator-name {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .content-card__title a:hover {
+  :global([data-theme='dark']) .content-card__title a:hover {
     color: var(--color-primary-400);
+  }
+
+  :global([data-theme='dark']) .content-card__duration,
+  :global([data-theme='dark']) .content-card__type {
+    background: hsl(0 0% 0% / 0.7);
+    color: var(--color-text-inverse);
+  }
+
+  :global([data-theme='dark']) .content-card__thumbnail {
+    background: var(--color-surface-tertiary);
+  }
+
+  :global([data-theme='dark']) .content-card__thumbnail--skeleton {
+    background: var(--color-surface-tertiary);
+  }
+
+  :global([data-theme='dark']) .content-card__price {
+    background: var(--color-primary-400);
+  }
+
+  :global([data-theme='dark']) .content-card__progress-fill {
+    background: var(--color-primary-400);
+  }
+
+  :global([data-theme='dark']) .content-card__progress-percent {
+    color: var(--color-primary-400);
+  }
+
+  :global([data-theme='dark']) .content-card__progress-time {
+    color: var(--color-text-secondary-dark);
   }
 </style>

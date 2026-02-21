@@ -447,15 +447,42 @@
 	}
 
 	/* Dark mode */
-	:global([data-theme='dark']) .success-message {
-		background-color: var(--color-success-900);
-		border-color: var(--color-success-700);
-		color: var(--color-success-100);
+	[data-theme='dark'] .profile h1 {
+		color: var(--color-text-primary);
 	}
 
-	:global([data-theme='dark']) .error-message {
-		background-color: var(--color-error-900);
-		border-color: var(--color-error-700);
-		color: var(--color-error-100);
+	[data-theme='dark'] .description {
+		color: var(--color-text-secondary);
+	}
+
+	[data-theme='dark'] .success-message {
+		background-color: var(--color-success-subtle);
+		border-color: var(--color-success);
+		color: var(--color-success-text);
+	}
+
+	[data-theme='dark'] .error-message {
+		background-color: var(--color-error-subtle);
+		border-color: var(--color-error);
+		color: var(--color-error-text);
+	}
+
+	[data-theme='dark'] .settings-card {
+		background-color: var(--color-surface);
+		border-color: var(--color-border);
+	}
+
+	[data-theme='dark'] .settings-card h2,
+	[data-theme='dark'] .settings-card h3 {
+		color: var(--color-text-primary);
+	}
+
+	[data-theme='dark'] .avatar-help,
+	[data-theme='dark'] .form-help {
+		color: var(--color-text-secondary);
+	}
+
+	[data-theme='dark'] .form-actions {
+		border-color: var(--color-border);
 	}
 </style>
