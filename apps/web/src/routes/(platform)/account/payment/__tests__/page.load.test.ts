@@ -6,6 +6,23 @@
 
 import { redirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockCookies, MockServerLoadEvent } from '$tests/test-helpers';
+
+// Type for the load function return data
+type PaymentPageData = {
+  purchases: {
+    items: unknown[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  };
+  filters: {
+    status: string | null;
+  };
+};
 
 // Mock SvelteKit modules before importing
 vi.mock('@sveltejs/kit', () => ({
@@ -24,11 +41,21 @@ vi.mock('$lib/server/api', () => ({
 }));
 
 describe('Payment Page Load', () => {
-  let mockLocals: { user: { id: string; email: string } | null };
+  let mockLocals: Partial<App.Locals>;
   let mockSetHeaders: ReturnType<typeof vi.fn>;
   let mockPlatform: App.Platform;
-  let mockCookies: ReturnType<typeof vi.fn>;
+  let mockCookies: MockCookies;
   let mockUrl: URL;
+
+  // Mock user object with all required UserData fields
+  const mockUser = {
+    id: 'user-123',
+    email: 'test@example.com',
+    name: 'Test User',
+    role: 'user',
+    emailVerified: true,
+    createdAt: new Date().toISOString(),
+  };
 
   beforeEach(() => {
     // Reset mocks before each test
@@ -36,7 +63,7 @@ describe('Payment Page Load', () => {
 
     // Setup default mock values
     mockLocals = {
-      user: { id: 'user-123', email: 'test@example.com' },
+      user: mockUser,
     };
     mockSetHeaders = vi.fn();
     mockPlatform = { env: {} } as App.Platform;
@@ -44,22 +71,38 @@ describe('Payment Page Load', () => {
       get: vi.fn(() => 'session-cookie'),
       set: vi.fn(),
       delete: vi.fn(),
+      serialize: vi.fn(),
+      getAll: vi.fn(() => []),
     };
     mockUrl = new URL('http://localhost:3000/account/payment');
   });
+
+  /**
+   * Helper to create a typed mock load event
+   * Returns MockServerLoadEvent for test usage
+   */
+  function createMockLoadEvent(
+    overrides: Partial<MockServerLoadEvent> = {}
+  ): MockServerLoadEvent {
+    return {
+      params: {},
+      cookies: mockCookies,
+      platform: mockPlatform as MockServerLoadEvent['platform'],
+      url: mockUrl,
+      route: { id: '/account/payment' },
+      locals: mockLocals,
+      setHeaders: mockSetHeaders,
+      request: new Request('http://localhost:3000/account/payment'),
+      ...overrides,
+    };
+  }
 
   it('redirects to login when locals.user is null', async () => {
     mockLocals.user = null;
 
     const { load } = await import('../+page.server');
 
-    await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    await load(createMockLoadEvent({ locals: mockLocals }));
 
     expect(redirect).toHaveBeenCalledWith(
       303,
@@ -76,13 +119,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -102,13 +139,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -129,13 +160,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    await load(createMockLoadEvent());
 
     const expectedParams = new URLSearchParams();
     expectedParams.set('limit', '50');
@@ -152,13 +177,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -181,13 +200,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -205,13 +218,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       purchases: {
@@ -236,13 +243,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    await load(createMockLoadEvent());
 
     expect(mockSetHeaders).toHaveBeenCalledWith({
       'Cache-Control': 'private, no-cache',
@@ -254,13 +255,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = (await load(createMockLoadEvent())) as PaymentPageData;
 
     expect(result.purchases.items).toEqual([]);
     expect(result.purchases.pagination.total).toBe(0);
@@ -276,13 +271,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    await load(createMockLoadEvent());
 
     // parseInt('invalid', 10) returns NaN, which is falsy, so page defaults to 1
     expect(mockGetPurchaseHistory).toHaveBeenCalledWith(new URLSearchParams());
@@ -297,13 +286,7 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      url: mockUrl,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = (await load(createMockLoadEvent())) as PaymentPageData;
 
     expect(result.purchases.items).toEqual([]);
     expect(result.purchases.pagination.total).toBe(0);

@@ -373,7 +373,6 @@ describe('PurchaseCTA', () => {
 
   describe('Watch Button Click Behavior', () => {
     test('navigates to watchUrl when clicked for purchased content', () => {
-      const mockHref = vi.fn();
       Object.defineProperty(window, 'location', {
         value: { href: '' },
         writable: true,

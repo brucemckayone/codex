@@ -5,6 +5,18 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockCookies, MockServerLoadEvent } from '$tests/test-helpers';
+
+// Type for the load function return data
+type ContentPageData = {
+  content: unknown;
+  isPurchased: boolean;
+  checkoutUrls: {
+    successUrl: string;
+    cancelUrl: string;
+  };
+  error?: string;
+};
 
 // Create mock functions that we can configure before each test
 const mockContentGet = vi.fn();
@@ -23,7 +35,7 @@ vi.mock('$lib/server/api', () => ({
 
 describe('Content Detail Page Load', () => {
   let mockParams: { contentId: string; slug: string };
-  let mockCookies: ReturnType<typeof vi.fn>;
+  let mockCookies: MockCookies;
   let mockPlatform: App.Platform;
   let mockUrl: URL;
 
@@ -64,10 +76,32 @@ describe('Content Detail Page Load', () => {
       get: vi.fn(() => 'session-cookie'),
       set: vi.fn(),
       delete: vi.fn(),
+      serialize: vi.fn(),
+      getAll: vi.fn(() => []),
     };
     mockPlatform = { env: {} } as App.Platform;
     mockUrl = new URL('http://localhost:3000/org/test-org/content/content-123');
   });
+
+  /**
+   * Helper to create a typed mock load event
+   * Returns MockServerLoadEvent for test usage
+   */
+  function createMockLoadEvent(
+    overrides: Partial<MockServerLoadEvent> = {}
+  ): MockServerLoadEvent {
+    return {
+      params: mockParams as MockServerLoadEvent['params'],
+      cookies: mockCookies,
+      platform: mockPlatform as MockServerLoadEvent['platform'],
+      url: mockUrl,
+      route: { id: '/org/[slug]/content/[contentId]' },
+      request: new Request(
+        'http://localhost:3000/org/test-org/content/content-123'
+      ),
+      ...overrides,
+    };
+  }
 
   describe('Success Paths', () => {
     it('returns content data when content exists', async () => {
@@ -76,12 +110,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toEqual(mockContent);
       expect(mockContentGet).toHaveBeenCalledWith('content-123');
@@ -108,12 +137,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.isPurchased).toBe(true);
       expect(mockGetUserLibrary).toHaveBeenCalled();
@@ -140,12 +164,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.isPurchased).toBe(false);
     });
@@ -156,12 +175,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.isPurchased).toBe(false);
     });
@@ -172,12 +186,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.checkoutUrls).toBeDefined();
       expect(result.checkoutUrls.successUrl).toBeDefined();
@@ -190,12 +199,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.checkoutUrls.successUrl).toBe(
         'http://localhost:3000/purchase/success?contentId=content-123'
@@ -208,12 +212,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.checkoutUrls.cancelUrl).toBe(
         'http://localhost:3000/org/test-org/content/content-123'
@@ -230,12 +229,9 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: customUrl,
-      } as any);
+      const result = (await load(
+        createMockLoadEvent({ url: customUrl })
+      )) as ContentPageData;
 
       expect(result.checkoutUrls.successUrl).toContain(
         'https://custom-domain.com'
@@ -252,12 +248,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toBe(null);
       expect(result.error).toBeDefined();
@@ -270,12 +261,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toEqual(mockContent);
       expect(result.isPurchased).toBe(false);
@@ -288,12 +274,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toEqual(mockContent);
       expect(result.isPurchased).toBe(false);
@@ -305,12 +286,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toEqual(mockContent);
       expect(result.isPurchased).toBe(false);
@@ -321,12 +297,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toBe(null);
       expect(result.error).toBeDefined();
@@ -337,12 +308,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toBe(null);
       expect(result.error).toBeDefined();
@@ -357,12 +323,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toEqual(contentWithoutMedia);
     });
@@ -374,12 +335,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content).toEqual(contentWithoutCreator);
     });
@@ -391,12 +347,7 @@ describe('Content Detail Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        params: mockParams,
-        cookies: mockCookies,
-        platform: mockPlatform,
-        url: mockUrl,
-      } as any);
+      const result = (await load(createMockLoadEvent())) as ContentPageData;
 
       expect(result.content.priceCents).toBe(0);
     });

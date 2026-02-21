@@ -4,14 +4,13 @@
  * Provides type-safe mock utilities for testing SvelteKit load functions.
  */
 
-import type { Cookies, Platform, RequestEvent } from '@sveltejs/kit';
 import { vi } from 'vitest';
 import type { ServerApi } from '$lib/server/api';
 
 /**
  * Mock cookies object for testing
  */
-export interface MockCookies extends Cookies {
+export interface MockCookies {
   get: ReturnType<typeof vi.fn>;
   set: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
@@ -35,8 +34,10 @@ export function createMockCookies(): MockCookies {
 /**
  * Mock platform object for testing
  */
-export interface MockPlatform extends Platform {
+export interface MockPlatform {
   env: App.Platform['env'];
+  context?: ExecutionContext;
+  caches?: CacheStorage;
 }
 
 /**
@@ -58,9 +59,9 @@ export function createMockPlatform(
 export interface MockServerLoadEvent {
   params: Record<string, string>;
   cookies: MockCookies;
-  platform: MockPlatform;
+  platform: MockPlatform | App.Platform;
   url: URL;
-  locals?: App.Locals;
+  locals?: Partial<App.Locals>;
   setHeaders?: ReturnType<typeof vi.fn>;
   request?: Request;
   route: { id: string | null };
@@ -78,6 +79,7 @@ export function createMockServerLoadEvent(
     platform: createMockPlatform(),
     url: new URL('http://localhost:3000'),
     route: { id: null },
+    request: new Request('http://localhost:3000'),
     ...overrides,
   };
 }

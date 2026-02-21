@@ -5,6 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockCookies, MockServerLoadEvent } from '$tests/test-helpers';
 
 // Create mock functions that we can configure before each test
 const mockContentGet = vi.fn();
@@ -20,7 +21,7 @@ vi.mock('$lib/server/api', () => ({
 describe('Purchase Success Page Load', () => {
   let mockUrl: URL;
   let mockPlatform: App.Platform;
-  let mockCookies: ReturnType<typeof vi.fn>;
+  let mockCookies: MockCookies;
 
   beforeEach(() => {
     // Reset mocks before each test
@@ -33,8 +34,28 @@ describe('Purchase Success Page Load', () => {
       get: vi.fn(() => 'session-cookie'),
       set: vi.fn(),
       delete: vi.fn(),
+      serialize: vi.fn(),
+      getAll: vi.fn(() => []),
     };
   });
+
+  /**
+   * Helper to create a typed mock load event
+   * Returns MockServerLoadEvent for test usage
+   */
+  function createMockLoadEvent(
+    overrides: Partial<MockServerLoadEvent> = {}
+  ): MockServerLoadEvent {
+    return {
+      params: {},
+      cookies: mockCookies,
+      platform: mockPlatform as MockServerLoadEvent['platform'],
+      url: mockUrl,
+      route: { id: '/purchase/success' },
+      request: new Request('https://example.com/purchase/success'),
+      ...overrides,
+    };
+  }
 
   describe('Success Paths', () => {
     it('returns content when contentId query param is valid', async () => {
@@ -50,11 +71,7 @@ describe('Purchase Success Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        url: mockUrl,
-        platform: mockPlatform,
-        cookies: mockCookies,
-      } as any);
+      const result = await load(createMockLoadEvent());
 
       expect(result).toEqual({
         content: contentData,
@@ -73,11 +90,7 @@ describe('Purchase Success Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        url: mockUrl,
-        platform: mockPlatform,
-        cookies: mockCookies,
-      } as any);
+      const result = await load(createMockLoadEvent());
 
       expect(result).toEqual({
         content: contentData,
@@ -93,11 +106,7 @@ describe('Purchase Success Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        url: mockUrl,
-        platform: mockPlatform,
-        cookies: mockCookies,
-      } as any);
+      const result = await load(createMockLoadEvent());
 
       expect(result).toEqual({
         content: contentData,
@@ -108,11 +117,7 @@ describe('Purchase Success Page Load', () => {
     it('returns content: null when contentId is missing', async () => {
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        url: mockUrl,
-        platform: mockPlatform,
-        cookies: mockCookies,
-      } as any);
+      const result = await load(createMockLoadEvent());
 
       expect(result).toEqual({
         content: null,
@@ -131,11 +136,7 @@ describe('Purchase Success Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        url: mockUrl,
-        platform: mockPlatform,
-        cookies: mockCookies,
-      } as any);
+      const result = await load(createMockLoadEvent());
 
       expect(result).toEqual({
         content: null,
@@ -153,11 +154,7 @@ describe('Purchase Success Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      const result = await load({
-        url: mockUrl,
-        platform: mockPlatform,
-        cookies: mockCookies,
-      } as any);
+      const result = await load(createMockLoadEvent());
 
       expect(result).toEqual({
         content: null,
@@ -173,19 +170,9 @@ describe('Purchase Success Page Load', () => {
 
       const { load } = await import('../+page.server');
 
-      await expect(
-        load({
-          url: mockUrl,
-          platform: mockPlatform,
-          cookies: mockCookies,
-        } as any)
-      ).resolves.toBeDefined();
+      await expect(load(createMockLoadEvent())).resolves.toBeDefined();
 
-      const result = await load({
-        url: mockUrl,
-        platform: mockPlatform,
-        cookies: mockCookies,
-      } as any);
+      const result = await load(createMockLoadEvent());
 
       expect(result).toHaveProperty('content', null);
     });

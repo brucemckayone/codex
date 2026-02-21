@@ -6,6 +6,7 @@
 
 import { redirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockCookies, MockServerLoadEvent } from '$tests/test-helpers';
 
 // Mock SvelteKit modules before importing
 vi.mock('@sveltejs/kit', () => ({
@@ -24,10 +25,20 @@ vi.mock('$lib/server/api', () => ({
 }));
 
 describe('Notifications Page Load', () => {
-  let mockLocals: { user: { id: string; email: string } | null };
+  let mockLocals: Partial<App.Locals>;
   let mockSetHeaders: ReturnType<typeof vi.fn>;
   let mockPlatform: App.Platform;
-  let mockCookies: ReturnType<typeof vi.fn>;
+  let mockCookies: MockCookies;
+
+  // Mock user object with all required UserData fields
+  const mockUser = {
+    id: 'user-123',
+    email: 'test@example.com',
+    name: 'Test User',
+    role: 'user',
+    emailVerified: true,
+    createdAt: new Date().toISOString(),
+  };
 
   beforeEach(() => {
     // Reset mocks before each test
@@ -35,7 +46,7 @@ describe('Notifications Page Load', () => {
 
     // Setup default mock values
     mockLocals = {
-      user: { id: 'user-123', email: 'test@example.com' },
+      user: mockUser,
     };
     mockSetHeaders = vi.fn();
     mockPlatform = { env: {} } as App.Platform;
@@ -43,20 +54,41 @@ describe('Notifications Page Load', () => {
       get: vi.fn(() => 'session-cookie'),
       set: vi.fn(),
       delete: vi.fn(),
+      serialize: vi.fn(),
+      getAll: vi.fn(() => []),
     };
   });
+
+  /**
+   * Helper to create a typed mock load event
+   * Returns MockServerLoadEvent for test usage
+   */
+  function createMockLoadEvent(
+    overrides: Partial<MockServerLoadEvent> = {}
+  ): MockServerLoadEvent {
+    return {
+      params: {},
+      cookies: mockCookies,
+      platform: mockPlatform as MockServerLoadEvent['platform'],
+      url: new URL('http://localhost:3000/account/notifications'),
+      route: { id: '/account/notifications' },
+      locals: mockLocals,
+      setHeaders: mockSetHeaders,
+      request: new Request('http://localhost:3000/account/notifications'),
+      ...overrides,
+    };
+  }
 
   it('redirects to login when locals.user is null', async () => {
     mockLocals.user = null;
 
     const { load } = await import('../+page.server');
 
-    await load({
-      locals: mockLocals,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    await load(
+      createMockLoadEvent({
+        locals: mockLocals,
+      })
+    );
 
     expect(redirect).toHaveBeenCalledWith(
       303,
@@ -74,12 +106,7 @@ describe('Notifications Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       preferences: preferencesData,
@@ -97,12 +124,7 @@ describe('Notifications Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       preferences: {
@@ -118,12 +140,7 @@ describe('Notifications Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       preferences: {
@@ -143,12 +160,7 @@ describe('Notifications Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    await load({
-      locals: mockLocals,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    await load(createMockLoadEvent());
 
     expect(mockSetHeaders).toHaveBeenCalledWith({
       'Cache-Control': 'private, no-cache',
@@ -160,12 +172,7 @@ describe('Notifications Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       preferences: {
@@ -186,12 +193,7 @@ describe('Notifications Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
-      locals: mockLocals,
-      setHeaders: mockSetHeaders,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as any);
+    const result = await load(createMockLoadEvent());
 
     expect(result).toEqual({
       preferences: {
