@@ -3,7 +3,7 @@
 
   Displays up to 4 in-progress content items sorted by last watched.
   Shows a section with heading and responsive card grid.
-
+  ```svelte
   @prop {LibraryItem[]} items - Library items to filter
   @prop {number} [limit=4] - Maximum number of items to display
 
@@ -12,6 +12,7 @@
    	items={libraryData}
 		limit={4}
   />
+  ```
 -->
 <script lang="ts">
 	import * as m from '$paraglide/messages';
