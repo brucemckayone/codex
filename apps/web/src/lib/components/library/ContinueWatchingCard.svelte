@@ -142,7 +142,7 @@
 		inset-inline: 0;
 		bottom: 0;
 		height: 3px;
-		background: rgba(0, 0, 0, 0.5);
+		background: var(--color-overlay-dark);
 	}
 
 	.continue-watching-card__progress-fill {
@@ -157,7 +157,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: rgba(0, 0, 0, 0);
+		background: hsl(0 0% 0% / 0);
 		transition: background var(--duration-fast);
 	}
 
@@ -167,7 +167,7 @@
 		align-items: center;
 		gap: var(--space-1);
 		padding: var(--space-3);
-		color: #ffffff;
+		color: var(--color-text-inverse);
 		opacity: 0;
 		transform: translateY(4px);
 		transition: opacity var(--duration-fast), transform var(--duration-fast);
@@ -179,7 +179,7 @@
 	}
 
 	.continue-watching-card:hover .continue-watching-card__overlay {
-		background: rgba(0, 0, 0, 0.3);
+		background: var(--color-overlay-light);
 	}
 
 	.continue-watching-card:hover .continue-watching-card__play {

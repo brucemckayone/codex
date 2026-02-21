@@ -286,7 +286,7 @@
     top: var(--space-2);
     left: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: hsl(0 0% 0% / 0.6);
+    background: var(--color-overlay-dark);
     color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
@@ -435,7 +435,7 @@
 
   :global([data-theme='dark']) .content-card__duration,
   :global([data-theme='dark']) .content-card__type {
-    background: hsl(0 0% 0% / 0.7);
+    background: var(--color-overlay);
     color: var(--color-text-inverse);
   }
 

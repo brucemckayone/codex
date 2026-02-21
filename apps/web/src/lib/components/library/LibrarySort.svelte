@@ -139,7 +139,7 @@
 		font-weight: var(--font-medium);
 		color: var(--color-text);
 		background: var(--color-surface);
-		border: 1px solid var(--color-border-default);
+		border: var(--border-width) solid var(--color-border-default);
 		border-radius: var(--radius-md);
 		cursor: pointer;
 		transition: border-color var(--duration-fast), background var(--duration-fast);
@@ -172,7 +172,7 @@
 		min-width: 12rem;
 		padding: var(--space-1);
 		background: var(--color-surface);
-		border: 1px solid var(--color-border-default);
+		border: var(--border-width) solid var(--color-border-default);
 		border-radius: var(--radius-md);
 		box-shadow: var(--shadow-lg);
 	}
