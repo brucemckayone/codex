@@ -9,15 +9,9 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import type {
-  AvatarUploadResponse,
-  PaginatedListResponse,
-  PurchaseListItem,
-} from '@codex/shared-types';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
-import { ApiError } from '$lib/server/errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms
@@ -25,6 +19,13 @@ import { ApiError } from '$lib/server/errors';
 
 /**
  * Profile update form schema
+ *
+ * Validates user profile information including:
+ * - Display name (1-255 chars)
+ * - Username (2-50 chars, lowercase alphanumeric with hyphens)
+ * - Bio (max 500 chars)
+ * - Social links (must be valid URLs)
+ *
  * Uses _ prefix for fields that shouldn't be repopulated on error (none here, but pattern)
  */
 const updateProfileFormSchema = z.object({
@@ -49,6 +50,14 @@ const updateProfileFormSchema = z.object({
   instagram: z.string().url('Invalid Instagram URL').optional(),
 });
 
+/**
+ * Notification preferences form schema
+ *
+ * Validates notification preference toggles:
+ * - emailMarketing: Promotional and marketing emails
+ * - emailTransactional: Transactional emails (receipts, notifications)
+ * - emailDigest: Weekly digest emails
+ */
 const updateNotificationsFormSchema = z.object({
   emailMarketing: z.boolean(),
   emailTransactional: z.boolean(),
@@ -90,10 +99,10 @@ export const updateProfileForm = form(
         username,
         bio,
         socialLinks: {
-          website: website || undefined,
-          twitter: twitter || undefined,
-          youtube: youtube || undefined,
-          instagram: instagram || undefined,
+          ...(website && { website }),
+          ...(twitter && { twitter }),
+          ...(youtube && { youtube }),
+          ...(instagram && { instagram }),
         },
       });
 
@@ -224,7 +233,12 @@ export const getNotificationPreferences = query(async () => {
 /**
  * Purchase history query schema
  *
- * Validates parameters for fetching user's purchase history.
+ * Validates parameters for fetching user's purchase history:
+ * - page: Page number (min 1, default 1)
+ * - limit: Items per page (min 1, max 100, default 20)
+ * - status: Optional filter by purchase status ('pending' | 'complete' | 'refunded' | 'failed')
+ * - contentId: Optional filter by content UUID
+ *
  * Extends standard pagination with optional status and contentId filters.
  */
 const purchaseHistoryQuerySchema = z.object({

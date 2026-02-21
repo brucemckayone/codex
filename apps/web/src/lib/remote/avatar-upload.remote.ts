@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { form, getRequestEvent } from '$app/server';
+import { ApiError } from '$lib/api/errors';
 import { createServerApi } from '$lib/server/api';
 
 /**
@@ -44,6 +45,13 @@ export const avatarUploadForm = form(avatarUploadSchema, async ({ avatar }) => {
       data: result.data,
     };
   } catch (error) {
+    // Preserve ApiError codes if available
+    if (error instanceof ApiError) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to upload avatar',

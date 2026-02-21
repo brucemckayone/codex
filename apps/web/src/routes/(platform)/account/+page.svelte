@@ -14,6 +14,8 @@
 		AvatarFallback
 	} from '$lib/components/ui/Avatar';
 	import { invalidateAll } from '$app/navigation';
+	import { onUnmount } from 'svelte';
+	import { getInitials } from '$lib/utils/avatar';
 
 	/**
 	 * Account profile page component.
@@ -33,14 +35,7 @@
 	);
 
 	// Get initials for avatar fallback
-	const initials = $derived(
-		data.user?.name
-			?.split(' ')
-			.map((n) => n[0])
-			.join('')
-			.toUpperCase()
-			.slice(0, 2) || data.user?.username?.slice(0, 2).toUpperCase() || '?'
-	);
+	const initials = $derived(getInitials(data.user?.name, data.user?.username));
 
 	// Handle file selection for avatar upload
 	function handleAvatarSelect(e: Event) {
@@ -96,6 +91,11 @@
 			hasSelectedFile = false;
 			invalidateAll();
 		}
+	});
+
+	// Cleanup timeout on component unmount
+	onUnmount(() => {
+		if (successTimeout) clearTimeout(successTimeout);
 	});
 </script>
 

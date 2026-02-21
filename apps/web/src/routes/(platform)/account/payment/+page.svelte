@@ -53,7 +53,7 @@
 
 	// Navigate to a filter status
 	function setFilter(status: string) {
-		const url = new URL(window.location.href);
+		const url = new URL($page.url.href);
 		if (status === 'all') {
 			url.searchParams.delete('status');
 		} else {
@@ -65,7 +65,7 @@
 
 	// Navigate to a specific page
 	function goToPage(pageNum: number) {
-		const url = new URL(window.location.href);
+		const url = new URL($page.url.href);
 		if (pageNum === 1) {
 			url.searchParams.delete('page');
 		} else {
