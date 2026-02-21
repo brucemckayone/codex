@@ -64,9 +64,9 @@
       <a href={errorInfo().href} class="btn btn-primary">{errorInfo().action}</a>
 
       {#if $page.status !== 401 && $page.status !== 403}
-        <button class="btn btn-secondary" onclick={() => history.back()}>{m.org_error_go_back()}</button>
+        <button class="btn btn-secondary" onclick={() => history.back()}>{m.errors_go_back()}</button>
       {:else}
-        <a href="/discover" class="btn btn-secondary">{m.org_error_go_home()}</a>
+        <a href="/discover" class="btn btn-secondary">{m.errors_go_home()}</a>
       {/if}
     </div>
   </div>
