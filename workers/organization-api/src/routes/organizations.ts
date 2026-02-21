@@ -148,7 +148,7 @@ app.get(
  * GET /api/organizations/public/:slug
  * Public branding endpoint - no auth required
  *
- * Returns only public branding fields: { logoUrl, primaryColorHex }
+ * Returns only public branding fields: { orgId, logoUrl, primaryColorHex, platformName }
  * Returns: PublicBrandingResponse (200)
  * Security: No auth required, rate limited
  * @returns {PublicBrandingResponse}
@@ -173,8 +173,10 @@ app.get(
       const branding = await ctx.services.settings.getBranding();
 
       return {
+        orgId: organization.id,
         logoUrl: branding.logoUrl ?? null,
         primaryColorHex: branding.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
+        platformName: branding.platformName ?? organization.name,
       };
     },
   })

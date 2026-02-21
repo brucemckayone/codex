@@ -25,7 +25,7 @@ export const load: LayoutServerLoad = async ({ params, locals }) => {
 
   return {
     org: {
-      id: '', // ID not available in public branding
+      id: branding.orgId,
       slug,
       name: branding.platformName,
       description: null,

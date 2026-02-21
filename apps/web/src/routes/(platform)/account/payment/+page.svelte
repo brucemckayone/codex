@@ -371,13 +371,5 @@
 		border-top: var(--border-width) var(--border-style) var(--color-border);
 	}
 
-	/* Dark mode */
-	:global([data-theme='dark']) .filter-list a.active {
-		background-color: var(--color-primary-900);
-		color: var(--color-primary-300);
-	}
-
-	:global([data-theme='dark']) .discover-link:hover {
-		background-color: var(--color-primary-900);
-	}
+	/* Dark mode - semantic tokens automatically adapt via theme files */
 </style>

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { page } from '$app/stores';
   import * as m from '$paraglide/messages';
 
   const statusConfig = {

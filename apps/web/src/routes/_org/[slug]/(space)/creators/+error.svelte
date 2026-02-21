@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { page } from '$app/stores';
   import OrgErrorBoundary from '$lib/components/org/OrgErrorBoundary.svelte';
   import type { OrganizationData } from '$lib/types';
 

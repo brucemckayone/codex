@@ -446,16 +446,5 @@
 		border-top: var(--border-width) var(--border-style) var(--color-border);
 	}
 
-	/* Dark mode */
-	:global([data-theme='dark']) .success-message {
-		background-color: var(--color-success-900);
-		border-color: var(--color-success-700);
-		color: var(--color-success-100);
-	}
-
-	:global([data-theme='dark']) .error-message {
-		background-color: var(--color-error-900);
-		border-color: var(--color-error-700);
-		color: var(--color-error-100);
-	}
+	/* Dark mode - semantic tokens automatically adapt via theme files */
 </style>

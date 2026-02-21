@@ -5,6 +5,7 @@
 import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import type { ContentWithRelations } from '$lib/types';
 import type { PageServerLoad } from './$types';
 
 const PAGE_SIZE = 12;
@@ -110,21 +111,32 @@ export const load: PageServerLoad = async ({
     const totalPages = pagination?.totalPages ?? Math.ceil(total / PAGE_SIZE);
 
     // Transform content items to match ContentCard props
-    const items: ContentItem[] = rawItems.map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      thumbnail: item.mediaItem?.thumbnailUrl ?? null,
-      contentType: item.type === 'article' ? 'article' : (item.type ?? 'video'),
-      duration: item.mediaItem?.duration ?? null,
-      creator: item.creator
-        ? {
-            username: item.creator.username,
-            displayName: item.creator.name ?? item.creator.displayName,
-            avatar: item.creator.avatarUrl ?? null,
-          }
-        : undefined,
-    }));
+    // Using a flexible type since API response structure differs from ContentWithRelations
+    const items: ContentItem[] = rawItems.map(
+      (item: Record<string, unknown>) => {
+        const mediaItem = item.mediaItem as Record<string, unknown> | undefined;
+        const creator = item.creator as Record<string, unknown> | undefined;
+
+        return {
+          id: String(item.id),
+          title: String(item.title ?? ''),
+          description: (item.description as string | null) ?? null,
+          thumbnail: (mediaItem?.thumbnailUrl as string | null) ?? null,
+          contentType: (item.type === 'article'
+            ? 'article'
+            : (item.type ?? 'video')) as 'video' | 'audio' | 'article',
+          duration: (mediaItem?.duration as number | null) ?? null,
+          creator: creator
+            ? {
+                username: (creator.email as string)?.split('@')[0] ?? '',
+                displayName:
+                  (creator.name as string | null) ?? (creator.email as string),
+                avatar: null,
+              }
+            : undefined,
+        };
+      }
+    );
 
     return {
       ...parentData,

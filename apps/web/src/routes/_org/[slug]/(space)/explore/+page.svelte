@@ -65,7 +65,7 @@
     <p class="subtitle">{m.org_explore_subtitle()}</p>
   </header>
 
-  <div class="filters">
+  <form class="filters" method="get" action={`/${data.org?.slug ?? 'org'}/explore`}>
     <div class="search-wrapper">
       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon">
         <circle cx="11" cy="11" r="8"></circle>
@@ -81,23 +81,23 @@
       />
     </div>
 
-    <select value={typeValue} onchange={(e) => updateFilter('type', e.currentTarget.value)} class="filter-select">
+    <select value={typeValue} onchange={(e) => updateFilter('type', e.currentTarget.value)} class="filter-select" aria-label="Filter by content type">
       <option value="all">{m.org_explore_filter_all()}</option>
       <option value="video">{m.org_explore_filter_video()}</option>
       <option value="audio">{m.org_explore_filter_audio()}</option>
       <option value="written">{m.org_explore_filter_written()}</option>
     </select>
 
-    <select value={sortValue} onchange={(e) => updateFilter('sort', e.currentTarget.value)} class="filter-select">
+    <select value={sortValue} onchange={(e) => updateFilter('sort', e.currentTarget.value)} class="filter-select" aria-label="Sort content">
       <option value="newest">{m.org_explore_sort_newest()}</option>
       <option value="popular">{m.org_explore_sort_popular()}</option>
       <option value="az">{m.org_explore_sort_az()}</option>
     </select>
 
     {#if hasActiveFilters}
-      <button onclick={() => goto(`/${data.org?.slug ?? 'org'}/explore`)} class="clear-btn">Clear filters</button>
+      <button type="button" onclick={() => goto(`/${data.org?.slug ?? 'org'}/explore`)} class="clear-btn" aria-label="Clear all filters">Clear filters</button>
     {/if}
-  </div>
+  </form>
 
   {#if hasContent}
     <div class="content-grid">
@@ -172,7 +172,7 @@
     left: var(--space-3);
     top: 50%;
     transform: translateY(-50%);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     pointer-events: none;
   }
 
@@ -224,7 +224,7 @@
 
   .clear-btn:hover {
     background-color: var(--color-surface-secondary);
-    border-color: var(--color-border-hover);
+    border-color: var(--color-primary-500);
   }
 
   .content-grid {
@@ -262,49 +262,5 @@
     margin-bottom: var(--space-4);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .page-header h1,
-  :global(.dark) .page-header h1 {
-    color: var(--color-text-dark);
-  }
-
-  :global([data-theme='dark']) .subtitle,
-  :global(.dark) .subtitle {
-    color: var(--color-text-secondary-dark);
-  }
-
-  :global([data-theme='dark']) .search-input,
-  :global(.dark) .search-input,
-  :global([data-theme='dark']) .filter-select,
-  :global(.dark) .filter-select {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
-  }
-
-  :global([data-theme='dark']) .search-input:focus,
-  :global(.dark) .search-input:focus,
-  :global([data-theme='dark']) .filter-select:focus,
-  :global(.dark) .filter-select:focus {
-    border-color: var(--color-primary-500);
-    box-shadow: 0 0 0 2px var(--color-primary-900);
-  }
-
-  :global([data-theme='dark']) .clear-btn,
-  :global(.dark) .clear-btn {
-    background: transparent;
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
-  }
-
-  :global([data-theme='dark']) .clear-btn:hover,
-  :global(.dark) .clear-btn:hover {
-    background-color: var(--color-surface-variant);
-    border-color: var(--color-border-hover-dark);
-  }
-
-  :global([data-theme='dark']) .empty-state,
-  :global(.dark) .empty-state {
-    color: var(--color-text-secondary-dark);
-  }
+  /* Dark mode - semantic tokens automatically adapt via theme files */
 </style>

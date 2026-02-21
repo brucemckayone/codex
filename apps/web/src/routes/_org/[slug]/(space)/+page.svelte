@@ -167,24 +167,5 @@
     margin: 0;
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .hero-subtitle,
-  :global(.dark) .hero-subtitle {
-    color: var(--color-text-secondary-dark);
-  }
-
-  :global([data-theme='dark']) .empty-state,
-  :global(.dark) .empty-state {
-    color: var(--color-text-secondary-dark);
-  }
-
-  :global([data-theme='dark']) .cta-button,
-  :global(.dark) .cta-button {
-    color: var(--color-text-inverse);
-  }
-
-  :global([data-theme='dark']) .cta-button:hover,
-  :global(.dark) .cta-button:hover {
-    background-color: color-mix(in srgb, var(--brand-color, var(--color-primary-500)) 75%, white);
-  }
+  /* Dark mode - semantic tokens automatically adapt via theme files */
 </style>

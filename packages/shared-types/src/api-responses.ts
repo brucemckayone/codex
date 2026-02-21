@@ -260,6 +260,7 @@ export interface AllSettingsResponse {
  * Public branding response shape (for unauthenticated endpoints)
  */
 export interface PublicBrandingResponse {
+  orgId: string;
   logoUrl: string | null;
   primaryColorHex: string;
   platformName: string;

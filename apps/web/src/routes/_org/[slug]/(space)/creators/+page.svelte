@@ -111,14 +111,5 @@
     margin: 0;
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .subtitle,
-  :global(.dark) .subtitle {
-    color: var(--color-text-secondary-dark);
-  }
-
-  :global([data-theme='dark']) .empty-state,
-  :global(.dark) .empty-state {
-    color: var(--color-text-secondary-dark);
-  }
+  /* Dark mode - semantic tokens automatically adapt via theme files */
 </style>
