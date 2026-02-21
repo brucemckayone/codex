@@ -9,47 +9,21 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import type { AvatarUploadResponse } from '@codex/shared-types';
-import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
+import {
+  purchaseHistoryQuerySchema,
+  updateNotificationsFormSchema,
+  updateProfileFormSchema,
+} from '$lib/schemas/account';
 import { createServerApi } from '$lib/server/api';
-import { ApiError } from '$lib/server/errors';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Schemas for forms
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Profile update form schema
- * Uses _ prefix for fields that shouldn't be repopulated on error (none here, but pattern)
- */
-const updateProfileFormSchema = z.object({
-  displayName: z
-    .string()
-    .min(1, 'Display name is required')
-    .max(255)
-    .optional(),
-  username: z
-    .string()
-    .min(2, 'Username must be at least 2 characters')
-    .max(50, 'Username must be at most 50 characters')
-    .regex(
-      /^[a-z0-9-]+$/,
-      'Username must be lowercase letters, numbers, and hyphens'
-    )
-    .optional(),
-  bio: z.string().max(500).optional(),
-  website: z.string().url('Invalid website URL').optional(),
-  twitter: z.string().url('Invalid Twitter URL').optional(),
-  youtube: z.string().url('Invalid YouTube URL').optional(),
-  instagram: z.string().url('Invalid Instagram URL').optional(),
-});
-
-const updateNotificationsFormSchema = z.object({
-  emailMarketing: z.boolean(),
-  emailTransactional: z.boolean(),
-  emailDigest: z.boolean(),
-});
+// Re-export schemas for test access (SvelteKit remote requires all exports to be remote functions)
+// Use a namespace object to avoid the remote function restriction
+export const schemas = {
+  updateProfileFormSchema,
+  updateNotificationsFormSchema,
+  purchaseHistoryQuerySchema,
+} as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Profile Update Form
@@ -86,10 +60,10 @@ export const updateProfileForm = form(
         username,
         bio,
         socialLinks: {
-          website: website || undefined,
-          twitter: twitter || undefined,
-          youtube: youtube || undefined,
-          instagram: instagram || undefined,
+          ...(website && { website }),
+          ...(twitter && { twitter }),
+          ...(youtube && { youtube }),
+          ...(instagram && { instagram }),
         },
       });
 
@@ -214,77 +188,50 @@ export const getNotificationPreferences = query(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Avatar Upload Command
+// Purchase History Query
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Upload avatar command
+ * Get purchase history
+ *
+ * Fetches the authenticated user's purchase history with pagination and optional filtering.
+ * Returns a paginated list of purchases including associated content details.
+ *
+ * Query parameters:
+ * - page: number (default: 1, min: 1)
+ * - limit: number (default: 20, min: 1, max: 100)
+ * - status: Optional filter by purchase status ('pending' | 'complete' | 'refunded' | 'failed')
+ * - contentId: Optional filter by content UUID
  *
  * Usage:
  * ```svelte
- * <input type="file" accept="image/*" onchange={(e) => uploadAvatar(e.target.files[0])} />
- * ```
- */
-export async function uploadAvatar(file: File): Promise<{
-  success: boolean;
-  data?: AvatarUploadResponse['data'];
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-
-  try {
-    const result = await api.account.uploadAvatar(file);
-    return {
-      success: true,
-      data: result.data,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to upload avatar',
-    };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Avatar Delete Command
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Delete avatar command
+ * <script>
+ *   import { getPurchaseHistory } from '$lib/remote/account.remote';
  *
- * Usage:
- * ```svelte
- * <button onclick={() => deleteAvatar()}>Remove Avatar</button>
+ *   const purchases = await getPurchaseHistory({ page: 1, limit: 20, status: 'completed' });
+ * </script>
+ *
+ * {#each purchases.items as purchase}
+ *   <PurchaseCard {purchase} />
+ * {/each}
+ *
+ * <Pagination pagination={purchases.pagination} />
  * ```
  */
-export async function deleteAvatar(): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
+export const getPurchaseHistory = query(
+  purchaseHistoryQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
 
-  try {
-    await api.account.deleteAvatar();
-    return {
-      success: true,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to delete avatar',
-    };
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(params.page));
+    searchParams.set('limit', String(params.limit));
+    if (params.status) searchParams.set('status', params.status);
+    if (params.contentId) searchParams.set('contentId', params.contentId);
+
+    return api.account.getPurchaseHistory(
+      searchParams.toString() ? searchParams : undefined
+    );
   }
-}
+);

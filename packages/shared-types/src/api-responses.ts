@@ -412,6 +412,19 @@ export interface CustomerListItem {
 }
 
 /**
+ * Purchase list item for account payment history
+ * Used in PaginatedListResponse<PurchaseListItem>
+ */
+export interface PurchaseListItem {
+  id: string;
+  createdAt: string; // ISO 8601 timestamp
+  contentId: string;
+  contentTitle: string;
+  amountCents: number;
+  status: 'complete' | 'pending' | 'failed' | 'refunded';
+}
+
+/**
  * Activity feed item type
  */
 export type ActivityItemType =
