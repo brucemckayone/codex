@@ -9,15 +9,10 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import type {
-  AvatarUploadResponse,
-  PaginatedListResponse,
-  PurchaseListItem,
-} from '@codex/shared-types';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
-import { ApiError } from '$lib/server/errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms
@@ -207,8 +202,11 @@ export const getNotificationPreferences = query(async () => {
 
   try {
     return await api.account.getNotificationPreferences();
-  } catch {
-    // Return defaults if not set
+  } catch (error) {
+    // Log error for debugging but return defaults for graceful degradation
+    logger.warn('Failed to fetch notification preferences, using defaults', {
+      error,
+    });
     return {
       emailMarketing: false,
       emailTransactional: true,
