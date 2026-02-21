@@ -25,6 +25,8 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PlaybackProgressResponse,
+  PublicCreatorResponse,
+  PurchaseListItem,
   RevenueAnalyticsResponse,
   SessionData,
   SingleItemResponse,
@@ -276,6 +278,29 @@ export function createServerApi(
         request<void>('identity', '/api/user/avatar', {
           method: 'DELETE',
         }),
+
+      /**
+       * Get purchase history
+       *
+       * Query parameters:
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       * - status: 'completed' | 'pending' | 'failed' | 'refunded' (optional)
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('page', '1');
+       * params.set('limit', '20');
+       * params.set('status', 'completed');
+       * const history = await api.account.getPurchaseHistory(params);
+       * ```
+       */
+      getPurchaseHistory: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<PurchaseListItem>>(
+          'ecom',
+          `/purchases${params ? `?${params}` : ''}`
+        ),
     },
 
     /**
@@ -477,6 +502,22 @@ export function createServerApi(
         request<MyMembershipResponse>(
           'org',
           `/api/organizations/${id}/members/my-membership`
+        ),
+
+      /**
+       * Get public creators for an organization
+       * Returns paginated list of public creator profiles
+       *
+       * @param slug - Organization slug
+       * @param params - Optional query string (page, limit)
+       *
+       * @example
+       * const creators = await api.org.getPublicCreators('yoga-studio', 'page=1&limit=12')
+       */
+      getPublicCreators: (slug: string, params?: string) =>
+        request<PaginatedListResponse<PublicCreatorResponse>>(
+          'org',
+          `/api/organizations/public/${slug}/creators${params ? `?${params}` : ''}`
         ),
     },
 

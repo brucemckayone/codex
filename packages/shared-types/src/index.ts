@@ -48,6 +48,8 @@ export type {
   PaginationMetadata,
   PlaybackProgressResponse,
   PublicBrandingResponse,
+  PublicCreatorResponse,
+  PurchaseListItem,
   RevenueAnalyticsResponse,
   RevenueByDay,
   SingleItemResponse,
@@ -55,6 +57,7 @@ export type {
   TopContentAnalyticsResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
+  UserProfileResponse,
 } from './api-responses';
 
 // Worker types
