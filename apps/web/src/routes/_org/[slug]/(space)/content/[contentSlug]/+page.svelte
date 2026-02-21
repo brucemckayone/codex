@@ -257,8 +257,8 @@
 
 	.content-detail__description {
 		padding-block: var(--space-2);
-		border-top: 1px solid var(--color-border-default);
-		border-bottom: 1px solid var(--color-border-default);
+		border-top: var(--border-width) solid var(--color-border-default);
+		border-bottom: var(--border-width) solid var(--color-border-default);
 	}
 
 	.content-detail__description p {

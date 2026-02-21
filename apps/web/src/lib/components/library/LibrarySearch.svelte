@@ -92,7 +92,7 @@
 			<button
 				type="button"
 				class="library-search__clear"
-				aria-label="Clear search"
+				aria-label={m.library_clear_search()}
 				onclick={handleClear}
 			>
 				<svg

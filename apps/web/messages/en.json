@@ -206,5 +206,20 @@
   "content_type_article": "Article",
   "content_view": "View {title}",
   "content_thumbnail_alt": "Thumbnail for {title}",
-  "content_duration": "Duration"
+  "content_duration": "Duration",
+  "discover_title": "Discover Content",
+  "discover_subtitle": "Browse premium content from creators and organizations.",
+  "discover_search_placeholder": "Search content...",
+  "discover_search_button": "Search",
+  "discover_empty_state": "No content found{search ? ` for \"{search}\"` : ``}. Check back soon.",
+  "discover_error_title": "Failed to load content",
+  "discover_error_description": "Some content could not be loaded. Please try refreshing the page.",
+  "discover_meta_title": "Discover Content - Codex",
+  "discover_meta_description": "Browse and discover premium content from independent creators on Codex.",
+  "library_title": "My Library",
+  "library_filter_status": "Progress",
+  "library_filter_organization": "Organization",
+  "library_filter_type": "Type",
+  "library_clear_search": "Clear search",
+  "library_time_remaining": "{time} left"
 }

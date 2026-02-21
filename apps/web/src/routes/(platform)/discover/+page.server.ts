@@ -37,14 +37,20 @@ export const load: PageServerLoad = async ({
   try {
     const content = await api.content.list(params);
     return {
-      content: content ?? { data: [], total: 0, page: 1, limit: 20 },
+      content: content ?? {
+        items: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+      },
       search,
       error: false,
     };
   } catch (error) {
     console.error('Failed to load discover content:', error);
     return {
-      content: { data: [], total: 0, page: 1, limit: 20 },
+      content: {
+        items: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+      },
       search,
       error: true,
     };

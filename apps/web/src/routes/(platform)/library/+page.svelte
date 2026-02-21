@@ -19,8 +19,9 @@
     useLiveQuery,
   } from '$lib/collections';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
+  import * as m from '$paraglide/messages';
 
-  let { data } = $props();
+  let { data }: { data: PageData } = $props();
 
   // Hydrate collection with server data on mount
   onMount(() => {
@@ -38,14 +39,14 @@
 </script>
 
 <svelte:head>
-  <title>My Library</title>
+  <title>{m.library_title()} - Codex</title>
 </svelte:head>
 
 <div class="library">
-  <h1 class="library-title">My Library</h1>
+  <h1 class="library-title">{m.library_title()}</h1>
 
   {#if data.error}
-    <ErrorBanner title="Failed to load library" description="Your library could not be loaded. Please try refreshing the page." />
+    <ErrorBanner title={m.discover_error_title()} description={m.discover_error_description()} />
   {/if}
 
   {#if libraryQuery.isLoading && !data.library?.items?.length}

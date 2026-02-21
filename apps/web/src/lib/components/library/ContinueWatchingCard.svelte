@@ -98,7 +98,7 @@
 		<div class="continue-watching-card__meta">
 			<span class="continue-watching-card__progress-text">{progressPercent}%</span>
 			{#if remainingTime}
-				<span class="continue-watching-card__remaining">{remainingTime} left</span>
+				<span class="continue-watching-card__remaining">{m.library_time_remaining({ time: remainingTime })}</span>
 			{/if}
 		</div>
 

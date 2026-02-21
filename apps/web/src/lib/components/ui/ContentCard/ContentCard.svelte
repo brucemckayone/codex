@@ -242,18 +242,6 @@
     z-index: 1;
   }
 
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border-width: 0;
-  }
-
   .content-card__thumbnail {
     position: relative;
     aspect-ratio: 16 / 9;
@@ -312,7 +300,7 @@
     right: var(--space-2);
     padding: var(--space-1) var(--space-2);
     background: var(--color-primary-500);
-    color: #ffffff;
+    color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     border-radius: var(--radius-sm);
@@ -323,8 +311,8 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 3px;
-    background: hsl(0 0% 0% / 0.5);
+    height: var(--space-1);
+    background: var(--color-neutral-900);
   }
 
   .content-card__progress-fill {

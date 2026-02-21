@@ -119,7 +119,7 @@
 					orgDropdownOpen = false;
 				}}
 			>
-				<span>{m.library_filter_type_video()}</span>
+				<span>{m.library_filter_type()}</span>
 				<svg
 					class="library-filters__chevron"
 					xmlns="http://www.w3.org/2000/svg"
@@ -179,7 +179,7 @@
 					orgDropdownOpen = false;
 				}}
 			>
-				<span>Progress</span>
+				<span>{m.library_filter_status()}</span>
 				<svg
 					class="library-filters__chevron"
 					xmlns="http://www.w3.org/2000/svg"
@@ -240,7 +240,7 @@
 						statusDropdownOpen = false;
 					}}
 				>
-					<span>Organization</span>
+					<span>{m.library_filter_organization()}</span>
 					<svg
 						class="library-filters__chevron"
 						xmlns="http://www.w3.org/2000/svg"

@@ -14,7 +14,11 @@ import {
 } from '$lib/remote/library.remote';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, setHeaders }) => {
+export const load: PageServerLoad = async ({
+  params,
+  setHeaders,
+  platform,
+}) => {
   const { slug: orgSlug, contentSlug } = params;
 
   // Cache headers - vary by cookie for authenticated/non-authenticated
@@ -24,6 +28,28 @@ export const load: PageServerLoad = async ({ params, setHeaders }) => {
   });
 
   try {
+    // Fetch organization data first (needed for page title and display)
+    const { createServerApi } = await import('$lib/server/api');
+    const api = createServerApi(platform, undefined); // No cookies needed for public org data
+
+    let org: { id: string; slug: string; name: string } | null = null;
+    try {
+      const orgResponse = await api.org.getBySlug(orgSlug);
+      org = orgResponse?.data
+        ? {
+            id: orgResponse.data.id,
+            slug: orgResponse.data.slug,
+            name: orgResponse.data.name,
+          }
+        : null;
+    } catch {
+      // Org fetch failed, continue without org data
+    }
+
+    if (!org) {
+      error(404, 'Organization not found');
+    }
+
     // Fetch content by slugs
     const contentResult = await getContentBySlug({ orgSlug, contentSlug });
     const content = contentResult?.data;
@@ -68,6 +94,7 @@ export const load: PageServerLoad = async ({ params, setHeaders }) => {
         durationSeconds: progressDuration,
         completed: progressCompleted,
       },
+      org,
       orgSlug,
     };
   } catch (e) {
