@@ -25,6 +25,7 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PlaybackProgressResponse,
+  PublicCreatorsResponse,
   PurchaseListItem,
   RevenueAnalyticsResponse,
   SessionData,
@@ -501,6 +502,34 @@ export function createServerApi(
         request<MyMembershipResponse>(
           'org',
           `/api/organizations/${id}/members/my-membership`
+        ),
+
+      /**
+       * Get public creators for an organization (unauthenticated)
+       *
+       * Returns paginated list of public creator profiles for an org.
+       * Used for the organization's creators directory page.
+       *
+       * Query parameters (standard pagination):
+       * - page: number (default: 1)
+       * - limit: number (1-50, default: 12)
+       *
+       * @param slug - Organization slug
+       * @param params - Optional pagination parameters
+       * @returns Paginated list of public creators
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('page', '1');
+       * params.set('limit', '12');
+       * const creators = await api.org.listPublicCreators('my-org', params);
+       * ```
+       */
+      listPublicCreators: (slug: string, params?: URLSearchParams) =>
+        request<PublicCreatorsResponse>(
+          'org',
+          `/api/organizations/public/${slug}/creators${params ? `?${params}` : ''}`
         ),
     },
 

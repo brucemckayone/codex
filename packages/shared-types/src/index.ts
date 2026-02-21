@@ -48,6 +48,8 @@ export type {
   PaginationMetadata,
   PlaybackProgressResponse,
   PublicBrandingResponse,
+  PublicCreator,
+  PublicCreatorsResponse,
   PurchaseListItem,
   RevenueAnalyticsResponse,
   RevenueByDay,

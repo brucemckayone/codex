@@ -5,7 +5,11 @@
  * Supports both authenticated (full data) and unauthenticated (public branding) queries.
  */
 
-import type { OrganizationWithRole } from '@codex/shared-types';
+import type {
+  OrganizationWithRole,
+  PublicBrandingResponse,
+  PublicCreatorsResponse,
+} from '@codex/shared-types';
 import { z } from 'zod';
 import { getRequestEvent, query } from '$app/server';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
@@ -36,12 +40,6 @@ export const getOrganization = query(z.string().min(1), async (slug) => {
 // Public Branding (Unauthenticated)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface PublicBrandingData {
-  logoUrl: string | null;
-  primaryColorHex: string;
-  platformName: string;
-}
-
 /**
  * Get public branding for theming (unauthenticated, fast)
  *
@@ -65,7 +63,7 @@ export const getPublicBranding = query(z.string().min(1), async (slug) => {
   const response = await fetch(`${orgApiUrl}/api/organizations/public/${slug}`);
   if (!response.ok) return null;
 
-  return (await response.json()) as PublicBrandingData;
+  return (await response.json()) as PublicBrandingResponse;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,23 +132,6 @@ export const getMyMembership = query(z.string().uuid(), async (orgId) => {
 // Public Creators List (Unauthenticated)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface PublicCreator {
-  id: string;
-  username: string;
-  name: string;
-  avatarUrl: string | null;
-  bio: string | null;
-  contentCount?: number;
-}
-
-interface PublicCreatorsResponse {
-  items: PublicCreator[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
-
 /**
  * Get public creators list for an organization (unauthenticated)
  *
@@ -173,17 +154,28 @@ export const listPublicCreators = query(
   }),
   async (params) => {
     const { platform } = getRequestEvent();
-    const orgApiUrl = serverApiUrl(platform, 'org');
+    const api = createServerApi(platform);
 
     const searchParams = new URLSearchParams();
     searchParams.set('page', String(params.page));
     searchParams.set('limit', String(params.limit));
 
-    const response = await fetch(
-      `${orgApiUrl}/api/organizations/public/${params.slug}/creators?${searchParams}`
-    );
+    try {
+      const result = await api.org.listPublicCreators(
+        params.slug,
+        searchParams
+      );
 
-    if (!response.ok) {
+      // Transform from PaginatedListResponse to flat response expected by components
+      return {
+        items: result.items,
+        total: result.pagination.total,
+        page: result.pagination.page,
+        limit: result.pagination.limit,
+        totalPages: result.pagination.totalPages,
+      };
+    } catch {
+      // Return empty state on error
       return {
         items: [],
         total: 0,
@@ -192,7 +184,5 @@ export const listPublicCreators = query(
         totalPages: 0,
       };
     }
-
-    return (await response.json()) as PublicCreatorsResponse;
   }
 );
