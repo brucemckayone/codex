@@ -6,6 +6,7 @@
   import { page } from '$app/stores';
   import type { PageData } from './$types';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
+  import * as m from '$paraglide/messages';
 
   const { data }: { data: PageData } = $props();
 
@@ -22,37 +23,37 @@
 </script>
 
 <svelte:head>
-  <title>Discover Content - Codex</title>
-  <meta name="description" content="Browse and discover premium content from independent creators on Codex." />
-  <meta property="og:title" content="Discover Content - Codex" />
-  <meta property="og:description" content="Browse and discover premium content from independent creators." />
+  <title>{m.discover_meta_title()}</title>
+  <meta name="description" content={m.discover_meta_description()} />
+  <meta property="og:title" content={m.discover_meta_title()} />
+  <meta property="og:description" content={m.discover_meta_description()} />
   <meta property="og:type" content="website" />
 </svelte:head>
 
 <div class="discover">
   <section class="discover-header">
-    <h1>Discover Content</h1>
-    <p class="subtitle">Browse premium content from creators and organizations.</p>
+    <h1>{m.discover_title()}</h1>
+    <p class="subtitle">{m.discover_subtitle()}</p>
   </section>
 
   <form class="search-bar" onsubmit={handleSearch}>
     <input
       type="search"
       bind:value={searchValue}
-      placeholder="Search content..."
+      placeholder={m.discover_search_placeholder()}
       class="search-input"
-      aria-label="Search content"
+      aria-label={m.discover_search_placeholder()}
     />
-    <button type="submit" class="search-btn">Search</button>
+    <button type="submit" class="search-btn">{m.discover_search_button()}</button>
   </form>
 
   {#if data.error}
-    <ErrorBanner title="Failed to load content" description="Some content could not be loaded. Please try refreshing the page." />
+    <ErrorBanner title={m.discover_error_title()} description={m.discover_error_description()} />
   {/if}
 
   <section class="content-grid" aria-label="Content results">
-    {#if data.content.data && data.content.data.length > 0}
-      {#each data.content.data as item (item.id)}
+    {#if data.content.items && data.content.items.length > 0}
+      {#each data.content.items as item (item.id)}
         <a href="/content/{item.id}" class="content-card">
           <div class="card-thumb">
             {#if item.mediaItem?.thumbnailUrl}
@@ -74,7 +75,7 @@
       {/each}
     {:else}
       <div class="empty-state">
-        <p>No content found{data.search ? ` for "${data.search}"` : ''}. Check back soon.</p>
+        <p>{m.discover_empty_state({ search: data.search })}</p>
       </div>
     {/if}
   </section>
@@ -119,14 +120,14 @@
   }
 
   .search-input:focus {
-    outline: 2px solid var(--color-primary-500);
-    outline-offset: -1px;
+    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline-offset: calc(var(--border-width) * -1);
   }
 
   .search-btn {
     padding: var(--space-2) var(--space-4);
     background-color: var(--color-primary-500);
-    color: white;
+    color: var(--color-white);
     border: none;
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
@@ -168,7 +169,7 @@
   }
 
   .content-card:hover {
-    transform: translateY(-2px);
+    transform: translateY(calc(var(--space-0-5) * -1));
     box-shadow: var(--shadow-md);
   }
 
@@ -222,6 +223,53 @@
     grid-column: 1 / -1;
     text-align: center;
     padding: var(--space-16) 0;
+    color: var(--color-text-secondary);
+  }
+
+  /* Dark mode */
+  [data-theme='dark'] .discover-header h1 {
+    color: var(--color-text-primary);
+  }
+
+  [data-theme='dark'] .subtitle {
+    color: var(--color-text-secondary);
+  }
+
+  [data-theme='dark'] .search-input {
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
+    border-color: var(--color-border);
+  }
+
+  [data-theme='dark'] .search-btn {
+    background-color: var(--color-interactive);
+    color: var(--color-text-inverse);
+  }
+
+  [data-theme='dark'] .search-btn:hover {
+    background-color: var(--color-interactive-hover);
+  }
+
+  [data-theme='dark'] .content-card {
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+  }
+
+  [data-theme='dark'] .card-thumb {
+    background-color: var(--color-surface-tertiary);
+  }
+
+  [data-theme='dark'] .thumb-placeholder {
+    background-color: var(--color-surface-tertiary);
+  }
+
+  [data-theme='dark'] .card-title {
+    color: var(--color-text-primary);
+  }
+
+  [data-theme='dark'] .card-desc,
+  [data-theme='dark'] .card-creator,
+  [data-theme='dark'] .empty-state {
     color: var(--color-text-secondary);
   }
 </style>

@@ -19,8 +19,9 @@
     useLiveQuery,
   } from '$lib/collections';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
+  import * as m from '$paraglide/messages';
 
-  let { data } = $props();
+  let { data }: { data: PageData } = $props();
 
   // Hydrate collection with server data on mount
   onMount(() => {
@@ -38,14 +39,14 @@
 </script>
 
 <svelte:head>
-  <title>My Library</title>
+  <title>{m.library_title()} - Codex</title>
 </svelte:head>
 
 <div class="library">
-  <h1 class="library-title">My Library</h1>
+  <h1 class="library-title">{m.library_title()}</h1>
 
   {#if data.error}
-    <ErrorBanner title="Failed to load library" description="Your library could not be loaded. Please try refreshing the page." />
+    <ErrorBanner title={m.discover_error_title()} description={m.discover_error_description()} />
   {/if}
 
   {#if libraryQuery.isLoading && !data.library?.items?.length}
@@ -196,7 +197,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 4px;
+    height: var(--space-1);
     background-color: var(--color-neutral-300);
   }
 
@@ -264,12 +265,12 @@
   }
 
   .skeleton-line-title {
-    height: 1rem;
+    height: var(--text-base);
     width: 75%;
   }
 
   .skeleton-line-subtitle {
-    height: 0.75rem;
+    height: var(--text-sm);
     width: 50%;
   }
 
@@ -297,7 +298,7 @@
     align-items: center;
     padding: var(--space-2) var(--space-4);
     background-color: var(--color-primary-500);
-    color: white;
+    color: var(--color-white);
     border-radius: var(--radius-lg);
     text-decoration: none;
     font-weight: var(--font-medium);
@@ -306,5 +307,73 @@
 
   .browse-btn:hover {
     background-color: var(--color-primary-600);
+  }
+
+  /* Dark mode */
+  [data-theme='dark'] .library-title {
+    color: var(--color-text-primary);
+  }
+
+  [data-theme='dark'] .content-card {
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+  }
+
+  [data-theme='dark'] .card-thumb {
+    background-color: var(--color-surface-tertiary);
+  }
+
+  [data-theme='dark'] .thumb-placeholder {
+    background-color: var(--color-surface-tertiary);
+  }
+
+  [data-theme='dark'] .placeholder-text {
+    color: var(--color-text-secondary);
+  }
+
+  [data-theme='dark'] .progress-track {
+    background-color: var(--color-surface-tertiary);
+  }
+
+  [data-theme='dark'] .progress-fill {
+    background-color: var(--color-interactive);
+  }
+
+  [data-theme='dark'] .card-title {
+    color: var(--color-text-primary);
+  }
+
+  [data-theme='dark'] .content-card:hover .card-title {
+    color: var(--color-interactive-hover);
+  }
+
+  [data-theme='dark'] .card-desc {
+    color: var(--color-text-secondary);
+  }
+
+  [data-theme='dark'] .card-progress {
+    color: var(--color-text-secondary);
+  }
+
+  [data-theme='dark'] .progress-completed {
+    color: var(--color-success);
+  }
+
+  [data-theme='dark'] .skeleton-thumb,
+  [data-theme='dark'] .skeleton-line {
+    background-color: var(--color-surface-tertiary);
+  }
+
+  [data-theme='dark'] .empty-text {
+    color: var(--color-text-secondary);
+  }
+
+  [data-theme='dark'] .browse-btn {
+    background-color: var(--color-interactive);
+    color: var(--color-text-inverse);
+  }
+
+  [data-theme='dark'] .browse-btn:hover {
+    background-color: var(--color-interactive-hover);
   }
 </style>

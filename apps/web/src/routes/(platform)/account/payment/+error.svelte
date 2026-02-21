@@ -141,7 +141,7 @@
 
   .btn-primary {
     background: var(--color-primary-500);
-    color: #ffffff;
+    color: var(--color-text-inverse);
   }
 
   .btn-primary:hover {

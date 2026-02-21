@@ -52,6 +52,12 @@
   --color-info-200: #bfdbfe;
   --color-info-600: #2563eb;
   --color-info-700: #1d4ed8;
+
+  /* Overlay Colors (for video players, gates, overlays) */
+  --color-overlay: hsl(0 0% 0% / var(--opacity-70));
+  --color-overlay-light: hsl(0 0% 0% / var(--opacity-30));
+  --color-overlay-dark: hsl(0 0% 0% / var(--opacity-50));
+  --color-border-overlay: hsl(0 0% 100% / var(--opacity-30));
 }
 
 /* Organization Brand Override Pattern */
