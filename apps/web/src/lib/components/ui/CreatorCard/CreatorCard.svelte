@@ -34,6 +34,7 @@
     socialLinks?: SocialLinks | null;
     actions?: Snippet;
     variant?: 'default' | 'compact';
+    profileHref?: string;
   }
 
   const {
@@ -45,11 +46,12 @@
     socialLinks,
     actions,
     variant = 'default',
+    profileHref,
     class: className,
     ...rest
   }: Props = $props();
 
-  const profileHref = $derived(`/@${username}`);
+  const href = $derived(profileHref ?? `/@${username}`);
   const initial = $derived(displayName.charAt(0).toUpperCase());
 </script>
 
@@ -57,12 +59,12 @@
   class="creator-card creator-card--{variant} {className ?? ''}"
   {...rest}
 >
-  <a href={profileHref} class="creator-card__link">
+  <a href={href} class="creator-card__link">
     <span class="sr-only">{m.creator_view_profile({ name: displayName })}</span>
   </a>
 
   <div class="creator-card__body">
-    <a href={profileHref} class="creator-card__avatar-link">
+    <a href={href} class="creator-card__avatar-link">
       <Avatar
         src={avatar}
         fallback={initial}
@@ -72,7 +74,7 @@
 
     <div class="creator-card__info">
       <h3 class="creator-card__name">
-        <a href={profileHref}>{displayName}</a>
+        <a href={href}>{displayName}</a>
       </h3>
 
       {#if variant === 'default' && bio}

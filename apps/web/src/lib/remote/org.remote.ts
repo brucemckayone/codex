@@ -129,3 +129,32 @@ export const getMyMembership = query(z.string().uuid(), async (orgId) => {
 }) as unknown as (
   orgId: string
 ) => Promise<{ role: string | null; joinedAt: string | null }>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public Creators Directory
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get public creators for an organization directory
+ * Unauthenticated, cacheable, for org creators page
+ *
+ * Usage in +page.server.ts:
+ * const creators = await getOrgCreators({ slug: 'yoga-studio', page: 1 });
+ */
+export const getOrgCreators = query(
+  z.object({
+    slug: z.string().min(1),
+    page: z.coerce.number().min(1).default(1),
+    limit: z.coerce.number().min(1).max(100).default(12),
+  }),
+  async ({ slug, page, limit }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('limit', String(limit));
+
+    return api.org.getPublicCreators(slug, params.toString());
+  }
+);

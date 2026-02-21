@@ -324,6 +324,37 @@ export interface UserProfileResponse {
 }
 
 /**
+ * Response for GET /api/organizations/public/:slug/creators
+ * Public profile data for creators within an organization
+ * @example
+ * {
+ *   id: "123e4567-e89b-12d3-a456-426614174000",
+ *   name: "Jane Creator",
+ *   username: "janecreator",
+ *   image: "https://...",
+ *   bio: "Video creator and educator",
+ *   socialLinks: { website: "https://jane.com", twitter: "@janecreator" },
+ *   contentCount: 15,
+ *   role: "creator"
+ * }
+ */
+export interface PublicCreatorResponse {
+  id: string;
+  name: string;
+  username: string;
+  image: string | null;
+  bio: string | null;
+  socialLinks: {
+    website?: string;
+    twitter?: string;
+    youtube?: string;
+    instagram?: string;
+  } | null;
+  contentCount?: number;
+  role?: string;
+}
+
+/**
  * Response for GET/PUT /api/user/notification-preferences
  * User's email notification preferences
  * @example

@@ -25,6 +25,7 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PlaybackProgressResponse,
+  PublicCreatorResponse,
   PurchaseListItem,
   RevenueAnalyticsResponse,
   SessionData,
@@ -501,6 +502,22 @@ export function createServerApi(
         request<MyMembershipResponse>(
           'org',
           `/api/organizations/${id}/members/my-membership`
+        ),
+
+      /**
+       * Get public creators for an organization
+       * Returns paginated list of public creator profiles
+       *
+       * @param slug - Organization slug
+       * @param params - Optional query string (page, limit)
+       *
+       * @example
+       * const creators = await api.org.getPublicCreators('yoga-studio', 'page=1&limit=12')
+       */
+      getPublicCreators: (slug: string, params?: string) =>
+        request<PaginatedListResponse<PublicCreatorResponse>>(
+          'org',
+          `/api/organizations/public/${slug}/creators${params ? `?${params}` : ''}`
         ),
     },
 
