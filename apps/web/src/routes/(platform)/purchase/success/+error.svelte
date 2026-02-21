@@ -23,7 +23,7 @@
   const config = $derived(
     statusConfig[page.status] ?? {
       title: m.account_error_server_error(),
-      description: m.account_error_server_error_description(),
+      description: page.error?.message ?? 'An unexpected error occurred.',
       icon: 'warning',
     }
   );
@@ -36,7 +36,7 @@
 </script>
 
 <svelte:head>
-  <title>{page.status} {config().title} | Payments</title>
+  <title>{page.status} {config().title} | Purchase</title>
 </svelte:head>
 
 <div class="error-page" role="alert" aria-live="polite">
@@ -50,10 +50,10 @@
     <p class="error-description">{config().description}</p>
 
     <div class="error-actions">
-      <a href="/account/payment" class="btn btn-primary">{m.common_go_to_account()}</a>
+      <a href="/library" class="btn btn-primary">{m.commerce_go_to_library()}</a>
 
       {#if page.status === 404}
-        <button class="btn btn-secondary" onclick={() => history.back()}>{m.common_go_back()}</button>
+        <a href="/discover" class="btn btn-secondary">{m.commerce_browse_content()}</a>
       {:else if page.status === 403}
         <a href="/login" class="btn btn-secondary">{m.common_sign_in()}</a>
       {:else if page.status === 500}
@@ -161,34 +161,34 @@
 
   /* Dark mode */
   :global(.dark) .error-page {
-    background: var(--color-background-dark);
+    background: var(--color-background);
   }
 
   :global(.dark) .error-card {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global(.dark) .error-icon {
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-secondary);
   }
 
   :global(.dark) .error-code,
   :global(.dark) .error-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global(.dark) .error-description {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global(.dark) .btn-secondary {
-    border-color: var(--color-border-dark);
-    color: var(--color-text-secondary-dark);
+    border-color: var(--color-border);
+    color: var(--color-text-secondary);
   }
 
   :global(.dark) .btn-secondary:hover {
-    background: var(--color-surface-variant);
-    color: var(--color-text-dark);
+    background: var(--color-surface-secondary);
+    color: var(--color-text);
   }
 </style>
