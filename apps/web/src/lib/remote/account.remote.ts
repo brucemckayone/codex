@@ -9,11 +9,10 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import type { AvatarUploadResponse } from '@codex/shared-types';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
-import { ApiError } from '$lib/server/errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms
@@ -203,8 +202,11 @@ export const getNotificationPreferences = query(async () => {
 
   try {
     return await api.account.getNotificationPreferences();
-  } catch {
-    // Return defaults if not set
+  } catch (error) {
+    // Log error for debugging but return defaults for graceful degradation
+    logger.warn('Failed to fetch notification preferences, using defaults', {
+      error,
+    });
     return {
       emailMarketing: false,
       emailTransactional: true,
@@ -214,77 +216,63 @@ export const getNotificationPreferences = query(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Avatar Upload Command
+// Purchase History Query
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Upload avatar command
+ * Purchase history query schema
  *
- * Usage:
- * ```svelte
- * <input type="file" accept="image/*" onchange={(e) => uploadAvatar(e.target.files[0])} />
- * ```
+ * Validates parameters for fetching user's purchase history.
+ * Extends standard pagination with optional status and contentId filters.
  */
-export async function uploadAvatar(file: File): Promise<{
-  success: boolean;
-  data?: AvatarUploadResponse['data'];
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-
-  try {
-    const result = await api.account.uploadAvatar(file);
-    return {
-      success: true,
-      data: result.data,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to upload avatar',
-    };
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Avatar Delete Command
-// ─────────────────────────────────────────────────────────────────────────────
+const purchaseHistoryQuerySchema = z.object({
+  page: z.coerce.number().min(1).optional().default(1),
+  limit: z.coerce.number().min(1).max(100).optional().default(20),
+  status: z.enum(['pending', 'complete', 'refunded', 'failed']).optional(),
+  contentId: z.string().uuid().optional(),
+});
 
 /**
- * Delete avatar command
+ * Get purchase history
+ *
+ * Fetches the authenticated user's purchase history with pagination and optional filtering.
+ * Returns a paginated list of purchases including associated content details.
+ *
+ * Query parameters:
+ * - page: number (default: 1, min: 1)
+ * - limit: number (default: 20, min: 1, max: 100)
+ * - status: Optional filter by purchase status ('pending' | 'complete' | 'refunded' | 'failed')
+ * - contentId: Optional filter by content UUID
  *
  * Usage:
  * ```svelte
- * <button onclick={() => deleteAvatar()}>Remove Avatar</button>
+ * <script>
+ *   import { getPurchaseHistory } from '$lib/remote/account.remote';
+ *
+ *   const purchases = await getPurchaseHistory({ page: 1, limit: 20, status: 'completed' });
+ * </script>
+ *
+ * {#each purchases.items as purchase}
+ *   <PurchaseCard {purchase} />
+ * {/each}
+ *
+ * <Pagination pagination={purchases.pagination} />
  * ```
  */
-export async function deleteAvatar(): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
+export const getPurchaseHistory = query(
+  purchaseHistoryQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
 
-  try {
-    await api.account.deleteAvatar();
-    return {
-      success: true,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to delete avatar',
-    };
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(params.page));
+    searchParams.set('limit', String(params.limit));
+    if (params.status) searchParams.set('status', params.status);
+    if (params.contentId) searchParams.set('contentId', params.contentId);
+
+    return api.account.getPurchaseHistory(
+      searchParams.toString() ? searchParams : undefined
+    );
   }
-}
+);

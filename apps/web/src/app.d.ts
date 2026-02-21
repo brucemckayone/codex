@@ -32,8 +32,8 @@ declare global {
         NOTIFICATIONS_API_URL?: string;
         /** Cloudflare Analytics Engine dataset for metrics */
         ANALYTICS?: AnalyticsEngineDataset;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ASSETS?: any;
+        /** R2 bucket for static asset storage */
+        ASSETS?: R2Bucket;
         BRAND_KV?: KVNamespace;
       };
       context: ExecutionContext;

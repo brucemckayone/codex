@@ -25,6 +25,7 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PlaybackProgressResponse,
+  PurchaseListItem,
   RevenueAnalyticsResponse,
   SessionData,
   SingleItemResponse,
@@ -276,6 +277,29 @@ export function createServerApi(
         request<void>('identity', '/api/user/avatar', {
           method: 'DELETE',
         }),
+
+      /**
+       * Get purchase history
+       *
+       * Query parameters:
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       * - status: 'completed' | 'pending' | 'failed' | 'refunded' (optional)
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('page', '1');
+       * params.set('limit', '20');
+       * params.set('status', 'completed');
+       * const history = await api.account.getPurchaseHistory(params);
+       * ```
+       */
+      getPurchaseHistory: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<PurchaseListItem>>(
+          'ecom',
+          `/purchases${params ? `?${params}` : ''}`
+        ),
     },
 
     /**

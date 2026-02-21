@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
 
   const statusConfig = {
@@ -21,7 +21,7 @@
   };
 
   const config = $derived(
-    statusConfig[$page.status] ?? {
+    statusConfig[page.status] ?? {
       title: m.account_error_server_error(),
       description: m.account_error_server_error_description(),
       icon: 'warning',
@@ -36,7 +36,7 @@
 </script>
 
 <svelte:head>
-  <title>{$page.status} {config().title} | Notifications</title>
+  <title>{page.status} {config().title} | Notifications</title>
 </svelte:head>
 
 <div class="error-page" role="alert" aria-live="polite">
@@ -45,18 +45,18 @@
       {@html icons[config().icon]}
     </div>
 
-    <h1 class="error-code">{$page.status}</h1>
+    <h1 class="error-code">{page.status}</h1>
     <h2 class="error-title">{config().title}</h2>
     <p class="error-description">{config().description}</p>
 
     <div class="error-actions">
       <a href="/account/notifications" class="btn btn-primary">{m.common_go_to_account()}</a>
 
-      {#if $page.status === 404}
+      {#if page.status === 404}
         <button class="btn btn-secondary" onclick={() => history.back()}>{m.common_go_back()}</button>
-      {:else if $page.status === 403}
+      {:else if page.status === 403}
         <a href="/login" class="btn btn-secondary">{m.common_sign_in()}</a>
-      {:else if $page.status === 500}
+      {:else if page.status === 500}
         <button class="btn btn-secondary" onclick={() => location.reload()}>{m.common_try_again()}</button>
       {/if}
     </div>
@@ -141,7 +141,7 @@
 
   .btn-primary {
     background: var(--color-primary-500);
-    color: #ffffff;
+    color: var(--color-text-inverse);
   }
 
   .btn-primary:hover {
@@ -155,40 +155,9 @@
   }
 
   .btn-secondary:hover {
-    background: var(--color-neutral-50);
+    background: var(--color-surface-secondary);
     color: var(--color-text);
   }
 
-  /* Dark mode */
-  [data-theme='dark'] .error-page {
-    background: var(--color-background-dark);
-  }
-
-  [data-theme='dark'] .error-card {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-  }
-
-  [data-theme='dark'] .error-icon {
-    color: var(--color-text-muted-dark);
-  }
-
-  [data-theme='dark'] .error-code,
-  [data-theme='dark'] .error-title {
-    color: var(--color-text-dark);
-  }
-
-  [data-theme='dark'] .error-description {
-    color: var(--color-text-secondary-dark);
-  }
-
-  [data-theme='dark'] .btn-secondary {
-    border-color: var(--color-border-dark);
-    color: var(--color-text-secondary-dark);
-  }
-
-  [data-theme='dark'] .btn-secondary:hover {
-    background: var(--color-surface-variant);
-    color: var(--color-text-dark);
-  }
+  /* Dark mode - all colors use semantic tokens that automatically adapt via theme files */
 </style>

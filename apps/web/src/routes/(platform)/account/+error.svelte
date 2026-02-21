@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
 
   const statusConfig = {
@@ -21,9 +21,9 @@
   };
 
   const config = $derived(
-    statusConfig[$page.status] ?? {
+    statusConfig[page.status] ?? {
       title: m.account_error_server_error(),
-      description: $page.error?.message ?? 'An unexpected error occurred.',
+      description: page.error?.message ?? 'An unexpected error occurred.',
       icon: 'warning',
     }
   );
@@ -36,7 +36,7 @@
 </script>
 
 <svelte:head>
-  <title>{$page.status} {config().title} | Account</title>
+  <title>{page.status} {config().title} | Account</title>
 </svelte:head>
 
 <div class="error-page" role="alert" aria-live="polite">
@@ -45,18 +45,18 @@
       {@html icons[config().icon]}
     </div>
 
-    <h1 class="error-code">{$page.status}</h1>
+    <h1 class="error-code">{page.status}</h1>
     <h2 class="error-title">{config().title}</h2>
     <p class="error-description">{config().description}</p>
 
     <div class="error-actions">
       <a href="/account" class="btn btn-primary">{m.common_go_to_account()}</a>
 
-      {#if $page.status === 404}
+      {#if page.status === 404}
         <button class="btn btn-secondary" onclick={() => history.back()}>{m.common_go_back()}</button>
-      {:else if $page.status === 403}
+      {:else if page.status === 403}
         <a href="/login" class="btn btn-secondary">{m.common_sign_in()}</a>
-      {:else if $page.status === 500}
+      {:else if page.status === 500}
         <button class="btn btn-secondary" onclick={() => location.reload()}>{m.common_try_again()}</button>
       {/if}
     </div>
@@ -160,34 +160,34 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .error-page {
+  :global(.dark) .error-page {
     background: var(--color-background-dark);
   }
 
-  [data-theme='dark'] .error-card {
+  :global(.dark) .error-card {
     background: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .error-icon {
+  :global(.dark) .error-icon {
     color: var(--color-text-muted-dark);
   }
 
-  [data-theme='dark'] .error-code,
-  [data-theme='dark'] .error-title {
+  :global(.dark) .error-code,
+  :global(.dark) .error-title {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .error-description {
+  :global(.dark) .error-description {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .btn-secondary {
+  :global(.dark) .btn-secondary {
     border-color: var(--color-border-dark);
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .btn-secondary:hover {
+  :global(.dark) .btn-secondary:hover {
     background: var(--color-surface-variant);
     color: var(--color-text-dark);
   }
