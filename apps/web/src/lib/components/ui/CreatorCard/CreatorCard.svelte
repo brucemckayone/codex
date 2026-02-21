@@ -12,6 +12,7 @@
   @prop {{ website?: string; twitter?: string; youtube?: string; instagram?: string }} socialLinks - Social media links
   @prop {Snippet} actions - Action buttons snippet
   @prop {'default' | 'compact'} variant - Display variant
+  @prop {string} profileHref - Optional custom profile link href (defaults to /@{username})
 -->
 <script lang="ts">
   import type { Snippet, HTMLAttributes } from 'svelte/elements';
@@ -59,12 +60,12 @@
   class="creator-card creator-card--{variant} {className ?? ''}"
   {...rest}
 >
-  <a href={href} class="creator-card__link">
-    <span class="sr-only">{m.creator_view_profile({ name: displayName })}</span>
-  </a>
-
   <div class="creator-card__body">
-    <a href={href} class="creator-card__avatar-link">
+    <a
+      href={href}
+      class="creator-card__avatar-link"
+      aria-label={m.creator_view_profile({ name: displayName })}
+    >
       <Avatar
         src={avatar}
         fallback={initial}
@@ -183,24 +184,6 @@
     padding: var(--space-3);
   }
 
-  .creator-card__link {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-  }
-
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border-width: 0;
-  }
-
   .creator-card__body {
     display: flex;
     align-items: flex-start;
@@ -295,6 +278,8 @@
     margin-top: var(--space-3);
     display: flex;
     gap: var(--space-2);
+    position: relative;
+    z-index: 2;
   }
 
   .creator-card--compact .creator-card__actions {
