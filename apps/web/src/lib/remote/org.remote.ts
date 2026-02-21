@@ -5,7 +5,11 @@
  * Supports both authenticated (full data) and unauthenticated (public branding) queries.
  */
 
-import type { OrganizationWithRole } from '@codex/shared-types';
+import type {
+  OrganizationWithRole,
+  PublicBrandingResponse,
+  PublicCreatorsResponse,
+} from '@codex/shared-types';
 import { z } from 'zod';
 import { getRequestEvent, query } from '$app/server';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
@@ -36,12 +40,6 @@ export const getOrganization = query(z.string().min(1), async (slug) => {
 // Public Branding (Unauthenticated)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface PublicBrandingData {
-  logoUrl: string | null;
-  primaryColorHex: string;
-  platformName: string;
-}
-
 /**
  * Get public branding for theming (unauthenticated, fast)
  *
@@ -65,7 +63,7 @@ export const getPublicBranding = query(z.string().min(1), async (slug) => {
   const response = await fetch(`${orgApiUrl}/api/organizations/public/${slug}`);
   if (!response.ok) return null;
 
-  return (await response.json()) as PublicBrandingData;
+  return (await response.json()) as PublicBrandingResponse;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,3 +127,62 @@ export const getMyMembership = query(z.string().uuid(), async (orgId) => {
 }) as unknown as (
   orgId: string
 ) => Promise<{ role: string | null; joinedAt: string | null }>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public Creators List (Unauthenticated)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get public creators list for an organization (unauthenticated)
+ *
+ * Used for the org creators directory page.
+ *
+ * Usage:
+ * ```svelte
+ * {#await listPublicCreators({ slug: 'my-org', page: 1, limit: 12 })}
+ *   <CreatorsSkeleton />
+ * {:then data}
+ *   <CreatorsGrid items={data.items} />
+ * {/await}
+ * ```
+ */
+export const listPublicCreators = query(
+  z.object({
+    slug: z.string().min(1),
+    page: z.coerce.number().min(1).default(1),
+    limit: z.coerce.number().min(1).max(50).default(12),
+  }),
+  async (params) => {
+    const { platform } = getRequestEvent();
+    const api = createServerApi(platform);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(params.page));
+    searchParams.set('limit', String(params.limit));
+
+    try {
+      const result = await api.org.listPublicCreators(
+        params.slug,
+        searchParams
+      );
+
+      // Transform from PaginatedListResponse to flat response expected by components
+      return {
+        items: result.items,
+        total: result.pagination.total,
+        page: result.pagination.page,
+        limit: result.pagination.limit,
+        totalPages: result.pagination.totalPages,
+      };
+    } catch {
+      // Return empty state on error
+      return {
+        items: [],
+        total: 0,
+        page: 1,
+        limit: params.limit,
+        totalPages: 0,
+      };
+    }
+  }
+);

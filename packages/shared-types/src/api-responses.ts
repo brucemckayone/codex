@@ -260,9 +260,35 @@ export interface AllSettingsResponse {
  * Public branding response shape (for unauthenticated endpoints)
  */
 export interface PublicBrandingResponse {
+  orgId: string;
   logoUrl: string | null;
   primaryColorHex: string;
+  platformName: string;
 }
+
+/**
+ * Public creator profile for organization directory
+ * Used in public creators list endpoint
+ */
+export interface PublicCreator {
+  id: string;
+  username: string;
+  name: string;
+  avatarUrl: string | null;
+  bio: string | null;
+  contentCount?: number;
+}
+
+/**
+ * Response for GET /api/organizations/public/:slug/creators
+ * Returns paginated list of public creators for an organization
+ * @example
+ * {
+ *   items: [{ id, username, name, avatarUrl, bio, contentCount }],
+ *   pagination: { page: 1, limit: 12, total: 45, totalPages: 4 }
+ * }
+ */
+export type PublicCreatorsResponse = PaginatedListResponse<PublicCreator>;
 
 // ============================================================================
 // User/Account Response Types
@@ -409,6 +435,19 @@ export interface CustomerListItem {
   createdAt: string;
   totalPurchases: number;
   totalSpentCents: number;
+}
+
+/**
+ * Purchase list item for account payment history
+ * Used in PaginatedListResponse<PurchaseListItem>
+ */
+export interface PurchaseListItem {
+  id: string;
+  createdAt: string; // ISO 8601 timestamp
+  contentId: string;
+  contentTitle: string;
+  amountCents: number;
+  status: 'complete' | 'pending' | 'failed' | 'refunded';
 }
 
 /**

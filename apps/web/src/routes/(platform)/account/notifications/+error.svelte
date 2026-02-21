@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { page } from '$app/stores';
   import * as m from '$paraglide/messages';
 
   const statusConfig = {
@@ -141,7 +140,7 @@
 
   .btn-primary {
     background: var(--color-primary-500);
-    color: #ffffff;
+    color: var(--color-text-inverse);
   }
 
   .btn-primary:hover {
@@ -155,40 +154,9 @@
   }
 
   .btn-secondary:hover {
-    background: var(--color-neutral-50);
+    background: var(--color-surface-secondary);
     color: var(--color-text);
   }
 
-  /* Dark mode */
-  [data-theme='dark'] .error-page {
-    background: var(--color-background-dark);
-  }
-
-  [data-theme='dark'] .error-card {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-  }
-
-  [data-theme='dark'] .error-icon {
-    color: var(--color-text-muted-dark);
-  }
-
-  [data-theme='dark'] .error-code,
-  [data-theme='dark'] .error-title {
-    color: var(--color-text-dark);
-  }
-
-  [data-theme='dark'] .error-description {
-    color: var(--color-text-secondary-dark);
-  }
-
-  [data-theme='dark'] .btn-secondary {
-    border-color: var(--color-border-dark);
-    color: var(--color-text-secondary-dark);
-  }
-
-  [data-theme='dark'] .btn-secondary:hover {
-    background: var(--color-surface-variant);
-    color: var(--color-text-dark);
-  }
+  /* Dark mode - all colors use semantic tokens that automatically adapt via theme files */
 </style>

@@ -7,21 +7,25 @@
 
   interface Props {
     user: LayoutUser | null;
-    org: LayoutOrganization;
+    org: LayoutOrganization | null;
   }
 
   const { user, org }: Props = $props();
 
-  const navLinks = $derived(getOrgNav(org.slug));
+  const navLinks = $derived(org ? getOrgNav(org.slug) : []);
+
+  const orgName = $derived(org?.name ?? 'Organization');
+  const orgSlug = $derived(org?.slug ?? '');
+  const orgLogoUrl = $derived(org?.logoUrl);
 </script>
 
 <header class="header">
   <PageContainer class="header-inner">
-    <a href="/{org.slug}" class="org-brand">
-      {#if org.logoUrl}
-        <img src={org.logoUrl} alt="{org.name} logo" class="org-logo" />
+    <a href="/{orgSlug}" class="org-brand">
+      {#if orgLogoUrl}
+        <img src={orgLogoUrl} alt="{orgName} logo" class="org-logo" />
       {/if}
-      <span class="org-name">{org.name}</span>
+      <span class="org-name">{orgName}</span>
     </a>
 
     <nav class="desktop-nav" aria-label="Organization">

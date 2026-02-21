@@ -1,34 +1,32 @@
 <script lang="ts">
-  /**
-   * Organization layout - for {slug}.revelations.studio routes
-   */
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
+  import OrgHeader from '$lib/components/layout/Header/OrgHeader.svelte';
+  import Footer from '$lib/components/ui/Layout/Footer.svelte';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 </script>
 
-<div class="org-layout">
-  <header class="org-header">
-    <a href="/" class="org-name">{data.org?.name ?? 'Organization'}</a>
-    <nav class="nav">
-      <a href="/explore">Explore</a>
-      {#if data.user}
-        <a href="https://revelations.studio/library">Library</a>
-        <a href="/studio">Studio</a>
-      {:else}
-        <a href="/login">Sign In</a>
-      {/if}
-    </nav>
-  </header>
+<div class="org-layout" data-org-brand={data.org?.slug ?? ''}>
+  <OrgHeader org={data.org} user={data.user} />
 
   <main class="org-main">
     {@render children()}
   </main>
 
-  <footer class="org-footer">
-    <p>Powered by <a href="https://revelations.studio">Revelations</a></p>
-  </footer>
+  <Footer />
 </div>
+
+<style>
+  .org-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  .org-main {
+    flex: 1;
+  }
+</style>
 
 
