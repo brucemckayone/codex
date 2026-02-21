@@ -77,6 +77,11 @@
 		if (updateProfileForm.result?.success) {
 			showSuccessMessage();
 		}
+
+		// Cleanup timeout on component unmount
+		return () => {
+			if (successTimeout) clearTimeout(successTimeout);
+		};
 	});
 
 	// Handle avatar upload success

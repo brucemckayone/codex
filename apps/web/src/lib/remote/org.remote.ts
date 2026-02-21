@@ -5,7 +5,10 @@
  * Supports both authenticated (full data) and unauthenticated (public branding) queries.
  */
 
-import type { OrganizationWithRole } from '@codex/shared-types';
+import type {
+  MyMembershipResponse,
+  OrganizationWithRole,
+} from '@codex/shared-types';
 import { z } from 'zod';
 import { getRequestEvent, query } from '$app/server';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
@@ -105,12 +108,14 @@ export const getOrganizationById = query(z.string().uuid(), async (id) => {
  *
  * Returns array of organizations where user is an active member.
  * Used for StudioSwitcher dropdown.
+ *
+ * @returns Array of organizations with user's role, or null if not authenticated
  */
 export const getMyOrganizations = query(async () => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   return api.org.getMyOrganizations();
-}) as unknown as () => Promise<OrganizationWithRole[] | null>;
+}) satisfies () => Promise<OrganizationWithRole[]>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // My Membership
@@ -120,15 +125,16 @@ export const getMyOrganizations = query(async () => {
  * Get user's membership in an organization
  *
  * @param orgId - Organization UUID
- * @returns Membership with role and joinedAt (null if not a member)
+ * @returns Membership with role, status, and joinedAt
  */
-export const getMyMembership = query(z.string().uuid(), async (orgId) => {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-  return api.org.getMyMembership(orgId);
-}) as unknown as (
-  orgId: string
-) => Promise<{ role: string | null; joinedAt: string | null }>;
+export const getMyMembership = query(
+  z.string().uuid(),
+  async (orgId: string) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.getMyMembership(orgId);
+  }
+) satisfies (orgId: string) => Promise<MyMembershipResponse>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public Creators Directory

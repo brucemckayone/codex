@@ -69,7 +69,16 @@ describe('Payment Page Load', () => {
 
   it('parses default pagination params (page 1, limit 20)', async () => {
     const purchasesData = {
-      items: [{ id: 'purchase-1', amount: 1000, status: 'completed' }],
+      items: [
+        {
+          id: 'purchase-1',
+          createdAt: '2025-01-15T10:30:00.000Z',
+          contentId: 'content-123',
+          contentTitle: 'Test Content',
+          amountCents: 1000,
+          status: 'complete' as const,
+        },
+      ],
       pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
     };
     mockGetPurchaseHistory.mockResolvedValue(purchasesData);
@@ -143,9 +152,18 @@ describe('Payment Page Load', () => {
   });
 
   it('parses status filter param', async () => {
-    mockUrl = new URL('http://localhost:3000/account/payment?status=completed');
+    mockUrl = new URL('http://localhost:3000/account/payment?status=complete');
     const purchasesData = {
-      items: [{ id: 'purchase-1', amount: 1000, status: 'completed' }],
+      items: [
+        {
+          id: 'purchase-1',
+          createdAt: '2025-01-15T10:30:00.000Z',
+          contentId: 'content-123',
+          contentTitle: 'Test Content',
+          amountCents: 1000,
+          status: 'complete' as const,
+        },
+      ],
       pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
     };
     mockGetPurchaseHistory.mockResolvedValue(purchasesData);
@@ -162,10 +180,10 @@ describe('Payment Page Load', () => {
 
     expect(result).toEqual({
       purchases: purchasesData,
-      filters: { status: 'completed' },
+      filters: { status: 'complete' },
     });
     const expectedParams = new URLSearchParams();
-    expectedParams.set('status', 'completed');
+    expectedParams.set('status', 'complete');
     expect(mockGetPurchaseHistory).toHaveBeenCalledWith(expectedParams);
   });
 
