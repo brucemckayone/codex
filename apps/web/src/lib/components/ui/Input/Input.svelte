@@ -17,6 +17,7 @@
 -->
 <script lang="ts">
   import type { HTMLInputAttributes } from 'svelte/elements';
+  import * as m from '$paraglide/messages';
 
   interface Props extends HTMLInputAttributes {
     error?: string;
@@ -48,7 +49,7 @@
         type="button"
         class="password-toggle"
         onclick={() => showPassword = !showPassword}
-        aria-label={showPassword ? 'Hide password' : 'Show password'}
+        aria-label={showPassword ? m.input_hide_password() : m.input_show_password()}
         tabindex="-1"
       >
         {#if showPassword}

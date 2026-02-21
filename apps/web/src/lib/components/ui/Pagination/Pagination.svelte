@@ -211,7 +211,7 @@
 
   .pagination__page.active {
     background: var(--color-primary-500);
-    color: #ffffff;
+    color: var(--color-text-inverse);
     border-color: var(--color-primary-500);
   }
 

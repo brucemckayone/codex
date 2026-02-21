@@ -183,5 +183,7 @@
   "footer_about": "About",
   "footer_terms": "Terms",
   "footer_privacy": "Privacy",
-  "footer_copyright": "© 2025 Codex. All rights reserved."
+  "footer_copyright": "© 2025 Codex. All rights reserved.",
+  "input_show_password": "Show password",
+  "input_hide_password": "Hide password"
 }
