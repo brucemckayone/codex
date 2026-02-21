@@ -13,7 +13,7 @@
 		AvatarImage,
 		AvatarFallback
 	} from '$lib/components/ui/Avatar';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidate } from '$app/navigation';
 	import { onUnmount } from 'svelte';
 	import { getInitials } from '$lib/utils/avatar';
 
@@ -29,6 +29,9 @@
 	let avatarPreview = $state(data.user?.avatarUrl ?? data.user?.image ?? null);
 	let hasSelectedFile = $state(false);
 
+	// Track the previous Blob URL for cleanup
+	let previousPreviewUrl: string | null = null;
+
 	// Show delete button only when user has avatar and no new file selected
 	const showDeleteAvatar = $derived(
 		(data.user?.avatarUrl || data.user?.image) && !hasSelectedFile
@@ -37,18 +40,31 @@
 	// Get initials for avatar fallback
 	const initials = $derived(getInitials(data.user?.name, data.user?.username));
 
+	// Revoke a Blob URL if it's a blob: URL to prevent memory leaks
+	function revokeBlobUrl(url: string | null) {
+		if (url?.startsWith('blob:')) {
+			URL.revokeObjectURL(url);
+		}
+	}
+
 	// Handle file selection for avatar upload
 	function handleAvatarSelect(e: Event) {
 		const target = e.target as HTMLInputElement;
 		const file = target.files?.[0];
 		if (file) {
+			// Revoke previous blob URL to prevent memory leak
+			revokeBlobUrl(previousPreviewUrl);
 			avatarPreview = URL.createObjectURL(file);
+			previousPreviewUrl = avatarPreview;
 			hasSelectedFile = true;
 		}
 	}
 
 	// Cancel avatar upload (just clear preview)
 	function handleAvatarCancel() {
+		// Revoke the blob URL when canceling
+		revokeBlobUrl(previousPreviewUrl);
+		previousPreviewUrl = null;
 		avatarPreview = data.user?.avatarUrl ?? data.user?.image ?? null;
 		hasSelectedFile = false;
 		const fileInput = document.getElementById('avatar-upload') as HTMLInputElement;
@@ -78,8 +94,10 @@
 	$effect(() => {
 		if (avatarUploadForm.result?.success) {
 			// Reset state and invalidate to reload data
+			// Note: blob URL will be revoked on unmount or when new file is selected
 			hasSelectedFile = false;
-			invalidateAll();
+			previousPreviewUrl = null;
+			invalidate('/account');
 		}
 	});
 
@@ -89,13 +107,15 @@
 			// Reset state and invalidate to reload data
 			avatarPreview = null;
 			hasSelectedFile = false;
-			invalidateAll();
+			previousPreviewUrl = null;
+			invalidate('/account');
 		}
 	});
 
-	// Cleanup timeout on component unmount
+	// Cleanup timeout and blob URLs on component unmount
 	onUnmount(() => {
 		if (successTimeout) clearTimeout(successTimeout);
+		revokeBlobUrl(previousPreviewUrl);
 	});
 </script>
 

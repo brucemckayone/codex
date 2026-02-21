@@ -9,60 +9,21 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
+import {
+  purchaseHistoryQuerySchema,
+  updateNotificationsFormSchema,
+  updateProfileFormSchema,
+} from '$lib/schemas/account';
 import { createServerApi } from '$lib/server/api';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Schemas for forms
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Profile update form schema
- *
- * Validates user profile information including:
- * - Display name (1-255 chars)
- * - Username (2-50 chars, lowercase alphanumeric with hyphens)
- * - Bio (max 500 chars)
- * - Social links (must be valid URLs)
- *
- * Uses _ prefix for fields that shouldn't be repopulated on error (none here, but pattern)
- */
-const updateProfileFormSchema = z.object({
-  displayName: z
-    .string()
-    .min(1, 'Display name is required')
-    .max(255)
-    .optional(),
-  username: z
-    .string()
-    .min(2, 'Username must be at least 2 characters')
-    .max(50, 'Username must be at most 50 characters')
-    .regex(
-      /^[a-z0-9-]+$/,
-      'Username must be lowercase letters, numbers, and hyphens'
-    )
-    .optional(),
-  bio: z.string().max(500).optional(),
-  website: z.string().url('Invalid website URL').optional(),
-  twitter: z.string().url('Invalid Twitter URL').optional(),
-  youtube: z.string().url('Invalid YouTube URL').optional(),
-  instagram: z.string().url('Invalid Instagram URL').optional(),
-});
-
-/**
- * Notification preferences form schema
- *
- * Validates notification preference toggles:
- * - emailMarketing: Promotional and marketing emails
- * - emailTransactional: Transactional emails (receipts, notifications)
- * - emailDigest: Weekly digest emails
- */
-const updateNotificationsFormSchema = z.object({
-  emailMarketing: z.boolean(),
-  emailTransactional: z.boolean(),
-  emailDigest: z.boolean(),
-});
+// Re-export schemas for test access (SvelteKit remote requires all exports to be remote functions)
+// Use a namespace object to avoid the remote function restriction
+export const schemas = {
+  updateProfileFormSchema,
+  updateNotificationsFormSchema,
+  purchaseHistoryQuerySchema,
+} as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Profile Update Form
@@ -229,24 +190,6 @@ export const getNotificationPreferences = query(async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Purchase History Query
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Purchase history query schema
- *
- * Validates parameters for fetching user's purchase history:
- * - page: Page number (min 1, default 1)
- * - limit: Items per page (min 1, max 100, default 20)
- * - status: Optional filter by purchase status ('pending' | 'complete' | 'refunded' | 'failed')
- * - contentId: Optional filter by content UUID
- *
- * Extends standard pagination with optional status and contentId filters.
- */
-const purchaseHistoryQuerySchema = z.object({
-  page: z.coerce.number().min(1).optional().default(1),
-  limit: z.coerce.number().min(1).max(100).optional().default(20),
-  status: z.enum(['pending', 'complete', 'refunded', 'failed']).optional(),
-  contentId: z.string().uuid().optional(),
-});
 
 /**
  * Get purchase history

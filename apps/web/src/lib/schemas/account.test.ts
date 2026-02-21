@@ -6,38 +6,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
-
-// Define the schemas inline for testing (matching account.remote.ts)
-const updateProfileFormSchema = z.object({
-  displayName: z
-    .string()
-    .min(1, 'Display name is required')
-    .max(255)
-    .optional(),
-  username: z
-    .string()
-    .min(2, 'Username must be at least 2 characters')
-    .max(50, 'Username must be at most 50 characters')
-    .regex(
-      /^[a-z0-9-]+$/,
-      'Username must be lowercase letters, numbers, and hyphens'
-    )
-    .optional(),
-  bio: z.string().max(500).optional(),
-  website: z.string().url('Invalid website URL').optional(),
-  twitter: z.string().url('Invalid Twitter URL').optional(),
-  youtube: z.string().url('Invalid YouTube URL').optional(),
-  instagram: z.string().url('Invalid Instagram URL').optional(),
-});
-
-const updateNotificationsFormSchema = z.object({
-  emailMarketing: z.boolean(),
-  emailTransactional: z.boolean(),
-  emailDigest: z.boolean(),
-});
-
 // Avatar upload schema - simplified for testing (without instanceof File check)
+// This schema is defined inline since it's part of the avatar-upload.remote module
+import { z } from 'zod';
+import {
+  purchaseHistoryQuerySchema,
+  updateNotificationsFormSchema,
+  updateProfileFormSchema,
+} from '../schemas/account';
+
 const avatarUploadFieldsSchema = z.object({
   avatar: z
     .any()
@@ -440,14 +417,6 @@ describe('Account Schemas', () => {
   // ─────────────────────────────────────────────────────────────────────────────
   // Additional schemas from account.remote.ts and avatar-delete.remote.ts
   // ─────────────────────────────────────────────────────────────────────────────
-
-  // Purchase history query schema (from account.remote.ts)
-  const purchaseHistoryQuerySchema = z.object({
-    page: z.coerce.number().min(1).optional().default(1),
-    limit: z.coerce.number().min(1).max(100).optional().default(20),
-    status: z.enum(['pending', 'complete', 'refunded', 'failed']).optional(),
-    contentId: z.string().uuid().optional(),
-  });
 
   describe('purchaseHistoryQuerySchema', () => {
     describe('page parameter', () => {
