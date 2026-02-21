@@ -162,5 +162,17 @@
   "footer_about": "About",
   "footer_terms": "Terms",
   "footer_privacy": "Privacy",
-  "footer_copyright": "© 2025 Codex. All rights reserved."
+  "footer_copyright": "© 2025 Codex. All rights reserved.",
+  "content_type_video": "Video",
+  "content_type_audio": "Audio",
+  "content_type_article": "Article",
+  "content_view": "View {title}",
+  "content_thumbnail_alt": "Thumbnail for {title}",
+  "content_duration": "Duration",
+  "creator_view_profile": "View {name}'s profile",
+  "creator_content_count": "{count} content items",
+  "creator_visit_website": "Visit website",
+  "creator_visit_twitter": "Visit Twitter",
+  "creator_visit_youtube": "Visit YouTube",
+  "creator_visit_instagram": "Visit Instagram"
 }

@@ -129,3 +129,70 @@ export const getMyMembership = query(z.string().uuid(), async (orgId) => {
 }) as unknown as (
   orgId: string
 ) => Promise<{ role: string | null; joinedAt: string | null }>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public Creators List (Unauthenticated)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PublicCreator {
+  id: string;
+  username: string;
+  name: string;
+  avatarUrl: string | null;
+  bio: string | null;
+  contentCount?: number;
+}
+
+interface PublicCreatorsResponse {
+  items: PublicCreator[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+/**
+ * Get public creators list for an organization (unauthenticated)
+ *
+ * Used for the org creators directory page.
+ *
+ * Usage:
+ * ```svelte
+ * {#await listPublicCreators({ slug: 'my-org', page: 1, limit: 12 })}
+ *   <CreatorsSkeleton />
+ * {:then data}
+ *   <CreatorsGrid items={data.items} />
+ * {/await}
+ * ```
+ */
+export const listPublicCreators = query(
+  z.object({
+    slug: z.string().min(1),
+    page: z.coerce.number().min(1).default(1),
+    limit: z.coerce.number().min(1).max(50).default(12),
+  }),
+  async (params) => {
+    const { platform } = getRequestEvent();
+    const orgApiUrl = serverApiUrl(platform, 'org');
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(params.page));
+    searchParams.set('limit', String(params.limit));
+
+    const response = await fetch(
+      `${orgApiUrl}/api/organizations/public/${params.slug}/creators?${searchParams}`
+    );
+
+    if (!response.ok) {
+      return {
+        items: [],
+        total: 0,
+        page: 1,
+        limit: params.limit,
+        totalPages: 0,
+      };
+    }
+
+    return (await response.json()) as PublicCreatorsResponse;
+  }
+);
