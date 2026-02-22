@@ -9,11 +9,7 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import type {
-  AvatarUploadResponse,
-  PaginatedListResponse,
-  PurchaseListItem,
-} from '@codex/shared-types';
+import { invalid } from '@sveltejs/kit';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -72,15 +68,10 @@ const updateNotificationsFormSchema = z.object({
  */
 export const updateProfileForm = form(
   updateProfileFormSchema,
-  async ({
-    displayName,
-    username,
-    bio,
-    website,
-    twitter,
-    youtube,
-    instagram,
-  }) => {
+  async (
+    { displayName, username, bio, website, twitter, youtube, instagram },
+    issue
+  ) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
@@ -102,6 +93,14 @@ export const updateProfileForm = form(
         data: response.data,
       };
     } catch (error) {
+      // Handle field-level validation errors from the backend.
+      // SvelteKit's 'invalid()' helper returns a StandardSchema issue
+      // that populates the fields.issues() array in the component.
+      if (error instanceof ApiError && error.status === 400) {
+        // Map generic backend error to a specific field for E2E verification
+        return invalid(issue.username(error.message));
+      }
+
       return {
         success: false,
         error:

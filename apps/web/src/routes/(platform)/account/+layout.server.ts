@@ -12,4 +12,7 @@ export const load: LayoutServerLoad = async ({ locals, setHeaders }) => {
   }
 
   setHeaders(CACHE_HEADERS.PRIVATE);
+
+  // Return empty object since we don't need to pass data to layout
+  return {};
 };

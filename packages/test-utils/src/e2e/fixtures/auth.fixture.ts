@@ -1,23 +1,95 @@
-/**
- * Auth fixture for e2e tests
- * Handles user registration, login, and session management via REAL auth worker
- */
-
-import { extractSessionCookie } from '../helpers/cookies';
+import { getServiceUrl } from '@codex/constants';
 import { httpClient } from '../helpers/http-client';
 import type { RegisteredUser } from '../helpers/types';
-import { WORKER_URLS } from '../helpers/worker-urls';
+
+/**
+ * Resolve the Auth Worker URL for E2E tests.
+ * E2E always runs in dev mode context (localhost workers).
+ */
+const AUTH_URL = getServiceUrl('auth', true);
+
+/**
+ * Extract session cookies from Set-Cookie header.
+ *
+ * Better Auth uses both `better-auth.session_token` AND `better-auth.session_data`.
+ * Both are required for session validation.
+ *
+ * @param setCookieHeader - The raw Set-Cookie header string from the response
+ * @returns A formatted Cookie string compatible with subsequent fetch requests
+ */
+export function extractSessionCookie(setCookieHeader: string | null): string {
+  if (!setCookieHeader) {
+    throw new Error('No Set-Cookie header found in response');
+  }
+
+  // Extract better-auth.session_token
+  const tokenMatch = setCookieHeader.match(
+    /better-auth\.session_token=([^;]+)/
+  );
+
+  // Extract better-auth.session_data (the last one, as there may be a deletion cookie first)
+  const dataMatches = Array.from(
+    setCookieHeader.matchAll(/better-auth\.session_data=([^;]*)/g)
+  );
+  let sessionData: string | null = null;
+  for (const match of dataMatches) {
+    if (match[1] && match[1].length > 0) {
+      sessionData = match[1];
+    }
+  }
+
+  if (tokenMatch) {
+    // Send both cookies (Better Auth requires both for session validation)
+    const cookies = [`better-auth.session_token=${tokenMatch[1]}`];
+    if (sessionData) {
+      cookies.push(`better-auth.session_data=${sessionData}`);
+    }
+    return cookies.join('; ');
+  }
+
+  // Fallback: try codex-session (configured name)
+  const codexMatch = setCookieHeader.match(/codex-session=([^;]+)/);
+  if (codexMatch) {
+    return `codex-session=${codexMatch[1]}`;
+  }
+
+  throw new Error(
+    `No session cookie found in Set-Cookie header: ${setCookieHeader}`
+  );
+}
+
+/**
+ * Parse a cookie string ("name=value; name2=value2") into an array of name/value pairs.
+ *
+ * This utility is used to convert raw cookie strings into objects compatible with
+ * Playwright's addCookies() method.
+ */
+export function parseCookieString(
+  cookieString: string
+): Array<{ name: string; value: string }> {
+  const cookieParts = cookieString.split(/;\s?/);
+  const result: Array<{ name: string; value: string }> = [];
+
+  for (const part of cookieParts) {
+    const [name, ...rest] = part.trim().split('=');
+    const value = rest.join('=');
+
+    if (!name || !value) continue;
+    result.push({ name, value });
+  }
+
+  return result;
+}
 
 export const authFixture = {
   /**
-   * Register a new user via auth worker
+   * Register a new user via auth worker.
    *
-   * Note: Better-auth requires email verification before creating session.
-   * This fixture handles the verification flow automatically by:
-   * 1. Registering user via HTTP POST
-   * 2. Extracting verification token from response
-   * 3. Verifying email via HTTP GET
-   * 4. Logging in to get session
+   * Handles the complete verification flow:
+   * 1. Register via HTTP POST
+   * 2. Capture verification token from KV (test endpoint)
+   * 3. Verify email via HTTP GET
+   * 4. Return user and session details
    */
   async registerUser(data: {
     email: string;
@@ -27,10 +99,10 @@ export const authFixture = {
   }): Promise<RegisteredUser> {
     // Step 1: Register via HTTP POST to /api/auth/sign-up/email
     const registerResponse = await httpClient.post(
-      `${WORKER_URLS.auth}/api/auth/sign-up/email`,
+      `${AUTH_URL}/api/auth/sign-up/email`,
       {
         headers: {
-          Origin: WORKER_URLS.auth, // Better Auth requires Origin header
+          Origin: AUTH_URL, // Better Auth requires Origin header
         },
         data: {
           email: data.email,
@@ -56,9 +128,8 @@ export const authFixture = {
     }
 
     // Step 2: Get verification token from test endpoint
-    // BetterAuth doesn't persist tokens to DB, so we capture them in KV
     const tokenResponse = await httpClient.get(
-      `${WORKER_URLS.auth}/api/test/verification-token/${encodeURIComponent(data.email)}`
+      `${AUTH_URL}/api/test/verification-token/${encodeURIComponent(data.email)}`
     );
 
     if (!tokenResponse.ok) {
@@ -66,16 +137,14 @@ export const authFixture = {
       throw new Error(`Verification token not found: ${error}`);
     }
 
-    const { token } = await tokenResponse.json();
+    const { token } = (await tokenResponse.json()) as { token: string };
 
     // Step 3: Verify email via HTTP GET to /api/auth/verify-email
-    // BetterAuth with autoSignInAfterVerification will create session and redirect
     const verifyResponse = await httpClient.get(
-      `${WORKER_URLS.auth}/api/auth/verify-email?token=${token}&callbackURL=/`,
-      { maxRedirects: 0 } // Don't follow redirects - we want to capture the cookie
+      `${AUTH_URL}/api/auth/verify-email?token=${token}&callbackURL=/`,
+      { maxRedirects: 0 }
     );
 
-    // Verification returns 302 redirect with Set-Cookie header
     if (verifyResponse.status !== 302 && !verifyResponse.ok) {
       const errorText = await verifyResponse.text();
       let errorMsg = errorText;
@@ -90,18 +159,14 @@ export const authFixture = {
       );
     }
 
-    // Session cookie is set in verify-email response (autoSignInAfterVerification: true)
     const verifyCookie = verifyResponse.headers.get('set-cookie');
-
-    // Check if BetterAuth session cookie was set
     const hasSessionCookie =
       verifyCookie &&
       (verifyCookie.includes('better-auth.session_token') ||
         verifyCookie.includes('codex-session'));
 
-    // If no cookie from verification, we need to explicitly sign in
     if (!hasSessionCookie) {
-      // Fallback: explicit sign-in with retry for worker restarts
+      // Fallback: explicit sign-in
       let loginResponse: Response | null = null;
       let lastError: Error | null = null;
       const maxRetries = 3;
@@ -109,36 +174,28 @@ export const authFixture = {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           loginResponse = await httpClient.post(
-            `${WORKER_URLS.auth}/api/auth/sign-in/email`,
+            `${AUTH_URL}/api/auth/sign-in/email`,
             {
               data: {
                 email: data.email,
                 password: data.password,
               },
               headers: {
-                Origin: WORKER_URLS.auth,
+                Origin: AUTH_URL,
               },
             }
           );
 
-          // Break on success or non-503 errors
           if (loginResponse.ok || loginResponse.status !== 503) {
             break;
           }
 
-          // Retry on 503 (worker restart)
           if (attempt < maxRetries) {
-            console.log(
-              `[DEBUG] Got 503, retrying sign-in (${attempt}/${maxRetries})...`
-            );
             await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
           }
         } catch (error) {
           lastError = error as Error;
           if (attempt < maxRetries) {
-            console.log(
-              `[DEBUG] Sign-in error, retrying (${attempt}/${maxRetries})...`
-            );
             await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
           }
         }
@@ -151,12 +208,10 @@ export const authFixture = {
       if (!loginResponse.ok) {
         const errorText = await loginResponse.text();
         let errorMsg = errorText;
-        // Try to parse as JSON, fall back to text if HTML
         try {
           const errorJson = JSON.parse(errorText);
           errorMsg = JSON.stringify(errorJson);
         } catch {
-          // Error text is likely HTML, use first 200 chars
           errorMsg = errorText.slice(0, 200);
         }
         throw new Error(
@@ -167,9 +222,8 @@ export const authFixture = {
       const loginCookie = loginResponse.headers.get('set-cookie');
       const cookieToSend = extractSessionCookie(loginCookie);
 
-      // Get session from get-session endpoint
       const sessionResponse = await httpClient.get(
-        `${WORKER_URLS.auth}/api/auth/get-session`,
+        `${AUTH_URL}/api/auth/get-session`,
         {
           headers: {
             Cookie: cookieToSend,
@@ -177,16 +231,17 @@ export const authFixture = {
         }
       );
 
-      console.log('[DEBUG] Session response status:', sessionResponse.status);
       if (!sessionResponse.ok) {
         const errorBody = await sessionResponse.text();
-        console.log('[DEBUG] Session error response:', errorBody);
         throw new Error(
           `Failed to get session after login: ${sessionResponse.status} - ${errorBody}`
         );
       }
 
-      const sessionData = await sessionResponse.json();
+      const sessionData = (await sessionResponse.json()) as {
+        user: RegisteredUser['user'];
+        session: RegisteredUser['session'];
+      };
 
       return {
         user: sessionData.user,
@@ -195,9 +250,8 @@ export const authFixture = {
       };
     }
 
-    // Get user info from get-session endpoint using the cookie from verification
     const sessionResponse = await httpClient.get(
-      `${WORKER_URLS.auth}/api/auth/get-session`,
+      `${AUTH_URL}/api/auth/get-session`,
       {
         headers: {
           Cookie: extractSessionCookie(verifyCookie),
@@ -211,7 +265,10 @@ export const authFixture = {
       );
     }
 
-    const sessionData = await sessionResponse.json();
+    const sessionData = (await sessionResponse.json()) as {
+      user: RegisteredUser['user'];
+      session: RegisteredUser['session'];
+    };
 
     return {
       user: sessionData.user,
@@ -221,18 +278,18 @@ export const authFixture = {
   },
 
   /**
-   * Login existing user via auth worker
+   * Login existing user via auth worker.
    */
   async loginUser(credentials: {
     email: string;
     password: string;
   }): Promise<RegisteredUser> {
     const response = await httpClient.post(
-      `${WORKER_URLS.auth}/api/auth/sign-in/email`,
+      `${AUTH_URL}/api/auth/sign-in/email`,
       {
         data: credentials,
         headers: {
-          Origin: WORKER_URLS.auth,
+          Origin: AUTH_URL,
         },
       }
     );
@@ -244,9 +301,8 @@ export const authFixture = {
 
     const setCookie = response.headers.get('set-cookie');
 
-    // Get session from get-session endpoint
     const sessionResponse = await httpClient.get(
-      `${WORKER_URLS.auth}/api/auth/get-session`,
+      `${AUTH_URL}/api/auth/get-session`,
       {
         headers: {
           Cookie: extractSessionCookie(setCookie),
@@ -260,7 +316,10 @@ export const authFixture = {
       );
     }
 
-    const sessionData = await sessionResponse.json();
+    const sessionData = (await sessionResponse.json()) as {
+      user: RegisteredUser['user'];
+      session: RegisteredUser['session'];
+    };
 
     return {
       user: sessionData.user,
@@ -270,15 +329,12 @@ export const authFixture = {
   },
 
   /**
-   * Get current session from auth worker
+   * Get current session from auth worker.
    */
   async getSession(sessionCookie: string) {
-    const response = await httpClient.get(
-      `${WORKER_URLS.auth}/api/auth/get-session`,
-      {
-        headers: { Cookie: sessionCookie },
-      }
-    );
+    const response = await httpClient.get(`${AUTH_URL}/api/auth/get-session`, {
+      headers: { Cookie: sessionCookie },
+    });
 
     if (!response.ok) {
       return null;
@@ -288,10 +344,10 @@ export const authFixture = {
   },
 
   /**
-   * Logout (invalidate session) via auth worker
+   * Logout (invalidate session) via auth worker.
    */
   async logout(sessionCookie: string): Promise<void> {
-    await httpClient.post(`${WORKER_URLS.auth}/api/auth/signout`, {
+    await httpClient.post(`${AUTH_URL}/api/auth/signout`, {
       headers: { Cookie: sessionCookie },
     });
   },

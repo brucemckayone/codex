@@ -65,7 +65,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       page,
       authenticateAsUser,
     }) => {
-      await authenticateAsUser(2);
+      await authenticateAsUser();
       await page.goto('/account/notifications');
       await page.waitForLoadState('networkidle');
 
@@ -77,6 +77,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       const digestSwitch = page.locator('button[name="emailDigest"]');
 
       // ASSERT: All switches should be visible
+      console.log('DOM content:', await page.content());
       await expect(marketingSwitch).toBeVisible();
       await expect(transactionalSwitch).toBeVisible();
       await expect(digestSwitch).toBeVisible();
@@ -88,7 +89,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       page,
       authenticateAsUser,
     }) => {
-      await authenticateAsUser(3);
+      await authenticateAsUser();
       await page.goto('/account/notifications');
       await page.waitForLoadState('networkidle');
 
@@ -113,7 +114,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       page,
       authenticateAsUser,
     }) => {
-      await authenticateAsUser(4);
+      await authenticateAsUser();
       await page.goto('/account/notifications');
       await page.waitForLoadState('networkidle');
 
@@ -140,7 +141,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       page,
       authenticateAsUser,
     }) => {
-      await authenticateAsUser(5);
+      await authenticateAsUser();
       await page.goto('/account/notifications');
       await page.waitForLoadState('networkidle');
 
@@ -167,7 +168,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       page,
       authenticateAsUser,
     }) => {
-      await authenticateAsUser(6);
+      await authenticateAsUser();
       await page.goto('/account/notifications');
       await page.waitForLoadState('networkidle');
 
@@ -186,7 +187,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       page,
       authenticateAsUser,
     }) => {
-      await authenticateAsUser(7);
+      await authenticateAsUser();
       await page.goto('/account/notifications');
       await page.waitForLoadState('networkidle');
 
@@ -214,7 +215,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       page,
       authenticateAsUser,
     }) => {
-      await authenticateAsUser(8);
+      await authenticateAsUser();
       await page.goto('/account/notifications');
 
       // ASSERT: Form should be present

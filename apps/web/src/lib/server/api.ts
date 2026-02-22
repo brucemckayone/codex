@@ -61,6 +61,13 @@ export function serverApiUrl(
   platform: App.Platform | undefined,
   worker: ServiceName
 ): string {
+  // If SvelteKit is in dev mode (including E2E tests), ensure we use local ports.
+  if (dev) {
+    return getServiceUrl(
+      worker,
+      platform?.env ? { ...platform.env, dev: true } : true
+    );
+  }
   return getServiceUrl(worker, platform?.env || dev);
 }
 
@@ -111,14 +118,23 @@ export function createServerApi(
       // Send both our platform cookie name and BetterAuth's internal name.
       // BetterAuth's get-session handler only looks for 'better-auth.session_token'
       // regardless of cookie.name config, while other workers use COOKIES.SESSION_NAME.
+      // Note: We MUST encode the cookie value because SvelteKit decodes it, but
+      // BetterAuth expects the original encoded value (e.g. signature containing +/=).
+      const encodedCookie = encodeURIComponent(sessionCookie);
       (headers as Record<string, string>).Cookie =
-        `${COOKIES.SESSION_NAME}=${sessionCookie}; better-auth.session_token=${sessionCookie}`;
+        `${COOKIES.SESSION_NAME}=${encodedCookie}; better-auth.session_token=${encodedCookie}`;
     }
+
+    // Abort fetch after 10 seconds to prevent indefinite hangs when a worker
+    // is slow or unresponsive (e.g. during E2E tests with cold KV/DB).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     const response = await fetch(url, {
       ...options,
+      signal: controller.signal,
       headers,
-    });
+    }).finally(() => clearTimeout(timeoutId));
 
     if (!response.ok) {
       const error = (await response
@@ -162,8 +178,10 @@ export function createServerApi(
 
       const cookieToUse = customSessionCookie || sessionCookie;
       if (cookieToUse) {
+        // Encode cookie value to match what BetterAuth expects
+        const encodedCookie = encodeURIComponent(cookieToUse);
         (headers as Record<string, string>).Cookie =
-          `${COOKIES.SESSION_NAME}=${cookieToUse}; better-auth.session_token=${cookieToUse}`;
+          `${COOKIES.SESSION_NAME}=${encodedCookie}; better-auth.session_token=${encodedCookie}`;
       }
 
       const response = await fetch(url, {

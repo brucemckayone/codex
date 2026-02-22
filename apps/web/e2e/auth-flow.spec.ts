@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './fixtures/auth';
 
 /**
  * Auth Flow E2E Tests
@@ -107,20 +108,27 @@ test.describe
       await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
     });
 
-    test('session cookie persists across navigation', async ({ page }) => {
-      // Login first
-      await page.goto('/login');
+    test('session persists across navigation', async ({
+      page,
+      authenticateAsUser,
+    }) => {
+      // Use the auth fixture to inject a valid session (same approach as
+      // the working account tests). The browser login flow is covered by
+      // test 3 ("logs in after email verification").
+      await authenticateAsUser();
 
-      await page.fill('input[name="email"]', TEST_USER.email);
-      await page.fill('input[name="password"]', TEST_USER.password);
-      await page.click('button[type="submit"]');
-      await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
+      // Navigate to a protected route
+      await page.goto('/account');
+      await expect(page).toHaveURL(/\/account/, { timeout: 10_000 });
 
-      // Navigate to homepage — session should persist
-      await page.goto('/');
-      const cookies = await page.context().cookies();
-      const sessionCookie = cookies.find((c) => c.name === 'codex-session');
-      expect(sessionCookie).toBeDefined();
+      // Navigate to another protected route — session should persist
+      await page.goto('/account/notifications');
+      await expect(page).toHaveURL(/\/account\/notifications/, {
+        timeout: 10_000,
+      });
+
+      // Session is not lost — we're not redirected to /login
+      await expect(page).not.toHaveURL(/\/login/);
     });
 
     test('rejects duplicate registration', async ({ page }) => {

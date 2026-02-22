@@ -2,122 +2,140 @@
  * Authenticated E2E Testing Fixtures
  *
  * Provides Playwright fixtures for authenticated E2E tests.
- * Uses persistent test users with real sessions created via BetterAuth test-utils.
+ * Uses fresh unique users per test via @codex/test-utils authFixture.
  *
  * Usage:
  * ```ts
  * import { test } from '../fixtures/auth';
  *
  * test('my authenticated test', async ({ page, authenticateAsUser }) => {
- *   await authenticateAsUser(); // Uses test user #1 by default
+ *   await authenticateAsUser(); // Creates and logs in a fresh user
  *   await page.goto('/account');
  *   // Test authenticated page...
- * });
- *
- * test('parallel test with different user', async ({ page, authenticateAsUser }) => {
- *   await authenticateAsUser(2); // Uses test user #2
- *   await page.goto('/account');
- *   // No conflict with test user #1
  * });
  * ```
  */
 
+import { COOKIES } from '@codex/constants';
+import {
+  authFixture,
+  orgFixture,
+  parseCookieString,
+} from '@codex/test-utils/e2e';
 import { test as base } from '@playwright/test';
-import { getSessionCookieName, getTestUser } from '../helpers/auth';
 
 /**
- * Authenticated test fixtures
- *
- * Extends Playwright's base test with authentication helpers.
+ * Check if the Auth Worker is healthy and ready to accept requests
  */
-type AuthFixtures = {
-  /**
-   * Authenticate the browser context with a test user session
-   *
-   * Injects real session cookies from persistent test users into the
-   * Playwright browser context. The SvelteKit server will recognize
-   * these as valid authenticated sessions.
-   *
-   * @param userIndex - Test user index (1-10), defaults to 1
-   *
-   * @example
-   * ```ts
-   * test('authenticated test', async ({ page, authenticateAsUser }) => {
-   *   await authenticateAsUser(); // Use user #1
-   *   await page.goto('/account');
-   *   // Page loads with authenticated session
-   * });
-   *
-   * test('with specific user', async ({ page, authenticateAsUser }) => {
-   *   await authenticateAsUser(3); // Use user #3
-   *   await page.goto('/account');
-   * });
-   * ```
-   */
-  authenticateAsUser: (userIndex?: number) => Promise<void>;
+async function checkAuthWorkerHealthy(): Promise<boolean> {
+  try {
+    const response = await fetch('http://localhost:42069/health');
+    return response.status === 200 || response.status === 503;
+  } catch {
+    return false;
+  }
+}
 
-  /**
-   * Get test user info without authentication
-   *
-   * Returns metadata about a test user (ID, email) without modifying
-   * the browser context. Useful for assertions or data setup.
-   *
-   * @param userIndex - Test user index (1-10), defaults to 1
-   * @returns Test user metadata
-   *
-   * @example
-   * ```ts
-   * test('check user info', async ({ page, testUser }) => {
-   *   const user = await testUser();
-   *   console.log(user.userId); // 'e2e_...'
-   *   console.log(user.email);   // 'e2e-test-1@example.com'
-   * });
-   * ```
-   */
-  testUser: (userIndex?: number) => Promise<{ userId: string; email: string }>;
+type AuthenticateAsUserFixture = {
+  authenticateAsUser: () => Promise<void>;
 };
 
+/**
+ * Organization Member Fixtures
+ */
+type OrgMemberFixture = {
+  createOrgMember: typeof orgFixture.createOrgMember;
+  createOrgWithMembers: typeof orgFixture.createOrgWithMembers;
+  getMemberByRole: typeof orgFixture.getMemberByRole;
+};
+
+type AuthFixtures = AuthenticateAsUserFixture & OrgMemberFixture;
+
 export const test = base.extend<AuthFixtures>({
-  // Fixture: Authenticate and inject cookies for a test user
   authenticateAsUser: async ({ page }, use) => {
-    const authenticate = async (userIndex = 1) => {
-      const user = await getTestUser(userIndex);
-
-      // Clear any existing session cookies first
-      const existingCookies = await page.context().cookies();
-      const sessionCookieName = getSessionCookieName();
-      const otherCookies = existingCookies.filter(
-        (c) => c.name !== sessionCookieName
+    // Verify auth worker is healthy first
+    const isHealthy = await checkAuthWorkerHealthy();
+    if (!isHealthy) {
+      console.warn(
+        'Auth Worker not running on port 42069 - authentication may fail'
       );
-      await page.context().addCookies(otherCookies);
+    }
 
-      // Inject new session cookies into Playwright context
-      await page.context().addCookies(
-        user.cookies.map((c) => ({
-          name: c.name,
-          value: c.value,
-          domain: c.domain === 'localhost' ? undefined : c.domain,
-          path: c.path,
-          httpOnly: c.httpOnly,
-          secure: c.secure,
-          sameSite: c.sameSite,
-        }))
-      );
+    let userCookie: string | null = null;
+
+    const authenticate = async () => {
+      // Fresh unique user per test — no caching, no indices
+      const email = `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@test.codex`;
+      const user = await authFixture.registerUser({
+        email,
+        password: 'Test123!@#',
+        name: 'E2E Test User',
+      });
+      userCookie = user.cookie;
+
+      // Parse cookies from the header string using shared helper
+      const parsedCookies = parseCookieString(user.cookie);
+      const browserCookies: {
+        name: string;
+        value: string;
+        domain: string;
+        path: string;
+        httpOnly: boolean;
+        secure: boolean;
+        sameSite: 'Lax' | 'Strict' | 'None';
+        expires: number;
+      }[] = [];
+
+      for (const { name, value } of parsedCookies) {
+        // Add cookie using domain/path
+        browserCookies.push({
+          name,
+          value,
+          domain: 'localhost',
+          path: '/',
+          httpOnly: true,
+          secure: false,
+          sameSite: 'Lax',
+          expires: -1,
+        });
+
+        // If this is the session token, add the codex-session alias
+        if (name === 'better-auth.session_token') {
+          browserCookies.push({
+            name: COOKIES.SESSION_NAME,
+            value,
+            domain: 'localhost',
+            path: '/',
+            httpOnly: true,
+            secure: false,
+            sameSite: 'Lax',
+            expires: -1,
+          });
+        }
+      }
+
+      await page.context().clearCookies();
+      await page.context().addCookies(browserCookies);
     };
 
     await use(authenticate);
+
+    // Cleanup: invalidate the session after each test
+    if (userCookie) {
+      await authFixture.logout(userCookie).catch(() => {});
+    }
   },
 
-  // Fixture: Get test user info without authentication
-  testUser: async (_baseInfo, use) => {
-    const getUser = async (userIndex = 1) => {
-      const user = await getTestUser(userIndex);
-      return {
-        userId: user.userId,
-        email: user.email,
-      };
-    };
-
-    await use(getUser);
+  // Org member fixtures (using shared logic from test-utils)
+  createOrgMember: async ({ page: _page }, use) => {
+    await use(orgFixture.createOrgMember);
+  },
+  createOrgWithMembers: async ({ page: _page }, use) => {
+    await use(orgFixture.createOrgWithMembers);
+  },
+  getMemberByRole: async ({ page: _page }, use) => {
+    await use(orgFixture.getMemberByRole);
   },
 });
+
+export { expect } from '@playwright/test';

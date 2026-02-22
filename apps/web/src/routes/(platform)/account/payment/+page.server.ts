@@ -5,15 +5,12 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({
   locals,
   url,
-  setHeaders,
   platform,
   cookies,
 }) => {
   if (!locals.user) {
     redirect(303, '/login?redirect=/account/payment');
   }
-
-  setHeaders({ 'Cache-Control': 'private, no-cache' });
 
   // Parse pagination and filter parameters from URL
   const page = parseInt(url.searchParams.get('page') || '1', 10);
@@ -39,9 +36,7 @@ export const load: PageServerLoad = async ({
         status: status || null,
       },
     };
-  } catch (error) {
-    // Log error for debugging but return empty state for graceful degradation
-    console.error('Failed to load purchase history:', error);
+  } catch {
     return {
       purchases: {
         items: [],

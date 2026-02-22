@@ -1,4 +1,14 @@
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
+import * as dotenv from 'dotenv';
+
+// Load environment variables for E2E tests
+// .env.test is at the monorepo root, not in apps/web
+// Use import.meta.url since this is an ES module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../.env.test') });
 
 /**
  * See https://playwright.dev/docs/test-configuration
@@ -26,7 +36,7 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
       },
     },
     // Accessibility tests against Storybook
@@ -46,19 +56,36 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
       },
     },
   ],
 
-  // Start dev server automatically for local e2e tests
+  // Start dev servers automatically for local e2e tests
   // In CI, PLAYWRIGHT_BASE_URL is set and this is skipped
+  // We start SvelteKit dev server, Auth Worker, and Identity-API Worker
   webServer: process.env.CI
     ? undefined
-    : {
-        command: 'pnpm dev',
-        url: 'http://localhost:3000',
-        reuseExistingServer: !process.env.CI,
-        timeout: 120000,
-      },
+    : [
+        {
+          command: 'pnpm dev --port 5173 --strictPort',
+          url: 'http://localhost:5173',
+          reuseExistingServer: true,
+          timeout: 180000, // 3 minutes - SvelteKit can take time to start
+        },
+        {
+          command:
+            'cd ../../workers/auth && npx wrangler dev --env test --port 42069',
+          url: 'http://localhost:42069/health', // Use health endpoint for ready detection
+          reuseExistingServer: true,
+          timeout: 90000, // 90 seconds - Workers start faster
+        },
+        {
+          command:
+            'cd ../../workers/identity-api && npx wrangler dev --env test --port 42074',
+          url: 'http://localhost:42074/health', // Use health endpoint for ready detection
+          reuseExistingServer: true,
+          timeout: 90000, // 90 seconds - Workers start faster
+        },
+      ],
 });

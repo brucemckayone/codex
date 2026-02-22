@@ -7,6 +7,7 @@
  * - Factory functions for generating test data
  * - Database setup and cleanup utilities
  * - Test helpers and assertion utilities
+ * - E2E fixtures and helpers for Playwright tests
  *
  * Note: Worker integration test utilities have been removed.
  * Workers now use `@cloudflare/vitest-pool-workers` for unit testing
@@ -15,6 +16,8 @@
 
 // Database Utilities
 export * from './database';
+// E2E Fixtures and Helpers
+export * from './e2e';
 // Test Data Factories
 export * from './factories';
 // Test Helpers and Assertions

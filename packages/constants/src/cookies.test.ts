@@ -51,7 +51,10 @@ describe('getCookieConfig', () => {
     });
 
     it('uses COOKIE_DOMAIN env var if provided', () => {
-      const config = getCookieConfig({ COOKIE_DOMAIN: '.custom.com' });
+      const config = getCookieConfig({
+        MODE: 'production',
+        COOKIE_DOMAIN: '.custom.com',
+      });
       expect(config.domain).toBe('.custom.com');
     });
 

@@ -6,6 +6,7 @@
 
 import { redirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { load } from '../+page.server';
 
 // Mock SvelteKit modules before importing
 vi.mock('@sveltejs/kit', () => ({
@@ -27,7 +28,7 @@ describe('Notifications Page Load', () => {
   let mockLocals: { user: { id: string; email: string } | null };
   let mockSetHeaders: ReturnType<typeof vi.fn>;
   let mockPlatform: App.Platform;
-  let mockCookies: ReturnType<typeof vi.fn>;
+  let mockCookies: Parameters<typeof load>[0]['cookies'];
 
   beforeEach(() => {
     // Reset mocks before each test
@@ -43,7 +44,9 @@ describe('Notifications Page Load', () => {
       get: vi.fn(() => 'session-cookie'),
       set: vi.fn(),
       delete: vi.fn(),
-    };
+      serialize: vi.fn(),
+      getAll: vi.fn(),
+    } as unknown as Parameters<typeof load>[0]['cookies'];
   });
 
   it('redirects to login when locals.user is null', async () => {
@@ -56,7 +59,7 @@ describe('Notifications Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(redirect).toHaveBeenCalledWith(
       303,
@@ -79,7 +82,7 @@ describe('Notifications Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       preferences: preferencesData,
@@ -102,7 +105,7 @@ describe('Notifications Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       preferences: {
@@ -123,7 +126,7 @@ describe('Notifications Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       preferences: {
@@ -148,7 +151,7 @@ describe('Notifications Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(mockSetHeaders).toHaveBeenCalledWith({
       'Cache-Control': 'private, no-cache',
@@ -165,7 +168,7 @@ describe('Notifications Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       preferences: {
@@ -191,7 +194,7 @@ describe('Notifications Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       preferences: {

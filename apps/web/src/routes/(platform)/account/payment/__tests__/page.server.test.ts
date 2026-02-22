@@ -7,6 +7,8 @@
 import { redirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { load } from '../+page.server';
+
 // Mock SvelteKit modules before importing
 vi.mock('@sveltejs/kit', () => ({
   redirect: vi.fn(),
@@ -20,7 +22,7 @@ describe('Payment Page Load', () => {
   let mockLocals: { user: { id: string; email: string } | null };
   let mockSetHeaders: ReturnType<typeof vi.fn>;
   let mockPlatform: App.Platform;
-  let mockCookies: ReturnType<typeof vi.fn>;
+  let mockCookies: Parameters<typeof load>[0]['cookies'];
   let mockUrl: URL;
   let mockGetPurchaseHistory: ReturnType<typeof vi.fn>;
 
@@ -38,7 +40,9 @@ describe('Payment Page Load', () => {
       get: vi.fn(() => 'session-cookie'),
       set: vi.fn(),
       delete: vi.fn(),
-    };
+      serialize: vi.fn(),
+      getAll: vi.fn(),
+    } as unknown as Parameters<typeof load>[0]['cookies'];
     mockUrl = new URL('http://localhost:3000/account/payment');
     mockGetPurchaseHistory = vi.fn();
 
@@ -48,7 +52,7 @@ describe('Payment Page Load', () => {
       account: {
         getPurchaseHistory: mockGetPurchaseHistory,
       },
-    } as any);
+    } as unknown as ReturnType<typeof createServerApi>);
   });
 
   it('redirects to login when locals.user is null', async () => {
@@ -62,7 +66,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(redirect).toHaveBeenCalledWith(
       303,
@@ -93,7 +97,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -117,7 +121,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(mockGetPurchaseHistory).toHaveBeenCalled();
   });
@@ -138,9 +142,10 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
-    expect(result.filters.status).toBe('complete');
+    const typedResult = result as { filters: { status: string | null } };
+    expect(typedResult.filters.status).toBe('complete');
   });
 
   it('handles API failure gracefully with empty state', async () => {
@@ -154,10 +159,13 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
-    expect(result.purchases.items).toEqual([]);
-    expect(result.purchases.pagination.total).toBe(0);
+    const typedResult = result as {
+      purchases: { items: unknown[]; pagination: { total: number } };
+    };
+    expect(typedResult.purchases.items).toEqual([]);
+    expect(typedResult.purchases.pagination.total).toBe(0);
   });
 
   it('sets cache-control headers', async () => {
@@ -175,7 +183,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(mockSetHeaders).toHaveBeenCalledWith({
       'Cache-Control': 'private, no-cache',
@@ -197,9 +205,12 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
-    expect(result.purchases.items).toEqual([]);
-    expect(result.purchases.pagination.total).toBe(0);
+    const typedResult = result as {
+      purchases: { items: unknown[]; pagination: { total: number } };
+    };
+    expect(typedResult.purchases.items).toEqual([]);
+    expect(typedResult.purchases.pagination.total).toBe(0);
   });
 });

@@ -6,6 +6,7 @@
 
 import { redirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { load } from '../+page.server';
 
 // Mock SvelteKit modules before importing
 vi.mock('@sveltejs/kit', () => ({
@@ -27,7 +28,7 @@ describe('Payment Page Load', () => {
   let mockLocals: { user: { id: string; email: string } | null };
   let mockSetHeaders: ReturnType<typeof vi.fn>;
   let mockPlatform: App.Platform;
-  let mockCookies: ReturnType<typeof vi.fn>;
+  let mockCookies: Parameters<typeof load>[0]['cookies'];
   let mockUrl: URL;
 
   beforeEach(() => {
@@ -44,7 +45,9 @@ describe('Payment Page Load', () => {
       get: vi.fn(() => 'session-cookie'),
       set: vi.fn(),
       delete: vi.fn(),
-    };
+      serialize: vi.fn(),
+      getAll: vi.fn(),
+    } as unknown as Parameters<typeof load>[0]['cookies'];
     mockUrl = new URL('http://localhost:3000/account/payment');
   });
 
@@ -59,7 +62,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(redirect).toHaveBeenCalledWith(
       303,
@@ -82,7 +85,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -108,7 +111,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -129,13 +132,13 @@ describe('Payment Page Load', () => {
 
     const { load } = await import('../+page.server');
 
-    const result = await load({
+    await load({
       locals: mockLocals,
       url: mockUrl,
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     const expectedParams = new URLSearchParams();
     expectedParams.set('limit', '50');
@@ -158,7 +161,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -187,7 +190,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: purchasesData,
@@ -211,7 +214,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(result).toEqual({
       purchases: {
@@ -242,7 +245,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     expect(mockSetHeaders).toHaveBeenCalledWith({
       'Cache-Control': 'private, no-cache',
@@ -260,10 +263,13 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
-    expect(result.purchases.items).toEqual([]);
-    expect(result.purchases.pagination.total).toBe(0);
+    const typedResult = result as {
+      purchases: { items: unknown[]; pagination: { total: number } };
+    };
+    expect(typedResult.purchases.items).toEqual([]);
+    expect(typedResult.purchases.pagination.total).toBe(0);
   });
 
   it('handles invalid page param by defaulting to 1', async () => {
@@ -282,7 +288,7 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
     // parseInt('invalid', 10) returns NaN, which is falsy, so page defaults to 1
     expect(mockGetPurchaseHistory).toHaveBeenCalledWith(new URLSearchParams());
@@ -303,9 +309,12 @@ describe('Payment Page Load', () => {
       setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
-    } as any);
+    } as unknown as Parameters<typeof load>[0]);
 
-    expect(result.purchases.items).toEqual([]);
-    expect(result.purchases.pagination.total).toBe(0);
+    const typedResult = result as {
+      purchases: { items: unknown[]; pagination: { total: number } };
+    };
+    expect(typedResult.purchases.items).toEqual([]);
+    expect(typedResult.purchases.pagination.total).toBe(0);
   });
 });

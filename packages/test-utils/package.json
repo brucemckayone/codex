@@ -7,6 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./e2e": "./src/e2e/index.ts",
+    "./e2e/*": "./src/e2e/*",
     "./*": "./src/*"
   },
   "scripts": {
@@ -22,6 +24,7 @@
   "dependencies": {
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/shared-types": "workspace:*",
     "@neondatabase/serverless": "^0.10.4",
     "drizzle-orm": "0.44.7",
     "vite-plugin-dts": "^4.5.4",

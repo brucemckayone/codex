@@ -877,6 +877,9 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../database
+      '@codex/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@neondatabase/serverless':
         specifier: ^0.10.4
         version: 0.10.4

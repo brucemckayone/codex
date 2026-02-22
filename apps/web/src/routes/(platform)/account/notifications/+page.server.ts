@@ -2,17 +2,10 @@ import { redirect } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({
-  locals,
-  setHeaders,
-  platform,
-  cookies,
-}) => {
+export const load: PageServerLoad = async ({ locals, platform, cookies }) => {
   if (!locals.user) {
     redirect(303, '/login?redirect=/account/notifications');
   }
-
-  setHeaders({ 'Cache-Control': 'private, no-cache' });
 
   // Fetch current notification preferences from the API
   // The remote function getNotificationPreferences has defaults built in

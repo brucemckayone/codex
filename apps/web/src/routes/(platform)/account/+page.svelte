@@ -209,19 +209,31 @@
 		{/if}
 	</div>
 
-	<!-- Profile Form (includes personal info and social links) -->
-	<form {...updateProfileForm} class="settings-card">
+	<!-- 
+		Profile Form
+		
+		Uses 'novalidate' to bypass browser-native validation (e.g., type="url").
+		This allows SvelteKit Remote Functions to handle validation entirely, 
+		which is required for E2E tests to verify custom server-side error states.
+	-->
+	<form {...updateProfileForm} class="settings-card" novalidate>
 		<h2>{m.account_personal_information()}</h2>
 
 		<!-- Display Name -->
 		<div class="form-group">
 			<Label for="displayName">{m.account_display_name()}</Label>
+			<!-- 
+				Defensive Error Pattern:
+				We use optional chaining and null-coalescing when accessing issues() 
+				to prevent "TypeError: Cannot read properties of undefined (reading '0')" 
+				during SSR or when the form state is not yet initialized.
+			-->
 			<Input
 				id="displayName"
 				name="displayName"
 				value={updateProfileForm.fields.displayName.value() ?? data.user?.name ?? ''}
 				placeholder={m.account_display_name_placeholder()}
-				error={updateProfileForm.fields.displayName.error()}
+				error={(updateProfileForm.fields.displayName?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.displayName.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
 		</div>
 
@@ -245,7 +257,7 @@
 				name="username"
 				value={updateProfileForm.fields.username.value() ?? data.user?.username ?? ''}
 				placeholder={m.account_username_placeholder()}
-				error={updateProfileForm.fields.username.error()}
+				error={(updateProfileForm.fields.username?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.username.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
 		</div>
 
@@ -258,6 +270,7 @@
 				value={updateProfileForm.fields.bio.value() ?? data.user?.bio ?? ''}
 				placeholder={m.account_bio_placeholder()}
 				rows={4}
+				error={(updateProfileForm.fields.bio?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.bio.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
 		</div>
 
@@ -273,7 +286,7 @@
 				type="url"
 				value={updateProfileForm.fields.website.value() ?? data.user?.socialLinks?.website ?? ''}
 				placeholder="https://example.com"
-				error={updateProfileForm.fields.website.error()}
+				error={(updateProfileForm.fields.website?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.website.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
 		</div>
 
@@ -286,7 +299,7 @@
 				type="url"
 				value={updateProfileForm.fields.twitter.value() ?? data.user?.socialLinks?.twitter ?? ''}
 				placeholder="https://twitter.com/username"
-				error={updateProfileForm.fields.twitter.error()}
+				error={(updateProfileForm.fields.twitter?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.twitter.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
 		</div>
 
@@ -299,7 +312,7 @@
 				type="url"
 				value={updateProfileForm.fields.youtube.value() ?? data.user?.socialLinks?.youtube ?? ''}
 				placeholder="https://youtube.com/channel/..."
-				error={updateProfileForm.fields.youtube.error()}
+				error={(updateProfileForm.fields.youtube?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.youtube.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
 		</div>
 
@@ -316,7 +329,7 @@
 					''
 				}
 				placeholder="https://instagram.com/username"
-				error={updateProfileForm.fields.instagram.error()}
+				error={(updateProfileForm.fields.instagram?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.instagram.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
 		</div>
 

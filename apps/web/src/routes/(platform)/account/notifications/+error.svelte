@@ -36,18 +36,18 @@
 </script>
 
 <svelte:head>
-  <title>{$page.status} {config().title} | Notifications</title>
+  <title>{$page.status} {config.title} | Notifications</title>
 </svelte:head>
 
 <div class="error-page" role="alert" aria-live="polite">
   <div class="error-card">
     <div class="error-icon" aria-hidden="true">
-      {@html icons[config().icon]}
+      {@html icons[config.icon]}
     </div>
 
     <h1 class="error-code">{$page.status}</h1>
-    <h2 class="error-title">{config().title}</h2>
-    <p class="error-description">{config().description}</p>
+    <h2 class="error-title">{config.title}</h2>
+    <p class="error-description">{config.description}</p>
 
     <div class="error-actions">
       <a href="/account/notifications" class="btn btn-primary">{m.common_go_to_account()}</a>
