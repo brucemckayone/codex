@@ -7,7 +7,7 @@ export const SERVICE_PORTS = {
   ADMIN: 42073,
   IDENTITY: 42074,
   NOTIFICATIONS: 42075,
-  MEDIA: 8788, // Media API (runpod integration port)
+  MEDIA: 4002, // Media API worker port
   MAILHOG: 8025,
 } as const;
 

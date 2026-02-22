@@ -37,7 +37,7 @@
         "CONTENT_API_URL": "http://localhost:4001",
         "ORG_API_URL": "http://localhost:42071",
         "ECOM_API_URL": "http://localhost:42072",
-        "MEDIA_API_URL": "http://localhost:8788",
+        "MEDIA_API_URL": "http://localhost:4002",
         "IDENTITY_API_URL": "http://localhost:42074",
         "ADMIN_API_URL": "http://localhost:42073",
         "NOTIFICATIONS_API_URL": "http://localhost:42075"
