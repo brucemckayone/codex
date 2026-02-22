@@ -108,20 +108,21 @@ test.describe
       await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
     });
 
-    test('session persists across navigation', async ({
-      page,
-      authenticateAsUser,
-    }) => {
-      // Use the auth fixture to inject a valid session (same approach as
-      // the working account tests). The browser login flow is covered by
-      // test 3 ("logs in after email verification").
-      await authenticateAsUser();
+    test('session persists across navigation', async ({ page }) => {
+      // Use the TEST_USER from tests 1-3 (already registered and verified)
+      await page.goto('/login');
 
-      // Navigate to a protected route
+      await page.fill('input[name="email"]', TEST_USER.email);
+      await page.fill('input[name="password"]', TEST_USER.password);
+      await page.click('button[type="submit"]');
+
+      await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
+
+      // Navigate to a protected route — session should persist
       await page.goto('/account');
       await expect(page).toHaveURL(/\/account/, { timeout: 10_000 });
 
-      // Navigate to another protected route — session should persist
+      // Navigate to another protected route — session should still persist
       await page.goto('/account/notifications');
       await expect(page).toHaveURL(/\/account\/notifications/, {
         timeout: 10_000,

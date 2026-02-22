@@ -51,7 +51,7 @@ export async function expectErrorResponse(
     expect(response.ok).toBe(false);
   }
 
-  const body: ErrorResponse = await response.json();
+  const body = (await response.json()) as ErrorResponse;
   expect(body.error).toBeDefined();
   expect(body.error.code).toBe(expectedCode);
 }
