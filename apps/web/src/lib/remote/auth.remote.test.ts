@@ -3,29 +3,12 @@
  *
  * Tests for authentication remote functions.
  * Note: Remote functions run on the server, so we test exports and schemas.
+ * Mocks are centralized in src/tests/mocks.ts
  */
 
 import { describe, expect, it, vi } from 'vitest';
 
-// Mock SvelteKit server modules before importing
-vi.mock('$app/server', () => ({
-  command: vi.fn((fn) => fn),
-  form: vi.fn((_schema, fn) => fn),
-  query: vi.fn((fn) => fn),
-  getRequestEvent: vi.fn(() => ({
-    platform: { env: {} },
-    cookies: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-    url: new URL('http://localhost:3000'),
-  })),
-}));
-
-vi.mock('$lib/server/api', () => ({
-  createServerApi: vi.fn(() => ({
-    auth: { getSession: vi.fn() },
-  })),
-  serverApiUrl: vi.fn(() => 'http://localhost:42069'),
-}));
-
+// Additional mock for @sveltejs/kit redirect function
 vi.mock('@sveltejs/kit', () => ({
   redirect: vi.fn(),
 }));

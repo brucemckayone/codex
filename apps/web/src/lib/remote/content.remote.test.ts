@@ -2,28 +2,10 @@
  * Content Remote Functions Tests
  *
  * Tests for content browsing remote functions.
+ * Mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it, vi } from 'vitest';
-
-// Mock SvelteKit server modules before importing
-vi.mock('$app/server', () => ({
-  query: Object.assign(
-    vi.fn((_schema, fn) => fn),
-    { batch: vi.fn((_schema, fn) => fn) }
-  ),
-  getRequestEvent: vi.fn(() => ({
-    platform: { env: {} },
-    cookies: { get: vi.fn() },
-  })),
-}));
-
-vi.mock('$lib/server/api', () => ({
-  createServerApi: vi.fn(() => ({
-    content: { list: vi.fn(), get: vi.fn() },
-    org: { getBySlug: vi.fn() },
-  })),
-}));
+import { describe, expect, it } from 'vitest';
 
 describe('remote/content.remote', () => {
   it('exports listContent query', async () => {

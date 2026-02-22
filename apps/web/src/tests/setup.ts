@@ -1,3 +1,6 @@
+// Import mocks BEFORE any other imports
+// This ensures mocks are hoisted and applied before module loading
+import './mocks';
 import { afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 

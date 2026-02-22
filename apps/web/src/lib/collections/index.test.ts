@@ -2,55 +2,10 @@
  * Collections Index Tests
  *
  * Tests for the QueryClient configuration and module exports.
- * Note: We mock TanStack DB to avoid queryClient initialization issues.
+ * Note: TanStack DB and other mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it, vi } from 'vitest';
-
-// Create mock collection with required methods
-const mockCollection = {
-  state: new Map(),
-  insert: vi.fn(),
-  update: vi.fn(),
-  delete: vi.fn(),
-};
-
-// Mock TanStack DB before importing
-vi.mock('@tanstack/db', () => ({
-  createCollection: vi.fn(() => mockCollection),
-  localStorageCollectionOptions: vi.fn((options) => options),
-  and: vi.fn(),
-  eq: vi.fn(),
-  gt: vi.fn(),
-  gte: vi.fn(),
-  lt: vi.fn(),
-  lte: vi.fn(),
-  not: vi.fn(),
-  or: vi.fn(),
-}));
-
-vi.mock('@tanstack/query-db-collection', () => ({
-  queryCollectionOptions: vi.fn((options) => options),
-}));
-
-vi.mock('@tanstack/svelte-db', () => ({
-  useLiveQuery: vi.fn(),
-}));
-
-// Mock remote functions
-vi.mock('$lib/remote/content.remote', () => ({
-  listContent: vi.fn(),
-}));
-
-vi.mock('$lib/remote/library.remote', () => ({
-  getUserLibrary: vi.fn(),
-  savePlaybackProgress: vi.fn(),
-  getPlaybackProgress: vi.fn(),
-}));
-
-vi.mock('$app/environment', () => ({
-  browser: true,
-}));
+import { describe, expect, it } from 'vitest';
 
 describe('collections/index', () => {
   describe('queryClient', () => {

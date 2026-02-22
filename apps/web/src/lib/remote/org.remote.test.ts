@@ -2,28 +2,10 @@
  * Organization Remote Functions Tests
  *
  * Tests for organization data remote functions.
+ * Mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it, vi } from 'vitest';
-
-// Mock SvelteKit server modules before importing
-vi.mock('$app/server', () => ({
-  query: vi.fn((_schema, fn) => fn),
-  getRequestEvent: vi.fn(() => ({
-    platform: { env: {} },
-    cookies: { get: vi.fn() },
-  })),
-}));
-
-vi.mock('$lib/server/api', () => ({
-  createServerApi: vi.fn(() => ({
-    org: {
-      getBySlug: vi.fn(),
-      getSettings: vi.fn(),
-    },
-  })),
-  serverApiUrl: vi.fn(() => 'http://localhost:42075'),
-}));
+import { describe, expect, it } from 'vitest';
 
 describe('remote/org.remote', () => {
   it('exports getOrganization query', async () => {
