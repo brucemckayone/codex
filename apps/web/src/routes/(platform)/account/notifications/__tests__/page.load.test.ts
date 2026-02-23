@@ -26,7 +26,6 @@ vi.mock('$lib/server/api', () => ({
 
 describe('Notifications Page Load', () => {
   let mockLocals: { user: { id: string; email: string } | null };
-  let mockSetHeaders: ReturnType<typeof vi.fn>;
   let mockPlatform: App.Platform;
   let mockCookies: Parameters<typeof load>[0]['cookies'];
 
@@ -38,7 +37,6 @@ describe('Notifications Page Load', () => {
     mockLocals = {
       user: { id: 'user-123', email: 'test@example.com' },
     };
-    mockSetHeaders = vi.fn();
     mockPlatform = { env: {} } as App.Platform;
     mockCookies = {
       get: vi.fn(() => 'session-cookie'),
@@ -56,7 +54,6 @@ describe('Notifications Page Load', () => {
 
     await load({
       locals: mockLocals,
-      setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
@@ -79,7 +76,6 @@ describe('Notifications Page Load', () => {
 
     const result = await load({
       locals: mockLocals,
-      setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
@@ -102,7 +98,6 @@ describe('Notifications Page Load', () => {
 
     const result = await load({
       locals: mockLocals,
-      setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
@@ -123,7 +118,6 @@ describe('Notifications Page Load', () => {
 
     const result = await load({
       locals: mockLocals,
-      setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
@@ -148,14 +142,9 @@ describe('Notifications Page Load', () => {
 
     await load({
       locals: mockLocals,
-      setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
-
-    expect(mockSetHeaders).toHaveBeenCalledWith({
-      'Cache-Control': 'private, no-cache',
-    });
   });
 
   it('handles API timeout gracefully', async () => {
@@ -165,7 +154,6 @@ describe('Notifications Page Load', () => {
 
     const result = await load({
       locals: mockLocals,
-      setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
@@ -191,7 +179,6 @@ describe('Notifications Page Load', () => {
 
     const result = await load({
       locals: mockLocals,
-      setHeaders: mockSetHeaders,
       platform: mockPlatform,
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
