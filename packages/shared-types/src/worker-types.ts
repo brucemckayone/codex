@@ -28,6 +28,13 @@ export type Bindings = {
   DB_METHOD?: string;
 
   /**
+   * Local database URL for development/testing
+   * Used when DB_METHOD=LOCAL_PROXY to connect via Docker/Neon proxy
+   * Format: postgresql://postgres:postgres@db.localtest.me:5432/main
+   */
+  DATABASE_URL_LOCAL_PROXY?: string;
+
+  /**
    * Web application URL for CORS
    */
   WEB_APP_URL?: string;
