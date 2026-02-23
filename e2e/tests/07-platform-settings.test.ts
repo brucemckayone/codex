@@ -14,9 +14,13 @@
  */
 
 import { closeDbPool } from '@codex/database';
+import {
+  expectErrorResponse,
+  expectForbidden,
+  httpClient,
+} from '@codex/test-utils/e2e';
 import { afterAll, describe, expect, test } from 'vitest';
-import { adminFixture, httpClient, settingsFixture } from '../fixtures';
-import { expectErrorResponse, expectForbidden } from '../helpers/assertions';
+import { adminFixture, settingsFixture } from '../fixtures';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Platform Settings', () => {

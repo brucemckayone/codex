@@ -838,6 +838,27 @@ jobs:
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
 
+      - name: Start Identity API Worker in background
+        run: |
+          cd workers/identity-api
+          pnpm wrangler dev --env test --port 42074 --local &
+          echo $! > identity-api-worker.pid
+          # Wait for identity-api worker to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      - name: Start Ecom API Worker in background
+        run: |
+          cd workers/ecom-api
+          pnpm wrangler dev --env test --port 42072 --local &
+          echo $! > ecom-api-worker.pid
+          # Wait for ecom-api worker to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+
       - name: Start Wrangler dev server in background
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -913,6 +934,22 @@ jobs:
           if [ -f workers/auth/auth-worker.pid ]; then
             kill $(cat workers/auth/auth-worker.pid) || true
             rm workers/auth/auth-worker.pid
+          fi
+
+      - name: Stop Identity API Worker
+        if: always()
+        run: |
+          if [ -f workers/identity-api/identity-api-worker.pid ]; then
+            kill $(cat workers/identity-api/identity-api-worker.pid) || true
+            rm workers/identity-api/identity-api-worker.pid
+          fi
+
+      - name: Stop Ecom API Worker
+        if: always()
+        run: |
+          if [ -f workers/ecom-api/ecom-api-worker.pid ]; then
+            kill $(cat workers/ecom-api/ecom-api-worker.pid) || true
+            rm workers/ecom-api/ecom-api-worker.pid
           fi
 
       # Upload generated snapshots for committing to repo

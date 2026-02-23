@@ -3,7 +3,7 @@
  * Handles platform settings API operations via REAL organization-api worker
  */
 
-import { httpClient } from '../helpers/http-client';
+import { httpClient } from '@codex/test-utils/e2e';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 // Settings response types

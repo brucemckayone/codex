@@ -13,14 +13,16 @@
  */
 
 import { closeDbPool, dbHttp, schema } from '@codex/database';
-import { and, eq } from 'drizzle-orm';
-import { afterAll, describe, expect, test } from 'vitest';
-import { adminFixture, authFixture, httpClient } from '../fixtures';
 import {
+  authFixture,
   expectErrorResponse,
   expectForbidden,
+  httpClient,
   unwrapApiResponse,
-} from '../helpers/assertions';
+} from '@codex/test-utils/e2e';
+import { and, eq } from 'drizzle-orm';
+import { afterAll, describe, expect, test } from 'vitest';
+import { adminFixture } from '../fixtures';
 import {
   createCheckoutCompletedEvent,
   sendSignedWebhook,

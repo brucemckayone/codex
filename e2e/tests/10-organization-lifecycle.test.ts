@@ -10,15 +10,20 @@
  */
 
 import { closeDbPool } from '@codex/database';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { adminFixture, authFixture, httpClient } from '../fixtures';
 import {
+  authFixture,
   expectErrorResponse,
   expectForbidden,
   expectNotFound,
   expectSuccessResponse,
-} from '../helpers/assertions';
-import type { PlatformOwnerContext, RegisteredUser } from '../helpers/types';
+  httpClient,
+} from '@codex/test-utils/e2e';
+import type {
+  PlatformOwnerContext,
+  RegisteredUser,
+} from '@codex/test-utils/e2e/helpers/types';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { adminFixture } from '../fixtures';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Organization Lifecycle', () => {
