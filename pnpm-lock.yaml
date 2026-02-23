@@ -253,6 +253,9 @@ importers:
       '@codex/cloudflare-clients':
         specifier: workspace:*
         version: link:../packages/cloudflare-clients
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../packages/constants
       '@codex/content':
         specifier: workspace:*
         version: link:../packages/content
