@@ -70,28 +70,24 @@ export default defineConfig({
         {
           command: 'pnpm dev --port 5173 --strictPort',
           url: 'http://localhost:5173',
-          reuseExistingServer: true,
           timeout: 180000, // 3 minutes - SvelteKit can take time to start
         },
         {
           command:
             'cd ../../workers/auth && npx wrangler dev --env test --port 42069',
           url: 'http://localhost:42069/health', // Use health endpoint for ready detection
-          reuseExistingServer: true,
           timeout: 90000, // 90 seconds - Workers start faster
         },
         {
           command:
             'cd ../../workers/identity-api && npx wrangler dev --env test --port 42074',
           url: 'http://localhost:42074/health', // Use health endpoint for ready detection
-          reuseExistingServer: true,
           timeout: 90000, // 90 seconds - Workers start faster
         },
         {
           command:
             'cd ../../workers/ecom-api && npx wrangler dev --env test --port 42072',
           url: 'http://localhost:42072/health', // Use health endpoint for ready detection
-          reuseExistingServer: true,
           timeout: 90000, // 90 seconds - Workers start faster
         },
       ],
