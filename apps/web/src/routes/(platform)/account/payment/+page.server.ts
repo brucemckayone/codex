@@ -7,13 +7,7 @@ export const load: PageServerLoad = async ({
   url,
   platform,
   cookies,
-  setHeaders,
 }) => {
-  // Prevent caching of sensitive user data
-  setHeaders({
-    'Cache-Control': 'private, no-cache',
-  });
-
   if (!locals.user) {
     redirect(303, '/login?redirect=/account/payment');
   }
