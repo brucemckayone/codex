@@ -23,7 +23,8 @@ export {
   or,
 } from '@tanstack/db';
 export { queryCollectionOptions } from '@tanstack/query-db-collection';
-export { useLiveQuery } from '@tanstack/svelte-db';
+// Also export the original for advanced use cases
+export { useLiveQuery as useLiveQueryUnsafe } from '@tanstack/svelte-db';
 // Collection exports
 export {
   contentCollection,
@@ -65,3 +66,9 @@ export {
 // QueryClient is defined in ./query-client.ts to avoid circular dependencies.
 // Collections import it directly from there; we re-export for external consumers.
 export { queryClient } from './query-client';
+// SSR-safe useLiveQuery wrapper
+// Replaces the vanilla @tanstack/svelte-db export to handle SSR gracefully
+export {
+  type UseLiveQuerySSROptions,
+  useLiveQuerySSR as useLiveQuery,
+} from './use-live-query-ssr';

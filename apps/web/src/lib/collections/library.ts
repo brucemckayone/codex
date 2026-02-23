@@ -40,9 +40,13 @@ export type LibraryProgress = NonNullable<LibraryItem['progress']>;
  * <script>
  *   import { useLiveQuery, libraryCollection } from '$lib/collections';
  *
- *   const library = useLiveQuery((q) =>
- *     q.from({ item: libraryCollection })
- *      .orderBy(({ item }) => item.progress?.updatedAt, 'desc')
+ *   let { data } = $props();  // From +page.server.ts
+ *
+ *   const library = useLiveQuery(
+ *     (q) => q.from({ item: libraryCollection })
+ *          .orderBy(({ item }) => item.progress?.updatedAt, 'desc'),
+ *     undefined,
+ *     { ssrData: data.library?.items }  // SSR fallback
  *   );
  * </script>
  * ```

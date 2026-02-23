@@ -23,9 +23,13 @@ import { queryClient } from './query-client';
  * <script>
  *   import { useLiveQuery, contentCollection, eq } from '$lib/collections';
  *
- *   const publishedContent = useLiveQuery((q) =>
- *     q.from({ content: contentCollection })
- *      .where(({ content }) => eq(content.status, 'published'))
+ *   let { data } = $props();  // From +page.server.ts
+ *
+ *   const publishedContent = useLiveQuery(
+ *     (q) => q.from({ content: contentCollection })
+ *          .where(({ content }) => eq(content.status, 'published')),
+ *     undefined,
+ *     { ssrData: data.content?.items }  // SSR fallback
  *   );
  * </script>
  * ```

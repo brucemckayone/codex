@@ -10,6 +10,7 @@ Serverless content streaming on Cloudflare Workers.
 | Task | Path |
 |---|---|
 | **Structure** | [packages/CLAUDE.md](packages/CLAUDE.md), [workers/CLAUDE.md](workers/CLAUDE.md) |
+| **Web App** | [web.md](web.md) - SvelteKit, SSR patterns, TanStack DB |
 | **New Endpoint** | [workers/CLAUDE.md](workers/CLAUDE.md) |
 | **New Service** | [packages/CLAUDE.md](packages/CLAUDE.md) |
 | **DB/Schema** | [packages/database/CLAUDE.md](packages/database/CLAUDE.md) |

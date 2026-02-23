@@ -118,11 +118,13 @@ export function createServerApi(
       // Send both our platform cookie name and BetterAuth's internal name.
       // BetterAuth's get-session handler only looks for 'better-auth.session_token'
       // regardless of cookie.name config, while other workers use COOKIES.SESSION_NAME.
-      // Note: We MUST encode the cookie value because SvelteKit decodes it, but
-      // BetterAuth expects the original encoded value (e.g. signature containing +/=).
-      const encodedCookie = encodeURIComponent(sessionCookie);
+      //
+      // IMPORTANT: The cookie value from SvelteKit's cookies.get() is the raw value
+      // as stored by the browser. We pass it through without encoding to avoid
+      // corrupting JWT signatures (which use URL-safe base64: A-Z, a-z, 0-9, -, _).
+      // Calling encodeURIComponent() would corrupt tokens by encoding . - _ as %2E %2D %5F.
       (headers as Record<string, string>).Cookie =
-        `${COOKIES.SESSION_NAME}=${encodedCookie}; better-auth.session_token=${encodedCookie}`;
+        `${COOKIES.SESSION_NAME}=${sessionCookie}; better-auth.session_token=${sessionCookie}`;
     }
 
     // Abort fetch after 10 seconds to prevent indefinite hangs when a worker
@@ -178,10 +180,9 @@ export function createServerApi(
 
       const cookieToUse = customSessionCookie || sessionCookie;
       if (cookieToUse) {
-        // Encode cookie value to match what BetterAuth expects
-        const encodedCookie = encodeURIComponent(cookieToUse);
+        // Pass cookie value through without encoding (see request() above for rationale)
         (headers as Record<string, string>).Cookie =
-          `${COOKIES.SESSION_NAME}=${encodedCookie}; better-auth.session_token=${encodedCookie}`;
+          `${COOKIES.SESSION_NAME}=${cookieToUse}; better-auth.session_token=${cookieToUse}`;
       }
 
       const response = await fetch(url, {

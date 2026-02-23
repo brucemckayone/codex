@@ -53,8 +53,10 @@ export type CollectionKey = keyof typeof COLLECTION_KEYS;
  *     hydrateCollection('library', data.library.items);
  *   });
  *
- *   const library = useLiveQuery((q) =>
- *     q.from({ item: libraryCollection })
+ *   const library = useLiveQuery(
+ *     (q) => q.from({ item: libraryCollection }),
+ *     undefined,
+ *     { ssrData: data.library?.items }  // SSR fallback
  *   );
  * </script>
  * ```

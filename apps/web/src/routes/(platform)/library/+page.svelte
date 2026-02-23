@@ -30,10 +30,15 @@
   });
 
   // Live query over library collection
-  // Initially uses hydrated data, then stays reactive
-  const libraryQuery = useLiveQuery((q) =>
-    q.from({ item: libraryCollection })
-      .orderBy(({ item }) => item.progress?.updatedAt ?? '', 'desc')
+  // - During SSR: Returns static server data (no reactivity)
+  // - After hydration: Uses cached data from onMount, stays reactive
+  const libraryQuery = useLiveQuery(
+    (q) =>
+      q
+        .from({ item: libraryCollection })
+        .orderBy(({ item }) => item.progress?.updatedAt ?? '', 'desc'),
+    undefined, // deps (optional)
+    { ssrData: data.library?.items } // SSR fallback data
   );
 </script>
 
