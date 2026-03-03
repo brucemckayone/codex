@@ -826,9 +826,7 @@ jobs:
 
       # Run E2E tests against built worker using wrangler dev
       - name: Install Playwright browsers
-        uses: playwright/setup@v1
-        with:
-          browsers: chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Start Auth Worker in background
         run: |
