@@ -877,6 +877,17 @@ jobs:
           echo $! > storybook.pid
           npx wait-on http://localhost:6006 --timeout 60000
 
+      - name: Wait for workers to stabilize
+        run: |
+          echo "Waiting for workers to fully initialize..."
+          sleep 5
+          # Verify all critical endpoints are responsive
+          curl -f http://localhost:42069/health || exit 1
+          curl -f http://localhost:42074/health || exit 1
+          curl -f http://localhost:42072/health || exit 1
+          curl -f http://localhost:8787 || exit 1
+          echo "All workers ready"
+
       - name: Run E2E tests
         env:
           CI: "true"

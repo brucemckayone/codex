@@ -40,11 +40,37 @@ const _MOCK_USER = {
  * Helper: Navigate to account page and wait for it to fully load
  *
  * This ensures the page is ready for interactions before tests proceed.
+ *
+ * IMPORTANT: In CI (wrangler dev --local), SSR hydration takes longer than local.
+ * We must wait for specific form elements to be visible, not just networkidle.
+ * The networkidle state only means network requests completed, not that Svelte 5
+ * runes and remote forms have finished hydrating on the client side.
  */
 async function navigateToAccountPage(page: import('@playwright/test').Page) {
   await page.goto('/account', { waitUntil: 'domcontentloaded' });
+
   // Wait for network to be idle - ensures API calls complete
-  await page.waitForLoadState('networkidle', { timeout: 10000 });
+  // Use longer timeout for CI where wrangler dev is slower than Vite
+  await page.waitForLoadState('networkidle', { timeout: 30000 });
+
+  // CRITICAL: Verify form actually rendered before proceeding
+  // In SSR apps, networkidle doesn't guarantee client-side hydration is complete.
+  // Svelte 5 remote forms need additional time to enhance after initial render.
+  await page
+    .waitForSelector('input[name="displayName"]', {
+      state: 'visible',
+      timeout: 15000,
+    })
+    .catch(async () => {
+      // Retry once if hydration is still in progress
+      console.warn('Form not ready after networkidle, reloading page...');
+      await page.goto('/account', { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 30000 });
+      await page.waitForSelector('input[name="displayName"]', {
+        state: 'visible',
+        timeout: 15000,
+      });
+    });
 }
 
 /**
