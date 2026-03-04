@@ -209,7 +209,6 @@ jobs:
               --reporter=list \
               --reporter=html \
               --workers=1 \
-              --headed=false \
               --trace=retain-on-failure \
               --screenshot=only-on-failure
           elif [ -n "${{ inputs.test_pattern }}" ]; then
@@ -219,8 +218,7 @@ jobs:
               --reporter=list \
               --reporter=html \
               --workers=1 \
-              --headed=false \
-              --trace=retain-on-failure \
+                --trace=retain-on-failure \
               --screenshot=only-on-failure
           else
             echo "Running all account E2E tests"
@@ -228,8 +226,7 @@ jobs:
               --reporter=list \
               --reporter=html \
               --workers=1 \
-              --headed=false \
-              --trace=retain-on-failure \
+                --trace=retain-on-failure \
               --screenshot=only-on-failure
           fi
         continue-on-error: true
