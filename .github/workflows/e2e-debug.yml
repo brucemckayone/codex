@@ -208,26 +208,20 @@ jobs:
             pnpm exec playwright test e2e/${{ inputs.test_file }} --project=e2e \
               --reporter=list \
               --reporter=html \
-              --workers=1 \
-              --trace=retain-on-failure \
-              --screenshot=only-on-failure
+              --workers=1
           elif [ -n "${{ inputs.test_pattern }}" ]; then
             echo "Running tests matching pattern: ${{ inputs.test_pattern }}"
             pnpm exec playwright test e2e --project=e2e \
               --grep="${{ inputs.test_pattern }}" \
               --reporter=list \
               --reporter=html \
-              --workers=1 \
-                --trace=retain-on-failure \
-              --screenshot=only-on-failure
+              --workers=1
           else
             echo "Running all account E2E tests"
             pnpm exec playwright test e2e/account --project=e2e \
               --reporter=list \
               --reporter=html \
-              --workers=1 \
-                --trace=retain-on-failure \
-              --screenshot=only-on-failure
+              --workers=1
           fi
         continue-on-error: true
 
