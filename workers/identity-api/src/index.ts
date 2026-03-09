@@ -43,7 +43,7 @@ const app = createWorker({
   enableGlobalAuth: false,
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV', 'CACHE_KV']),
   },
 });
 

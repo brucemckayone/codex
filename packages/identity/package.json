@@ -22,8 +22,10 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@codex/cache": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/image-processing": "workspace:*",
+    "@codex/observability": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",

@@ -1,17 +1,33 @@
 <script lang="ts">
-  import { type createAvatar, melt } from '@melt-ui/svelte';
-  import { getContext } from 'svelte';
+  import { getContext, onMount } from 'svelte';
   import type { HTMLImgAttributes } from 'svelte/elements';
 
   interface Props extends HTMLImgAttributes {}
 
   const { class: className, ...restProps }: Props = $props();
-  const { elements: { image } } = getContext<ReturnType<typeof createAvatar>>('AVATAR');
+  const { getLoaded, onLoad, onError } = getContext<{
+    getLoaded: () => boolean;
+    onLoad: () => void;
+    onError: () => void;
+  }>('AVATAR');
+
+  let imgEl: HTMLImageElement;
+
+  // If the image was already in cache, onload fires before the handler is
+  // attached and the state never updates. Check complete on mount.
+  onMount(() => {
+    if (imgEl?.complete && imgEl.naturalWidth > 0) {
+      onLoad();
+    }
+  });
 </script>
 
 <img
-  use:melt={$image}
+  bind:this={imgEl}
   class="avatar-image {className ?? ''}"
+  style:display={getLoaded() ? 'block' : 'none'}
+  onload={onLoad}
+  onerror={onError}
   {...restProps}
   alt={restProps.alt || ""}
 />

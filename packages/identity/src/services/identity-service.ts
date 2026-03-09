@@ -1,3 +1,5 @@
+import type { VersionedCache } from '@codex/cache';
+import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import { whereNotDeleted } from '@codex/database';
 import {
@@ -10,6 +12,7 @@ import {
   ImageProcessingService,
 } from '@codex/image-processing';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import type { UserProfile } from '@codex/shared-types';
 import { and, eq, ne } from 'drizzle-orm';
 
 import { UserNotFoundError, UsernameTakenError } from '../errors';
@@ -17,16 +20,19 @@ import { UserNotFoundError, UsernameTakenError } from '../errors';
 export interface IdentityServiceConfig extends ServiceConfig {
   r2Service: R2Service;
   r2PublicUrlBase: string;
+  cache?: VersionedCache;
 }
 
 export class IdentityService extends BaseService {
   private r2Service: R2Service;
   private r2PublicUrlBase: string;
+  private cache?: VersionedCache;
 
   constructor(config: IdentityServiceConfig) {
     super(config);
     this.r2Service = config.r2Service;
     this.r2PublicUrlBase = config.r2PublicUrlBase;
+    this.cache = config.cache;
   }
 
   /**
@@ -57,30 +63,49 @@ export class IdentityService extends BaseService {
     });
 
     // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
-    return await imageService.processUserAvatar(userId, file);
+    const result = await imageService.processUserAvatar(userId, file);
+
+    // Invalidate cache so next getProfile() returns the new avatarUrl
+    if (this.cache) {
+      await this.cache.invalidate(userId);
+    }
+
+    return result;
   }
 
   /**
    * Get user profile
    *
+   * Uses cache-aside pattern: returns cached data if available,
+   * otherwise fetches from database and caches the result.
+   *
    * @param userId - User ID
    * @returns User profile data
    */
-  async getProfile(userId: string): Promise<{
-    id: string;
-    name: string;
-    email: string;
-    emailVerified: boolean;
-    image: string | null;
-    username: string | null;
-    bio: string | null;
-    socialLinks: {
-      website?: string;
-      twitter?: string;
-      youtube?: string;
-      instagram?: string;
-    } | null;
-  }> {
+  async getProfile(userId: string): Promise<UserProfile> {
+    if (this.cache) {
+      const result = await this.cache.getWithResult(
+        userId,
+        CacheType.USER_PROFILE,
+        () => this.fetchProfileFromDB(userId),
+        { ttl: 600 }
+      );
+      this.obs.debug('getProfile', { userId, cacheHit: result.hit });
+      return result.data;
+    }
+
+    return this.fetchProfileFromDB(userId);
+  }
+
+  /**
+   * Fetch user profile directly from database
+   *
+   * Internal method used by getProfile as the cache fetcher.
+   *
+   * @param userId - User ID
+   * @returns User profile data
+   */
+  private async fetchProfileFromDB(userId: string): Promise<UserProfile> {
     try {
       const user = await this.db.query.users.findFirst({
         where: and(eq(users.id, userId), whereNotDeleted(users)),
@@ -95,13 +120,13 @@ export class IdentityService extends BaseService {
         name: user.name,
         email: user.email,
         emailVerified: user.emailVerified,
-        image: user.image,
+        image: user.avatarUrl ?? user.image,
         username: user.username ?? null,
         bio: user.bio ?? null,
         socialLinks: user.socialLinks ?? null,
       };
     } catch (error) {
-      throw this.handleError(error, 'IdentityService.getProfile');
+      throw this.handleError(error, 'IdentityService.fetchProfileFromDB');
     }
   }
 
@@ -269,12 +294,19 @@ export class IdentityService extends BaseService {
         throw new UserNotFoundError(userId);
       }
 
+      this.obs.debug('updateProfile', { userId });
+
+      // Invalidate cache after successful update
+      if (this.cache) {
+        await this.cache.invalidate(userId);
+      }
+
       return {
         id: updated.id,
         name: updated.name,
         email: updated.email,
         emailVerified: updated.emailVerified,
-        image: updated.image,
+        image: updated.avatarUrl ?? updated.image,
         username: updated.username ?? null,
         bio: updated.bio ?? null,
         socialLinks: updated.socialLinks ?? null,
@@ -287,10 +319,44 @@ export class IdentityService extends BaseService {
   /**
    * Get notification preferences for a user (upserts defaults on first access)
    *
+   * Uses cache-aside pattern if cache is available.
+   *
    * @param userId - User ID
    * @returns Notification preferences
    */
   async getNotificationPreferences(userId: string): Promise<{
+    emailMarketing: boolean;
+    emailTransactional: boolean;
+    emailDigest: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
+    if (this.cache) {
+      const result = await this.cache.getWithResult(
+        userId,
+        CacheType.USER_PREFERENCES,
+        () => this.fetchNotificationPreferencesFromDB(userId),
+        { ttl: 600 }
+      );
+      this.obs.debug('getNotificationPreferences', {
+        userId,
+        cacheHit: result.hit,
+      });
+      return result.data;
+    }
+
+    return this.fetchNotificationPreferencesFromDB(userId);
+  }
+
+  /**
+   * Fetch notification preferences directly from database
+   *
+   * Internal method used by getNotificationPreferences as the cache fetcher.
+   *
+   * @param userId - User ID
+   * @returns Notification preferences
+   */
+  private async fetchNotificationPreferencesFromDB(userId: string): Promise<{
     emailMarketing: boolean;
     emailTransactional: boolean;
     emailDigest: boolean;
@@ -318,13 +384,15 @@ export class IdentityService extends BaseService {
     } catch (error) {
       throw this.handleError(
         error,
-        'IdentityService.getNotificationPreferences'
+        'IdentityService.fetchNotificationPreferencesFromDB'
       );
     }
   }
 
   /**
    * Update notification preferences for a user
+   *
+   * Invalidates cache after successful update if cache is available.
    *
    * @param userId - User ID
    * @param input - Preference fields to update
@@ -345,6 +413,11 @@ export class IdentityService extends BaseService {
     updatedAt: Date;
   }> {
     try {
+      this.obs.debug('updateNotificationPreferences input', {
+        userId,
+        input,
+      });
+
       // Upsert: insert with provided values or update existing
       const [prefs] = await this.db
         .insert(notificationPreferences)
@@ -376,6 +449,11 @@ export class IdentityService extends BaseService {
           },
         })
         .returning();
+
+      // Invalidate cache after successful update
+      if (this.cache) {
+        await this.cache.invalidate(userId);
+      }
 
       return {
         emailMarketing: prefs.emailMarketing,

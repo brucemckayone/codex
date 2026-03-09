@@ -63,7 +63,7 @@ export function getClientIP(c: Context<HonoEnv>): string {
  * Format Zod validation errors into standardized structure
  * (Internal helper - not exported from package)
  */
-function formatValidationError(zodError: ZodError): {
+function formatValidationError(zodError: ZodError<unknown>): {
   code: string;
   message: string;
   details: Array<{ path: string; message: string }>;
@@ -71,9 +71,9 @@ function formatValidationError(zodError: ZodError): {
   return {
     code: ERROR_CODES.VALIDATION_ERROR,
     message: 'Invalid request data',
-    details: zodError.errors.map((err) => ({
-      path: err.path.join('.'),
-      message: err.message,
+    details: zodError.issues.map((issue) => ({
+      path: issue.path.join('.'),
+      message: issue.message,
     })),
   };
 }

@@ -34,6 +34,7 @@
   "dependencies": {
     "@codex/access": "workspace:*",
     "@codex/admin": "workspace:*",
+    "@codex/cache": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/identity": "workspace:*",
@@ -52,7 +53,7 @@
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7",
     "hono": "^4.7.8",
-    "zod": "^3.24.1"
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250102.0",
