@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { type createAvatar, melt } from '@melt-ui/svelte';
   import { getContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
@@ -8,10 +7,14 @@
   }
 
   const { children, class: className, ...restProps }: Props = $props();
-  const { elements: { fallback } } = getContext<ReturnType<typeof createAvatar>>('AVATAR');
+  const { getLoaded } = getContext<{ getLoaded: () => boolean }>('AVATAR');
 </script>
 
-<div use:melt={$fallback} class="avatar-fallback {className ?? ''}" {...restProps}>
+<div
+  class="avatar-fallback {className ?? ''}"
+  style:display={getLoaded() ? 'none' : 'flex'}
+  {...restProps}
+>
   {@render children()}
 </div>
 

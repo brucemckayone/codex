@@ -5,8 +5,19 @@
  * Validates username, URLs, and file upload rules.
  */
 
+import { optionalUrlSchema } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+
+/**
+ * Helper schema for optional text fields
+ * Converts empty strings to undefined before validation
+ */
+const optionalTextField = (max: number) =>
+  z
+    .string()
+    .transform((val) => (val === '' ? undefined : val))
+    .pipe(z.string().max(max).optional());
 
 // Define the schemas inline for testing (matching account.remote.ts)
 const updateProfileFormSchema = z.object({
@@ -24,11 +35,11 @@ const updateProfileFormSchema = z.object({
       'Username must be lowercase letters, numbers, and hyphens'
     )
     .optional(),
-  bio: z.string().max(500).optional(),
-  website: z.string().url('Invalid website URL').optional(),
-  twitter: z.string().url('Invalid Twitter URL').optional(),
-  youtube: z.string().url('Invalid YouTube URL').optional(),
-  instagram: z.string().url('Invalid Instagram URL').optional(),
+  bio: optionalTextField(500),
+  website: optionalUrlSchema('Invalid website URL'),
+  twitter: optionalUrlSchema('Invalid Twitter URL'),
+  youtube: optionalUrlSchema('Invalid YouTube URL'),
+  instagram: optionalUrlSchema('Invalid Instagram URL'),
 });
 
 const updateNotificationsFormSchema = z.object({
@@ -194,6 +205,14 @@ describe('Account Schemas', () => {
         const result = updateProfileFormSchema.safeParse({});
         expect(result.success).toBe(true);
       });
+
+      it('accepts empty string for bio (treated as missing)', () => {
+        const result = updateProfileFormSchema.safeParse({
+          bio: '',
+        });
+        // Empty string is converted to undefined by optionalTextField
+        expect(result.success).toBe(true);
+      });
     });
 
     describe('social links', () => {
@@ -265,9 +284,8 @@ describe('Account Schemas', () => {
           youtube: '',
           instagram: '',
         });
-        // Empty string is still a string, so it might fail url() validation
-        // In practice, optional() transforms undefined, but empty string goes through url()
-        expect(result.success).toBe(false);
+        // Empty strings are converted to undefined by optionalUrlSchema
+        expect(result.success).toBe(true);
       });
 
       it('accepts missing social links', () => {

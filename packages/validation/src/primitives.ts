@@ -98,6 +98,30 @@ export const urlSchema = z
     }
   );
 
+/**
+ * Optional URL validation
+ * - Converts empty strings to undefined before validation
+ * - Allows form fields to be left blank without validation errors
+ *
+ * @param message - Custom error message for invalid URLs
+ *
+ * @example
+ * ```typescript
+ * import { optionalUrlSchema } from '@codex/validation/primitives';
+ *
+ * const schema = z.object({
+ *   website: optionalUrlSchema('Invalid website URL'),
+ *   twitter: optionalUrlSchema('Invalid Twitter URL'),
+ * });
+ * // All accept: valid URL, undefined, or empty string
+ * ```
+ */
+export const optionalUrlSchema = (message?: string) =>
+  z
+    .string()
+    .transform((val) => (val === '' ? undefined : val))
+    .pipe(z.string().url(message).optional());
+
 // ============================================================================
 // Numbers
 // ============================================================================
@@ -231,9 +255,7 @@ export function createSlugParamsSchema(maxLength: number = 255) {
  * ```
  */
 export const isoDateSchema = z.coerce.date({
-  errorMap: () => ({
-    message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)',
-  }),
+  message: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)',
 });
 
 // ============================================================================

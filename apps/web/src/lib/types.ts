@@ -13,6 +13,7 @@ export type {
   ProgressData,
   SessionData,
   UserData,
+  UserProfile,
 } from '@codex/shared-types';
 
 import type { Content, MediaItem, Organization } from '@codex/database/schema';

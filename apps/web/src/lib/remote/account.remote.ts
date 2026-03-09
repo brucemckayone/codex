@@ -9,7 +9,8 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import { invalid } from '@sveltejs/kit';
+import { optionalUrlSchema, uuidSchema } from '@codex/validation';
+import { invalid, isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -20,8 +21,19 @@ import { ApiError } from '$lib/server/errors';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Helper schema for optional text fields
+ * Converts empty strings to undefined before validation
+ * This allows form fields to be left blank without validation errors
+ */
+const optionalTextField = (max: number) =>
+  z
+    .string()
+    .transform((val) => (val === '' ? undefined : val))
+    .pipe(z.string().max(max).optional());
+
+/**
  * Profile update form schema
- * Uses _ prefix for fields that shouldn't be repopulated on error (none here, but pattern)
+ * Social links are now truly optional - empty strings are treated as undefined
  */
 const updateProfileFormSchema = z.object({
   displayName: z
@@ -38,17 +50,17 @@ const updateProfileFormSchema = z.object({
       'Username must be lowercase letters, numbers, and hyphens'
     )
     .optional(),
-  bio: z.string().max(500).optional(),
-  website: z.string().url('Invalid website URL').optional(),
-  twitter: z.string().url('Invalid Twitter URL').optional(),
-  youtube: z.string().url('Invalid YouTube URL').optional(),
-  instagram: z.string().url('Invalid Instagram URL').optional(),
+  bio: optionalTextField(500),
+  website: optionalUrlSchema('Invalid website URL'),
+  twitter: optionalUrlSchema('Invalid Twitter URL'),
+  youtube: optionalUrlSchema('Invalid YouTube URL'),
+  instagram: optionalUrlSchema('Invalid Instagram URL'),
 });
 
 const updateNotificationsFormSchema = z.object({
-  emailMarketing: z.boolean(),
-  emailTransactional: z.boolean(),
-  emailDigest: z.boolean(),
+  emailMarketing: z.boolean().optional().default(false),
+  emailTransactional: z.boolean().optional().default(false),
+  emailDigest: z.boolean().optional().default(false),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,12 +93,14 @@ export const updateProfileForm = form(
         username,
         bio,
         socialLinks: {
-          website: website || undefined,
-          twitter: twitter || undefined,
-          youtube: youtube || undefined,
-          instagram: instagram || undefined,
+          website: website,
+          twitter: twitter,
+          youtube: youtube,
+          instagram: instagram,
         },
       });
+
+      await getProfile().refresh();
 
       return {
         success: true,
@@ -137,6 +151,8 @@ export const updateNotificationsForm = form(
         emailTransactional,
         emailDigest,
       });
+
+      await getNotificationPreferences().refresh();
 
       return {
         success: true,
@@ -205,7 +221,8 @@ export const getNotificationPreferences = query(async () => {
   const api = createServerApi(platform, cookies);
 
   try {
-    return await api.account.getNotificationPreferences();
+    const response = await api.account.getNotificationPreferences();
+    return response.data;
   } catch {
     // Return defaults if not set
     return {
@@ -230,7 +247,7 @@ const purchaseHistoryQuerySchema = z.object({
   page: z.coerce.number().min(1).optional().default(1),
   limit: z.coerce.number().min(1).max(100).optional().default(20),
   status: z.enum(['pending', 'complete', 'refunded', 'failed']).optional(),
-  contentId: z.string().uuid().optional(),
+  contentId: uuidSchema.optional(),
 });
 
 /**
@@ -260,6 +277,40 @@ const purchaseHistoryQuerySchema = z.object({
  * <Pagination pagination={purchases.pagination} />
  * ```
  */
+// ─────────────────────────────────────────────────────────────────────────────
+// Portal Session Form
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Open Stripe Customer Portal
+ * No user input needed — returnUrl is derived from the current origin.
+ * Redirects directly to the Stripe billing portal on success.
+ */
+export const portalSessionForm = form(z.object({}), async (_data) => {
+  const { platform, cookies, url } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  try {
+    const result = await api.checkout.createPortalSession({
+      returnUrl: `${url.origin}/account/payment`,
+    });
+    redirect(303, result.data.url);
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Failed to open billing portal',
+    };
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Purchase History Query
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const getPurchaseHistory = query(
   purchaseHistoryQuerySchema,
   async (params) => {

@@ -87,5 +87,6 @@ export type {
   SessionData,
   SuccessResponse,
   UserData,
+  UserProfile,
   Variables,
 } from './worker-types';

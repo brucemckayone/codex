@@ -19,6 +19,10 @@
     {
       "binding": "AUTH_SESSION_KV",
       "id": "82d04a4236df4aac8e9d87793344f0ed"
+    },
+    {
+      "binding": "CACHE_KV",
+      "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
     }
   ],
 
@@ -68,6 +72,10 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
         }
       ],
       "r2_buckets": [
@@ -103,6 +111,10 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
         }
       ],
       "r2_buckets": [

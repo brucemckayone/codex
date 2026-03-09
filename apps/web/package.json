@@ -25,6 +25,7 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
+    "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",

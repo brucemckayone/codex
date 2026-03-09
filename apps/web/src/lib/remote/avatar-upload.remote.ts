@@ -5,9 +5,12 @@
  * Validates file type and size before uploading.
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
+import { VersionedCache } from '@codex/cache';
 import { z } from 'zod';
 import { form, getRequestEvent } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { getProfile } from './account.remote';
 
 /**
  * Avatar upload schema
@@ -34,11 +37,23 @@ const avatarUploadSchema = z.object({
  * ```
  */
 export const avatarUploadForm = form(avatarUploadSchema, async ({ avatar }) => {
-  const { platform, cookies } = getRequestEvent();
+  const { platform, cookies, locals } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
   try {
     const result = await api.account.uploadAvatar(avatar);
+
+    // Invalidate web app's cache after successful upload
+    const cache = platform?.env?.CACHE_KV
+      ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
+      : null;
+
+    if (cache && locals?.user?.id) {
+      await cache.invalidate(locals.user.id);
+    }
+
+    await getProfile().refresh();
+
     return {
       success: true,
       data: result.data,

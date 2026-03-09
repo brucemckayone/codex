@@ -37,6 +37,7 @@ import type {
 } from '@codex/shared-types';
 import type {
   CreateCheckoutInput,
+  CreatePortalSessionInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
 } from '@codex/validation';
@@ -248,7 +249,7 @@ export function createServerApi(
        * Get notification preferences
        */
       getNotificationPreferences: () =>
-        request<NotificationPreferencesResponse>(
+        request<SingleItemResponse<NotificationPreferencesResponse>>(
           'identity',
           '/api/user/notification-preferences'
         ),
@@ -259,7 +260,7 @@ export function createServerApi(
       updateNotificationPreferences: (
         data: UpdateNotificationPreferencesInput
       ) =>
-        request<NotificationPreferencesResponse>(
+        request<SingleItemResponse<NotificationPreferencesResponse>>(
           'identity',
           '/api/user/notification-preferences',
           {
@@ -534,6 +535,16 @@ export function createServerApi(
         request<SingleItemResponse<CheckoutResponse>>(
           'ecom',
           '/checkout/create',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      createPortalSession: (data: CreatePortalSessionInput) =>
+        request<SingleItemResponse<{ url: string }>>(
+          'ecom',
+          '/checkout/portal-session',
           {
             method: 'POST',
             body: JSON.stringify(data),

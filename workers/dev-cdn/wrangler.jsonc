@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dev-cdn",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+
+  // R2 Buckets — Miniflare simulates these locally.
+  // bucket_name must match the names used by identity-api and content-api
+  // so that --persist-to ../../.wrangler/state gives access to the same files.
+  "r2_buckets": [
+    {
+      "binding": "ASSETS_BUCKET",
+      "bucket_name": "codex-assets-production",
+      "preview_bucket_name": "codex-assets-test"
+    },
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "codex-media-production",
+      "preview_bucket_name": "codex-media-test"
+    }
+  ]
+
+  // NO routes — this worker is never deployed to Cloudflare.
+  // wrangler will refuse to deploy without routes, which is intentional.
+}

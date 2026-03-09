@@ -17,8 +17,12 @@ export function createMockUser(overrides: Partial<UserData> = {}): UserData {
     id: `user-${Math.random().toString(36).substring(2, 11)}`,
     email: 'test@example.com',
     name: 'Test User',
-    role: 'customer',
     emailVerified: true,
+    image: null,
+    username: null,
+    bio: null,
+    socialLinks: null,
+    role: 'customer',
     createdAt: new Date().toISOString(),
     ...overrides,
   };

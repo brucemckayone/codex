@@ -1,48 +1,31 @@
 <script lang="ts">
-	import type { PageData } from './$types';
 	import * as m from '$paraglide/messages';
-	import { updateProfileForm } from '$lib/remote/account.remote';
+	import { getProfile, updateProfileForm } from '$lib/remote/account.remote';
 	import { avatarUploadForm } from '$lib/remote/avatar-upload.remote';
 	import { avatarDeleteForm } from '$lib/remote/avatar-delete.remote';
 	import Button from '$lib/components/ui/Button/Button.svelte';
 	import Input from '$lib/components/ui/Input/Input.svelte';
 	import Label from '$lib/components/ui/Label/Label.svelte';
-	import Textarea from '$lib/components/ui/TextArea/TextArea.svelte';
-	import {
-		Avatar,
-		AvatarImage,
-		AvatarFallback
-	} from '$lib/components/ui/Avatar';
-	import { invalidateAll } from '$app/navigation';
+	import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
+	import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
 
-	/**
-	 * Account profile page component.
-	 * Uses Svelte 5 runes for state management and progressive enhancement.
-	 * @component
-	 * @prop {PageData} data - Server-loaded profile data
-	 */
-	let { data }: { data: PageData } = $props();
+	const profile = await getProfile();
 
-	// Avatar state for preview
-	let avatarPreview = $state(data.user?.avatarUrl ?? data.user?.image ?? null);
+	// Avatar preview state
+	let avatarPreview = $state(profile?.image as string | null);
 	let hasSelectedFile = $state(false);
 
-	// Show delete button only when user has avatar and no new file selected
-	const showDeleteAvatar = $derived(
-		(data.user?.avatarUrl || data.user?.image) && !hasSelectedFile
-	);
+	const showDeleteAvatar = $derived(!!avatarPreview && !hasSelectedFile);
 
-	// Get initials for avatar fallback
 	const initials = $derived(
-		data.user?.name
+		profile?.name
 			?.split(' ')
 			.map((n) => n[0])
 			.join('')
 			.toUpperCase()
-			.slice(0, 2) || data.user?.username?.slice(0, 2).toUpperCase() || '?'
+			.slice(0, 2) ?? profile?.username?.slice(0, 2).toUpperCase() ?? '?'
 	);
 
-	// Handle file selection for avatar upload
 	function handleAvatarSelect(e: Event) {
 		const target = e.target as HTMLInputElement;
 		const file = target.files?.[0];
@@ -52,51 +35,73 @@
 		}
 	}
 
-	// Cancel avatar upload (just clear preview)
 	function handleAvatarCancel() {
-		avatarPreview = data.user?.avatarUrl ?? data.user?.image ?? null;
+		avatarPreview = profile?.image ?? null;
 		hasSelectedFile = false;
 		const fileInput = document.getElementById('avatar-upload') as HTMLInputElement;
 		if (fileInput) fileInput.value = '';
 	}
 
-	// Show success message after profile form submission
+	// Success message state
 	let showSuccess = $state(false);
 	let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	function showSuccessMessage() {
 		showSuccess = true;
 		if (successTimeout) clearTimeout(successTimeout);
-		successTimeout = setTimeout(() => {
-			showSuccess = false;
-		}, 3000);
+		successTimeout = setTimeout(() => (showSuccess = false), 3000);
 	}
 
-	// Handle form completion
+	// Sync state after profile update
 	$effect(() => {
-		if (updateProfileForm.result?.success) {
+		if (updateProfileForm.result?.success && !updateProfileForm.pending) {
 			showSuccessMessage();
+			// Sync avatar preview if it was updated
+			const resultData = updateProfileForm.result.data;
+			if (resultData?.image) {
+				avatarPreview = resultData.image  ?? avatarPreview;
+			}
 		}
 	});
 
 	// Handle avatar upload success
 	$effect(() => {
-		if (avatarUploadForm.result?.success) {
-			// Reset state and invalidate to reload data
+		if (avatarUploadForm.result?.success && !avatarUploadForm.pending) {
+			const resultData = avatarUploadForm.result.data;
+			if (resultData?.avatarUrl) {
+				avatarPreview = resultData.avatarUrl
+			}
 			hasSelectedFile = false;
-			invalidateAll();
+			const fileInput = document.getElementById('avatar-upload') as HTMLInputElement;
+			if (fileInput) fileInput.value = '';
 		}
 	});
 
 	// Handle avatar delete success
 	$effect(() => {
-		if (avatarDeleteForm.result?.success) {
-			// Reset state and invalidate to reload data
+		if (avatarDeleteForm.result?.success && !avatarDeleteForm.pending) {
 			avatarPreview = null;
 			hasSelectedFile = false;
-			invalidateAll();
 		}
 	});
+
+	// Destructure form fields for cleaner template
+	const { displayName, username, bio, website, twitter, youtube, instagram } =
+		updateProfileForm.fields;
+
+
+		// Populate form fields once with initial profile data
+	if (profile) {
+		updateProfileForm.fields.set({
+			displayName: profile.name,
+			username: profile.username,
+			bio: profile.bio,
+			website: profile.socialLinks?.website ?? undefined,
+			twitter: profile.socialLinks?.twitter ?? undefined,
+			youtube: profile.socialLinks?.youtube ?? undefined,
+			instagram: profile.socialLinks?.instagram ?? undefined,
+		});
+	}
 </script>
 
 <svelte:head>
@@ -115,34 +120,27 @@
 	{/if}
 
 	{#if updateProfileForm.result?.error}
-		<div class="error-message" role="alert">
-			{updateProfileForm.result.error}
-		</div>
+		<div class="error-message" role="alert">{updateProfileForm.result.error}</div>
 	{/if}
 
 	<!-- Avatar Section -->
 	<div class="settings-card">
 		<h2>{m.account_avatar_heading()}</h2>
 		<div class="avatar-container">
-			<Avatar>
-				{#if avatarPreview}
-					<AvatarImage src={avatarPreview} alt="Avatar" />
-				{:else}
-					<AvatarFallback>{initials}</AvatarFallback>
-				{/if}
+			<Avatar src={avatarPreview ?? undefined}>
+				<AvatarImage src={avatarPreview ?? ''} alt="Avatar" />
+				<AvatarFallback>{initials}</AvatarFallback>
 			</Avatar>
 
 			<div class="avatar-actions">
-				<!-- Avatar Upload Form -->
 				<form {...avatarUploadForm} enctype="multipart/form-data" class="avatar-upload-form">
 					<input
 						type="file"
 						id="avatar-upload"
-						name="avatar"
+						{...avatarUploadForm.fields.avatar.as('file')}
 						accept="image/*"
 						hidden
 						onchange={handleAvatarSelect}
-						disabled={avatarUploadForm.pending > 0}
 					/>
 
 					<Button
@@ -163,7 +161,9 @@
 							disabled={avatarUploadForm.pending > 0}
 							loading={avatarUploadForm.pending > 0}
 						>
-							{avatarUploadForm.pending > 0 ? m.account_avatar_uploading() : m.account_avatar_save()}
+							{avatarUploadForm.pending > 0
+								? m.account_avatar_uploading()
+								: m.account_avatar_save()}
 						</Button>
 						<Button
 							type="button"
@@ -177,7 +177,6 @@
 					{/if}
 				</form>
 
-				<!-- Avatar Delete Form (shown only when no new file selected) -->
 				{#if showDeleteAvatar}
 					<form {...avatarDeleteForm}>
 						<Button
@@ -197,23 +196,19 @@
 		<p class="avatar-help">{m.account_avatar_help()}</p>
 
 		{#if avatarUploadForm.result?.error}
-			<div class="error-message" role="alert">
-				{avatarUploadForm.result.error}
-			</div>
+			<div class="error-message" role="alert">{avatarUploadForm.result.error}</div>
 		{/if}
 
 		{#if avatarDeleteForm.result?.error}
-			<div class="error-message" role="alert">
-				{avatarDeleteForm.result.error}
-			</div>
+			<div class="error-message" role="alert">{avatarDeleteForm.result.error}</div>
 		{/if}
 	</div>
 
-	<!-- 
+	<!--
 		Profile Form
-		
+
 		Uses 'novalidate' to bypass browser-native validation (e.g., type="url").
-		This allows SvelteKit Remote Functions to handle validation entirely, 
+		This allows SvelteKit Remote Functions to handle validation entirely,
 		which is required for E2E tests to verify custom server-side error states.
 	-->
 	<form {...updateProfileForm} class="settings-card" novalidate>
@@ -222,30 +217,20 @@
 		<!-- Display Name -->
 		<div class="form-group">
 			<Label for="displayName">{m.account_display_name()}</Label>
-			<!-- 
-				Defensive Error Pattern:
-				We use optional chaining and null-coalescing when accessing issues() 
-				to prevent "TypeError: Cannot read properties of undefined (reading '0')" 
-				during SSR or when the form state is not yet initialized.
-			-->
 			<Input
 				id="displayName"
-				name="displayName"
-				value={updateProfileForm.fields.displayName.value() ?? data.user?.name ?? ''}
+				{...displayName.as('text')}
 				placeholder={m.account_display_name_placeholder()}
-				error={(updateProfileForm.fields.displayName?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.displayName.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
+			{#each displayName.issues() as issue}
+				<p class="field-error">{issue.message}</p>
+			{/each}
 		</div>
 
 		<!-- Email (read-only) -->
 		<div class="form-group">
 			<Label for="email">{m.account_email()}</Label>
-			<Input
-				id="email"
-				name="email"
-				value={data.user?.email ?? ''}
-				disabled
-			/>
+			<Input id="email" name="email" value={profile?.email ?? ''} disabled />
 			<p class="form-help">{m.account_email_change_disclaimer()}</p>
 		</div>
 
@@ -254,24 +239,26 @@
 			<Label for="username">{m.account_username()}</Label>
 			<Input
 				id="username"
-				name="username"
-				value={updateProfileForm.fields.username.value() ?? data.user?.username ?? ''}
+				{...username.as('text')}
 				placeholder={m.account_username_placeholder()}
-				error={(updateProfileForm.fields.username?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.username.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
+			{#each username.issues() as issue}
+				<p class="field-error">{issue.message}</p>
+			{/each}
 		</div>
 
 		<!-- Bio -->
 		<div class="form-group">
 			<Label for="bio">{m.account_bio()}</Label>
-			<Textarea
+			<TextArea
 				id="bio"
-				name="bio"
-				value={updateProfileForm.fields.bio.value() ?? data.user?.bio ?? ''}
+				{...bio.as('text')}
 				placeholder={m.account_bio_placeholder()}
 				rows={4}
-				error={(updateProfileForm.fields.bio?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.bio.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
+			{#each bio.issues() as issue}
+				<p class="field-error">{issue.message}</p>
+			{/each}
 		</div>
 
 		<!-- Social Links Section -->
@@ -280,14 +267,10 @@
 		<!-- Website -->
 		<div class="form-group">
 			<Label for="website">{m.account_social_website()}</Label>
-			<Input
-				id="website"
-				name="website"
-				type="url"
-				value={updateProfileForm.fields.website.value() ?? data.user?.socialLinks?.website ?? ''}
-				placeholder="https://example.com"
-				error={(updateProfileForm.fields.website?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.website.issues()[0]?.message ?? 'Invalid') : undefined}
-			/>
+			<Input id="website" {...website.as('url')} placeholder="https://example.com" />
+			{#each website.issues() as issue}
+				<p class="field-error">{issue.message}</p>
+			{/each}
 		</div>
 
 		<!-- Twitter -->
@@ -295,12 +278,12 @@
 			<Label for="twitter">{m.account_social_twitter()}</Label>
 			<Input
 				id="twitter"
-				name="twitter"
-				type="url"
-				value={updateProfileForm.fields.twitter.value() ?? data.user?.socialLinks?.twitter ?? ''}
+				{...twitter.as('url')}
 				placeholder="https://twitter.com/username"
-				error={(updateProfileForm.fields.twitter?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.twitter.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
+			{#each twitter.issues() as issue}
+				<p class="field-error">{issue.message}</p>
+			{/each}
 		</div>
 
 		<!-- YouTube -->
@@ -308,12 +291,12 @@
 			<Label for="youtube">{m.account_social_youtube()}</Label>
 			<Input
 				id="youtube"
-				name="youtube"
-				type="url"
-				value={updateProfileForm.fields.youtube.value() ?? data.user?.socialLinks?.youtube ?? ''}
+				{...youtube.as('url')}
 				placeholder="https://youtube.com/channel/..."
-				error={(updateProfileForm.fields.youtube?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.youtube.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
+			{#each youtube.issues() as issue}
+				<p class="field-error">{issue.message}</p>
+			{/each}
 		</div>
 
 		<!-- Instagram -->
@@ -321,23 +304,17 @@
 			<Label for="instagram">{m.account_social_instagram()}</Label>
 			<Input
 				id="instagram"
-				name="instagram"
-				type="url"
-				value={
-					updateProfileForm.fields.instagram.value() ??
-					data.user?.socialLinks?.instagram ??
-					''
-				}
+				{...instagram.as('url')}
 				placeholder="https://instagram.com/username"
-				error={(updateProfileForm.fields.instagram?.issues?.()?.length ?? 0) > 0 ? (updateProfileForm.fields.instagram.issues()[0]?.message ?? 'Invalid') : undefined}
 			/>
+			{#each instagram.issues() as issue}
+				<p class="field-error">{issue.message}</p>
+			{/each}
 		</div>
 
 		<div class="form-actions">
 			<Button type="submit" variant="primary" loading={updateProfileForm.pending > 0}>
-				{updateProfileForm.pending > 0
-					? m.account_saving()
-					: m.account_save_button()}
+				{updateProfileForm.pending > 0 ? m.account_saving() : m.account_save_button()}
 			</Button>
 		</div>
 	</form>
@@ -376,6 +353,12 @@
 		border: var(--border-width) var(--border-style) var(--color-error-200);
 		color: var(--color-error-700);
 		font-size: var(--text-sm);
+	}
+
+	.field-error {
+		font-size: var(--text-xs);
+		color: var(--color-error-600);
+		margin-top: var(--space-1);
 	}
 
 	.settings-card {
@@ -470,5 +453,9 @@
 		background-color: var(--color-error-900);
 		border-color: var(--color-error-700);
 		color: var(--color-error-100);
+	}
+
+	:global([data-theme='dark']) .field-error {
+		color: var(--color-error-400);
 	}
 </style>

@@ -19,7 +19,7 @@
   import type { HTMLTextareaAttributes } from 'svelte/elements';
 
   interface Props extends HTMLTextareaAttributes {
-    value?: string;
+    value?: string | number;
     autoResize?: boolean;
     error?: string;
   }

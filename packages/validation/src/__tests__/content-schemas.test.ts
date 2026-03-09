@@ -178,7 +178,7 @@ describe('Media Item Schemas', () => {
           fileSizeBytes: 1000,
           r2Key: 'test.flv',
         })
-      ).toThrow('Unsupported file format');
+      ).toThrow('Invalid option'); // Zod v4 default message for enum validation
     });
 
     it('should reject file size exceeding 5GB', () => {
@@ -642,9 +642,7 @@ describe('Enum Schemas', () => {
   it('should validate mediaTypeEnum', () => {
     expect(mediaTypeEnum.parse('video')).toBe('video');
     expect(mediaTypeEnum.parse('audio')).toBe('audio');
-    expect(() => mediaTypeEnum.parse('invalid')).toThrow(
-      'Media type must be video or audio'
-    );
+    expect(() => mediaTypeEnum.parse('invalid')).toThrow('Invalid option');
   });
 
   it('should validate mediaStatusEnum', () => {
@@ -658,18 +656,14 @@ describe('Enum Schemas', () => {
     validStatuses.forEach((status) => {
       expect(mediaStatusEnum.parse(status)).toBe(status);
     });
-    expect(() => mediaStatusEnum.parse('invalid')).toThrow(
-      'Invalid media status'
-    );
+    expect(() => mediaStatusEnum.parse('invalid')).toThrow('Invalid option');
   });
 
   it('should validate contentTypeEnum', () => {
     expect(contentTypeEnum.parse('video')).toBe('video');
     expect(contentTypeEnum.parse('audio')).toBe('audio');
     expect(contentTypeEnum.parse('written')).toBe('written');
-    expect(() => contentTypeEnum.parse('invalid')).toThrow(
-      'Content type must be video, audio, or written'
-    );
+    expect(() => contentTypeEnum.parse('invalid')).toThrow('Invalid option');
   });
 
   it('should validate visibilityEnum', () => {
@@ -682,18 +676,14 @@ describe('Enum Schemas', () => {
     validVisibilities.forEach((visibility) => {
       expect(visibilityEnum.parse(visibility)).toBe(visibility);
     });
-    expect(() => visibilityEnum.parse('invalid')).toThrow(
-      'Invalid visibility setting'
-    );
+    expect(() => visibilityEnum.parse('invalid')).toThrow('Invalid option');
   });
 
   it('should validate contentStatusEnum', () => {
     expect(contentStatusEnum.parse('draft')).toBe('draft');
     expect(contentStatusEnum.parse('published')).toBe('published');
     expect(contentStatusEnum.parse('archived')).toBe('archived');
-    expect(() => contentStatusEnum.parse('invalid')).toThrow(
-      'Status must be draft, published, or archived'
-    );
+    expect(() => contentStatusEnum.parse('invalid')).toThrow('Invalid option');
   });
 });
 

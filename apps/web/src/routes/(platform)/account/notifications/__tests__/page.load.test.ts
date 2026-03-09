@@ -16,6 +16,17 @@ vi.mock('@sveltejs/kit', () => ({
 // Create mock functions that we can configure before each test
 const mockGetNotificationPreferences = vi.fn();
 
+// Mock the cache package to avoid actual KV calls during tests
+vi.mock('@codex/cache', () => ({
+  VersionedCache: vi.fn().mockImplementation(() => ({
+    get: vi.fn((_id, _type, fetcher) => fetcher()),
+  })),
+  CacheType: {
+    USER_PREFERENCES: 'USER_PREFERENCES',
+    USER_PROFILE: 'USER_PROFILE',
+  },
+}));
+
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({
     account: {
@@ -70,7 +81,7 @@ describe('Notifications Page Load', () => {
       emailTransactional: true,
       emailDigest: false,
     };
-    mockGetNotificationPreferences.mockResolvedValue(preferencesData);
+    mockGetNotificationPreferences.mockResolvedValue({ data: preferencesData });
 
     const { load } = await import('../+page.server');
 
@@ -92,7 +103,7 @@ describe('Notifications Page Load', () => {
       // emailTransactional missing
       // emailDigest missing
     };
-    mockGetNotificationPreferences.mockResolvedValue(partialData);
+    mockGetNotificationPreferences.mockResolvedValue({ data: partialData });
 
     const { load } = await import('../+page.server');
 
@@ -131,22 +142,6 @@ describe('Notifications Page Load', () => {
     });
   });
 
-  it('sets cache-control headers', async () => {
-    mockGetNotificationPreferences.mockResolvedValue({
-      emailMarketing: true,
-      emailTransactional: true,
-      emailDigest: false,
-    });
-
-    const { load } = await import('../+page.server');
-
-    await load({
-      locals: mockLocals,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as unknown as Parameters<typeof load>[0]);
-  });
-
   it('handles API timeout gracefully', async () => {
     mockGetNotificationPreferences.mockRejectedValue(new Error('Timeout'));
 
@@ -173,7 +168,7 @@ describe('Notifications Page Load', () => {
       emailTransactional: null,
       emailDigest: null,
     };
-    mockGetNotificationPreferences.mockResolvedValue(nullData);
+    mockGetNotificationPreferences.mockResolvedValue({ data: nullData });
 
     const { load } = await import('../+page.server');
 

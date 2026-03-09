@@ -11,6 +11,7 @@ export default defineConfig({
       'packages/database/vitest.config.database.ts',
       'packages/validation/vitest.config.validation.ts',
       'packages/cloudflare-clients/vitest.config.cloudflare-clients.ts',
+      'packages/cache/vitest.config.cache.ts',
       'packages/test-utils/vitest.config.test-utils.ts',
       'packages/observability/vitest.config.observability.ts',
       'packages/security/vitest.config.security.ts',

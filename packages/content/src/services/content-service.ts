@@ -13,6 +13,7 @@
  */
 
 import type { R2Bucket } from '@cloudflare/workers-types';
+import { CacheType, type VersionedCache } from '@codex/cache';
 import { type CachePurgeClient, R2Service } from '@codex/cloudflare-clients';
 import {
   CONTENT_STATUS,
@@ -70,6 +71,11 @@ import type {
 export class ContentService extends BaseService {
   private cachePurge?: CachePurgeClient;
   private webAppUrl?: string;
+  private cache?: VersionedCache;
+
+  setCache(cache: VersionedCache): void {
+    this.cache = cache;
+  }
 
   setCachePurge(client: CachePurgeClient, webAppUrl: string): void {
     if (!webAppUrl) {
@@ -281,6 +287,14 @@ export class ContentService extends BaseService {
         throw new ContentNotFoundError(id);
       }
 
+      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
+      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+      if (result.organizationId) {
+        void this.cache?.invalidate(
+          CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
+        );
+      }
+
       return result;
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
@@ -424,6 +438,14 @@ export class ContentService extends BaseService {
       // Purge cached content pages after publish
       await this.purgeContentCache(result.slug);
 
+      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
+      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+      if (result.organizationId) {
+        void this.cache?.invalidate(
+          CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
+        );
+      }
+
       return result;
     } catch (error) {
       if (
@@ -477,6 +499,14 @@ export class ContentService extends BaseService {
 
       // Purge cached content pages after unpublish (critical for takedowns)
       await this.purgeContentCache(result.slug);
+
+      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
+      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+      if (result.organizationId) {
+        void this.cache?.invalidate(
+          CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
+        );
+      }
 
       return result;
     } catch (error) {

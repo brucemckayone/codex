@@ -1,11 +1,16 @@
 /**
  * Account profile page server load
- * Provides user data from the session (locals.user) without calling external APIs
+ * Fetches profile data from the identity API with cache-backed SSR
  */
+
+import { redirect } from '@sveltejs/kit';
+
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
-  return {
-    user: locals.user,
-  };
+  if (!locals.user) {
+    redirect(303, '/login?redirect=/account');
+  }
+
+  return {};
 };

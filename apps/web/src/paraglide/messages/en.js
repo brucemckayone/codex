@@ -695,6 +695,22 @@ export const account_payments_billing = () => `Billing Information`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const account_payments_billing_description = () => `Manage your payment methods and view billing history via the Stripe Customer Portal.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_payments_manage_billing = () => `Manage Billing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const account_payments_none_placeholder = () => `No payment methods on file. Payment methods will be added when you make your first purchase.`
 
 

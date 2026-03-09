@@ -16,3 +16,7 @@ ENVIRONMENT=development
 
 # Worker-to-worker authentication (HMAC)
 WORKER_SHARED_SECRET=your-shared-secret-here
+
+# Local CDN override — serves Miniflare R2 files via dev-cdn worker (port 4100)
+# Run `pnpm dev:dev-cdn` alongside this worker for avatars/images to load on reload
+R2_PUBLIC_URL_BASE=http://localhost:4100

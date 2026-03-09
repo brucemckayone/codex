@@ -44,6 +44,7 @@ export {
   type LibraryItem,
   type LibraryProgress,
   libraryCollection,
+  loadLibraryFromServer,
   markAsCompleted,
   resetProgress,
   updateProgress,

@@ -8,6 +8,10 @@
     disabled?: boolean;
     required?: boolean;
     onCheckedChange?: (checked: boolean) => void;
+    /** Form field name for the hidden input - required for form submission */
+    name?: string;
+    /** Value for the hidden input when checked (default: "true") */
+    value?: string;
   }
 
   let {
@@ -15,6 +19,8 @@
     disabled = false,
     required = false,
     onCheckedChange,
+    name,
+    value = 'true',
     class: className,
     ...restProps
   }: Props = $props();
@@ -47,7 +53,9 @@
   {...restProps}
 >
   <span class="thumb"></span>
-  <input {...$input} use:input type="hidden" {required} />
+  {#if name}
+    <input {...$input} use:input {name} {value} {required} aria-hidden="true" tabindex="-1" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;overflow:hidden;margin:0;" />
+  {/if}
 </button>
 
 <style>

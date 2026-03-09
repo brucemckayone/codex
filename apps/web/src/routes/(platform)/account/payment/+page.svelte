@@ -4,8 +4,10 @@
 	import * as Table from '$lib/components/ui/Table';
 	import Badge from '$lib/components/ui/Badge/Badge.svelte';
 	import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
+	import Button from '$lib/components/ui/Button/Button.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { portalSessionForm } from '$lib/remote/account.remote';
 
 	/**
 	 * Payment page component.
@@ -120,7 +122,17 @@
 	<!-- Billing Information Section -->
 	<div class="settings-card">
 		<h2>{m.account_payments_billing()}</h2>
-		<p class="placeholder">{m.account_payments_none_placeholder()}</p>
+		<p class="description">{m.account_payments_billing_description()}</p>
+
+		<form {...portalSessionForm} class="portal-form">
+			<Button type="submit" variant="secondary" loading={portalSessionForm.pending > 0}>
+				{portalSessionForm.pending > 0 ? m.common_loading() : m.account_payments_manage_billing()}
+			</Button>
+		</form>
+
+		{#if portalSessionForm.result?.error}
+			<div class="error-message" role="alert">{portalSessionForm.result.error}</div>
+		{/if}
 	</div>
 
 	<!-- Purchase History Section -->
@@ -234,10 +246,14 @@
 		margin-bottom: var(--space-4);
 	}
 
-	.placeholder {
+	.portal-form {
+		margin-top: var(--space-4);
+	}
+
+	.error-message {
+		margin-top: var(--space-3);
 		font-size: var(--text-sm);
-		color: var(--color-text-secondary);
-		line-height: var(--leading-relaxed);
+		color: var(--color-error);
 	}
 
 	.history-card {

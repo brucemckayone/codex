@@ -631,9 +631,11 @@ describe('Organization Validation Schemas', () => {
       const result = organizationStatusEnum.safeParse('invalid');
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0].message).toContain(
-          'Status must be active, suspended, or deleted'
-        );
+        // Zod v4 default error message format
+        expect(result.error.issues[0].message).toContain('Invalid option');
+        expect(result.error.issues[0].message).toContain('active');
+        expect(result.error.issues[0].message).toContain('suspended');
+        expect(result.error.issues[0].message).toContain('deleted');
       }
     });
   });

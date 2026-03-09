@@ -3,17 +3,32 @@
    * Account layout - sub-navigation for account settings
    */
   import type { Snippet } from 'svelte';
+  import type { LayoutData } from './$types';
+  import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { ACCOUNT_NAV } from '$lib/config/navigation';
+  import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
+  import { invalidateCollection } from '$lib/collections';
 
-  const { children }: { children: Snippet } = $props();
+  const { children, data }: { children: Snippet; data: LayoutData } = $props();
+
+  onMount(() => {
+    const staleKeys = getStaleKeys(data.versions ?? {});
+
+    // User entity stale → library items may have changed (purchase/access updates)
+    if (staleKeys.some((k) => k.startsWith('user:'))) {
+      invalidateCollection('library');
+    }
+
+    updateStoredVersions(data.versions ?? {});
+  });
 </script>
 
 <div class="account-layout">
   <aside class="account-sidebar">
     <h2 class="sidebar-title">Account Settings</h2>
     <nav class="sidebar-nav" aria-label="Account">
-      {#each ACCOUNT_NAV as link}
+      {#each ACCOUNT_NAV as link (link.href)}
         <a
           href={link.href}
           class="sidebar-link"

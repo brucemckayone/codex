@@ -2,7 +2,7 @@
  * Library Collection Tests
  *
  * Tests for the library collection and optimistic update helpers.
- * Note: We mock TanStack DB to avoid queryClient initialization issues.
+ * Note: We mock TanStack DB to avoid localStorage/queryClient initialization issues.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,28 +15,20 @@ const mockCollection = {
   delete: vi.fn(),
 };
 
+// Mock $app/environment so browser = true (enables libraryCollection creation)
+vi.mock('$app/environment', () => ({
+  browser: true,
+}));
+
 // Mock TanStack DB before importing
 vi.mock('@tanstack/db', () => ({
   createCollection: vi.fn(() => mockCollection),
-}));
-
-vi.mock('@tanstack/query-db-collection', () => ({
-  queryCollectionOptions: vi.fn((options) => options),
-}));
-
-// Mock the index to provide queryClient
-vi.mock('./index', () => ({
-  queryClient: {
-    getDefaultOptions: vi.fn(() => ({ queries: {} })),
-    setQueryData: vi.fn(),
-    getQueryData: vi.fn(),
-  },
+  localStorageCollectionOptions: vi.fn((options) => options),
 }));
 
 // Mock remote functions
 vi.mock('$lib/remote/library.remote', () => ({
   getUserLibrary: vi.fn(),
-  savePlaybackProgress: vi.fn(),
 }));
 
 describe('collections/library', () => {

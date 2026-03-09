@@ -16,14 +16,12 @@ import { uuidSchema } from '../primitives';
  * Mezzanine status enum
  * Aligns with database CHECK constraint: check_mezzanine_status
  */
-export const mezzanineStatusEnum = z.enum(
-  ['pending', 'processing', 'ready', 'failed'],
-  {
-    errorMap: () => ({
-      message: 'Mezzanine status must be pending, processing, ready, or failed',
-    }),
-  }
-);
+export const mezzanineStatusEnum = z.enum([
+  'pending',
+  'processing',
+  'ready',
+  'failed',
+]);
 
 /**
  * Transcoding priority enum (0-4 scale)
@@ -43,9 +41,7 @@ export const transcodingPrioritySchema = z
 /**
  * RunPod job status from webhook
  */
-export const runpodJobStatusEnum = z.enum(['completed', 'failed'], {
-  errorMap: () => ({ message: 'Job status must be completed or failed' }),
-});
+export const runpodJobStatusEnum = z.enum(['completed', 'failed']);
 
 /**
  * Canonical thumbnail size variants
