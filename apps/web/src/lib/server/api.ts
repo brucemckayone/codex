@@ -304,7 +304,7 @@ export function createServerApi(
        * Query parameters:
        * - page: number (default: 1)
        * - limit: number (1-100, default: 20)
-       * - status: 'completed' | 'pending' | 'failed' | 'refunded' (optional)
+       * - status: 'completed' | 'pending' | 'failed' | 'refunded' (optional filter)
        *
        * @example
        * ```typescript

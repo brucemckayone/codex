@@ -246,7 +246,7 @@ export const getNotificationPreferences = query(async () => {
 const purchaseHistoryQuerySchema = z.object({
   page: z.coerce.number().min(1).optional().default(1),
   limit: z.coerce.number().min(1).max(100).optional().default(20),
-  status: z.enum(['pending', 'complete', 'refunded', 'failed']).optional(),
+  status: z.enum(['pending', 'completed', 'refunded', 'failed']).optional(),
   contentId: uuidSchema.optional(),
 });
 
@@ -259,7 +259,7 @@ const purchaseHistoryQuerySchema = z.object({
  * Query parameters:
  * - page: number (default: 1, min: 1)
  * - limit: number (default: 20, min: 1, max: 100)
- * - status: Optional filter by purchase status ('pending' | 'complete' | 'refunded' | 'failed')
+ * - status: Optional filter by purchase status ('pending' | 'completed' | 'refunded' | 'failed')
  * - contentId: Optional filter by content UUID
  *
  * Usage:

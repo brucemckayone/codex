@@ -41,6 +41,14 @@ interface CachedSessionData {
     role: string;
     createdAt: string;
     updatedAt: string;
+    username: string | null;
+    bio: string | null;
+    socialLinks: {
+      website?: string;
+      twitter?: string;
+      youtube?: string;
+      instagram?: string;
+    } | null;
   };
 }
 
@@ -321,6 +329,9 @@ export function createSessionMiddleware(
                   sessionData.user.updatedAt instanceof Date
                     ? sessionData.user.updatedAt.toISOString()
                     : sessionData.user.updatedAt,
+                username: sessionData.user.username ?? null,
+                bio: sessionData.user.bio ?? null,
+                socialLinks: sessionData.user.socialLinks ?? null,
               },
             };
             // Fire and forget - don't wait for cache

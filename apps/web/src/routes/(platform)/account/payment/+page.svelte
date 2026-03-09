@@ -24,7 +24,7 @@
 	// Map purchase status to badge variant
 	function getStatusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
 		switch (status) {
-			case 'complete':
+			case 'completed':
 				return 'success';
 			case 'pending':
 				return 'warning';
@@ -40,7 +40,7 @@
 	// Get localized status text
 	function getStatusText(status: string): string {
 		switch (status) {
-			case 'complete':
+			case 'completed':
 				return m.account_payments_status_complete();
 			case 'pending':
 				return m.account_payments_status_pending();
@@ -86,7 +86,7 @@
 	// Filter links
 	const filters = [
 		{ key: 'all', label: m.account_payments_filter_all() },
-		{ key: 'complete', label: m.account_payments_filter_complete() },
+		{ key: 'completed', label: m.account_payments_filter_complete() },
 		{ key: 'pending', label: m.account_payments_filter_pending() },
 		{ key: 'failed', label: m.account_payments_filter_failed() },
 		{ key: 'refunded', label: m.account_payments_filter_refunded() },

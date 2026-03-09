@@ -39,7 +39,7 @@ import {
   getPurchaseSchema,
   purchaseQuerySchema,
 } from '@codex/validation';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadyPurchasedError,
@@ -504,12 +504,10 @@ export class PurchaseService extends BaseService {
       });
 
       // Get total count
-      const countResult = await this.db
-        .select({ count: purchases.id })
+      const [{ total }] = await this.db
+        .select({ total: count() })
         .from(purchases)
         .where(and(...conditions));
-
-      const total = countResult.length;
 
       return {
         items: items as PurchaseWithContent[],

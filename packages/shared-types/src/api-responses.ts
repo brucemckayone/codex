@@ -421,7 +421,7 @@ export interface PurchaseListItem {
   contentId: string;
   contentTitle: string;
   amountCents: number;
-  status: 'complete' | 'pending' | 'failed' | 'refunded';
+  status: 'completed' | 'pending' | 'failed' | 'refunded';
 }
 
 /**
