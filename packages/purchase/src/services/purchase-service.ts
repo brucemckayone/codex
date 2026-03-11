@@ -504,10 +504,11 @@ export class PurchaseService extends BaseService {
       });
 
       // Get total count
-      const [{ total }] = await this.db
+      const countResult = await this.db
         .select({ total: count() })
         .from(purchases)
         .where(and(...conditions));
+      const total = countResult[0]?.total ?? 0;
 
       return {
         items: items as PurchaseWithContent[],

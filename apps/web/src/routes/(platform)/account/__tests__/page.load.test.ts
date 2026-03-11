@@ -2,6 +2,8 @@
  * Profile Page Server Load Tests
  *
  * Tests for account profile page load function.
+ * Note: Profile data is fetched client-side via async Remote Functions,
+ * not in the server load. The load function only handles auth gating.
  */
 
 import { redirect } from '@sveltejs/kit';
@@ -12,28 +14,6 @@ vi.mock('@sveltejs/kit', () => ({
   redirect: vi.fn(),
 }));
 
-// Create mock functions that we can configure before each test
-const mockGetProfile = vi.fn();
-
-// Mock the cache package to avoid actual KV calls during tests
-vi.mock('@codex/cache', () => ({
-  VersionedCache: vi.fn().mockImplementation(() => ({
-    get: vi.fn((_id, _type, fetcher) => fetcher()),
-  })),
-  CacheType: {
-    USER_PREFERENCES: 'USER_PREFERENCES',
-    USER_PROFILE: 'USER_PROFILE',
-  },
-}));
-
-vi.mock('$lib/server/api', () => ({
-  createServerApi: vi.fn(() => ({
-    account: {
-      getProfile: mockGetProfile,
-    },
-  })),
-}));
-
 describe('Account Profile Page Load', () => {
   let mockLocals: { user: { id: string; email: string } | null };
   let mockPlatform: App.Platform;
@@ -42,10 +22,8 @@ describe('Account Profile Page Load', () => {
   >[0]['cookies'];
 
   beforeEach(() => {
-    // Reset mocks before each test
     vi.clearAllMocks();
 
-    // Setup default mock values
     mockLocals = {
       user: { id: 'user-123', email: 'test@example.com' },
     };
@@ -75,15 +53,7 @@ describe('Account Profile Page Load', () => {
     expect(redirect).toHaveBeenCalledWith(303, '/login?redirect=/account');
   });
 
-  it('loads profile data from API when authenticated', async () => {
-    const profileData = {
-      name: 'Test User',
-      username: 'testuser',
-      bio: 'Test bio',
-      email: 'test@example.com',
-    };
-    mockGetProfile.mockResolvedValue({ data: profileData });
-
+  it('returns empty object when authenticated (profile loaded client-side)', async () => {
     const { load } = await import('../+page.server');
 
     const result = await load({
@@ -92,25 +62,6 @@ describe('Account Profile Page Load', () => {
       cookies: mockCookies,
     } as unknown as Parameters<typeof import('../+page.server').load>[0]);
 
-    expect(result).toEqual({
-      profile: profileData,
-    });
-    expect(mockGetProfile).toHaveBeenCalled();
-  });
-
-  it('handles API failure gracefully by returning null profile', async () => {
-    mockGetProfile.mockRejectedValue(new Error('API Error'));
-
-    const { load } = await import('../+page.server');
-
-    const result = await load({
-      locals: mockLocals,
-      platform: mockPlatform,
-      cookies: mockCookies,
-    } as unknown as Parameters<typeof import('../+page.server').load>[0]);
-
-    expect(result).toEqual({
-      profile: null,
-    });
+    expect(result).toEqual({});
   });
 });
