@@ -35,6 +35,11 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
+      // Wait for the Switch components to render (they have id attributes)
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
       // ASSERT: Should show page title and description
       await expect(page.locator('h1')).toContainText('Notifications');
@@ -48,11 +53,10 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       );
 
       // ASSERT: Should have toggles for all three preferences
-      await expect(page.locator('button[name="emailMarketing"]')).toBeVisible();
-      await expect(
-        page.locator('button[name="emailTransactional"]')
-      ).toBeVisible();
-      await expect(page.locator('button[name="emailDigest"]')).toBeVisible();
+      // Switch component renders <button id="..."> (id, not name)
+      await expect(page.locator('#emailMarketing')).toBeVisible();
+      await expect(page.locator('#emailTransactional')).toBeVisible();
+      await expect(page.locator('#emailDigest')).toBeVisible();
 
       // ASSERT: Should have "Save Preferences" button
       await expect(page.locator('button[type="submit"]')).toBeVisible();
@@ -67,17 +71,18 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
-      await page.waitForLoadState('networkidle');
+      // Wait for switches to be visible (confirms remote function query completed)
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
       // ASSERT: Check that switches use the Switch component (button with data-state)
-      const marketingSwitch = page.locator('button[name="emailMarketing"]');
-      const transactionalSwitch = page.locator(
-        'button[name="emailTransactional"]'
-      );
-      const digestSwitch = page.locator('button[name="emailDigest"]');
+      const marketingSwitch = page.locator('#emailMarketing');
+      const transactionalSwitch = page.locator('#emailTransactional');
+      const digestSwitch = page.locator('#emailDigest');
 
       // ASSERT: All switches should be visible
-      console.log('DOM content:', await page.content());
       await expect(marketingSwitch).toBeVisible();
       await expect(transactionalSwitch).toBeVisible();
       await expect(digestSwitch).toBeVisible();
@@ -91,17 +96,22 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
-      await page.waitForLoadState('networkidle');
+      // Wait for Switch components to render — proves remote function query completed
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
-      const marketingSwitch = page.locator('button[name="emailMarketing"]');
+      const marketingSwitch = page.locator('#emailMarketing');
       const initialState = await marketingSwitch.getAttribute('data-state');
 
-      // Toggle the switch
-      await marketingSwitch.click();
-
-      // ASSERT: Switch should toggle
-      const newState = await marketingSwitch.getAttribute('data-state');
-      expect(newState).not.toBe(initialState);
+      // Click and retry until Svelte 5 hydration attaches the Melt UI handler.
+      // Pre-hydration clicks are no-ops; post-hydration clicks toggle data-state.
+      await expect(async () => {
+        await marketingSwitch.click();
+        const state = await marketingSwitch.getAttribute('data-state');
+        expect(state).not.toBe(initialState);
+      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
       // ACT: Submit form
       await page.locator('button[type="submit"]').click();
@@ -116,19 +126,19 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
-      await page.waitForLoadState('networkidle');
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
-      const transactionalSwitch = page.locator(
-        'button[name="emailTransactional"]'
-      );
+      const transactionalSwitch = page.locator('#emailTransactional');
       const initialState = await transactionalSwitch.getAttribute('data-state');
 
-      // Toggle the switch
-      await transactionalSwitch.click();
-
-      // ASSERT: Switch should toggle
-      const newState = await transactionalSwitch.getAttribute('data-state');
-      expect(newState).not.toBe(initialState);
+      await expect(async () => {
+        await transactionalSwitch.click();
+        const state = await transactionalSwitch.getAttribute('data-state');
+        expect(state).not.toBe(initialState);
+      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
       // ACT: Submit form
       await page.locator('button[type="submit"]').click();
@@ -143,17 +153,19 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
-      await page.waitForLoadState('networkidle');
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
-      const digestSwitch = page.locator('button[name="emailDigest"]');
+      const digestSwitch = page.locator('#emailDigest');
       const initialState = await digestSwitch.getAttribute('data-state');
 
-      // Toggle the switch
-      await digestSwitch.click();
-
-      // ASSERT: Switch should toggle
-      const newState = await digestSwitch.getAttribute('data-state');
-      expect(newState).not.toBe(initialState);
+      await expect(async () => {
+        await digestSwitch.click();
+        const state = await digestSwitch.getAttribute('data-state');
+        expect(state).not.toBe(initialState);
+      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
       // ACT: Submit form
       await page.locator('button[type="submit"]').click();
@@ -170,10 +182,31 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
-      await page.waitForLoadState('networkidle');
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
-      // ACT: Toggle and submit
-      await page.locator('button[name="emailMarketing"]').click();
+      // Toggle with retry to ensure Svelte hydration (must happen BEFORE route
+      // interceptor, which could block hydration-critical POST requests)
+      const marketingSwitch = page.locator('#emailMarketing');
+      const initialState = await marketingSwitch.getAttribute('data-state');
+      await expect(async () => {
+        await marketingSwitch.click();
+        const state = await marketingSwitch.getAttribute('data-state');
+        expect(state).not.toBe(initialState);
+      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
+
+      // Intercept POST to add delay so aria-busy is observable before response arrives.
+      // Set up AFTER hydration to avoid blocking background fetches.
+      await page.route('**', async (route) => {
+        if (route.request().method() === 'POST') {
+          await new Promise<void>((r) => setTimeout(r, 2000));
+        }
+        await route.continue();
+      });
+
+      // ACT: Submit form (hydration guaranteed by successful toggle above)
       const submitButton = page.locator('button[type="submit"]');
       await submitButton.click({ noWaitAfter: true });
 
@@ -189,9 +222,29 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
-      await page.waitForLoadState('networkidle');
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
-      // ACT: Submit form
+      // Prove Svelte hydration BEFORE setting up route interceptor
+      const marketingSwitch = page.locator('#emailMarketing');
+      const initialState = await marketingSwitch.getAttribute('data-state');
+      await expect(async () => {
+        await marketingSwitch.click();
+        const state = await marketingSwitch.getAttribute('data-state');
+        expect(state).not.toBe(initialState);
+      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
+
+      // Intercept POST to add delay (set up AFTER hydration)
+      await page.route('**', async (route) => {
+        if (route.request().method() === 'POST') {
+          await new Promise<void>((r) => setTimeout(r, 2000));
+        }
+        await route.continue();
+      });
+
+      // ACT: Submit form (hydration guaranteed by successful toggle above)
       const submitButton = page.locator('button[type="submit"]');
       await submitButton.click({ noWaitAfter: true });
 
@@ -201,7 +254,9 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       });
 
       // ASSERT: Check that switches are disabled during submission
-      const switches = page.locator('button[name^="email"]');
+      const switches = page.locator(
+        '#emailMarketing, #emailTransactional, #emailDigest'
+      );
       const count = await switches.count();
 
       for (let i = 0; i < count; i++) {
@@ -217,16 +272,18 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
     }) => {
       await authenticateAsUser();
       await page.goto('/account/notifications');
+      await page.waitForSelector('#emailMarketing', {
+        state: 'visible',
+        timeout: 30000,
+      });
 
       // ASSERT: Form should be present
       await expect(page.locator('form')).toBeVisible();
 
       // ASSERT: Check form elements exist for progressive enhancement
-      await expect(page.locator('button[name="emailMarketing"]')).toBeVisible();
-      await expect(
-        page.locator('button[name="emailTransactional"]')
-      ).toBeVisible();
-      await expect(page.locator('button[name="emailDigest"]')).toBeVisible();
+      await expect(page.locator('#emailMarketing')).toBeVisible();
+      await expect(page.locator('#emailTransactional')).toBeVisible();
+      await expect(page.locator('#emailDigest')).toBeVisible();
     });
   });
 });

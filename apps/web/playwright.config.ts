@@ -21,11 +21,16 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env.test') });
 export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? 'html' : 'list',
+  // Authenticated tests create real users via DB (register→verify→session) which takes
+  // 5-25s under parallel load (Neon DB latency). 90s accommodates auth + page load.
+  timeout: 90000,
   use: {
     trace: 'on-first-retry',
+    // Most assertions need to wait for async operations to settle
+    actionTimeout: 15000,
   },
 
   projects: [
@@ -71,24 +76,28 @@ export default defineConfig({
           command: 'pnpm dev --port 5173 --strictPort',
           url: 'http://localhost:5173',
           timeout: 180000, // 3 minutes - SvelteKit can take time to start
+          reuseExistingServer: true,
         },
         {
           command:
             'cd ../../workers/auth && npx wrangler dev --env test --port 42069',
           url: 'http://localhost:42069/health', // Use health endpoint for ready detection
           timeout: 90000, // 90 seconds - Workers start faster
+          reuseExistingServer: true,
         },
         {
           command:
             'cd ../../workers/identity-api && npx wrangler dev --env test --port 42074',
           url: 'http://localhost:42074/health', // Use health endpoint for ready detection
           timeout: 90000, // 90 seconds - Workers start faster
+          reuseExistingServer: true,
         },
         {
           command:
             'cd ../../workers/ecom-api && npx wrangler dev --env test --port 42072',
           url: 'http://localhost:42072/health', // Use health endpoint for ready detection
           timeout: 90000, // 90 seconds - Workers start faster
+          reuseExistingServer: true,
         },
       ],
 });

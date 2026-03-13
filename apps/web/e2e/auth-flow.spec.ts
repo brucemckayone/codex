@@ -103,9 +103,10 @@ test.describe
 
       await page.fill('input[name="email"]', TEST_USER.email);
       await page.fill('input[name="password"]', TEST_USER.password);
-      await page.click('button[type="submit"]');
+      // noWaitAfter: login triggers navigation; let the URL assertion handle the wait
+      await page.click('button[type="submit"]', { noWaitAfter: true });
 
-      await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
+      await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
     });
 
     test('session persists across navigation', async ({ page }) => {
@@ -114,9 +115,9 @@ test.describe
 
       await page.fill('input[name="email"]', TEST_USER.email);
       await page.fill('input[name="password"]', TEST_USER.password);
-      await page.click('button[type="submit"]');
+      await page.click('button[type="submit"]', { noWaitAfter: true });
 
-      await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
+      await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
 
       // Navigate to a protected route — session should persist
       await page.goto('/account');

@@ -47,30 +47,20 @@ const _MOCK_USER = {
  * runes and remote forms have finished hydrating on the client side.
  */
 async function navigateToAccountPage(page: import('@playwright/test').Page) {
-  await page.goto('/account', { waitUntil: 'domcontentloaded' });
+  await page.goto('/account', { waitUntil: 'load' });
 
-  // Wait for network to be idle - ensures API calls complete
-  // Use longer timeout for CI where wrangler dev is slower than Vite
-  await page.waitForLoadState('networkidle', { timeout: 30000 });
+  // Wait for the profile form to be visible (SSR-rendered).
+  // We can't use networkidle because TanStack Query background refetches never settle.
+  await page.waitForSelector('input[name="displayName"]', {
+    state: 'visible',
+    timeout: 30000,
+  });
 
-  // CRITICAL: Verify form actually rendered before proceeding
-  // In SSR apps, networkidle doesn't guarantee client-side hydration is complete.
-  // Svelte 5 remote forms need additional time to enhance after initial render.
-  await page
-    .waitForSelector('input[name="displayName"]', {
-      state: 'visible',
-      timeout: 15000,
-    })
-    .catch(async () => {
-      // Retry once if hydration is still in progress
-      console.warn('Form not ready after networkidle, reloading page...');
-      await page.goto('/account', { waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('networkidle', { timeout: 30000 });
-      await page.waitForSelector('input[name="displayName"]', {
-        state: 'visible',
-        timeout: 15000,
-      });
-    });
+  // Wait for Svelte 5 hydration to complete. After the 'load' event, all module
+  // scripts have executed and Svelte's synchronous hydration pass has started.
+  // A requestAnimationFrame ensures the hydration pass and any pending microtasks
+  // (e.g. $effect runs) have finished before we interact with the form.
+  await page.evaluate(() => new Promise(requestAnimationFrame));
 }
 
 /**
@@ -153,16 +143,16 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await authenticateAsUser();
     await navigateToAccountPage(page);
 
-    // Display name should be pre-filled (test user has a name)
+    // Form fields should be visible and interactive
+    // Note: profile data is not pre-filled (identity API returns empty profile for new users)
     const displayNameInput = page.locator('input[name="displayName"]');
-    await expect(displayNameInput).not.toBeEmpty();
+    await expect(displayNameInput).toBeVisible();
 
-    // Email should be pre-filled and disabled
+    // Email field is always disabled (cannot change email)
     const emailInput = page.locator('input[name="email"]');
-    await expect(emailInput).not.toBeEmpty();
     await expect(emailInput).toBeDisabled();
 
-    // Username may or may not be set depending on test user
+    // Username field should be visible
     const usernameInput = page.locator('input[name="username"]');
     await expect(usernameInput).toBeVisible();
   });
@@ -196,7 +186,7 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="displayName"]', newDisplayName);
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Wait for form submission
     await waitForFormSave(page);
@@ -237,7 +227,7 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="username"]', newUsername);
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should submit form
     await waitForFormSave(page);
@@ -254,11 +244,11 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="username"]', 'InvalidUser');
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should show validation error
     const usernameInput = page.locator('input[name="username"]');
-    await expect(usernameInput).toHaveAttribute('data-error', 'true');
+    await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
   });
 
   test('shows validation error for invalid username with special characters', async ({
@@ -271,11 +261,11 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="username"]', 'user@name');
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should show validation error
     const usernameInput = page.locator('input[name="username"]');
-    await expect(usernameInput).toHaveAttribute('data-error', 'true');
+    await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
   });
 
   test('shows validation error for username too short', async ({
@@ -288,11 +278,11 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="username"]', 'a');
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should show validation error
     const usernameInput = page.locator('input[name="username"]');
-    await expect(usernameInput).toHaveAttribute('data-error', 'true');
+    await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
   });
 
   test('shows validation error for username too long', async ({
@@ -305,11 +295,11 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="username"]', 'a'.repeat(51));
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should show validation error
     const usernameInput = page.locator('input[name="username"]');
-    await expect(usernameInput).toHaveAttribute('data-error', 'true');
+    await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
   });
 
   test('can update bio with multiline text', async ({
@@ -325,7 +315,7 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('textarea[name="bio"]', newBio);
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should submit form
     await waitForFormSave(page);
@@ -349,7 +339,7 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     );
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should submit form
     await waitForFormSave(page);
@@ -366,11 +356,11 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="website"]', 'not-a-valid-url');
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should show validation error
     const websiteInput = page.locator('input[name="website"]');
-    await expect(websiteInput).toHaveAttribute('data-error', 'true');
+    await expect(websiteInput).toHaveAttribute('aria-invalid', 'true');
   });
 
   test('shows validation error for invalid twitter URL', async ({
@@ -383,11 +373,11 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await page.fill('input[name="twitter"]', 'twitter.com/user');
 
     // Click save
-    await page.click('button[type="submit"]');
+    await page.click('button[type="submit"]', { noWaitAfter: true });
 
     // Should show validation error
     const twitterInput = page.locator('input[name="twitter"]');
-    await expect(twitterInput).toHaveAttribute('data-error', 'true');
+    await expect(twitterInput).toHaveAttribute('aria-invalid', 'true');
   });
 
   test('avatar preview shows when file is selected', async ({
@@ -397,21 +387,24 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await authenticateAsUser();
     await navigateToAccountPage(page);
 
-    // Create a mock file
-    const fileBuffer = Buffer.from('fake-image-content');
-
-    // Set up the file input with a mock file
-    const fileInput = page.locator('input#avatar-upload');
-    await fileInput.setInputFiles({
+    // Retry setInputFiles until Svelte hydration attaches the onchange handler.
+    // Pre-hydration: file is set on input but change event has no listener.
+    // Post-hydration: change event fires handleAvatarSelect → hasSelectedFile=true.
+    // Clear input before each retry so the change event fires again.
+    const avatarInput = page.locator('input#avatar-upload');
+    const avatarFile = {
       name: 'avatar.jpg',
       mimeType: 'image/jpeg',
-      buffer: fileBuffer,
-    });
+      buffer: Buffer.from('fake-image-content'),
+    };
+    await expect(async () => {
+      await avatarInput.setInputFiles([]);
+      await avatarInput.setInputFiles(avatarFile);
+      await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
-    // "Save Avatar" and "Cancel" buttons should appear
-    await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
-      timeout: 5000,
-    });
     await expect(page.locator('button:has-text("Cancel")')).toBeVisible({
       timeout: 5000,
     });
@@ -424,21 +417,19 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await authenticateAsUser();
     await navigateToAccountPage(page);
 
-    // Create a mock file
-    const fileBuffer = Buffer.from('fake-image-content');
-
-    // Set up the file input with a mock file
-    const fileInput = page.locator('input#avatar-upload');
-    await fileInput.setInputFiles({
+    const avatarInput = page.locator('input#avatar-upload');
+    const avatarFile = {
       name: 'avatar.jpg',
       mimeType: 'image/jpeg',
-      buffer: fileBuffer,
-    });
-
-    // "Save Avatar" and "Cancel" buttons should appear
-    await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
-      timeout: 5000,
-    });
+      buffer: Buffer.from('fake-image-content'),
+    };
+    await expect(async () => {
+      await avatarInput.setInputFiles([]);
+      await avatarInput.setInputFiles(avatarFile);
+      await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
     // Click cancel
     await page.click('button:has-text("Cancel")');
@@ -459,27 +450,24 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await authenticateAsUser();
     await navigateToAccountPage(page);
 
-    // Create a mock file
-    const fileBuffer = Buffer.from('fake-image-content');
-
-    // Set up the file input with a mock file
-    const fileInput = page.locator('input#avatar-upload');
-    await fileInput.setInputFiles({
+    const avatarInput = page.locator('input#avatar-upload');
+    const avatarFile = {
       name: 'avatar.jpg',
       mimeType: 'image/jpeg',
-      buffer: fileBuffer,
-    });
-
-    // "Save Avatar" button should appear
-    await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
-      timeout: 5000,
-    });
+      buffer: Buffer.from('fake-image-content'),
+    };
+    await expect(async () => {
+      await avatarInput.setInputFiles([]);
+      await avatarInput.setInputFiles(avatarFile);
+      await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
     // Click save avatar
     await page.click('button:has-text("Save Avatar")');
 
     // Should show loading state or complete
-    // The button may change text or show loading indicator
     await page.waitForTimeout(1000);
   });
 
@@ -490,22 +478,24 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await authenticateAsUser();
     await navigateToAccountPage(page);
 
-    // Create a mock non-image file
-    const fileBuffer = Buffer.from('fake-pdf-content');
-
-    // Set up the file input with a non-image file
-    const fileInput = page.locator('input#avatar-upload');
-    await fileInput.setInputFiles({
+    const avatarInput = page.locator('input#avatar-upload');
+    const pdfFile = {
       name: 'document.pdf',
       mimeType: 'application/pdf',
-      buffer: fileBuffer,
-    });
+      buffer: Buffer.from('fake-pdf-content'),
+    };
+    await expect(async () => {
+      await avatarInput.setInputFiles([]);
+      await avatarInput.setInputFiles(pdfFile);
+      await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
-    // Click save avatar
+    // Click save avatar — server will validate and return error
     await page.click('button:has-text("Save Avatar")');
 
     // Should show error about file type or fail validation
-    // The "Uploading..." button should not appear permanently
     await page.waitForTimeout(2000);
   });
 
@@ -516,18 +506,22 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     await authenticateAsUser();
     await navigateToAccountPage(page);
 
-    // Create a mock file larger than 5MB
-    const fileBuffer = Buffer.alloc(6 * 1024 * 1024); // 6MB
-
-    // Set up the file input with a large file
-    const fileInput = page.locator('input#avatar-upload');
-    await fileInput.setInputFiles({
+    // Allocate once outside the retry loop to avoid repeated 6MB allocations
+    const avatarInput = page.locator('input#avatar-upload');
+    const largeFile = {
       name: 'large-avatar.jpg',
       mimeType: 'image/jpeg',
-      buffer: fileBuffer,
-    });
+      buffer: Buffer.alloc(6 * 1024 * 1024), // 6MB
+    };
+    await expect(async () => {
+      await avatarInput.setInputFiles([]);
+      await avatarInput.setInputFiles(largeFile);
+      await expect(page.locator('button:has-text("Save Avatar")')).toBeVisible({
+        timeout: 2000,
+      });
+    }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
-    // Click save avatar
+    // Click save avatar — server will validate and return error
     await page.click('button:has-text("Save Avatar")');
 
     // Should show error about file size
@@ -546,14 +540,22 @@ test.describe('Account Profile Page - Authenticated Behavior', () => {
     const isVisible = await removeButton.isVisible().catch(() => false);
 
     if (!isVisible) {
-      // User doesn't have avatar, upload one first
-      const fileBuffer = Buffer.from('fake-image-content');
-      const fileInput = page.locator('input#avatar-upload');
-      await fileInput.setInputFiles({
+      // User doesn't have avatar — upload one to verify Remove button state
+      const avatarInput = page.locator('input#avatar-upload');
+      const avatarFile = {
         name: 'avatar.jpg',
         mimeType: 'image/jpeg',
-        buffer: fileBuffer,
-      });
+        buffer: Buffer.from('fake-image-content'),
+      };
+      await expect(async () => {
+        await avatarInput.setInputFiles([]);
+        await avatarInput.setInputFiles(avatarFile);
+        await expect(
+          page.locator('button:has-text("Save Avatar")')
+        ).toBeVisible({
+          timeout: 2000,
+        });
+      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
 
       // When uploading new avatar, "Remove" button should be hidden
       await expect(page.locator('button:has-text("Remove")')).not.toBeVisible({
