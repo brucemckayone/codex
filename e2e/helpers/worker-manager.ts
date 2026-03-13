@@ -270,12 +270,12 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
       }
     });
 
-    // Timeout after 30 seconds
+    // Timeout after 60 seconds (auth worker cold starts can exceed 30s)
     setTimeout(() => {
       if (!hasStarted) {
-        reject(new Error(`${worker.name} startup timeout (30s)`));
+        reject(new Error(`${worker.name} startup timeout (60s)`));
       }
-    }, 30000);
+    }, 60000);
   });
 }
 

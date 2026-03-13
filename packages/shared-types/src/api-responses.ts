@@ -417,6 +417,7 @@ export interface CustomerListItem {
  */
 export interface PurchaseListItem {
   id: string;
+  customerId: string;
   createdAt: string; // ISO 8601 timestamp
   contentId: string;
   contentTitle: string;

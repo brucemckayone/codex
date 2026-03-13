@@ -71,6 +71,7 @@ purchases.get(
         items: result.items.map(
           (p): PurchaseListItem => ({
             id: p.id,
+            customerId: p.customerId,
             createdAt:
               p.createdAt instanceof Date
                 ? p.createdAt.toISOString()

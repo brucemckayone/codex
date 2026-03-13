@@ -410,12 +410,9 @@ describe('Purchase History API', () => {
       const purchase = data.items[0];
       expect(purchase.id).toBeDefined();
       expect(purchase.customerId).toBe(buyer.id);
-      expect(purchase.amountPaidCents).toBeDefined();
+      expect(purchase.amountCents).toBeDefined();
       expect(purchase.status).toBe('completed');
-      expect(purchase.content).toBeDefined();
-      expect(purchase.content.title).toBeDefined();
-      expect(purchase.content.slug).toBeDefined();
-      expect(purchase.content.contentType).toBe('video');
+      expect(purchase.contentTitle).toBeDefined();
     });
 
     test('should filter purchases by status', async () => {
@@ -458,7 +455,7 @@ describe('Purchase History API', () => {
       // Should have exactly one purchase for this content
       expect(data.items.length).toBe(1);
       expect(data.items[0].contentId).toBe(contentId);
-      expect(data.items[0].amountPaidCents).toBe(2999);
+      expect(data.items[0].amountCents).toBe(2999);
     });
 
     test('should handle custom pagination', async () => {
