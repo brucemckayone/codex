@@ -181,4 +181,9 @@
     background: var(--color-surface-secondary);
     color: var(--color-text);
   }
+
+  .btn-secondary:focus-visible {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 2px;
+  }
 </style>

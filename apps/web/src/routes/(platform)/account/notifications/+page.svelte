@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import * as m from '$paraglide/messages';
 	import { updateNotificationsForm } from '$lib/remote/account.remote';
 	import Button from '$lib/components/ui/Button/Button.svelte';
@@ -22,6 +23,10 @@
 		if (successTimeout) clearTimeout(successTimeout);
 		successTimeout = setTimeout(() => (showSuccess = false), 3000);
 	}
+
+	onDestroy(() => {
+		if (successTimeout) clearTimeout(successTimeout);
+	});
 
 	$effect(() => {
 		if (updateNotificationsForm.result?.success && !updateNotificationsForm.pending) {

@@ -9,9 +9,11 @@
 	import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
 	import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
 
+	import { onDestroy } from 'svelte';
+
 	// Use server-loaded profile data (no client-side fetch needed)
 	let { data } = $props();
-	const profile = data.profile;
+	const profile = $derived(data.profile);
 
 	// Avatar preview state
 	let avatarPreview = $state(profile?.image as string | null);
@@ -53,6 +55,10 @@
 		if (successTimeout) clearTimeout(successTimeout);
 		successTimeout = setTimeout(() => (showSuccess = false), 3000);
 	}
+
+	onDestroy(() => {
+		if (successTimeout) clearTimeout(successTimeout);
+	});
 
 	// Sync state after profile update
 	$effect(() => {

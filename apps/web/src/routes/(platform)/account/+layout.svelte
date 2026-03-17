@@ -4,7 +4,6 @@
    */
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
-  import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import * as m from '$paraglide/messages';
   import { ACCOUNT_NAV } from '$lib/config/navigation';
@@ -13,7 +12,7 @@
 
   const { children, data }: { children: Snippet; data: LayoutData } = $props();
 
-  onMount(() => {
+  $effect(() => {
     const staleKeys = getStaleKeys(data.versions ?? {});
 
     // User entity stale → library items may have changed (purchase/access updates)
