@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$paraglide/messages';
-	import { getProfile, updateProfileForm } from '$lib/remote/account.remote';
+	import { updateProfileForm } from '$lib/remote/account.remote';
 	import { avatarUploadForm } from '$lib/remote/avatar-upload.remote';
 	import { avatarDeleteForm } from '$lib/remote/avatar-delete.remote';
 	import Button from '$lib/components/ui/Button/Button.svelte';
@@ -9,11 +9,14 @@
 	import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
 	import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
 
-	const profile = await getProfile();
+	// Use server-loaded profile data (no client-side fetch needed)
+	let { data } = $props();
+	const profile = data.profile;
 
 	// Avatar preview state
 	let avatarPreview = $state(profile?.image as string | null);
 	let hasSelectedFile = $state(false);
+	let fileInput: HTMLInputElement;
 
 	const showDeleteAvatar = $derived(!!avatarPreview && !hasSelectedFile);
 
@@ -38,7 +41,6 @@
 	function handleAvatarCancel() {
 		avatarPreview = profile?.image ?? null;
 		hasSelectedFile = false;
-		const fileInput = document.getElementById('avatar-upload') as HTMLInputElement;
 		if (fileInput) fileInput.value = '';
 	}
 
@@ -72,7 +74,6 @@
 				avatarPreview = resultData.avatarUrl
 			}
 			hasSelectedFile = false;
-			const fileInput = document.getElementById('avatar-upload') as HTMLInputElement;
 			if (fileInput) fileInput.value = '';
 		}
 	});
@@ -135,6 +136,7 @@
 			<div class="avatar-actions">
 				<form {...avatarUploadForm} enctype="multipart/form-data" class="avatar-upload-form">
 					<input
+						bind:this={fileInput}
 						type="file"
 						id="avatar-upload"
 						{...avatarUploadForm.fields.avatar.as('file')}
@@ -147,7 +149,7 @@
 						type="button"
 						variant="secondary"
 						size="sm"
-						onclick={() => document.getElementById('avatar-upload')?.click()}
+						onclick={() => fileInput?.click()}
 						disabled={avatarUploadForm.pending > 0}
 					>
 						{m.account_avatar_upload()}

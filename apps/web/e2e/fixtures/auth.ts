@@ -22,7 +22,7 @@ import {
   orgFixture,
   parseCookieString,
 } from '@codex/test-utils/e2e';
-import { test as base } from '@playwright/test';
+import { test as base, type Page } from '@playwright/test';
 
 /**
  * Check if the Auth Worker is healthy and ready to accept requests
@@ -139,3 +139,100 @@ export const test = base.extend<AuthFixtures>({
 });
 
 export { expect } from '@playwright/test';
+
+/**
+ * Shared auth helper for beforeAll patterns.
+ *
+ * Registers a single user and returns cookies that can be injected
+ * into page contexts via beforeEach. Use for describe blocks where
+ * all tests are read-only (no mutations that leak between tests).
+ *
+ * Usage:
+ * ```ts
+ * let sharedCookies: SharedAuthCookies;
+ *
+ * test.beforeAll(async () => {
+ *   sharedCookies = await registerSharedUser();
+ * });
+ *
+ * test.beforeEach(async ({ page }) => {
+ *   await injectSharedAuth(page, sharedCookies);
+ * });
+ * ```
+ */
+export interface SharedAuthCookies {
+  cookies: {
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: 'Lax' | 'Strict' | 'None';
+    expires: number;
+  }[];
+  rawCookie: string;
+}
+
+export async function registerSharedUser(): Promise<SharedAuthCookies> {
+  const isHealthy = await checkAuthWorkerHealthy();
+  if (!isHealthy) {
+    console.warn(
+      'Auth Worker not running on port 42069 - shared auth may fail'
+    );
+  }
+
+  const email = `e2e-shared-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@test.codex`;
+  const user = await authFixture.registerUser({
+    email,
+    password: 'Test123!@#',
+    name: 'E2E Shared User',
+  });
+
+  const parsedCookies = parseCookieString(user.cookie);
+  const browserCookies: SharedAuthCookies['cookies'] = [];
+
+  for (const { name, value } of parsedCookies) {
+    browserCookies.push({
+      name,
+      value,
+      domain: 'localhost',
+      path: '/',
+      httpOnly: true,
+      secure: false,
+      sameSite: 'Lax',
+      expires: -1,
+    });
+
+    if (name === 'better-auth.session_token') {
+      browserCookies.push({
+        name: COOKIES.SESSION_NAME,
+        value,
+        domain: 'localhost',
+        path: '/',
+        httpOnly: true,
+        secure: false,
+        sameSite: 'Lax',
+        expires: -1,
+      });
+    }
+  }
+
+  return { cookies: browserCookies, rawCookie: user.cookie };
+}
+
+export async function injectSharedAuth(
+  page: Page,
+  shared: SharedAuthCookies
+): Promise<void> {
+  await page.context().clearCookies();
+  await page.context().addCookies(shared.cookies);
+}
+
+export async function cleanupSharedAuth(
+  shared: SharedAuthCookies | null
+): Promise<void> {
+  if (shared) {
+    await authFixture.logout(shared.rawCookie).catch(() => {});
+  }
+}

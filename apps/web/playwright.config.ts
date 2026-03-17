@@ -22,7 +22,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? 'html' : 'list',
   // Authenticated tests create real users via DB (register→verify→session) which takes
   // 5-25s under parallel load (Neon DB latency). 90s accommodates auth + page load.

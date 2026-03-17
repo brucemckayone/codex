@@ -8,7 +8,8 @@
  * requires direct handler delegation. Request tracking is integrated.
  */
 
-import { ENV_NAMES } from '@codex/constants';
+import { AUTH_ROLES, ENV_NAMES } from '@codex/constants';
+import { createDbClient, eq, schema } from '@codex/database';
 import { securityHeaders } from '@codex/security';
 import {
   createEnvValidationMiddleware,
@@ -22,7 +23,7 @@ import {
 import type { Context, Next } from 'hono';
 import { createAuthInstance } from './auth-config';
 import { createAuthRateLimiter } from './middleware';
-import type { AuthEnv } from './types';
+import type { AuthBindings, AuthEnv } from './types';
 
 /**
  * Create worker with standard middleware
@@ -118,6 +119,89 @@ app.get('/api/test/verification-token/:email', async (c) => {
   } catch (error) {
     console.error('[TEST] Failed to retrieve verification token:', error);
     return c.json({ error: 'Failed to retrieve token' }, 500);
+  }
+});
+
+/**
+ * Test-only endpoint for fast user registration
+ * Combines register + verify + session creation in a single call.
+ * Bypasses BetterAuth's multi-step flow for E2E test performance.
+ * ONLY available in development/test environments.
+ */
+app.post('/api/test/fast-register', async (c) => {
+  const env = c.env as unknown as AuthBindings;
+  const environment = env.ENVIRONMENT || ENV_NAMES.DEVELOPMENT;
+
+  if (environment !== ENV_NAMES.DEVELOPMENT && environment !== ENV_NAMES.TEST) {
+    return c.notFound();
+  }
+
+  const { email, password, name, role } = await c.req.json<{
+    email: string;
+    password: string;
+    name?: string;
+    role?: string;
+  }>();
+
+  if (!email || !password) {
+    return c.json({ error: 'email and password are required' }, 400);
+  }
+
+  try {
+    const db = createDbClient(env);
+    const auth = createAuthInstance({ env });
+
+    // Use BetterAuth's internal API to create user + session in one go.
+    // This calls signUpEmail which handles password hashing and user creation.
+    const userName = name ?? email.split('@')[0] ?? 'Test User';
+    const userRole = role ?? AUTH_ROLES.USER;
+
+    // Use BetterAuth as an HTTP handler to get proper Set-Cookie headers.
+    // Build a synthetic request to the sign-up endpoint.
+    const signUpRequest = new Request(
+      `${env.WEB_APP_URL || 'http://localhost:42069'}/api/auth/sign-up/email`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin:
+            env.WEB_APP_URL ||
+            c.req.header('Origin') ||
+            'http://localhost:42069',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          name: userName,
+          role: userRole,
+        }),
+      }
+    );
+
+    const signUpResponse = await auth.handler(signUpRequest);
+
+    if (!signUpResponse || signUpResponse.status >= 400) {
+      const body = signUpResponse ? await signUpResponse.text() : 'null';
+      return c.json({ error: 'Sign-up failed', details: body }, 500);
+    }
+
+    // Mark email as verified directly in the database
+    await db
+      .update(schema.users)
+      .set({ emailVerified: true })
+      .where(eq(schema.users.email, email));
+
+    // Return the sign-up response which includes Set-Cookie headers
+    return signUpResponse;
+  } catch (error) {
+    console.error('[TEST] fast-register failed:', error);
+    return c.json(
+      {
+        error: 'Fast registration failed',
+        details: error instanceof Error ? error.message : String(error),
+      },
+      500
+    );
   }
 });
 

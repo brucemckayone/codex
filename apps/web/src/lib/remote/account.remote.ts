@@ -250,33 +250,6 @@ const purchaseHistoryQuerySchema = z.object({
   contentId: uuidSchema.optional(),
 });
 
-/**
- * Get purchase history
- *
- * Fetches the authenticated user's purchase history with pagination and optional filtering.
- * Returns a paginated list of purchases including associated content details.
- *
- * Query parameters:
- * - page: number (default: 1, min: 1)
- * - limit: number (default: 20, min: 1, max: 100)
- * - status: Optional filter by purchase status ('pending' | 'completed' | 'refunded' | 'failed')
- * - contentId: Optional filter by content UUID
- *
- * Usage:
- * ```svelte
- * <script>
- *   import { getPurchaseHistory } from '$lib/remote/account.remote';
- *
- *   const purchases = await getPurchaseHistory({ page: 1, limit: 20, status: 'completed' });
- * </script>
- *
- * {#each purchases.items as purchase}
- *   <PurchaseCard {purchase} />
- * {/each}
- *
- * <Pagination pagination={purchases.pagination} />
- * ```
- */
 // ─────────────────────────────────────────────────────────────────────────────
 // Portal Session Form
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,6 +267,13 @@ export const portalSessionForm = form(z.object({}), async (_data) => {
     const result = await api.checkout.createPortalSession({
       returnUrl: `${url.origin}/account/payment`,
     });
+
+    // Validate the redirect URL to prevent open redirect attacks
+    const portalUrl = new URL(result.data.url);
+    if (!portalUrl.hostname.endsWith('.stripe.com')) {
+      throw new Error('Invalid billing portal URL');
+    }
+
     redirect(303, result.data.url);
   } catch (error) {
     if (isRedirect(error)) throw error;

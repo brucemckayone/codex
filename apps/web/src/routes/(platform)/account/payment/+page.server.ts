@@ -12,10 +12,22 @@ export const load: PageServerLoad = async ({
     redirect(303, '/login?redirect=/account/payment');
   }
 
-  // Parse pagination and filter parameters from URL
-  const page = parseInt(url.searchParams.get('page') || '1', 10);
-  const limit = parseInt(url.searchParams.get('limit') || '20', 10);
-  const status = url.searchParams.get('status') || undefined;
+  // Parse pagination and filter parameters from URL with validation
+  const page = Math.max(
+    1,
+    parseInt(url.searchParams.get('page') || '1', 10) || 1
+  );
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10) || 20)
+  );
+  const validStatuses = ['completed', 'pending', 'failed', 'refunded'] as const;
+  const rawStatus = url.searchParams.get('status');
+  const status =
+    rawStatus &&
+    validStatuses.includes(rawStatus as (typeof validStatuses)[number])
+      ? rawStatus
+      : undefined;
 
   // Build query parameters
   const params = new URLSearchParams();

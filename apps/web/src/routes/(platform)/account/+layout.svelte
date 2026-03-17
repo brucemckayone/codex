@@ -6,6 +6,7 @@
   import type { LayoutData } from './$types';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
+  import * as m from '$paraglide/messages';
   import { ACCOUNT_NAV } from '$lib/config/navigation';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection } from '$lib/collections';
@@ -26,7 +27,7 @@
 
 <div class="account-layout">
   <aside class="account-sidebar">
-    <h2 class="sidebar-title">Account Settings</h2>
+    <h2 class="sidebar-title">{m.account_settings_title()}</h2>
     <nav class="sidebar-nav" aria-label="Account">
       {#each ACCOUNT_NAV as link (link.href)}
         <a
@@ -102,6 +103,11 @@
   .sidebar-link:hover {
     color: var(--color-text);
     background-color: var(--color-neutral-100);
+  }
+
+  .sidebar-link:focus-visible {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 2px;
   }
 
   .sidebar-link.active {

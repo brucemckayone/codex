@@ -4,13 +4,20 @@
  */
 
 import { redirect } from '@sveltejs/kit';
+import { createServerApi } from '$lib/server/api';
 
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, platform, cookies }) => {
   if (!locals.user) {
     redirect(303, '/login?redirect=/account');
   }
 
-  return {};
+  try {
+    const api = createServerApi(platform, cookies);
+    const response = await api.account.getProfile();
+    return { profile: response.data };
+  } catch {
+    return { profile: null };
+  }
 };

@@ -64,6 +64,10 @@ function isStripeError(error: unknown): error is Error & { type: string } {
 }
 
 import type {
+  PaginatedListResponse,
+  PurchaseListItem,
+} from '@codex/shared-types';
+import type {
   CheckoutSessionResult,
   CheckoutSessionVerifyResult,
   CompletePurchaseMetadata,
@@ -519,6 +523,54 @@ export class PurchaseService extends BaseService {
     } catch (error) {
       throw wrapError(error, { customerId, filters: validated });
     }
+  }
+
+  /**
+   * Format purchase history for client consumption
+   *
+   * Maps raw PurchaseWithContent records into PurchaseListItem DTOs
+   * with validated status values and ISO date strings.
+   *
+   * @param result - Raw purchase history from getPurchaseHistory()
+   * @returns Paginated response with formatted PurchaseListItem items
+   */
+  formatPurchasesForClient(result: {
+    items: PurchaseWithContent[];
+    total: number;
+    page: number;
+    limit: number;
+  }): PaginatedListResponse<PurchaseListItem> {
+    const validStatuses = new Set<PurchaseListItem['status']>([
+      PURCHASE_STATUS.COMPLETED,
+      PURCHASE_STATUS.PENDING,
+      PURCHASE_STATUS.FAILED,
+      PURCHASE_STATUS.REFUNDED,
+    ]);
+
+    return {
+      items: result.items.map(
+        (p): PurchaseListItem => ({
+          id: p.id,
+          customerId: p.customerId,
+          createdAt:
+            p.createdAt instanceof Date
+              ? p.createdAt.toISOString()
+              : p.createdAt,
+          contentId: p.contentId,
+          contentTitle: p.content.title,
+          amountCents: p.amountPaidCents,
+          status: validStatuses.has(p.status as PurchaseListItem['status'])
+            ? (p.status as PurchaseListItem['status'])
+            : PURCHASE_STATUS.PENDING,
+        })
+      ),
+      pagination: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / result.limit),
+      },
+    };
   }
 
   /**

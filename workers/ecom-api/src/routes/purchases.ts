@@ -67,28 +67,7 @@ purchases.get(
         ctx.input.query
       );
 
-      return {
-        items: result.items.map(
-          (p): PurchaseListItem => ({
-            id: p.id,
-            customerId: p.customerId,
-            createdAt:
-              p.createdAt instanceof Date
-                ? p.createdAt.toISOString()
-                : p.createdAt,
-            contentId: p.contentId,
-            contentTitle: p.content.title,
-            amountCents: p.amountPaidCents,
-            status: p.status as PurchaseListItem['status'],
-          })
-        ),
-        pagination: {
-          page: result.page,
-          limit: result.limit,
-          total: result.total,
-          totalPages: Math.ceil(result.total / result.limit),
-        },
-      };
+      return ctx.services.purchase.formatPurchasesForClient(result);
     },
   })
 );

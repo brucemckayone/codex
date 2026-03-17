@@ -201,7 +201,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 4px;
+    height: var(--space-1);
     background-color: var(--color-neutral-300);
   }
 
@@ -269,12 +269,12 @@
   }
 
   .skeleton-line-title {
-    height: 1rem;
+    height: var(--text-sm);
     width: 75%;
   }
 
   .skeleton-line-subtitle {
-    height: 0.75rem;
+    height: var(--text-xs);
     width: 50%;
   }
 
@@ -302,7 +302,7 @@
     align-items: center;
     padding: var(--space-2) var(--space-4);
     background-color: var(--color-primary-500);
-    color: white;
+    color: var(--color-text-inverse);
     border-radius: var(--radius-lg);
     text-decoration: none;
     font-weight: var(--font-medium);
@@ -311,5 +311,11 @@
 
   .browse-btn:hover {
     background-color: var(--color-primary-600);
+  }
+
+  .content-card:focus-visible,
+  .browse-btn:focus-visible {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 2px;
   }
 </style>

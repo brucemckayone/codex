@@ -94,15 +94,15 @@
 
 	// Format currency (UK pricing default)
 	function formatAmount(cents: number): string {
-		return new Intl.NumberFormat('en-GB', {
+		return new Intl.NumberFormat('en-US', {
 			style: 'currency',
-			currency: 'GBP',
+			currency: 'USD',
 		}).format(cents / 100);
 	}
 
 	// Format date (UK format)
 	function formatDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString('en-GB', {
+		return new Date(dateStr).toLocaleDateString('en-US', {
 			year: 'numeric',
 			month: 'short',
 			day: 'numeric',
@@ -377,6 +377,12 @@
 	.discover-link:hover {
 		background-color: var(--color-primary-50);
 		color: var(--color-primary-600);
+	}
+
+	.filter-list a:focus-visible,
+	.discover-link:focus-visible {
+		outline: 2px solid var(--color-primary-500);
+		outline-offset: 2px;
 	}
 
 	/* Pagination */

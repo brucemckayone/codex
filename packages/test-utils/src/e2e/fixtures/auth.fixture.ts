@@ -85,13 +85,103 @@ export const authFixture = {
   /**
    * Register a new user via auth worker.
    *
-   * Handles the complete verification flow:
+   * Tries the fast-register endpoint first (single HTTP call).
+   * Falls back to the multi-step flow if fast-register is unavailable.
+   */
+  async registerUser(data: {
+    email: string;
+    password: string;
+    name?: string;
+    role?: string;
+  }): Promise<RegisteredUser> {
+    // Try fast-register first (1 HTTP call instead of 3-5)
+    const fastResult = await this._tryFastRegister(data);
+    if (fastResult) return fastResult;
+
+    // Fallback: multi-step registration flow
+    return this._legacyRegister(data);
+  },
+
+  /**
+   * Fast registration via test-only endpoint.
+   * Returns null if the endpoint is unavailable (404).
+   */
+  async _tryFastRegister(data: {
+    email: string;
+    password: string;
+    name?: string;
+    role?: string;
+  }): Promise<RegisteredUser | null> {
+    try {
+      const response = await httpClient.post(
+        `${AUTH_URL}/api/test/fast-register`,
+        {
+          headers: { Origin: AUTH_URL },
+          data: {
+            email: data.email,
+            password: data.password,
+            name: data.name ?? data.email.split('@')[0],
+            role: data.role ?? 'customer',
+          },
+        }
+      );
+
+      // Endpoint not available (production/staging) — fall back
+      if (response.status === 404) return null;
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Fast registration failed (${response.status}): ${errorText.slice(0, 200)}`
+        );
+      }
+
+      const setCookie = response.headers.get('set-cookie');
+      const cookie = extractSessionCookie(setCookie);
+
+      // Get session data
+      const sessionResponse = await httpClient.get(
+        `${AUTH_URL}/api/auth/get-session`,
+        { headers: { Cookie: cookie } }
+      );
+
+      if (!sessionResponse.ok) {
+        throw new Error(
+          `Failed to get session after fast-register: ${sessionResponse.status}`
+        );
+      }
+
+      const sessionData = (await sessionResponse.json()) as {
+        user: RegisteredUser['user'];
+        session: RegisteredUser['session'];
+      };
+
+      return {
+        user: sessionData.user,
+        session: sessionData.session,
+        cookie,
+      };
+    } catch (error) {
+      // If fast-register throws (not just 404), log and fall back
+      if (
+        error instanceof Error &&
+        error.message.includes('Fast registration failed')
+      ) {
+        throw error; // Re-throw actual failures
+      }
+      console.warn('Fast-register unavailable, falling back:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Legacy multi-step registration flow.
    * 1. Register via HTTP POST
    * 2. Capture verification token from KV (test endpoint)
    * 3. Verify email via HTTP GET
    * 4. Return user and session details
    */
-  async registerUser(data: {
+  async _legacyRegister(data: {
     email: string;
     password: string;
     name?: string;

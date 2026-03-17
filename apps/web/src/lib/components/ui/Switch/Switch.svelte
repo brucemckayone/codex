@@ -94,7 +94,7 @@
     height: var(--space-5);
     width: var(--space-5);
     border-radius: var(--radius-full);
-    background-color: white;
+    background-color: var(--color-text-inverse);
     box-shadow: var(--shadow-sm);
     transition: transform var(--duration-normal) var(--ease-out);
     transform: translateX(var(--space-0-5));

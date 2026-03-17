@@ -128,12 +128,19 @@ export function useLiveQuerySSR(
   }
 
   // On client, delegate to real useLiveQuery
-  // Normalize parameters for the base function
-  if (Array.isArray(depsOrOptions)) {
+  // Runtime disambiguation: if first arg has a `.state` property it's a collection (overload 3),
+  // otherwise it's a query function or config object (overload 1/2).
+  const isCollection =
+    queryFnOrConfigOrCollection != null &&
+    typeof queryFnOrConfigOrCollection === 'object' &&
+    'state' in queryFnOrConfigOrCollection;
+
+  if (!isCollection && Array.isArray(depsOrOptions)) {
     // Overload 1 or 2: deps is second param, options is third
     return baseUseLiveQuery(queryFnOrConfigOrCollection, depsOrOptions);
   } else {
     // Overload 3: collection is first param, options is second (or omitted)
+    // Also handles overload 1/2 when deps are omitted
     return baseUseLiveQuery(queryFnOrConfigOrCollection);
   }
 }

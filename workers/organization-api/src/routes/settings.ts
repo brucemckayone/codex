@@ -124,6 +124,25 @@ export async function updateBrandCache(
   }
 }
 
+/**
+ * Invalidate brand cache and bump org version for client staleness detection.
+ * Extracts duplicated cache invalidation logic used by branding mutation handlers.
+ */
+function invalidateBrandAndCache(
+  ctx: {
+    env: Bindings;
+    executionCtx: { waitUntil(promise: Promise<unknown>): void };
+  },
+  orgId: string
+) {
+  const tasks: Promise<unknown>[] = [updateBrandCache(ctx.env, orgId)];
+  if (ctx.env.CACHE_KV) {
+    const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+    tasks.push(cache.invalidate(orgId));
+  }
+  ctx.executionCtx.waitUntil(Promise.all(tasks));
+}
+
 const app = new Hono<HonoEnv>();
 
 // Param schema for org ID validation
@@ -178,20 +197,7 @@ app.put(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       const result = await ctx.services.settings.updateBranding(ctx.input.body);
 
-      // Invalidate brand page cache and bump org version for client staleness detection
-      if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        ctx.executionCtx.waitUntil(
-          Promise.all([
-            updateBrandCache(ctx.env, ctx.input.params.id),
-            cache.invalidate(ctx.input.params.id),
-          ])
-        );
-      } else {
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env, ctx.input.params.id)
-        );
-      }
+      invalidateBrandAndCache(ctx, ctx.input.params.id);
 
       return result;
     },
@@ -240,20 +246,7 @@ app.post(
         size: logoFile.size,
       });
 
-      // Invalidate brand page cache and bump org version for client staleness detection
-      if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        ctx.executionCtx.waitUntil(
-          Promise.all([
-            updateBrandCache(ctx.env, ctx.input.params.id),
-            cache.invalidate(ctx.input.params.id),
-          ])
-        );
-      } else {
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env, ctx.input.params.id)
-        );
-      }
+      invalidateBrandAndCache(ctx, ctx.input.params.id);
 
       return result;
     },
@@ -276,20 +269,7 @@ app.delete(
       }
       const result = await ctx.services.settings.deleteLogo();
 
-      // Invalidate brand page cache and bump org version for client staleness detection
-      if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        ctx.executionCtx.waitUntil(
-          Promise.all([
-            updateBrandCache(ctx.env, ctx.input.params.id),
-            cache.invalidate(ctx.input.params.id),
-          ])
-        );
-      } else {
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env, ctx.input.params.id)
-        );
-      }
+      invalidateBrandAndCache(ctx, ctx.input.params.id);
 
       return result;
     },

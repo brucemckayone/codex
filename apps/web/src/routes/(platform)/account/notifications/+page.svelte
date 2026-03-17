@@ -1,12 +1,13 @@
 <script lang="ts">
 	import * as m from '$paraglide/messages';
-	import { getNotificationPreferences, updateNotificationsForm } from '$lib/remote/account.remote';
+	import { updateNotificationsForm } from '$lib/remote/account.remote';
 	import Button from '$lib/components/ui/Button/Button.svelte';
 	import Label from '$lib/components/ui/Label/Label.svelte';
 	import Switch from '$lib/components/ui/Switch/Switch.svelte';
 
-	// Fetch notification preferences via remote query
-	const preferences = await getNotificationPreferences();
+	// Use server-loaded preferences (no client-side fetch needed)
+	let { data } = $props();
+	const preferences = data.preferences;
 
 	// Local state for Switch bindings and conditional hidden input rendering
 	let marketingChecked = $state(preferences?.emailMarketing ?? false);
@@ -65,7 +66,7 @@
 			{#if marketingChecked}
 				<input type="hidden" name="b:emailMarketing" value="on" />
 			{/if}
-			<Switch id="emailMarketing" bind:checked={marketingChecked} />
+			<Switch id="emailMarketing" bind:checked={marketingChecked} disabled={updateNotificationsForm.pending > 0} />
 		</div>
 
 		<!-- Transactional Emails -->
@@ -77,7 +78,7 @@
 			{#if transactionalChecked}
 				<input type="hidden" name="b:emailTransactional" value="on" />
 			{/if}
-			<Switch id="emailTransactional" bind:checked={transactionalChecked} />
+			<Switch id="emailTransactional" bind:checked={transactionalChecked} disabled={updateNotificationsForm.pending > 0} />
 		</div>
 
 		<!-- Weekly Digest -->
@@ -89,7 +90,7 @@
 			{#if digestChecked}
 				<input type="hidden" name="b:emailDigest" value="on" />
 			{/if}
-			<Switch id="emailDigest" bind:checked={digestChecked} />
+			<Switch id="emailDigest" bind:checked={digestChecked} disabled={updateNotificationsForm.pending > 0} />
 		</div>
 
 		<div class="form-actions">

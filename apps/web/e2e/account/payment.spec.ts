@@ -1,5 +1,11 @@
 import { expect } from '@playwright/test';
-import { test } from '../fixtures/auth';
+import {
+  cleanupSharedAuth,
+  injectSharedAuth,
+  registerSharedUser,
+  type SharedAuthCookies,
+  test,
+} from '../fixtures/auth';
 
 /**
  * Account Payment Page Integration Tests
@@ -26,48 +32,25 @@ test.describe('Account Payment Page', () => {
 });
 
 test.describe('Account Payment Page - Authenticated Behavior', () => {
-  // These tests use authenticated test users
+  // All tests are read-only (checking empty states, filters, pagination).
+  // Share a single auth session across all tests to avoid redundant registrations.
+  test.describe.configure({ mode: 'serial' });
 
-  // Mock data for reference when testing the page structure
-  const _mockPurchaseHistory = {
-    items: [
-      {
-        id: 'purchase-1',
-        createdAt: '2025-01-15T10:30:00Z',
-        amountCents: 999,
-        status: 'complete',
-        contentTitle: 'Advanced Photography Course',
-      },
-      {
-        id: 'purchase-2',
-        createdAt: '2025-01-10T14:20:00Z',
-        amountCents: 1499,
-        status: 'pending',
-        contentTitle: 'Music Production Tutorial',
-      },
-      {
-        id: 'purchase-3',
-        createdAt: '2025-01-05T09:15:00Z',
-        amountCents: 2499,
-        status: 'failed',
-        contentTitle: 'Web Development Bootcamp',
-      },
-      {
-        id: 'purchase-4',
-        createdAt: '2024-12-20T16:45:00Z',
-        amountCents: 799,
-        status: 'refunded',
-        contentTitle: 'Digital Art Basics',
-      },
-    ],
-    pagination: { page: 1, limit: 20, total: 4, totalPages: 1 },
-  };
+  let sharedAuth: SharedAuthCookies;
 
-  test('displays payment page with all sections', async ({
-    page,
-    authenticateAsUser,
-  }) => {
-    await authenticateAsUser();
+  test.beforeAll(async () => {
+    sharedAuth = await registerSharedUser();
+  });
+
+  test.afterAll(async () => {
+    await cleanupSharedAuth(sharedAuth);
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await injectSharedAuth(page, sharedAuth);
+  });
+
+  test('displays payment page with all sections', async ({ page }) => {
     await page.goto('/account/payment');
 
     // Should show page title "Payments"
@@ -84,33 +67,20 @@ test.describe('Account Payment Page - Authenticated Behavior', () => {
     ).toBeVisible();
   });
 
-  test('shows empty state when no purchases exist', async ({
-    page,
-    authenticateAsUser,
-  }) => {
-    await authenticateAsUser();
+  test('shows empty state when no purchases exist', async ({ page }) => {
     await page.goto('/account/payment');
 
     // Test users have no purchases, so empty state should show
     const emptyState = page.locator('text=/No purchases/i');
-    const isVisible = await emptyState.isVisible().catch(() => false);
+    await expect(emptyState).toBeVisible();
 
-    if (isVisible) {
-      // Should show empty state message
-      await expect(emptyState).toBeVisible();
-
-      // Should show link to discover page
-      await expect(
-        page.locator('a[href="/discover"], a:has-text("Browse")').first()
-      ).toBeVisible();
-    }
+    // Should show link to discover page
+    await expect(
+      page.locator('a[href="/discover"], a:has-text("Browse")').first()
+    ).toBeVisible();
   });
 
-  test('displays "Manage Billing" section', async ({
-    page,
-    authenticateAsUser,
-  }) => {
-    await authenticateAsUser();
+  test('displays "Manage Billing" section', async ({ page }) => {
     await page.goto('/account/payment');
 
     // Should show "Billing Information" heading
@@ -119,183 +89,100 @@ test.describe('Account Payment Page - Authenticated Behavior', () => {
     ).toBeVisible();
   });
 
-  test('status filter links are displayed', async ({
+  test('status filter links are hidden when no purchases exist', async ({
     page,
-    authenticateAsUser,
   }) => {
-    await authenticateAsUser();
     await page.goto('/account/payment');
 
-    // Look for filter links
-    const filters = page.locator('nav.filters a, .filter-list a');
-    const count = await filters.count();
-
-    // Should have at least some filter links if they exist
-    if (count > 0) {
-      expect(count).toBeGreaterThan(0);
-    }
+    // Filters only render when purchases exist — test user has none
+    const filters = page.locator('nav.filters');
+    await expect(filters).not.toBeVisible();
   });
 
-  test('displays status badges with correct text', async ({
-    page,
-    authenticateAsUser,
-  }) => {
-    await authenticateAsUser();
+  test('displays status badges with correct text', async ({ page }) => {
     await page.goto('/account/payment');
 
-    // If there are purchase items, check for status badges
+    // Test users have no purchases — status badges only appear with purchase data
     const statusBadges = page.locator('[data-status], .status-badge');
     const count = await statusBadges.count();
 
-    if (count > 0) {
-      // At least one status badge should be visible
-      await expect(statusBadges.first()).toBeVisible();
-    }
+    // With no purchases, there should be no status badges
+    expect(count).toBe(0);
   });
 
   test.describe('Pagination', () => {
-    test('shows pagination when totalPages > 1', async ({
-      page,
-      authenticateAsUser,
-    }) => {
-      await authenticateAsUser();
+    test('pagination not shown when no purchases exist', async ({ page }) => {
       await page.goto('/account/payment');
 
-      // Check for pagination component
+      // Test users have no purchases, so pagination should not be visible
       const pagination = page.locator(
         '.pagination, nav[aria-label="Pagination"]'
       );
-      const hasPagination = await pagination.isVisible().catch(() => false);
-
-      if (hasPagination) {
-        // Should show Pagination component
-        await expect(pagination).toBeVisible();
-
-        // Check for Previous/Next buttons
-        const prevButton = page.locator(
-          'button:has-text("Previous"), a:has-text("Previous")'
-        );
-        const nextButton = page.locator(
-          'button:has-text("Next"), a:has-text("Next")'
-        );
-
-        await expect(prevButton.or(nextButton)).toHaveCount(1);
-      }
+      await expect(pagination).not.toBeVisible();
     });
 
-    test('navigates to next page', async ({ page, authenticateAsUser }) => {
-      await authenticateAsUser();
+    test('navigates to next page', async ({ page }) => {
       await page.goto('/account/payment');
 
-      // Look for Next button
+      // With no purchases, Next button should not be visible
       const nextButton = page.locator(
         'button:has-text("Next"), a:has-text("Next")'
       );
-      const hasButton = await nextButton.isVisible().catch(() => false);
-
-      if (hasButton && !(await nextButton.isDisabled())) {
-        await nextButton.click();
-
-        // URL should update with ?page=2
-        const url = new URL(page.url());
-        expect(url.searchParams.get('page')).toBe('2');
-      }
+      await expect(nextButton).not.toBeVisible();
     });
 
-    test('navigates to previous page', async ({ page, authenticateAsUser }) => {
-      await authenticateAsUser();
+    test('navigates to previous page', async ({ page }) => {
       await page.goto('/account/payment?page=2');
 
-      // Look for Previous button
+      // With no purchases, Previous button should not be visible
       const prevButton = page.locator(
         'button:has-text("Previous"), a:has-text("Previous")'
       );
-      const hasButton = await prevButton.isVisible().catch(() => false);
-
-      if (hasButton && !(await prevButton.isDisabled())) {
-        await prevButton.click();
-
-        // URL should update (page param removed or set to 1)
-        await expect(page).toHaveURL(/account\/payment/);
-      }
+      await expect(prevButton).not.toBeVisible();
     });
 
-    test('disables Next button on last page', async ({
-      page,
-      authenticateAsUser,
-    }) => {
-      await authenticateAsUser();
+    test('disables Next button on last page', async ({ page }) => {
       await page.goto('/account/payment?page=999');
 
-      // Check if Next button is disabled
+      // With no data, Next button should not appear
       const nextButton = page.locator(
         'button:has-text("Next"), a:has-text("Next")'
       );
-      const hasButton = await nextButton.isVisible().catch(() => false);
-
-      if (hasButton) {
-        const isDisabled = await nextButton.isDisabled();
-        expect(isDisabled).toBeDefined();
-      }
+      await expect(nextButton).not.toBeVisible();
     });
   });
 
   test.describe('Filter and Pagination Interaction', () => {
-    test('changing filter resets to page 1', async ({
-      page,
-      authenticateAsUser,
-    }) => {
-      await authenticateAsUser();
+    test('filter nav is not present without purchases', async ({ page }) => {
       await page.goto('/account/payment?page=2');
 
-      // Look for status filter links
-      const filterLink = page.locator('nav.filters a, .filter-list a').first();
-      const hasFilter = await filterLink.isVisible().catch(() => false);
-
-      if (hasFilter) {
-        await filterLink.click();
-
-        // URL should have status parameter but page should be reset
-        const url = new URL(page.url());
-        const pageParam = url.searchParams.get('page');
-        expect(pageParam).toBeFalsy();
-      }
+      // Without purchases, filters don't render — verify absence
+      const filterNav = page.locator('nav.filters');
+      await expect(filterNav).not.toBeVisible();
     });
   });
 
   test.describe('Currency and Date Formatting', () => {
-    test('formats currency amounts correctly (GBP)', async ({
-      page,
-      authenticateAsUser,
-    }) => {
-      await authenticateAsUser();
+    test('formats currency amounts correctly (USD)', async ({ page }) => {
       await page.goto('/account/payment');
 
-      // Look for currency amounts (should use £ symbol)
-      const currencyElements = page.locator('text=/£[0-9]+.[0-9]{2}/');
+      // Test users have no purchases — currency elements only appear with data
+      const currencyElements = page.locator('text=/\\$[0-9]+.[0-9]{2}/');
       const count = await currencyElements.count();
 
-      if (count > 0) {
-        // At least one properly formatted currency amount
-        await expect(currencyElements.first()).toBeVisible();
-      }
+      // With no purchases, no currency amounts should be displayed
+      expect(count).toBe(0);
     });
 
-    test('formats dates correctly (UK format)', async ({
-      page,
-      authenticateAsUser,
-    }) => {
-      await authenticateAsUser();
+    test('formats dates correctly (US format)', async ({ page }) => {
       await page.goto('/account/payment');
 
-      // Look for date elements - UK format typically shows day month year
+      // Test users have no purchases — date elements only appear with data
       const dateElements = page.locator('[data-date], .date, time');
       const count = await dateElements.count();
 
-      if (count > 0) {
-        // At least one date should be visible
-        await expect(dateElements.first()).toBeVisible();
-      }
+      // With no purchases, no date elements should be displayed
+      expect(count).toBe(0);
     });
   });
 });

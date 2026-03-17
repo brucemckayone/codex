@@ -293,37 +293,6 @@ export interface AvatarUploadResponse {
 // ============================================================================
 
 /**
- * Response for GET /api/user/profile
- * User's profile information including creator profile fields
- * @example
- * {
- *   id: "123e4567-e89b-12d3-a456-426614174000",
- *   name: "Jane Creator",
- *   email: "jane@example.com",
- *   emailVerified: true,
- *   image: "https://...",
- *   username: "janecreator",
- *   bio: "Video creator and educator",
- *   socialLinks: { website: "https://jane.com", twitter: "@janecreator" }
- * }
- */
-export interface UserProfileResponse {
-  id: string;
-  name: string;
-  email: string;
-  emailVerified: boolean;
-  image: string | null;
-  username: string | null;
-  bio: string | null;
-  socialLinks: {
-    website?: string;
-    twitter?: string;
-    youtube?: string;
-    instagram?: string;
-  } | null;
-}
-
-/**
  * Response for GET/PUT /api/user/notification-preferences
  * User's email notification preferences
  * @example

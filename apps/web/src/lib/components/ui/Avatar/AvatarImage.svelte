@@ -29,7 +29,7 @@
   onload={onLoad}
   onerror={onError}
   {...restProps}
-  alt={restProps.alt || ""}
+  alt={restProps.alt || "User avatar"}
 />
 
 <style>

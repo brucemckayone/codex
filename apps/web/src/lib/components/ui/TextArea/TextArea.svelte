@@ -29,8 +29,11 @@
     autoResize = true,
     error,
     class: className,
+    id,
     ...restProps
   }: Props = $props();
+
+  const errorId = id ? `${id}-error` : 'textarea-error';
 
   let textarea: HTMLTextAreaElement;
   // Internal state prevents resize loop when autoResize updates textarea height
@@ -66,10 +69,13 @@
     oninput={handleInput}
     class="textarea"
     data-error={!!error}
+    aria-invalid={!!error}
+    aria-describedby={error ? errorId : undefined}
+    {id}
     {...restProps}
   ></textarea>
   {#if error}
-    <span class="error-text">{error}</span>
+    <span class="error-text" id={errorId} role="alert">{error}</span>
   {/if}
 </div>
 
