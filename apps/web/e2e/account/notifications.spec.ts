@@ -1,5 +1,68 @@
-import { expect } from '@playwright/test';
-import { test } from '../fixtures/auth';
+import { expect, type Page } from '@playwright/test';
+import {
+  cleanupSharedAuth,
+  injectSharedAuth,
+  registerSharedUser,
+  type SharedAuthCookies,
+  test,
+} from '../fixtures/auth';
+
+/**
+ * Wait for a Melt UI Switch to become interactive (use:root action has attached
+ * the click handler) and toggle it once.
+ *
+ * data-state is present in SSR HTML via the $root attribute spread, so its mere
+ * presence does NOT indicate hydration. Instead, we click the element inside the
+ * browser context and check whether data-state actually changed — which only
+ * happens after the use:root action has run.
+ *
+ * A _toggled marker prevents double-toggling across polling iterations.
+ */
+async function toggleSwitch(page: Page, switchId: string) {
+  await page.waitForFunction(
+    async (id) => {
+      const el = document.getElementById(id);
+      if (!el) return false;
+      const before = el.getAttribute('data-state');
+      if (!before) return false;
+      if (el.dataset._toggled) return true;
+      el.click();
+      await new Promise((r) => setTimeout(r, 100));
+      const after = el.getAttribute('data-state');
+      if (after !== before) {
+        el.dataset._toggled = '1';
+        return true;
+      }
+      return false;
+    },
+    switchId,
+    { timeout: 10000, polling: 250 }
+  );
+}
+
+/**
+ * Navigate to the notifications page, retrying once if a transient auth
+ * failure causes a redirect to /login.
+ *
+ * Under parallel cold-start load, the auth worker may be briefly
+ * overloaded. hooks.server.ts catches the error and sets locals.user
+ * to null, which triggers a redirect to /login in +page.server.ts.
+ */
+async function navigateToNotificationsPage(page: Page) {
+  await page.goto('/account/notifications');
+  await page.waitForLoadState('networkidle');
+
+  // If auth worker was transiently unavailable, we'll be on /login — retry once
+  if (!page.url().includes('/account/notifications')) {
+    await page.goto('/account/notifications');
+    await page.waitForLoadState('networkidle');
+  }
+
+  await page.waitForSelector('#emailMarketing', {
+    state: 'visible',
+    timeout: 30000,
+  });
+}
 
 /**
  * Account Notifications Page Integration Tests
@@ -29,11 +92,26 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
   // All tests in this describe block use authenticated sessions
 
   test.describe('Form Display', () => {
+    // Read-only tests: share a single auth session
+    test.describe.configure({ mode: 'serial' });
+
+    let sharedAuth: SharedAuthCookies;
+
+    test.beforeAll(async () => {
+      sharedAuth = await registerSharedUser();
+    });
+
+    test.afterAll(async () => {
+      await cleanupSharedAuth(sharedAuth);
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await injectSharedAuth(page, sharedAuth);
+    });
+
     test('displays notification preferences page with all toggles', async ({
       page,
-      authenticateAsUser,
     }) => {
-      await authenticateAsUser();
       await page.goto('/account/notifications');
       // Wait for the Switch components to render (they have id attributes)
       await page.waitForSelector('#emailMarketing', {
@@ -67,9 +145,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
 
     test('toggles reflect current preferences from server', async ({
       page,
-      authenticateAsUser,
     }) => {
-      await authenticateAsUser();
       await page.goto('/account/notifications');
       // Wait for switches to be visible (confirms remote function query completed)
       await page.waitForSelector('#emailMarketing', {
@@ -90,28 +166,16 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
   });
 
   test.describe('Toggle Functionality', () => {
+    // These tests mutate toggle state — use per-test auth
     test('can toggle marketing emails preference', async ({
       page,
       authenticateAsUser,
     }) => {
       await authenticateAsUser();
-      await page.goto('/account/notifications');
-      // Wait for Switch components to render — proves remote function query completed
-      await page.waitForSelector('#emailMarketing', {
-        state: 'visible',
-        timeout: 30000,
-      });
+      await navigateToNotificationsPage(page);
 
-      const marketingSwitch = page.locator('#emailMarketing');
-      const initialState = await marketingSwitch.getAttribute('data-state');
-
-      // Click and retry until Svelte 5 hydration attaches the Melt UI handler.
-      // Pre-hydration clicks are no-ops; post-hydration clicks toggle data-state.
-      await expect(async () => {
-        await marketingSwitch.click();
-        const state = await marketingSwitch.getAttribute('data-state');
-        expect(state).not.toBe(initialState);
-      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
+      // Wait for hydration and toggle in one step
+      await toggleSwitch(page, 'emailMarketing');
 
       // ACT: Submit form
       await page.locator('button[type="submit"]').click();
@@ -125,20 +189,9 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       authenticateAsUser,
     }) => {
       await authenticateAsUser();
-      await page.goto('/account/notifications');
-      await page.waitForSelector('#emailMarketing', {
-        state: 'visible',
-        timeout: 30000,
-      });
+      await navigateToNotificationsPage(page);
 
-      const transactionalSwitch = page.locator('#emailTransactional');
-      const initialState = await transactionalSwitch.getAttribute('data-state');
-
-      await expect(async () => {
-        await transactionalSwitch.click();
-        const state = await transactionalSwitch.getAttribute('data-state');
-        expect(state).not.toBe(initialState);
-      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
+      await toggleSwitch(page, 'emailTransactional');
 
       // ACT: Submit form
       await page.locator('button[type="submit"]').click();
@@ -152,20 +205,9 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       authenticateAsUser,
     }) => {
       await authenticateAsUser();
-      await page.goto('/account/notifications');
-      await page.waitForSelector('#emailMarketing', {
-        state: 'visible',
-        timeout: 30000,
-      });
+      await navigateToNotificationsPage(page);
 
-      const digestSwitch = page.locator('#emailDigest');
-      const initialState = await digestSwitch.getAttribute('data-state');
-
-      await expect(async () => {
-        await digestSwitch.click();
-        const state = await digestSwitch.getAttribute('data-state');
-        expect(state).not.toBe(initialState);
-      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
+      await toggleSwitch(page, 'emailDigest');
 
       // ACT: Submit form
       await page.locator('button[type="submit"]').click();
@@ -176,26 +218,17 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
   });
 
   test.describe('Form States', () => {
+    // These tests mutate toggle state and intercept routes — use per-test auth
     test('shows loading state on save button during submission', async ({
       page,
       authenticateAsUser,
     }) => {
       await authenticateAsUser();
-      await page.goto('/account/notifications');
-      await page.waitForSelector('#emailMarketing', {
-        state: 'visible',
-        timeout: 30000,
-      });
+      await navigateToNotificationsPage(page);
 
-      // Toggle with retry to ensure Svelte hydration (must happen BEFORE route
-      // interceptor, which could block hydration-critical POST requests)
-      const marketingSwitch = page.locator('#emailMarketing');
-      const initialState = await marketingSwitch.getAttribute('data-state');
-      await expect(async () => {
-        await marketingSwitch.click();
-        const state = await marketingSwitch.getAttribute('data-state');
-        expect(state).not.toBe(initialState);
-      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
+      // Toggle must happen BEFORE route interceptor to avoid blocking
+      // hydration-critical POST requests
+      await toggleSwitch(page, 'emailMarketing');
 
       // Intercept POST to add delay so aria-busy is observable before response arrives.
       // Set up AFTER hydration to avoid blocking background fetches.
@@ -221,20 +254,10 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
       authenticateAsUser,
     }) => {
       await authenticateAsUser();
-      await page.goto('/account/notifications');
-      await page.waitForSelector('#emailMarketing', {
-        state: 'visible',
-        timeout: 30000,
-      });
+      await navigateToNotificationsPage(page);
 
-      // Prove Svelte hydration BEFORE setting up route interceptor
-      const marketingSwitch = page.locator('#emailMarketing');
-      const initialState = await marketingSwitch.getAttribute('data-state');
-      await expect(async () => {
-        await marketingSwitch.click();
-        const state = await marketingSwitch.getAttribute('data-state');
-        expect(state).not.toBe(initialState);
-      }).toPass({ intervals: [500, 1000, 2000], timeout: 15000 });
+      // Toggle must happen BEFORE route interceptor
+      await toggleSwitch(page, 'emailMarketing');
 
       // Intercept POST to add delay (set up AFTER hydration)
       await page.route('**', async (route) => {
@@ -261,8 +284,7 @@ test.describe('Account Notifications Page - Authenticated Behavior', () => {
 
       for (let i = 0; i < count; i++) {
         const isDisabled = await switches.nth(i).isDisabled();
-        // Switches may be disabled via attribute or CSS
-        expect(isDisabled || true).toBeTruthy();
+        expect(isDisabled).toBe(true);
       }
     });
 
