@@ -3,6 +3,7 @@
 
   Displays a content item with thumbnail, title, description, and creator info.
   Supports video, audio, and article content types with duration display.
+  Optional progress bar overlay and price badge on the thumbnail.
 
   @prop {string} id - Unique content identifier
   @prop {string} title - Content title
@@ -14,6 +15,8 @@
   @prop {Snippet} actions - Action buttons snippet
   @prop {string} href - Link URL
   @prop {boolean} loading - Show loading state
+  @prop {{ positionSeconds?: number; durationSeconds?: number; completed?: boolean; percentComplete?: number } | null} progress - Playback progress
+  @prop {{ amount: number; currency: string } | null} price - Price info (null = hidden, amount 0 = Free)
 -->
 <script lang="ts">
   import type { Snippet, HTMLAttributes } from 'svelte/elements';
@@ -36,6 +39,16 @@
     actions?: Snippet;
     href?: string;
     loading?: boolean;
+    progress?: {
+      positionSeconds?: number;
+      durationSeconds?: number;
+      completed?: boolean;
+      percentComplete?: number;
+    } | null;
+    price?: {
+      amount: number;
+      currency: string;
+    } | null;
   }
 
   const {
@@ -49,6 +62,8 @@
     actions,
     href = '#',
     loading = false,
+    progress = null,
+    price = null,
     class: className,
     ...rest
   }: Props = $props();
@@ -59,6 +74,15 @@
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   }
 
+  function formatPrice(amount: number, currency: string): string {
+    if (amount === 0) return m.content_price_free();
+    return new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 2,
+    }).format(amount / 100);
+  }
+
   const contentTypeLabels = {
     video: m.content_type_video(),
     audio: m.content_type_audio(),
@@ -66,6 +90,18 @@
   };
 
   const profileHref = $derived(creator?.username ? `/@${creator.username}` : '#');
+
+  const progressPercent = $derived.by(() => {
+    if (!progress) return 0;
+    if (progress.completed) return 100;
+    if (progress.percentComplete != null) return Math.round(progress.percentComplete);
+    if (progress.positionSeconds != null && progress.durationSeconds && progress.durationSeconds > 0) {
+      return Math.round((progress.positionSeconds / progress.durationSeconds) * 100);
+    }
+    return 0;
+  });
+
+  const hasProgress = $derived(progress != null && (progress.completed || progressPercent > 0));
 </script>
 
 <article class="content-card {className ?? ''} {loading ? 'content-card--loading' : ''}" {...rest}>
@@ -122,6 +158,18 @@
       {/if}
 
       <span class="content-card__type">{contentTypeLabels[contentType]}</span>
+
+      {#if price != null}
+        <span class="content-card__price-badge" class:content-card__price-badge--free={price.amount === 0}>
+          {formatPrice(price.amount, price.currency)}
+        </span>
+      {/if}
+
+      {#if hasProgress}
+        <div class="content-card__progress-track" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+          <div class="content-card__progress-fill" style="width: {progressPercent}%"></div>
+        </div>
+      {/if}
     </div>
 
     <div class="content-card__body">
@@ -131,6 +179,16 @@
 
       {#if description}
         <p class="content-card__description">{description}</p>
+      {/if}
+
+      {#if hasProgress}
+        <p class="content-card__progress-text">
+          {#if progress?.completed}
+            {m.content_progress_completed()}
+          {:else}
+            {m.content_progress_percent({ percent: String(progressPercent) })}
+          {/if}
+        </p>
       {/if}
 
       {#if creator}
@@ -246,6 +304,49 @@
     text-transform: uppercase;
   }
 
+  /* Price badge */
+  .content-card__price-badge {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    background: var(--color-primary-500, #c24129);
+    color: #ffffff;
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold, 600);
+    border-radius: var(--radius-sm);
+    z-index: 1;
+  }
+
+  .content-card__price-badge--free {
+    background: var(--color-success-500, #16a34a);
+  }
+
+  /* Progress bar */
+  .content-card__progress-track {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  .content-card__progress-fill {
+    height: 100%;
+    background: var(--color-primary-500, #c24129);
+    transition: width 0.3s ease;
+    border-radius: 0 2px 2px 0;
+  }
+
+  /* Progress text */
+  .content-card__progress-text {
+    margin: 0;
+    font-size: var(--text-xs, 0.75rem);
+    color: var(--color-primary-500, #c24129);
+    font-weight: var(--font-medium, 500);
+  }
+
   .content-card__body {
     padding: var(--space-3);
     display: flex;
@@ -338,6 +439,10 @@
   }
 
   [data-theme='dark'] .content-card__title a:hover {
+    color: var(--color-primary-400);
+  }
+
+  [data-theme='dark'] .content-card__progress-text {
     color: var(--color-primary-400);
   }
 </style>

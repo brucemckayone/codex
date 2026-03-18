@@ -4,10 +4,16 @@
   Accessible pagination component with page number display and navigation.
   Supports both default and compact variants.
 
+  When `baseUrl` is provided, renders `<a>` tags instead of `<button>` for
+  SSR/SEO-friendly pagination (progressive enhancement). Links still fire
+  `onPageChange` for client-side state sync.
+
   @prop {number} currentPage - Current active page (1-indexed)
   @prop {number} totalPages - Total number of pages
   @prop {(page: number) => void} onPageChange - Callback when page changes
   @prop {'default' | 'compact'} variant - Display variant
+  @prop {string} [baseUrl] - When set, render <a> tags with href for SEO
+  @prop {string} [paramName='page'] - URL search param name for page number
 -->
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
@@ -18,6 +24,8 @@
     totalPages: number;
     onPageChange?: (page: number) => void;
     variant?: 'default' | 'compact';
+    baseUrl?: string;
+    paramName?: string;
   }
 
   const {
@@ -25,15 +33,18 @@
     totalPages,
     onPageChange,
     variant = 'default',
+    baseUrl,
+    paramName = 'page',
     class: className,
     ...rest
   }: Props = $props();
 
+  const useLinks = $derived(!!baseUrl);
   const hasPrevious = $derived(currentPage > 1);
   const hasNext = $derived(currentPage < totalPages);
 
   // Generate page numbers to show with ellipsis for large ranges
-  const pages = $derived(() => {
+  const pages = $derived.by(() => {
     const pages: Array<number | 'ellipsis'> = [];
     const maxVisible = variant === 'compact' ? 5 : 7;
 
@@ -73,10 +84,33 @@
     return pages;
   });
 
+  /**
+   * Build a URL for the given page number, preserving any existing
+   * query parameters from the baseUrl.
+   */
+  function hrefForPage(page: number): string {
+    if (!baseUrl) return '#';
+    try {
+      const url = new URL(baseUrl, 'https://placeholder.local');
+      url.searchParams.set(paramName, String(page));
+      // Return only path + search (no origin) so links work with SvelteKit routing
+      return `${url.pathname}${url.search}`;
+    } catch {
+      // Fallback: baseUrl is already a path
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      return `${baseUrl}${separator}${paramName}=${page}`;
+    }
+  }
+
   function goToPage(page: number) {
     if (page >= 1 && page <= totalPages && page !== currentPage) {
       onPageChange?.(page);
     }
+  }
+
+  function handleLinkClick(page: number, event: MouseEvent) {
+    // Fire callback for client-side state sync; let default navigation proceed
+    goToPage(page);
   }
 </script>
 
@@ -85,26 +119,68 @@
   aria-label={m.common_pagination()}
   {...rest}
 >
-  <!-- Previous button -->
-  <button
-    class="pagination__btn pagination__prev"
-    disabled={!hasPrevious}
-    aria-label={m.common_previous()}
-    onclick={() => goToPage(currentPage - 1)}
-  >
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="15 18 9 12 15 6"></polyline>
-    </svg>
-    {#if variant === 'default'}
-      <span>{m.common_previous()}</span>
+  <!-- Previous -->
+  {#if useLinks}
+    {#if hasPrevious}
+      <a
+        class="pagination__btn pagination__prev"
+        href={hrefForPage(currentPage - 1)}
+        aria-label={m.common_previous()}
+        data-sveltekit-noscroll
+        onclick={(e) => handleLinkClick(currentPage - 1, e)}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        {#if variant === 'default'}
+          <span>{m.common_previous()}</span>
+        {/if}
+      </a>
+    {:else}
+      <span class="pagination__btn pagination__prev pagination__btn--disabled" aria-disabled="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        {#if variant === 'default'}
+          <span>{m.common_previous()}</span>
+        {/if}
+      </span>
     {/if}
-  </button>
+  {:else}
+    <button
+      class="pagination__btn pagination__prev"
+      disabled={!hasPrevious}
+      aria-label={m.common_previous()}
+      onclick={() => goToPage(currentPage - 1)}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+      {#if variant === 'default'}
+        <span>{m.common_previous()}</span>
+      {/if}
+    </button>
+  {/if}
 
   <!-- Page numbers -->
   <ol class="pagination__pages" role="list">
-    {#each pages() as pageItem (pageItem)}
+    {#each pages as pageItem (pageItem)}
       {#if pageItem === 'ellipsis'}
-        <li class="pagination__ellipsis" aria-hidden="true">…</li>
+        <li class="pagination__ellipsis" aria-hidden="true">...</li>
+      {:else if useLinks}
+        <li>
+          <a
+            class="pagination__page"
+            class:active={pageItem === currentPage}
+            href={hrefForPage(pageItem)}
+            aria-label={m.common_page_number({ page: pageItem })}
+            aria-current={pageItem === currentPage ? 'page' : undefined}
+            data-sveltekit-noscroll
+            onclick={(e) => handleLinkClick(pageItem, e)}
+          >
+            {pageItem}
+          </a>
+        </li>
       {:else}
         <li>
           <button
@@ -121,20 +197,48 @@
     {/each}
   </ol>
 
-  <!-- Next button -->
-  <button
-    class="pagination__btn pagination__next"
-    disabled={!hasNext}
-    aria-label={m.common_next()}
-    onclick={() => goToPage(currentPage + 1)}
-  >
-    {#if variant === 'default'}
-      <span>{m.common_next()}</span>
+  <!-- Next -->
+  {#if useLinks}
+    {#if hasNext}
+      <a
+        class="pagination__btn pagination__next"
+        href={hrefForPage(currentPage + 1)}
+        aria-label={m.common_next()}
+        data-sveltekit-noscroll
+        onclick={(e) => handleLinkClick(currentPage + 1, e)}
+      >
+        {#if variant === 'default'}
+          <span>{m.common_next()}</span>
+        {/if}
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </a>
+    {:else}
+      <span class="pagination__btn pagination__next pagination__btn--disabled" aria-disabled="true">
+        {#if variant === 'default'}
+          <span>{m.common_next()}</span>
+        {/if}
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </span>
     {/if}
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="9 18 15 12 9 6"></polyline>
-    </svg>
-  </button>
+  {:else}
+    <button
+      class="pagination__btn pagination__next"
+      disabled={!hasNext}
+      aria-label={m.common_next()}
+      onclick={() => goToPage(currentPage + 1)}
+    >
+      {#if variant === 'default'}
+        <span>{m.common_next()}</span>
+      {/if}
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"></polyline>
+      </svg>
+    </button>
+  {/if}
 
   {#if variant === 'default'}
     <p class="pagination__info">
@@ -170,13 +274,22 @@
     transition: var(--transition-colors);
   }
 
-  .pagination__btn:hover:not(:disabled) {
+  .pagination__btn:hover:not(:disabled):not(.pagination__btn--disabled) {
     background: var(--color-surface-secondary);
   }
 
-  .pagination__btn:disabled {
+  .pagination__btn:disabled,
+  .pagination__btn--disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Anchor tag resets for link variant */
+  a.pagination__btn,
+  a.pagination__page {
+    text-decoration: none;
+    color: inherit;
   }
 
   .pagination__pages {
@@ -238,7 +351,7 @@
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .pagination__btn:hover:not(:disabled),
+  [data-theme='dark'] .pagination__btn:hover:not(:disabled):not(.pagination__btn--disabled),
   [data-theme='dark'] .pagination__page:hover {
     background: var(--color-surface-variant);
   }
