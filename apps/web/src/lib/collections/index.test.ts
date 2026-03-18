@@ -5,9 +5,14 @@
  * Note: TanStack DB and other mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 describe('collections/index', () => {
+  // Pre-warm dynamic imports (Paraglide i18n, TanStack, Zod are slow on first load)
+  beforeAll(async () => {
+    await import('./index');
+  }, 30_000);
+
   describe('queryClient', () => {
     it('is defined', async () => {
       const { queryClient } = await import('./index');

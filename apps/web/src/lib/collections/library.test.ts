@@ -5,7 +5,7 @@
  * Note: We mock TanStack DB to avoid localStorage/queryClient initialization issues.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Create mock collection with required methods
 const mockCollection = {
@@ -32,6 +32,11 @@ vi.mock('$lib/remote/library.remote', () => ({
 }));
 
 describe('collections/library', () => {
+  // Pre-warm dynamic imports (slow on first load)
+  beforeAll(async () => {
+    await import('./library');
+  }, 30_000);
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

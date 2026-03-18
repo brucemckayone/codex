@@ -6,7 +6,7 @@
  * Mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Additional mock for @sveltejs/kit redirect function
 vi.mock('@sveltejs/kit', () => ({
@@ -14,6 +14,11 @@ vi.mock('@sveltejs/kit', () => ({
 }));
 
 describe('remote/auth.remote', () => {
+  // Pre-warm dynamic imports (slow on first load)
+  beforeAll(async () => {
+    await import('./auth.remote');
+  }, 30_000);
+
   it('exports loginForm', async () => {
     const { loginForm } = await import('./auth.remote');
     expect(loginForm).toBeDefined();

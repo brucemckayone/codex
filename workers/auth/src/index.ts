@@ -191,8 +191,18 @@ app.post('/api/test/fast-register', async (c) => {
       .set({ emailVerified: true })
       .where(eq(schema.users.email, email));
 
-    // Return the sign-up response which includes Set-Cookie headers
-    return signUpResponse;
+    // Build a new Response that preserves Set-Cookie headers.
+    // BetterAuth's handler returns a standard Response, but returning it
+    // directly through Hono can lose multi-valued Set-Cookie headers.
+    const body = await signUpResponse.text();
+    const headers = new Headers();
+    signUpResponse.headers.forEach((value, key) => {
+      headers.append(key, value);
+    });
+    return new Response(body, {
+      status: signUpResponse.status,
+      headers,
+    });
   } catch (error) {
     console.error('[TEST] fast-register failed:', error);
     return c.json(

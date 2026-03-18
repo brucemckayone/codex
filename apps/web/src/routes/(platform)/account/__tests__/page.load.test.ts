@@ -53,7 +53,7 @@ describe('Account Profile Page Load', () => {
     expect(redirect).toHaveBeenCalledWith(303, '/login?redirect=/account');
   });
 
-  it('returns empty object when authenticated (profile loaded client-side)', async () => {
+  it('returns profile null when authenticated and API unreachable', async () => {
     const { load } = await import('../+page.server');
 
     const result = await load({
@@ -62,6 +62,6 @@ describe('Account Profile Page Load', () => {
       cookies: mockCookies,
     } as unknown as Parameters<typeof import('../+page.server').load>[0]);
 
-    expect(result).toEqual({});
+    expect(result).toEqual({ profile: null });
   });
 });

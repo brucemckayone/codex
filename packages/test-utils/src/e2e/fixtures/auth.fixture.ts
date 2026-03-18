@@ -113,9 +113,11 @@ export const authFixture = {
     role?: string;
   }): Promise<RegisteredUser | null> {
     try {
-      const response = await httpClient.post(
-        `${AUTH_URL}/api/test/fast-register`,
-        {
+      const maxRetries = 3;
+      let response: Response | null = null;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        response = await httpClient.post(`${AUTH_URL}/api/test/fast-register`, {
           headers: { Origin: AUTH_URL },
           data: {
             email: data.email,
@@ -123,8 +125,18 @@ export const authFixture = {
             name: data.name ?? data.email.split('@')[0],
             role: data.role ?? 'customer',
           },
+        });
+
+        // Retry on 503 (worker restart mid-request)
+        if (response.status === 503 && attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          continue;
         }
-      );
+
+        break;
+      }
+
+      if (!response) return null;
 
       // Endpoint not available (production/staging) — fall back
       if (response.status === 404) return null;
@@ -137,6 +149,17 @@ export const authFixture = {
       }
 
       const setCookie = response.headers.get('set-cookie');
+
+      // If fast-register succeeded but returned no cookies,
+      // the user was created — login directly instead of the slow legacy path.
+      if (
+        !setCookie ||
+        (!setCookie.includes('better-auth.session_token') &&
+          !setCookie.includes('codex-session'))
+      ) {
+        return this._loginFallback(data);
+      }
+
       const cookie = extractSessionCookie(setCookie);
 
       // Get session data
@@ -180,6 +203,9 @@ export const authFixture = {
    * 2. Capture verification token from KV (test endpoint)
    * 3. Verify email via HTTP GET
    * 4. Return user and session details
+   *
+   * If the user already exists (e.g. fast-register created them but didn't
+   * return cookies), falls back to login instead of throwing.
    */
   async _legacyRegister(data: {
     email: string;
@@ -205,6 +231,16 @@ export const authFixture = {
 
     if (!registerResponse.ok) {
       const errorText = await registerResponse.text();
+
+      // If user already exists (fast-register created them, or stale from
+      // a prior test run), fall back to login instead of failing.
+      if (
+        registerResponse.status === 422 &&
+        errorText.includes('USER_ALREADY_EXISTS')
+      ) {
+        return this._loginFallback(data);
+      }
+
       let errorMsg = errorText;
       try {
         const errorJson = JSON.parse(errorText);
@@ -364,6 +400,56 @@ export const authFixture = {
       user: sessionData.user,
       session: sessionData.session,
       cookie: extractSessionCookie(verifyCookie),
+    };
+  },
+
+  /**
+   * Internal fallback: login when registration fails because the user
+   * already exists (e.g. created by fast-register without cookies, or
+   * left over from a previous test run).
+   */
+  async _loginFallback(data: {
+    email: string;
+    password: string;
+  }): Promise<RegisteredUser> {
+    const loginResponse = await httpClient.post(
+      `${AUTH_URL}/api/auth/sign-in/email`,
+      {
+        data: { email: data.email, password: data.password },
+        headers: { Origin: AUTH_URL },
+      }
+    );
+
+    if (!loginResponse.ok) {
+      const errorText = await loginResponse.text();
+      throw new Error(
+        `Login fallback failed (${loginResponse.status}): ${errorText.slice(0, 200)}`
+      );
+    }
+
+    const setCookie = loginResponse.headers.get('set-cookie');
+    const cookie = extractSessionCookie(setCookie);
+
+    const sessionResponse = await httpClient.get(
+      `${AUTH_URL}/api/auth/get-session`,
+      { headers: { Cookie: cookie } }
+    );
+
+    if (!sessionResponse.ok) {
+      throw new Error(
+        `Failed to get session after login fallback: ${sessionResponse.status}`
+      );
+    }
+
+    const sessionData = (await sessionResponse.json()) as {
+      user: RegisteredUser['user'];
+      session: RegisteredUser['session'];
+    };
+
+    return {
+      user: sessionData.user,
+      session: sessionData.session,
+      cookie,
     };
   },
 

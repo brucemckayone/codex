@@ -5,9 +5,14 @@
  * Mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 describe('remote/org.remote', () => {
+  // Pre-warm dynamic imports (slow on first load)
+  beforeAll(async () => {
+    await import('./org.remote');
+  }, 30_000);
+
   it('exports getOrganization query', async () => {
     const { getOrganization } = await import('./org.remote');
     expect(getOrganization).toBeDefined();

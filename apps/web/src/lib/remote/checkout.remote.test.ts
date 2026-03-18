@@ -5,7 +5,7 @@
  * Mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Additional mock for @sveltejs/kit redirect function
 vi.mock('@sveltejs/kit', () => ({
@@ -13,6 +13,11 @@ vi.mock('@sveltejs/kit', () => ({
 }));
 
 describe('remote/checkout.remote', () => {
+  // Pre-warm dynamic imports (slow on first load)
+  beforeAll(async () => {
+    await import('./checkout.remote');
+  }, 30_000);
+
   it('exports createCheckout form', async () => {
     const { createCheckout } = await import('./checkout.remote');
     expect(createCheckout).toBeDefined();

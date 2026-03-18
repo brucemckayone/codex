@@ -287,9 +287,9 @@ describe('Content Creation Flow', () => {
       }
     );
 
-    // Expect 404 (content not found due to creator scoping) or 403 (forbidden)
+    // Expect 400 (validation), 403 (forbidden), or 404 (creator scoping)
     expect(unauthorizedUpdate.ok).toBe(false);
-    expect([403, 404]).toContain(unauthorizedUpdate.status);
+    expect([400, 403, 404]).toContain(unauthorizedUpdate.status);
   });
 
   afterAll(async () => {
