@@ -12,7 +12,7 @@
 
 import { contentQuerySchema } from '@codex/validation';
 import { z } from 'zod';
-import { getRequestEvent, query } from '$app/server';
+import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,4 +207,100 @@ export const getContentBatch = query.batch(z.string().uuid(), async (ids) => {
 
   // Return resolver function
   return (id: string) => lookup.get(id) ?? null;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content Mutations (command)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const createContentCommandSchema = z.object({
+  title: z.string().min(1),
+  slug: z.string().min(1),
+  description: z.string().optional().nullable(),
+  contentType: z.enum(['video', 'audio', 'written']),
+  visibility: z.enum(['public', 'private', 'members_only', 'purchased_only']),
+  priceCents: z.number().int().min(0).optional().nullable(),
+  organizationId: z.string().uuid().optional().nullable(),
+  mediaItemId: z.string().uuid().optional().nullable(),
+  contentBody: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
+  tags: z.array(z.string()).optional(),
+  thumbnailUrl: z.string().url().optional().nullable(),
+});
+
+/**
+ * Create new content
+ *
+ * Usage:
+ * ```typescript
+ * const result = await createContent({
+ *   title: 'My Post',
+ *   slug: 'my-post',
+ *   contentType: 'written',
+ *   visibility: 'public',
+ *   organizationId: orgId,
+ *   contentBody: 'Hello world',
+ * });
+ * ```
+ */
+export const createContent = command(
+  createContentCommandSchema,
+  async (data) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.content.create(data);
+  }
+);
+
+const updateContentCommandSchema = z.object({
+  id: z.string().uuid(),
+  data: z.object({
+    title: z.string().min(1).optional(),
+    slug: z.string().min(1).optional(),
+    description: z.string().optional().nullable(),
+    contentType: z.enum(['video', 'audio', 'written']).optional(),
+    visibility: z
+      .enum(['public', 'private', 'members_only', 'purchased_only'])
+      .optional(),
+    priceCents: z.number().int().min(0).optional().nullable(),
+    organizationId: z.string().uuid().optional().nullable(),
+    contentBody: z.string().optional().nullable(),
+    category: z.string().optional().nullable(),
+    tags: z.array(z.string()).optional(),
+    thumbnailUrl: z.string().url().optional().nullable(),
+  }),
+});
+
+/**
+ * Update existing content
+ *
+ * Usage:
+ * ```typescript
+ * const result = await updateContent({
+ *   id: contentId,
+ *   data: { title: 'Updated Title' },
+ * });
+ * ```
+ */
+export const updateContent = command(
+  updateContentCommandSchema,
+  async ({ id, data }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.content.update(id, data);
+  }
+);
+
+/**
+ * Delete content by ID
+ *
+ * Usage:
+ * ```typescript
+ * await deleteContent(contentId);
+ * ```
+ */
+export const deleteContent = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.content.delete(id);
 });

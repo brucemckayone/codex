@@ -28,6 +28,10 @@
 
 <svelte:head>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Discover transformative content from independent creators" />
+  <meta property="og:site_name" content="Revelations" />
+  <meta property="og:type" content="website" />
+  <link rel="manifest" href="/manifest.json" />
 </svelte:head>
 
 <a href="#main-content" class="skip-link">Skip to content</a>

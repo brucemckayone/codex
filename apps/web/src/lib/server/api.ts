@@ -21,6 +21,7 @@ import type {
   AllSettingsResponse,
   AvatarUploadResponse,
   BrandingSettingsResponse,
+  ContactSettingsResponse,
   CustomerListItem,
   MyMembershipResponse,
   NotificationPreferencesResponse,
@@ -41,6 +42,7 @@ import type {
   CreateCheckoutInput,
   CreatePortalSessionInput,
   UpdateBrandingInput,
+  UpdateContactInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
 } from '@codex/validation';
@@ -54,6 +56,19 @@ import type {
   OrganizationData,
 } from '../types';
 import { ApiError } from './errors';
+
+/**
+ * Organization member item shape returned by the members API
+ */
+export interface OrgMemberItem {
+  userId: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  role: string;
+  status: string;
+  joinedAt: string;
+}
 
 /**
  * Resolve API URL for a worker
@@ -624,6 +639,68 @@ export function createServerApi(
           'org',
           `/api/organizations/${id}/members/my-membership`
         ),
+
+      /**
+       * Update contact settings (platform name, support email, social URLs, etc.)
+       */
+      updateContactSettings: (id: string, data: UpdateContactInput) =>
+        request<ContactSettingsResponse>(
+          'org',
+          `/api/organizations/${id}/settings/contact`,
+          {
+            method: 'PUT',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * Get organization members
+       *
+       * @param id - Organization UUID
+       * @param params - Optional pagination/filter params
+       * @returns Paginated list of members
+       */
+      getMembers: (id: string, params?: URLSearchParams) =>
+        request<PaginatedListResponse<OrgMemberItem>>(
+          'org',
+          `/api/organizations/${id}/members${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Invite a member to the organization
+       *
+       * @param id - Organization UUID
+       * @param data - Email and role
+       */
+      inviteMember: (id: string, data: { email: string; role: string }) =>
+        request<unknown>('org', `/api/organizations/${id}/members/invite`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Update a member's role
+       *
+       * @param id - Organization UUID
+       * @param userId - Member's user ID
+       * @param data - New role
+       */
+      updateMemberRole: (id: string, userId: string, data: { role: string }) =>
+        request<unknown>('org', `/api/organizations/${id}/members/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Remove a member from the organization
+       *
+       * @param id - Organization UUID
+       * @param userId - Member's user ID
+       */
+      removeMember: (id: string, userId: string) =>
+        request<void>('org', `/api/organizations/${id}/members/${userId}`, {
+          method: 'DELETE',
+        }),
     },
 
     /**

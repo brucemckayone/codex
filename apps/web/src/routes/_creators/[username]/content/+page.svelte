@@ -1,0 +1,409 @@
+<!--
+  @component CreatorContentCatalog
+
+  Displays a creator's full content catalog with search, type filtering,
+  and SEO-friendly pagination. Uses ContentCard grid and Pagination component.
+-->
+<script lang="ts">
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
+  import * as m from '$paraglide/messages';
+  import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { Pagination } from '$lib/components/ui/Pagination';
+  import type { PageData } from './$types';
+
+  const { data }: { data: PageData } = $props();
+
+  const username = $derived(data.username ?? 'Creator');
+  const displayName = $derived(data.creatorName ?? username);
+  const contentItems = $derived(data.contentItems ?? []);
+  const currentPage = $derived(data.pagination.page);
+  const totalPages = $derived(Math.max(1, data.pagination.totalPages));
+  const hasContent = $derived(contentItems.length > 0 || currentPage > 1);
+
+  // Local state for search input, synced with server data on navigation
+  let searchInput = $state('');
+
+  // Sync search input when data changes (e.g., after navigation)
+  $effect(() => {
+    searchInput = data.search ?? '';
+  });
+
+  // Type filter options
+  const typeOptions = [
+    { value: 'all', label: m.creator_content_filter_all() },
+    { value: 'video', label: m.creator_content_filter_video() },
+    { value: 'audio', label: m.creator_content_filter_audio() },
+    { value: 'article', label: m.creator_content_filter_article() },
+  ] as const;
+
+  const activeType = $derived(data.typeFilter ?? 'all');
+
+  /**
+   * Build URL with updated search params, resetting page to 1
+   */
+  function buildFilterUrl(overrides: Record<string, string>): string {
+    const params = new URLSearchParams();
+    const search = overrides.search ?? searchInput;
+    const type = overrides.type ?? activeType;
+
+    if (search) params.set('search', search);
+    if (type && type !== 'all') params.set('type', type);
+    // Reset page to 1 when filters change
+    if (overrides.page) params.set('page', overrides.page);
+
+    const qs = params.toString();
+    return `/@${username}/content${qs ? `?${qs}` : ''}`;
+  }
+
+  function handleSearch(event: Event) {
+    event.preventDefault();
+    void goto(buildFilterUrl({ search: searchInput }));
+  }
+
+  function handleTypeChange(type: string) {
+    void goto(buildFilterUrl({ type }));
+  }
+
+  // Build base URL for pagination (preserves current filters)
+  const paginationBaseUrl = $derived.by(() => {
+    const params = new URLSearchParams();
+    if (data.search) params.set('search', data.search);
+    if (data.typeFilter && data.typeFilter !== 'all') params.set('type', data.typeFilter);
+    const qs = params.toString();
+    return `/@${username}/content${qs ? `?${qs}` : ''}`;
+  });
+</script>
+
+<svelte:head>
+  <title>{m.creator_content_title({ username: displayName })}</title>
+  <meta property="og:title" content="{displayName}'s Content" />
+  <meta property="og:type" content="website" />
+</svelte:head>
+
+<div class="catalog">
+  <!-- Header -->
+  <div class="catalog-header">
+    <h1 class="catalog-title">{m.creator_content_title({ username: displayName })}</h1>
+    <a href="/@{username}" class="back-link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+      @{username}
+    </a>
+  </div>
+
+  <!-- Filters -->
+  <div class="catalog-filters">
+    <form class="search-form" onsubmit={handleSearch}>
+      <input
+        type="search"
+        class="search-input"
+        placeholder={m.creator_content_search_placeholder()}
+        bind:value={searchInput}
+      />
+    </form>
+
+    <div class="type-filters" role="tablist" aria-label="Content type filter">
+      {#each typeOptions as option (option.value)}
+        <button
+          type="button"
+          role="tab"
+          class="type-btn"
+          class:active={activeType === option.value}
+          aria-selected={activeType === option.value}
+          onclick={() => handleTypeChange(option.value)}
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
+  </div>
+
+  <!-- Content Grid -->
+  {#if hasContent && contentItems.length > 0}
+    <div class="content-grid">
+      {#each contentItems as item (item.id)}
+        <ContentCard
+          id={item.id}
+          title={item.title}
+          thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
+          description={item.description}
+          contentType={item.contentType === 'written' ? 'article' : item.contentType}
+          duration={item.mediaItem?.durationSeconds ?? null}
+          href="/content/{item.slug}"
+          price={item.priceCents != null ? {
+            amount: item.priceCents,
+            currency: 'GBP',
+          } : null}
+        />
+      {/each}
+    </div>
+
+    {#if totalPages > 1}
+      <div class="pagination-wrapper">
+        <Pagination
+          {currentPage}
+          {totalPages}
+          baseUrl={paginationBaseUrl}
+        />
+      </div>
+    {/if}
+  {:else if data.search || (data.typeFilter && data.typeFilter !== 'all')}
+    <div class="empty-state">
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-state__icon" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <p class="empty-state__text">{m.creator_content_no_results()}</p>
+      <a href="/@{username}/content" class="empty-state__clear">
+        {m.explore_clear_filters()}
+      </a>
+    </div>
+  {:else}
+    <div class="empty-state">
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-state__icon" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+      </svg>
+      <p class="empty-state__text">{m.creator_content_empty()}</p>
+    </div>
+  {/if}
+</div>
+
+<style>
+  /* ── Layout ── */
+  .catalog {
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: var(--space-8, 2rem) var(--space-6, 1.5rem);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6, 1.5rem);
+  }
+
+  /* ── Header ── */
+  .catalog-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 0.5rem);
+  }
+
+  @media (min-width: 640px) {
+    .catalog-header {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+    }
+  }
+
+  .catalog-title {
+    margin: 0;
+    font-size: var(--text-2xl, 1.5rem);
+    font-weight: var(--font-bold, 700);
+    color: var(--color-text);
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1, 0.25rem);
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    transition: var(--transition-colors);
+  }
+
+  .back-link:hover {
+    color: var(--color-primary-500);
+  }
+
+  /* ── Filters ── */
+  .catalog-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3, 0.75rem);
+  }
+
+  @media (min-width: 640px) {
+    .catalog-filters {
+      flex-direction: row;
+      align-items: center;
+      gap: var(--space-4, 1rem);
+    }
+  }
+
+  .search-form {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .search-input {
+    width: 100%;
+    padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
+    border-radius: var(--radius-md, 0.375rem);
+    transition: var(--transition-colors);
+  }
+
+  .search-input::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  .search-input:focus {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: -1px;
+    border-color: var(--color-primary-500);
+  }
+
+  .type-filters {
+    display: flex;
+    gap: var(--space-1, 0.25rem);
+    flex-shrink: 0;
+  }
+
+  .type-btn {
+    padding: var(--space-1-5, 0.375rem) var(--space-3, 0.75rem);
+    font-size: var(--text-sm, 0.875rem);
+    font-weight: var(--font-medium, 500);
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
+    border-radius: var(--radius-md, 0.375rem);
+    cursor: pointer;
+    transition: var(--transition-colors);
+    white-space: nowrap;
+  }
+
+  .type-btn:hover {
+    background: var(--color-surface-secondary);
+    color: var(--color-text);
+  }
+
+  .type-btn.active {
+    background: var(--color-primary-500);
+    color: #ffffff;
+    border-color: var(--color-primary-500);
+  }
+
+  /* ── Content Grid ── */
+  .content-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6, 1.5rem);
+  }
+
+  @media (min-width: 640px) {
+    .content-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .content-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  /* ── Pagination ── */
+  .pagination-wrapper {
+    display: flex;
+    justify-content: center;
+    padding-top: var(--space-4, 1rem);
+    border-top: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
+  }
+
+  /* ── Empty State ── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4, 1rem);
+    padding: var(--space-16, 4rem) var(--space-4, 1rem);
+    text-align: center;
+  }
+
+  .empty-state__icon {
+    color: var(--color-text-muted);
+    opacity: 0.6;
+  }
+
+  .empty-state__text {
+    margin: 0;
+    font-size: var(--text-lg, 1.125rem);
+    color: var(--color-text-muted);
+  }
+
+  .empty-state__clear {
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-primary-500);
+    text-decoration: none;
+    transition: var(--transition-colors);
+  }
+
+  .empty-state__clear:hover {
+    color: var(--color-primary-600);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 639px) {
+    .catalog {
+      padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
+    }
+
+    .catalog-title {
+      font-size: var(--text-xl, 1.25rem);
+    }
+  }
+
+  /* ── Dark Mode ── */
+  :global([data-theme='dark']) .catalog-title {
+    color: var(--color-text-dark);
+  }
+
+  :global([data-theme='dark']) .back-link {
+    color: var(--color-text-secondary-dark);
+  }
+
+  :global([data-theme='dark']) .back-link:hover {
+    color: var(--color-primary-400);
+  }
+
+  :global([data-theme='dark']) .search-input {
+    background: var(--color-surface-dark);
+    border-color: var(--color-border-dark);
+    color: var(--color-text-dark);
+  }
+
+  :global([data-theme='dark']) .search-input::placeholder {
+    color: var(--color-text-muted-dark);
+  }
+
+  :global([data-theme='dark']) .type-btn {
+    color: var(--color-text-secondary-dark);
+    border-color: var(--color-border-dark);
+  }
+
+  :global([data-theme='dark']) .type-btn:hover {
+    background: var(--color-surface-variant);
+    color: var(--color-text-dark);
+  }
+
+  :global([data-theme='dark']) .pagination-wrapper {
+    border-top-color: var(--color-border-dark);
+  }
+
+  :global([data-theme='dark']) .empty-state__icon {
+    color: var(--color-text-muted-dark, #94a3b8);
+  }
+
+  :global([data-theme='dark']) .empty-state__text {
+    color: var(--color-text-muted-dark, #94a3b8);
+  }
+</style>

@@ -21,6 +21,7 @@
 <script lang="ts">
   import type { Snippet, HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
+  import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import { Avatar } from '../Avatar';
   import { Skeleton } from '../Skeleton';
 
@@ -123,6 +124,8 @@
       {#if thumbnail}
         <img
           src={thumbnail}
+          srcset={getThumbnailSrcset(thumbnail)}
+          sizes={DEFAULT_SIZES}
           alt={m.content_thumbnail_alt({ title })}
           loading="lazy"
           class="content-card__image"

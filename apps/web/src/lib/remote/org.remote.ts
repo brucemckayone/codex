@@ -7,7 +7,7 @@
 
 import type { OrganizationWithRole } from '@codex/shared-types';
 import { z } from 'zod';
-import { getRequestEvent, query } from '$app/server';
+import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,6 +121,83 @@ export const getOrgSettings = query(z.string().uuid(), async (orgId) => {
   const api = createServerApi(platform, cookies);
   return api.org.getSettings(orgId);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Organization Members (Authenticated Admin)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const membersQuerySchema = z.object({
+  orgId: z.string().uuid(),
+  page: z.coerce.number().min(1).optional().default(1),
+  limit: z.coerce.number().min(1).max(100).optional().default(50),
+  role: z
+    .enum(['owner', 'admin', 'creator', 'subscriber', 'member'])
+    .optional(),
+});
+
+/**
+ * Get organization members (authenticated, for admin/team page)
+ *
+ * Requires user to be a member of the organization.
+ */
+export const getOrgMembers = query(membersQuerySchema, async (params) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  const searchParams = new URLSearchParams();
+  searchParams.set('page', String(params.page));
+  searchParams.set('limit', String(params.limit));
+  if (params.role) searchParams.set('role', params.role);
+
+  return api.org.getMembers(params.orgId, searchParams);
+});
+
+/**
+ * Invite a member to the organization
+ */
+export const inviteMember = command(
+  z.object({
+    orgId: z.string().uuid(),
+    email: z.string().email(),
+    role: z.enum(['admin', 'creator', 'member']),
+  }),
+  async ({ orgId, email, role }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.inviteMember(orgId, { email, role });
+  }
+);
+
+/**
+ * Update a member's role
+ */
+export const updateMemberRole = command(
+  z.object({
+    orgId: z.string().uuid(),
+    userId: z.string().min(1),
+    role: z.enum(['owner', 'admin', 'creator', 'member']),
+  }),
+  async ({ orgId, userId, role }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.updateMemberRole(orgId, userId, { role });
+  }
+);
+
+/**
+ * Remove a member from the organization
+ */
+export const removeMember = command(
+  z.object({
+    orgId: z.string().uuid(),
+    userId: z.string().min(1),
+  }),
+  async ({ orgId, userId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.removeMember(orgId, userId);
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Organization by ID
