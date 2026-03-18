@@ -51,7 +51,9 @@ export const httpClient = {
       const formData = new FormData();
 
       for (const [fieldName, file] of Object.entries(options.multipart)) {
-        const blob = new Blob([file.buffer], { type: file.mimeType });
+        const blob = new Blob([new Uint8Array(file.buffer)], {
+          type: file.mimeType,
+        });
         formData.append(fieldName, blob, file.name);
       }
 

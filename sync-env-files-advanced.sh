@@ -116,8 +116,9 @@ Examples:
 
 Files synced:
   - Root: .env.*, .gitignore, package.json, turbo.json
-  - Workers: wrangler.jsonc, .dev.vars*, package.json (all 8 workers)
+  - Workers: wrangler.jsonc, .dev.vars, .dev.vars.test, .dev.vars.example, package.json (all 8 workers)
   - Infrastructure: docker-compose files
+  - IMPORTANT: .dev.vars.test is required for vitest/wrangler test to work
 
 EOF
             exit 0
@@ -161,40 +162,81 @@ TOTAL=0
 
 # Array of files to sync
 FILES_TO_SYNC=(
+    # Root level environment files
     ".env.example"
     ".env.dev"
     ".env.test"
+    ".env.prod"
     ".gitignore"
+
+    # Scripts environment file
+    "scripts/.env.dev"
+
+    # Auth Worker
     "workers/auth/wrangler.jsonc"
     "workers/auth/.dev.vars.example"
     "workers/auth/.dev.vars"
+    "workers/auth/.dev.vars.test"
+    "workers/auth/package.json"
+
+    # Content API Worker
     "workers/content-api/wrangler.jsonc"
     "workers/content-api/.dev.vars.example"
     "workers/content-api/.dev.vars"
+    "workers/content-api/.dev.vars.test"
+    "workers/content-api/package.json"
+
+    # Ecom API Worker
     "workers/ecom-api/wrangler.jsonc"
     "workers/ecom-api/.dev.vars.example"
     "workers/ecom-api/.dev.vars"
+    "workers/ecom-api/.dev.vars.test"
+    "workers/ecom-api/package.json"
+
+    # Identity API Worker
     "workers/identity-api/wrangler.jsonc"
     "workers/identity-api/.dev.vars.example"
     "workers/identity-api/.dev.vars"
+    "workers/identity-api/.dev.vars.test"
+    "workers/identity-api/package.json"
+
+    # Admin API Worker
     "workers/admin-api/wrangler.jsonc"
     "workers/admin-api/.dev.vars.example"
     "workers/admin-api/.dev.vars"
+    "workers/admin-api/.dev.vars.test"
+    "workers/admin-api/package.json"
+
+    # Media API Worker
     "workers/media-api/wrangler.jsonc"
     "workers/media-api/.dev.vars.example"
     "workers/media-api/.dev.vars"
+    "workers/media-api/.dev.vars.test"
+    "workers/media-api/package.json"
+
+    # Notifications API Worker
     "workers/notifications-api/wrangler.jsonc"
     "workers/notifications-api/.dev.vars.example"
     "workers/notifications-api/.dev.vars"
+    "workers/notifications-api/.dev.vars.test"
+    "workers/notifications-api/package.json"
+
+    # Organization API Worker
     "workers/organization-api/wrangler.jsonc"
     "workers/organization-api/.dev.vars.example"
     "workers/organization-api/.dev.vars"
+    "workers/organization-api/.dev.vars.test"
+    "workers/organization-api/package.json"
+
+    # Infrastructure files
     "infrastructure/neon/docker-compose.dev.local.yml"
     "infrastructure/neon/docker-compose.dev.ephemeral.yml"
-    ".nvmrc"
+
+    # Additional config files
     "package.json"
     "turbo.json"
     "tsconfig.json"
+    "pnpm-workspace.yaml"
 )
 
 # Function to copy a single file

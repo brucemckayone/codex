@@ -9,6 +9,21 @@
  * to avoid circular dependencies.
  */
 
+// Admin dashboard types
+export type {
+  AdminContentItem,
+  AdminContentStatus,
+  CustomerDetails,
+  CustomerStats,
+  CustomerWithStats,
+  DailyRevenue,
+  DashboardStats,
+  DashboardStatsOptions,
+  PurchaseHistoryItem,
+  RevenueQueryOptions,
+  RevenueStats,
+  TopContentItem,
+} from './admin-types';
 // API query parameter types (for documentation - see api-queries.ts)
 export type {
   AdminActivityQueryInput,
@@ -26,7 +41,6 @@ export type {
   PublicMembersQueryInput,
   PurchaseQueryInput,
 } from './api-queries';
-
 // API response types (generic wrappers and non-entity-specific types)
 export type {
   ActivityFeedResponse,
@@ -48,6 +62,7 @@ export type {
   PaginationMetadata,
   PlaybackProgressResponse,
   PublicBrandingResponse,
+  PurchaseListItem,
   RevenueAnalyticsResponse,
   RevenueByDay,
   SingleItemResponse,
@@ -56,6 +71,9 @@ export type {
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
 } from './api-responses';
+
+// Organization and Member types
+export type { OrgMemberContext, OrgMemberRole } from './member-types';
 
 // Worker types
 export type {
@@ -69,5 +87,6 @@ export type {
   SessionData,
   SuccessResponse,
   UserData,
+  UserProfile,
   Variables,
 } from './worker-types';

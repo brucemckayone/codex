@@ -7,7 +7,8 @@ import {
   savePlaybackProgressSchema,
 } from './access';
 
-const validUUID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+const validUUID = 'a1b2c3d4-e5f6-4a90-b234-567890abcdef';
+// Note: 3rd segment must start with 1-8 (version), 4th segment must start with 8-9-a-b (variant)
 
 describe('Content Access Validation Schemas', () => {
   describe('getStreamingUrlSchema', () => {

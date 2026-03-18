@@ -2,35 +2,17 @@
  * Library Remote Functions Tests
  *
  * Tests for user library and playback remote functions.
+ * Mocks are centralized in src/tests/mocks.ts
  */
 
-import { describe, expect, it, vi } from 'vitest';
-
-// Mock SvelteKit server modules before importing
-vi.mock('$app/server', () => ({
-  command: vi.fn((_schema, fn) => fn),
-  query: Object.assign(
-    vi.fn((_schema, fn) => fn),
-    { batch: vi.fn((_schema, fn) => fn) }
-  ),
-  getRequestEvent: vi.fn(() => ({
-    platform: { env: {} },
-    cookies: { get: vi.fn() },
-  })),
-}));
-
-vi.mock('$lib/server/api', () => ({
-  createServerApi: vi.fn(() => ({
-    access: {
-      getUserLibrary: vi.fn(),
-      getStreamingUrl: vi.fn(),
-      getProgress: vi.fn(),
-      saveProgress: vi.fn(),
-    },
-  })),
-}));
+import { beforeAll, describe, expect, it } from 'vitest';
 
 describe('remote/library.remote', () => {
+  // Pre-warm dynamic imports (slow on first load)
+  beforeAll(async () => {
+    await import('./library.remote');
+  }, 30_000);
+
   it('exports getUserLibrary query', async () => {
     const { getUserLibrary } = await import('./library.remote');
     expect(getUserLibrary).toBeDefined();

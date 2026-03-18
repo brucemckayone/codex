@@ -10,11 +10,7 @@ import { paginationSchema } from '../shared/pagination-schema';
  */
 export const inviteMemberSchema = z.object({
   email: z.string().email('Invalid email format'),
-  role: z.enum(['admin', 'creator', 'member'], {
-    errorMap: () => ({
-      message: "Role must be 'admin', 'creator', or 'member'",
-    }),
-  }),
+  role: z.enum(['admin', 'creator', 'member']),
 });
 
 export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
@@ -23,11 +19,7 @@ export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
  * Schema for updating a member's role
  */
 export const updateMemberRoleSchema = z.object({
-  role: z.enum(['owner', 'admin', 'creator', 'member'], {
-    errorMap: () => ({
-      message: "Role must be 'owner', 'admin', 'creator', or 'member'",
-    }),
-  }),
+  role: z.enum(['owner', 'admin', 'creator', 'member']),
 });
 
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;

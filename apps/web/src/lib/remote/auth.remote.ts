@@ -13,6 +13,7 @@
 import { COOKIES } from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { z } from 'zod';
+import { dev } from '$app/environment';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { logger } from '$lib/observability';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
@@ -126,7 +127,8 @@ export const loginForm = form(loginFormSchema, async ({ email, _password }) => {
   }
 
   // Extract and set session cookie
-  const isSecure = !platform?.env || platform.env.ENVIRONMENT !== 'development';
+  const isSecure =
+    !dev && (!platform?.env || platform.env.ENVIRONMENT !== 'development');
   extractAndSetSessionCookie(response, cookies, isSecure);
 
   // Redirect to library on success
@@ -166,7 +168,7 @@ export const registerForm = form(
 
     // Extract and set session cookie
     const isSecure =
-      !platform?.env || platform.env.ENVIRONMENT !== 'development';
+      !dev && (!platform?.env || platform.env.ENVIRONMENT !== 'development');
     extractAndSetSessionCookie(response, cookies, isSecure);
 
     redirect(303, '/library');

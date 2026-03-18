@@ -16,6 +16,7 @@
  * - PUT    /api/organizations/:id/settings/features     - Update feature settings
  */
 
+import { VersionedCache } from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient, eq, schema } from '@codex/database';
 import type {
@@ -123,6 +124,25 @@ export async function updateBrandCache(
   }
 }
 
+/**
+ * Invalidate brand cache and bump org version for client staleness detection.
+ * Extracts duplicated cache invalidation logic used by branding mutation handlers.
+ */
+function invalidateBrandAndCache(
+  ctx: {
+    env: Bindings;
+    executionCtx: { waitUntil(promise: Promise<unknown>): void };
+  },
+  orgId: string
+) {
+  const tasks: Promise<unknown>[] = [updateBrandCache(ctx.env, orgId)];
+  if (ctx.env.CACHE_KV) {
+    const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+    tasks.push(cache.invalidate(orgId));
+  }
+  ctx.executionCtx.waitUntil(Promise.all(tasks));
+}
+
 const app = new Hono<HonoEnv>();
 
 // Param schema for org ID validation
@@ -177,10 +197,7 @@ app.put(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       const result = await ctx.services.settings.updateBranding(ctx.input.body);
 
-      // Invalidate cache - optimized, moves fetch to background
-      ctx.executionCtx.waitUntil(
-        updateBrandCache(ctx.env, ctx.input.params.id)
-      );
+      invalidateBrandAndCache(ctx, ctx.input.params.id);
 
       return result;
     },
@@ -229,10 +246,7 @@ app.post(
         size: logoFile.size,
       });
 
-      // Invalidate cache
-      ctx.executionCtx.waitUntil(
-        updateBrandCache(ctx.env, ctx.input.params.id)
-      );
+      invalidateBrandAndCache(ctx, ctx.input.params.id);
 
       return result;
     },
@@ -255,10 +269,7 @@ app.delete(
       }
       const result = await ctx.services.settings.deleteLogo();
 
-      // Invalidate cache
-      ctx.executionCtx.waitUntil(
-        updateBrandCache(ctx.env, ctx.input.params.id)
-      );
+      invalidateBrandAndCache(ctx, ctx.input.params.id);
 
       return result;
     },
@@ -297,7 +308,15 @@ app.put(
       body: updateContactSchema,
     },
     handler: async (ctx): Promise<ContactSettingsResponse> => {
-      return await ctx.services.settings.updateContact(ctx.input.body);
+      const result = await ctx.services.settings.updateContact(ctx.input.body);
+
+      // Bump org version for client staleness detection
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        ctx.executionCtx.waitUntil(cache.invalidate(ctx.input.params.id));
+      }
+
+      return result;
     },
   })
 );
@@ -334,7 +353,15 @@ app.put(
       body: updateFeaturesSchema,
     },
     handler: async (ctx): Promise<FeatureSettingsResponse> => {
-      return await ctx.services.settings.updateFeatures(ctx.input.body);
+      const result = await ctx.services.settings.updateFeatures(ctx.input.body);
+
+      // Bump org version for client staleness detection
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        ctx.executionCtx.waitUntil(cache.invalidate(ctx.input.params.id));
+      }
+
+      return result;
     },
   })
 );

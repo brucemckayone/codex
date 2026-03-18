@@ -34,6 +34,7 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@codex/cache": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",

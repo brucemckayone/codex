@@ -16,6 +16,7 @@
  * - Transaction safety ensures purchase + access grant atomicity
  */
 
+import { CacheType, VersionedCache } from '@codex/cache';
 import { CURRENCY } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';
@@ -137,6 +138,16 @@ export async function handleCheckoutCompleted(
         contentId: validatedMetadata.contentId,
         amountCents: amountTotal,
       });
+
+      // Bump user library version so other devices detect the new purchase on next load
+      if (c.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: c.env.CACHE_KV });
+        c.executionCtx.waitUntil(
+          cache.invalidate(
+            CacheType.COLLECTION_USER_LIBRARY(validatedMetadata.customerId)
+          )
+        );
+      }
     } finally {
       await cleanup();
     }

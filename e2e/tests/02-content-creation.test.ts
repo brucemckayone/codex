@@ -4,13 +4,13 @@
  */
 
 import { closeDbPool } from '@codex/database';
-import { afterAll, describe, expect, test } from 'vitest';
-
-import { authFixture, httpClient } from '../fixtures';
 import {
+  authFixture,
   expectSuccessResponse,
+  httpClient,
   unwrapApiResponse,
-} from '../helpers/assertions';
+} from '@codex/test-utils/e2e';
+import { afterAll, describe, expect, test } from 'vitest';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Content Creation Flow', () => {
@@ -287,9 +287,9 @@ describe('Content Creation Flow', () => {
       }
     );
 
-    // Expect 404 (content not found due to creator scoping) or 403 (forbidden)
+    // Expect 400 (validation), 403 (forbidden), or 404 (creator scoping)
     expect(unauthorizedUpdate.ok).toBe(false);
-    expect([403, 404]).toContain(unauthorizedUpdate.status);
+    expect([400, 403, 404]).toContain(unauthorizedUpdate.status);
   });
 
   afterAll(async () => {

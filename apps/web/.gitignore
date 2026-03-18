@@ -1,2 +1,6 @@
 .svelte-kit/
 storybook-static/
+
+# E2E test session tokens (persistent test users)
+.e2e-tokens.json
+.e2e-tokens.lock

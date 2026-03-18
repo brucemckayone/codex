@@ -21,6 +21,11 @@ import type { Context, MiddlewareHandler } from 'hono';
 /**
  * Cached session data structure stored in KV
  */
+/**
+ * Session cache includes username, bio, and socialLinks for SSR profile rendering.
+ * This is intentional — these fields are needed to render user profiles without
+ * additional API calls. They are public-facing profile data, not sensitive PII.
+ */
 interface CachedSessionData {
   session: {
     id: string;
@@ -41,6 +46,14 @@ interface CachedSessionData {
     role: string;
     createdAt: string;
     updatedAt: string;
+    username: string | null;
+    bio: string | null;
+    socialLinks: {
+      website?: string;
+      twitter?: string;
+      youtube?: string;
+      instagram?: string;
+    } | null;
   };
 }
 
@@ -321,6 +334,9 @@ export function createSessionMiddleware(
                   sessionData.user.updatedAt instanceof Date
                     ? sessionData.user.updatedAt.toISOString()
                     : sessionData.user.updatedAt,
+                username: sessionData.user.username ?? null,
+                bio: sessionData.user.bio ?? null,
+                socialLinks: sessionData.user.socialLinks ?? null,
               },
             };
             // Fire and forget - don't wait for cache

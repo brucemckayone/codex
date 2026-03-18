@@ -162,9 +162,10 @@ describe('TextArea', () => {
       },
     });
 
-    const textarea = document.body.querySelector(
-      'textarea'
-    ) as HTMLTextAreaElement;
-    expect(textarea.classList.contains('custom-class')).toBe(true);
+    // The className is applied to the container div, not the textarea element
+    const container = document.body.querySelector(
+      '.textarea-container'
+    ) as HTMLElement;
+    expect(container.classList.contains('custom-class')).toBe(true);
   });
 });

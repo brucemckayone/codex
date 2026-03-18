@@ -10,6 +10,7 @@
  * - Soft deletes only (preserves purchase history)
  */
 
+import { CacheType, type VersionedCache } from '@codex/cache';
 import { CONTENT_STATUS, CONTENT_TYPES, PAGINATION } from '@codex/constants';
 import { schema, withPagination } from '@codex/database';
 import {
@@ -26,6 +27,12 @@ import type {
 } from '../types';
 
 export class AdminContentManagementService extends BaseService {
+  private cache?: VersionedCache;
+
+  setCache(cache: VersionedCache): void {
+    this.cache = cache;
+  }
+
   /**
    * List all content in an organization
    *
@@ -190,6 +197,12 @@ export class AdminContentManagementService extends BaseService {
         return updated as AdminContentItem;
       });
 
+      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
+      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+      void this.cache?.invalidate(
+        CacheType.COLLECTION_ORG_CONTENT(organizationId)
+      );
+
       return result;
     } catch (error) {
       if (
@@ -272,6 +285,12 @@ export class AdminContentManagementService extends BaseService {
 
         return updated as AdminContentItem;
       });
+
+      // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
+      void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
+      void this.cache?.invalidate(
+        CacheType.COLLECTION_ORG_CONTENT(organizationId)
+      );
 
       return result;
     } catch (error) {

@@ -1,0 +1,320 @@
+# Debug E2E Tests - For faster iteration on CI issues
+#
+# This workflow is designed for debugging E2E test failures with:
+# - Longer timeouts
+# - More verbose output
+# - Better artifacts (screenshots, traces, logs)
+# - Can be triggered manually or on specific branches
+#
+# Usage:
+# 1. Manual trigger: Go to Actions → E2E Debug → Run workflow
+# 2. Push to branch with [debug-e2e] in commit message
+# 3. Comment '/debug-e2e' on a PR
+
+name: E2E Debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_file:
+        description: 'Specific test file to run (e.g., account/profile.spec.ts)'
+        required: false
+        type: string
+      test_pattern:
+        description: 'Test pattern (grep filter)'
+        required: false
+        type: string
+        default: 'account'
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'apps/web/**'
+      - 'apps/web/e2e/**'
+      - '.github/workflows/e2e-debug.yml'
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_call:
+
+# Skip if this is a documentation-only change
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  EXPIRES_IN_DAYS: 1
+
+jobs:
+  e2e-debug:
+    name: E2E Debug Tests
+    runs-on: ubuntu-latest
+    environment: test
+    timeout-minutes: 60  # Generous timeout for debugging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Neon Branch Name
+        id: branch-name
+        run: echo "name=debug-e2e-${{ github.run_id }}" >> $GITHUB_OUTPUT
+
+      - name: Create Neon branch for tests
+        id: create-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: ${{ steps.branch-name.outputs.name }}
+          parent: production
+          username: neondb_owner
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: NEON_BRANCH
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:migrate
+
+      - name: Build all
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm build
+
+      - name: Generate worker dev vars
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: ${{ vars.DB_METHOD }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          RUNPOD_API_URL: http://localhost:4002/internal/mock-runpod
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$R2_SECRET_ACCESS_KEY"
+          echo "::add-mask::$STRIPE_SECRET_KEY"
+          echo "::add-mask::$BETTER_AUTH_SECRET"
+          chmod +x .github/scripts/generate-dev-vars.sh
+          .github/scripts/generate-dev-vars.sh
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start Auth Worker
+        run: |
+          cd workers/auth
+          pnpm wrangler dev --env test --port 42069 --local &
+          echo $! > auth-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
+          echo "Auth Worker ready"
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      - name: Start Identity API Worker
+        run: |
+          cd workers/identity-api
+          pnpm wrangler dev --env test --port 42074 --local &
+          echo $! > identity-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done'
+          echo "Identity API Worker ready"
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      - name: Start Ecom API Worker
+        run: |
+          cd workers/ecom-api
+          pnpm wrangler dev --env test --port 42072 --local &
+          echo $! > ecom-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done'
+          echo "Ecom API Worker ready"
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+
+      - name: Start Wrangler dev server
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          cd apps/web
+          pnpm wrangler dev --env test --port 8787 --local &
+          echo $! > wrangler.pid
+          timeout 60 bash -c 'until curl -f http://localhost:8787 > /dev/null 2>&1; do sleep 1; done'
+          echo "Web server ready"
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      - name: Wait for workers to stabilize
+        run: |
+          echo "Waiting for workers to fully initialize..."
+          sleep 10
+          curl -f http://localhost:42069/health && echo "✓ Auth Worker"
+          curl -f http://localhost:42074/health && echo "✓ Identity API Worker"
+          curl -f http://localhost:42072/health && echo "✓ Ecom API Worker"
+          curl -f http://localhost:8787 && echo "✓ Web App"
+          echo "All services ready"
+
+      - name: Run E2E tests (DEBUG MODE)
+        env:
+          CI: "true"
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: ${{ vars.DB_METHOD }}
+          NODE_ENV: ${{ vars.NODE_ENV }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          PLAYWRIGHT_BASE_URL: http://localhost:8787
+          DEBUG: pw:api  # Enable Playwright debug output
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          cd apps/web
+          # Run tests with detailed output
+          if [ -n "${{ inputs.test_file }}" ]; then
+            echo "Running specific test file: ${{ inputs.test_file }}"
+            pnpm exec playwright test e2e/${{ inputs.test_file }} --project=e2e \
+              --reporter=list \
+              --reporter=html \
+              --workers=1
+          elif [ -n "${{ inputs.test_pattern }}" ]; then
+            echo "Running tests matching pattern: ${{ inputs.test_pattern }}"
+            pnpm exec playwright test e2e --project=e2e \
+              --grep="${{ inputs.test_pattern }}" \
+              --reporter=list \
+              --reporter=html \
+              --workers=1
+          else
+            echo "Running all account E2E tests"
+            pnpm exec playwright test e2e/account --project=e2e \
+              --reporter=list \
+              --reporter=html \
+              --workers=1
+          fi
+        continue-on-error: true
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-debug-${{ github.run_id }}
+          path: apps/web/playwright-report/
+          retention-days: 30
+
+      - name: Upload test traces
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-traces-debug-${{ github.run_id }}
+          path: apps/web/test-results/
+          retention-days: 30
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-screenshots-debug-${{ github.run_id }}
+          path: |
+            apps/web/test-results/**/*.png
+            apps/web/playwright-report/**/*.png
+          retention-days: 30
+
+      - name: Collect worker logs
+        if: always()
+        run: |
+          mkdir -p debug-logs
+          # Try to get any worker logs if available
+          for pid in auth-worker.pid identity-api-worker.pid ecom-api-worker.pid wrangler.pid; do
+            if [ -f "apps/web/$pid" ] || [ -f "workers/auth/$pid" ] || [ -f "workers/identity-api/$pid" ]; then
+              echo "Found PID file: $pid"
+            fi
+          done
+          echo "Worker startup completed at $(date)" > debug-logs/timestamp.txt
+
+      - name: Upload debug logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debug-logs-${{ github.run_id }}
+          path: debug-logs/
+          retention-days: 7
+
+      - name: Stop workers
+        if: always()
+        run: |
+          for pid in auth-worker.pid identity-api-worker.pid ecom-api-worker.pid wrangler.pid; do
+            if [ -f "apps/web/$pid" ]; then
+              kill $(cat apps/web/$pid) 2>/dev/null || true
+              rm apps/web/$pid 2>/dev/null || true
+            fi
+            if [ -f "workers/auth/$pid" ]; then
+              kill $(cat workers/auth/$pid) 2>/dev/null || true
+              rm workers/auth/$pid 2>/dev/null || true
+            fi
+            if [ -f "workers/identity-api/$pid" ]; then
+              kill $(cat workers/identity-api/$pid) 2>/dev/null || true
+              rm workers/identity-api/$pid 2>/dev/null || true
+            fi
+            if [ -f "workers/ecom-api/$pid" ]; then
+              kill $(cat workers/ecom-api/$pid) 2>/dev/null || true
+              rm workers/ecom-api/$pid 2>/dev/null || true
+            fi
+          done
+
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+      - name: Test Results Summary
+        if: always()
+        run: |
+          echo "## 🎭 E2E Debug Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- [Playwright Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Test Traces](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Debugging Tips" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download the Playwright report artifact" >> $GITHUB_STEP_SUMMARY
+          echo "2. Unzip and open \`playwright-report/index.html\` in a browser" >> $GITHUB_STEP_SUMMARY
+          echo "3. Look for screenshots and traces in the artifacts" >> $GITHUB_STEP_SUMMARY

@@ -1,9 +1,16 @@
 /**
  * Custom assertion helpers for e2e API tests (Vitest + fetch)
+ *
+ * NOTE: We dynamically import 'expect' to avoid conflicts with Playwright's expect
+ * when this module is loaded in web E2E tests. The Symbol($$jest-matchers-object)
+ * conflict occurs because both Vitest and Playwright try to define the same global.
  */
-
-import { expect } from 'vitest';
 import type { ErrorResponse } from './types';
+
+// Lazy-load expect to avoid module-level import conflicts
+function getExpect() {
+  return import('vitest').then((m) => m.expect);
+}
 
 /**
  * Assert API response is successful (2xx)
@@ -33,6 +40,7 @@ export async function expectSuccessResponse(
     );
     console.error(`[E2E Debug] Response body: ${body}`);
   }
+  const expect = await getExpect();
   expect(response.status).toBe(expectedStatus);
   expect(response.headers.get('content-type')).toContain('application/json');
 }
@@ -45,13 +53,14 @@ export async function expectErrorResponse(
   expectedCode: string,
   expectedStatus?: number
 ): Promise<void> {
+  const expect = await getExpect();
   if (expectedStatus) {
     expect(response.status).toBe(expectedStatus);
   } else {
     expect(response.ok).toBe(false);
   }
 
-  const body: ErrorResponse = await response.json();
+  const body = (await response.json()) as ErrorResponse;
   expect(body.error).toBeDefined();
   expect(body.error.code).toBe(expectedCode);
 }

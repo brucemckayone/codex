@@ -15,8 +15,8 @@ import {
   AdminContentManagementService,
   AdminCustomerManagementService,
 } from '@codex/admin';
+import { VersionedCache } from '@codex/cache';
 import { R2Service } from '@codex/cloudflare-clients';
-
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
@@ -126,6 +126,12 @@ export function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
         });
+
+        if (env.CACHE_KV) {
+          _content.setCache(
+            new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          );
+        }
       }
       return _content;
     },
@@ -309,6 +315,12 @@ export function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
         });
+
+        if (env.CACHE_KV) {
+          _adminContent.setCache(
+            new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          );
+        }
       }
       return _adminContent;
     },
@@ -400,11 +412,20 @@ export function createServiceRegistry(
 
         const r2Service = new R2Service(assetsBucket);
 
+        // Create versioned cache if CACHE_KV is available
+        const cache = env.CACHE_KV
+          ? new VersionedCache({
+              kv: env.CACHE_KV,
+              prefix: 'cache',
+            })
+          : undefined;
+
         _identity = new IdentityService({
           db: getSharedDb(),
           environment: getEnvironment(),
           r2Service,
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
+          cache,
         });
       }
       return _identity;

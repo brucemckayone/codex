@@ -9,14 +9,21 @@
  * 2. Data passed to client via SvelteKit load
  * 3. onMount calls hydrateCollection() to populate cache
  * 4. useLiveQuery finds cached data - no refetch!
+ *
+ * Note: 'library' is localStorage-backed (libraryCollection).
+ *       'content' is QueryClient-backed.
  */
 
+import {
+  type LibraryItem,
+  libraryCollection,
+  loadLibraryFromServer,
+} from './library';
 import { queryClient } from './query-client';
 
 /**
- * Collection keys used for hydration
- *
- * These must match the queryKey used in each collection's queryCollectionOptions.
+ * Collection keys — kept for content (QueryClient-backed).
+ * Library uses localStorage so these keys are content-only in practice.
  */
 export const COLLECTION_KEYS = {
   content: ['content'] as const,
@@ -28,64 +35,56 @@ export type CollectionKey = keyof typeof COLLECTION_KEYS;
 /**
  * Hydrate a collection with server-side data
  *
- * Call this in onMount to populate the QueryClient cache
- * with data fetched on the server. This prevents double-fetching.
+ * For 'library': inserts/upserts into localStorage collection.
+ * For 'content': sets QueryClient cache.
  *
  * @param collection - Which collection to hydrate
  * @param data - The array of items from server load
- *
- * @example
- * ```svelte
- * <!-- +page.server.ts -->
- * export async function load() {
- *   const library = await getUserLibrary({});
- *   return { library };
- * }
- *
- * <!-- +page.svelte -->
- * <script>
- *   import { onMount } from 'svelte';
- *   import { hydrateCollection, libraryCollection, useLiveQuery } from '$lib/collections';
- *
- *   let { data } = $props();
- *
- *   onMount(() => {
- *     hydrateCollection('library', data.library.items);
- *   });
- *
- *   const library = useLiveQuery((q) =>
- *     q.from({ item: libraryCollection })
- *   );
- * </script>
- * ```
  */
 export function hydrateCollection<T>(
   collection: CollectionKey,
   data: T[]
 ): void {
+  if (collection === 'library') {
+    if (!libraryCollection) return;
+    for (const item of data as LibraryItem[]) {
+      const key = item.content.id;
+      if (libraryCollection.state.has(key)) {
+        libraryCollection.update(key, () => item);
+      } else {
+        libraryCollection.insert(item);
+      }
+    }
+    return;
+  }
+
+  // Query-backed collections (content)
   if (!queryClient) return;
-  const queryKey = COLLECTION_KEYS[collection];
-  queryClient.setQueryData(queryKey, data);
+  queryClient.setQueryData(COLLECTION_KEYS[collection], data);
 }
 
 /**
  * Check if a collection is already hydrated
  *
- * Useful for conditional hydration - only hydrate if not already cached.
+ * For 'library': checks localStorage collection state size.
+ * For 'content': checks QueryClient cache.
  *
  * @param collection - Which collection to check
- * @returns true if data exists in cache
+ * @returns true if data exists in cache/storage
  */
 export function isCollectionHydrated(collection: CollectionKey): boolean {
+  if (collection === 'library') {
+    return (libraryCollection?.state.size ?? 0) > 0;
+  }
   if (!queryClient) return false;
-  const queryKey = COLLECTION_KEYS[collection];
-  return queryClient.getQueryData(queryKey) !== undefined;
+  return queryClient.getQueryData(COLLECTION_KEYS[collection]) !== undefined;
 }
 
 /**
  * Hydrate if not already cached
  *
  * Safe to call multiple times - only hydrates on first call.
+ * On return visits, localStorage already has library data → no-op.
  *
  * @param collection - Which collection to hydrate
  * @param data - The array of items from server load
@@ -95,7 +94,6 @@ export function hydrateIfNeeded<T>(
   collection: CollectionKey,
   data: T[]
 ): boolean {
-  if (!queryClient) return false;
   if (isCollectionHydrated(collection)) {
     return false;
   }
@@ -106,13 +104,18 @@ export function hydrateIfNeeded<T>(
 /**
  * Invalidate and refetch a collection
  *
- * Use after mutations that affect collection data.
+ * For 'library': fetches fresh data from server and reconciles localStorage.
+ * For 'content': invalidates QueryClient queries.
  *
  * @param collection - Which collection to invalidate
  */
 export async function invalidateCollection(
   collection: CollectionKey
 ): Promise<void> {
+  if (collection === 'library') {
+    await loadLibraryFromServer();
+    return;
+  }
   if (!queryClient) return;
   const queryKey = COLLECTION_KEYS[collection];
   await queryClient.invalidateQueries({ queryKey });

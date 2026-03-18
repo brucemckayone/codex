@@ -64,10 +64,17 @@ export const INFRA_KEYS = {
 
 export function isDev(env?: Env | boolean): boolean {
   if (typeof env === 'boolean') return env;
+  if (env?.MODE === 'production') return false;
   if (env?.MODE === 'development') return true;
   if (env?.dev === true) return true;
-  // Node.js fallback
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development')
+  // Node.js fallback — includes 'test' so cookies are non-secure on localhost
+  // during E2E tests (SvelteKit dev server + Cloudflare adapter passes env
+  // bindings without MODE/dev, so we rely on process.env.NODE_ENV)
+  if (
+    typeof process !== 'undefined' &&
+    (process.env?.NODE_ENV === 'development' ||
+      process.env?.NODE_ENV === 'test')
+  )
     return true;
   return false;
 }
@@ -213,6 +220,21 @@ export function getServiceUrl(
   const devMode = isDev(env);
   const bindings = typeof env === 'object' ? env : {};
 
+  /**
+   * Resolve an environment variable from bindings or process.env
+   */
+  const getEnvVar = (key: string): string | undefined => {
+    // 1. Check bindings (Cloudflare/SvelteKit platform.env)
+    if (bindings[key]) return bindings[key] as string;
+
+    // 2. Check Node.js process.env (for local development and E2E tests)
+    if (typeof process !== 'undefined' && process.env[key]) {
+      return process.env[key];
+    }
+
+    return undefined;
+  };
+
   // Helper to validate and return URL from env or use default
   const getValidatedUrl = (
     envUrl: string | undefined,
@@ -227,49 +249,49 @@ export function getServiceUrl(
   switch (service) {
     case 'auth':
       return getValidatedUrl(
-        bindings.AUTH_WORKER_URL,
+        getEnvVar('AUTH_WORKER_URL'),
         devMode ? DEFAULT_URLS.auth.dev : DEFAULT_URLS.auth.prod
       );
     case 'content':
       return getValidatedUrl(
-        bindings.API_URL,
+        getEnvVar('API_URL'),
         devMode ? DEFAULT_URLS.content.dev : DEFAULT_URLS.content.prod
       );
     case 'access':
       return getValidatedUrl(
-        bindings.API_URL,
+        getEnvVar('API_URL'),
         devMode ? DEFAULT_URLS.access.dev : DEFAULT_URLS.access.prod
       );
     case 'org':
       return getValidatedUrl(
-        bindings.ORG_API_URL,
+        getEnvVar('ORG_API_URL'),
         devMode ? DEFAULT_URLS.org.dev : DEFAULT_URLS.org.prod
       );
     case 'ecom':
       return getValidatedUrl(
-        bindings.ECOM_API_URL,
+        getEnvVar('ECOM_API_URL'),
         devMode ? DEFAULT_URLS.ecom.dev : DEFAULT_URLS.ecom.prod
       );
     case 'admin':
       return getValidatedUrl(
-        bindings.ADMIN_API_URL,
+        getEnvVar('ADMIN_API_URL'),
         devMode ? DEFAULT_URLS.admin.dev : DEFAULT_URLS.admin.prod
       );
     case 'identity':
       return getValidatedUrl(
-        bindings.IDENTITY_API_URL,
+        getEnvVar('IDENTITY_API_URL'),
         devMode ? DEFAULT_URLS.identity.dev : DEFAULT_URLS.identity.prod
       );
     case 'notifications':
       return getValidatedUrl(
-        bindings.NOTIFICATIONS_API_URL,
+        getEnvVar('NOTIFICATIONS_API_URL'),
         devMode
           ? DEFAULT_URLS.notifications.dev
           : DEFAULT_URLS.notifications.prod
       );
     case 'media':
       return getValidatedUrl(
-        bindings.MEDIA_API_URL,
+        getEnvVar('MEDIA_API_URL'),
         devMode ? DEFAULT_URLS.media.dev : DEFAULT_URLS.media.prod
       );
     default: {

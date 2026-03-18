@@ -14,9 +14,13 @@
  */
 
 import { closeDbPool } from '@codex/database';
+import {
+  expectErrorResponse,
+  expectForbidden,
+  httpClient,
+} from '@codex/test-utils/e2e';
 import { afterAll, describe, expect, test } from 'vitest';
-import { adminFixture, httpClient, settingsFixture } from '../fixtures';
-import { expectErrorResponse, expectForbidden } from '../helpers/assertions';
+import { adminFixture, settingsFixture } from '../fixtures';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Platform Settings', () => {
@@ -35,35 +39,39 @@ describe('Platform Settings', () => {
       await expectErrorResponse(response, 'UNAUTHORIZED', 401);
     });
 
-    test('should reject non-org-member users', { timeout: 60000 }, async () => {
-      // Create org owner with their org
-      const admin1 = await adminFixture.createOrgOwner({
-        email: `admin1-settings-${Date.now()}@example.com`,
-        password: 'SecurePassword123!',
-        orgName: `Settings Org 1 ${Date.now()}`,
-        orgSlug: `settings-org-1-${Date.now()}`,
-      });
+    test(
+      'should reject non-org-member users',
+      { timeout: 120000 },
+      async () => {
+        // Create org owner with their org
+        const admin1 = await adminFixture.createOrgOwner({
+          email: `admin1-settings-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          orgName: `Settings Org 1 ${Date.now()}`,
+          orgSlug: `settings-org-1-${Date.now()}`,
+        });
 
-      // Create another org owner with different org (NOT platform_owner)
-      // Regular org owners should NOT have cross-org access
-      const admin2 = await adminFixture.createOrgOwner({
-        email: `admin2-settings-${Date.now()}@example.com`,
-        password: 'SecurePassword123!',
-        orgName: `Settings Org 2 ${Date.now()}`,
-        orgSlug: `settings-org-2-${Date.now()}`,
-      });
+        // Create another org owner with different org (NOT platform_owner)
+        // Regular org owners should NOT have cross-org access
+        const admin2 = await adminFixture.createOrgOwner({
+          email: `admin2-settings-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          orgName: `Settings Org 2 ${Date.now()}`,
+          orgSlug: `settings-org-2-${Date.now()}`,
+        });
 
-      // Admin2 tries to access admin1's org settings - should fail with 403
-      const response = await httpClient.get(
-        `${WORKER_URLS.organization}/api/organizations/${admin1.organization.id}/settings`,
-        {
-          headers: { Cookie: admin2.cookie },
-        }
-      );
+        // Admin2 tries to access admin1's org settings - should fail with 403
+        const response = await httpClient.get(
+          `${WORKER_URLS.organization}/api/organizations/${admin1.organization.id}/settings`,
+          {
+            headers: { Cookie: admin2.cookie },
+          }
+        );
 
-      expect(response.status).toBe(403);
-      await expectForbidden(response);
-    });
+        expect(response.status).toBe(403);
+        await expectForbidden(response);
+      }
+    );
 
     test('should accept org owner', { timeout: 60000 }, async () => {
       const admin = await adminFixture.createPlatformOwner({

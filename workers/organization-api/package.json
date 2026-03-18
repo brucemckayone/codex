@@ -5,7 +5,7 @@
   "description": "Cloudflare Worker for Organization management API endpoints",
   "type": "module",
   "scripts": {
-    "dev": "pnpm build && dotenv -e ../../.env.dev -- wrangler dev --port 42071 --inspector-port 9234",
+    "dev": "pnpm build && dotenv -e ../../.env.dev -- wrangler dev --port 42071 --inspector-port 9234 --persist-to ../../.wrangler/state",
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "deploy:production": "wrangler deploy --env production",
@@ -18,6 +18,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@codex/cache": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
@@ -30,7 +31,7 @@
     "@codex/worker-utils": "workspace:*",
     "hono": "^4.7.8",
     "vite-plugin-dts": "^4.5.4",
-    "zod": "^3.24.1"
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

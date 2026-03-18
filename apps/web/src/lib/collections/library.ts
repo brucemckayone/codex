@@ -2,22 +2,18 @@
  * Library Collection
  *
  * TanStack DB collection for user's content library.
- * Supports optimistic playback progress updates.
+ * localStorage-backed for local-first persistence.
  *
  * Features:
- * - Sub-ms client-side queries and filtering
- * - Optimistic updates for playback progress
- * - Automatic rollback on server errors
+ * - Instant load from localStorage on page refresh (no loading flash)
+ * - Reconciled with server on staleness detection or explicit refresh
+ * - Optimistic progress updates (visual state only — server sync via progressCollection)
  */
 
 import type { UserLibraryResponse } from '@codex/shared-types';
-import { createCollection } from '@tanstack/db';
-import { queryCollectionOptions } from '@tanstack/query-db-collection';
-import {
-  getUserLibrary,
-  savePlaybackProgress,
-} from '$lib/remote/library.remote';
-import { queryClient } from './query-client';
+import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
+import { browser } from '$app/environment';
+import { getUserLibrary } from '$lib/remote/library.remote';
 
 /**
  * Library item type extracted from UserLibraryResponse
@@ -33,88 +29,74 @@ export type LibraryProgress = NonNullable<LibraryItem['progress']>;
  * Library Collection
  *
  * User's content library (purchased + free content).
- * Supports optimistic progress updates.
+ * localStorage-backed: survives page refresh, no loading flash on return visits.
  *
  * Usage:
  * ```svelte
  * <script>
  *   import { useLiveQuery, libraryCollection } from '$lib/collections';
  *
- *   const library = useLiveQuery((q) =>
- *     q.from({ item: libraryCollection })
- *      .orderBy(({ item }) => item.progress?.updatedAt, 'desc')
+ *   let { data } = $props();  // From +page.server.ts
+ *
+ *   const library = useLiveQuery(
+ *     (q) => q.from({ item: libraryCollection })
+ *          .orderBy(({ item }) => item.progress?.updatedAt, 'desc'),
+ *     undefined,
+ *     { ssrData: data.library?.items }  // SSR fallback
  *   );
  * </script>
  * ```
  */
-export const libraryCollection = queryClient
+export const libraryCollection = browser
   ? createCollection<LibraryItem, string>(
-      queryCollectionOptions({
-        queryKey: ['library'],
-
-        // Load via remote function (pass empty object for optional params)
-        queryFn: async () => {
-          const result = await getUserLibrary({});
-          return result?.items ?? [];
-        },
-
-        queryClient,
+      localStorageCollectionOptions({
+        storageKey: 'codex-library',
         getKey: (item) => item.content.id,
-
-        /**
-         * Handle optimistic updates
-         * Called when collection.update() is used
-         *
-         * Flow:
-         * 1. UI updates immediately (optimistic)
-         * 2. This handler syncs to server
-         * 3. If error, transaction rolls back automatically
-         */
-        onUpdate: async ({ transaction }) => {
-          const mutation = transaction.mutations[0];
-          if (!mutation) return;
-
-          const { key, modified } = mutation;
-
-          // Only sync progress changes to server
-          if (modified.progress) {
-            try {
-              await savePlaybackProgress({
-                contentId: key as string,
-                positionSeconds: modified.progress.positionSeconds,
-                durationSeconds: modified.progress.durationSeconds,
-              });
-            } catch (error) {
-              // Transaction automatically rolls back on error
-              console.error('Failed to save progress:', error);
-              throw error;
-            }
-          }
-        },
       })
     )
   : undefined;
 
 /**
- * Update playback progress (optimistic)
+ * Fetch library from server and reconcile with localStorage collection.
  *
- * UI updates immediately, syncs to server in background.
- * Automatically rolls back if server save fails.
+ * Called by invalidateCollection('library') when the server-side version
+ * bumps (e.g. a purchase completes on another device).
+ */
+export async function loadLibraryFromServer(): Promise<void> {
+  if (!libraryCollection) return;
+  try {
+    const result = await getUserLibrary({});
+    const freshItems = result?.items ?? [];
+
+    // Track existing keys to detect removals (access revoked, etc.)
+    const existingKeys = new Set<string>();
+    for (const key of libraryCollection.state.keys()) existingKeys.add(key);
+
+    // Upsert all fresh items
+    for (const item of freshItems) {
+      const key = item.content.id;
+      if (existingKeys.has(key)) {
+        libraryCollection.update(key, () => item);
+      } else {
+        libraryCollection.insert(item);
+      }
+      existingKeys.delete(key);
+    }
+
+    // Remove items no longer in library
+    for (const key of existingKeys) {
+      libraryCollection.delete(key);
+    }
+  } catch (error) {
+    console.error('Failed to refresh library from server:', error);
+  }
+}
+
+/**
+ * Update playback progress (optimistic local update)
  *
- * Usage:
- * ```svelte
- * <script>
- *   import { updateProgress } from '$lib/collections/library';
- *
- *   function handleTimeUpdate(e) {
- *     updateProgress(
- *       contentId,
- *       e.target.currentTime,
- *       e.target.duration
- *     );
- *   }
- * </script>
- * ```
+ * Writes to localStorage immediately — no network call.
+ * Server sync is handled by progressCollection + progress-sync.ts.
  *
  * @param contentId - The content ID
  * @param positionSeconds - Current playback position in seconds

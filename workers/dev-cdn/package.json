@@ -1,0 +1,17 @@
+{
+  "name": "dev-cdn",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-only CDN proxy for Miniflare R2 — never deployed to Cloudflare",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 4100 --inspector-port 9240 --persist-to ../../.wrangler/state",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250102.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.47.0"
+  }
+}

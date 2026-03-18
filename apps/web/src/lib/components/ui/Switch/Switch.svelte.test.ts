@@ -137,10 +137,11 @@ describe('Switch', () => {
   test('contains hidden input for form submission', () => {
     component = mount(Switch, {
       target: document.body,
-      props: { required: true },
+      props: { required: true, name: 'switch-field' },
     });
 
-    const input = document.body.querySelector('input[type="hidden"]');
+    // Melt-UI uses type="checkbox" with the `hidden` HTML attribute for form submission
+    const input = document.body.querySelector('input[name="switch-field"]');
     expect(input).toBeTruthy();
     expect(input?.hasAttribute('required')).toBe(true);
   });

@@ -4,9 +4,7 @@
  */
 
 import { dbHttp, schema } from '@codex/database';
-import { eq } from 'drizzle-orm';
-
-import { httpClient } from '../helpers/http-client';
+import { authFixture, httpClient } from '@codex/test-utils/e2e';
 import type {
   AdminContentItem,
   AdminPaginatedResponse,
@@ -16,9 +14,9 @@ import type {
   PlatformOwnerContext,
   RevenueStats,
   TopContentItem,
-} from '../helpers/types';
+} from '@codex/test-utils/e2e/helpers/types';
+import { eq } from 'drizzle-orm';
 import { WORKER_URLS } from '../helpers/worker-urls';
-import { authFixture } from './auth.fixture';
 
 export const adminFixture = {
   /**

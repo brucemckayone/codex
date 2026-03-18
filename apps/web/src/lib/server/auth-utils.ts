@@ -8,8 +8,16 @@ import { COOKIES } from '@codex/constants';
  * their __Secure- prefixed variants.
  */
 export function extractSessionToken(res: Response): string | null {
-  const setCookieHeader = res.headers.get('set-cookie');
-  if (!setCookieHeader) return null;
+  // Use getSetCookie() if available, otherwise fallback to get
+  const setCookies =
+    typeof res.headers.getSetCookie === 'function'
+      ? res.headers.getSetCookie()
+      : ([res.headers.get('set-cookie')].filter(Boolean) as string[]);
+
+  if (!setCookies || setCookies.length === 0) return null;
+
+  // Join them for the regex to work over all of them, or test individually
+  const cookieString = setCookies.join('; ');
 
   // Try platform cookie name first, then BetterAuth's internal name
   const patterns = [
@@ -20,7 +28,7 @@ export function extractSessionToken(res: Response): string | null {
   ];
 
   for (const pattern of patterns) {
-    const match = setCookieHeader.match(pattern);
+    const match = cookieString.match(pattern);
     if (match) return match[1];
   }
 

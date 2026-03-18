@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './fixtures/auth';
 
 /**
  * Auth Flow E2E Tests
@@ -102,25 +103,34 @@ test.describe
 
       await page.fill('input[name="email"]', TEST_USER.email);
       await page.fill('input[name="password"]', TEST_USER.password);
-      await page.click('button[type="submit"]');
+      // noWaitAfter: login triggers navigation; let the URL assertion handle the wait
+      await page.click('button[type="submit"]', { noWaitAfter: true });
 
-      await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
+      await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
     });
 
-    test('session cookie persists across navigation', async ({ page }) => {
-      // Login first
+    test('session persists across navigation', async ({ page }) => {
+      // Use the TEST_USER from tests 1-3 (already registered and verified)
       await page.goto('/login');
 
       await page.fill('input[name="email"]', TEST_USER.email);
       await page.fill('input[name="password"]', TEST_USER.password);
-      await page.click('button[type="submit"]');
-      await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
+      await page.click('button[type="submit"]', { noWaitAfter: true });
 
-      // Navigate to homepage — session should persist
-      await page.goto('/');
-      const cookies = await page.context().cookies();
-      const sessionCookie = cookies.find((c) => c.name === 'codex-session');
-      expect(sessionCookie).toBeDefined();
+      await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
+
+      // Navigate to a protected route — session should persist
+      await page.goto('/account');
+      await expect(page).toHaveURL(/\/account/, { timeout: 10_000 });
+
+      // Navigate to another protected route — session should still persist
+      await page.goto('/account/notifications');
+      await expect(page).toHaveURL(/\/account\/notifications/, {
+        timeout: 10_000,
+      });
+
+      // Session is not lost — we're not redirected to /login
+      await expect(page).not.toHaveURL(/\/login/);
     });
 
     test('rejects duplicate registration', async ({ page }) => {

@@ -1,29 +1,27 @@
 <script lang="ts">
-  import { createAvatar } from '@melt-ui/svelte';
-  import { type Snippet, setContext, untrack } from 'svelte';
+  import { type Snippet, setContext } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
-    src?: string; // Optional for fallback-only
-    delayMs?: number;
+    src?: string;
     children: Snippet;
   }
 
-  const { src = '', delayMs = 0, children, class: className, ...restProps }: Props = $props();
+  const { src, children, class: className, ...restProps }: Props = $props();
 
-  const avatar = createAvatar({
-    src: untrack(() => src),
-    delayMs: untrack(() => delayMs)
-  });
+  let imageLoaded = $state(false);
 
-  const { options } = avatar;
-
+  // Reset loaded state whenever src changes
   $effect(() => {
-    options.src.set(src);
-    options.delayMs.set(delayMs);
+    src; // reactive dependency — re-runs when src changes
+    imageLoaded = false;
   });
 
-  setContext('AVATAR', avatar);
+  setContext('AVATAR', {
+    getLoaded: () => imageLoaded,
+    onLoad: () => { imageLoaded = true; },
+    onError: () => { imageLoaded = false; },
+  });
 </script>
 
 <div class="avatar {className ?? ''}" {...restProps}>

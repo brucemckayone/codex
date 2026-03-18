@@ -7,7 +7,10 @@
 import type { Organization } from '@codex/database/schema';
 import type { SessionData, UserData } from '@codex/shared-types';
 
-// Re-export admin types from @codex/admin (single source of truth)
+// Re-export database types
+export type { Content, Organization, User } from '@codex/database/schema';
+// Re-export admin types from @codex/shared-types (single source of truth)
+// Re-export shared types
 export type {
   AdminContentItem,
   AdminContentStatus,
@@ -15,19 +18,13 @@ export type {
   CustomerStats,
   CustomerWithStats,
   DailyRevenue,
-  PaginatedResponse as AdminPaginatedResponse,
-  PurchaseHistoryItem,
-  RevenueStats,
-  TopContentItem,
-} from '@codex/admin';
-// Re-export database types
-export type { Content, Organization, User } from '@codex/database/schema';
-// Re-export shared types
-export type {
   ErrorResponse,
   PaginatedListResponse,
+  PurchaseHistoryItem,
+  RevenueStats,
   SessionData,
   SingleItemResponse,
+  TopContentItem,
   UserData,
 } from '@codex/shared-types';
 

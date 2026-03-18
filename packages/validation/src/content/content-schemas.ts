@@ -70,14 +70,11 @@ const optionalTextSchema = createOptionalTextSchema;
  * Database enum: No CHECK constraint, but follows convention
  * Keeping validation for type safety
  */
-export const organizationStatusEnum = z.enum(
-  ['active', 'suspended', 'deleted'],
-  {
-    errorMap: () => ({
-      message: 'Status must be active, suspended, or deleted',
-    }),
-  }
-);
+export const organizationStatusEnum = z.enum([
+  'active',
+  'suspended',
+  'deleted',
+]);
 
 /**
  * Create Organization Input
@@ -109,49 +106,37 @@ export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>;
  * Media type enum
  * Aligns with database CHECK constraint: line 73
  */
-export const mediaTypeEnum = z.enum([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO], {
-  errorMap: () => ({ message: 'Media type must be video or audio' }),
-});
+export const mediaTypeEnum = z.enum([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO]);
 
 /**
  * Media status enum
  * Aligns with database CHECK constraint: line 72
  */
-export const mediaStatusEnum = z.enum(
-  [
-    MEDIA_STATUS.UPLOADING,
-    MEDIA_STATUS.UPLOADED,
-    MEDIA_STATUS.TRANSCODING,
-    MEDIA_STATUS.READY,
-    MEDIA_STATUS.FAILED,
-  ],
-  {
-    errorMap: () => ({ message: 'Invalid media status' }),
-  }
-);
+export const mediaStatusEnum = z.enum([
+  MEDIA_STATUS.UPLOADING,
+  MEDIA_STATUS.UPLOADED,
+  MEDIA_STATUS.TRANSCODING,
+  MEDIA_STATUS.READY,
+  MEDIA_STATUS.FAILED,
+]);
 
 /**
  * MIME type validation for media uploads
  * Whitelist only supported formats
  */
-const mimeTypeSchema = z.enum(
-  [
-    // Video formats
-    'video/mp4',
-    'video/quicktime',
-    'video/x-msvideo',
-    'video/webm',
-    // Audio formats
-    'audio/mpeg',
-    'audio/mp4',
-    'audio/wav',
-    'audio/webm',
-    'audio/ogg',
-  ],
-  {
-    errorMap: () => ({ message: 'Unsupported file format' }),
-  }
-);
+const mimeTypeSchema = z.enum([
+  // Video formats
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/webm',
+  // Audio formats
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/wav',
+  'audio/webm',
+  'audio/ogg',
+]);
 
 /**
  * Create Media Item Input
@@ -210,43 +195,32 @@ export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
  * Content type enum
  * Aligns with database CHECK constraint: line 150
  */
-export const contentTypeEnum = z.enum(
-  [CONTENT_TYPES.VIDEO, CONTENT_TYPES.AUDIO, CONTENT_TYPES.WRITTEN],
-  {
-    errorMap: () => ({
-      message: 'Content type must be video, audio, or written',
-    }),
-  }
-);
+export const contentTypeEnum = z.enum([
+  CONTENT_TYPES.VIDEO,
+  CONTENT_TYPES.AUDIO,
+  CONTENT_TYPES.WRITTEN,
+]);
 
 /**
  * Visibility enum
  * Aligns with database CHECK constraint: line 149
  */
-export const visibilityEnum = z.enum(
-  [
-    VISIBILITY.PUBLIC,
-    VISIBILITY.PRIVATE,
-    VISIBILITY.MEMBERS_ONLY,
-    VISIBILITY.PURCHASED_ONLY,
-  ],
-  {
-    errorMap: () => ({ message: 'Invalid visibility setting' }),
-  }
-);
+export const visibilityEnum = z.enum([
+  VISIBILITY.PUBLIC,
+  VISIBILITY.PRIVATE,
+  VISIBILITY.MEMBERS_ONLY,
+  VISIBILITY.PURCHASED_ONLY,
+]);
 
 /**
  * Content status enum
  * Aligns with database CHECK constraint: line 148
  */
-export const contentStatusEnum = z.enum(
-  [CONTENT_STATUS.DRAFT, CONTENT_STATUS.PUBLISHED, CONTENT_STATUS.ARCHIVED],
-  {
-    errorMap: () => ({
-      message: 'Status must be draft, published, or archived',
-    }),
-  }
-);
+export const contentStatusEnum = z.enum([
+  CONTENT_STATUS.DRAFT,
+  CONTENT_STATUS.PUBLISHED,
+  CONTENT_STATUS.ARCHIVED,
+]);
 
 /**
  * Tag validation
@@ -397,9 +371,7 @@ export type PublishContentInput = z.infer<typeof publishContentSchema>;
 /**
  * Sort order enum
  */
-export const sortOrderEnum = z.enum(['asc', 'desc'], {
-  errorMap: () => ({ message: 'Sort order must be asc or desc' }),
-});
+export const sortOrderEnum = z.enum(['asc', 'desc']);
 
 /**
  * Content query/filter schema

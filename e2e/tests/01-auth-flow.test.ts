@@ -3,12 +3,19 @@
  * Tests user registration, login, session validation, and logout
  */
 
+import { getServiceUrl } from '@codex/constants';
 import { closeDbPool } from '@codex/database';
+import {
+  authFixture,
+  expectSuccessResponse,
+  httpClient,
+} from '@codex/test-utils/e2e';
 import { afterAll, describe, expect, test } from 'vitest';
 
-import { authFixture, httpClient } from '../fixtures';
-import { expectSuccessResponse } from '../helpers/assertions';
-import { WORKER_URLS } from '../helpers/worker-urls';
+/**
+ * Resolve worker URLs
+ */
+const AUTH_URL = getServiceUrl('auth', true);
 
 describe('Auth Flow', () => {
   test('should register new user, login, validate session, and logout', async () => {
@@ -33,7 +40,7 @@ describe('Auth Flow', () => {
 
     // Step 2: Validate session is active
     const sessionResponse = await httpClient.get(
-      `${WORKER_URLS.auth}/api/auth/get-session`,
+      `${AUTH_URL}/api/auth/get-session`,
       {
         headers: { Cookie: registered.cookie },
       }
@@ -46,11 +53,11 @@ describe('Auth Flow', () => {
 
     // Step 3: Logout
     const logoutResponse = await httpClient.post(
-      `${WORKER_URLS.auth}/api/auth/sign-out`,
+      `${AUTH_URL}/api/auth/sign-out`,
       {
         headers: {
           Cookie: registered.cookie,
-          Origin: WORKER_URLS.auth, // Better Auth requires Origin header
+          Origin: AUTH_URL, // Better Auth requires Origin header
         },
         data: {}, // Better Auth requires JSON body even if empty
       }
@@ -95,7 +102,7 @@ describe('Auth Flow', () => {
 
   test('should reject invalid credentials', async () => {
     const loginResponse = await httpClient.post(
-      `${WORKER_URLS.auth}/api/auth/sign-in/email`,
+      `${AUTH_URL}/api/auth/sign-in/email`,
       {
         data: {
           email: 'nonexistent@example.com',
@@ -119,10 +126,10 @@ describe('Auth Flow', () => {
 
     // Try to register again with same email
     const duplicateResponse = await httpClient.post(
-      `${WORKER_URLS.auth}/api/auth/sign-up/email`,
+      `${AUTH_URL}/api/auth/sign-up/email`,
       {
         headers: {
-          Origin: WORKER_URLS.auth, // Better Auth requires Origin header
+          Origin: AUTH_URL, // Better Auth requires Origin header
         },
         data: {
           email: testEmail,

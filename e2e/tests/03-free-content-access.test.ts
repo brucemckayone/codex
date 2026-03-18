@@ -11,12 +11,13 @@
  */
 
 import { closeDbPool } from '@codex/database';
-import { afterAll, describe, expect, test } from 'vitest';
-import { authFixture, httpClient } from '../fixtures';
 import {
+  authFixture,
   expectSuccessResponse,
+  httpClient,
   unwrapApiResponse,
-} from '../helpers/assertions';
+} from '@codex/test-utils/e2e';
+import { afterAll, describe, expect, test } from 'vitest';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Free Content Access Flow', () => {

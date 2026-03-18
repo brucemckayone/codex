@@ -23,7 +23,7 @@ jobs:
       - run: pnpm --filter web build-storybook
 
       - name: Install Playwright Browsers
-        run: pnpm --filter web exec playwright install --with-deps
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Start Storybook
         run: npx http-server apps/web/storybook-static -p 6006 &

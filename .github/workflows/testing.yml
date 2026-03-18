@@ -826,7 +826,7 @@ jobs:
 
       # Run E2E tests against built worker using wrangler dev
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Start Auth Worker in background
         run: |
@@ -837,6 +837,27 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      - name: Start Identity API Worker in background
+        run: |
+          cd workers/identity-api
+          pnpm wrangler dev --env test --port 42074 --local &
+          echo $! > identity-api-worker.pid
+          # Wait for identity-api worker to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      - name: Start Ecom API Worker in background
+        run: |
+          cd workers/ecom-api
+          pnpm wrangler dev --env test --port 42072 --local &
+          echo $! > ecom-api-worker.pid
+          # Wait for ecom-api worker to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       - name: Start Wrangler dev server in background
         run: |
@@ -855,6 +876,17 @@ jobs:
           npx http-server storybook-static -p 6006 &
           echo $! > storybook.pid
           npx wait-on http://localhost:6006 --timeout 60000
+
+      - name: Wait for workers to stabilize
+        run: |
+          echo "Waiting for workers to fully initialize..."
+          sleep 5
+          # Verify all critical endpoints are responsive
+          curl -f http://localhost:42069/health || exit 1
+          curl -f http://localhost:42074/health || exit 1
+          curl -f http://localhost:42072/health || exit 1
+          curl -f http://localhost:8787 || exit 1
+          echo "All workers ready"
 
       - name: Run E2E tests
         env:
@@ -913,6 +945,22 @@ jobs:
           if [ -f workers/auth/auth-worker.pid ]; then
             kill $(cat workers/auth/auth-worker.pid) || true
             rm workers/auth/auth-worker.pid
+          fi
+
+      - name: Stop Identity API Worker
+        if: always()
+        run: |
+          if [ -f workers/identity-api/identity-api-worker.pid ]; then
+            kill $(cat workers/identity-api/identity-api-worker.pid) || true
+            rm workers/identity-api/identity-api-worker.pid
+          fi
+
+      - name: Stop Ecom API Worker
+        if: always()
+        run: |
+          if [ -f workers/ecom-api/ecom-api-worker.pid ]; then
+            kill $(cat workers/ecom-api/ecom-api-worker.pid) || true
+            rm workers/ecom-api/ecom-api-worker.pid
           fi
 
       # Upload generated snapshots for committing to repo

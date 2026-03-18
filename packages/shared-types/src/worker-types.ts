@@ -28,6 +28,13 @@ export type Bindings = {
   DB_METHOD?: string;
 
   /**
+   * Local database URL for development/testing
+   * Used when DB_METHOD=LOCAL_PROXY to connect via Docker/Neon proxy
+   * Format: postgresql://postgres:postgres@db.localtest.me:5432/main
+   */
+  DATABASE_URL_LOCAL_PROXY?: string;
+
+  /**
    * Web application URL for CORS
    */
   WEB_APP_URL?: string;
@@ -47,6 +54,12 @@ export type Bindings = {
    * Used for caching authenticated sessions to reduce database load
    */
   AUTH_SESSION_KV?: import('@cloudflare/workers-types').KVNamespace;
+
+  /**
+   * Cache KV namespace
+   * Used for versioned caching of user profiles, preferences, and other data
+   */
+  CACHE_KV?: import('@cloudflare/workers-types').KVNamespace;
 
   /**
    * Branding cache KV namespace
@@ -341,16 +354,43 @@ export type SessionData = {
 };
 
 /**
- * User data
- * User information needed for API operations
+ * User profile data
+ * Full user profile returned by getProfile API endpoint
+ * Single source of truth for profile-related types across all workers
  */
-export type UserData = {
+export type UserProfile = {
   id: string;
   email: string;
-  name: string | null;
-  role: string;
+  name: string;
   emailVerified: boolean;
+  /** Profile image URL (also aliased as avatarUrl in some contexts) */
+  image: string | null;
+  /** Username handle */
+  username: string | null;
+  /** User bio/description */
+  bio: string | null;
+  /** Social media links */
+  socialLinks: {
+    website?: string;
+    twitter?: string;
+    youtube?: string;
+    instagram?: string;
+  } | null;
+};
+
+/**
+ * User data
+ * User information needed for API operations
+ * Extends UserProfile with auth-related fields
+ */
+export type UserData = UserProfile & {
+  /** Name can be null in some auth contexts before profile is complete */
+  name: string | null;
+  /** User role */
+  role: string;
+  /** Account creation timestamp */
   createdAt: Date | string;
+  /** Allow additional properties */
   [key: string]: unknown;
 };
 

@@ -25,6 +25,7 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PlaybackProgressResponse,
+  PurchaseListItem,
   RevenueAnalyticsResponse,
   SessionData,
   SingleItemResponse,
@@ -36,6 +37,7 @@ import type {
 } from '@codex/shared-types';
 import type {
   CreateCheckoutInput,
+  CreatePortalSessionInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
 } from '@codex/validation';
@@ -60,6 +62,13 @@ export function serverApiUrl(
   platform: App.Platform | undefined,
   worker: ServiceName
 ): string {
+  // If SvelteKit is in dev mode (including E2E tests), ensure we use local ports.
+  if (dev) {
+    return getServiceUrl(
+      worker,
+      platform?.env ? { ...platform.env, dev: true } : true
+    );
+  }
   return getServiceUrl(worker, platform?.env || dev);
 }
 
@@ -110,14 +119,25 @@ export function createServerApi(
       // Send both our platform cookie name and BetterAuth's internal name.
       // BetterAuth's get-session handler only looks for 'better-auth.session_token'
       // regardless of cookie.name config, while other workers use COOKIES.SESSION_NAME.
+      //
+      // IMPORTANT: The cookie value from SvelteKit's cookies.get() is the raw value
+      // as stored by the browser. We pass it through without encoding to avoid
+      // corrupting JWT signatures (which use URL-safe base64: A-Z, a-z, 0-9, -, _).
+      // Calling encodeURIComponent() would corrupt tokens by encoding . - _ as %2E %2D %5F.
       (headers as Record<string, string>).Cookie =
         `${COOKIES.SESSION_NAME}=${sessionCookie}; better-auth.session_token=${sessionCookie}`;
     }
 
+    // Abort fetch after 10 seconds to prevent indefinite hangs when a worker
+    // is slow or unresponsive (e.g. during E2E tests with cold KV/DB).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     const response = await fetch(url, {
       ...options,
+      signal: controller.signal,
       headers,
-    });
+    }).finally(() => clearTimeout(timeoutId));
 
     if (!response.ok) {
       const error = (await response
@@ -161,6 +181,7 @@ export function createServerApi(
 
       const cookieToUse = customSessionCookie || sessionCookie;
       if (cookieToUse) {
+        // Pass cookie value through without encoding (see request() above for rationale)
         (headers as Record<string, string>).Cookie =
           `${COOKIES.SESSION_NAME}=${cookieToUse}; better-auth.session_token=${cookieToUse}`;
       }
@@ -228,7 +249,7 @@ export function createServerApi(
        * Get notification preferences
        */
       getNotificationPreferences: () =>
-        request<NotificationPreferencesResponse>(
+        request<SingleItemResponse<NotificationPreferencesResponse>>(
           'identity',
           '/api/user/notification-preferences'
         ),
@@ -239,7 +260,7 @@ export function createServerApi(
       updateNotificationPreferences: (
         data: UpdateNotificationPreferencesInput
       ) =>
-        request<NotificationPreferencesResponse>(
+        request<SingleItemResponse<NotificationPreferencesResponse>>(
           'identity',
           '/api/user/notification-preferences',
           {
@@ -276,6 +297,29 @@ export function createServerApi(
         request<void>('identity', '/api/user/avatar', {
           method: 'DELETE',
         }),
+
+      /**
+       * Get purchase history
+       *
+       * Query parameters:
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       * - status: 'completed' | 'pending' | 'failed' | 'refunded' (optional filter)
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('page', '1');
+       * params.set('limit', '20');
+       * params.set('status', 'completed');
+       * const history = await api.account.getPurchaseHistory(params);
+       * ```
+       */
+      getPurchaseHistory: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<PurchaseListItem>>(
+          'ecom',
+          `/purchases${params ? `?${params}` : ''}`
+        ),
     },
 
     /**
@@ -491,6 +535,16 @@ export function createServerApi(
         request<SingleItemResponse<CheckoutResponse>>(
           'ecom',
           '/checkout/create',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      createPortalSession: (data: CreatePortalSessionInput) =>
+        request<SingleItemResponse<{ url: string }>>(
+          'ecom',
+          '/checkout/portal-session',
           {
             method: 'POST',
             body: JSON.stringify(data),

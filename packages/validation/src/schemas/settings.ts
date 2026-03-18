@@ -50,11 +50,7 @@ export const MAX_LOGO_FILE_SIZE_BYTES = FILE_SIZES.LOGO_MAX_BYTES;
 /**
  * Logo MIME type validation
  */
-export const logoMimeTypeSchema = z.enum(ALLOWED_LOGO_MIME_TYPES, {
-  errorMap: () => ({
-    message: 'Logo must be PNG, JPEG, WebP, or SVG format',
-  }),
-});
+export const logoMimeTypeSchema = z.enum(ALLOWED_LOGO_MIME_TYPES);
 
 // ============================================================================
 // Domain Schemas
@@ -110,14 +106,19 @@ export type UpdateFeaturesInput = z.infer<typeof updateFeaturesSchema>;
 
 /**
  * Branding settings response shape
+ * Explicitly typed to match BrandingSettingsResponse (logoUrl is required but nullable)
  */
-/**
- * Branding settings response shape
- */
-export const brandingSettingsSchema = z.object({
-  logoUrl: urlSchema.nullable(),
-  primaryColorHex: hexColorSchema,
-});
+export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
+  .object({
+    logoUrl: z.string().url('Invalid URL format').nullable(),
+    primaryColorHex: hexColorSchema,
+  })
+  .pipe(
+    z.object({
+      logoUrl: z.string().url().nullable(),
+      primaryColorHex: z.string(),
+    })
+  );
 
 /**
  * Contact settings response shape

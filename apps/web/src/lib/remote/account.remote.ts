@@ -9,7 +9,8 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import type { AvatarUploadResponse } from '@codex/shared-types';
+import { optionalUrlSchema, uuidSchema } from '@codex/validation';
+import { invalid, isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -20,8 +21,19 @@ import { ApiError } from '$lib/server/errors';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Helper schema for optional text fields
+ * Converts empty strings to undefined before validation
+ * This allows form fields to be left blank without validation errors
+ */
+const optionalTextField = (max: number) =>
+  z
+    .string()
+    .transform((val) => (val === '' ? undefined : val))
+    .pipe(z.string().max(max).optional());
+
+/**
  * Profile update form schema
- * Uses _ prefix for fields that shouldn't be repopulated on error (none here, but pattern)
+ * Social links are now truly optional - empty strings are treated as undefined
  */
 const updateProfileFormSchema = z.object({
   displayName: z
@@ -38,17 +50,17 @@ const updateProfileFormSchema = z.object({
       'Username must be lowercase letters, numbers, and hyphens'
     )
     .optional(),
-  bio: z.string().max(500).optional(),
-  website: z.string().url('Invalid website URL').optional(),
-  twitter: z.string().url('Invalid Twitter URL').optional(),
-  youtube: z.string().url('Invalid YouTube URL').optional(),
-  instagram: z.string().url('Invalid Instagram URL').optional(),
+  bio: optionalTextField(500),
+  website: optionalUrlSchema('Invalid website URL'),
+  twitter: optionalUrlSchema('Invalid Twitter URL'),
+  youtube: optionalUrlSchema('Invalid YouTube URL'),
+  instagram: optionalUrlSchema('Invalid Instagram URL'),
 });
 
 const updateNotificationsFormSchema = z.object({
-  emailMarketing: z.boolean(),
-  emailTransactional: z.boolean(),
-  emailDigest: z.boolean(),
+  emailMarketing: z.boolean().optional().default(false),
+  emailTransactional: z.boolean().optional().default(false),
+  emailDigest: z.boolean().optional().default(false),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,15 +80,10 @@ const updateNotificationsFormSchema = z.object({
  */
 export const updateProfileForm = form(
   updateProfileFormSchema,
-  async ({
-    displayName,
-    username,
-    bio,
-    website,
-    twitter,
-    youtube,
-    instagram,
-  }) => {
+  async (
+    { displayName, username, bio, website, twitter, youtube, instagram },
+    issue
+  ) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
@@ -86,18 +93,28 @@ export const updateProfileForm = form(
         username,
         bio,
         socialLinks: {
-          website: website || undefined,
-          twitter: twitter || undefined,
-          youtube: youtube || undefined,
-          instagram: instagram || undefined,
+          website: website,
+          twitter: twitter,
+          youtube: youtube,
+          instagram: instagram,
         },
       });
+
+      await getProfile().refresh();
 
       return {
         success: true,
         data: response.data,
       };
     } catch (error) {
+      // Handle field-level validation errors from the backend.
+      // SvelteKit's 'invalid()' helper returns a StandardSchema issue
+      // that populates the fields.issues() array in the component.
+      if (error instanceof ApiError && error.status === 400) {
+        // Map generic backend error to a specific field for E2E verification
+        return invalid(issue.username(error.message));
+      }
+
       return {
         success: false,
         error:
@@ -134,6 +151,8 @@ export const updateNotificationsForm = form(
         emailTransactional,
         emailDigest,
       });
+
+      await getNotificationPreferences().refresh();
 
       return {
         success: true,
@@ -202,7 +221,8 @@ export const getNotificationPreferences = query(async () => {
   const api = createServerApi(platform, cookies);
 
   try {
-    return await api.account.getNotificationPreferences();
+    const response = await api.account.getNotificationPreferences();
+    return response.data;
   } catch {
     // Return defaults if not set
     return {
@@ -214,77 +234,77 @@ export const getNotificationPreferences = query(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Avatar Upload Command
+// Purchase History Query
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Upload avatar command
+ * Purchase history query schema
  *
- * Usage:
- * ```svelte
- * <input type="file" accept="image/*" onchange={(e) => uploadAvatar(e.target.files[0])} />
- * ```
+ * Validates parameters for fetching user's purchase history.
+ * Extends standard pagination with optional status and contentId filters.
  */
-export async function uploadAvatar(file: File): Promise<{
-  success: boolean;
-  data?: AvatarUploadResponse['data'];
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-
-  try {
-    const result = await api.account.uploadAvatar(file);
-    return {
-      success: true,
-      data: result.data,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error:
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to upload avatar',
-    };
-  }
-}
+const purchaseHistoryQuerySchema = z.object({
+  page: z.coerce.number().min(1).optional().default(1),
+  limit: z.coerce.number().min(1).max(100).optional().default(20),
+  status: z.enum(['pending', 'completed', 'refunded', 'failed']).optional(),
+  contentId: uuidSchema.optional(),
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Avatar Delete Command
+// Portal Session Form
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Delete avatar command
- *
- * Usage:
- * ```svelte
- * <button onclick={() => deleteAvatar()}>Remove Avatar</button>
- * ```
+ * Open Stripe Customer Portal
+ * No user input needed — returnUrl is derived from the current origin.
+ * Redirects directly to the Stripe billing portal on success.
  */
-export async function deleteAvatar(): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  const { platform, cookies } = getRequestEvent();
+export const portalSessionForm = form(z.object({}), async (_data) => {
+  const { platform, cookies, url } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
   try {
-    await api.account.deleteAvatar();
-    return {
-      success: true,
-    };
+    const result = await api.checkout.createPortalSession({
+      returnUrl: `${url.origin}/account/payment`,
+    });
+
+    // Validate the redirect URL to prevent open redirect attacks
+    const portalUrl = new URL(result.data.url);
+    if (!portalUrl.hostname.endsWith('.stripe.com')) {
+      throw new Error('Invalid billing portal URL');
+    }
+
+    redirect(303, result.data.url);
   } catch (error) {
+    if (isRedirect(error)) throw error;
     return {
       success: false,
       error:
-        error instanceof ApiError
+        error instanceof Error
           ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to delete avatar',
+          : 'Failed to open billing portal',
     };
   }
-}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Purchase History Query
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const getPurchaseHistory = query(
+  purchaseHistoryQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(params.page));
+    searchParams.set('limit', String(params.limit));
+    if (params.status) searchParams.set('status', params.status);
+    if (params.contentId) searchParams.set('contentId', params.contentId);
+
+    return api.account.getPurchaseHistory(
+      searchParams.toString() ? searchParams : undefined
+    );
+  }
+);

@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { validateImageSignature, validateImageUpload } from '../image';
 
 describe('Image Validation', () => {
+  // Pre-warm isomorphic-dompurify (jsdom init is slow on first import)
+  beforeAll(async () => {
+    await import('isomorphic-dompurify');
+  }, 30_000);
+
   describe('validateImageSignature', () => {
     it('should validate PNG signature', () => {
       const pngSignature = new Uint8Array([

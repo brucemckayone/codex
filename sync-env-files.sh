@@ -16,9 +16,11 @@
 #   ./sync-env-files.sh ../feature-branch        # Sync from any sibling
 #
 # WHAT GETS COPIED:
-#   - Root: .env.example, .env.dev, .env.test, .gitignore, package.json
-#   - Workers (8): wrangler.jsonc, .dev.vars*, package.json for each
+#   - Root: .env.example, .env.dev, .env.test, .env.prod, .gitignore, package.json
+#   - Workers (8): wrangler.jsonc, .dev.vars, .dev.vars.test, .dev.vars.example, package.json
 #   - Infrastructure: docker-compose files
+#
+# IMPORTANT: .dev.vars.test is required for vitest/wrangler test to work
 #
 # TYPICAL WORKFLOW:
 #   1. Create new worktree: git worktree add ../feature-branch feature-name
@@ -82,14 +84,14 @@ copy_file() {
         # Copy file
         if cp "$source_file" "$target_file" 2>/dev/null; then
             echo -e "${GREEN}✓${NC} $rel_path"
-            ((COPIED++))
+            COPIED=$((COPIED + 1))
         else
             echo -e "${RED}✗${NC} $rel_path (copy failed)"
-            ((ERRORS++))
+            ERRORS=$((ERRORS + 1))
         fi
     else
         echo -e "${YELLOW}○${NC} $rel_path (not in source)"
-        ((SKIPPED++))
+        SKIPPED=$((SKIPPED + 1))
     fi
 }
 
@@ -100,13 +102,18 @@ echo ""
 copy_file ".env.example"
 copy_file ".env.dev"
 copy_file ".env.test"
+copy_file ".env.prod"
 copy_file ".gitignore"
+
+# Scripts environment file (used by various scripts)
+copy_file "scripts/.env.dev"
 
 # Worker configuration files (all 8 workers)
 for worker in auth content-api ecom-api identity-api admin-api media-api notifications-api organization-api; do
     copy_file "workers/$worker/wrangler.jsonc"
     copy_file "workers/$worker/.dev.vars.example"
     copy_file "workers/$worker/.dev.vars"
+    copy_file "workers/$worker/.dev.vars.test"
     copy_file "workers/$worker/package.json"
 done
 
@@ -115,9 +122,9 @@ copy_file "infrastructure/neon/docker-compose.dev.local.yml"
 copy_file "infrastructure/neon/docker-compose.dev.ephemeral.yml"
 
 # Additional config files that might be useful
-copy_file ".nvmrc"
 copy_file "package.json"
 copy_file "turbo.json"
+copy_file "pnpm-workspace.yaml"
 copy_file "tsconfig.json"
 
 echo ""

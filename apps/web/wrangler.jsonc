@@ -22,6 +22,11 @@
       "binding": "BRAND_KV",
       "id": "e86ed818ff4f4a54bfb801bb46c10788",
       "preview_id": "d65732c40d7143e38f5b8cf5323a2250"
+    },
+    {
+      "binding": "CACHE_KV",
+      "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1",
+      "preview_id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
     }
   ],
 
@@ -37,7 +42,7 @@
         "CONTENT_API_URL": "http://localhost:4001",
         "ORG_API_URL": "http://localhost:42071",
         "ECOM_API_URL": "http://localhost:42072",
-        "MEDIA_API_URL": "http://localhost:8788",
+        "MEDIA_API_URL": "http://localhost:4002",
         "IDENTITY_API_URL": "http://localhost:42074",
         "ADMIN_API_URL": "http://localhost:42073",
         "NOTIFICATIONS_API_URL": "http://localhost:42075"
@@ -46,6 +51,10 @@
         {
           "binding": "BRAND_KV",
           "id": "e86ed818ff4f4a54bfb801bb46c10788"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
         }
       ]
     },

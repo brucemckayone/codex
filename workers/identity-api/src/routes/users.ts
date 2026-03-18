@@ -42,8 +42,8 @@ app.post(
       },
     },
     handler: async (ctx) => {
-      // Process avatar image via service registry
-      const result = await ctx.services.imageProcessing.processUserAvatar(
+      // Process avatar image via identity service (handles cache invalidation)
+      const result = await ctx.services.identity.uploadAvatar(
         ctx.user.id,
         new File([ctx.files.avatar.buffer], ctx.files.avatar.name, {
           type: ctx.files.avatar.type,

@@ -22,8 +22,15 @@ describe('isDev', () => {
     expect(isDev({ MODE: 'production' })).toBe(false);
   });
 
-  it('returns false for undefined env', () => {
-    expect(isDev()).toBe(false);
+  it('returns true when NODE_ENV is test (vitest sets this)', () => {
+    // isDev() with no env falls through to Node.js fallback
+    // NODE_ENV=test is treated as dev so cookies are non-secure on localhost
+    expect(isDev()).toBe(true);
+  });
+
+  it('returns false for production even when NODE_ENV is test', () => {
+    // Explicit MODE: production overrides the Node.js fallback
+    expect(isDev({ MODE: 'production' })).toBe(false);
   });
 });
 

@@ -20,6 +20,7 @@
     "@codex/access": "workspace:*",
     "@codex/admin": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
+    "@codex/constants": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/organization": "workspace:*",

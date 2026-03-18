@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { SERVICE_PORTS } from '@codex/constants';
 import { config as dotenvConfig } from 'dotenv';
 
 const execAsync = promisify(exec);
@@ -21,54 +22,58 @@ interface WorkerConfig {
   healthUrl: string;
 }
 
+/**
+ * Worker configurations for E2E tests.
+ * Ports are sourced from @codex/constants to maintain single source of truth.
+ */
 const WORKERS: WorkerConfig[] = [
   {
     name: 'auth',
-    port: 42069,
+    port: SERVICE_PORTS.AUTH,
     cwd: resolve(__dirname, '../../workers/auth'),
-    healthUrl: 'http://localhost:42069/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.AUTH}/health`,
   },
   {
     name: 'content-api',
-    port: 4001,
+    port: SERVICE_PORTS.CONTENT,
     cwd: resolve(__dirname, '../../workers/content-api'),
-    healthUrl: 'http://localhost:4001/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.CONTENT}/health`,
   },
   {
     name: 'identity-api',
-    port: 42074,
+    port: SERVICE_PORTS.IDENTITY,
     cwd: resolve(__dirname, '../../workers/identity-api'),
-    healthUrl: 'http://localhost:42074/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.IDENTITY}/health`,
   },
   {
     name: 'organization-api',
-    port: 42071,
+    port: SERVICE_PORTS.ORGANIZATION,
     cwd: resolve(__dirname, '../../workers/organization-api'),
-    healthUrl: 'http://localhost:42071/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.ORGANIZATION}/health`,
   },
   {
     name: 'notifications-api',
-    port: 42075,
+    port: SERVICE_PORTS.NOTIFICATIONS,
     cwd: resolve(__dirname, '../../workers/notifications-api'),
-    healthUrl: 'http://localhost:42075/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.NOTIFICATIONS}/health`,
   },
   {
     name: 'ecom-api',
-    port: 42072,
+    port: SERVICE_PORTS.ECOMMERCE,
     cwd: resolve(__dirname, '../../workers/ecom-api'),
-    healthUrl: 'http://localhost:42072/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.ECOMMERCE}/health`,
   },
   {
     name: 'admin-api',
-    port: 42073,
+    port: SERVICE_PORTS.ADMIN,
     cwd: resolve(__dirname, '../../workers/admin-api'),
-    healthUrl: 'http://localhost:42073/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.ADMIN}/health`,
   },
   {
     name: 'media-api',
-    port: 4002,
+    port: SERVICE_PORTS.MEDIA,
     cwd: resolve(__dirname, '../../workers/media-api'),
-    healthUrl: 'http://localhost:4002/health',
+    healthUrl: `http://localhost:${SERVICE_PORTS.MEDIA}/health`,
   },
 ];
 
@@ -265,12 +270,12 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
       }
     });
 
-    // Timeout after 30 seconds
+    // Timeout after 60 seconds (auth worker cold starts can exceed 30s)
     setTimeout(() => {
       if (!hasStarted) {
-        reject(new Error(`${worker.name} startup timeout (30s)`));
+        reject(new Error(`${worker.name} startup timeout (60s)`));
       }
-    }, 30000);
+    }, 60000);
   });
 }
 

@@ -3,17 +3,32 @@
    * Account layout - sub-navigation for account settings
    */
   import type { Snippet } from 'svelte';
+  import type { LayoutData } from './$types';
   import { page } from '$app/stores';
+  import * as m from '$paraglide/messages';
   import { ACCOUNT_NAV } from '$lib/config/navigation';
+  import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
+  import { invalidateCollection } from '$lib/collections';
 
-  const { children }: { children: Snippet } = $props();
+  const { children, data }: { children: Snippet; data: LayoutData } = $props();
+
+  $effect(() => {
+    const staleKeys = getStaleKeys(data.versions ?? {});
+
+    // User entity stale → library items may have changed (purchase/access updates)
+    if (staleKeys.some((k) => k.startsWith('user:'))) {
+      invalidateCollection('library');
+    }
+
+    updateStoredVersions(data.versions ?? {});
+  });
 </script>
 
 <div class="account-layout">
   <aside class="account-sidebar">
-    <h2 class="sidebar-title">Account Settings</h2>
+    <h2 class="sidebar-title">{m.account_settings_title()}</h2>
     <nav class="sidebar-nav" aria-label="Account">
-      {#each ACCOUNT_NAV as link}
+      {#each ACCOUNT_NAV as link (link.href)}
         <a
           href={link.href}
           class="sidebar-link"
@@ -87,6 +102,11 @@
   .sidebar-link:hover {
     color: var(--color-text);
     background-color: var(--color-neutral-100);
+  }
+
+  .sidebar-link:focus-visible {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 2px;
   }
 
   .sidebar-link.active {

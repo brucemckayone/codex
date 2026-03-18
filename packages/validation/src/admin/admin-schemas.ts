@@ -137,14 +137,12 @@ export type AdminDashboardStatsQueryInput = z.infer<
  * Admin content status filter
  * Includes 'all' option to show content in any status
  */
-export const adminContentStatusEnum = z.enum(
-  ['draft', 'published', 'archived', 'all'],
-  {
-    errorMap: () => ({
-      message: 'Status must be draft, published, archived, or all',
-    }),
-  }
-);
+export const adminContentStatusEnum = z.enum([
+  'draft',
+  'published',
+  'archived',
+  'all',
+]);
 
 export type AdminContentStatus = z.infer<typeof adminContentStatusEnum>;
 
@@ -218,15 +216,11 @@ export type AdminGrantAccessParams = z.infer<
  * Activity type enum for the activity feed
  * Represents the types of activities tracked across the platform
  */
-export const activityTypeEnum = z.enum(
-  ['purchase', 'content_published', 'member_joined'],
-  {
-    errorMap: () => ({
-      message:
-        'Activity type must be purchase, content_published, or member_joined',
-    }),
-  }
-);
+export const activityTypeEnum = z.enum([
+  'purchase',
+  'content_published',
+  'member_joined',
+]);
 
 /**
  * Admin activity feed query parameters

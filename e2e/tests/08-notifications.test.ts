@@ -1,11 +1,10 @@
 import { closeDbPool, dbWs, schema } from '@codex/database';
 import { createUniqueSlug } from '@codex/test-utils';
+import { authFixture, httpClient } from '@codex/test-utils/e2e';
+import type { RegisteredUser } from '@codex/test-utils/e2e/helpers/types';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { authFixture } from '../fixtures/auth.fixture';
 import { setupDatabaseFixture } from '../fixtures/database.fixture';
-import { httpClient } from '../helpers/http-client';
-import type { RegisteredUser } from '../helpers/types';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Notifications API', () => {
