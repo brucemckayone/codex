@@ -89,6 +89,7 @@ export type {
   NewContent,
   NewMediaItem,
   PaginationParams,
+  PublicContentListResponse,
   PublishContentResponse,
   ServiceConfig,
   SortOrder,
@@ -140,6 +141,7 @@ export type {
   CreateContentInput,
   CreateMediaItemInput,
   MediaQueryInput,
+  PublicContentQueryInput,
   UpdateContentInput,
   UpdateMediaItemInput,
 } from '@codex/validation';
@@ -153,6 +155,7 @@ export {
   mediaQuerySchema,
   mediaStatusEnum,
   mediaTypeEnum,
+  publicContentQuerySchema,
   updateContentSchema,
   updateMediaItemSchema,
   visibilityEnum,

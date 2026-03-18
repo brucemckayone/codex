@@ -187,5 +187,20 @@
   "content_duration": "Duration",
   "content_progress_completed": "Completed",
   "content_progress_percent": "{percent}% watched",
-  "content_price_free": "Free"
+  "content_price_free": "Free",
+  "content_detail_purchase_cta": "Purchase to watch",
+  "content_detail_purchase_cta_description": "Get access to this content to start watching",
+  "content_detail_by_creator": "By {creator}",
+  "content_detail_about": "About this content",
+  "studio_dashboard_title": "Dashboard",
+  "studio_dashboard_subtitle": "Overview of your organization's performance",
+  "studio_stat_revenue": "Revenue",
+  "studio_stat_customers": "Customers",
+  "studio_stat_content": "Content",
+  "studio_stat_views": "Views",
+  "studio_activity_title": "Recent Activity",
+  "studio_activity_empty": "No recent activity",
+  "studio_activity_purchase": "{title} was purchased",
+  "studio_activity_publish": "{title} was published",
+  "studio_activity_signup": "New member joined"
 }

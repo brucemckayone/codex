@@ -404,6 +404,32 @@ export function createServerApi(
         request<void>('content', `/api/content/${id}`, {
           method: 'DELETE',
         }),
+
+      /**
+       * List public content for an organization (no auth required)
+       *
+       * Query parameters (from PublicContentQueryInput):
+       * - orgId: UUID (required) - organization to scope content
+       * - page: number (default: 1)
+       * - limit: number (1-50, default: 20)
+       * - contentType: 'video' | 'audio' | 'written' (optional)
+       * - search: text search (max 255 chars, optional)
+       * - sort: 'newest' | 'oldest' | 'title' (default: 'newest')
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('orgId', orgId);
+       * params.set('sort', 'newest');
+       * params.set('limit', '12');
+       * const content = await api.content.getPublicContent(params);
+       * ```
+       */
+      getPublicContent: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<ContentWithRelations>>(
+          'content',
+          `/api/content/public${params ? `?${params}` : ''}`
+        ),
     },
 
     /**

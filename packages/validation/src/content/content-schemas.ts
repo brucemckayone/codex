@@ -420,6 +420,25 @@ export const mediaQuerySchema = paginationSchema.extend({
 export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
 /**
+ * Public content query schema
+ * Used for unauthenticated listing of published content on org explore pages.
+ * Extends pagination with org scoping, type filter, search, and sort.
+ */
+export const publicContentQuerySchema = paginationSchema
+  .extend({
+    orgId: uuidSchema,
+    contentType: contentTypeEnum.optional(),
+    search: z.string().max(255).optional(),
+    sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
+  })
+  .transform((data) => ({
+    ...data,
+    limit: Math.min(data.limit, 50), // Cap at 50 for public endpoint
+  }));
+
+export type PublicContentQueryInput = z.infer<typeof publicContentQuerySchema>;
+
+/**
  * Organization query schema
  * Extends pagination with organization-specific filters and sorting
  */

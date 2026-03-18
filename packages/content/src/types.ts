@@ -132,6 +132,13 @@ export type ContentResponse = SingleItemResponse<ContentWithRelations>;
 export type ContentListResponse = PaginatedListResponse<ContentWithRelations>;
 
 /**
+ * Response for GET /api/content/public
+ * Returns paginated list of published content for unauthenticated visitors
+ */
+export type PublicContentListResponse =
+  PaginatedListResponse<ContentWithRelations>;
+
+/**
  * Response for POST /api/content
  * Returns newly created content item
  */

@@ -126,6 +126,49 @@ export const getContentBySlug = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Public Content List Query (no auth required)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const publicContentQueryParamsSchema = z.object({
+  orgId: z.string().uuid(),
+  page: z.number().min(1).default(1).optional(),
+  limit: z.number().min(1).max(50).default(20).optional(),
+  contentType: z.enum(['video', 'audio', 'written']).optional(),
+  search: z.string().max(255).optional(),
+  sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
+});
+
+/**
+ * List published content for an organization (public, no auth required)
+ *
+ * Used by org landing and explore pages to display content to unauthenticated visitors.
+ *
+ * Usage in Svelte:
+ * ```svelte
+ * {#each (await getPublicContent({ orgId })).items as item}
+ *   <ContentCard content={item} />
+ * {/each}
+ * ```
+ */
+export const getPublicContent = query(
+  publicContentQueryParamsSchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('orgId', params.orgId);
+    if (params.page) searchParams.set('page', String(params.page));
+    if (params.limit) searchParams.set('limit', String(params.limit));
+    if (params.contentType) searchParams.set('contentType', params.contentType);
+    if (params.search) searchParams.set('search', params.search);
+    if (params.sort) searchParams.set('sort', params.sort);
+
+    return api.content.getPublicContent(searchParams);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Batched Content Query (for n+1 problem)
 // ─────────────────────────────────────────────────────────────────────────────
 

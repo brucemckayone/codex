@@ -682,6 +682,115 @@ export class ContentService extends BaseService {
   }
 
   /**
+   * List published content for public (unauthenticated) access
+   *
+   * Security:
+   * - No authentication required
+   * - Only returns published, non-deleted content
+   * - Scoped to a specific organization
+   *
+   * Features:
+   * - Optional contentType filter
+   * - Optional text search on title/description
+   * - Sorting: newest, oldest, title
+   * - Pagination with offset/limit
+   * - Includes media item and creator relations
+   *
+   * @param params - Public content query parameters
+   * @returns Paginated list of published content
+   */
+  async listPublic(params: {
+    orgId: string;
+    page: number;
+    limit: number;
+    contentType?: string;
+    search?: string;
+    sort: string;
+  }): Promise<PaginatedListResponse<ContentWithRelations>> {
+    try {
+      const { limit, offset } = withPagination({
+        page: params.page,
+        limit: params.limit,
+      });
+
+      // Build WHERE conditions — published, not deleted, scoped to org
+      const whereConditions = [
+        eq(content.status, CONTENT_STATUS.PUBLISHED),
+        isNull(content.deletedAt),
+        eq(content.organizationId, params.orgId),
+      ];
+
+      // Optional content type filter
+      if (params.contentType) {
+        whereConditions.push(eq(content.contentType, params.contentType));
+      }
+
+      // Optional search on title/description
+      if (params.search) {
+        const searchCondition = or(
+          ilike(content.title, `%${params.search}%`),
+          ilike(content.description ?? '', `%${params.search}%`)
+        );
+        if (searchCondition) {
+          whereConditions.push(searchCondition);
+        }
+      }
+
+      // Determine sort order
+      const orderByClause =
+        params.sort === 'oldest'
+          ? asc(content.createdAt)
+          : params.sort === 'title'
+            ? asc(content.title)
+            : desc(content.createdAt);
+
+      // Get items
+      const items = await this.db.query.content.findMany({
+        where: and(...whereConditions),
+        limit,
+        offset,
+        orderBy: [orderByClause],
+        with: {
+          mediaItem: true,
+          creator: {
+            columns: {
+              id: true,
+              email: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      // Get total count
+      const countResult = await this.db
+        .select({ total: count() })
+        .from(content)
+        .where(and(...whereConditions));
+
+      const totalRecord = countResult[0];
+      if (!totalRecord) {
+        throw new Error('Failed to get content count');
+      }
+
+      const totalCount = Number(totalRecord.total);
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        items,
+        pagination: {
+          page: params.page,
+          limit,
+          total: totalCount,
+          totalPages,
+        },
+      };
+    } catch (error) {
+      throw wrapError(error, { params });
+    }
+  }
+
+  /**
    * Private helper: Validate media item
    *
    * Checks:

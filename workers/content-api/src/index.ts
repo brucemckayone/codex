@@ -36,6 +36,7 @@ import {
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
 import mediaRoutes from './routes/media';
+import publicRoutes from './routes/public';
 
 // ============================================================================
 // Application Setup
@@ -91,6 +92,7 @@ app.use(
  * All routes inherit authentication from createWorker middleware
  */
 app.route('/api/content', contentRoutes);
+app.route('/api/content/public', publicRoutes);
 app.route('/api/media', mediaRoutes);
 app.route('/api/access', contentAccessRoutes);
 
