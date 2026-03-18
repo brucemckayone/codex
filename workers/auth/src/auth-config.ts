@@ -56,18 +56,13 @@ export function createAuthInstance(options: AuthConfigOptions) {
         enabled: true,
         maxAge: 60 * 5, // 5 minutes (short-lived)
       },
-      // Cross-subdomain authentication support
-      // Cookie domain with leading dot allows sharing across all subdomains
       cookie: {
         name: COOKIES.SESSION_NAME,
         sameSite: 'lax',
         httpOnly: true,
-        // Only set domain and secure in non-dev environments
-        // In dev, omit domain (defaults to request origin) and secure (allows HTTP)
-        ...(env.ENVIRONMENT !== ENV_NAMES.DEVELOPMENT &&
-        env.ENVIRONMENT !== ENV_NAMES.TEST
-          ? { domain: `.${DOMAINS.PROD}`, secure: true }
-          : { secure: false }),
+        secure:
+          env.ENVIRONMENT !== ENV_NAMES.DEVELOPMENT &&
+          env.ENVIRONMENT !== ENV_NAMES.TEST,
       },
     },
     logger: {
@@ -125,5 +120,20 @@ export function createAuthInstance(options: AuthConfigOptions) {
       env.API_URL,
       'http://localhost:42069', // Auth worker's own URL for E2E tests
     ].filter((url): url is string => Boolean(url)),
+
+    // Cross-subdomain cookie support
+    // Allows sessions from localhost:3000 to work on {slug}.localhost:3000
+    // In production: sessions from revelations.studio work on {slug}.revelations.studio
+    advanced: {
+      crossSubDomainCookies: {
+        enabled: true,
+        domain:
+          env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
+            ? '.localhost'
+            : env.ENVIRONMENT === ENV_NAMES.TEST
+              ? undefined // Tests use exact origin
+              : `.${DOMAINS.PROD}`,
+      },
+    },
   });
 }

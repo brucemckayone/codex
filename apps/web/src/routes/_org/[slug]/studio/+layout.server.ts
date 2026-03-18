@@ -16,7 +16,7 @@ import type { LayoutServerLoad } from './$types';
 export const load: LayoutServerLoad = async ({ params, locals }) => {
   // Auth gate: must be logged in
   if (!locals.user) {
-    redirect(302, `/login?redirect=/${params.slug}/studio`);
+    redirect(302, '/login?redirect=/studio');
   }
 
   // Disable edge caching - headers set via platform adapter
@@ -38,7 +38,7 @@ export const load: LayoutServerLoad = async ({ params, locals }) => {
 
   // Membership gate: must be creator, admin, or owner (members cannot access studio)
   if (!role || role === 'member') {
-    redirect(302, `/${slug}?error=access_denied`);
+    redirect(302, '/?error=access_denied');
   }
 
   // Load all user's organizations for switcher
