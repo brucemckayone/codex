@@ -77,6 +77,7 @@ export const reroute: Reroute = ({ url }) => {
     return `/_org/${subdomain}${pathname}`;
   }
 
-  // Public org pages → /_org/[slug]/(space)/*
-  return `/_org/${subdomain}/(space)${pathname}`;
+  // Public org pages → /_org/[slug]/*
+  // Route group (space) is filesystem-only — don't include it in the rerouted path
+  return `/_org/${subdomain}${pathname}`;
 };

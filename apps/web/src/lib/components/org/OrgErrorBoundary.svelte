@@ -65,18 +65,18 @@
 </script>
 
 <svelte:head>
-  <title>{$page.status} {getMessage(config().titleKey)} | {org?.name ?? 'Org'}</title>
+  <title>{$page.status} {getMessage(config.titleKey)} | {org?.name ?? 'Org'}</title>
 </svelte:head>
 
 <div class="org-error-page" role="alert" aria-live="polite">
   <div class="org-error-card">
     <div class="error-icon" aria-hidden="true">
-      {@html icons[config().icon]}
+      {@html icons[config.icon]}
     </div>
 
     <h1 class="error-code">{$page.status}</h1>
-    <h2 class="error-title">{getMessage(config().titleKey)}</h2>
-    <p class="error-description">{getMessage(config().descriptionKey)}</p>
+    <h2 class="error-title">{getMessage(config.titleKey)}</h2>
+    <p class="error-description">{getMessage(config.descriptionKey)}</p>
 
     {#if $page.error?.message}
       <p class="error-detail">{$page.error.message}</p>
@@ -84,9 +84,9 @@
 
     <div class="error-actions">
       {#if $page.status === 401 || $page.status === 403}
-        <a href="/login" class="btn btn-primary">{getMessage(config().actionKey)}</a>
+        <a href="/login" class="btn btn-primary">{getMessage(config.actionKey)}</a>
       {:else}
-        <a href={homeUrl} class="btn btn-primary">{getMessage(config().actionKey)}</a>
+        <a href={homeUrl} class="btn btn-primary">{getMessage(config.actionKey)}</a>
       {/if}
 
       <button class="btn btn-secondary" onclick={() => history.back()}>

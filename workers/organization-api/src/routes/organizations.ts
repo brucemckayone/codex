@@ -181,6 +181,56 @@ app.get(
 );
 
 /**
+ * GET /api/organizations/public/:slug/info
+ * Public org info endpoint - no auth required
+ *
+ * Returns org identity + branding for the org layout (works without cookies).
+ */
+app.get(
+  '/public/:slug/info',
+  procedure({
+    policy: { auth: 'none' },
+    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    handler: async (ctx) => {
+      const organization = await ctx.services.organization.getBySlug(
+        ctx.input.params.slug
+      );
+
+      if (!organization) {
+        throw new NotFoundError('Organization not found', {
+          slug: ctx.input.params.slug,
+        });
+      }
+
+      let branding: { logoUrl: string | null; primaryColorHex: string } = {
+        logoUrl: null,
+        primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
+      };
+      try {
+        const b = await ctx.services.settings.getBranding();
+        branding = {
+          logoUrl: b.logoUrl ?? null,
+          primaryColorHex: b.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
+        };
+      } catch {
+        // No branding settings yet — use defaults
+      }
+
+      return {
+        data: {
+          id: organization.id,
+          slug: organization.slug,
+          name: organization.name,
+          description: organization.description,
+          logoUrl: branding.logoUrl,
+          brandColors: { primary: branding.primaryColorHex },
+        },
+      };
+    },
+  })
+);
+
+/**
  * GET /api/organizations/public/:slug/creators
  * Public creators endpoint - no auth required
  *

@@ -91,8 +91,8 @@ app.use(
  * Mount API routes
  * All routes inherit authentication from createWorker middleware
  */
-app.route('/api/content', contentRoutes);
 app.route('/api/content/public', publicRoutes);
+app.route('/api/content', contentRoutes);
 app.route('/api/media', mediaRoutes);
 app.route('/api/access', contentAccessRoutes);
 

@@ -69,6 +69,37 @@ export const getPublicBranding = query(z.string().min(1), async (slug) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Public Org Info (Unauthenticated)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PublicOrgInfo {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  logoUrl: string | null;
+  brandColors: { primary?: string };
+}
+
+/**
+ * Get public org info by slug — no auth required.
+ * Used by org layout to load org data across subdomains.
+ */
+/**
+ * Get public org info by slug — no auth required.
+ * Uses createServerApi but doesn't require cookies.
+ */
+export const getPublicOrgInfo = query(z.string().min(1), async (slug) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  const result = await api.org.getPublicInfo(slug);
+  // procedure() wraps handler return in { data: ... }
+  const inner = (result as { data: { data: PublicOrgInfo } })?.data;
+  const org = inner?.data ?? inner;
+  return { data: org as PublicOrgInfo };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public Creators (Unauthenticated)
 // ─────────────────────────────────────────────────────────────────────────────
 

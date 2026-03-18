@@ -594,6 +594,18 @@ export function createServerApi(
         ),
 
       /**
+       * Get public org info by slug (no auth required)
+       *
+       * Returns org identity + branding for the org layout.
+       * Works across subdomains without session cookies.
+       */
+      getPublicInfo: (slug: string) =>
+        request<SingleItemResponse<OrganizationData>>(
+          'org',
+          `/api/organizations/public/${slug}/info`
+        ),
+
+      /**
        * Get public creators for an organization (no auth required)
        *
        * Returns paginated public creator profiles for display on org pages.
