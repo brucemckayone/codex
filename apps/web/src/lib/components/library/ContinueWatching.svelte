@@ -6,7 +6,6 @@
   Shows up to 4 items. Does not render if no in-progress items exist.
 
   @prop {import('$lib/collections').LibraryItem[]} items - All library items
-  @prop {string} orgSlug - Organization slug for content links
 -->
 <script lang="ts">
   import type { LibraryItem } from '$lib/collections';
@@ -15,10 +14,9 @@
 
   interface Props {
     items: LibraryItem[];
-    orgSlug?: string;
   }
 
-  const { items, orgSlug }: Props = $props();
+  const { items }: Props = $props();
 
   const continueWatchingItems = $derived.by(() => {
     return items
@@ -42,7 +40,7 @@
     <h2 class="continue-watching__title">{m.library_continue_watching()}</h2>
     <div class="continue-watching__row">
       {#each continueWatchingItems as item (item.content.id)}
-        <ContinueWatchingCard {item} {orgSlug} />
+        <ContinueWatchingCard {item} />
       {/each}
     </div>
   </section>

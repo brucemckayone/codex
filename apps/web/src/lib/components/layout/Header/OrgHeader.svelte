@@ -17,7 +17,7 @@
 
 <header class="header">
   <PageContainer class="header-inner">
-    <a href="/{org.slug}" class="org-brand">
+    <a href="/" class="org-brand">
       {#if org.logoUrl}
         <img src={org.logoUrl} alt="{org.name} logo" class="org-logo" />
       {/if}

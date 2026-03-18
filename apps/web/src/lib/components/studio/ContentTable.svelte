@@ -5,7 +5,6 @@
   Shows title (linked to edit), type badge, status badge, created date, and actions.
 
   @prop {ContentWithRelations[]} items - Array of content items to display
-  @prop {string} orgSlug - Organization slug for building edit URLs
 -->
 <script lang="ts">
   import type { ContentWithRelations } from '$lib/types';
@@ -15,10 +14,9 @@
 
   interface Props {
     items: ContentWithRelations[];
-    orgSlug: string;
   }
 
-  const { items, orgSlug }: Props = $props();
+  const { items }: Props = $props();
 
   const isEmpty = $derived(items.length === 0);
 
@@ -106,7 +104,7 @@
         {#each items as item (item.id)}
           <Table.Row>
             <Table.Cell class="title-cell">
-              <a href="/{orgSlug}/studio/content/{item.id}" class="title-link">
+              <a href="/studio/content/{item.id}" class="title-link">
                 {item.title}
               </a>
             </Table.Cell>
@@ -122,7 +120,7 @@
               {formatDate(item.createdAt)}
             </Table.Cell>
             <Table.Cell>
-              <a href="/{orgSlug}/studio/content/{item.id}" class="edit-link">
+              <a href="/studio/content/{item.id}" class="edit-link">
                 {m.studio_content_edit()}
               </a>
             </Table.Cell>

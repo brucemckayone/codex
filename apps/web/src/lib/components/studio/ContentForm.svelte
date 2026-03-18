@@ -6,11 +6,10 @@
 
   @prop {ContentWithRelations} [content] - Existing content (edit mode) or undefined (create mode)
   @prop {string} organizationId - Organization UUID
-  @prop {string} orgSlug - Organization slug for navigation
 
   @example
-  <ContentForm {organizationId} {orgSlug} />
-  <ContentForm {content} {organizationId} {orgSlug} />
+  <ContentForm {organizationId} />
+  <ContentForm {content} {organizationId} />
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -28,10 +27,9 @@
   interface Props {
     content?: ContentWithRelations;
     organizationId: string;
-    orgSlug: string;
   }
 
-  const { content, organizationId, orgSlug }: Props = $props();
+  const { content, organizationId }: Props = $props();
 
   const isEdit = $derived(!!content);
 
@@ -114,7 +112,7 @@
       } else {
         await createContent(payload);
         toast.success(m.studio_content_form_create_success());
-        goto(`/${orgSlug}/studio/content`);
+        goto(`/studio/content`);
       }
     } catch (err) {
       const message =
@@ -135,7 +133,7 @@
     try {
       await deleteContent(content.id);
       toast.success(m.studio_content_form_delete_success());
-      goto(`/${orgSlug}/studio/content`);
+      goto(`/studio/content`);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : m.studio_content_form_delete_error();
@@ -148,7 +146,7 @@
 
 <form class="content-form" onsubmit={handleSubmit}>
   <div class="form-header">
-    <a href="/{orgSlug}/studio/content" class="back-link">
+    <a href="/studio/content" class="back-link">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <line x1="19" y1="12" x2="5" y2="12"></line>
         <polyline points="12 19 5 12 12 5"></polyline>

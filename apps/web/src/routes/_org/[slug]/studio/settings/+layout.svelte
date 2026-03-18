@@ -28,12 +28,12 @@
   const tabs = $derived([
     {
       value: 'general',
-      href: `/${slug}/studio/settings`,
+      href: '/studio/settings',
       label: m.settings_general(),
     },
     {
       value: 'branding',
-      href: `/${slug}/studio/settings/branding`,
+      href: '/studio/settings/branding',
       label: m.settings_branding(),
     },
   ]);

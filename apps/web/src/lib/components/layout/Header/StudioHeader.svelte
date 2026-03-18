@@ -22,7 +22,7 @@
   <PageContainer class="studio-header-inner">
     <div class="header-left">
       {#if context === 'org' && org}
-        <a href="/studio/org/{org.slug}" class="context-brand">
+        <a href="/studio" class="context-brand">
           {#if org.logoUrl}
             <img src={org.logoUrl} alt="{org.name} logo" class="context-logo" />
           {/if}

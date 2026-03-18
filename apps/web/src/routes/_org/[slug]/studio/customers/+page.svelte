@@ -47,7 +47,7 @@
         <Pagination
           {currentPage}
           {totalPages}
-          baseUrl="/{orgSlug}/studio/customers"
+          baseUrl="/studio/customers"
         />
       </div>
     {/if}

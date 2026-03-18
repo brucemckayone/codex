@@ -6,7 +6,6 @@
 -->
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
-  import { page } from '$app/stores';
   import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
   import MediaGrid from '$lib/components/studio/MediaGrid.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
@@ -21,8 +20,7 @@
 
   const currentPage = $derived(data.pagination.page);
   const totalPages = $derived(data.pagination.totalPages);
-  const orgSlug = $derived($page.params.slug);
-  const baseUrl = $derived(`/${orgSlug}/studio/media`);
+  const baseUrl = '/studio/media';
 
   /**
    * Handle successful upload: refresh the media list

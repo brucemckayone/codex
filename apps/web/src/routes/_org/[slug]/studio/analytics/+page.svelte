@@ -58,7 +58,7 @@
     params.set('dateFrom', from.toISOString().split('T')[0]);
     params.set('dateTo', now.toISOString().split('T')[0]);
 
-    goto(`/${slug}/studio/analytics?${params}`, {
+    goto(`/studio/analytics?${params}`, {
       keepFocus: true,
       noScroll: true,
     });

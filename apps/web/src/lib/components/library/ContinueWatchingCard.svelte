@@ -12,10 +12,9 @@
 
   interface Props {
     item: LibraryItem;
-    orgSlug?: string;
   }
 
-  const { item, orgSlug }: Props = $props();
+  const { item }: Props = $props();
 
   const progressPercent = $derived.by(() => {
     if (!item.progress) return 0;
@@ -33,11 +32,7 @@
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   });
 
-  const href = $derived(
-    orgSlug
-      ? `/${orgSlug}/content/${item.content.id}`
-      : `/content/${item.content.id}`
-  );
+  const href = $derived(`/content/${item.content.id}`);
 </script>
 
 <a {href} class="cw-card">

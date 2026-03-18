@@ -25,6 +25,5 @@
   <ContentForm
     content={data.content}
     organizationId={data.organizationId}
-    {orgSlug}
   />
 </ErrorBoundary>

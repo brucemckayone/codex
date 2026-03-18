@@ -160,7 +160,7 @@
             username: item.creator.name ?? undefined,
             displayName: item.creator.name ?? undefined,
           } : undefined}
-          href="/{orgSlug}/content/{item.slug}"
+          href="/content/{item.slug}"
           price={item.priceCents != null ? {
             amount: item.priceCents,
             currency: 'GBP',

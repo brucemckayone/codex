@@ -15,7 +15,6 @@
   const brandSecondary = $derived(data.org?.brandColors?.secondary ?? '#4f46e5');
   const orgName = $derived(data.org?.name ?? 'Organization');
   const orgDescription = $derived(data.org?.description ?? '');
-  const orgSlug = $derived(data.org?.slug ?? '');
   const logoUrl = $derived(data.org?.logoUrl ?? '');
   const featuredContent = $derived(data.featuredContent ?? []);
 </script>
@@ -53,7 +52,7 @@
       {#if orgDescription}
         <p class="hero__description">{orgDescription}</p>
       {/if}
-      <a href="/{orgSlug}/explore" class="hero__cta">
+      <a href="/explore" class="hero__cta">
         {m.org_hero_explore()}
       </a>
     </div>
@@ -64,7 +63,7 @@
     <div class="featured__header">
       <h2 class="featured__title">{m.org_featured_content()}</h2>
       {#if featuredContent.length > 0}
-        <a href="/{orgSlug}/explore" class="featured__view-all">
+        <a href="/explore" class="featured__view-all">
           {m.org_view_all_content()} &rarr;
         </a>
       {/if}
@@ -84,7 +83,7 @@
               username: item.creator.name ?? undefined,
               displayName: item.creator.name ?? undefined,
             } : undefined}
-            href="/{orgSlug}/content/{item.slug}"
+            href="/content/{item.slug}"
             price={item.priceCents != null ? {
               amount: item.priceCents,
               currency: 'GBP',

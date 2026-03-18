@@ -31,7 +31,7 @@
     <div class="header-text">
       <h1>{m.studio_content_title()}</h1>
     </div>
-    <a href="/{orgSlug}/studio/content/new" class="create-btn">
+    <a href="/studio/content/new" class="create-btn">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <line x1="12" y1="5" x2="12" y2="19"></line>
         <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -41,14 +41,14 @@
   </div>
 
   {#if hasContent}
-    <ContentTable items={data.content.items} {orgSlug} />
+    <ContentTable items={data.content.items} />
 
     {#if totalPages > 1}
       <div class="pagination-wrapper">
         <Pagination
           {currentPage}
           {totalPages}
-          baseUrl="/{orgSlug}/studio/content"
+          baseUrl="/studio/content"
         />
       </div>
     {/if}
@@ -59,7 +59,7 @@
         <polyline points="14 2 14 8 20 8"></polyline>
       </svg>
       <h2 class="empty-title">{m.studio_content_empty()}</h2>
-      <a href="/{orgSlug}/studio/content/new" class="empty-cta">
+      <a href="/studio/content/new" class="empty-cta">
         {m.studio_content_create()}
       </a>
     </div>
