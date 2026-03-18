@@ -1,0 +1,457 @@
+<!--
+  @component PreviewPlayer
+
+  Plays an HLS preview clip with a 30-second time limit.
+  Shows a CTA overlay when the preview ends or when access is locked.
+
+  @prop {string} previewUrl - HLS preview manifest URL
+  @prop {string} [poster] - Poster/thumbnail image URL
+  @prop {string} contentId - Content ID for checkout form
+  @prop {string} [contentTitle] - Content title for display
+  @prop {AccessState} accessState - Current access state
+-->
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import * as m from '$paraglide/messages';
+  import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
+  import { createCheckout } from '$lib/remote/checkout.remote';
+  import { page } from '$app/state';
+  import type Hls from 'hls.js';
+  import type { AccessState } from './access-state';
+
+  const PREVIEW_TIME_LIMIT = 30;
+
+  interface Props {
+    previewUrl: string;
+    poster?: string;
+    contentId: string;
+    contentTitle?: string;
+    accessState: AccessState;
+  }
+
+  const { previewUrl, poster, contentId, contentTitle, accessState }: Props = $props();
+
+  let videoEl: HTMLVideoElement | undefined = $state();
+  let hlsInstance: Hls | null = null;
+  let loading = $state(true);
+  let errorMessage = $state('');
+  let previewEnded = $state(false);
+  let showCta = $derived(previewEnded || accessState.status === 'locked');
+
+  const loginUrl = $derived(`/login?redirect=${encodeURIComponent(page.url.pathname)}`);
+
+  const ctaReason = $derived<'auth_required' | 'purchase_required'>(
+    accessState.status === 'locked' ? accessState.reason : 'purchase_required'
+  );
+
+  function handleCanPlay() {
+    loading = false;
+  }
+
+  function handleError() {
+    if (!errorMessage) {
+      errorMessage = 'Failed to load preview.';
+    }
+    loading = false;
+  }
+
+  function handleTimeUpdate() {
+    if (!videoEl) return;
+    if (videoEl.currentTime >= PREVIEW_TIME_LIMIT) {
+      videoEl.pause();
+      previewEnded = true;
+    }
+  }
+
+  function handleEnded() {
+    previewEnded = true;
+  }
+
+  async function initPlayer() {
+    if (!videoEl) return;
+
+    loading = true;
+    errorMessage = '';
+
+    try {
+      hlsInstance = await createHlsPlayer({
+        video: videoEl,
+        src: previewUrl,
+        onError: (msg) => {
+          errorMessage = msg;
+          loading = false;
+        },
+      });
+    } catch {
+      errorMessage = 'Failed to initialize preview player.';
+      loading = false;
+    }
+  }
+
+  onMount(() => {
+    initPlayer();
+  });
+
+  onDestroy(() => {
+    if (hlsInstance) {
+      hlsInstance.destroy();
+      hlsInstance = null;
+    }
+  });
+</script>
+
+<div class="preview-player">
+  {#if loading}
+    <div class="preview-player__loading">
+      <div class="preview-player__spinner" aria-label={m.common_loading()}></div>
+    </div>
+  {/if}
+
+  {#if errorMessage}
+    <div class="preview-player__error" role="alert">
+      <p>{errorMessage}</p>
+    </div>
+  {:else}
+    <div class="preview-player__video-container">
+      <video
+        bind:this={videoEl}
+        playsinline
+        preload="metadata"
+        poster={poster}
+        oncanplay={handleCanPlay}
+        onerror={handleError}
+        ontimeupdate={handleTimeUpdate}
+        onended={handleEnded}
+      ></video>
+
+      <!-- Minimal controls -->
+      {#if !showCta}
+        <div class="preview-player__controls">
+          <button
+            class="preview-player__control-btn"
+            onclick={() => {
+              if (!videoEl) return;
+              if (videoEl.paused) videoEl.play();
+              else videoEl.pause();
+            }}
+            aria-label={videoEl?.paused ? 'Play' : 'Pause'}
+          >
+            {#if videoEl?.paused}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+            {:else}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="6" y="4" width="4" height="16" />
+                <rect x="14" y="4" width="4" height="16" />
+              </svg>
+            {/if}
+          </button>
+
+          <button
+            class="preview-player__control-btn"
+            onclick={() => {
+              if (videoEl) videoEl.muted = !videoEl.muted;
+            }}
+            aria-label={videoEl?.muted ? 'Unmute' : 'Mute'}
+          >
+            {#if videoEl?.muted}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
+              </svg>
+            {:else}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+              </svg>
+            {/if}
+          </button>
+
+          <button
+            class="preview-player__control-btn"
+            onclick={() => {
+              const container = videoEl?.closest('.preview-player');
+              if (document.fullscreenElement) {
+                document.exitFullscreen();
+              } else {
+                container?.requestFullscreen();
+              }
+            }}
+            aria-label="Fullscreen"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <polyline points="15,3 21,3 21,9" />
+              <polyline points="9,21 3,21 3,15" />
+              <line x1="21" y1="3" x2="14" y2="10" />
+              <line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
+        </div>
+      {/if}
+
+      <!-- Preview badge -->
+      <div class="preview-player__badge">{m.player_preview_label()}</div>
+
+      <!-- CTA Overlay -->
+      {#if showCta}
+        <div class="preview-player__overlay" class:preview-player__overlay--visible={showCta}>
+          <div class="preview-player__cta">
+            {#if previewEnded}
+              <p class="preview-player__cta-title">{m.player_preview_ended()}</p>
+            {/if}
+
+            <p class="preview-player__cta-description">
+              {#if contentTitle}
+                {m.purchase_cta_description()}
+              {:else}
+                {m.player_preview_cta()}
+              {/if}
+            </p>
+
+            {#if ctaReason === 'auth_required'}
+              <a href={loginUrl} class="preview-player__cta-button">
+                {m.purchase_sign_in()}
+              </a>
+            {:else}
+              <form {...createCheckout}>
+                <input type="hidden" name="contentId" value={contentId} />
+                <button
+                  type="submit"
+                  class="preview-player__cta-button"
+                  disabled={createCheckout.pending}
+                >
+                  {createCheckout.pending ? m.common_loading() : m.purchase_cta_title()}
+                </button>
+              </form>
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+</div>
+
+<style>
+  .preview-player {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background-color: var(--color-neutral-900);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  /* Loading */
+  .preview-player__loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--color-neutral-900);
+    z-index: 3;
+  }
+
+  .preview-player__spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    animation: preview-spin 0.8s linear infinite;
+  }
+
+  @keyframes preview-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Error */
+  .preview-player__error {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--color-neutral-900);
+    color: var(--color-neutral-300);
+    z-index: 2;
+    padding: var(--space-6);
+    text-align: center;
+  }
+
+  .preview-player__error p {
+    font-size: var(--text-sm);
+    margin: 0;
+  }
+
+  /* Video container */
+  .preview-player__video-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .preview-player__video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  /* Minimal controls */
+  .preview-player__controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, transparent 100%);
+    z-index: 2;
+  }
+
+  .preview-player__control-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: white;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background-color 150ms ease;
+  }
+
+  .preview-player__control-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .preview-player__control-btn:focus-visible {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 2px;
+  }
+
+  /* Preview badge */
+  .preview-player__badge {
+    position: absolute;
+    top: var(--space-3);
+    left: var(--space-3);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: white;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: var(--radius-sm);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  /* CTA Overlay */
+  .preview-player__overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0);
+    z-index: 4;
+    opacity: 0;
+    transition:
+      opacity 300ms ease,
+      background 300ms ease;
+    pointer-events: none;
+  }
+
+  .preview-player__overlay--visible {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.7);
+    pointer-events: auto;
+  }
+
+  .preview-player__cta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    text-align: center;
+    padding: var(--space-6);
+    max-width: 320px;
+  }
+
+  .preview-player__cta-title {
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: white;
+    margin: 0;
+  }
+
+  .preview-player__cta-description {
+    font-size: var(--text-sm);
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .preview-player__cta-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 2.5rem;
+    padding-inline: var(--space-6);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: white;
+    background-color: var(--color-primary-500);
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background-color 150ms ease;
+  }
+
+  .preview-player__cta-button:hover {
+    background-color: var(--color-primary-600);
+  }
+
+  .preview-player__cta-button:focus-visible {
+    outline: 2px solid var(--color-primary-400);
+    outline-offset: 2px;
+  }
+
+  .preview-player__cta-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* Responsive */
+  @media (max-width: 640px) {
+    .preview-player__controls {
+      padding: var(--space-1) var(--space-2);
+    }
+
+    .preview-player__cta {
+      padding: var(--space-4);
+    }
+
+    .preview-player__cta-title {
+      font-size: var(--text-base);
+    }
+  }
+
+  /* Dark mode */
+  :global([data-theme='dark']) .preview-player__badge {
+    background: rgba(0, 0, 0, 0.7);
+  }
+</style>

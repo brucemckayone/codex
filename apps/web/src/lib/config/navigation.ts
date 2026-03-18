@@ -57,6 +57,12 @@ export const SIDEBAR_OWNER_LINKS: SidebarLink[] = [
   { href: '/studio/billing', label: 'Billing', icon: 'billing' },
 ];
 
+/** Studio settings sub-navigation (General, Branding) */
+export const SETTINGS_NAV: NavLink[] = [
+  { href: '/studio/settings', label: 'General' },
+  { href: '/studio/settings/branding', label: 'Branding' },
+];
+
 /** Account settings sub-navigation */
 export const ACCOUNT_NAV: NavLink[] = [
   { href: '/account', label: 'Profile' },

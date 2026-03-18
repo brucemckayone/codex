@@ -7,6 +7,7 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import VideoPlayer from '$lib/components/VideoPlayer/VideoPlayer.svelte';
+  import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import type { PageData } from './$types';
 
   interface Props {
@@ -33,6 +34,15 @@
   const description = $derived(data.content.description ?? '');
   const thumbnailUrl = $derived(data.content.mediaItem?.thumbnailUrl ?? undefined);
   const duration = $derived(data.content.mediaItem?.durationSeconds ?? 0);
+
+  const previewUrl = $derived(data.content.mediaItem?.hlsPreviewKey ?? undefined);
+  const accessState = $derived(
+    deriveAccessState({
+      hasAccess: data.hasAccess,
+      hasPreview: !!previewUrl,
+      isAuthenticated: !!data.user,
+    })
+  );
 </script>
 
 <svelte:head>
@@ -57,6 +67,33 @@
         initialProgress={data.progress?.positionSeconds ?? 0}
         poster={thumbnailUrl}
       />
+    {:else if previewUrl && accessState.status === 'preview'}
+      <svelte:boundary>
+        <PreviewPlayer
+          previewUrl={previewUrl}
+          poster={thumbnailUrl}
+          contentId={data.content.id}
+          contentTitle={data.content.title}
+          {accessState}
+        />
+        {#snippet failed(error, reset)}
+          <div class="content-detail__preview">
+            {#if thumbnailUrl}
+              <img
+                class="content-detail__preview-image"
+                src={thumbnailUrl}
+                alt={m.content_thumbnail_alt({ title: data.content.title })}
+              />
+            {/if}
+            <div class="content-detail__preview-overlay">
+              <div class="content-detail__preview-cta">
+                <p class="content-detail__cta-text">{m.content_detail_purchase_cta()}</p>
+                <p class="content-detail__cta-subtext">{m.content_detail_purchase_cta_description()}</p>
+              </div>
+            </div>
+          </div>
+        {/snippet}
+      </svelte:boundary>
     {:else}
       <div class="content-detail__preview">
         {#if thumbnailUrl}

@@ -1,27 +1,291 @@
+<!--
+  @component OrgLandingPage
+
+  Organization landing page with hero section, featured content grid, and org branding.
+  Displays the org's identity and up to 6 newest content items.
+-->
 <script lang="ts">
-  /**
-   * Organization landing page (space)
-   */
+  import * as m from '$paraglide/messages';
+  import { ContentCard } from '$lib/components/ui/ContentCard';
   import type { PageData } from './$types';
 
-  const { data }: { data: PageData } = $props();
+  let { data }: { data: PageData } = $props();
+
+  const brandPrimary = $derived(data.org?.brandColors?.primary ?? '#6366f1');
+  const brandSecondary = $derived(data.org?.brandColors?.secondary ?? '#4f46e5');
+  const orgName = $derived(data.org?.name ?? 'Organization');
+  const orgDescription = $derived(data.org?.description ?? '');
+  const orgSlug = $derived(data.org?.slug ?? '');
+  const logoUrl = $derived(data.org?.logoUrl ?? '');
+  const featuredContent = $derived(data.featuredContent ?? []);
 </script>
 
 <svelte:head>
-  <title>{data.org?.name ?? 'Organization'} | Revelations</title>
+  <title>{orgName} | Revelations</title>
+  <meta property="og:title" content={orgName} />
+  {#if orgDescription}
+    <meta property="og:description" content={orgDescription} />
+    <meta name="description" content={orgDescription} />
+  {/if}
+  <meta property="og:type" content="website" />
+  {#if logoUrl}
+    <meta property="og:image" content={logoUrl} />
+  {/if}
 </svelte:head>
 
 <div class="org-landing">
-  <section class="org-hero">
-    <h1>{data.org?.name ?? 'Organization'}</h1>
-    <p class="org-description">{data.org?.description ?? 'Welcome to our content space'}</p>
-    <a href="/explore" class="cta">Explore Content</a>
+  <!-- Hero Section -->
+  <section
+    class="hero"
+    style:--brand-primary={brandPrimary}
+    style:--brand-secondary={brandSecondary}
+  >
+    <div class="hero__inner">
+      {#if logoUrl}
+        <img
+          src={logoUrl}
+          alt="{orgName} logo"
+          class="hero__logo"
+          loading="eager"
+        />
+      {/if}
+      <h1 class="hero__title">{orgName}</h1>
+      {#if orgDescription}
+        <p class="hero__description">{orgDescription}</p>
+      {/if}
+      <a href="/{orgSlug}/explore" class="hero__cta">
+        {m.org_hero_explore()}
+      </a>
+    </div>
   </section>
 
+  <!-- Featured Content Section -->
   <section class="featured">
-    <h2>Featured Content</h2>
-    <p class="placeholder">Content grid will be displayed here</p>
+    <div class="featured__header">
+      <h2 class="featured__title">{m.org_featured_content()}</h2>
+      {#if featuredContent.length > 0}
+        <a href="/{orgSlug}/explore" class="featured__view-all">
+          {m.org_view_all_content()} &rarr;
+        </a>
+      {/if}
+    </div>
+
+    {#if featuredContent.length > 0}
+      <div class="featured__grid">
+        {#each featuredContent as item (item.id)}
+          <ContentCard
+            id={item.id}
+            title={item.title}
+            thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
+            description={item.description}
+            contentType={item.contentType === 'written' ? 'article' : item.contentType}
+            duration={item.mediaItem?.durationSeconds ?? null}
+            creator={item.creator ? {
+              username: item.creator.name ?? undefined,
+              displayName: item.creator.name ?? undefined,
+            } : undefined}
+            href="/{orgSlug}/content/{item.slug}"
+            price={item.priceCents != null ? {
+              amount: item.priceCents,
+              currency: 'GBP',
+            } : null}
+          />
+        {/each}
+      </div>
+    {:else}
+      <div class="featured__empty">
+        <p>{m.org_no_content_yet()}</p>
+      </div>
+    {/if}
   </section>
 </div>
 
+<style>
+  /* ── Layout ── */
+  .org-landing {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+  }
 
+  /* ── Hero Section ── */
+  .hero {
+    position: relative;
+    padding: var(--space-16, 4rem) var(--space-6, 1.5rem);
+    background: linear-gradient(135deg, var(--brand-primary, #6366f1), var(--brand-secondary, #4f46e5));
+    color: #ffffff;
+    text-align: center;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero__inner {
+    position: relative;
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4, 1rem);
+  }
+
+  .hero__logo {
+    width: 80px;
+    height: 80px;
+    border-radius: var(--radius-full, 9999px);
+    object-fit: cover;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+  }
+
+  .hero__title {
+    margin: 0;
+    font-size: var(--text-4xl, 2.25rem);
+    font-weight: var(--font-bold, 700);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .hero__description {
+    margin: 0;
+    font-size: var(--text-lg, 1.125rem);
+    line-height: 1.6;
+    opacity: 0.9;
+    max-width: 560px;
+  }
+
+  .hero__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2, 0.5rem);
+    margin-top: var(--space-4, 1rem);
+    padding: var(--space-3, 0.75rem) var(--space-6, 1.5rem);
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    font-size: var(--text-base, 1rem);
+    font-weight: var(--font-semibold, 600);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: var(--radius-lg, 0.5rem);
+    text-decoration: none;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  }
+
+  .hero__cta:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .hero__cta:active {
+    transform: translateY(0);
+  }
+
+  /* ── Featured Content Section ── */
+  .featured {
+    padding: var(--space-12, 3rem) var(--space-6, 1.5rem);
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .featured__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4, 1rem);
+    margin-bottom: var(--space-8, 2rem);
+  }
+
+  .featured__title {
+    margin: 0;
+    font-size: var(--text-2xl, 1.5rem);
+    font-weight: var(--font-bold, 700);
+    color: var(--color-text-primary);
+  }
+
+  .featured__view-all {
+    font-size: var(--text-sm, 0.875rem);
+    font-weight: var(--font-medium, 500);
+    color: var(--color-primary-500);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+  }
+
+  .featured__view-all:hover {
+    color: var(--color-primary-600);
+  }
+
+  .featured__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6, 1.5rem);
+  }
+
+  @media (min-width: 640px) {
+    .featured__grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .featured__grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .featured__empty {
+    text-align: center;
+    padding: var(--space-16, 4rem) var(--space-4, 1rem);
+    color: var(--color-text-muted);
+  }
+
+  .featured__empty p {
+    margin: 0;
+    font-size: var(--text-lg, 1.125rem);
+  }
+
+  /* ── Dark Mode ── */
+  :global([data-theme='dark']) .featured__title {
+    color: var(--color-text-primary-dark, #f1f5f9);
+  }
+
+  :global([data-theme='dark']) .featured__view-all {
+    color: var(--color-primary-400);
+  }
+
+  :global([data-theme='dark']) .featured__view-all:hover {
+    color: var(--color-primary-300);
+  }
+
+  :global([data-theme='dark']) .featured__empty {
+    color: var(--color-text-muted-dark, #94a3b8);
+  }
+
+  /* ── Responsive Hero ── */
+  @media (max-width: 639px) {
+    .hero {
+      padding: var(--space-10, 2.5rem) var(--space-4, 1rem);
+    }
+
+    .hero__title {
+      font-size: var(--text-2xl, 1.5rem);
+    }
+
+    .hero__description {
+      font-size: var(--text-base, 1rem);
+    }
+
+    .hero__logo {
+      width: 64px;
+      height: 64px;
+    }
+  }
+</style>
