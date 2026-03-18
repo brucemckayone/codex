@@ -20,6 +20,7 @@ import type {
   ActivityFeedResponse,
   AllSettingsResponse,
   AvatarUploadResponse,
+  BrandingSettingsResponse,
   CustomerListItem,
   MyMembershipResponse,
   NotificationPreferencesResponse,
@@ -39,6 +40,7 @@ import type {
 import type {
   CreateCheckoutInput,
   CreatePortalSessionInput,
+  UpdateBrandingInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
 } from '@codex/validation';
@@ -520,12 +522,84 @@ export function createServerApi(
         }),
 
       /**
+       * Update branding settings (primary color)
+       */
+      updateBranding: (id: string, data: UpdateBrandingInput) =>
+        request<BrandingSettingsResponse>(
+          'org',
+          `/api/organizations/${id}/settings/branding`,
+          {
+            method: 'PUT',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * Upload organization logo (multipart form data)
+       */
+      uploadLogo: (
+        id: string,
+        file: File
+      ): Promise<BrandingSettingsResponse> => {
+        const url = `${serverApiUrl(platform, 'org')}/api/organizations/${id}/settings/branding/logo`;
+        const formData = new FormData();
+        formData.append('logo', file);
+
+        return fetch(url, {
+          method: 'POST',
+          headers: sessionCookie
+            ? { Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}` }
+            : {},
+          body: formData,
+        }).then(async (res) => {
+          if (!res.ok) throw new ApiError(res.status, 'Logo upload failed');
+          return res.json() as Promise<BrandingSettingsResponse>;
+        });
+      },
+
+      /**
+       * Delete organization logo
+       */
+      deleteLogo: (id: string) =>
+        request<BrandingSettingsResponse>(
+          'org',
+          `/api/organizations/${id}/settings/branding/logo`,
+          {
+            method: 'DELETE',
+          }
+        ),
+
+      /**
        * Get current user's organizations
        */
       getMyOrganizations: () =>
         request<OrganizationWithRole[]>(
           'org',
           '/api/organizations/my-organizations'
+        ),
+
+      /**
+       * Get public creators for an organization (no auth required)
+       *
+       * Returns paginated public creator profiles for display on org pages.
+       * Only active members with owner/admin/creator roles are included.
+       *
+       * @param slug - Organization slug
+       * @param params - Optional URL search params (page, limit)
+       * @returns Paginated list of public creator profiles
+       */
+      getPublicCreators: (slug: string, params?: URLSearchParams) =>
+        request<
+          PaginatedListResponse<{
+            name: string;
+            avatarUrl: string | null;
+            role: string;
+            joinedAt: string;
+            contentCount: number;
+          }>
+        >(
+          'org',
+          `/api/organizations/public/${slug}/creators${params ? `?${params}` : ''}`
         ),
 
       /**

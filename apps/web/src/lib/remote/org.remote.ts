@@ -69,6 +69,45 @@ export const getPublicBranding = query(z.string().min(1), async (slug) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Public Creators (Unauthenticated)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const publicCreatorsQuerySchema = z.object({
+  slug: z.string().min(1),
+  page: z.number().min(1).default(1).optional(),
+  limit: z.number().min(1).max(100).default(20).optional(),
+});
+
+/**
+ * Get public creators for an organization (unauthenticated, paginated)
+ *
+ * Returns public-safe creator information for the org directory page.
+ *
+ * Usage:
+ * ```svelte
+ * {#each (await getPublicCreators({ slug, page: 1, limit: 20 })).items as creator}
+ *   <CreatorCard {...creator} />
+ * {/each}
+ * ```
+ */
+export const getPublicCreators = query(
+  publicCreatorsQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    if (params.page) searchParams.set('page', String(params.page));
+    if (params.limit) searchParams.set('limit', String(params.limit));
+
+    return api.org.getPublicCreators(
+      params.slug,
+      searchParams.toString() ? searchParams : undefined
+    );
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Organization Settings (Authenticated Admin)
 // ─────────────────────────────────────────────────────────────────────────────
 

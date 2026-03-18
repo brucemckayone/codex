@@ -1,0 +1,196 @@
+<!--
+  @component OrgCreatorsPage
+
+  Organization creators directory page with a responsive grid of CreatorCard
+  components and pagination. Displays public creator profiles for the org.
+-->
+<script lang="ts">
+  import { page } from '$app/state';
+  import * as m from '$paraglide/messages';
+  import { CreatorCard } from '$lib/components/ui/CreatorCard';
+  import { Pagination } from '$lib/components/ui/Pagination';
+  import type { PageData } from './$types';
+
+  const { data }: { data: PageData } = $props();
+
+  const orgName = $derived(data.org?.name ?? 'Organization');
+  const items = $derived(data.creators?.items ?? []);
+  const total = $derived(data.creators?.total ?? 0);
+  const currentPage = $derived(data.pagination?.page ?? 1);
+  const limit = $derived(data.pagination?.limit ?? 20);
+  const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
+
+  /**
+   * Build the baseUrl for Pagination links, preserving current path
+   * but without the 'page' param (Pagination adds it).
+   */
+  const paginationBaseUrl = $derived.by(() => {
+    const url = new URL(page.url);
+    url.searchParams.delete('page');
+    return `${url.pathname}${url.search}`;
+  });
+</script>
+
+<svelte:head>
+  <title>{m.org_creators_title()} | {orgName}</title>
+  <meta name="description" content="{m.org_creators_subtitle()}" />
+  <meta property="og:title" content="{m.org_creators_title()} | {orgName}" />
+  <meta property="og:description" content={m.org_creators_subtitle()} />
+  <meta property="og:type" content="website" />
+</svelte:head>
+
+<div class="creators">
+  <!-- Header -->
+  <header class="creators__header">
+    <h1 class="creators__title">{m.org_creators_title()}</h1>
+    <p class="creators__subtitle">{m.org_creators_subtitle()}</p>
+  </header>
+
+  <!-- Creators Grid -->
+  {#if items.length > 0}
+    <div class="creators__grid">
+      {#each items as creator (creator.name + creator.joinedAt)}
+        <CreatorCard
+          username={creator.name.toLowerCase().replace(/\s+/g, '-')}
+          displayName={creator.name}
+          avatar={creator.avatarUrl}
+          contentCount={creator.contentCount}
+        />
+      {/each}
+    </div>
+
+    <!-- Pagination -->
+    {#if totalPages > 1}
+      <div class="creators__pagination">
+        <Pagination
+          {currentPage}
+          {totalPages}
+          baseUrl={paginationBaseUrl}
+        />
+      </div>
+    {/if}
+  {:else}
+    <!-- Empty State -->
+    <div class="creators__empty">
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="creators__empty-icon">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+        <circle cx="9" cy="7" r="4"></circle>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+      </svg>
+      <p class="creators__empty-text">{m.org_creators_empty()}</p>
+    </div>
+  {/if}
+</div>
+
+<style>
+  /* ── Layout ── */
+  .creators {
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: var(--space-8, 2rem) var(--space-6, 1.5rem);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8, 2rem);
+  }
+
+  /* ── Header ── */
+  .creators__header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 0.5rem);
+  }
+
+  .creators__title {
+    margin: 0;
+    font-size: var(--text-3xl, 1.875rem);
+    font-weight: var(--font-bold, 700);
+    color: var(--color-text-primary);
+    line-height: 1.2;
+  }
+
+  .creators__subtitle {
+    margin: 0;
+    font-size: var(--text-base, 1rem);
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ── Grid ── */
+  .creators__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6, 1.5rem);
+  }
+
+  @media (min-width: 640px) {
+    .creators__grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .creators__grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  /* ── Pagination ── */
+  .creators__pagination {
+    display: flex;
+    justify-content: center;
+    padding-top: var(--space-4, 1rem);
+  }
+
+  /* ── Empty State ── */
+  .creators__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4, 1rem);
+    padding: var(--space-16, 4rem) var(--space-4, 1rem);
+    text-align: center;
+  }
+
+  .creators__empty-icon {
+    color: var(--color-text-muted);
+    opacity: 0.6;
+  }
+
+  .creators__empty-text {
+    margin: 0;
+    font-size: var(--text-lg, 1.125rem);
+    color: var(--color-text-muted);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 639px) {
+    .creators {
+      padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
+      gap: var(--space-6, 1.5rem);
+    }
+
+    .creators__title {
+      font-size: var(--text-2xl, 1.5rem);
+    }
+  }
+
+  /* ── Dark Mode ── */
+  :global([data-theme='dark']) .creators__title {
+    color: var(--color-text-primary-dark, #f1f5f9);
+  }
+
+  :global([data-theme='dark']) .creators__subtitle {
+    color: var(--color-text-secondary-dark, #94a3b8);
+  }
+
+  :global([data-theme='dark']) .creators__empty-text {
+    color: var(--color-text-muted-dark, #94a3b8);
+  }
+
+  :global([data-theme='dark']) .creators__empty-icon {
+    color: var(--color-text-muted-dark, #94a3b8);
+  }
+</style>
