@@ -15,6 +15,7 @@ import {
   MIME_TYPES,
   type ServiceName,
 } from '@codex/constants';
+import type { MediaItem } from '@codex/database/schema';
 import type {
   ActivityFeedResponse,
   AllSettingsResponse,
@@ -47,6 +48,7 @@ import { dev } from '$app/environment';
 import type {
   CheckoutResponse,
   ContentWithRelations,
+  MediaItemWithRelations,
   OrganizationData,
 } from '../types';
 import { ApiError } from './errors';
@@ -632,6 +634,78 @@ export function createServerApi(
         request<TopContentAnalyticsResponse>(
           'admin',
           `/api/admin/analytics/top-content${params ? `?${params}` : ''}`
+        ),
+    },
+
+    /**
+     * Media endpoints (content-api worker)
+     */
+    media: {
+      /**
+       * Create a new media item (returns presigned upload info)
+       *
+       * @param data - Media item creation input (title, mediaType, mimeType, fileSizeBytes, r2Key)
+       * @returns Created media item
+       */
+      create: (data: Record<string, unknown>) =>
+        request<SingleItemResponse<MediaItem>>('content', '/api/media', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * List media items with filters and pagination
+       *
+       * Query parameters (from MediaQueryInput):
+       * - page: number (default: 1)
+       * - limit: number (1-100, default: 20)
+       * - status: 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed' (optional)
+       * - mediaType: 'video' | 'audio' (optional)
+       * - sortBy: 'createdAt' | 'uploadedAt' | 'title' (optional)
+       * - sortOrder: 'asc' | 'desc' (optional)
+       */
+      list: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<MediaItemWithRelations>>(
+          'content',
+          `/api/media${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get a single media item by ID
+       */
+      get: (id: string) =>
+        request<SingleItemResponse<MediaItemWithRelations>>(
+          'content',
+          `/api/media/${id}`
+        ),
+
+      /**
+       * Update media item metadata
+       */
+      update: (id: string, data: unknown) =>
+        request<SingleItemResponse<MediaItem>>('content', `/api/media/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Soft delete a media item
+       */
+      delete: (id: string) =>
+        request<void>('content', `/api/media/${id}`, {
+          method: 'DELETE',
+        }),
+
+      /**
+       * Mark upload as complete and trigger transcoding
+       */
+      uploadComplete: (id: string) =>
+        request<{ success: boolean; status: string }>(
+          'content',
+          `/api/media/${id}/upload-complete`,
+          {
+            method: 'POST',
+          }
         ),
     },
 

@@ -3,6 +3,7 @@
    * Library Page
    *
    * Displays user's content library with SSR hydration.
+   * Includes filtering (type, progress, search) and continue watching section.
    *
    * Hydration Flow:
    * 1. +page.server.ts fetches library data on server
@@ -19,6 +20,9 @@
     useLiveQuery,
   } from '$lib/collections';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
+  import LibraryFilters from '$lib/components/library/LibraryFilters.svelte';
+  import ContinueWatching from '$lib/components/library/ContinueWatching.svelte';
+  import * as m from '$paraglide/messages';
 
   let { data } = $props();
 
@@ -40,6 +44,65 @@
     undefined, // deps (optional)
     { ssrData: data.library?.items } // SSR fallback data
   );
+
+  // Filter state
+  let filters = $state({
+    contentType: 'all',
+    progressStatus: 'all',
+    search: '',
+  });
+
+  let filtersRef: LibraryFilters | undefined = $state();
+
+  function handleFilterChange(newFilters: { contentType: string; progressStatus: string; search: string }) {
+    filters = newFilters;
+  }
+
+  const hasActiveFilters = $derived(
+    filters.contentType !== 'all' ||
+    filters.progressStatus !== 'all' ||
+    filters.search !== ''
+  );
+
+  // Filtered items derived from live query data
+  const filteredItems = $derived.by(() => {
+    const items = libraryQuery.data ?? [];
+    if (!hasActiveFilters) return items;
+
+    return items.filter((item) => {
+      // Content type filter
+      if (filters.contentType !== 'all') {
+        const type = item.content.contentType?.toLowerCase() ?? '';
+        if (type !== filters.contentType) return false;
+      }
+
+      // Progress status filter
+      if (filters.progressStatus !== 'all') {
+        const progress = item.progress;
+        switch (filters.progressStatus) {
+          case 'not_started':
+            if (progress && (progress.positionSeconds > 0 || progress.completed)) return false;
+            break;
+          case 'in_progress':
+            if (!progress || progress.positionSeconds === 0 || progress.completed) return false;
+            break;
+          case 'completed':
+            if (!progress || !progress.completed) return false;
+            break;
+        }
+      }
+
+      // Search filter
+      if (filters.search) {
+        const search = filters.search.toLowerCase();
+        const title = item.content.title?.toLowerCase() ?? '';
+        const description = item.content.description?.toLowerCase() ?? '';
+        if (!title.includes(search) && !description.includes(search)) return false;
+      }
+
+      return true;
+    });
+  });
 </script>
 
 <svelte:head>
@@ -73,55 +136,72 @@
       </a>
     </div>
   {:else}
-    <div class="content-grid">
-      {#each libraryQuery.data ?? [] as item (item.content.id)}
-        <a href="/content/{item.content.id}" class="content-card">
-          {#if item.content.thumbnailUrl}
-            <div class="card-thumb">
-              <img
-                src={item.content.thumbnailUrl}
-                alt={item.content.title}
-                class="thumb-img"
-              />
+    <LibraryFilters bind:this={filtersRef} onFilterChange={handleFilterChange} />
+
+    <ContinueWatching items={libraryQuery.data ?? []} />
+
+    {#if filteredItems.length === 0 && hasActiveFilters}
+      <div class="no-results">
+        <p class="no-results-text">{m.library_no_results()}</p>
+        <button
+          type="button"
+          class="clear-filters-btn"
+          onclick={() => filtersRef?.clearAll()}
+        >
+          {m.library_clear_filters()}
+        </button>
+      </div>
+    {:else}
+      <div class="content-grid">
+        {#each filteredItems as item (item.content.id)}
+          <a href="/content/{item.content.id}" class="content-card">
+            {#if item.content.thumbnailUrl}
+              <div class="card-thumb">
+                <img
+                  src={item.content.thumbnailUrl}
+                  alt={item.content.title}
+                  class="thumb-img"
+                />
+                {#if item.progress}
+                  <div class="progress-track">
+                    <div
+                      class="progress-fill"
+                      style="width: {item.progress.percentComplete}%"
+                    ></div>
+                  </div>
+                {/if}
+              </div>
+            {:else}
+              <div class="card-thumb thumb-placeholder">
+                <span class="placeholder-text">No thumbnail</span>
+              </div>
+            {/if}
+
+            <div class="card-body">
+              <h2 class="card-title">
+                {item.content.title}
+              </h2>
+
+              {#if item.content.description}
+                <p class="card-desc">
+                  {item.content.description}
+                </p>
+              {/if}
+
               {#if item.progress}
-                <div class="progress-track">
-                  <div
-                    class="progress-fill"
-                    style="width: {item.progress.percentComplete}%"
-                  ></div>
+                <div class="card-progress">
+                  {#if item.progress.completed}
+                    <span class="progress-completed">Completed</span>
+                  {:else}
+                    {item.progress.percentComplete}% watched
+                  {/if}
                 </div>
               {/if}
             </div>
-          {:else}
-            <div class="card-thumb thumb-placeholder">
-              <span class="placeholder-text">No thumbnail</span>
-            </div>
-          {/if}
-
-          <div class="card-body">
-            <h2 class="card-title">
-              {item.content.title}
-            </h2>
-
-            {#if item.content.description}
-              <p class="card-desc">
-                {item.content.description}
-              </p>
-            {/if}
-
-            {#if item.progress}
-              <div class="card-progress">
-                {#if item.progress.completed}
-                  <span class="progress-completed">Completed</span>
-                {:else}
-                  {item.progress.percentComplete}% watched
-                {/if}
-              </div>
-            {/if}
-          </div>
-        </a>
-      {/each}
-    </div>
+          </a>
+        {/each}
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -311,6 +391,39 @@
 
   .browse-btn:hover {
     background-color: var(--color-primary-600);
+  }
+
+  .no-results {
+    text-align: center;
+    padding: var(--space-12) 0;
+  }
+
+  .no-results-text {
+    color: var(--color-text-secondary);
+    margin-bottom: var(--space-4);
+  }
+
+  .clear-filters-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-2) var(--space-4);
+    background-color: transparent;
+    color: var(--color-primary-500);
+    border: var(--border-width) var(--border-style) var(--color-primary-500);
+    border-radius: var(--radius-lg);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .clear-filters-btn:hover {
+    background-color: var(--color-primary-500);
+    color: var(--color-text-inverse);
+  }
+
+  .clear-filters-btn:focus-visible {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 2px;
   }
 
   .content-card:focus-visible,
