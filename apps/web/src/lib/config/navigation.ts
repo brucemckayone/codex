@@ -22,10 +22,11 @@ export const PLATFORM_NAV: NavLink[] = [
 ];
 
 /** Organization-level navigation (org subdomain header) */
-export function getOrgNav(slug: string): NavLink[] {
+export function getOrgNav(_slug: string): NavLink[] {
+  // On org subdomains, the slug is in the hostname — paths are relative to root
   return [
-    { href: `/${slug}`, label: 'Explore' },
-    { href: `/${slug}/creators`, label: 'Creators' },
+    { href: '/', label: 'Explore' },
+    { href: '/creators', label: 'Creators' },
     { href: '/library', label: 'Library' },
   ];
 }
