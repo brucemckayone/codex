@@ -68,7 +68,7 @@ export default defineConfig({
 
   // Start dev servers automatically for local e2e tests
   // In CI, PLAYWRIGHT_BASE_URL is set and this is skipped
-  // We start SvelteKit dev server, Auth Worker, Identity-API Worker, and Ecom-API Worker
+  // We start SvelteKit dev server, Auth Worker, Identity-API Worker, Ecom-API Worker, and Content-API Worker
   webServer: process.env.CI
     ? undefined
     : [
@@ -96,6 +96,13 @@ export default defineConfig({
           command:
             'cd ../../workers/ecom-api && npx wrangler dev --env test --port 42072',
           url: 'http://localhost:42072/health', // Use health endpoint for ready detection
+          timeout: 90000, // 90 seconds - Workers start faster
+          reuseExistingServer: true,
+        },
+        {
+          command:
+            'cd ../../workers/content-api && npx wrangler dev --env test --port 4001',
+          url: 'http://localhost:4001/health', // Use health endpoint for ready detection
           timeout: 90000, // 90 seconds - Workers start faster
           reuseExistingServer: true,
         },

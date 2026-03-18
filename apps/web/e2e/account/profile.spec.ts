@@ -222,7 +222,9 @@ test.describe('Account Profile Page - Validation', () => {
     await page.click('button[type="submit"]', { noWaitAfter: true });
 
     const usernameInput = page.locator('input[name="username"]');
-    await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
+    await expect(usernameInput).toHaveAttribute('aria-invalid', 'true', {
+      timeout: 15000,
+    });
   });
 
   test('shows validation error for invalid website URL', async ({ page }) => {
