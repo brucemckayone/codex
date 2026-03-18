@@ -16,7 +16,7 @@
 <script lang="ts">
   import type { Snippet, HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
-  import { Avatar } from '../Avatar';
+  import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
 
   interface SocialLinks {
     website?: string;
@@ -63,11 +63,12 @@
 
   <div class="creator-card__body">
     <a href={profileHref} class="creator-card__avatar-link">
-      <Avatar
-        src={avatar}
-        fallback={initial}
-        size={variant === 'compact' ? 'md' : 'lg'}
-      />
+      <Avatar src={avatar} class="creator-card__avatar-{variant === 'compact' ? 'md' : 'lg'}">
+        {#if avatar}
+          <AvatarImage src={avatar} alt={displayName} />
+        {/if}
+        <AvatarFallback>{initial}</AvatarFallback>
+      </Avatar>
     </a>
 
     <div class="creator-card__info">

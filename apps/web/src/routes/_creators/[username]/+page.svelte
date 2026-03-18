@@ -7,7 +7,7 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
-  import { Avatar } from '$lib/components/ui/Avatar';
+  import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -43,11 +43,12 @@
   <!-- Profile Header -->
   <section class="profile-header">
     <div class="profile-header__avatar">
-      <Avatar
-        src={avatar}
-        fallback={initial}
-        size="xl"
-      />
+      <Avatar src={avatar} class="avatar--xl">
+        {#if avatar}
+          <AvatarImage src={avatar} alt={displayName} />
+        {/if}
+        <AvatarFallback>{initial}</AvatarFallback>
+      </Avatar>
     </div>
 
     <h1 class="profile-header__name">{displayName}</h1>
