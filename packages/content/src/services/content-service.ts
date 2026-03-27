@@ -700,9 +700,10 @@ export class ContentService extends BaseService {
    * @returns Paginated list of published content
    */
   async listPublic(params: {
-    orgId: string;
+    orgId?: string;
     page: number;
     limit: number;
+    slug?: string;
     contentType?: string;
     search?: string;
     sort: string;
@@ -713,12 +714,20 @@ export class ContentService extends BaseService {
         limit: params.limit,
       });
 
-      // Build WHERE conditions — published, not deleted, scoped to org
+      // Build WHERE conditions — published, not deleted, optionally scoped to org
       const whereConditions = [
         eq(content.status, CONTENT_STATUS.PUBLISHED),
         isNull(content.deletedAt),
-        eq(content.organizationId, params.orgId),
       ];
+
+      if (params.orgId) {
+        whereConditions.push(eq(content.organizationId, params.orgId));
+      }
+
+      // Optional slug filter (exact match for content detail page)
+      if (params.slug) {
+        whereConditions.push(eq(content.slug, params.slug));
+      }
 
       // Optional content type filter
       if (params.contentType) {
@@ -759,6 +768,7 @@ export class ContentService extends BaseService {
               name: true,
             },
           },
+          organization: true,
         },
       });
 

@@ -138,9 +138,52 @@ export function createServiceRegistry(
 
     get media() {
       if (!_media) {
+        // Build R2Service for media uploads.
+        // Signing config is optional — presigned URLs only work when
+        // R2 S3-compatible credentials are configured (not in local dev).
+        let mediaR2: R2Service | undefined;
+        if (env.MEDIA_BUCKET) {
+          const accountId =
+            typeof env.R2_ACCOUNT_ID === 'string'
+              ? env.R2_ACCOUNT_ID
+              : undefined;
+          const accessKeyId =
+            typeof env.R2_ACCESS_KEY_ID === 'string'
+              ? env.R2_ACCESS_KEY_ID
+              : undefined;
+          const secretAccessKey =
+            typeof env.R2_SECRET_ACCESS_KEY === 'string'
+              ? env.R2_SECRET_ACCESS_KEY
+              : undefined;
+          const bucketName =
+            typeof env.R2_BUCKET_MEDIA === 'string'
+              ? env.R2_BUCKET_MEDIA
+              : undefined;
+
+          const signingConfig =
+            accountId && accessKeyId && secretAccessKey && bucketName
+              ? { accountId, accessKeyId, secretAccessKey, bucketName }
+              : undefined;
+
+          if (!signingConfig) {
+            _obs?.warn(
+              'R2 signing config unavailable — presigned upload URLs will not be generated',
+              {
+                hasAccountId: !!accountId,
+                hasAccessKeyId: !!accessKeyId,
+                hasSecretKey: !!secretAccessKey,
+                hasBucketName: !!bucketName,
+              }
+            );
+          }
+
+          mediaR2 = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);
+        }
+
         _media = new MediaItemService({
           db: getSharedDb(),
           environment: getEnvironment(),
+          r2: mediaR2,
         });
       }
       return _media;
@@ -277,13 +320,23 @@ export function createServiceRegistry(
 
         // NOTE: B2 and R2 credentials are configured in RunPod's secret manager,
         // not passed via service config (security: avoids credential sprawl)
+        //
+        // TRANSCODING_WEBHOOK_URL overrides the webhook callback URL.
+        // In local dev, the transcoder runs in Docker and can't reach localhost —
+        // set this to http://host.docker.internal:4002 in .dev.vars.
+        const transcodingWebhookUrl =
+          env.TRANSCODING_WEBHOOK_URL ||
+          webhookBaseUrl ||
+          'http://localhost:4002';
+
         _transcoding = new TranscodingService({
           db: getSharedDb(),
           environment: getEnvironment(),
           runpodApiKey,
           runpodEndpointId,
-          webhookBaseUrl: webhookBaseUrl || 'http://localhost:4002',
+          webhookBaseUrl: transcodingWebhookUrl,
           runpodApiBaseUrl: env.RUNPOD_API_URL,
+          runpodDirectUrl: env.RUNPOD_DIRECT_URL,
         });
       }
       return _transcoding;

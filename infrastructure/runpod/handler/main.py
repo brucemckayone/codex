@@ -236,15 +236,29 @@ def get_media_info(probe_data: dict[str, Any]) -> tuple[int, int | None, int | N
 
 
 def check_gpu_available() -> bool:
-    """Check if NVIDIA GPU encoder is available."""
+    """Check if NVIDIA GPU encoder is actually usable (not just listed)."""
     try:
+        # Actually try to initialize the encoder — listing it isn't enough
+        # because the encoder definition ships in ffmpeg but CUDA may not be present
         result = subprocess.run(
-            ["ffmpeg", "-encoders"],
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "nullsrc=s=16x16:d=0.1",
+                "-c:v",
+                "h264_nvenc",
+                "-f",
+                "null",
+                "-",
+            ],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        return "h264_nvenc" in result.stdout
+        return result.returncode == 0
     except Exception:
         return False
 
@@ -722,21 +736,29 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
 # =============================================================================
 
 
-def sign_payload(payload: str, secret: str) -> str:
-    """Generate HMAC-SHA256 signature for webhook payload."""
+def sign_payload(payload: str, secret: str, timestamp: str | None = None) -> str:
+    """Generate HMAC-SHA256 signature for webhook payload.
+
+    If timestamp is provided, signs 'timestamp.payload' to match
+    the server's signature format for replay protection.
+    """
+    message = f"{timestamp}.{payload}" if timestamp else payload
     return hmac.new(
         secret.encode("utf-8"),
-        payload.encode("utf-8"),
+        message.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
 
 
-def send_webhook(url: str, secret: str, result: TranscodingResult) -> None:
+def send_webhook(url: str, secret: str, result: dict) -> None:
     """Send signed webhook to notify completion."""
+    import time
+
     print(f"Sending webhook to {url}...")
 
     payload = json.dumps(result)
-    signature = sign_payload(payload, secret)
+    timestamp = str(int(time.time()))
+    signature = sign_payload(payload, secret, timestamp)
 
     response = requests.post(
         url,
@@ -744,6 +766,7 @@ def send_webhook(url: str, secret: str, result: TranscodingResult) -> None:
         headers={
             "Content-Type": "application/json",
             "X-Runpod-Signature": signature,
+            "X-Runpod-Timestamp": timestamp,
         },
         timeout=30,
     )
@@ -928,26 +951,36 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
                 "image/png",
             )
 
-        # Build result
-        result: TranscodingResult = {
-            "status": "completed",
+        # Build result — field names must match runpodWebhookOutputSchema
+        result = {
             "mediaId": media_id,
-            "hlsMasterPlaylistKey": hls_master_key,
+            "type": media_type,
+            "hlsMasterKey": hls_master_key,
             "hlsPreviewKey": hls_preview_key,
             "thumbnailKey": thumbnail_key,  # 'lg' variant
             "thumbnailVariants": thumbnail_variants,  # All 3 sizes
             "waveformKey": waveform_key,
             "waveformImageKey": waveform_image_key,
-            "mezzanineKey": mezzanine_key,
             "durationSeconds": duration,
             "width": width,
             "height": height,
             "readyVariants": ready_variants,
-            "error": None,
+            "loudnessIntegrated": int(loudness["input_i"] * 100),
+            "loudnessPeak": int(loudness["input_tp"] * 100),
+            "loudnessRange": int(loudness["input_lra"] * 100),
         }
 
-        # Step 10: Send webhook
-        send_webhook(job_input["webhookUrl"], job_input["webhookSecret"], result)
+        # Step 10: Send webhook (RunPod envelope format: { jobId, status, output })
+        # webhookSecret comes from env (RunPod secrets), not job payload
+        webhook_secret = os.environ.get(
+            "WEBHOOK_SECRET", job_input.get("webhookSecret", "")
+        )
+        webhook_payload = {
+            "jobId": job.get("id", media_id),
+            "status": "completed",
+            "output": result,
+        }
+        send_webhook(job_input["webhookUrl"], webhook_secret, webhook_payload)
 
         return {"status": "success", "mediaId": media_id}
 
@@ -955,26 +988,19 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         error_msg = str(e)
         print(f"Transcoding failed: {error_msg}")
 
-        # Send failure webhook
-        result: TranscodingResult = {
-            "status": "failed",
-            "mediaId": media_id,
-            "hlsMasterPlaylistKey": None,
-            "hlsPreviewKey": None,
-            "thumbnailKey": None,
-            "thumbnailVariants": None,
-            "waveformKey": None,
-            "waveformImageKey": None,
-            "mezzanineKey": None,
-            "durationSeconds": None,
-            "width": None,
-            "height": None,
-            "readyVariants": [],
-            "error": error_msg[:2000],  # Cap at 2KB
-        }
+        # Send failure webhook — no output, just error
+        result = None
 
         try:
-            send_webhook(job_input["webhookUrl"], job_input["webhookSecret"], result)
+            webhook_secret = os.environ.get(
+                "WEBHOOK_SECRET", job_input.get("webhookSecret", "")
+            )
+            webhook_payload = {
+                "jobId": job.get("id", media_id),
+                "status": "failed",
+                "error": error_msg[:2000],
+            }
+            send_webhook(job_input["webhookUrl"], webhook_secret, webhook_payload)
         except Exception as webhook_error:
             print(f"Failed to send error webhook: {webhook_error}")
 

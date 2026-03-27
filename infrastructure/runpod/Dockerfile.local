@@ -1,0 +1,40 @@
+# Local Development Transcoding Worker
+# CPU-only variant of the RunPod Dockerfile for local dev on macOS/Linux.
+#
+# Runs the same handler/main.py as production but:
+# - No NVIDIA GPU requirement (CPU fallback via libx264)
+# - Points R2_ENDPOINT at dev-cdn (http://host.docker.internal:4100)
+# - Points B2_ENDPOINT at MinIO (http://host.docker.internal:9000)
+#
+# Build:  docker build -f Dockerfile.local -t codex-transcoder-local .
+# Run:    docker run --env-file local.env codex-transcoder-local
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    gpg \
+    gpg-agent \
+    && add-apt-repository ppa:chris-needham/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    python3 \
+    python3-pip \
+    python3-dev \
+    audiowaveform \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+COPY handler/ ./handler/
+
+ENV PYTHONPATH=/app
+
+CMD ["python3", "-u", "handler/main.py", "--rp_serve_api", "--rp_api_host=0.0.0.0", "--rp_api_port=8000"]

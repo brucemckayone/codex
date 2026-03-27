@@ -53,6 +53,10 @@ export {
 // Procedure pattern (tRPC-style)
 export {
   type AuthLevel,
+  type BinaryFileConfig,
+  type BinaryUploadContext,
+  type BinaryUploadProcedureConfig,
+  binaryUploadProcedure,
   // checkOrganizationMembership is re-exported for convenience.
   // Workers that don't use it will tree-shake it out during bundling.
   checkOrganizationMembership,
@@ -83,6 +87,7 @@ export {
   type ServiceRegistryResult,
   type SessionForAuth,
   type UserForAuth,
+  type ValidatedBinaryFile,
   type ValidatedFile,
   validateInput,
 } from './procedure';
