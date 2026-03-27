@@ -7,7 +7,7 @@
   @prop {(media: { id: string }) => void} [onUploadComplete] - Callback when a single upload finishes
 -->
 <script lang="ts">
-  import { createMedia, completeUpload } from '$lib/remote/media.remote';
+  import { createMedia, completeUpload, uploadMedia } from '$lib/remote/media.remote';
   import * as m from '$paraglide/messages';
 
   interface UploadItem {
@@ -38,15 +38,14 @@
    */
   const ACCEPTED_TYPES = [
     'video/mp4',
-    'video/webm',
     'video/quicktime',
     'video/x-msvideo',
+    'video/webm',
     'audio/mpeg',
+    'audio/mp4',
     'audio/wav',
+    'audio/webm',
     'audio/ogg',
-    'audio/aac',
-    'audio/flac',
-    'audio/x-m4a',
   ];
 
   /**
@@ -59,15 +58,6 @@
    */
   function getMediaType(mimeType: string): 'video' | 'audio' {
     return mimeType.startsWith('video/') ? 'video' : 'audio';
-  }
-
-  /**
-   * Generate a safe R2 key for the file
-   */
-  function generateR2Key(file: File): string {
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'bin';
-    const id = crypto.randomUUID();
-    return `originals/${id}/media.${ext}`;
   }
 
   /**
@@ -110,30 +100,38 @@
   }
 
   /**
-   * Upload a single file using XMLHttpRequest for progress tracking
+   * Upload a single file: createMedia → PUT to presigned URL → completeUpload
    */
   async function uploadFile(item: UploadItem) {
     item.status = 'uploading';
     item.progress = 0;
 
     try {
-      // Step 1: Create media item via server
-      const r2Key = generateR2Key(item.file);
+      // Step 1: Create media item — server generates r2Key and returns presigned upload URL
       const result = await createMedia({
         title: item.file.name.replace(/\.[^/.]+$/, ''),
         mediaType: getMediaType(item.file.type),
         mimeType: item.file.type,
         fileSizeBytes: item.file.size,
-        r2Key,
       });
 
-      const mediaId = result.data.id;
+      // API client unwraps { data: T } → T, so result IS the MediaItem
+      const mediaId = result.id;
+      const presignedUrl = result.presignedUrl;
       item.id = mediaId;
 
-      // Step 2: Simulate upload progress (real presigned URL upload would go here)
-      // In production, this would PUT to a presigned R2 URL
-      // For now, we simulate progress and mark as complete
-      await simulateUploadProgress(item);
+      // Step 2: PUT file directly to R2 via presigned URL with progress tracking.
+      // Falls back to worker upload if presigned URL fails (e.g. CORS in local dev
+      // where R2 creds exist but browser can't reach the real R2 endpoint).
+      if (presignedUrl) {
+        try {
+          await uploadToR2(item, presignedUrl);
+        } catch {
+          await uploadViaWorker(item, mediaId);
+        }
+      } else {
+        await uploadViaWorker(item, mediaId);
+      }
 
       // Step 3: Mark upload complete and trigger transcoding
       item.status = 'completing';
@@ -153,23 +151,56 @@
   }
 
   /**
-   * Simulate upload progress
-   * In production, replace with actual XHR upload to presigned URL
+   * PUT file directly to R2 via presigned URL with XHR progress tracking
    */
-  function simulateUploadProgress(item: UploadItem): Promise<void> {
-    return new Promise((resolve) => {
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += Math.random() * 30 + 10;
-        if (progress >= 100) {
-          progress = 100;
-          clearInterval(interval);
-          item.progress = 100;
+  function uploadToR2(item: UploadItem, presignedUrl: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          item.progress = Math.round((e.loaded / e.total) * 100);
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          item.progress = Math.round(progress);
+          reject(new Error(`Upload failed with status ${xhr.status}`));
         }
-      }, 200);
+      };
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+      xhr.open('PUT', presignedUrl);
+      xhr.setRequestHeader('Content-Type', item.file.type);
+      xhr.send(item.file);
+    });
+  }
+
+  /**
+   * Fallback: upload file directly to content-api → R2 binding via XHR.
+   * Used when presigned URLs are unavailable or fail (CORS in local dev).
+   * Cannot use command() because File objects aren't serializable.
+   */
+  async function uploadViaWorker(item: UploadItem, mediaId: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          item.progress = Math.round((e.loaded / e.total) * 100);
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(`Worker upload failed with status ${xhr.status}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network error during worker upload'));
+      // POST binary body to content-api binaryUploadProcedure endpoint
+      xhr.open('POST', `/api/media/${mediaId}/upload`);
+      xhr.setRequestHeader('Content-Type', item.file.type);
+      xhr.withCredentials = true;
+      xhr.send(item.file);
     });
   }
 

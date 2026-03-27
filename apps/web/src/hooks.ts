@@ -48,6 +48,12 @@ export const reroute: Reroute = ({ url }) => {
     return pathname;
   }
 
+  // API routes are global — never reroute /api/* paths regardless of subdomain.
+  // These serve SvelteKit +server.ts endpoints (e.g. upload proxy, health checks).
+  if (pathname.startsWith('/api/')) {
+    return pathname;
+  }
+
   // No subdomain or www → platform routes (files in (platform) group)
   // Route groups like (platform) are INVISIBLE to the router - they only affect layouts
   // So we just return the original pathname and let SvelteKit match against (platform)/* files
