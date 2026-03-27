@@ -1,7 +1,7 @@
 /**
  * Media Management Endpoints
  *
- * RESTful API for managing media items (uploaded videos and audio).
+ * RESTful API for managing media items (uploaded videos and audio files).
  * All routes require authentication and enforce creator ownership.
  *
  * Endpoints:
@@ -12,7 +12,12 @@
  * - DELETE /api/media/:id    - Soft delete
  */
 
-import { AUTH_ROLES, MEDIA_STATUS } from '@codex/constants';
+import {
+  AUTH_ROLES,
+  FILE_SIZES,
+  MEDIA_STATUS,
+  SUPPORTED_MEDIA_MIME_TYPES,
+} from '@codex/constants';
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,
@@ -29,7 +34,7 @@ import {
 import { workerFetch } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { binaryUploadProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
@@ -135,6 +140,43 @@ app.get(
 );
 
 /**
+ * POST /api/media/:id/upload
+ * Upload file data to R2 via the media service.
+ *
+ * Fallback for local dev when presigned R2 URLs are unavailable.
+ * In production, clients PUT directly to the presigned URL instead.
+ *
+ * NOTE: Uses procedure() normally — the body is read from the raw request
+ * inside the handler since procedure() skips body parsing when no body schema
+ * is defined. The Hono context is accessed via the closure.
+ *
+ * Security: Creator/Admin only
+ */
+app.post(
+  '/:id/upload',
+  binaryUploadProcedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { params: createIdParamsSchema() },
+    file: {
+      maxSize: FILE_SIZES.MEDIA_MAX_BYTES,
+      minSize: FILE_SIZES.MEDIA_MIN_BYTES,
+      allowedMimeTypes: SUPPORTED_MEDIA_MIME_TYPES,
+    },
+    handler: async (ctx) => {
+      return ctx.services.media.upload(
+        ctx.input.params.id,
+        ctx.file.body,
+        ctx.file.contentType,
+        ctx.user.id
+      );
+    },
+  })
+);
+
+/**
  * POST /api/media/:id/upload-complete
  * Mark upload as complete and trigger transcoding
  *
@@ -157,7 +199,13 @@ app.post(
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
     },
     input: { params: createIdParamsSchema() },
-    handler: async (ctx): Promise<{ success: boolean; status: string }> => {
+    handler: async (
+      ctx
+    ): Promise<{
+      success: boolean;
+      transcodingTriggered: boolean;
+      status: string;
+    }> => {
       const mediaId = ctx.input.params.id;
       const creatorId = ctx.user.id;
 
@@ -199,16 +247,33 @@ app.post(
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error(`Failed to trigger transcoding: ${errorText}`);
-          // Don't fail the request - media is still marked as 'uploaded'
-          // Transcoding can be retried manually
-          return { success: true, status: MEDIA_STATUS.UPLOADED };
+          ctx.obs?.error('Failed to trigger transcoding', {
+            mediaId,
+            statusCode: response.status,
+            error: errorText,
+          });
+          return {
+            success: true,
+            transcodingTriggered: false,
+            status: MEDIA_STATUS.UPLOADED,
+          };
         }
 
-        return { success: true, status: MEDIA_STATUS.TRANSCODING };
+        return {
+          success: true,
+          transcodingTriggered: true,
+          status: MEDIA_STATUS.TRANSCODING,
+        };
       } catch (error) {
-        console.error('Transcoding trigger failed:', error);
-        return { success: true, status: MEDIA_STATUS.UPLOADED };
+        ctx.obs?.error('Transcoding trigger failed', {
+          mediaId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return {
+          success: true,
+          transcodingTriggered: false,
+          status: MEDIA_STATUS.UPLOADED,
+        };
       }
     },
   })

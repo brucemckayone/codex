@@ -8,12 +8,12 @@ Pipeline:
 2. Probe metadata (ffprobe)
 3. Create mezzanine (CRF 18) → Upload to B2
 4. Two-pass loudness analysis
-5. Transcode HLS variants (1080p/720p/480p/360p)
+5. Transcode HLS variants (1080p/720p/480p/360p + source fallback)
 6. Generate preview (30s at 720p)
 7. Extract thumbnail (10% mark)
 8. Generate waveform JSON + PNG (audio only)
 9. Upload outputs to R2
-10. Send signed webhook
+10. Send signed webhook (with retry)
 
 FFmpeg Settings:
 - GPU: h264_nvenc, preset p4, cq 23
@@ -26,10 +26,13 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Any, TypedDict
+from urllib.parse import urlparse
 
 import boto3
 import requests
@@ -53,27 +56,29 @@ class JobInput(TypedDict):
     type: str  # 'video' | 'audio'
     inputKey: str  # R2 key for original file
     webhookUrl: str
-    webhookSecret: str
+    # NOTE: webhookSecret comes from env, NOT job payload (security)
     # NOTE: Both B2 and R2 credentials come from environment variables, not job payload
 
 
-class TranscodingResult(TypedDict):
-    """Result payload sent via webhook."""
+class WebhookOutput(TypedDict):
+    """Output payload matching runpodWebhookOutputSchema in TypeScript."""
 
-    status: str  # 'completed' | 'failed'
     mediaId: str
-    hlsMasterPlaylistKey: str | None
+    type: str  # 'video' | 'audio'
+    hlsMasterKey: str | None
     hlsPreviewKey: str | None
     thumbnailKey: str | None  # Points to 'lg' variant
     thumbnailVariants: dict[str, str] | None  # {'sm': key, 'md': key, 'lg': key}
     waveformKey: str | None
     waveformImageKey: str | None
     mezzanineKey: str | None
-    durationSeconds: int | None
+    durationSeconds: int
     width: int | None
     height: int | None
     readyVariants: list[str]
-    error: str | None
+    loudnessIntegrated: int
+    loudnessPeak: int
+    loudnessRange: int
 
 
 # =============================================================================
@@ -100,6 +105,30 @@ PREVIEW_HEIGHT = 720
 
 # Segment duration for HLS
 HLS_SEGMENT_DURATION = 6
+
+
+# =============================================================================
+# FFmpeg Helper
+# =============================================================================
+
+
+def run_ffmpeg(
+    cmd: list[str], timeout: int = 3600, description: str = "ffmpeg"
+) -> subprocess.CompletedProcess:
+    """Run an ffmpeg/ffprobe command with proper error capture.
+
+    On failure, raises RuntimeError with the last 2KB of stderr
+    so the actual ffmpeg error message is preserved for debugging.
+    """
+    try:
+        return subprocess.run(
+            cmd, check=True, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.CalledProcessError as e:
+        stderr_excerpt = (e.stderr or "")[-2000:]
+        raise RuntimeError(
+            f"{description} failed (exit {e.returncode}): {stderr_excerpt}"
+        ) from e
 
 
 # =============================================================================
@@ -161,42 +190,108 @@ def upload_directory(client: Any, bucket: str, key_prefix: str, local_dir: str) 
             upload_file(client, bucket, key, local_path, content_type)
 
 
+def cleanup_uploaded_keys(uploaded_keys: list[tuple[Any, str, str]]) -> None:
+    """Best-effort cleanup of uploaded files on error."""
+    for client, bucket, key in uploaded_keys:
+        try:
+            client.delete_object(Bucket=bucket, Key=key)
+            print(f"Cleaned up s3://{bucket}/{key}")
+        except Exception as err:
+            print(f"Failed to clean up s3://{bucket}/{key}: {err}")
+
+
 # =============================================================================
 # Input Validation
 # =============================================================================
 
 
 def validate_path_component(value: str, name: str) -> None:
-    """
-    Validate path component to prevent path traversal attacks.
-
-    Args:
-        value: The path component to validate
-        name: Name of the component for error messages
-
-    Raises:
-        ValueError: If validation fails
-    """
-    import re
-
+    """Validate a single path component (no slashes allowed)."""
     if not value:
         raise ValueError(f"{name} cannot be empty")
 
-    # Check for path traversal attempts
     if ".." in value or "//" in value or "\\" in value:
         raise ValueError(f"Invalid {name}: path traversal detected")
 
-    # Check for URL-encoded traversal
     if "%2e" in value.lower() or "%2f" in value.lower() or "%5c" in value.lower():
         raise ValueError(f"Invalid {name}: encoded path traversal detected")
 
-    # Check for null bytes
     if "\0" in value or "%00" in value:
         raise ValueError(f"Invalid {name}: null byte detected")
 
-    # Must be alphanumeric with allowed chars (hyphen, underscore)
     if not re.match(r"^[a-zA-Z0-9_-]+$", value):
         raise ValueError(f"Invalid {name}: contains disallowed characters")
+
+
+def validate_input_key(key: str) -> None:
+    """Validate an R2 input key (full path with slashes).
+
+    Expected format: {creatorId}/{folder}/{mediaId}/{filename}
+    Must have at least 4 segments, no traversal, no null bytes.
+    """
+    if not key:
+        raise ValueError("inputKey cannot be empty")
+
+    if ".." in key or "//" in key or "\\" in key:
+        raise ValueError("Invalid inputKey: path traversal detected")
+
+    if "%2e" in key.lower() or "%2f" in key.lower() or "%5c" in key.lower():
+        raise ValueError("Invalid inputKey: encoded path traversal detected")
+
+    if "\0" in key or "%00" in key:
+        raise ValueError("Invalid inputKey: null byte detected")
+
+    if key.startswith("/"):
+        raise ValueError("Invalid inputKey: must not start with /")
+
+    segments = key.split("/")
+    if len(segments) < 4:
+        raise ValueError(
+            f"Invalid inputKey: expected at least 4 path segments, got {len(segments)}"
+        )
+
+
+def validate_webhook_url(url: str) -> None:
+    """Validate webhook URL to prevent SSRF attacks.
+
+    Blocks internal IPs in production. Allows host.docker.internal in dev.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Invalid webhook URL scheme: {parsed.scheme}")
+    if not parsed.hostname:
+        raise ValueError("Webhook URL has no hostname")
+
+    hostname = parsed.hostname
+    env_mode = os.environ.get("ENVIRONMENT", "production")
+
+    if env_mode == "production":
+        blocked_prefixes = (
+            "127.",
+            "10.",
+            "172.16.",
+            "172.17.",
+            "172.18.",
+            "172.19.",
+            "172.20.",
+            "172.21.",
+            "172.22.",
+            "172.23.",
+            "172.24.",
+            "172.25.",
+            "172.26.",
+            "172.27.",
+            "172.28.",
+            "172.29.",
+            "172.30.",
+            "172.31.",
+            "192.168.",
+            "169.254.",
+        )
+        if hostname == "localhost" or any(
+            hostname.startswith(p) for p in blocked_prefixes
+        ):
+            raise ValueError(f"Webhook URL points to internal address: {hostname}")
 
 
 # =============================================================================
@@ -216,7 +311,7 @@ def probe_media(input_path: str) -> dict[str, Any]:
         "-show_streams",
         input_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+    result = run_ffmpeg(cmd, timeout=30, description="ffprobe")
     return json.loads(result.stdout)
 
 
@@ -235,11 +330,21 @@ def get_media_info(probe_data: dict[str, Any]) -> tuple[int, int | None, int | N
     return duration, width, height
 
 
+def validate_streams(probe_data: dict[str, Any], media_type: str) -> None:
+    """Verify the file actually contains the expected stream types."""
+    streams = probe_data.get("streams", [])
+    has_video = any(s.get("codec_type") == "video" for s in streams)
+    has_audio = any(s.get("codec_type") == "audio" for s in streams)
+
+    if media_type == "video" and not has_video:
+        raise ValueError("File declared as video but contains no video streams")
+    if media_type == "audio" and not has_audio:
+        raise ValueError("File declared as audio but contains no audio streams")
+
+
 def check_gpu_available() -> bool:
     """Check if NVIDIA GPU encoder is actually usable (not just listed)."""
     try:
-        # Actually try to initialize the encoder — listing it isn't enough
-        # because the encoder definition ships in ffmpeg but CUDA may not be present
         result = subprocess.run(
             [
                 "ffmpeg",
@@ -268,13 +373,10 @@ def check_gpu_available() -> bool:
 # =============================================================================
 
 
-def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
-    """Create high-quality mezzanine file (CRF 18 for archival)."""
-    print("Creating mezzanine (CRF 18)...")
-
+def _build_mezzanine_cmd(input_path: str, output_path: str, use_gpu: bool) -> list[str]:
+    """Build ffmpeg command for mezzanine creation."""
     if use_gpu:
-        # GPU encoding
-        cmd = [
+        return [
             "ffmpeg",
             "-y",
             "-hwaccel",
@@ -293,27 +395,48 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
             "256k",
             output_path,
         ]
-    else:
-        # CPU encoding
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            input_path,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "slow",
-            "-crf",
-            "18",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "256k",
-            output_path,
-        ]
+    return [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-crf",
+        "18",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "256k",
+        output_path,
+    ]
 
-    subprocess.run(cmd, check=True, timeout=3600)  # 1 hour timeout
+
+def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
+    """Create high-quality mezzanine file (CRF 18 for archival).
+
+    Falls back to CPU if GPU encoding fails (e.g. OOM).
+    """
+    print("Creating mezzanine (CRF 18)...")
+
+    if use_gpu:
+        try:
+            run_ffmpeg(
+                _build_mezzanine_cmd(input_path, output_path, use_gpu=True),
+                timeout=3600,
+                description="mezzanine (GPU)",
+            )
+            return
+        except RuntimeError as e:
+            print(f"GPU mezzanine failed, falling back to CPU: {e}")
+
+    run_ffmpeg(
+        _build_mezzanine_cmd(input_path, output_path, use_gpu=False),
+        timeout=3600,
+        description="mezzanine (CPU)",
+    )
 
 
 def analyze_loudness(input_path: str) -> dict[str, float]:
@@ -335,7 +458,6 @@ def analyze_loudness(input_path: str) -> dict[str, float]:
     # Parse loudnorm output from stderr
     output = result.stderr
     try:
-        # Find JSON block in output
         json_start = output.rfind("{")
         json_end = output.rfind("}") + 1
         if json_start >= 0 and json_end > json_start:
@@ -346,9 +468,125 @@ def analyze_loudness(input_path: str) -> dict[str, float]:
                 "input_lra": float(loudness_data.get("input_lra", 7)),
             }
     except (json.JSONDecodeError, ValueError):
-        pass
+        print("WARNING: Failed to parse loudness data, using defaults")
 
     return {"input_i": -16, "input_tp": -1, "input_lra": 7}
+
+
+def _build_hls_variant_cmd(
+    input_path: str,
+    variant_dir: str,
+    playlist_path: str,
+    settings: dict,
+    use_gpu: bool,
+) -> list[str]:
+    """Build ffmpeg command for a single HLS variant."""
+    segment_path = os.path.join(variant_dir, "segment_%03d.ts")
+
+    if use_gpu:
+        return [
+            "ffmpeg",
+            "-y",
+            "-hwaccel",
+            "cuda",
+            "-i",
+            input_path,
+            "-vf",
+            f"scale=-2:{settings['height']}",
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p4",
+            "-cq",
+            "23",
+            "-b:v",
+            settings["video_bitrate"],
+            "-maxrate",
+            settings["video_bitrate"],
+            "-bufsize",
+            f"{int(settings['video_bitrate'][:-1]) * 2}k",
+            "-c:a",
+            "aac",
+            "-b:a",
+            settings["audio_bitrate"],
+            "-af",
+            "loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-f",
+            "hls",
+            "-hls_time",
+            str(HLS_SEGMENT_DURATION),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_filename",
+            segment_path,
+            playlist_path,
+        ]
+    return [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-vf",
+        f"scale=-2:{settings['height']}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-b:v",
+        settings["video_bitrate"],
+        "-maxrate",
+        settings["video_bitrate"],
+        "-bufsize",
+        f"{int(settings['video_bitrate'][:-1]) * 2}k",
+        "-c:a",
+        "aac",
+        "-b:a",
+        settings["audio_bitrate"],
+        "-af",
+        "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-f",
+        "hls",
+        "-hls_time",
+        str(HLS_SEGMENT_DURATION),
+        "-hls_playlist_type",
+        "vod",
+        "-hls_segment_filename",
+        segment_path,
+        playlist_path,
+    ]
+
+
+def _encode_hls_variant(
+    input_path: str,
+    variant_dir: str,
+    playlist_path: str,
+    settings: dict,
+    variant_name: str,
+    use_gpu: bool,
+) -> None:
+    """Encode a single HLS variant with GPU → CPU fallback."""
+    if use_gpu:
+        try:
+            run_ffmpeg(
+                _build_hls_variant_cmd(
+                    input_path, variant_dir, playlist_path, settings, use_gpu=True
+                ),
+                timeout=3600,
+                description=f"HLS {variant_name} (GPU)",
+            )
+            return
+        except RuntimeError as e:
+            print(f"GPU failed for {variant_name}, falling back to CPU: {e}")
+
+    run_ffmpeg(
+        _build_hls_variant_cmd(
+            input_path, variant_dir, playlist_path, settings, use_gpu=False
+        ),
+        timeout=3600,
+        description=f"HLS {variant_name} (CPU)",
+    )
 
 
 def transcode_video_hls(
@@ -357,14 +595,17 @@ def transcode_video_hls(
     source_height: int | None,
     use_gpu: bool,
 ) -> list[str]:
-    """Transcode video to multi-quality HLS variants."""
+    """Transcode video to multi-quality HLS variants.
+
+    If source is smaller than all standard variants, produces a 'source'
+    variant at the native resolution so the master playlist is never empty.
+    """
     print("Transcoding video to HLS variants...")
 
     ready_variants = []
     variant_playlists = []
 
     for variant_name, settings in HLS_VARIANTS.items():
-        # Skip variants higher than source resolution
         if source_height and settings["height"] > source_height:
             print(
                 f"Skipping {variant_name} (source height {source_height} < {settings['height']})"
@@ -376,85 +617,31 @@ def transcode_video_hls(
         playlist_path = os.path.join(variant_dir, "index.m3u8")
 
         print(f"Encoding {variant_name}...")
-
-        if use_gpu:
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-hwaccel",
-                "cuda",
-                "-i",
-                input_path,
-                "-vf",
-                f"scale=-2:{settings['height']}",
-                "-c:v",
-                "h264_nvenc",
-                "-preset",
-                "p4",
-                "-cq",
-                "23",
-                "-b:v",
-                settings["video_bitrate"],
-                "-maxrate",
-                settings["video_bitrate"],
-                "-bufsize",
-                f"{int(settings['video_bitrate'][:-1]) * 2}k",
-                "-c:a",
-                "aac",
-                "-b:a",
-                settings["audio_bitrate"],
-                "-af",
-                "loudnorm=I=-16:TP=-1.5:LRA=11",
-                "-f",
-                "hls",
-                "-hls_time",
-                str(HLS_SEGMENT_DURATION),
-                "-hls_playlist_type",
-                "vod",
-                "-hls_segment_filename",
-                os.path.join(variant_dir, "segment_%03d.ts"),
-                playlist_path,
-            ]
-        else:
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-i",
-                input_path,
-                "-vf",
-                f"scale=-2:{settings['height']}",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-                "-b:v",
-                settings["video_bitrate"],
-                "-maxrate",
-                settings["video_bitrate"],
-                "-bufsize",
-                f"{int(settings['video_bitrate'][:-1]) * 2}k",
-                "-c:a",
-                "aac",
-                "-b:a",
-                settings["audio_bitrate"],
-                "-af",
-                "loudnorm=I=-16:TP=-1.5:LRA=11",
-                "-f",
-                "hls",
-                "-hls_time",
-                str(HLS_SEGMENT_DURATION),
-                "-hls_playlist_type",
-                "vod",
-                "-hls_segment_filename",
-                os.path.join(variant_dir, "segment_%03d.ts"),
-                playlist_path,
-            ]
-
-        subprocess.run(cmd, check=True, timeout=3600)  # 1 hour per variant
+        _encode_hls_variant(
+            input_path, variant_dir, playlist_path, settings, variant_name, use_gpu
+        )
         ready_variants.append(variant_name)
         variant_playlists.append((variant_name, settings))
+
+    # Fallback: if source is smaller than all standard variants, encode at native resolution
+    if not ready_variants and source_height is not None:
+        print(
+            f"No standard variants fit source ({source_height}p). Encoding 'source' variant..."
+        )
+        settings = {
+            "height": source_height,
+            "video_bitrate": "800k",
+            "audio_bitrate": "64k",
+        }
+        variant_dir = os.path.join(output_dir, "source")
+        os.makedirs(variant_dir, exist_ok=True)
+        playlist_path = os.path.join(variant_dir, "index.m3u8")
+
+        _encode_hls_variant(
+            input_path, variant_dir, playlist_path, settings, "source", use_gpu
+        )
+        ready_variants.append("source")
+        variant_playlists.append(("source", settings))
 
     # Generate master playlist
     master_path = os.path.join(output_dir, "master.m3u8")
@@ -491,7 +678,7 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
             "-y",
             "-i",
             input_path,
-            "-vn",  # No video
+            "-vn",
             "-c:a",
             "aac",
             "-b:a",
@@ -509,7 +696,7 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
             playlist_path,
         ]
 
-        subprocess.run(cmd, check=True, timeout=600)
+        run_ffmpeg(cmd, timeout=600, description=f"audio HLS {variant_name}")
         ready_variants.append(variant_name)
         variant_playlists.append((variant_name, settings))
 
@@ -526,21 +713,19 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
     return ready_variants
 
 
-def create_preview(
-    input_path: str, output_dir: str, duration: int, use_gpu: bool
-) -> None:
-    """Create 30-second preview clip at 720p."""
-    print("Creating preview clip...")
-
-    preview_dir = os.path.join(output_dir, "preview")
-    os.makedirs(preview_dir, exist_ok=True)
-
-    # Calculate start time (10% into the video, but at least 0)
-    start_time = max(0, int(duration * 0.1))
-    preview_duration = min(PREVIEW_DURATION, duration - start_time)
+def _build_preview_cmd(
+    input_path: str,
+    preview_dir: str,
+    start_time: int,
+    preview_duration: int,
+    use_gpu: bool,
+) -> list[str]:
+    """Build ffmpeg command for preview clip."""
+    segment_path = os.path.join(preview_dir, "segment_%03d.ts")
+    playlist_path = os.path.join(preview_dir, "preview.m3u8")
 
     if use_gpu:
-        cmd = [
+        return [
             "ffmpeg",
             "-y",
             "-hwaccel",
@@ -570,43 +755,74 @@ def create_preview(
             "-hls_playlist_type",
             "vod",
             "-hls_segment_filename",
-            os.path.join(preview_dir, "segment_%03d.ts"),
-            os.path.join(preview_dir, "preview.m3u8"),
+            segment_path,
+            playlist_path,
         ]
-    else:
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            str(start_time),
-            "-i",
-            input_path,
-            "-t",
-            str(preview_duration),
-            "-vf",
-            f"scale=-2:{PREVIEW_HEIGHT}",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "23",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-f",
-            "hls",
-            "-hls_time",
-            str(HLS_SEGMENT_DURATION),
-            "-hls_playlist_type",
-            "vod",
-            "-hls_segment_filename",
-            os.path.join(preview_dir, "segment_%03d.ts"),
-            os.path.join(preview_dir, "preview.m3u8"),
-        ]
+    return [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(start_time),
+        "-i",
+        input_path,
+        "-t",
+        str(preview_duration),
+        "-vf",
+        f"scale=-2:{PREVIEW_HEIGHT}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-f",
+        "hls",
+        "-hls_time",
+        str(HLS_SEGMENT_DURATION),
+        "-hls_playlist_type",
+        "vod",
+        "-hls_segment_filename",
+        segment_path,
+        playlist_path,
+    ]
 
-    subprocess.run(cmd, check=True, timeout=120)
+
+def create_preview(
+    input_path: str, output_dir: str, duration: int, use_gpu: bool
+) -> None:
+    """Create 30-second preview clip at 720p with GPU → CPU fallback."""
+    print("Creating preview clip...")
+
+    preview_dir = os.path.join(output_dir, "preview")
+    os.makedirs(preview_dir, exist_ok=True)
+
+    start_time = max(0, int(duration * 0.1))
+    preview_duration = min(PREVIEW_DURATION, duration - start_time)
+
+    if use_gpu:
+        try:
+            run_ffmpeg(
+                _build_preview_cmd(
+                    input_path, preview_dir, start_time, preview_duration, use_gpu=True
+                ),
+                timeout=120,
+                description="preview (GPU)",
+            )
+            return
+        except RuntimeError as e:
+            print(f"GPU preview failed, falling back to CPU: {e}")
+
+    run_ffmpeg(
+        _build_preview_cmd(
+            input_path, preview_dir, start_time, preview_duration, use_gpu=False
+        ),
+        timeout=120,
+        description="preview (CPU)",
+    )
 
 
 def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
@@ -629,7 +845,7 @@ def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
         output_path,
     ]
 
-    subprocess.run(cmd, check=True, timeout=60)
+    run_ffmpeg(cmd, timeout=60, description="thumbnail extraction")
 
 
 # Allowed thumbnail sizes - must match THUMBNAIL_SIZES in @codex/validation
@@ -640,23 +856,17 @@ ALLOWED_THUMBNAIL_SIZES: frozenset[str] = frozenset({"sm", "md", "lg"})
 def extract_thumbnail_variants(
     input_path: str, output_dir: str, duration: int
 ) -> dict[str, str]:
-    """
-    Extract thumbnail at 10% mark and generate 3 WebP size variants.
-
-    Returns dict with local file paths: {'sm': path, 'md': path, 'lg': path}
-    """
+    """Extract thumbnail at 10% mark and generate 3 WebP size variants."""
     print("Extracting thumbnail variants (sm/md/lg)...")
 
     timestamp = max(1, int(duration * 0.1))
 
-    # Size configurations (quality tuned for file size targets)
     sizes = {
-        "sm": {"width": 200, "quality": 75, "compression": 6},  # <15KB target
-        "md": {"width": 400, "quality": 80, "compression": 5},  # <40KB target
-        "lg": {"width": 800, "quality": 82, "compression": 4},  # <100KB target
+        "sm": {"width": 200, "quality": 75, "compression": 6},
+        "md": {"width": 400, "quality": 80, "compression": 5},
+        "lg": {"width": 800, "quality": 82, "compression": 4},
     }
 
-    # Validate all size keys are in allowed set (defense in depth)
     for size_name in sizes:
         if size_name not in ALLOWED_THUMBNAIL_SIZES:
             raise ValueError(f"Invalid thumbnail size: {size_name}")
@@ -676,7 +886,7 @@ def extract_thumbnail_variants(
             "-vframes",
             "1",
             "-vf",
-            f"scale={config['width']}:-1",  # Preserve aspect ratio
+            f"scale={config['width']}:-1",
             "-c:v",
             "libwebp",
             "-quality",
@@ -686,10 +896,9 @@ def extract_thumbnail_variants(
             output_path,
         ]
 
-        subprocess.run(cmd, check=True, timeout=60)
+        run_ffmpeg(cmd, timeout=60, description=f"thumbnail {size_name}")
         variants[size_name] = output_path
 
-        # Log file size
         file_size = os.path.getsize(output_path)
         print(f"  {size_name}: {file_size} bytes")
 
@@ -700,7 +909,6 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
     """Generate audio waveform data and image using audiowaveform."""
     print("Generating audio waveform...")
 
-    # Generate JSON waveform data
     cmd_json = [
         "audiowaveform",
         "-i",
@@ -712,9 +920,8 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
         "-b",
         "8",
     ]
-    subprocess.run(cmd_json, check=True, timeout=120)
+    run_ffmpeg(cmd_json, timeout=120, description="waveform JSON")
 
-    # Generate PNG waveform image
     cmd_png = [
         "audiowaveform",
         "-i",
@@ -728,7 +935,7 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
         "--colors",
         "audition",
     ]
-    subprocess.run(cmd_png, check=True, timeout=120)
+    run_ffmpeg(cmd_png, timeout=120, description="waveform PNG")
 
 
 # =============================================================================
@@ -751,28 +958,39 @@ def sign_payload(payload: str, secret: str, timestamp: str | None = None) -> str
 
 
 def send_webhook(url: str, secret: str, result: dict) -> None:
-    """Send signed webhook to notify completion."""
-    import time
+    """Send signed webhook with retry (3 attempts, exponential backoff).
 
-    print(f"Sending webhook to {url}...")
+    On exhaustion, raises RuntimeError so RunPod can retry the entire job.
+    """
+    max_attempts = 3
+    backoff_base = 2
 
     payload = json.dumps(result)
     timestamp = str(int(time.time()))
     signature = sign_payload(payload, secret, timestamp)
+    headers = {
+        "Content-Type": "application/json",
+        "X-Runpod-Signature": signature,
+        "X-Runpod-Timestamp": timestamp,
+    }
 
-    response = requests.post(
-        url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "X-Runpod-Signature": signature,
-            "X-Runpod-Timestamp": timestamp,
-        },
-        timeout=30,
-    )
+    last_error: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            response = requests.post(url, data=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            print(f"Webhook sent successfully (attempt {attempt + 1})")
+            return
+        except Exception as e:
+            last_error = e
+            if attempt < max_attempts - 1:
+                delay = backoff_base**attempt
+                print(
+                    f"Webhook attempt {attempt + 1} failed: {e}. Retrying in {delay}s..."
+                )
+                time.sleep(delay)
 
-    print(f"Webhook response: {response.status_code}")
-    response.raise_for_status()
+    raise RuntimeError(f"Webhook failed after {max_attempts} attempts: {last_error}")
 
 
 # =============================================================================
@@ -789,13 +1007,20 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     media_type = job_input["type"]
     input_key = job_input["inputKey"]
 
-    # Validate path components to prevent traversal attacks
+    # --- Input validation ---
     validate_path_component(creator_id, "creatorId")
     validate_path_component(media_id, "mediaId")
+    validate_input_key(input_key)
+    validate_webhook_url(job_input["webhookUrl"])
+
+    if media_type not in ("video", "audio"):
+        raise ValueError(
+            f"Invalid media type: '{media_type}'. Must be 'video' or 'audio'."
+        )
 
     print(f"Starting transcoding job for {media_type}: {media_id}")
 
-    # Read B2 credentials from environment (set via RunPod secret manager)
+    # --- Environment credentials ---
     b2_endpoint = os.environ.get("B2_ENDPOINT")
     b2_access_key_id = os.environ.get("B2_ACCESS_KEY_ID")
     b2_secret_access_key = os.environ.get("B2_SECRET_ACCESS_KEY")
@@ -806,7 +1031,6 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "B2 credentials not configured in environment. Add secrets in RunPod console."
         )
 
-    # Read R2 credentials from environment (set via RunPod secret manager)
     r2_endpoint = os.environ.get("R2_ENDPOINT")
     r2_access_key_id = os.environ.get("R2_ACCESS_KEY_ID")
     r2_secret_access_key = os.environ.get("R2_SECRET_ACCESS_KEY")
@@ -817,38 +1041,30 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "R2 credentials not configured in environment. Add secrets in RunPod console."
         )
 
-    # Read ASSETS_BUCKET name from environment (uses shared R2 credentials)
     assets_bucket_name = os.environ.get("ASSETS_BUCKET_NAME")
-
     if not assets_bucket_name:
         raise ValueError(
             "ASSETS_BUCKET_NAME not configured in environment. Add secret in RunPod console."
         )
 
-    # Initialize storage clients
-    r2_client = create_s3_client(
-        r2_endpoint,
-        r2_access_key_id,
-        r2_secret_access_key,
-    )
-    b2_client = create_s3_client(
-        b2_endpoint,
-        b2_access_key_id,
-        b2_secret_access_key,
-    )
-    # Assets bucket uses shared R2 credentials (same account, different bucket)
+    webhook_secret = os.environ.get("WEBHOOK_SECRET", "")
+    if not webhook_secret:
+        raise ValueError("WEBHOOK_SECRET not configured in environment.")
+
+    # --- Storage clients ---
+    r2_client = create_s3_client(r2_endpoint, r2_access_key_id, r2_secret_access_key)
+    b2_client = create_s3_client(b2_endpoint, b2_access_key_id, b2_secret_access_key)
     assets_client = create_s3_client(
-        r2_endpoint,
-        r2_access_key_id,
-        r2_secret_access_key,
+        r2_endpoint, r2_access_key_id, r2_secret_access_key
     )
 
-    # Check GPU availability
+    # --- GPU check ---
     use_gpu = check_gpu_available()
     print(f"GPU available: {use_gpu}")
 
-    # Create temp directory for processing
+    # --- Processing ---
     work_dir = tempfile.mkdtemp(prefix="transcoding_")
+    uploaded_keys: list[tuple[Any, str, str]] = []
 
     try:
         # Step 1: Download original from R2
@@ -861,6 +1077,13 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         duration, width, height = get_media_info(probe_data)
         print(f"Media info: duration={duration}s, width={width}, height={height}")
 
+        if duration <= 0:
+            raise ValueError(
+                f"Invalid media duration: {duration}s. File may be corrupt or empty."
+            )
+
+        validate_streams(probe_data, media_type)
+
         # Step 3: Create mezzanine → Upload to B2
         mezzanine_path = os.path.join(work_dir, "mezzanine.mp4")
         mezzanine_key = f"{creator_id}/mezzanine/{media_id}/mezzanine.mp4"
@@ -868,14 +1091,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         if media_type == "video":
             create_mezzanine(input_path, mezzanine_path, use_gpu)
             upload_file(
-                b2_client,
-                b2_bucket_name,
-                mezzanine_key,
-                mezzanine_path,
-                "video/mp4",
+                b2_client, b2_bucket_name, mezzanine_key, mezzanine_path, "video/mp4"
             )
+            uploaded_keys.append((b2_client, b2_bucket_name, mezzanine_key))
         else:
-            mezzanine_key = None  # No mezzanine for audio-only
+            mezzanine_key = None
 
         # Step 4: Loudness analysis
         loudness = analyze_loudness(input_path)
@@ -901,29 +1121,22 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         # Step 6: Create preview (video only)
         if media_type == "video" and duration > 0:
             create_preview(input_path, hls_dir, duration, use_gpu)
-            # Preview is already in hls_dir, uploaded above
 
         # Step 7: Extract thumbnail variants (video only)
         thumbnail_key = None
         thumbnail_variants = None
         if media_type == "video" and duration > 0:
-            # Generate 3 WebP size variants (sm/md/lg)
             thumbnail_files = extract_thumbnail_variants(input_path, work_dir, duration)
 
-            # Upload all 3 variants to ASSETS_BUCKET (public CDN)
             thumbnail_variants = {}
             for size_name, local_path in thumbnail_files.items():
                 r2_key = f"{creator_id}/media-thumbnails/{media_id}/{size_name}.webp"
                 upload_file(
-                    assets_client,  # Use ASSETS_BUCKET client, not MEDIA_BUCKET
-                    assets_bucket_name,
-                    r2_key,
-                    local_path,
-                    "image/webp",
+                    assets_client, assets_bucket_name, r2_key, local_path, "image/webp"
                 )
+                uploaded_keys.append((assets_client, assets_bucket_name, r2_key))
                 thumbnail_variants[size_name] = r2_key
 
-            # Store 'lg' variant as canonical thumbnailKey
             thumbnail_key = thumbnail_variants.get("lg")
 
         # Step 8: Generate waveform (audio only)
@@ -943,6 +1156,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
                 waveform_json_path,
                 "application/json",
             )
+            uploaded_keys.append((r2_client, r2_bucket_name, waveform_key))
             upload_file(
                 r2_client,
                 r2_bucket_name,
@@ -950,17 +1164,19 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
                 waveform_png_path,
                 "image/png",
             )
+            uploaded_keys.append((r2_client, r2_bucket_name, waveform_image_key))
 
         # Build result — field names must match runpodWebhookOutputSchema
-        result = {
+        result: WebhookOutput = {
             "mediaId": media_id,
             "type": media_type,
             "hlsMasterKey": hls_master_key,
             "hlsPreviewKey": hls_preview_key,
-            "thumbnailKey": thumbnail_key,  # 'lg' variant
-            "thumbnailVariants": thumbnail_variants,  # All 3 sizes
+            "thumbnailKey": thumbnail_key,
+            "thumbnailVariants": thumbnail_variants,
             "waveformKey": waveform_key,
             "waveformImageKey": waveform_image_key,
+            "mezzanineKey": mezzanine_key,
             "durationSeconds": duration,
             "width": width,
             "height": height,
@@ -970,11 +1186,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "loudnessRange": int(loudness["input_lra"] * 100),
         }
 
-        # Step 10: Send webhook (RunPod envelope format: { jobId, status, output })
-        # webhookSecret comes from env (RunPod secrets), not job payload
-        webhook_secret = os.environ.get(
-            "WEBHOOK_SECRET", job_input.get("webhookSecret", "")
-        )
+        # Step 10: Send webhook (RunPod envelope format)
         webhook_payload = {
             "jobId": job.get("id", media_id),
             "status": "completed",
@@ -988,13 +1200,13 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         error_msg = str(e)
         print(f"Transcoding failed: {error_msg}")
 
-        # Send failure webhook — no output, just error
-        result = None
+        # Clean up any partial uploads
+        if uploaded_keys:
+            print(f"Cleaning up {len(uploaded_keys)} uploaded files...")
+            cleanup_uploaded_keys(uploaded_keys)
 
+        # Send failure webhook
         try:
-            webhook_secret = os.environ.get(
-                "WEBHOOK_SECRET", job_input.get("webhookSecret", "")
-            )
             webhook_payload = {
                 "jobId": job.get("id", media_id),
                 "status": "failed",
@@ -1007,7 +1219,6 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "error": error_msg}
 
     finally:
-        # Cleanup temp directory
         shutil.rmtree(work_dir, ignore_errors=True)
 
 

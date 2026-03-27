@@ -11,6 +11,8 @@ export const PAGINATION = {
 export const FILE_SIZES = {
   LOGO_MAX_BYTES: 5 * 1024 * 1024, // 5MB
   IMAGE_MAX_BYTES: 5 * 1024 * 1024, // 5MB (for avatars, thumbnails, etc.)
+  MEDIA_MAX_BYTES: 5 * 1024 * 1024 * 1024, // 5GB (video/audio uploads)
+  MEDIA_MIN_BYTES: 1024, // 1KB minimum (reject empty/corrupt uploads)
 } as const;
 
 export const VIDEO_PROGRESS = {

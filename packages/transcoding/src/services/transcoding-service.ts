@@ -57,7 +57,8 @@ export interface TranscodingServiceConfig {
   runpodApiKey: string;
   runpodEndpointId: string;
   webhookBaseUrl: string; // Required for callbacks
-  runpodApiBaseUrl?: string; // Optional: Override base RunPod API URL (for tests)
+  runpodApiBaseUrl?: string; // Optional: Override base RunPod API URL
+  runpodDirectUrl?: string; // Optional: Use this URL as-is (skips path construction, for local container)
   runpodTimeout?: number; // Configurable timeout, defaults to 30000ms
 }
 
@@ -113,8 +114,14 @@ export class TranscodingService extends BaseService {
     this.runpodTimeout = config.runpodTimeout ?? 30000;
 
     // Pre-construct URLs (won't change during service lifetime)
-    const apiBaseUrl = config.runpodApiBaseUrl || 'https://api.runpod.ai/v2';
-    this.runpodApiUrl = `${apiBaseUrl}/${config.runpodEndpointId}/run`;
+    // If a direct URL is provided (local container), use it as-is.
+    // Otherwise construct from base URL + endpoint ID (RunPod cloud API).
+    if (config.runpodDirectUrl) {
+      this.runpodApiUrl = config.runpodDirectUrl;
+    } else {
+      const apiBaseUrl = config.runpodApiBaseUrl || 'https://api.runpod.ai/v2';
+      this.runpodApiUrl = `${apiBaseUrl}/${config.runpodEndpointId}/run`;
+    }
     this.webhookUrl = `${config.webhookBaseUrl}/api/transcoding/webhook`;
   }
 
@@ -280,6 +287,32 @@ export class TranscodingService extends BaseService {
     // The atomic WHERE check handles this correctly.
 
     if (status === 'completed' && output) {
+      // Defense in depth: readyVariants must be non-empty for completed jobs.
+      // Schema validation (min(1)) catches this at the route level, but guard
+      // here too in case handleWebhook is called from other paths.
+      if (!output.readyVariants || output.readyVariants.length === 0) {
+        this.obs.error('Completed webhook has no ready variants', {
+          jobId,
+          mediaId: media.id,
+        });
+        await this.db
+          .update(mediaItems)
+          .set({
+            status: MEDIA_STATUS.FAILED,
+            transcodingError:
+              'Transcoding completed but produced no playable variants',
+            transcodingAttempts: media.transcodingAttempts + 1,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(mediaItems.id, media.id),
+              eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
+            )
+          );
+        return;
+      }
+
       // Success: Update atomically with all transcoding outputs
       // Only updates if status='transcoding' to prevent race conditions
       const result = await this.db
@@ -293,6 +326,8 @@ export class TranscodingService extends BaseService {
           thumbnailKey: output.thumbnailKey,
           waveformKey: output.waveformKey,
           waveformImageKey: output.waveformImageKey,
+          mezzanineKey: output.mezzanineKey ?? null,
+          mezzanineStatus: output.mezzanineKey ? 'ready' : null,
           durationSeconds: output.durationSeconds,
           width: output.width,
           height: output.height,
@@ -333,7 +368,7 @@ export class TranscodingService extends BaseService {
         thumbnailVariants: output.thumbnailVariants, // Logged for debugging, not stored
       });
     } else {
-      // Failure: Store error message atomically
+      // Failure: Store error message atomically, increment retry counter
       const result = await this.db
         .update(mediaItems)
         .set({
@@ -342,6 +377,7 @@ export class TranscodingService extends BaseService {
           transcodingError: (
             errorMessage || 'Unknown transcoding error'
           ).substring(0, 2000),
+          transcodingAttempts: media.transcodingAttempts + 1,
           updatedAt: new Date(),
         })
         .where(

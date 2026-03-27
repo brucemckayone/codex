@@ -228,6 +228,20 @@ export type Bindings = {
   RUNPOD_API_URL?: string;
 
   /**
+   * Direct URL for the transcoding endpoint (local dev).
+   * When set, bypasses RunPod API URL construction and calls this URL as-is.
+   * e.g. http://localhost:8000/runsync for a locally running container.
+   */
+  RUNPOD_DIRECT_URL?: string;
+
+  /**
+   * Override webhook callback URL for transcoding (local dev).
+   * When set, the transcoder calls this URL instead of API_URL.
+   * e.g. http://host.docker.internal:4002 for Docker → host networking.
+   */
+  TRANSCODING_WEBHOOK_URL?: string;
+
+  /**
    * Shared secret for worker-to-worker HMAC authentication
    */
   WORKER_SHARED_SECRET?: string;

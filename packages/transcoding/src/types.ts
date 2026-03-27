@@ -45,7 +45,13 @@ export type MediaStatus =
 /**
  * HLS variant quality levels
  */
-export type HlsVariant = '1080p' | '720p' | '480p' | '360p' | 'audio';
+export type HlsVariant =
+  | '1080p'
+  | '720p'
+  | '480p'
+  | '360p'
+  | 'source'
+  | 'audio';
 
 /**
  * RunPod job request payload

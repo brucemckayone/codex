@@ -60,6 +60,7 @@ export const hlsVariantSchema = z.enum([
   '720p',
   '480p',
   '360p',
+  'source',
   'audio',
 ]);
 
@@ -81,6 +82,9 @@ export const runpodWebhookOutputSchema = z.object({
   waveformKey: z.string().max(500).optional(),
   waveformImageKey: z.string().max(500).optional(),
 
+  // B2 archival mezzanine key (video only)
+  mezzanineKey: z.string().max(500).optional(),
+
   // Multi-size thumbnail variants
   // Keys MUST match THUMBNAIL_SIZES constant above. If sizes change,
   // update both this schema and the THUMBNAIL_SIZES array.
@@ -95,12 +99,12 @@ export const runpodWebhookOutputSchema = z.object({
     .optional(),
 
   // Media metadata
-  durationSeconds: z.number().int().min(0).max(86400).optional(), // Max 24 hours
+  durationSeconds: z.number().int().min(1).max(86400).optional(), // Max 24 hours
   width: z.number().int().min(1).max(7680).optional(), // Max 8K
   height: z.number().int().min(1).max(4320).optional(), // Max 8K
 
   // HLS variants that are ready (bounded to prevent DoS via unbounded array)
-  readyVariants: z.array(hlsVariantSchema).max(10).optional(),
+  readyVariants: z.array(hlsVariantSchema).min(1).max(10),
 
   // Audio loudness (×100 for precision)
   // Integrated Loudness (LUFS × 100): Range -10000 to 0 (-100.00 to 0.00 LUFS)
