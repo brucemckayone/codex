@@ -46,6 +46,7 @@ describe('RunPod Webhook Output Schema', () => {
     durationSeconds: 300,
     width: 1920,
     height: 1080,
+    readyVariants: ['1080p', '720p'] as const,
   };
 
   it('should validate complete webhook output', () => {
@@ -93,5 +94,45 @@ describe('RunPod Webhook Output Schema', () => {
       width: 10000,
     });
     expect(result.success).toBe(false);
+  });
+
+  it('should reject empty readyVariants', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validOutput,
+      readyVariants: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should accept source variant in readyVariants', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validOutput,
+      readyVariants: ['source'],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject invalid variant names in readyVariants', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validOutput,
+      readyVariants: ['240p'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject zero durationSeconds', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validOutput,
+      durationSeconds: 0,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should accept mezzanineKey when present', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validOutput,
+      mezzanineKey: 'user-123/mezzanine/media-456/mezzanine.mp4',
+    });
+    expect(result.success).toBe(true);
   });
 });

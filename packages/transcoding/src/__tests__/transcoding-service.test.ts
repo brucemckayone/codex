@@ -209,19 +209,18 @@ describe('TranscodingService', () => {
       );
     });
 
-    it('should update status to failed on error', async () => {
+    it('should update status to failed on error and increment transcodingAttempts', async () => {
       const payload: RunPodWebhookPayload = {
         jobId: jobId,
         status: 'failed',
         error: 'Transcoding failed due to GPU error',
-        output: { mediaId } as RunPodWebhookOutput,
       };
 
-      // Mock DB to return media in 'transcoding' state
       mockDb.query.mediaItems.findFirst.mockResolvedValue({
         id: mediaId,
         status: 'transcoding',
         runpodJobId: jobId,
+        transcodingAttempts: 1,
       });
 
       const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
@@ -235,6 +234,124 @@ describe('TranscodingService', () => {
         expect.objectContaining({
           status: 'failed',
           transcodingError: 'Transcoding failed due to GPU error',
+          transcodingAttempts: 2,
+        })
+      );
+    });
+
+    it('should reject completed webhook with empty readyVariants', async () => {
+      const payload: RunPodWebhookPayload = {
+        jobId: jobId,
+        status: 'completed',
+        output: {
+          mediaId,
+          type: 'video',
+          hlsMasterKey: 'path/to/master.m3u8',
+          durationSeconds: 120,
+          width: 320,
+          height: 240,
+          readyVariants: [],
+        },
+      };
+
+      mockDb.query.mediaItems.findFirst.mockResolvedValue({
+        id: mediaId,
+        status: 'transcoding',
+        runpodJobId: jobId,
+        transcodingAttempts: 0,
+      });
+
+      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
+      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
+      const setMock = vi.fn().mockReturnValue({ where: whereMock });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.handleWebhook(payload);
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'failed',
+          transcodingError:
+            'Transcoding completed but produced no playable variants',
+          transcodingAttempts: 1,
+        })
+      );
+    });
+
+    it('should store mezzanineKey on completed webhook', async () => {
+      const payload: RunPodWebhookPayload = {
+        jobId: jobId,
+        status: 'completed',
+        output: {
+          mediaId,
+          type: 'video',
+          hlsMasterKey: 'path/to/master.m3u8',
+          thumbnailKey: 'path/to/thumb.webp',
+          durationSeconds: 120,
+          width: 1920,
+          height: 1080,
+          readyVariants: ['1080p', '720p'],
+          mezzanineKey: 'user_123/mezzanine/media-456/mezzanine.mp4',
+        },
+      };
+
+      mockDb.query.mediaItems.findFirst.mockResolvedValue({
+        id: mediaId,
+        status: 'transcoding',
+        runpodJobId: jobId,
+        transcodingAttempts: 0,
+      });
+
+      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
+      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
+      const setMock = vi.fn().mockReturnValue({ where: whereMock });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.handleWebhook(payload);
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'ready',
+          mezzanineKey: 'user_123/mezzanine/media-456/mezzanine.mp4',
+          mezzanineStatus: 'ready',
+        })
+      );
+    });
+
+    it('should accept source variant in readyVariants', async () => {
+      const payload: RunPodWebhookPayload = {
+        jobId: jobId,
+        status: 'completed',
+        output: {
+          mediaId,
+          type: 'video',
+          hlsMasterKey: 'path/to/master.m3u8',
+          thumbnailKey: 'path/to/thumb.webp',
+          durationSeconds: 3,
+          width: 320,
+          height: 240,
+          readyVariants: ['source'],
+        },
+      };
+
+      mockDb.query.mediaItems.findFirst.mockResolvedValue({
+        id: mediaId,
+        status: 'transcoding',
+        runpodJobId: jobId,
+        transcodingAttempts: 0,
+      });
+
+      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
+      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
+      const setMock = vi.fn().mockReturnValue({ where: whereMock });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.handleWebhook(payload);
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'ready',
+          readyVariants: ['source'],
         })
       );
     });
