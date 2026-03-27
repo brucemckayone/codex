@@ -190,6 +190,34 @@ def upload_directory(client: Any, bucket: str, key_prefix: str, local_dir: str) 
             upload_file(client, bucket, key, local_path, content_type)
 
 
+def upload_directory_tracked(
+    client: Any, bucket: str, key_prefix: str, local_dir: str
+) -> list[tuple[Any, str, str]]:
+    """Upload all files in a directory and return list of (client, bucket, key) for cleanup."""
+    uploaded: list[tuple[Any, str, str]] = []
+    for root, _, files in os.walk(local_dir):
+        for filename in files:
+            local_path = os.path.join(root, filename)
+            relative_path = os.path.relpath(local_path, local_dir)
+            key = f"{key_prefix}{relative_path}"
+
+            content_type = None
+            if filename.endswith(".m3u8"):
+                content_type = "application/vnd.apple.mpegurl"
+            elif filename.endswith(".ts"):
+                content_type = "video/MP2T"
+            elif filename.endswith(".json"):
+                content_type = "application/json"
+            elif filename.endswith(".png"):
+                content_type = "image/png"
+            elif filename.endswith(".jpg") or filename.endswith(".jpeg"):
+                content_type = "image/jpeg"
+
+            upload_file(client, bucket, key, local_path, content_type)
+            uploaded.append((client, bucket, key))
+    return uploaded
+
+
 def cleanup_uploaded_keys(uploaded_keys: list[tuple[Any, str, str]]) -> None:
     """Best-effort cleanup of uploaded files on error."""
     for client, bucket, key in uploaded_keys:
@@ -663,7 +691,6 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
     """Transcode audio to HLS variants."""
     print("Transcoding audio to HLS variants...")
 
-    ready_variants = []
     variant_playlists = []
 
     for variant_name, settings in AUDIO_VARIANTS.items():
@@ -697,7 +724,6 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
         ]
 
         run_ffmpeg(cmd, timeout=600, description=f"audio HLS {variant_name}")
-        ready_variants.append(variant_name)
         variant_playlists.append((variant_name, settings))
 
     # Generate master playlist
@@ -710,7 +736,9 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
             f.write(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}\n")
             f.write(f"{variant_name}/index.m3u8\n")
 
-    return ready_variants
+    # Report 'audio' as the ready variant (matches hlsVariantSchema enum).
+    # Individual bitrate levels (128k/64k) are internal to the master playlist.
+    return ["audio"] if variant_playlists else []
 
 
 def _build_preview_cmd(
@@ -1110,17 +1138,20 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         else:
             ready_variants = transcode_audio_hls(input_path, hls_dir)
 
-        # Upload HLS to R2
-        hls_prefix = f"{creator_id}/hls/{media_id}/"
-        upload_directory(r2_client, r2_bucket_name, hls_prefix, hls_dir)
-        hls_master_key = f"{hls_prefix}master.m3u8"
-        hls_preview_key = (
-            f"{hls_prefix}preview/preview.m3u8" if media_type == "video" else None
-        )
-
-        # Step 6: Create preview (video only)
+        # Step 6: Create preview BEFORE uploading HLS dir (preview goes into hls_dir)
+        hls_preview_key = None
         if media_type == "video" and duration > 0:
             create_preview(input_path, hls_dir, duration, use_gpu)
+
+        # Upload HLS to R2 (includes preview if generated above)
+        hls_prefix = f"{creator_id}/hls/{media_id}/"
+        hls_uploaded = upload_directory_tracked(
+            r2_client, r2_bucket_name, hls_prefix, hls_dir
+        )
+        uploaded_keys.extend(hls_uploaded)
+        hls_master_key = f"{hls_prefix}master.m3u8"
+        if media_type == "video":
+            hls_preview_key = f"{hls_prefix}preview/preview.m3u8"
 
         # Step 7: Extract thumbnail variants (video only)
         thumbnail_key = None

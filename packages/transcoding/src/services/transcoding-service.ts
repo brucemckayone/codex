@@ -501,6 +501,48 @@ export class TranscodingService extends BaseService {
   }
 
   /**
+   * Recover media items stuck in 'transcoding' status.
+   *
+   * If a webhook never arrives (network failure, RunPod outage), media
+   * stays in 'transcoding' indefinitely. This method finds items stuck
+   * longer than `maxAgeMinutes` and marks them as 'failed' so they can
+   * be retried.
+   *
+   * Intended for scheduled/cron invocation, not user-facing.
+   *
+   * @param maxAgeMinutes - How long to wait before considering stuck (default: 120)
+   * @returns Number of media items recovered
+   */
+  async recoverStuckTranscoding(maxAgeMinutes: number = 120): Promise<number> {
+    const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+
+    const result = await this.db
+      .update(mediaItems)
+      .set({
+        status: MEDIA_STATUS.FAILED,
+        transcodingError: `Stuck in transcoding for over ${maxAgeMinutes} minutes — no webhook received`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
+          lt(mediaItems.updatedAt, cutoff),
+          isNull(mediaItems.deletedAt)
+        )
+      )
+      .returning();
+
+    if (result.length > 0) {
+      this.obs.warn(`Recovered ${result.length} stuck transcoding jobs`, {
+        maxAgeMinutes,
+        mediaIds: result.map((m) => m.id),
+      });
+    }
+
+    return result.length;
+  }
+
+  /**
    * Get expected output keys for a transcoding job
    *
    * Utility method to get all expected R2 paths for transcoding outputs.

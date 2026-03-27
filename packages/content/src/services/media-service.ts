@@ -12,15 +12,21 @@
  * - Soft deletes only (sets deleted_at)
  */
 
-import { MEDIA_STATUS, PAGINATION } from '@codex/constants';
+import type { R2Service } from '@codex/cloudflare-clients';
+import { MEDIA_STATUS, MIME_TO_EXTENSION, PAGINATION } from '@codex/constants';
 import {
   scopedNotDeleted,
   withCreatorScope,
   withPagination,
 } from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
-import { BaseService } from '@codex/service-errors';
+import {
+  BaseService,
+  type ServiceConfig,
+  ValidationError,
+} from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
+import { getOriginalKey, isValidR2Key } from '@codex/transcoding';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -38,16 +44,29 @@ import type {
   PaginationParams,
 } from '../types';
 
+export interface MediaItemServiceConfig extends ServiceConfig {
+  /** R2Service with signing config for presigned upload URLs. Optional in dev. */
+  r2?: R2Service;
+}
+
 /**
  * Media Item Service Class
  *
  * Handles all media item-related business logic:
- * - Create media items (during upload)
+ * - Create media items (during upload) with presigned upload URL
  * - Update media metadata (after transcoding)
  * - Delete media items (soft delete)
  * - List media items with filters
+ *
+ * Media items are creator-scoped: all R2 paths use {creatorId}/ prefix.
  */
 export class MediaItemService extends BaseService {
+  private readonly r2?: R2Service;
+
+  constructor(config: MediaItemServiceConfig) {
+    super(config);
+    this.r2 = config.r2;
+  }
   /**
    * Create new media item
    *
@@ -58,25 +77,47 @@ export class MediaItemService extends BaseService {
    *
    * @param input - Media item creation data
    * @param creatorId - ID of the creator (uploader)
-   * @returns Created media item
+   * @returns Created media item with optional presigned upload URL
    */
   async create(
     input: CreateMediaItemInput,
     creatorId: string
-  ): Promise<MediaItem> {
-    // Validate input with Zod
+  ): Promise<MediaItem & { presignedUrl: string | null }> {
     const validated = createMediaItemSchema.parse(input);
 
+    // Resolve file extension from MIME type using the validation schema's enum as SSOT.
+    // Throws if MIME type is unknown — upstream validation should have caught this.
+    const ext = MIME_TO_EXTENSION[validated.mimeType];
+    if (!ext) {
+      throw new ValidationError(
+        `Unsupported MIME type '${validated.mimeType}' — no file extension mapping exists`
+      );
+    }
+
     try {
+      const mediaId = crypto.randomUUID();
+
+      // Generate R2 key server-side using SSOT path helper.
+      // Media items are creator-scoped: {creatorId}/originals/{mediaId}/media.{ext}
+      // If r2Key is provided (e.g. in tests), use it; otherwise generate from SSOT.
+      const r2Key =
+        validated.r2Key ?? getOriginalKey(creatorId, mediaId, `media.${ext}`);
+
+      // Validate generated key matches expected format (defense-in-depth)
+      if (!isValidR2Key(r2Key)) {
+        throw new Error(`Generated r2Key '${r2Key}' failed validation`);
+      }
+
       const [newMediaItem] = await this.db
         .insert(mediaItems)
         .values({
+          id: mediaId,
           creatorId,
           title: validated.title,
           description: validated.description || null,
           mediaType: validated.mediaType,
-          status: MEDIA_STATUS.UPLOADING, // Always start as uploading
-          r2Key: validated.r2Key,
+          status: MEDIA_STATUS.UPLOADING,
+          r2Key,
           fileSizeBytes: validated.fileSizeBytes,
           mimeType: validated.mimeType,
         })
@@ -86,10 +127,68 @@ export class MediaItemService extends BaseService {
         throw new Error('Failed to create media item');
       }
 
-      return newMediaItem;
+      // Generate presigned upload URL if R2 signing is available.
+      // Null in local dev (no S3 creds) — client uses fallback upload endpoint.
+      let presignedUrl: string | null = null;
+      if (this.r2 && newMediaItem.r2Key && newMediaItem.mimeType) {
+        try {
+          presignedUrl = await this.r2.generateSignedUploadUrl(
+            newMediaItem.r2Key,
+            newMediaItem.mimeType,
+            3600
+          );
+        } catch (err) {
+          // Log so signing config issues are visible — but don't fail the create
+          console.error(
+            '[MediaItemService] Failed to generate presigned upload URL:',
+            err
+          );
+        }
+      }
+
+      return { ...newMediaItem, presignedUrl };
     } catch (error) {
       throw wrapError(error, { creatorId, input: validated });
     }
+  }
+
+  /**
+   * Upload file data to R2 for a media item.
+   *
+   * Verifies creator ownership and that media is in 'uploading' status.
+   * Stores the file at the media item's r2Key path (creator-scoped).
+   *
+   * Used as a fallback when presigned URLs are unavailable (local dev).
+   * In production, the client PUTs directly to the presigned R2 URL.
+   *
+   * @param mediaId - Media item UUID
+   * @param body - File data (ArrayBuffer or ReadableStream)
+   * @param contentType - MIME type of the file
+   * @param creatorId - Creator ID for authorization
+   */
+  async upload(
+    mediaId: string,
+    body: ArrayBuffer,
+    contentType: string,
+    creatorId: string
+  ): Promise<{ success: true; r2Key: string }> {
+    if (!this.r2) {
+      throw new Error('R2 service not configured — cannot upload media files');
+    }
+
+    const media = await this.get(mediaId, creatorId);
+    if (!media) throw new MediaNotFoundError(mediaId);
+
+    if (media.status !== MEDIA_STATUS.UPLOADING) {
+      throw new Error(`Cannot upload: media status is '${media.status}'`);
+    }
+    if (!media.r2Key) {
+      throw new Error('Media has no r2Key');
+    }
+
+    await this.r2.put(media.r2Key, body, undefined, { contentType });
+
+    return { success: true, r2Key: media.r2Key };
   }
 
   /**
@@ -371,7 +470,34 @@ export class MediaItemService extends BaseService {
       | typeof MEDIA_STATUS.FAILED,
     creatorId: string
   ): Promise<MediaItem> {
+    // Validate status transition before attempting DB update
+    const media = await this.get(id, creatorId);
+    if (media) {
+      const currentStatus = media.status;
+      if (!this.isValidTransition(currentStatus, status)) {
+        throw new ValidationError(
+          `Invalid status transition: '${currentStatus}' → '${status}'`
+        );
+      }
+    }
     return this.update(id, { status }, creatorId);
+  }
+
+  /**
+   * Valid status transitions (state machine):
+   *   uploading → uploaded
+   *   uploaded → transcoding
+   *   transcoding → ready | failed
+   *   failed → transcoding (retry)
+   */
+  private isValidTransition(from: string, to: string): boolean {
+    const VALID_TRANSITIONS: Record<string, string[]> = {
+      [MEDIA_STATUS.UPLOADING]: [MEDIA_STATUS.UPLOADED],
+      [MEDIA_STATUS.UPLOADED]: [MEDIA_STATUS.TRANSCODING],
+      [MEDIA_STATUS.TRANSCODING]: [MEDIA_STATUS.READY, MEDIA_STATUS.FAILED],
+      [MEDIA_STATUS.FAILED]: [MEDIA_STATUS.TRANSCODING],
+    };
+    return VALID_TRANSITIONS[from]?.includes(to) ?? false;
   }
 
   /**
