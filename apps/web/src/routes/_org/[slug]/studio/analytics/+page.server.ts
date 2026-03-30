@@ -7,18 +7,25 @@
  */
 
 import { redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import {
   getAnalyticsRevenue,
   getAnalyticsTopContent,
 } from '$lib/remote/admin.remote';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ parent, params, url }) => {
+export const load: PageServerLoad = async ({
+  parent,
+  params,
+  url,
+  depends,
+}) => {
+  depends('cache:studio-page:analytics');
   const { org, userRole } = await parent();
 
   // Admin/owner guard
   if (userRole !== 'admin' && userRole !== 'owner') {
-    redirect(302, `/${params.slug}/studio`);
+    redirect(302, '/studio');
   }
 
   // Parse date range from URL, default to last 30 days
@@ -31,8 +38,8 @@ export const load: PageServerLoad = async ({ parent, params, url }) => {
   const dateTo =
     url.searchParams.get('dateTo') ?? now.toISOString().split('T')[0];
 
-  // Fetch revenue and top content in parallel
-  const [revenue, topContent] = await Promise.all([
+  // Fetch revenue and top content in parallel with graceful degradation
+  const [revenueResult, topContentResult] = await Promise.allSettled([
     getAnalyticsRevenue({
       organizationId: org.id,
       dateFrom,
@@ -44,9 +51,21 @@ export const load: PageServerLoad = async ({ parent, params, url }) => {
     }),
   ]);
 
+  if (revenueResult.status === 'rejected') {
+    logger.error('[Analytics] Failed to fetch revenue', {
+      reason: String(revenueResult.reason),
+    });
+  }
+  if (topContentResult.status === 'rejected') {
+    logger.error('[Analytics] Failed to fetch top content', {
+      reason: String(topContentResult.reason),
+    });
+  }
+
   return {
-    revenue,
-    topContent,
+    revenue: revenueResult.status === 'fulfilled' ? revenueResult.value : null,
+    topContent:
+      topContentResult.status === 'fulfilled' ? topContentResult.value : null,
     dateFrom,
     dateTo,
   };

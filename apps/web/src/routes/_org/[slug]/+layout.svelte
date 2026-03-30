@@ -2,10 +2,20 @@
   /**
    * Organization layout - for {slug}.revelations.studio routes
    * Wires OrgHeader component and injects org brand colors as CSS variables.
+   * Hides org chrome (header/footer) when inside the studio, which has its own layout.
+   *
+   * Caching: mirrors the platform layout pattern — $effect watches data.versions
+   * for staleness, visibilitychange re-runs the server load on tab return.
    */
   import type { Snippet } from 'svelte';
+  import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
+  import { invalidate } from '$app/navigation';
+  import { page } from '$app/state';
   import type { LayoutData } from './$types';
   import OrgHeader from '$lib/components/layout/Header/OrgHeader.svelte';
+  import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
+  import { invalidateCollection } from '$lib/collections';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -14,6 +24,36 @@
   }
 
   const { data, children }: Props = $props();
+
+  // Studio routes have their own header/sidebar — hide the org chrome
+  const isStudio = $derived(page.url.pathname.startsWith('/studio'));
+
+  // Reactive staleness check — runs on mount AND whenever data.versions changes.
+  // data.versions changes after invalidate('cache:org-versions') re-runs the server load.
+  // Guard with `browser` since $effect runs during SSR in Svelte 5.
+  $effect(() => {
+    if (!browser) return;
+    const staleKeys = getStaleKeys(data.versions ?? {});
+    if (staleKeys.some((k) => k.includes(':content'))) {
+      void invalidateCollection('content');
+    }
+    updateStoredVersions(data.versions ?? {});
+  });
+
+  onMount(() => {
+    // Re-check KV versions on tab return — detects content published/unpublished
+    // while this tab was hidden, or org settings changed on another device.
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') {
+        void invalidate('cache:org-versions');
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  });
 </script>
 
 <div
@@ -22,25 +62,29 @@
   style:--brand-secondary={data.org?.brandColors?.secondary}
   style:--brand-accent={data.org?.brandColors?.accent}
 >
-  <OrgHeader user={data.user} org={data.org} />
+  {#if !isStudio}
+    <OrgHeader user={data.user} org={data.org} />
+  {/if}
 
-  <main class="org-main">
+  <main id="main-content" class="org-main">
     {@render children()}
   </main>
 
-  <footer class="org-footer">
-    <div class="footer-inner">
-      <p class="powered-by">
-        {m.footer_powered_by({ platform: m.footer_powered_by_platform() })}
-      </p>
-      <nav class="footer-links">
-        <a href="/about">{m.footer_about()}</a>
-        <a href="/terms">{m.footer_terms()}</a>
-        <a href="/privacy">{m.footer_privacy()}</a>
-      </nav>
-      <p class="copyright">{m.footer_copyright()}</p>
-    </div>
-  </footer>
+  {#if !isStudio}
+    <footer class="org-footer">
+      <div class="footer-inner">
+        <p class="powered-by">
+          {m.footer_powered_by({ platform: m.footer_powered_by_platform() })}
+        </p>
+        <nav class="footer-links">
+          <a href="/about">{m.footer_about()}</a>
+          <a href="/terms">{m.footer_terms()}</a>
+          <a href="/privacy">{m.footer_privacy()}</a>
+        </nav>
+        <p class="copyright">&copy; {new Date().getFullYear()} Codex. All rights reserved.</p>
+      </div>
+    </footer>
+  {/if}
 </div>
 
 <style>
@@ -72,7 +116,7 @@
     text-align: center;
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .footer-inner {
       flex-direction: row;
       justify-content: space-between;

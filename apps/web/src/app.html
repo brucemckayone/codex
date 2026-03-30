@@ -5,10 +5,21 @@
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script>
+      // Polyfill crypto.randomUUID for non-secure contexts (HTTP on lvh.me dev)
+      if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
+        crypto.randomUUID = function() {
+          return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, function(c) {
+            return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
+          });
+        };
+      }
+    </script>
+    <script>
       (function() {
         const theme = document.cookie.match(/theme=(dark|light)/)?.[1]
           || localStorage.getItem('theme')
           || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
         document.documentElement.classList.add(theme);
       })();
     </script>

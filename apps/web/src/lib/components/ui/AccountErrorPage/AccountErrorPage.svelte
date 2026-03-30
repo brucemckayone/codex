@@ -4,12 +4,12 @@
   Shared error page for all account-related routes.
   Displays a status-specific error card with icon, message, and actions.
 
-  @prop {number} status - HTTP status code from $page.status
+  @prop {number} status - HTTP status code from page.status
   @prop {string} returnHref - Primary action link (e.g. "/account", "/account/payment")
   @prop {string} pageTitle - Title suffix for the <title> tag (e.g. "Account", "Payments")
 -->
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -41,7 +41,7 @@
   const config = $derived(
     statusConfig[status] ?? {
       title: m.account_error_server_error(),
-      description: $page.error?.message ?? 'An unexpected error occurred.',
+      description: page.error?.message ?? 'An unexpected error occurred.',
       icon: 'warning',
     }
   );

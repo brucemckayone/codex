@@ -69,6 +69,7 @@ export {
 // Types
 // ============================================================================
 
+export type { ServiceConfig } from '@codex/service-errors';
 export type {
   Content,
   ContentFilters,
@@ -91,7 +92,6 @@ export type {
   PaginationParams,
   PublicContentListResponse,
   PublishContentResponse,
-  ServiceConfig,
   SortOrder,
   UnpublishContentResponse,
   UpdateContentResponse,

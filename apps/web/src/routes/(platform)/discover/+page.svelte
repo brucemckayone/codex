@@ -3,8 +3,9 @@
    * Discover page - filterable content grid with search
    */
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import type { PageData } from './$types';
+  import { buildOrgUrl } from '$lib/utils/subdomain';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
 
   const { data }: { data: PageData } = $props();
@@ -27,6 +28,9 @@
   <meta property="og:title" content="Discover Content - Codex" />
   <meta property="og:description" content="Browse and discover premium content from independent creators." />
   <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Discover Content - Codex" />
+  <meta name="twitter:description" content="Browse and discover premium content from independent creators." />
 </svelte:head>
 
 <div class="discover">
@@ -51,9 +55,11 @@
   {/if}
 
   <section class="content-grid" aria-label="Content results">
-    {#if data.content.data && data.content.data.length > 0}
-      {#each data.content.data as item (item.id)}
-        <a href="/content/{item.id}" class="content-card">
+    {#if data.content.items && data.content.items.length > 0}
+      {#each data.content.items as item (item.id)}
+        <a href={item.organization?.slug
+          ? buildOrgUrl(page.url, item.organization.slug, `/content/${item.slug}`)
+          : `/content/${item.slug ?? item.id}`} class="content-card">
           <div class="card-thumb">
             {#if item.mediaItem?.thumbnailUrl}
               <img src={item.mediaItem.thumbnailUrl} alt="" class="thumb-img" />
@@ -126,7 +132,7 @@
   .search-btn {
     padding: var(--space-2) var(--space-4);
     background-color: var(--color-primary-500);
-    color: white;
+    color: var(--color-text-inverse);
     border: none;
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
@@ -145,13 +151,13 @@
     gap: var(--space-6);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .content-grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .content-grid {
       grid-template-columns: repeat(3, 1fr);
     }

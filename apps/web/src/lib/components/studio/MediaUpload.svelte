@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { createMedia, completeUpload, uploadMedia } from '$lib/remote/media.remote';
+  import { logger } from '$lib/observability';
   import * as m from '$paraglide/messages';
 
   interface UploadItem {
@@ -37,6 +38,7 @@
    * Accepted MIME types for media uploads
    */
   const ACCEPTED_TYPES = [
+    // MIME types
     'video/mp4',
     'video/quicktime',
     'video/x-msvideo',
@@ -46,6 +48,15 @@
     'audio/wav',
     'audio/webm',
     'audio/ogg',
+    // File extensions (some browsers need these instead of MIME types)
+    '.mp4',
+    '.mov',
+    '.avi',
+    '.webm',
+    '.mp3',
+    '.m4a',
+    '.wav',
+    '.ogg',
   ];
 
   /**
@@ -126,7 +137,10 @@
       if (presignedUrl) {
         try {
           await uploadToR2(item, presignedUrl);
-        } catch {
+        } catch (error) {
+          logger.warn('Presigned URL upload failed, falling back to worker upload', {
+            error: error instanceof Error ? error.message : String(error),
+          });
           await uploadViaWorker(item, mediaId);
         }
       } else {
@@ -299,7 +313,7 @@
               {:else if item.status === 'completing'}
                 {m.media_status_processing()}
               {:else if item.status === 'done'}
-                {m.media_status_ready()}
+                {m.media_status_uploaded()}
               {:else if item.status === 'error'}
                 {item.error ?? m.media_status_failed()}
               {/if}
@@ -504,40 +518,40 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .upload-heading {
+  :global([data-theme='dark']) .upload-heading {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .drop-zone {
+  :global([data-theme='dark']) .drop-zone {
     background-color: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .drop-zone:hover,
-  [data-theme='dark'] .drop-zone:focus-visible,
-  [data-theme='dark'] .drop-zone.dragging {
+  :global([data-theme='dark']) .drop-zone:hover,
+  :global([data-theme='dark']) .drop-zone:focus-visible,
+  :global([data-theme='dark']) .drop-zone.dragging {
     border-color: var(--color-primary-400);
     background-color: var(--color-surface-variant);
   }
 
-  [data-theme='dark'] .upload-icon {
+  :global([data-theme='dark']) .upload-icon {
     color: var(--color-text-muted-dark);
   }
 
-  [data-theme='dark'] .drop-text {
+  :global([data-theme='dark']) .drop-text {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .queue-item {
+  :global([data-theme='dark']) .queue-item {
     background-color: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .queue-item-name {
+  :global([data-theme='dark']) .queue-item-name {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .progress-bar {
+  :global([data-theme='dark']) .progress-bar {
     background-color: var(--color-neutral-800);
   }
 </style>

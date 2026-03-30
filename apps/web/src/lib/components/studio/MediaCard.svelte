@@ -9,6 +9,9 @@
   @prop {(id: string) => void} [onDelete] - Callback when delete is triggered
 -->
 <script lang="ts">
+  import { onDestroy, onMount } from 'svelte';
+  import { getTranscodingStatus } from '$lib/remote/media.remote';
+  import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
   import { Badge } from '$lib/components/ui/Badge';
   import * as m from '$paraglide/messages';
@@ -20,6 +23,68 @@
   }
 
   const { media, onEdit, onDelete }: Props = $props();
+
+  const isTranscoding = $derived(media.status === 'transcoding');
+
+  let progress = $state<{ progress: number | null; step: string | null; status: string } | null>(null);
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let pollErrors = 0;
+  let pollErrorMessage = $state<string | null>(null);
+  let visible = true;
+
+  const MAX_CONSECUTIVE_ERRORS = 3;
+
+  function stopPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = null;
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+  }
+
+  async function pollProgress() {
+    if (!visible) return;
+    try {
+      const q = getTranscodingStatus(media.id);
+      await q.refresh();
+      const result = q.current;
+      if (!result) return;
+      pollErrors = 0;
+      pollErrorMessage = null;
+      progress = {
+        progress: result.transcodingProgress ?? null,
+        step: result.transcodingStep ?? null,
+        status: result.status,
+      };
+      if (result.status === 'ready' || result.status === 'failed') {
+        stopPolling();
+      }
+    } catch (error) {
+      pollErrors++;
+      if (pollErrors >= MAX_CONSECUTIVE_ERRORS) {
+        logger.warn('MediaCard: stopping poll after consecutive failures', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        pollErrorMessage = 'Unable to fetch transcoding status';
+        stopPolling();
+      }
+    }
+  }
+
+  function onVisibilityChange() {
+    visible = document.visibilityState === 'visible';
+    if (visible) pollProgress();
+  }
+
+  onMount(() => {
+    if (media.status === 'transcoding') {
+      pollProgress();
+      pollInterval = setInterval(pollProgress, 5000);
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+  });
+
+  onDestroy(() => {
+    stopPolling();
+  });
 
   /**
    * Map media status to badge variant
@@ -85,6 +150,23 @@
   }
 
   const isVideo = $derived(media.mediaType === 'video');
+
+  const STEP_LABELS: Record<string, () => string> = {
+    downloading: () => m.transcoding_step_downloading(),
+    probing: () => m.transcoding_step_probing(),
+    mezzanine: () => m.transcoding_step_mezzanine(),
+    loudness: () => m.transcoding_step_loudness(),
+    encoding_variants: () => m.transcoding_step_encoding_variants(),
+    preview: () => m.transcoding_step_preview(),
+    thumbnails: () => m.transcoding_step_thumbnails(),
+    waveform: () => m.transcoding_step_waveform(),
+    uploading_outputs: () => m.transcoding_step_uploading_outputs(),
+    finalizing: () => m.transcoding_step_finalizing(),
+  };
+
+  function getStepLabel(step: string): string {
+    return STEP_LABELS[step]?.() ?? step;
+  }
 </script>
 
 <article class="media-card">
@@ -105,8 +187,31 @@
   <div class="media-info">
     <div class="media-header">
       <h3 class="media-title">{media.title}</h3>
-      <Badge variant={statusVariant}>{statusLabel}</Badge>
+      {#if isTranscoding && progress}
+        <Badge variant="neutral">
+          {progress.progress != null ? `${progress.progress}%` : statusLabel}
+        </Badge>
+      {:else}
+        <Badge variant={statusVariant}>{statusLabel}</Badge>
+      {/if}
     </div>
+
+    {#if isTranscoding && progress?.progress != null}
+      <div class="transcoding-progress">
+        <div
+          class="transcoding-progress-bar"
+          role="progressbar"
+          aria-valuenow={progress.progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div class="transcoding-progress-fill" style="width: {progress.progress}%"></div>
+        </div>
+        {#if progress.step}
+          <span class="transcoding-step">{getStepLabel(progress.step)}</span>
+        {/if}
+      </div>
+    {/if}
 
     <div class="media-meta">
       <span class="media-type">
@@ -245,34 +350,60 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .media-card {
+  :global([data-theme='dark']) .media-card {
     background-color: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .media-card:hover {
+  :global([data-theme='dark']) .media-card:hover {
     border-color: var(--color-primary-400);
   }
 
-  [data-theme='dark'] .media-thumbnail {
+  :global([data-theme='dark']) .media-thumbnail {
     background-color: var(--color-surface-variant);
     color: var(--color-text-muted-dark);
   }
 
-  [data-theme='dark'] .media-title {
+  :global([data-theme='dark']) .media-title {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .media-meta {
+  :global([data-theme='dark']) .media-meta {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .action-btn {
+  :global([data-theme='dark']) .action-btn {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .action-btn:hover {
+  :global([data-theme='dark']) .action-btn:hover {
     background-color: var(--color-surface-variant);
     color: var(--color-text-dark);
+  }
+
+  .transcoding-progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+  }
+
+  .transcoding-progress-bar {
+    height: var(--space-1);
+    background-color: var(--color-neutral-200);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+  }
+
+  .transcoding-progress-fill {
+    height: 100%;
+    background-color: var(--color-primary-500);
+    border-radius: var(--radius-full);
+    transition: width 0.5s ease;
+  }
+
+  .transcoding-step {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
   }
 </style>

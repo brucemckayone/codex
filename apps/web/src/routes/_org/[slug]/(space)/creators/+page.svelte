@@ -124,13 +124,13 @@
     gap: var(--space-6, 1.5rem);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .creators__grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .creators__grid {
       grid-template-columns: repeat(3, 1fr);
     }
@@ -166,7 +166,7 @@
   }
 
   /* ── Responsive ── */
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .creators {
       padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
       gap: var(--space-6, 1.5rem);

@@ -39,9 +39,28 @@ export const transcodingPrioritySchema = z
 // ============================================================================
 
 /**
- * RunPod job status from webhook
+ * RunPod job status from webhook (completion or failure)
  */
 export const runpodJobStatusEnum = z.enum(['completed', 'failed']);
+
+/**
+ * Transcoding pipeline step names
+ * Sent by handler between each processing stage for progress tracking
+ */
+export const transcodingStepEnum = z.enum([
+  'downloading',
+  'probing',
+  'mezzanine',
+  'loudness',
+  'encoding_variants',
+  'preview',
+  'thumbnails',
+  'waveform',
+  'uploading_outputs',
+  'finalizing',
+]);
+
+export type TranscodingStep = z.infer<typeof transcodingStepEnum>;
 
 /**
  * Canonical thumbnail size variants
@@ -74,16 +93,16 @@ export const runpodWebhookOutputSchema = z.object({
   type: z.enum(['video', 'audio']),
 
   // HLS outputs
-  hlsMasterKey: z.string().max(500).optional(),
-  hlsPreviewKey: z.string().max(500).optional(),
+  hlsMasterKey: z.string().max(500).nullable().optional(),
+  hlsPreviewKey: z.string().max(500).nullable().optional(),
 
   // Visual assets
-  thumbnailKey: z.string().max(500).optional(),
-  waveformKey: z.string().max(500).optional(),
-  waveformImageKey: z.string().max(500).optional(),
+  thumbnailKey: z.string().max(500).nullable().optional(),
+  waveformKey: z.string().max(500).nullable().optional(),
+  waveformImageKey: z.string().max(500).nullable().optional(),
 
   // B2 archival mezzanine key (video only)
-  mezzanineKey: z.string().max(500).optional(),
+  mezzanineKey: z.string().max(500).nullable().optional(),
 
   // Multi-size thumbnail variants
   // Keys MUST match THUMBNAIL_SIZES constant above. If sizes change,
@@ -162,6 +181,41 @@ export const runpodWebhookSchema = z.object({
 
 export type RunPodWebhookPayload = z.infer<typeof runpodWebhookSchema>;
 
+/**
+ * RunPod progress webhook payload
+ * Sent by handler between pipeline steps (fire-and-forget)
+ */
+export const runpodProgressWebhookSchema = z.object({
+  jobId: z.string().min(1, 'Job ID is required'),
+  status: z.literal('progress'),
+  progress: z.number().int().min(0).max(100),
+  step: transcodingStepEnum,
+  mediaId: uuidSchema.optional(),
+});
+
+export type RunPodProgressWebhookPayload = z.infer<
+  typeof runpodProgressWebhookSchema
+>;
+
+/**
+ * Combined webhook schema (discriminated union on status)
+ * Accepts completion, failure, or progress payloads
+ */
+export const runpodWebhookUnionSchema = z.discriminatedUnion('status', [
+  runpodWebhookSchema.extend({ status: z.literal('completed') }),
+  runpodWebhookSchema.extend({
+    status: z.literal('failed'),
+    // Python handler includes mediaId on failure so the service can find the
+    // media item even when runpodJobId hasn't been stored yet (local /runsync)
+    mediaId: uuidSchema.optional(),
+  }),
+  runpodProgressWebhookSchema,
+]);
+
+export type RunPodWebhookUnionPayload = z.infer<
+  typeof runpodWebhookUnionSchema
+>;
+
 // ============================================================================
 // API Request Schemas
 // ============================================================================
@@ -210,6 +264,8 @@ export const transcodingStatusResponseSchema = z.object({
   transcodingError: z.string().nullable(),
   runpodJobId: z.string().nullable(),
   transcodingPriority: z.number().int().min(0).max(4),
+  transcodingProgress: z.number().int().min(0).max(100).nullable(),
+  transcodingStep: transcodingStepEnum.nullable(),
   readyVariants: z.array(hlsVariantSchema).nullable(),
 });
 

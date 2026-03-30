@@ -29,6 +29,7 @@
  * - /internal/orphan-cleanup/* - Orphan cleanup DO management (internal)
  */
 
+import { workerAuth as createWorkerAuth } from '@codex/security';
 import {
   createEnvValidationMiddleware,
   createKvCheck,
@@ -109,51 +110,45 @@ app.route('/', webhookRoutes);
  * - POST /internal/orphan-cleanup/trigger - Manually trigger cleanup
  * - POST /internal/orphan-cleanup/schedule - Reschedule next alarm
  */
-app.all('/internal/orphan-cleanup/*', async (c) => {
-  const env = c.env as unknown as {
-    ORPHAN_CLEANUP_DO: DurableObjectNamespace;
-  };
+app.all(
+  '/internal/orphan-cleanup/*',
+  async (c, next) => {
+    // Enforce worker-to-worker HMAC auth before forwarding to DO
+    const secret = (c.env as Record<string, string>).WORKER_SHARED_SECRET;
+    if (!secret) {
+      return c.json({ error: 'Worker auth not configured' }, 503);
+    }
+    const middleware = createWorkerAuth({ secret });
+    return middleware(c, next);
+  },
+  async (c) => {
+    const env = c.env as unknown as {
+      ORPHAN_CLEANUP_DO: DurableObjectNamespace;
+    };
 
-  if (!env.ORPHAN_CLEANUP_DO) {
-    return c.json({ error: 'Orphan cleanup DO not configured' }, 503);
+    if (!env.ORPHAN_CLEANUP_DO) {
+      return c.json({ error: 'Orphan cleanup DO not configured' }, 503);
+    }
+
+    // Get the singleton DO instance
+    const id = env.ORPHAN_CLEANUP_DO.idFromName('singleton');
+    const stub = env.ORPHAN_CLEANUP_DO.get(id);
+
+    // Extract the path after /internal/orphan-cleanup
+    const url = new URL(c.req.url);
+    const doPath = url.pathname.replace('/internal/orphan-cleanup', '');
+    const doUrl = new URL(doPath || '/', url.origin);
+
+    // Forward the request to the DO
+    return stub.fetch(
+      new Request(doUrl.toString(), {
+        method: c.req.method,
+        headers: c.req.raw.headers,
+        body: c.req.method !== 'GET' ? c.req.raw.body : undefined,
+      })
+    );
   }
-
-  // Get the singleton DO instance
-  const id = env.ORPHAN_CLEANUP_DO.idFromName('singleton');
-  const stub = env.ORPHAN_CLEANUP_DO.get(id);
-
-  // Extract the path after /internal/orphan-cleanup
-  const url = new URL(c.req.url);
-  const doPath = url.pathname.replace('/internal/orphan-cleanup', '');
-  const doUrl = new URL(doPath || '/', url.origin);
-
-  // Forward the request to the DO
-  return stub.fetch(
-    new Request(doUrl.toString(), {
-      method: c.req.method,
-      headers: c.req.raw.headers,
-      body: c.req.method !== 'GET' ? c.req.raw.body : undefined,
-    })
-  );
-});
-
-// ============================================================================
-// Mock Routes (Development/Test Only)
-// ============================================================================
-
-/**
- * Mock RunPod API for E2E tests
- * Only active if RUNPOD_API_URL points here
- */
-app.post('/internal/mock-runpod/:endpointId/run', async (c) => {
-  const body = (await c.req.json()) as { input?: { mediaId?: string } };
-  const mediaId = body.input?.mediaId || 'unknown';
-
-  return c.json({
-    id: `mock-job-${mediaId}-${Date.now()}`,
-    status: 'IN_QUEUE',
-  });
-});
+);
 
 // ============================================================================
 // Export

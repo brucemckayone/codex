@@ -62,10 +62,10 @@ export { OrganizationService } from './services';
 // Types
 // ============================================================================
 
+export type { ServiceConfig } from '@codex/service-errors';
 export type {
   CreateOrganizationResponse,
   Database,
-  DatabaseTransaction,
   NewOrganization,
   Organization,
   OrganizationBySlugResponse,
@@ -73,7 +73,6 @@ export type {
   OrganizationListResponse,
   OrganizationResponse,
   PaginationParams,
-  ServiceConfig,
   SortOrder,
   UpdateOrganizationResponse,
 } from './types';

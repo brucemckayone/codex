@@ -28,6 +28,16 @@ describe('getCookieConfig', () => {
       expect(config.secure).toBe(false);
     });
 
+    it('sets secure=false for lvh.me in dev mode', () => {
+      const config = getCookieConfig(true, 'lvh.me:3000');
+      expect(config.secure).toBe(false);
+    });
+
+    it('sets secure=false for subdomain.lvh.me in dev mode', () => {
+      const config = getCookieConfig(true, 'bruce-studio.lvh.me:3000');
+      expect(config.secure).toBe(false);
+    });
+
     it('sets secure=true for non-localhost in dev mode', () => {
       const config = getCookieConfig(true, 'dev.example.com');
       expect(config.secure).toBe(true);
@@ -58,9 +68,19 @@ describe('getCookieConfig', () => {
       expect(config.domain).toBe('.custom.com');
     });
 
-    it('does not set domain in dev mode', () => {
+    it('does not set domain in dev mode without lvh.me', () => {
       const config = getCookieConfig(true);
       expect(config.domain).toBeUndefined();
+    });
+
+    it('sets domain to .lvh.me in dev mode with lvh.me host', () => {
+      const config = getCookieConfig(true, 'lvh.me:3000');
+      expect(config.domain).toBe('.lvh.me');
+    });
+
+    it('sets domain to .lvh.me for subdomain.lvh.me in dev mode', () => {
+      const config = getCookieConfig(true, 'bruce-studio.lvh.me:3000');
+      expect(config.domain).toBe('.lvh.me');
     });
 
     it('does not set domain in dev mode even with COOKIE_DOMAIN', () => {

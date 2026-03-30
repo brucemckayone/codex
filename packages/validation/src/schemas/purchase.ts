@@ -36,6 +36,7 @@ const ALLOWED_REDIRECT_DOMAINS = [
   // Development
   'localhost',
   '127.0.0.1',
+  'lvh.me', // Local dev with subdomain routing (*.lvh.me resolves to 127.0.0.1)
 ];
 
 /**

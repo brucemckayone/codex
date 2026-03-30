@@ -43,6 +43,7 @@ import { OrganizationService } from '../organization-service';
 describe('OrganizationService', () => {
   let db: Database;
   let service: OrganizationService;
+  let defaultTestUserId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -60,6 +61,10 @@ describe('OrganizationService', () => {
     }
 
     service = new OrganizationService({ db, environment: 'test' });
+
+    // Seed a default test user for create() calls that need a userId
+    const [userId] = await seedTestUsers(db, 1);
+    defaultTestUserId = userId;
   });
 
   // No cleanup needed between tests - neon-testing provides fresh database per file
@@ -78,7 +83,7 @@ describe('OrganizationService', () => {
         websiteUrl: 'https://example.com',
       };
 
-      const result = await service.create(input);
+      const result = await service.create(input, defaultTestUserId);
 
       expect(result.id).toBeDefined();
       expect(result.name).toBe(input.name);
@@ -97,7 +102,7 @@ describe('OrganizationService', () => {
         slug: createUniqueSlug('minimal'),
       };
 
-      const result = await service.create(input);
+      const result = await service.create(input, defaultTestUserId);
 
       expect(result.name).toBe(input.name);
       expect(result.slug).toBe(input.slug);
@@ -106,29 +111,53 @@ describe('OrganizationService', () => {
       expect(result.websiteUrl).toBeNull();
     });
 
+    it('should auto-create owner membership for the creating user', async () => {
+      const org = await service.create(
+        { name: 'Owner Test Org', slug: createUniqueSlug('owner-test') },
+        defaultTestUserId
+      );
+
+      const membership = await service.getMyMembership(
+        org.id,
+        defaultTestUserId
+      );
+
+      expect(membership.role).toBe('owner');
+      expect(membership.joinedAt).not.toBeNull();
+    });
+
     it('should throw ConflictError for duplicate slug', async () => {
       const slug = createUniqueSlug('duplicate');
 
-      await service.create({
-        name: 'First Org',
-        slug,
-      });
+      await service.create(
+        {
+          name: 'First Org',
+          slug,
+        },
+        defaultTestUserId
+      );
 
       await expect(
-        service.create({
-          name: 'Second Org',
-          slug, // Same slug
-        })
+        service.create(
+          {
+            name: 'Second Org',
+            slug, // Same slug
+          },
+          defaultTestUserId
+        )
       ).rejects.toThrow(ConflictError);
     });
   });
 
   describe('get', () => {
     it('should retrieve organization by id', async () => {
-      const created = await service.create({
-        name: 'Test Org',
-        slug: createUniqueSlug('test'),
-      });
+      const created = await service.create(
+        {
+          name: 'Test Org',
+          slug: createUniqueSlug('test'),
+        },
+        defaultTestUserId
+      );
 
       const result = await service.get(created.id);
 
@@ -144,10 +173,13 @@ describe('OrganizationService', () => {
     });
 
     it('should return null for soft-deleted organization', async () => {
-      const created = await service.create({
-        name: 'To Delete',
-        slug: createUniqueSlug('delete'),
-      });
+      const created = await service.create(
+        {
+          name: 'To Delete',
+          slug: createUniqueSlug('delete'),
+        },
+        defaultTestUserId
+      );
 
       await service.delete(created.id);
       const result = await service.get(created.id);
@@ -159,10 +191,13 @@ describe('OrganizationService', () => {
   describe('getBySlug', () => {
     it('should retrieve organization by slug', async () => {
       const slug = createUniqueSlug('test-slug');
-      const created = await service.create({
-        name: 'Test Org',
-        slug,
-      });
+      const created = await service.create(
+        {
+          name: 'Test Org',
+          slug,
+        },
+        defaultTestUserId
+      );
 
       const result = await service.getBySlug(slug);
 
@@ -173,10 +208,13 @@ describe('OrganizationService', () => {
 
     it('should be case-insensitive', async () => {
       const slug = createUniqueSlug('case-test');
-      await service.create({
-        name: 'Test Org',
-        slug: slug.toLowerCase(),
-      });
+      await service.create(
+        {
+          name: 'Test Org',
+          slug: slug.toLowerCase(),
+        },
+        defaultTestUserId
+      );
 
       const result = await service.getBySlug(slug.toUpperCase());
 
@@ -191,10 +229,13 @@ describe('OrganizationService', () => {
 
     it('should return null for soft-deleted organization', async () => {
       const slug = createUniqueSlug('deleted');
-      const created = await service.create({
-        name: 'To Delete',
-        slug,
-      });
+      const created = await service.create(
+        {
+          name: 'To Delete',
+          slug,
+        },
+        defaultTestUserId
+      );
 
       await service.delete(created.id);
       const result = await service.getBySlug(slug);
@@ -205,10 +246,13 @@ describe('OrganizationService', () => {
 
   describe('update', () => {
     it('should update organization name', async () => {
-      const created = await service.create({
-        name: 'Original Name',
-        slug: createUniqueSlug('test'),
-      });
+      const created = await service.create(
+        {
+          name: 'Original Name',
+          slug: createUniqueSlug('test'),
+        },
+        defaultTestUserId
+      );
 
       const updated = await service.update(created.id, {
         name: 'Updated Name',
@@ -221,10 +265,13 @@ describe('OrganizationService', () => {
     });
 
     it('should update organization description', async () => {
-      const created = await service.create({
-        name: 'Test',
-        slug: createUniqueSlug('test'),
-      });
+      const created = await service.create(
+        {
+          name: 'Test',
+          slug: createUniqueSlug('test'),
+        },
+        defaultTestUserId
+      );
 
       const updated = await service.update(created.id, {
         description: 'New description',
@@ -234,10 +281,13 @@ describe('OrganizationService', () => {
     });
 
     it('should update organization slug', async () => {
-      const created = await service.create({
-        name: 'Test',
-        slug: createUniqueSlug('old-slug'),
-      });
+      const created = await service.create(
+        {
+          name: 'Test',
+          slug: createUniqueSlug('old-slug'),
+        },
+        defaultTestUserId
+      );
 
       const newSlug = createUniqueSlug('new-slug');
       const updated = await service.update(created.id, {
@@ -259,8 +309,11 @@ describe('OrganizationService', () => {
       const slug1 = createUniqueSlug('slug1');
       const slug2 = createUniqueSlug('slug2');
 
-      await service.create({ name: 'Org 1', slug: slug1 });
-      const org2 = await service.create({ name: 'Org 2', slug: slug2 });
+      await service.create({ name: 'Org 1', slug: slug1 }, defaultTestUserId);
+      const org2 = await service.create(
+        { name: 'Org 2', slug: slug2 },
+        defaultTestUserId
+      );
 
       await expect(
         service.update(org2.id, { slug: slug1 }) // Try to use slug1
@@ -268,10 +321,13 @@ describe('OrganizationService', () => {
     });
 
     it('should update multiple fields at once', async () => {
-      const created = await service.create({
-        name: 'Test',
-        slug: createUniqueSlug('test'),
-      });
+      const created = await service.create(
+        {
+          name: 'Test',
+          slug: createUniqueSlug('test'),
+        },
+        defaultTestUserId
+      );
 
       const updated = await service.update(created.id, {
         name: 'New Name',
@@ -289,10 +345,13 @@ describe('OrganizationService', () => {
 
   describe('delete', () => {
     it('should soft delete organization', async () => {
-      const created = await service.create({
-        name: 'To Delete',
-        slug: createUniqueSlug('delete'),
-      });
+      const created = await service.create(
+        {
+          name: 'To Delete',
+          slug: createUniqueSlug('delete'),
+        },
+        defaultTestUserId
+      );
 
       await service.delete(created.id);
 
@@ -307,10 +366,13 @@ describe('OrganizationService', () => {
     });
 
     it('should throw OrganizationNotFoundError if already deleted', async () => {
-      const created = await service.create({
-        name: 'To Delete',
-        slug: createUniqueSlug('delete'),
-      });
+      const created = await service.create(
+        {
+          name: 'To Delete',
+          slug: createUniqueSlug('delete'),
+        },
+        defaultTestUserId
+      );
 
       await service.delete(created.id);
 
@@ -328,11 +390,14 @@ describe('OrganizationService', () => {
       // Create test organizations and track their IDs
       createdOrgIds = [];
       for (let i = 0; i < 5; i++) {
-        const org = await service.create({
-          name: `Organization ${i}`,
-          slug: createUniqueSlug(`org-${i}`),
-          description: `Description for org ${i}`,
-        });
+        const org = await service.create(
+          {
+            name: `Organization ${i}`,
+            slug: createUniqueSlug(`org-${i}`),
+            description: `Description for org ${i}`,
+          },
+          defaultTestUserId
+        );
         createdOrgIds.push(org.id);
       }
     });
@@ -358,10 +423,13 @@ describe('OrganizationService', () => {
       const createdIds: string[] = [];
 
       for (let i = 0; i < 5; i++) {
-        const org = await service.create({
-          name: `${testPrefix} Org ${i}`,
-          slug: createUniqueSlug(`paginate-${i}`),
-        });
+        const org = await service.create(
+          {
+            name: `${testPrefix} Org ${i}`,
+            slug: createUniqueSlug(`paginate-${i}`),
+          },
+          defaultTestUserId
+        );
         createdIds.push(org.id);
       }
 
@@ -390,10 +458,13 @@ describe('OrganizationService', () => {
     });
 
     it('should search by name', async () => {
-      await service.create({
-        name: 'Unique Search Term',
-        slug: createUniqueSlug('unique'),
-      });
+      await service.create(
+        {
+          name: 'Unique Search Term',
+          slug: createUniqueSlug('unique'),
+        },
+        defaultTestUserId
+      );
 
       const result = await service.list({ search: 'Unique Search' });
 
@@ -437,10 +508,13 @@ describe('OrganizationService', () => {
 
     it('should return false for taken slug', async () => {
       const slug = createUniqueSlug('taken');
-      await service.create({
-        name: 'Test',
-        slug,
-      });
+      await service.create(
+        {
+          name: 'Test',
+          slug,
+        },
+        defaultTestUserId
+      );
 
       const available = await service.isSlugAvailable(slug);
 
@@ -449,10 +523,13 @@ describe('OrganizationService', () => {
 
     it('should be case-insensitive', async () => {
       const slug = createUniqueSlug('test-case');
-      await service.create({
-        name: 'Test',
-        slug: slug.toLowerCase(),
-      });
+      await service.create(
+        {
+          name: 'Test',
+          slug: slug.toLowerCase(),
+        },
+        defaultTestUserId
+      );
 
       const available = await service.isSlugAvailable(slug.toUpperCase());
 
@@ -461,10 +538,13 @@ describe('OrganizationService', () => {
 
     it('should return true for deleted organization slug', async () => {
       const slug = createUniqueSlug('deleted');
-      const created = await service.create({
-        name: 'To Delete',
-        slug,
-      });
+      const created = await service.create(
+        {
+          name: 'To Delete',
+          slug,
+        },
+        defaultTestUserId
+      );
 
       await service.delete(created.id);
 
@@ -482,10 +562,13 @@ describe('OrganizationService', () => {
       // Create multiple organizations rapidly to potentially have identical timestamps
       const orgs = await Promise.all(
         Array.from({ length: 6 }, (_, i) =>
-          service.create({
-            name: `${testPrefix} Org ${i}`,
-            slug: createUniqueSlug(`determ-${i}`),
-          })
+          service.create(
+            {
+              name: `${testPrefix} Org ${i}`,
+              slug: createUniqueSlug(`determ-${i}`),
+            },
+            defaultTestUserId
+          )
         )
       );
 
@@ -526,10 +609,13 @@ describe('OrganizationService', () => {
 
       // Create test organizations (sequentially to ensure distinct timestamps)
       for (let i = 0; i < 4; i++) {
-        await service.create({
-          name: `${testPrefix} Org ${i}`,
-          slug: createUniqueSlug(`consistency-${i}`),
-        });
+        await service.create(
+          {
+            name: `${testPrefix} Org ${i}`,
+            slug: createUniqueSlug(`consistency-${i}`),
+          },
+          defaultTestUserId
+        );
       }
 
       // Fetch the same filtered page multiple times
@@ -572,25 +658,19 @@ describe('OrganizationService', () => {
     let memberMgmtInviterUserId: string;
 
     beforeEach(async () => {
-      // Create test organization
-      const org = await service.create({
-        name: `Test Org ${Date.now()}`,
-        slug: createUniqueSlug('test-org'),
-      });
-      memberMgmtTestOrgId = org.id;
-
-      // Create test users (need real users for membership operations)
+      // Create test users first (needed for org creation's auto-owner membership)
       memberMgmtTestUserIds = await seedTestUsers(db, 4);
       memberMgmtInviterUserId = memberMgmtTestUserIds[0];
 
-      // Add inviter as owner of the organization
-      await db.insert(schema.organizationMemberships).values({
-        organizationId: memberMgmtTestOrgId,
-        userId: memberMgmtInviterUserId,
-        role: 'owner',
-        status: 'active',
-        invitedBy: null,
-      });
+      // Create test organization — auto-creates owner membership for inviter
+      const org = await service.create(
+        {
+          name: `Test Org ${Date.now()}`,
+          slug: createUniqueSlug('test-org'),
+        },
+        memberMgmtInviterUserId
+      );
+      memberMgmtTestOrgId = org.id;
     });
 
     describe('listMembers', () => {
@@ -667,19 +747,25 @@ describe('OrganizationService', () => {
         expect(result.pagination.page).toBe(1);
       });
 
-      it('should return empty list for organization with no members', async () => {
-        const emptyOrg = await service.create({
-          name: `Empty Org ${Date.now()}`,
-          slug: createUniqueSlug('empty-org'),
-        });
+      it('should have only the auto-created owner for a new organization', async () => {
+        const [newUserId] = await seedTestUsers(db, 1);
+        const newOrg = await service.create(
+          {
+            name: `New Org ${Date.now()}`,
+            slug: createUniqueSlug('new-org'),
+          },
+          newUserId
+        );
 
-        const result = await service.listMembers(emptyOrg.id, {
+        const result = await service.listMembers(newOrg.id, {
           page: 1,
           limit: 10,
         });
 
-        expect(result.items).toHaveLength(0);
-        expect(result.pagination.total).toBe(0);
+        expect(result.items).toHaveLength(1);
+        expect(result.pagination.total).toBe(1);
+        expect(result.items[0].role).toBe('owner');
+        expect(result.items[0].userId).toBe(newUserId);
       });
 
       it('should include user details in response', async () => {
@@ -974,22 +1060,19 @@ describe('OrganizationService', () => {
       const userIds = await seedTestUsers(db, 5);
       creatorsTestUserIds.push(...userIds);
 
-      // Create test organization
-      const org = await service.create({
-        name: 'Test Creators Org',
-        slug: createUniqueSlug('test-creators'),
-      });
+      // Create test organization — auto-creates owner membership for creatorsTestUserIds[0]
+      const org = await service.create(
+        {
+          name: 'Test Creators Org',
+          slug: createUniqueSlug('test-creators'),
+        },
+        creatorsTestUserIds[0]
+      );
       creatorsTestOrgId = org.id;
       creatorsTestOrgSlug = org.slug;
 
-      // Add users as members with different roles
+      // Add additional users as members with different roles (owner already exists)
       await db.insert(schema.organizationMemberships).values([
-        {
-          organizationId: creatorsTestOrgId,
-          userId: creatorsTestUserIds[0],
-          role: 'owner',
-          status: 'active',
-        },
         {
           organizationId: creatorsTestOrgId,
           userId: creatorsTestUserIds[1],
@@ -1195,22 +1278,19 @@ describe('OrganizationService', () => {
       const userIds = await seedTestUsers(db, 6);
       membersTestUserIds.push(...userIds);
 
-      // Create test organization
-      const org = await service.create({
-        name: 'Test Members Org',
-        slug: createUniqueSlug('test-members'),
-      });
+      // Create test organization — auto-creates owner membership for membersTestUserIds[0]
+      const org = await service.create(
+        {
+          name: 'Test Members Org',
+          slug: createUniqueSlug('test-members'),
+        },
+        membersTestUserIds[0]
+      );
       membersTestOrgId = org.id;
       membersTestOrgSlug = org.slug;
 
-      // Add users as members with different roles
+      // Add additional users as members with different roles (owner already exists)
       await db.insert(schema.organizationMemberships).values([
-        {
-          organizationId: membersTestOrgId,
-          userId: membersTestUserIds[0],
-          role: 'owner',
-          status: 'active',
-        },
         {
           organizationId: membersTestOrgId,
           userId: membersTestUserIds[1],
@@ -1364,17 +1444,21 @@ describe('OrganizationService', () => {
       expect(joinedAtDates).toEqual(sortedDates);
     });
 
-    it('should handle empty organization (no members)', async () => {
-      const emptyOrg = await service.create({
-        name: 'Empty Org',
-        slug: createUniqueSlug('empty-org-members'),
-      });
+    it('should have only the auto-created owner for a new organization', async () => {
+      const [newUserId] = await seedTestUsers(db, 1);
+      const newOrg = await service.create(
+        {
+          name: 'New Org',
+          slug: createUniqueSlug('new-org-members'),
+        },
+        newUserId
+      );
 
-      const result = await service.getPublicMembers(emptyOrg.slug);
+      const result = await service.getPublicMembers(newOrg.slug);
 
-      expect(result.items).toHaveLength(0);
-      expect(result.pagination.total).toBe(0);
-      expect(result.pagination.totalPages).toBe(0);
+      expect(result.items).toHaveLength(1);
+      expect(result.pagination.total).toBe(1);
+      expect(result.items[0].role).toBe('owner');
     });
   });
 });

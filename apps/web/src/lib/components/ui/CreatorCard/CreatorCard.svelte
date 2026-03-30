@@ -301,30 +301,30 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .creator-card {
+  :global([data-theme='dark']) .creator-card {
     background: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .creator-card:hover {
+  :global([data-theme='dark']) .creator-card:hover {
     border-color: var(--color-border-hover-dark);
   }
 
-  [data-theme='dark'] .creator-card__bio,
-  [data-theme='dark'] .creator-card__count,
-  [data-theme='dark'] .creator-card__social-link {
+  :global([data-theme='dark']) .creator-card__bio,
+  :global([data-theme='dark']) .creator-card__count,
+  :global([data-theme='dark']) .creator-card__social-link {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .creator-card__name a:hover {
+  :global([data-theme='dark']) .creator-card__name a:hover {
     color: var(--color-primary-400);
   }
 
-  [data-theme='dark'] .creator-card__social-link {
+  :global([data-theme='dark']) .creator-card__social-link {
     background: var(--color-surface-variant);
   }
 
-  [data-theme='dark'] .creator-card__social-link:hover {
+  :global([data-theme='dark']) .creator-card__social-link:hover {
     background: var(--color-neutral-800);
   }
 </style>

@@ -30,7 +30,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.studio_dashboard_title()} | {data.org.name} Studio</title>
+  <title>{m.studio_dashboard_title()} | {data.org.name}</title>
 </svelte:head>
 
 <div class="dashboard">
@@ -117,14 +117,14 @@
   }
 
   /* Tablet: 2 columns */
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .stats-grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
   /* Desktop: 4 columns */
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .stats-grid {
       grid-template-columns: repeat(4, 1fr);
     }

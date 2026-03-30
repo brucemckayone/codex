@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { logger } from '$lib/observability';
   import Button from '../../Button/Button.svelte';
 
   interface Props {
@@ -12,7 +13,7 @@
   const { children, fallback, onerror, onreset }: Props = $props();
 
   function handleError(e: Error, reset: () => void) {
-    console.error('[ErrorBoundary]', e);
+    logger.error('[ErrorBoundary]', { error: e.message, stack: e.stack });
     onerror?.(e, reset);
   }
 

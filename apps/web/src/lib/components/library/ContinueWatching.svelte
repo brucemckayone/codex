@@ -82,7 +82,7 @@
     border-radius: var(--radius-full, 9999px);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .continue-watching__row {
       overflow-x: visible;
       scroll-snap-type: none;

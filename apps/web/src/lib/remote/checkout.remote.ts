@@ -51,7 +51,7 @@ export const createCheckout = form(
       });
 
       // Redirect to Stripe Checkout
-      redirect(303, result.data.sessionUrl);
+      redirect(303, result.sessionUrl);
     } catch (error) {
       // SvelteKit redirect() throws - let it propagate
       if (isRedirect(error)) throw error;
@@ -118,6 +118,6 @@ export const createCheckoutSession = command(
     });
 
     // Return URL for client-side redirect
-    return { sessionUrl: result.data.sessionUrl };
+    return { sessionUrl: result.sessionUrl };
   }
 );

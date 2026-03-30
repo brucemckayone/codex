@@ -1,39 +1,58 @@
 # @codex/image-processing
 
-Image upload validation, Wasm processing, and R2 storage. Handles content thumbnails, user avatars, and org logos (raster/SVG). Integrates with `@cf-wasm/photon`.
+Image validation, WASM-based processing, and R2 storage. Handles content thumbnails, user avatars, and org logos (raster and SVG).
 
 ## API
 
-### Service: `ImageProcessingService`
-- **processContentThumbnail**: Validates, resizes to 3 variants (sm/md/lg WebP), uploads to R2, updates DB.
-- **processUserAvatar**: Validates, resizes to 3 variants, uploads to R2, updates DB.
-- **processOrgLogo**: Validates. SVGs sanitized/stored as-is. Raster converted to 3 WebP variants.
-- **delete***: Removes R2 files and clears DB fields.
+### `ImageProcessingService`
+| Method | Purpose | Notes |
+|---|---|---|
+| `processContentThumbnail(contentId, userId, file)` | Validate → resize → upload | 3 WebP variants (sm/md/lg) |
+| `processUserAvatar(userId, file)` | Validate → resize → upload | 3 WebP variants |
+| `processOrgLogo(orgId, userId, file)` | Validate → process → upload | SVG: sanitize + store as-is. Raster: 3 WebP variants |
+| `delete*(id, userId)` | Remove R2 files + clear DB fields | |
 
-### Errors
-- `InvalidImageError` (400): Corrupt, wrong MIME, signature mismatch.
-- `ImageUploadError` (400): Too large, empty, unsupported.
+### Error Classes
+| Error | Code | When |
+|---|---|---|
+| `InvalidImageError` | 400 | Corrupt file, wrong MIME type, magic byte mismatch |
+| `ImageUploadError` | 400 | Too large, empty, unsupported format |
 
-### Config
-- `MAX_IMAGE_SIZE_BYTES`: 5MB.
-- `SUPPORTED_IMAGE_MIME_TYPES`: PNG, JPEG, WebP, GIF.
+## Processing Pipeline
 
-## Pipeline
-1. **Validation**: Check size, MIME, magic bytes.
-2. **Processing**: `@cf-wasm/photon` (safe wrapper) -> resize (Lanczos3) -> WebP. Never upscales.
-3. **Storage**: R2.
-   - Raster: Immutable cache (1yr).
-   - SVG: Sanitized (DOMPurify), 1hr cache.
-   - **Keys**: `{creatorId}/{type}/{id}/{size}.webp`.
+1. **Validation**: Check file size (max 5MB), MIME type, magic bytes signature match
+2. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) → Lanczos3 resize → WebP conversion. Never upscales.
+3. **Storage** → R2:
+   - **Raster**: 3 size variants, immutable cache (1 year: `Cache-Control: public, max-age=31536000`)
+   - **SVG**: Sanitized via DOMPurify (`sanitizeSvgContent()` from `@codex/validation`), shorter cache (1hr)
+   - **Key format**: `{creatorId}/{type}/{id}/{size}.webp`
+
+### Supported Formats
+- Input: PNG, JPEG, WebP, GIF (+ SVG for logos)
+- Output: WebP (raster) or sanitized SVG
+
+### Size Variants
+| Variant | Typical Max Dimension |
+|---|---|
+| `sm` | Small thumbnail |
+| `md` | Medium display |
+| `lg` | Full-size/hero |
+
+## Strict Rules
+
+- **MUST** validate MIME type AND magic bytes — NEVER trust Content-Type header alone
+- **MUST** sanitize ALL SVG uploads with `sanitizeSvgContent()` — unsanitized SVGs are XSS vectors
+- **MUST** set immutable cache headers on raster images (they're content-addressed)
+- **MUST** scope all operations by `creatorId` or `userId`
+- **NEVER** upscale images — only downscale
+- **NEVER** store unsanitized SVG content
+- **NEVER** exceed 5MB file size limit
 
 ## Integration
-```ts
-const proc = new ImageProcessingService({ db, r2Service, ... });
-await proc.processContentThumbnail(contentId, userId, file);
-```
 
-## Standards
-- **Assert**: `invariant()` for preconditions/state.
-- **Scope**: MANDATORY `where(eq(creatorId, ...))`.
-- **Atomic**: `db.transaction()` for all multi-step mutations.
-- **Inputs**: Validated DTOs only.
+- **Depends on**: `@codex/database`, `@codex/cloudflare-clients` (R2), `@codex/validation` (SVG sanitization), `@cf-wasm/photon`
+- **Used by**: content-api worker (thumbnails), identity-api worker (avatars), organization-api worker (logos)
+
+## Reference Files
+
+- `packages/image-processing/src/services/image-processing-service.ts` — ImageProcessingService

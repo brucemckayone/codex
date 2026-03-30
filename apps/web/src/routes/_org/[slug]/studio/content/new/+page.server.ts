@@ -1,15 +1,38 @@
 /**
- * Studio Content Creation - server load
+ * New Content Page - Server Load
  *
- * Passes organization ID from parent layout for the create form.
- * Auth is handled by the parent studio layout (redirects to login/join).
+ * Loads available media items for the media picker in the content form.
+ * Auth is handled by the parent studio layout.
  */
+
+import { createServerApi } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ parent }) => {
+export const load: PageServerLoad = async ({ parent, platform, cookies }) => {
   const { org } = await parent();
 
-  return {
-    organizationId: org.id,
-  };
+  // Load ready media items for the media picker
+  try {
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    params.set('organizationId', org.id);
+    params.set('status', 'ready');
+    params.set('limit', '50');
+    params.set('sortBy', 'createdAt');
+    params.set('sortOrder', 'desc');
+
+    const mediaResult = await api.media.list(params);
+
+    return {
+      organizationId: org.id,
+      orgSlug: org.slug,
+      mediaItems: mediaResult?.items ?? [],
+    };
+  } catch {
+    return {
+      organizationId: org.id,
+      orgSlug: org.slug,
+      mediaItems: [],
+    };
+  }
 };

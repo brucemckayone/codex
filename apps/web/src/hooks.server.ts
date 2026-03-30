@@ -12,6 +12,7 @@ import { COOKIES } from '@codex/constants';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { nanoid } from 'nanoid';
+import { dev } from '$app/environment';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 
@@ -30,7 +31,9 @@ const sessionHook: Handle = async ({ event, resolve }) => {
     try {
       // Use modern API helper with cookies for type safety
       const api = createServerApi(event.platform, event.cookies);
+      const timer = logger.startTimer('session-validation', { threshold: 500 });
       const data = await api.auth.getSession();
+      timer.end({ path: event.url.pathname });
 
       // BetterAuth returns { user, session } on success, or null when
       // the session cookie is invalid/expired (still HTTP 200)
@@ -90,6 +93,13 @@ export const handleError: HandleServerError = async ({ error, event }) => {
     url: event.url.href,
     method: event.url.search,
   });
+
+  // In dev mode, expose the real error message for debugging (production
+  // keeps the sanitised "unexpected error" message to avoid leaking internals).
+  if (dev) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { message: msg, code: 'INTERNAL_ERROR' };
+  }
 
   return {
     message: 'An unexpected error occurred',

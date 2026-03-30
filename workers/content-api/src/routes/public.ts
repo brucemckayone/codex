@@ -11,7 +11,7 @@
 import type { PublicContentListResponse } from '@codex/content';
 import { publicContentQuerySchema } from '@codex/content';
 import type { HonoEnv } from '@codex/shared-types';
-import { procedure } from '@codex/worker-utils';
+import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
@@ -38,8 +38,9 @@ app.get(
   procedure({
     policy: { auth: 'none', rateLimit: 'api' },
     input: { query: publicContentQuerySchema },
-    handler: async (ctx): Promise<PublicContentListResponse> => {
-      return await ctx.services.content.listPublic(ctx.input.query);
+    handler: async (ctx) => {
+      const result = await ctx.services.content.listPublic(ctx.input.query);
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );

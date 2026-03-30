@@ -48,3 +48,9 @@ export {
   ContentAccessService,
   createContentAccessService,
 } from './services/ContentAccessService';
+export type {
+  PlaybackProgressResponse,
+  StreamingUrlResponse,
+  UpdatePlaybackProgressResponse,
+  UserLibraryResponse,
+} from './types';

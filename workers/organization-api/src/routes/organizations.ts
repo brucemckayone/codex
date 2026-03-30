@@ -21,7 +21,6 @@ import { BRAND_COLORS } from '@codex/constants';
 import type {
   CreateOrganizationResponse,
   OrganizationBySlugResponse,
-  OrganizationListResponse,
   OrganizationResponse,
   UpdateOrganizationResponse,
 } from '@codex/organization';
@@ -32,7 +31,6 @@ import {
 import { NotFoundError } from '@codex/service-errors';
 import type {
   CheckSlugResponse,
-  DeleteOrganizationResponse,
   HonoEnv,
   PublicBrandingResponse,
 } from '@codex/shared-types';
@@ -41,7 +39,7 @@ import {
   organizationQuerySchema,
   uuidSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { updateBrandCache } from './settings';
@@ -64,11 +62,14 @@ app.post(
     input: { body: createOrganizationSchema },
     successStatus: 201,
     handler: async (ctx): Promise<CreateOrganizationResponse['data']> => {
-      const org = await ctx.services.organization.create(ctx.input.body);
+      const org = await ctx.services.organization.create(
+        ctx.input.body,
+        ctx.user.id
+      );
 
       // Issue 4: Warm cache with default branding for new org
       if (ctx.env.BRAND_KV) {
-        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, org.id));
+        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, org.id, ctx.obs));
       }
 
       return org;
@@ -217,14 +218,12 @@ app.get(
       }
 
       return {
-        data: {
-          id: organization.id,
-          slug: organization.slug,
-          name: organization.name,
-          description: organization.description,
-          logoUrl: branding.logoUrl,
-          brandColors: { primary: branding.primaryColorHex },
-        },
+        id: organization.id,
+        slug: organization.slug,
+        name: organization.name,
+        description: organization.description,
+        logoUrl: branding.logoUrl,
+        brandColors: { primary: branding.primaryColorHex },
       };
     },
   })
@@ -260,10 +259,11 @@ app.get(
         .optional(),
     },
     handler: async (ctx) => {
-      return await ctx.services.organization.getPublicCreators(
+      const result = await ctx.services.organization.getPublicCreators(
         ctx.input.params.slug,
         ctx.input.query ?? { page: 1, limit: 20 }
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -302,10 +302,11 @@ app.get(
         .optional(),
     },
     handler: async (ctx) => {
-      return await ctx.services.organization.getPublicMembers(
+      const result = await ctx.services.organization.getPublicMembers(
         ctx.input.params.slug,
         ctx.input.query ?? { page: 1, limit: 20 }
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -377,7 +378,9 @@ app.patch(
           );
         }
         // Always refresh cache on update (in case slug changed OR other relevant fields)
-        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, updated.id));
+        ctx.executionCtx.waitUntil(
+          updateBrandCache(ctx.env, updated.id, ctx.obs)
+        );
       }
 
       return updated;
@@ -399,13 +402,14 @@ app.get(
   procedure({
     policy: { auth: 'required' },
     input: { query: organizationQuerySchema },
-    handler: async (ctx): Promise<OrganizationListResponse> => {
+    handler: async (ctx) => {
       const { search, sortBy, sortOrder, page, limit } = ctx.input.query;
 
-      return await ctx.services.organization.list(
+      const result = await ctx.services.organization.list(
         { search, sortBy, sortOrder },
         { page, limit }
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -414,9 +418,8 @@ app.get(
  * DELETE /api/organizations/:id
  * Soft delete organization
  *
- * Returns: Success message (200)
+ * Returns: 204 No Content
  * Security: Requires owner/admin role in the organization, Strict rate limit (5 req/15min)
- * @returns {DeleteOrganizationResponse}
  */
 app.delete(
   '/:id',
@@ -427,7 +430,8 @@ app.delete(
       rateLimit: 'auth', // Stricter rate limit for deletion
     },
     input: { params: z.object({ id: uuidSchema }) },
-    handler: async (ctx): Promise<DeleteOrganizationResponse> => {
+    successStatus: 204,
+    handler: async (ctx) => {
       // Get org slug for cache invalidation before deletion
       const org = await ctx.services.organization.get(ctx.input.params.id);
 
@@ -440,10 +444,7 @@ app.delete(
         );
       }
 
-      return {
-        success: true,
-        message: 'Organization deleted successfully',
-      };
+      return null;
     },
   })
 );

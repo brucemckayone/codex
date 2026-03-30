@@ -43,20 +43,18 @@ export const load: PageServerLoad = async ({
 
   try {
     const profileResult = await api.fetch<{
-      data?: {
-        id: string;
-        name: string | null;
-        image: string | null;
-        bio: string | null;
-        socialLinks?: {
-          website?: string;
-          twitter?: string;
-          youtube?: string;
-          instagram?: string;
-        } | null;
-      };
-    }>('identity', `/api/user/public/${encodeURIComponent(username)}`);
-    creatorProfile = profileResult?.data ?? null;
+      id: string;
+      name: string | null;
+      image: string | null;
+      bio: string | null;
+      socialLinks?: {
+        website?: string;
+        twitter?: string;
+        youtube?: string;
+        instagram?: string;
+      } | null;
+    } | null>('identity', `/api/user/public/${encodeURIComponent(username)}`);
+    creatorProfile = profileResult ?? null;
   } catch {
     // Profile endpoint may not exist yet - degrade gracefully
     creatorProfile = null;

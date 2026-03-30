@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Pagination } from '$lib/components/ui/Pagination';
@@ -191,7 +191,7 @@
     gap: var(--space-2, 0.5rem);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .catalog-header {
       flex-direction: row;
       align-items: center;
@@ -227,7 +227,7 @@
     gap: var(--space-3, 0.75rem);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .catalog-filters {
       flex-direction: row;
       align-items: center;
@@ -298,13 +298,13 @@
     gap: var(--space-6, 1.5rem);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .content-grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .content-grid {
       grid-template-columns: repeat(3, 1fr);
     }
@@ -352,7 +352,7 @@
   }
 
   /* ── Responsive ── */
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .catalog {
       padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
     }

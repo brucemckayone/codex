@@ -1,0 +1,20 @@
+/**
+ * Breakpoint Custom Media Queries
+ *
+ * Build-time breakpoint aliases processed by postcss-custom-media.
+ * Values match the CSS custom properties in layout.css.
+ *
+ * Usage: @media (--breakpoint-md) { ... }
+ */
+
+/* Min-width (mobile-first) */
+@custom-media --breakpoint-sm (min-width: 40rem);   /* 640px */
+@custom-media --breakpoint-md (min-width: 48rem);   /* 768px */
+@custom-media --breakpoint-lg (min-width: 64rem);   /* 1024px */
+@custom-media --breakpoint-xl (min-width: 80rem);   /* 1280px */
+@custom-media --breakpoint-2xl (min-width: 96rem);  /* 1536px */
+
+/* Max-width (for mobile-only styles) */
+@custom-media --below-sm (max-width: 39.9375rem);   /* 639px */
+@custom-media --below-md (max-width: 47.9375rem);   /* 767px */
+@custom-media --below-lg (max-width: 63.9375rem);   /* 1023px */

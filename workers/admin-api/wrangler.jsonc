@@ -44,7 +44,7 @@
   "vars": {
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
-    "WEB_APP_URL": "http://localhost:3000", "API_URL": "http://localhost:8787"
+    "WEB_APP_URL": "http://lvh.me:3000", "API_URL": "http://localhost:8787"
   },
 
   // Environment configurations
@@ -56,7 +56,7 @@
       "vars": {
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
-        "WEB_APP_URL": "http://localhost:3000",
+        "WEB_APP_URL": "http://lvh.me:3000",
         "API_URL": "http://localhost:8787"
       },
       "kv_namespaces": [

@@ -107,7 +107,7 @@
     display: none;
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .desktop-only {
       display: contents;
     }

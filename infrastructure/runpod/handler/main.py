@@ -25,6 +25,7 @@ FFmpeg Settings:
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import shutil
@@ -467,6 +468,16 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
     )
 
 
+def _safe_loudness(value: float, default: float) -> float:
+    """Clamp non-finite loudness values (inf, -inf, NaN) to a safe default.
+
+    ffmpeg's loudnorm returns -inf for silent audio tracks — int(-inf) crashes.
+    """
+    if math.isfinite(value):
+        return value
+    return default
+
+
 def analyze_loudness(input_path: str) -> dict[str, float]:
     """Two-pass loudness analysis using loudnorm filter."""
     print("Analyzing audio loudness...")
@@ -491,9 +502,15 @@ def analyze_loudness(input_path: str) -> dict[str, float]:
         if json_start >= 0 and json_end > json_start:
             loudness_data = json.loads(output[json_start:json_end])
             return {
-                "input_i": float(loudness_data.get("input_i", -16)),
-                "input_tp": float(loudness_data.get("input_tp", -1)),
-                "input_lra": float(loudness_data.get("input_lra", 7)),
+                "input_i": _safe_loudness(
+                    float(loudness_data.get("input_i", -16)), -70.0
+                ),
+                "input_tp": _safe_loudness(
+                    float(loudness_data.get("input_tp", -1)), -1.0
+                ),
+                "input_lra": _safe_loudness(
+                    float(loudness_data.get("input_lra", 7)), 0.0
+                ),
             }
     except (json.JSONDecodeError, ValueError):
         print("WARNING: Failed to parse loudness data, using defaults")
@@ -1021,6 +1038,32 @@ def send_webhook(url: str, secret: str, result: dict) -> None:
     raise RuntimeError(f"Webhook failed after {max_attempts} attempts: {last_error}")
 
 
+def send_progress(
+    url: str, secret: str, job_id: str, step: str, percent: int, media_id: str = ""
+) -> None:
+    """Send a progress update webhook. Fire-and-forget: failures are logged but don't stop the job."""
+    payload_dict: dict[str, Any] = {
+        "jobId": job_id,
+        "status": "progress",
+        "progress": percent,
+        "step": step,
+    }
+    if media_id:
+        payload_dict["mediaId"] = media_id
+    payload = json.dumps(payload_dict)
+    try:
+        timestamp = str(int(time.time()))
+        signature = sign_payload(payload, secret, timestamp)
+        headers = {
+            "Content-Type": "application/json",
+            "X-Runpod-Signature": signature,
+            "X-Runpod-Timestamp": timestamp,
+        }
+        requests.post(url, data=payload, headers=headers, timeout=5)
+    except Exception as e:
+        print(f"Progress webhook failed (non-fatal): {e}")
+
+
 # =============================================================================
 # Main Handler
 # =============================================================================
@@ -1047,6 +1090,10 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         )
 
     print(f"Starting transcoding job for {media_type}: {media_id}")
+
+    # Progress tracking — captured early so steps can report progress
+    webhook_url = job_input["webhookUrl"]
+    job_id = job.get("id", media_id)
 
     # --- Environment credentials ---
     b2_endpoint = os.environ.get("B2_ENDPOINT")
@@ -1096,11 +1143,13 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
     try:
         # Step 1: Download original from R2
+        send_progress(webhook_url, webhook_secret, job_id, "downloading", 0, media_id)
         input_ext = os.path.splitext(input_key)[1] or ".mp4"
         input_path = os.path.join(work_dir, f"input{input_ext}")
         download_file(r2_client, r2_bucket_name, input_key, input_path)
 
         # Step 2: Probe metadata
+        send_progress(webhook_url, webhook_secret, job_id, "probing", 5, media_id)
         probe_data = probe_media(input_path)
         duration, width, height = get_media_info(probe_data)
         print(f"Media info: duration={duration}s, width={width}, height={height}")
@@ -1113,6 +1162,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         validate_streams(probe_data, media_type)
 
         # Step 3: Create mezzanine → Upload to B2
+        send_progress(webhook_url, webhook_secret, job_id, "mezzanine", 6, media_id)
         mezzanine_path = os.path.join(work_dir, "mezzanine.mp4")
         mezzanine_key = f"{creator_id}/mezzanine/{media_id}/mezzanine.mp4"
 
@@ -1126,10 +1176,14 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             mezzanine_key = None
 
         # Step 4: Loudness analysis
+        send_progress(webhook_url, webhook_secret, job_id, "loudness", 15, media_id)
         loudness = analyze_loudness(input_path)
         print(f"Loudness: {loudness}")
 
         # Step 5: Transcode HLS variants
+        send_progress(
+            webhook_url, webhook_secret, job_id, "encoding_variants", 17, media_id
+        )
         hls_dir = os.path.join(work_dir, "hls")
         os.makedirs(hls_dir, exist_ok=True)
 
@@ -1139,6 +1193,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             ready_variants = transcode_audio_hls(input_path, hls_dir)
 
         # Step 6: Create preview BEFORE uploading HLS dir (preview goes into hls_dir)
+        send_progress(webhook_url, webhook_secret, job_id, "preview", 72, media_id)
         hls_preview_key = None
         if media_type == "video" and duration > 0:
             create_preview(input_path, hls_dir, duration, use_gpu)
@@ -1154,6 +1209,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             hls_preview_key = f"{hls_prefix}preview/preview.m3u8"
 
         # Step 7: Extract thumbnail variants (video only)
+        send_progress(webhook_url, webhook_secret, job_id, "thumbnails", 77, media_id)
         thumbnail_key = None
         thumbnail_variants = None
         if media_type == "video" and duration > 0:
@@ -1171,6 +1227,14 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             thumbnail_key = thumbnail_variants.get("lg")
 
         # Step 8: Generate waveform (audio only)
+        send_progress(
+            webhook_url,
+            webhook_secret,
+            job_id,
+            "waveform" if media_type == "audio" else "uploading_outputs",
+            80,
+            media_id,
+        )
         waveform_key = None
         waveform_image_key = None
         if media_type == "audio":
@@ -1217,13 +1281,14 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "loudnessRange": int(loudness["input_lra"] * 100),
         }
 
-        # Step 10: Send webhook (RunPod envelope format)
+        # Step 10: Send completion webhook
+        send_progress(webhook_url, webhook_secret, job_id, "finalizing", 95, media_id)
         webhook_payload = {
-            "jobId": job.get("id", media_id),
+            "jobId": job_id,
             "status": "completed",
             "output": result,
         }
-        send_webhook(job_input["webhookUrl"], webhook_secret, webhook_payload)
+        send_webhook(webhook_url, webhook_secret, webhook_payload)
 
         return {"status": "success", "mediaId": media_id}
 
@@ -1236,14 +1301,16 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             print(f"Cleaning up {len(uploaded_keys)} uploaded files...")
             cleanup_uploaded_keys(uploaded_keys)
 
-        # Send failure webhook
+        # Send failure webhook (include mediaId so the service can find it even
+        # when runpodJobId hasn't been stored yet — common in local /runsync flow)
         try:
             webhook_payload = {
-                "jobId": job.get("id", media_id),
+                "jobId": job_id,
                 "status": "failed",
                 "error": error_msg[:2000],
+                "mediaId": media_id,
             }
-            send_webhook(job_input["webhookUrl"], webhook_secret, webhook_payload)
+            send_webhook(webhook_url, webhook_secret, webhook_payload)
         except Exception as webhook_error:
             print(f"Failed to send error webhook: {webhook_error}")
 

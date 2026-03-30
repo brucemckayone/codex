@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import OrgErrorBoundary from '$lib/components/org/OrgErrorBoundary.svelte';
   import type { OrganizationData } from '$lib/types';
 
   const org: OrganizationData = {
     id: '',
-    slug: $page.params.slug,
-    name: $page.params.slug,
+    slug: page.params.slug,
+    name: page.params.slug,
     description: '',
     logoUrl: null,
     brandColors: {

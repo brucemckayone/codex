@@ -87,10 +87,20 @@ export async function expectNotFound(response: Response): Promise<void> {
 }
 
 /**
- * Unwrap double-wrapped API responses
- * Handles: { data: { data: {...} } } OR { data: {...} } OR {...}
+ * Unwrap API response envelope
+ *
+ * Handles the standard Codex API envelope:
+ *   Single: { data: T }          → returns T
+ *   List:   { items, pagination } → returns as-is
+ *   Legacy: { data: { data: T }} → returns T (backward compat, will be removed)
+ *
  * biome-ignore lint/suspicious/noExplicitAny: E2E test helper for dynamic API responses
  */
 export function unwrapApiResponse<T = any>(response: Record<string, any>): T {
-  return response.data?.data || response.data || response;
+  // Legacy double-wrap (backward compat — remove once all endpoints migrated)
+  if (response.data?.data) return response.data.data;
+  // Single-item envelope
+  if (response.data !== undefined) return response.data;
+  // List envelope or raw response (already unwrapped)
+  return response as T;
 }

@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import { getRequestEvent, query } from '$app/server';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,10 +68,9 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
   results.forEach((result, i) => {
     if (result.status === 'rejected') {
       const endpointNames = ['revenue', 'customers', 'topContent'] as const;
-      console.error(
-        `[Dashboard] Failed to fetch ${endpointNames[i]}:`,
-        result.reason
-      );
+      logger.error(`[Dashboard] Failed to fetch ${endpointNames[i]}`, {
+        reason: String(result.reason),
+      });
     }
   });
 

@@ -36,6 +36,20 @@ export interface PaginationMetadata {
 }
 
 /**
+ * Input-side pagination parameters (page + limit)
+ * Distinct from PaginationMetadata which is the output envelope with total/totalPages
+ */
+export interface PaginationParams {
+  page: number;
+  limit: number;
+}
+
+/**
+ * Sort direction for list queries
+ */
+export type SortOrder = 'asc' | 'desc';
+
+/**
  * Generic wrapper for paginated list responses
  * All list endpoints return data in this format
  * @template T The type of items in the list
@@ -49,6 +63,49 @@ export interface PaginatedListResponse<T> {
   items: T[];
   pagination: PaginationMetadata;
 }
+
+// ============================================================================
+// API Envelope Types (Wire Format)
+// ============================================================================
+
+/**
+ * Wire format for single-item responses
+ *
+ * procedure() wraps handler return values in this envelope automatically.
+ * The client `request<T>()` unwraps `.data` for single items.
+ *
+ * @example Wire: `{ "data": { "id": "...", "title": "..." } }`
+ */
+export type ApiSingleEnvelope<T> = { data: T };
+
+/**
+ * Wire format for list (paginated) responses
+ *
+ * procedure() emits this when a handler returns PaginatedResult.
+ * `items` and `pagination` are top-level siblings — pagination is never
+ * buried inside `data`.
+ *
+ * @example Wire: `{ "items": [...], "pagination": { "page": 1, ... } }`
+ */
+export type ApiListEnvelope<T> = {
+  items: T[];
+  pagination: PaginationMetadata;
+};
+
+/**
+ * Wire format for error responses
+ *
+ * Produced by mapErrorToResponse() in @codex/service-errors.
+ *
+ * @example Wire: `{ "error": { "code": "NOT_FOUND", "message": "..." } }`
+ */
+export type ApiErrorEnvelope = {
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+};
 
 /**
  * Generic wrapper for single-item responses
@@ -64,92 +121,12 @@ export interface SingleItemResponse<T> {
 }
 
 // ============================================================================
-// Content Access Response Types
-// ============================================================================
-
-/**
- * Response for GET /api/access/content/:id/stream
- * Provides streaming URL for content playback
- * @example
- * {
- *   streamingUrl: "https://...",
- *   expiresAt: "2025-01-23T15:30:00Z",
- *   contentType: "video/mp4"
- * }
- */
-export interface StreamingUrlResponse {
-  streamingUrl: string;
-  expiresAt: string; // ISO 8601 timestamp
-  contentType: string;
-}
-
-/**
- * Response for GET /api/access/content/:id/progress
- * Returns current playback progress or null if not started
- * @example
- * {
- *   progress: {
- *     positionSeconds: 1200,
- *     durationSeconds: 3600,
- *     completed: false,
- *     updatedAt: "2025-01-23T15:30:00Z"
- *   }
- * }
- */
-export interface PlaybackProgressResponse {
-  progress: ProgressData | null;
-}
-
-/**
- * Response for GET /api/access/user/library
- * Returns user's library with content and purchase information
- * @example
- * {
- *   items: [{
- *     content: { id, title, description, thumbnailUrl, contentType, durationSeconds },
- *     purchase: { purchasedAt, priceCents },
- *     progress: { positionSeconds, durationSeconds, completed, percentComplete, updatedAt }
- *   }],
- *   pagination: { page, limit, total, totalPages }
- * }
- */
-export interface UserLibraryResponse {
-  items: Array<{
-    content: {
-      id: string;
-      title: string;
-      description: string;
-      thumbnailUrl: string | null;
-      contentType: string;
-      durationSeconds: number;
-    };
-    purchase: {
-      purchasedAt: string; // ISO 8601 timestamp
-      priceCents: number;
-    };
-    progress: (ProgressData & { percentComplete: number }) | null;
-  }>;
-  pagination: PaginationMetadata;
-}
-
-/**
- * Response for POST /api/access/content/:id/progress
- * Returns null (204 No Content)
- */
-export type UpdatePlaybackProgressResponse = null;
-
-// ============================================================================
 // Organization Response Types (generic, not entity-specific)
 // ============================================================================
 
 /**
- * Response for DELETE /api/organizations/:id
- * Returns success message with deletion confirmation
- * @example
- * {
- *   success: true,
- *   message: "Organization deleted successfully"
- * }
+ * @deprecated Organization DELETE now returns 204 No Content.
+ * Kept temporarily for backward compatibility with any external consumers.
  */
 export interface DeleteOrganizationResponse {
   success: true;
@@ -262,167 +239,4 @@ export interface AllSettingsResponse {
 export interface PublicBrandingResponse {
   logoUrl: string | null;
   primaryColorHex: string;
-}
-
-// ============================================================================
-// User/Account Response Types
-// ============================================================================
-
-/**
- * Response for POST /api/user/avatar
- * Returns the uploaded avatar URL and metadata
- * @example
- * {
- *   data: {
- *     avatarUrl: "https://...",
- *     size: 123456,
- *     mimeType: "image/jpeg"
- *   }
- * }
- */
-export interface AvatarUploadResponse {
-  data: {
-    avatarUrl: string;
-    size: number;
-    mimeType: string;
-  };
-}
-
-// ============================================================================
-// Account Response Types
-// ============================================================================
-
-/**
- * Response for GET/PUT /api/user/notification-preferences
- * User's email notification preferences
- * @example
- * {
- *   emailMarketing: true,
- *   emailTransactional: true,
- *   emailDigest: false
- * }
- */
-export interface NotificationPreferencesResponse {
-  emailMarketing: boolean;
-  emailTransactional: boolean;
-  emailDigest: boolean;
-}
-
-// ============================================================================
-// Analytics Response Types
-// ============================================================================
-
-/**
- * Revenue data point for a specific day
- */
-export interface RevenueByDay {
-  date: string;
-  revenueCents: number;
-  purchaseCount: number;
-}
-
-/**
- * Response for GET /api/admin/analytics/revenue
- * Returns revenue statistics broken down by fee distribution and daily revenue
- * @example
- * {
- *   totalRevenueCents: 150000,
- *   totalPurchases: 45,
- *   averageOrderValueCents: 3333,
- *   platformFeeCents: 15000,
- *   organizationFeeCents: 7500,
- *   creatorPayoutCents: 127500,
- *   revenueByDay: [{ date: "2025-01-01", revenueCents: 5000, purchaseCount: 2 }]
- * }
- */
-export interface RevenueAnalyticsResponse {
-  totalRevenueCents: number;
-  totalPurchases: number;
-  averageOrderValueCents: number;
-  platformFeeCents: number;
-  organizationFeeCents: number;
-  creatorPayoutCents: number;
-  revenueByDay: RevenueByDay[];
-}
-
-/**
- * Response for GET /api/admin/analytics/top-content
- * Returns paginated list of top-performing content by revenue
- * @example
- * {
- *   items: [
- *     { contentId: "abc-123", contentTitle: "My Video", revenueCents: 5000, purchaseCount: 10 }
- *   ],
- *   pagination: { page: 1, limit: 10, total: 10, totalPages: 1 }
- * }
- */
-export type TopContentAnalyticsResponse = PaginatedListResponse<{
-  contentId: string;
-  contentTitle: string;
-  revenueCents: number;
-  purchaseCount: number;
-}>;
-
-// ============================================================================
-// Admin Response Types
-// ============================================================================
-
-/**
- * Customer list item for admin dashboard
- * Used in PaginatedListResponse<CustomerListItem>
- */
-export interface CustomerListItem {
-  userId: string;
-  email: string;
-  name: string | null;
-  createdAt: string;
-  totalPurchases: number;
-  totalSpentCents: number;
-}
-
-/**
- * Purchase list item for account payment history
- * Used in PaginatedListResponse<PurchaseListItem>
- */
-export interface PurchaseListItem {
-  id: string;
-  customerId: string;
-  createdAt: string; // ISO 8601 timestamp
-  contentId: string;
-  contentTitle: string;
-  amountCents: number;
-  status: 'completed' | 'pending' | 'failed' | 'refunded';
-}
-
-/**
- * Activity feed item type
- */
-export type ActivityItemType =
-  | 'purchase'
-  | 'content_published'
-  | 'member_joined';
-
-/**
- * Individual activity feed item
- */
-export interface ActivityItem {
-  id: string;
-  type: ActivityItemType;
-  title: string;
-  description: string | null;
-  timestamp: string;
-}
-
-/**
- * Response for GET /api/admin/activity
- * Returns paginated activity feed
- * @example
- * {
- *   items: [{ id: "1", type: "purchase", title: "New Purchase", description: null, timestamp: "..." }],
- *   pagination: { page: 1, limit: 20, total: 100, totalPages: 5 }
- * }
- */
-export interface ActivityFeedResponse {
-  items: ActivityItem[];
-  pagination: PaginationMetadata;
 }

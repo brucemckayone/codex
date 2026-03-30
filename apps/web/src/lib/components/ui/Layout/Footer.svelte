@@ -31,7 +31,7 @@
     gap: var(--space-6);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     :global(.footer-inner) {
       flex-direction: row;
       justify-content: space-between;

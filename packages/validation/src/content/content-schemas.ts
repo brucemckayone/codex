@@ -153,11 +153,11 @@ export const createMediaItemSchema = z.object({
     .min(1, 'File size must be greater than 0')
     .max(5 * 1024 * 1024 * 1024, 'File size cannot exceed 5GB'), // 5GB max
 
-  // R2 storage path (validated format)
-  // Prevents path traversal attacks
+  // R2 storage path — optional, generated server-side if not provided.
+  // When provided (e.g. tests), validated to prevent path traversal.
   r2Key: z
     .string()
-    .min(1, 'R2 key is required')
+    .min(1, 'R2 key cannot be empty')
     .max(500, 'R2 key must be 500 characters or less')
     .regex(
       /^[a-zA-Z0-9/_-]+(\.[a-zA-Z0-9]+)?$/,
@@ -166,7 +166,8 @@ export const createMediaItemSchema = z.object({
     .refine(
       (key) => !key.includes('..'),
       'R2 key cannot contain path traversal sequences'
-    ),
+    )
+    .optional(),
 });
 
 export type CreateMediaItemInput = z.infer<typeof createMediaItemSchema>;
@@ -426,11 +427,16 @@ export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
  */
 export const publicContentQuerySchema = paginationSchema
   .extend({
-    orgId: uuidSchema,
+    orgId: uuidSchema.optional(),
+    slug: z.string().max(500).optional(),
     contentType: contentTypeEnum.optional(),
     search: z.string().max(255).optional(),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
   })
+  .refine(
+    (data) => data.orgId || data.slug,
+    'Either orgId or slug must be provided'
+  )
   .transform((data) => ({
     ...data,
     limit: Math.min(data.limit, 50), // Cap at 50 for public endpoint

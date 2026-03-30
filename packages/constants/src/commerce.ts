@@ -15,6 +15,7 @@ export const FEES = {
 } as const;
 
 export const CURRENCY = {
+  GBP: 'gbp',
   USD: 'usd',
   EUR: 'eur',
 } as const;

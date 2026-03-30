@@ -13,6 +13,7 @@
 
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import { logger } from '$lib/observability';
 import {
   getPlaybackProgress,
   savePlaybackProgress,
@@ -48,12 +49,14 @@ export interface PlaybackProgress {
  * const progress = progressCollection.get(contentId);
  * ```
  */
-export const progressCollection = createCollection<PlaybackProgress, string>(
-  localStorageCollectionOptions({
-    storageKey: 'codex-playback-progress',
-    getKey: (item) => item.contentId,
-  })
-);
+export const progressCollection = browser
+  ? createCollection<PlaybackProgress, string>(
+      localStorageCollectionOptions({
+        storageKey: 'codex-playback-progress',
+        getKey: (item) => item.contentId,
+      })
+    )
+  : undefined;
 
 /**
  * Update progress (writes to localStorage immediately)
@@ -70,6 +73,7 @@ export function updateLocalProgress(
   positionSeconds: number,
   durationSeconds: number
 ): void {
+  if (!progressCollection) return;
   const now = new Date().toISOString();
   const completed =
     durationSeconds > 0 && positionSeconds / durationSeconds > 0.9;
@@ -106,6 +110,7 @@ export function updateLocalProgress(
  * Get all unsynced progress entries
  */
 export function getUnsyncedProgress(): PlaybackProgress[] {
+  if (!progressCollection) return [];
   const all: PlaybackProgress[] = [];
   progressCollection.state.forEach((value) => {
     if (!value.syncedAt) {
@@ -122,7 +127,7 @@ export function getUnsyncedProgress(): PlaybackProgress[] {
  * Failed syncs will be retried on next call.
  */
 export async function syncProgressToServer(): Promise<void> {
-  if (!browser) return;
+  if (!browser || !progressCollection) return;
 
   const unsynced = getUnsyncedProgress();
 
@@ -139,7 +144,9 @@ export async function syncProgressToServer(): Promise<void> {
         draft.syncedAt = new Date().toISOString();
       });
     } catch (error) {
-      console.error('Failed to sync progress:', error);
+      logger.error('Failed to sync progress', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       // Will retry next sync
     }
   }
@@ -156,6 +163,7 @@ export async function syncProgressToServer(): Promise<void> {
 export async function mergeServerProgress(
   contentId: string
 ): Promise<PlaybackProgress | null> {
+  if (!progressCollection) return null;
   const local = progressCollection.state.get(contentId) ?? null;
 
   try {
@@ -225,6 +233,7 @@ export async function mergeServerProgress(
  * @returns The progress or null if not found
  */
 export function getProgress(contentId: string): PlaybackProgress | null {
+  if (!progressCollection) return null;
   return progressCollection.state.get(contentId) ?? null;
 }
 
@@ -234,6 +243,7 @@ export function getProgress(contentId: string): PlaybackProgress | null {
  * @param contentId - The content ID to clear
  */
 export function clearProgress(contentId: string): void {
+  if (!progressCollection) return;
   progressCollection.delete(contentId);
 }
 
@@ -241,6 +251,7 @@ export function clearProgress(contentId: string): void {
  * Clear all local progress
  */
 export function clearAllProgress(): void {
+  if (!progressCollection) return;
   progressCollection.state.forEach((_, key) => {
     progressCollection.delete(key);
   });

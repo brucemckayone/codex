@@ -7,7 +7,7 @@
  * - Policy enforcement (auth, RBAC, IP whitelist, org membership)
  * - Input validation (Zod schemas)
  * - Error handling (mapErrorToResponse)
- * - Response envelope ({ data: T })
+ * - Response envelope ({ data: T } for singles, { items, pagination } for lists)
  * - Service injection (lazy-loaded ctx.services)
  *
  * @example
@@ -27,6 +27,7 @@
  * ```
  */
 
+export * from './binary-upload-procedure';
 export type { OrganizationMembership } from './helpers';
 // Helper exports (for advanced use cases)
 export {
@@ -40,6 +41,8 @@ export * from './multipart-procedure';
 // org-helpers: dynamically imported in helpers.ts for code-splitting inside procedure().
 // Re-exported here for direct use by route handlers.
 export { checkOrganizationMembership } from './org-helpers';
+// Paginated result marker for list endpoints
+export { PaginatedResult } from './paginated-result';
 // Main procedure function
 export { procedure } from './procedure';
 export type { ServiceRegistryResult } from './service-registry';

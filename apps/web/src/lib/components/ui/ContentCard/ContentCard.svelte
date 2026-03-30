@@ -22,7 +22,7 @@
   import type { Snippet, HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
   import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
-  import { Avatar } from '../Avatar';
+  import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -129,7 +129,17 @@
           alt={m.content_thumbnail_alt({ title })}
           loading="lazy"
           class="content-card__image"
+          onerror={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }}
         />
+        <div class="content-card__placeholder hidden">
+          {#if contentType === 'video'}
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          {:else if contentType === 'audio'}
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+          {:else}
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          {/if}
+        </div>
       {:else}
         <div class="content-card__placeholder">
           {#if contentType === 'video'}
@@ -197,11 +207,10 @@
       {#if creator}
         <div class="content-card__creator">
           <a href={profileHref} class="content-card__creator-link">
-            <Avatar
-              src={creator.avatar}
-              fallback={creator.displayName?.charAt(0).toUpperCase() ?? '?'}
-              size="sm"
-            />
+            <Avatar src={creator.avatar} class="content-card__creator-avatar">
+              <AvatarImage src={creator.avatar} alt={creator.displayName ?? 'Creator'} />
+              <AvatarFallback>{creator.displayName?.charAt(0).toUpperCase() ?? '?'}</AvatarFallback>
+            </Avatar>
             <span class="content-card__creator-name">
               {creator.displayName ?? creator.username ?? '?'}
             </span>
@@ -272,6 +281,10 @@
     object-fit: cover;
   }
 
+  .hidden {
+    display: none;
+  }
+
   .content-card__placeholder {
     display: flex;
     align-items: center;
@@ -287,8 +300,8 @@
     bottom: var(--space-2);
     right: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: rgba(0, 0, 0, 0.75);
-    color: #ffffff;
+    background: var(--color-overlay);
+    color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
@@ -299,8 +312,8 @@
     top: var(--space-2);
     left: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: rgba(0, 0, 0, 0.6);
-    color: #ffffff;
+    background: var(--color-overlay);
+    color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
@@ -313,16 +326,16 @@
     top: var(--space-2);
     right: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: var(--color-primary-500, #c24129);
-    color: #ffffff;
+    background: var(--color-primary-500);
+    color: var(--color-text-inverse);
     font-size: var(--text-xs);
-    font-weight: var(--font-semibold, 600);
+    font-weight: var(--font-semibold);
     border-radius: var(--radius-sm);
     z-index: 1;
   }
 
   .content-card__price-badge--free {
-    background: var(--color-success-500, #16a34a);
+    background: var(--color-success-500);
   }
 
   /* Progress bar */
@@ -331,23 +344,23 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.3);
+    height: var(--space-1);
+    background: var(--color-overlay-light);
   }
 
   .content-card__progress-fill {
     height: 100%;
-    background: var(--color-primary-500, #c24129);
+    background: var(--color-primary-500);
     transition: width 0.3s ease;
-    border-radius: 0 2px 2px 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
 
   /* Progress text */
   .content-card__progress-text {
     margin: 0;
-    font-size: var(--text-xs, 0.75rem);
-    color: var(--color-primary-500, #c24129);
-    font-weight: var(--font-medium, 500);
+    font-size: var(--text-xs);
+    color: var(--color-primary-500);
+    font-weight: var(--font-medium);
   }
 
   .content-card__body {
@@ -417,35 +430,41 @@
     transition: var(--transition-colors);
   }
 
+  :global(.content-card__creator-avatar) {
+    height: var(--space-6);
+    width: var(--space-6);
+    font-size: var(--text-xs);
+  }
+
   .content-card__actions {
     padding: var(--space-3);
     padding-top: 0;
   }
 
   /* Dark mode */
-  [data-theme='dark'] .content-card {
+  :global([data-theme='dark']) .content-card {
     background: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .content-card:hover {
+  :global([data-theme='dark']) .content-card:hover {
     border-color: var(--color-border-hover-dark);
   }
 
-  [data-theme='dark'] .content-card__placeholder {
+  :global([data-theme='dark']) .content-card__placeholder {
     background: var(--color-neutral-800);
   }
 
-  [data-theme='dark'] .content-card__description,
-  [data-theme='dark'] .content-card__creator-name {
+  :global([data-theme='dark']) .content-card__description,
+  :global([data-theme='dark']) .content-card__creator-name {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .content-card__title a:hover {
+  :global([data-theme='dark']) .content-card__title a:hover {
     color: var(--color-primary-400);
   }
 
-  [data-theme='dark'] .content-card__progress-text {
+  :global([data-theme='dark']) .content-card__progress-text {
     color: var(--color-primary-400);
   }
 </style>

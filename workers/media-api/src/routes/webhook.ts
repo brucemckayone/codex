@@ -15,7 +15,10 @@
 import { createDbClient } from '@codex/database';
 import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
-import { runpodWebhookSchema, TranscodingService } from '@codex/transcoding';
+import {
+  runpodWebhookUnionSchema,
+  TranscodingService,
+} from '@codex/transcoding';
 import { Hono } from 'hono';
 import { verifyRunpodSignature } from '../middleware/verify-runpod-signature';
 
@@ -63,8 +66,8 @@ app.post(
         throw new ValidationError('Invalid JSON in request body');
       }
 
-      // Validate against schema
-      const result = runpodWebhookSchema.safeParse(payload);
+      // Validate against union schema (completed | failed | progress)
+      const result = runpodWebhookUnionSchema.safeParse(payload);
       if (!result.success) {
         throw new ValidationError('Invalid webhook payload');
       }
@@ -91,8 +94,12 @@ app.post(
         webhookBaseUrl: c.env.API_URL || 'http://localhost:4002',
       });
 
-      // Process the webhook
-      await service.handleWebhook(result.data);
+      // Dispatch based on webhook type
+      if (result.data.status === 'progress') {
+        await service.handleProgressWebhook(result.data);
+      } else {
+        await service.handleWebhook(result.data);
+      }
 
       // Return success - RunPod expects 200 OK to acknowledge receipt
       return c.json({ received: true }, 200);

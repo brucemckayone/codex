@@ -12,18 +12,24 @@ export {
   hlsVariantSchema,
   mezzanineStatusEnum,
   type RetryTranscodingInput,
+  type RunPodProgressWebhookPayload,
   type RunPodWebhookOutput,
   // Types
   type RunPodWebhookPayload,
+  type RunPodWebhookUnionPayload,
   retryTranscodingSchema,
   runpodJobStatusEnum,
+  runpodProgressWebhookSchema,
   runpodWebhookOutputSchema,
   // Schemas
   runpodWebhookSchema,
+  runpodWebhookUnionSchema,
   type TranscodingStatusResponse,
+  type TranscodingStep,
   type TriggerTranscodingInput,
   transcodingPrioritySchema,
   transcodingStatusResponseSchema,
+  transcodingStepEnum,
   triggerTranscodingSchema,
 } from '@codex/validation';
 
@@ -94,12 +100,8 @@ export interface RunPodJobResponse {
  *
  * This service only needs RunPod API credentials to trigger jobs.
  */
-export interface TranscodingServiceConfig {
-  runpodApiKey: string;
-  runpodEndpointId: string;
-  webhookBaseUrl: string;
-  runpodApiBaseUrl?: string;
-}
+// Re-exported from transcoding-service.ts (canonical definition with all 6 fields)
+export type { TranscodingServiceConfig } from './services/transcoding-service';
 
 /**
  * Mezzanine processing status
@@ -132,4 +134,8 @@ export interface TranscodingMediaItem {
   mezzanineKey: string | null;
   /** Mezzanine processing status */
   mezzanineStatus: MezzanineStatus | null;
+  /** Transcoding progress percentage (0-100) */
+  transcodingProgress: number | null;
+  /** Current transcoding step name */
+  transcodingStep: TranscodingStep | null;
 }

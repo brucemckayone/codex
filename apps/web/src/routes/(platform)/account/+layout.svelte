@@ -4,7 +4,7 @@
    */
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
-  import { page } from '$app/stores';
+  import { navigating, page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ACCOUNT_NAV } from '$lib/config/navigation';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
@@ -32,8 +32,9 @@
         <a
           href={link.href}
           class="sidebar-link"
-          class:active={$page.url.pathname === link.href}
-          aria-current={$page.url.pathname === link.href ? 'page' : undefined}
+          class:active={page.url.pathname === link.href}
+          class:loading={navigating?.to?.url.pathname === link.href}
+          aria-current={page.url.pathname === link.href ? 'page' : undefined}
         >
           {link.label}
         </a>
@@ -54,7 +55,7 @@
     padding: var(--space-8) 0;
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .account-layout {
       flex-direction: row;
     }
@@ -64,7 +65,7 @@
     flex-shrink: 0;
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .account-sidebar {
       width: 14rem;
     }
@@ -83,7 +84,7 @@
     gap: var(--space-1);
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .sidebar-nav {
       flex-direction: column;
     }
@@ -107,6 +108,11 @@
   .sidebar-link:focus-visible {
     outline: 2px solid var(--color-primary-500);
     outline-offset: 2px;
+  }
+
+  .sidebar-link.loading {
+    color: var(--color-text);
+    background-color: var(--color-neutral-100);
   }
 
   .sidebar-link.active {

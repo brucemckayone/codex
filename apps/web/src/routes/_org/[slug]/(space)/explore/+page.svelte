@@ -90,6 +90,12 @@
 <svelte:head>
   <title>{m.explore_title()} | {orgName}</title>
   <meta name="description" content="Explore content from {orgName}" />
+  <meta property="og:title" content="{m.explore_title()} | {orgName}" />
+  <meta property="og:description" content="Explore content from {orgName}" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="{m.explore_title()} | {orgName}" />
+  <meta name="twitter:description" content="Explore content from {orgName}" />
 </svelte:head>
 
 <div class="explore">
@@ -348,13 +354,13 @@
     gap: var(--space-6, 1.5rem);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .explore__grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .explore__grid {
       grid-template-columns: repeat(3, 1fr);
     }
@@ -407,7 +413,7 @@
   }
 
   /* ── Responsive Controls ── */
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .explore {
       padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
       gap: var(--space-6, 1.5rem);

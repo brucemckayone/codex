@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import StudioSwitcher from '$lib/components/layout/StudioSidebar/StudioSwitcher.svelte';
   import type { LayoutData } from './$types';
@@ -23,6 +23,12 @@
 
   // Close menu handler for reuse
   const closeMenu = () => (mobileMenuOpen = false);
+
+  // Close drawer on navigation (route change)
+  $effect(() => {
+    page.url.pathname;
+    mobileMenuOpen = false;
+  });
 
   // Keyboard handler: ESC key closes mobile menu
   $effect(() => {
@@ -39,9 +45,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>{data.org.name} Studio</title>
-</svelte:head>
+<!-- Child pages set their own titles -->
 
 <div class="studio-layout">
   <!-- Mobile Header -->
@@ -62,6 +66,7 @@
 
       <StudioSwitcher
         currentContext="org"
+        currentSlug={data.org.slug}
         orgs={data.orgs}
       />
     </div>
@@ -71,11 +76,17 @@
   <header class="studio-header desktop">
     <StudioSwitcher
       currentContext="org"
+      currentSlug={data.org.slug}
       orgs={data.orgs}
     />
   </header>
 
   <div class="studio-content">
+    <!-- Overlay for mobile (outside aside so sidebar paints on top) -->
+    {#if mobileMenuOpen}
+      <div class="sidebar-overlay" onclick={closeMenu}></div>
+    {/if}
+
     <!-- Sidebar -->
     <aside class="studio-sidebar" class:open={mobileMenuOpen}>
       <StudioSidebar role={data.userRole} context="org" />
@@ -91,13 +102,6 @@
           <line x1="6" x2="18" y1="6" y2="18"/>
         </svg>
       </button>
-
-      <!-- Overlay for mobile -->
-      <div
-        class="sidebar-overlay"
-        class:visible={mobileMenuOpen}
-        onclick={closeMenu}
-      ></div>
     </aside>
 
     <!-- Main Content -->
@@ -205,15 +209,10 @@
   }
 
   .sidebar-overlay {
-    display: none;
     position: fixed;
     inset: 0;
     background-color: var(--color-overlay);
     z-index: calc(var(--z-fixed) - 1);
-  }
-
-  .sidebar-overlay.visible {
-    display: block;
   }
 
   /* Main content */
@@ -225,7 +224,7 @@
   }
 
   /* Desktop breakpoint: aligns with --breakpoint-lg (1024px) for sidebar visibility */
-  @media (min-width: var(--breakpoint-lg)) {
+  @media (--breakpoint-lg) {
     .studio-header.mobile {
       display: none;
     }
@@ -248,6 +247,7 @@
       height: calc(100vh - var(--space-16));
       transform: translateX(0);
       border-right: var(--border-width) var(--border-style) var(--color-border);
+      z-index: auto;
     }
 
     .sidebar-close,
@@ -261,32 +261,32 @@
   }
 
   /* Dark mode overrides */
-  [data-theme='dark'] .studio-layout {
+  :global([data-theme='dark']) .studio-layout {
     background-color: var(--color-background-dark);
   }
 
-  [data-theme='dark'] .studio-header.mobile,
-  [data-theme='dark'] .studio-header.desktop {
+  :global([data-theme='dark']) .studio-header.mobile,
+  :global([data-theme='dark']) .studio-header.desktop {
     background-color: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .studio-sidebar {
+  :global([data-theme='dark']) .studio-sidebar {
     background-color: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .menu-toggle:hover,
-  [data-theme='dark'] .sidebar-close:hover {
+  :global([data-theme='dark']) .menu-toggle:hover,
+  :global([data-theme='dark']) .sidebar-close:hover {
     background-color: var(--color-surface-variant);
   }
 
-  [data-theme='dark'] .menu-toggle,
-  [data-theme='dark'] .sidebar-close {
+  :global([data-theme='dark']) .menu-toggle,
+  :global([data-theme='dark']) .sidebar-close {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .sidebar-close {
+  :global([data-theme='dark']) .sidebar-close {
     color: var(--color-text-muted-dark);
   }
 </style>

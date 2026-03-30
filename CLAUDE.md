@@ -1,102 +1,205 @@
 # Codex Platform
 
-Serverless content streaming on Cloudflare Workers.
-**Structure**: Workers (API) → Service Layer (Logic) → Foundation (Infra) → External (Neon, R2, KV, Stripe).
+Serverless content streaming platform on Cloudflare Workers.
 
-# IMPORTANT WHEN WORKING WITH BEADS TASK MANAGEMENT
-!!!IMPORTANT!!! when working with beads you must ensure that you have a full understanding of how the tasks fit into the codebase as a whole when making changes ensure that we are working to the established patterns and using the existing packages here required. Ensure that we are following the correct statemanagement patterns etc.
+**Architecture**: Workers (API) → Service Layer (Logic) → Foundation (Infra) → External (Neon, R2, KV, Stripe).
+
+## IMPORTANT: Task Management (Beads)
+
+When working with beads, you MUST have a full understanding of how tasks fit into the codebase as a whole. When making changes, ensure you are working to the established patterns and using the existing packages as required. Ensure you are following the correct state management patterns, security patterns, and error handling patterns documented in this file and the relevant sub-CLAUDE.md files.
+
+---
 
 ## Navigation
-| Task | Path |
+
+| I need to... | Read this |
 |---|---|
-| **Structure** | [packages/CLAUDE.md](packages/CLAUDE.md), [workers/CLAUDE.md](workers/CLAUDE.md) |
-| **Web App** | [web.md](web.md) - SvelteKit, SSR patterns, TanStack DB |
-| **New Endpoint** | [workers/CLAUDE.md](workers/CLAUDE.md) |
-| **New Service** | [packages/CLAUDE.md](packages/CLAUDE.md) |
-| **DB/Schema** | [packages/database/CLAUDE.md](packages/database/CLAUDE.md) |
-| **Validation** | [packages/validation/CLAUDE.md](packages/validation/CLAUDE.md) |
-| **Security** | [packages/security/CLAUDE.md](packages/security/CLAUDE.md) |
-| **Errors** | [packages/service-errors/CLAUDE.md](packages/service-errors/CLAUDE.md) |
+| Understand project structure | [packages/CLAUDE.md](packages/CLAUDE.md), [workers/CLAUDE.md](workers/CLAUDE.md) |
+| Work on the web app | [apps/web/CLAUDE.md](apps/web/CLAUDE.md) — SvelteKit, SSR, TanStack DB, routing |
+| Add a new API endpoint | [workers/CLAUDE.md](workers/CLAUDE.md), [packages/worker-utils/CLAUDE.md](packages/worker-utils/CLAUDE.md) |
+| Add a new service | [packages/CLAUDE.md](packages/CLAUDE.md), [packages/service-errors/CLAUDE.md](packages/service-errors/CLAUDE.md) |
+| Work with database/schema | [packages/database/CLAUDE.md](packages/database/CLAUDE.md) |
+| Add input validation | [packages/validation/CLAUDE.md](packages/validation/CLAUDE.md) |
+| Understand security/auth | [packages/security/CLAUDE.md](packages/security/CLAUDE.md) |
+| Handle errors correctly | [packages/service-errors/CLAUDE.md](packages/service-errors/CLAUDE.md) |
+| Work with R2/KV | [packages/cloudflare-clients/CLAUDE.md](packages/cloudflare-clients/CLAUDE.md) |
+| Work with caching/versions | [packages/cache/CLAUDE.md](packages/cache/CLAUDE.md) (if exists), [apps/web/CLAUDE.md](apps/web/CLAUDE.md) |
+
+---
 
 ## Workers (Cloudflare)
-1. **Auth** (42069): BetterAuth, Session (PG+KV), Rate Limit. `POST /register`, `/login`, `GET /session`.
-2. **Content-API** (4001): CRUD, Media, Access, Streaming (R2). `POST /content`, `/media`, `GET /stream/:id`.
-3. **Identity-API** (42071): Placeholder. `GET /health`.
-4. **Ecom-API** (42072): Stripe Checkout/Webhooks. `POST /checkout/create`, `/webhooks/stripe`.
-5. **Admin-API** (42073): Analytics, Content/Customer Mgmt.
-6. **Notifications-API** (42074): Email (Resend).
-7. **Organization-API** (42075): Org CRUD, Members.
-8. **Media-API** (42076): Transcoding (RunPod), HLS.
 
-## Packages
-### Foundation
-- **@codex/database**: Drizzle ORM, Neon. `dbHttp` (prod), `dbWs` (test). Schema & Queries.
-- **@codex/shared-types**: Contracts, HonoEnv, API Responses (`SingleItemResponse`, `ErrorResponse`).
-- **@codex/service-errors**: `BaseService`, Error classes (404, 403, etc.), `mapErrorToResponse`.
-- **@codex/security**: Auth middleware, Rate Limit (KV), Headers, Worker Auth (HMAC).
-- **@codex/validation**: Zod schemas.
+All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceUrl(service, env)` to resolve URLs. NEVER hardcode port numbers.
 
-### Services
-- **@codex/content**: Content/Media lifecycle.
-- **@codex/organization**: Org mgmt.
-- **@codex/access**: Access control, Signed URLs, Playback.
-- **@codex/purchase**: Stripe integration, Purchases.
-- **@codex/notifications**: Emails.
-- **@codex/admin**: Admin services.
-- **@codex/transcoding**: Transcoding pipeline.
+| # | Worker | Port | Purpose | Key Endpoints |
+|---|---|---|---|---|
+| 1 | **auth** | 42069 | BetterAuth, sessions (PG+KV cache), rate limiting | `POST /register`, `/login`, `GET /session` |
+| 2 | **content-api** | 4001 | Content CRUD, media registration, access control, streaming | `POST /content`, `GET /stream/:id` |
+| 3 | **organization-api** | 42071 | Org CRUD, membership, settings | `POST /organizations`, `GET /organizations/:slug` |
+| 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe` |
+| 5 | **admin-api** | 42073 | Analytics, content/customer management (platform_owner) | `GET /analytics/revenue`, `POST /content/publish-override` |
+| 6 | **identity-api** | 42074 | User profiles, platform settings (branding, contact, features) | `GET /settings/branding`, `PUT /settings/features` |
+| 7 | **notifications-api** | 42075 | Email templates, sending (Resend) | `POST /templates`, `POST /send` |
+| 8 | **media-api** | 4002 | Transcoding pipeline (RunPod), webhooks, HLS | `POST /transcode`, `POST /webhook` |
+| 9 | **dev-cdn** | 4100 | Local development CDN proxy (Miniflare R2) | `GET /:key` |
+
+> **Note**: Content-API and Access share port 4001 — access control is co-deployed with the content worker because signed URL generation needs direct R2 access.
+
+---
+
+## Packages (21 total)
+
+### Foundation (core infrastructure, no business logic)
+| Package | Purpose | Key Exports |
+|---|---|---|
+| **@codex/database** | Drizzle ORM, Neon | `dbHttp`, `dbWs`, `schema`, query helpers |
+| **@codex/shared-types** | TypeScript contracts | `HonoEnv`, `SingleItemResponse`, `ErrorResponse` |
+| **@codex/service-errors** | Error handling | `BaseService`, `*Error` classes, `mapErrorToResponse` |
+| **@codex/security** | Auth & protection | `requireAuth`, `rateLimit`, `workerAuth`, `securityHeaders` |
+| **@codex/validation** | Zod schemas | `*Schema`, `sanitizeSvgContent` |
+| **@codex/constants** | Shared constants | `SERVICE_PORTS`, `getServiceUrl`, `isDev`, `getCookieConfig` |
+
+### Services (business logic)
+| Package | Purpose | Key Exports |
+|---|---|---|
+| **@codex/content** | Content/media lifecycle | `ContentService`, `MediaItemService` |
+| **@codex/organization** | Org CRUD, membership | `OrganizationService` |
+| **@codex/identity** | User identity | `IdentityService` |
+| **@codex/access** | Access control, streaming | `ContentAccessService` |
+| **@codex/purchase** | Stripe, purchases | `PurchaseService` |
+| **@codex/notifications** | Email, templates | `NotificationsService`, `TemplateService` |
+| **@codex/admin** | Admin analytics/mgmt | `AnalyticsService` |
+| **@codex/transcoding** | RunPod transcoding | `TranscodingService` |
 
 ### Utilities
-- **@codex/worker-utils**: Worker factory, `procedure()` handler, Middleware.
-- **@codex/cloudflare-clients**: R2, KV.
-- **@codex/observability**: Logging.
-- **@codex/test-utils**: DB setup, Seeders.
-- **@codex/platform-settings**: Settings/Flags.
+| Package | Purpose | Key Exports |
+|---|---|---|
+| **@codex/worker-utils** | Worker factory, procedure handler | `createWorker`, `procedure`, `PaginatedResult` |
+| **@codex/cloudflare-clients** | R2 and KV clients | `R2Service`, `R2SigningClient` |
+| **@codex/cache** | Version-based cache | `VersionedCache`, `CacheType` |
+| **@codex/observability** | Structured logging | `ObservabilityClient` |
+| **@codex/image-processing** | Image resize/convert | `ImageProcessingService` |
+| **@codex/platform-settings** | Settings facade | `PlatformSettingsFacade` |
+| **@codex/test-utils** | Test infrastructure | `setupTestDatabase`, factories |
+
+---
+
+## Strict Rules (All Code)
+
+These rules are MANDATORY. Every agent working anywhere in this codebase MUST follow them.
+
+### Security
+
+- **MUST** scope every database query with `scopedNotDeleted(table, creatorId)` or `withCreatorScope()` — unscoped queries are a data exposure vulnerability
+- **MUST** use `procedure({ policy: { auth: 'required' } })` for any endpoint that accesses user data
+- **MUST** validate all input with Zod schemas via `procedure({ input: { body: schema } })` — no unvalidated input reaches handlers
+- **MUST** use `policy: { auth: 'worker' }` with HMAC-SHA256 for worker-to-worker calls
+- **MUST** use rate limiting on all auth endpoints (`rateLimit: 'auth'` = 5 req/15min)
+- **NEVER** expose internal error details (stack traces, SQL, DB URLs) in API responses — `mapErrorToResponse()` handles this
+- **NEVER** log PII (passwords, tokens, emails) — use `@codex/observability` redaction
+
+### Error Handling
+
+- **MUST** throw typed `ServiceError` subclasses (`NotFoundError`, `ForbiddenError`, etc.) — NEVER throw raw strings or generic `Error`
+- **MUST** let errors propagate to `procedure()` which calls `mapErrorToResponse()` — NEVER catch-and-swallow in route handlers
+- **MUST** use `handleError()` in services to re-throw known errors and wrap unknown ones
+- **MUST** roll back transactions automatically by throwing inside `db.transaction()` — NEVER catch inside transactions unless you want partial commit
+
+### Data Integrity
+
+- **MUST** use soft deletes (`deletedAt` column) — NEVER hard-delete rows
+- **MUST** use `db.transaction()` for multi-step operations (e.g., create content + assign media)
+- **MUST** use `withPagination()` helper for list queries — returns `{ limit, offset }` from page/limit params
+- **MUST** return `new PaginatedResult(items, pagination)` from list handlers — procedure() wraps in `{ items, pagination }` envelope
+
+### API Response Envelope
+
+All `procedure()` endpoints follow this envelope — NEVER deviate:
+
+| Type | HTTP Status | Response Shape |
+|---|---|---|
+| **Single item** | 200 (GET/PATCH) or 201 (POST create) | `{ data: T }` — handler returns plain object, procedure wraps |
+| **List** | 200 | `{ items: T[], pagination: { page, limit, total, totalPages } }` — handler returns `PaginatedResult` |
+| **Error** | 4xx/5xx | `{ error: { code, message, details? } }` — from `mapErrorToResponse()` |
+| **No content** | 204 | Empty body — handler returns `null` |
+
+### Ports & URLs
+
+- **MUST** use `getServiceUrl(service, env)` from `@codex/constants` — NEVER hardcode localhost URLs or port numbers
+- **MUST** use `SERVICE_PORTS` from `@codex/constants` as single source of truth for port assignments
+
+### Currency
+
+- Default currency is **GBP (£)**, not USD ($)
+
+---
 
 ## Common Developer Tasks
 
 ### Adding a New API Endpoint
+
 1. Define Zod schema → `packages/validation/src/[domain].ts`
-2. Add service method → `packages/[service]/src/services/*.service.ts` (extend BaseService)
-3. Create worker route → `workers/[worker]/src/routes/*.ts` (use procedure())
-4. **Always:** Scope by creatorId/orgId, validate input, use transactions for multi-step
+2. Add service method → `packages/[service]/src/services/*-service.ts` (extend `BaseService`)
+3. Create worker route → `workers/[worker]/src/routes/*.ts` using `procedure()`
+4. **Always**: Scope by creatorId/orgId, validate input, use transactions for multi-step
+5. **Lists**: Return `new PaginatedResult(result.items, result.pagination)` from handler
 
 ### Implementing Content/Media Features
-- Content lifecycle → `@codex/content` ContentService
-- Media upload/transcode → `@codex/content` MediaItemService
-- Streaming URLs → `@codex/access` ContentAccessService (signed R2 URLs)
-- **Reference:** `/packages/content/src/services/content-service.ts:1-100`
+
+- Content lifecycle → `@codex/content` `ContentService`
+- Media upload/transcode → `@codex/content` `MediaItemService`
+- Streaming URLs → `@codex/access` `ContentAccessService` (signed R2 URLs)
+- Transcoding → `@codex/transcoding` `TranscodingService` → RunPod
+- Reference: `packages/content/src/services/content-service.ts`
 
 ### Handling Authentication/Authorization
-- Session validation → Use `procedure({ policy: { auth: 'required' } })`
+
+- Session validation → `procedure({ policy: { auth: 'required' } })`
 - Role checks → `policy: { roles: ['creator', 'admin'] }`
-- Worker-to-worker → `policy: { auth: 'worker' }` (HMAC)
-- **Reference:** `/packages/worker-utils/src/procedure/procedure.ts:1-80`
+- Org membership → `policy: { requireOrgMembership: true }`
+- Platform owner → `policy: { auth: 'platform_owner' }`
+- Worker-to-worker → `policy: { auth: 'worker' }` (HMAC-SHA256)
+- Reference: `packages/worker-utils/src/procedure/procedure.ts`
 
 ### Working with Database
-- Simple queries → `dbHttp` (workers)
-- Transactions → `dbWs` (tests/dev), wrap multi-step in `db.transaction()`
-- Scoping → **ALWAYS** use `scopedNotDeleted(table, creatorId)` or `withCreatorScope()`
-- **Reference:** `/packages/database/CLAUDE.md`, `/packages/content/src/services/content-service.ts`
+
+- Production queries → `dbHttp` (stateless HTTP, Cloudflare Workers)
+- Transactions → `dbWs` (WebSocket, stateful — required for `db.transaction()`)
+- Scoping → **ALWAYS** `scopedNotDeleted(table, creatorId)` or `withCreatorScope()`
+- Pagination → `withPagination({ page, limit })` returns `{ limit, offset }`
+- Reference: `packages/database/CLAUDE.md`
 
 ### Testing
+
 - Unit tests → `@codex/test-utils` factories, `setupTestDatabase()`
-- Integration tests → Use `withNeonTestBranch()` (CI), dbWs for transactions
-- Mocking → Factories in `@codex/test-utils/src/factories.ts`
-- **Reference:** `/packages/organization/src/services/__tests__/organization-service.test.ts`
+- Integration tests → Use `withNeonTestBranch()` (CI), `dbWs` for transactions
+- Test factories → `packages/test-utils/src/factories.ts`
+- Reference test → `packages/organization/src/services/__tests__/organization-service.test.ts`
 
 ### Handling SVG/Media
-- SVG uploads → Validate with `@codex/validation` `sanitizeSvgContent()` (XSS prevention)
-- Image processing → `@codex/image-processing` ImageProcessingService
-- R2 uploads → `@codex/cloudflare-clients` R2Service
-- **Reference:** `/packages/validation/src/primitives.ts:sanitizeSvgContent`
+
+- SVG uploads → `@codex/validation` `sanitizeSvgContent()` (XSS prevention)
+- Image processing → `@codex/image-processing` `ImageProcessingService` (WebP, 3 variants)
+- R2 uploads → `@codex/cloudflare-clients` `R2Service`
+- Local dev images → Use dev-cdn (port 4100) + Miniflare R2, NEVER external placeholder services
+
+---
 
 ## Development
-- **Commands**: `pnpm test`, `pnpm build`, `pnpm typecheck`, `pnpm db:migrate`.
-- **Dev**: `cd workers/auth && pnpm dev`.
-- **Key Patterns**:
-  - **Transact**: `db.transaction()`.
-  - **Scope**: Filter by `creatorId`/`orgId`.
-  - **Soft Delete**: `deletedAt`.
-  - **Errors**: Throw typed errors; Worker maps to HTTP.
-  - **Env**: Shared bindings in `shared-types`.
 
+- **Start all services**: `pnpm dev` (from monorepo root — NEVER cd into individual workers)
+- **Run tests**: `pnpm test`
+- **Build**: `pnpm build`
+- **Type check**: `pnpm typecheck`
+- **DB migrations**: `pnpm db:migrate`
+
+### Key Patterns Summary
+
+| Pattern | Rule |
+|---|---|
+| **Transactions** | `db.transaction()` for multi-step — MUST use `dbWs` |
+| **Scoping** | ALWAYS filter by `creatorId`/`orgId` — NEVER unscoped queries |
+| **Soft Delete** | Set `deletedAt` — NEVER hard delete |
+| **Errors** | Throw typed `ServiceError` subclass → procedure maps to HTTP |
+| **Env** | Shared bindings defined in `@codex/shared-types` `HonoEnv` |
+| **Logging** | Use `ObservabilityClient` with PII redaction — NEVER `console.log` |

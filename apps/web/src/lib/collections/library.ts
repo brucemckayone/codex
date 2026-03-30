@@ -10,9 +10,10 @@
  * - Optimistic progress updates (visual state only — server sync via progressCollection)
  */
 
-import type { UserLibraryResponse } from '@codex/shared-types';
+import type { UserLibraryResponse } from '@codex/access';
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import { logger } from '$lib/observability';
 import { getUserLibrary } from '$lib/remote/library.remote';
 
 /**
@@ -88,7 +89,9 @@ export async function loadLibraryFromServer(): Promise<void> {
       libraryCollection.delete(key);
     }
   } catch (error) {
-    console.error('Failed to refresh library from server:', error);
+    logger.error('Failed to refresh library from server', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

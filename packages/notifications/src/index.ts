@@ -15,13 +15,11 @@ export type {
 } from './providers/types';
 export type {
   Database,
-  DatabaseTransaction,
   // Re-exported from @codex/database/schema via types.ts
   EmailTemplate,
   NewEmailTemplate,
+  NotificationPreferencesResponse,
   NotificationsServiceConfig,
-  PaginatedResponse,
-  PaginationMetadata,
   PaginationParams,
   RenderedTemplate,
   ServiceConfig,

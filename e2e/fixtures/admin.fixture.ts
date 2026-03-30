@@ -207,8 +207,8 @@ export const adminFixture = {
     }
 
     const body = await response.json();
-    // API now returns PaginatedListResponse<TopContentItem>
-    return body.data?.items ?? [];
+    // List envelope: { items, pagination } at top level
+    return body.items ?? [];
   },
 
   // ============================================================================
@@ -240,7 +240,7 @@ export const adminFixture = {
     }
 
     const body = await response.json();
-    return body.data;
+    return body; // List envelope: { items, pagination } at top level
   },
 
   /**
@@ -345,7 +345,7 @@ export const adminFixture = {
     }
 
     const body = await response.json();
-    return body.data;
+    return body; // List envelope: { items, pagination } at top level
   },
 
   /**

@@ -85,15 +85,15 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .empty-icon {
+  :global([data-theme='dark']) .empty-icon {
     color: var(--color-text-muted-dark);
   }
 
-  [data-theme='dark'] .empty-title {
+  :global([data-theme='dark']) .empty-title {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .empty-description {
+  :global([data-theme='dark']) .empty-description {
     color: var(--color-text-secondary-dark);
   }
 </style>

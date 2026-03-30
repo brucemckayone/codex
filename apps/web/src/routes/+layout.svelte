@@ -5,7 +5,7 @@
    */
   import type { Snippet } from 'svelte';
   import { onNavigate } from '$app/navigation';
-  import { Toaster } from '$lib/components/ui';
+  import { NavigationProgress, SkipLink, Toaster } from '$lib/components/ui';
   import type { LayoutData } from './$types';
   import '../lib/styles/global.css';
 
@@ -15,43 +15,42 @@
     if (!navigation.to) return;
     if (!document.startViewTransition) return;
 
+    // Skip view transition for same-path navigations (query/hash changes)
+    if (navigation.from?.url.pathname === navigation.to.url.pathname) return;
+
     return new Promise((resolve) => {
-      document.startViewTransition(async () => {
+      const transition = document.startViewTransition(async () => {
         resolve();
         await navigation.complete;
       });
+
+      // Safety valve: skip the visual transition if DOM update takes too long.
+      // With experimental.async, Svelte's tick() races rAF against setTimeout,
+      // but slow server loads (cold workers in dev) can still hit edge cases.
+      // skipTransition() completes the transition instantly (no animation),
+      // ensuring the DOM always updates without waiting for Chrome's 4s timeout.
+      const safety = setTimeout(() => transition.skipTransition(), 500);
+      transition.finished
+        .finally(() => clearTimeout(safety))
+        .catch(() => {});
     });
   });
 
-  const _ = data;
+
 </script>
 
 <svelte:head>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Discover transformative content from independent creators" />
   <meta property="og:site_name" content="Revelations" />
   <meta property="og:type" content="website" />
   <link rel="manifest" href="/manifest.json" />
 </svelte:head>
 
-<a href="#main-content" class="skip-link">Skip to content</a>
+<SkipLink />
+
+<NavigationProgress />
 
 {@render children()}
 
 <Toaster />
 
-<style>
-  .skip-link {
-    position: absolute;
-    top: -100%;
-    left: 0;
-    padding: var(--space-2) var(--space-4);
-    background: var(--color-surface);
-    z-index: var(--z-toast);
-    color: var(--color-text);
-  }
-
-  .skip-link:focus {
-    top: 0;
-  }
-</style>

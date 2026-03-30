@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { LayoutOrganization } from '$lib/types';
+  import { page } from '$app/state';
+  import { buildOrgUrl } from '$lib/utils/subdomain';
   import DropdownMenu from '$lib/components/ui/DropdownMenu/DropdownMenu.svelte';
   import DropdownMenuTrigger from '$lib/components/ui/DropdownMenu/DropdownMenuTrigger.svelte';
   import DropdownMenuContent from '$lib/components/ui/DropdownMenu/DropdownMenuContent.svelte';
@@ -9,15 +11,16 @@
 
   interface Props {
     currentContext: 'personal' | 'org';
+    currentSlug?: string;
     orgs: LayoutOrganization[];
   }
 
-  const { currentContext, orgs }: Props = $props();
+  const { currentContext, currentSlug, orgs }: Props = $props();
 
   const label = $derived(
     currentContext === 'personal'
       ? m.studio_switcher_personal()
-      : m.studio_switcher_organization()
+      : orgs.find(o => o.slug === currentSlug)?.name ?? m.studio_switcher_organization()
   );
 </script>
 
@@ -28,7 +31,7 @@
     <svg class="switcher-chevron" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
   </DropdownMenuTrigger>
   <DropdownMenuContent>
-    <a href="/studio">
+    <a href={buildOrgUrl(page.url, 'creators', '/studio')}>
       <DropdownMenuItem>
         <span class="item-content">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -43,7 +46,7 @@
     {#if orgs.length > 0}
       <DropdownMenuSeparator />
       {#each orgs as orgItem}
-        <a href="/{orgItem.slug}/studio">
+        <a href={buildOrgUrl(page.url, orgItem.slug, '/studio')}>
           <DropdownMenuItem>
             <span class="item-content">
               {#if orgItem.logoUrl}
@@ -53,6 +56,9 @@
               {/if}
               {orgItem.name}
             </span>
+            {#if currentSlug === orgItem.slug}
+              <svg class="check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            {/if}
           </DropdownMenuItem>
         </a>
       {/each}

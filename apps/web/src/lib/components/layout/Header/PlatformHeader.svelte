@@ -67,7 +67,7 @@
     gap: var(--space-6);
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .desktop-nav {
       display: flex;
     }
@@ -94,7 +94,7 @@
     display: none;
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .desktop-only {
       display: contents;
     }

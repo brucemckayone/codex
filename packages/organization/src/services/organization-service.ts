@@ -79,27 +79,40 @@ export class OrganizationService extends BaseService {
    * @returns Created organization
    * @throws {ConflictError} If slug already exists
    */
-  async create(input: CreateOrganizationInput): Promise<Organization> {
+  async create(
+    input: CreateOrganizationInput,
+    userId: string
+  ): Promise<Organization> {
     // Validate input with Zod
     const validated = createOrganizationSchema.parse(input);
 
     try {
-      const [newOrganization] = await this.db
-        .insert(organizations)
-        .values({
-          name: validated.name,
-          slug: validated.slug,
-          description: validated.description || null,
-          logoUrl: validated.logoUrl || null,
-          websiteUrl: validated.websiteUrl || null,
-        })
-        .returning();
+      return await this.db.transaction(async (tx) => {
+        const [newOrganization] = await tx
+          .insert(organizations)
+          .values({
+            name: validated.name,
+            slug: validated.slug,
+            description: validated.description || null,
+            logoUrl: validated.logoUrl || null,
+            websiteUrl: validated.websiteUrl || null,
+          })
+          .returning();
 
-      if (!newOrganization) {
-        throw new Error('Failed to create organization');
-      }
+        if (!newOrganization) {
+          throw new Error('Failed to create organization');
+        }
 
-      return newOrganization;
+        // Auto-create owner membership for the creating user
+        await tx.insert(organizationMemberships).values({
+          organizationId: newOrganization.id,
+          userId,
+          role: 'owner',
+          status: 'active',
+        });
+
+        return newOrganization;
+      });
     } catch (error) {
       // Diagnostic logging for debugging connection/constraint issues
       this.obs?.error('Organization creation failed', {
@@ -702,57 +715,69 @@ export class OrganizationService extends BaseService {
     status: string;
     joinedAt: Date;
   }> {
-    return await this.db.transaction(async (tx) => {
-      // Find user by email
-      const user = await tx.query.users.findFirst({
-        where: eq(users.email, input.email),
-        columns: { id: true },
-      });
-
-      if (!user) {
-        throw new NotFoundError('User not found', { email: input.email });
-      }
-
-      // Check if already a member
-      const existing = await tx.query.organizationMemberships.findFirst({
-        where: and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, user.id)
-        ),
-      });
-
-      if (existing) {
-        throw new ConflictError(
-          'User is already a member of this organization'
-        );
-      }
-
-      const [membership] = await tx
-        .insert(organizationMemberships)
-        .values({
-          organizationId,
-          userId: user.id,
-          role: input.role,
-          status: 'active',
-          invitedBy,
-        })
-        .returning();
-
-      if (!membership) {
-        throw new InternalServiceError('Failed to create membership', {
-          organizationId,
-          userId: user.id,
+    try {
+      return await this.db.transaction(async (tx) => {
+        // Find user by email
+        const user = await tx.query.users.findFirst({
+          where: eq(users.email, input.email),
+          columns: { id: true },
         });
-      }
 
-      return {
-        id: membership.id,
-        userId: membership.userId,
-        role: membership.role,
-        status: membership.status,
-        joinedAt: membership.createdAt,
-      };
-    });
+        if (!user) {
+          throw new NotFoundError('User not found by email', {
+            organizationId,
+          });
+        }
+
+        // Check if already a member
+        const existing = await tx.query.organizationMemberships.findFirst({
+          where: and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.userId, user.id)
+          ),
+        });
+
+        if (existing) {
+          throw new ConflictError(
+            'User is already a member of this organization'
+          );
+        }
+
+        const [membership] = await tx
+          .insert(organizationMemberships)
+          .values({
+            organizationId,
+            userId: user.id,
+            role: input.role,
+            status: 'active',
+            invitedBy,
+          })
+          .returning();
+
+        if (!membership) {
+          throw new InternalServiceError('Failed to create membership', {
+            organizationId,
+            userId: user.id,
+          });
+        }
+
+        return {
+          id: membership.id,
+          userId: membership.userId,
+          role: membership.role,
+          status: membership.status,
+          joinedAt: membership.createdAt,
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof NotFoundError ||
+        error instanceof ConflictError ||
+        error instanceof InternalServiceError
+      )
+        throw error;
+      throw wrapError(error, { organizationId });
+    }
   }
 
   /**
@@ -776,60 +801,69 @@ export class OrganizationService extends BaseService {
     status: string;
     joinedAt: Date;
   }> {
-    return await this.db.transaction(async (tx) => {
-      const membership = await tx.query.organizationMemberships.findFirst({
-        where: and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, userId)
-        ),
-      });
+    try {
+      return await this.db.transaction(async (tx) => {
+        const membership = await tx.query.organizationMemberships.findFirst({
+          where: and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.userId, userId)
+          ),
+        });
 
-      if (!membership) {
-        throw new MemberNotFoundError(userId);
-      }
+        if (!membership) {
+          throw new MemberNotFoundError(userId);
+        }
 
-      // Safety: If demoting from owner, check there's at least one other active owner
-      if (membership.role === 'owner' && role !== 'owner') {
-        const ownerCount = await tx
-          .select({ total: count() })
-          .from(organizationMemberships)
+        // Safety: If demoting from owner, check there's at least one other active owner
+        if (membership.role === 'owner' && role !== 'owner') {
+          const ownerCount = await tx
+            .select({ total: count() })
+            .from(organizationMemberships)
+            .where(
+              and(
+                eq(organizationMemberships.organizationId, organizationId),
+                eq(organizationMemberships.role, 'owner'),
+                eq(organizationMemberships.status, 'active')
+              )
+            );
+
+          const totalOwners = Number(ownerCount[0]?.total ?? 0);
+          if (totalOwners <= 1) {
+            throw new LastOwnerError();
+          }
+        }
+
+        const [updated] = await tx
+          .update(organizationMemberships)
+          .set({ role, updatedAt: new Date() })
           .where(
             and(
               eq(organizationMemberships.organizationId, organizationId),
-              eq(organizationMemberships.role, 'owner'),
-              eq(organizationMemberships.status, 'active')
+              eq(organizationMemberships.userId, userId)
             )
-          );
-
-        const totalOwners = Number(ownerCount[0]?.total ?? 0);
-        if (totalOwners <= 1) {
-          throw new LastOwnerError();
-        }
-      }
-
-      const [updated] = await tx
-        .update(organizationMemberships)
-        .set({ role, updatedAt: new Date() })
-        .where(
-          and(
-            eq(organizationMemberships.organizationId, organizationId),
-            eq(organizationMemberships.userId, userId)
           )
-        )
-        .returning();
+          .returning();
 
-      if (!updated) {
-        throw new MemberNotFoundError(userId);
-      }
+        if (!updated) {
+          throw new MemberNotFoundError(userId);
+        }
 
-      return {
-        id: updated.id,
-        userId: updated.userId,
-        role: updated.role,
-        status: updated.status,
-        joinedAt: updated.createdAt,
-      };
-    });
+        return {
+          id: updated.id,
+          userId: updated.userId,
+          role: updated.role,
+          status: updated.status,
+          joinedAt: updated.createdAt,
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof MemberNotFoundError ||
+        error instanceof LastOwnerError
+      )
+        throw error;
+      throw wrapError(error, { organizationId, userId });
+    }
   }
 
   /**
@@ -873,7 +907,8 @@ export class OrganizationService extends BaseService {
       }
 
       await tx
-        .delete(organizationMemberships)
+        .update(organizationMemberships)
+        .set({ status: 'inactive', updatedAt: new Date() })
         .where(
           and(
             eq(organizationMemberships.organizationId, organizationId),

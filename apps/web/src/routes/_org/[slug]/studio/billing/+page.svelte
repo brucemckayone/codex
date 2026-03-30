@@ -38,7 +38,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.billing_title()} | {data.org.name} Studio</title>
+  <title>{m.billing_title()} | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -150,7 +150,7 @@
     gap: var(--space-4);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .stats-grid {
       grid-template-columns: repeat(3, 1fr);
     }

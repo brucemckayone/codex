@@ -9,12 +9,19 @@
 import { getContactSettings } from '$lib/remote/settings.remote';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ parent }) => {
+export const load: PageServerLoad = async ({ parent, depends }) => {
+  depends('cache:studio-page:settings');
   const { orgId } = await parent();
 
-  const contact = await getContactSettings(orgId);
+  try {
+    const contact = await getContactSettings(orgId);
 
-  return {
-    contact,
-  };
+    return {
+      contact: contact ?? null,
+    };
+  } catch {
+    return {
+      contact: null,
+    };
+  }
 };

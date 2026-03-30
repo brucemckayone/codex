@@ -296,14 +296,14 @@
   padding-right: var(--space-4);
 }
 
-@media (min-width: 640px) {
+@media (--breakpoint-sm) {
   .container {
     padding-left: var(--space-6);
     padding-right: var(--space-6);
   }
 }
 
-@media (min-width: 1024px) {
+@media (--breakpoint-lg) {
   .container {
     padding-left: var(--space-8);
     padding-right: var(--space-8);

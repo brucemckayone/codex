@@ -12,7 +12,7 @@
 
 import { contentQuerySchema } from '@codex/validation';
 import { z } from 'zod';
-import { command, getRequestEvent, query } from '$app/server';
+import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,14 +103,14 @@ export const getContentBySlug = query(
     const api = createServerApi(platform, cookies);
 
     // First get the organization by slug
-    const orgResponse = await api.org.getBySlug(orgSlug);
-    if (!orgResponse?.data) {
+    const org = await api.org.getBySlug(orgSlug);
+    if (!org?.id) {
       throw new Error('Organization not found');
     }
 
     // Then get content filtered by org
     const params = new URLSearchParams();
-    params.set('organizationId', orgResponse.data.id);
+    params.set('organizationId', org.id);
     params.set('slug', contentSlug);
     params.set('limit', '1');
 
@@ -121,7 +121,7 @@ export const getContentBySlug = query(
       throw new Error('Content not found');
     }
 
-    return { data: content };
+    return content;
   }
 );
 
@@ -131,6 +131,7 @@ export const getContentBySlug = query(
 
 const publicContentQueryParamsSchema = z.object({
   orgId: z.string().uuid(),
+  slug: z.string().max(500).optional(),
   page: z.number().min(1).default(1).optional(),
   limit: z.number().min(1).max(50).default(20).optional(),
   contentType: z.enum(['video', 'audio', 'written']).optional(),
@@ -158,6 +159,7 @@ export const getPublicContent = query(
 
     const searchParams = new URLSearchParams();
     searchParams.set('orgId', params.orgId);
+    if (params.slug) searchParams.set('slug', params.slug);
     if (params.page) searchParams.set('page', String(params.page));
     if (params.limit) searchParams.set('limit', String(params.limit));
     if (params.contentType) searchParams.set('contentType', params.contentType);
@@ -264,6 +266,7 @@ const updateContentCommandSchema = z.object({
       .optional(),
     priceCents: z.number().int().min(0).optional().nullable(),
     organizationId: z.string().uuid().optional().nullable(),
+    mediaItemId: z.string().uuid().optional().nullable(),
     contentBody: z.string().optional().nullable(),
     category: z.string().optional().nullable(),
     tags: z.array(z.string()).optional(),
@@ -304,3 +307,145 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
   const api = createServerApi(platform, cookies);
   return api.content.delete(id);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content Form (progressive enhancement)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Helper: missing/empty strings → null for optional fields from FormData */
+const optionalString = z
+  .string()
+  .optional()
+  .default('')
+  .transform((v) => (v === '' ? null : v));
+
+/** Helper: missing/empty string → null for optional UUID fields */
+const optionalUuid = z
+  .string()
+  .optional()
+  .default('')
+  .transform((v) => (v === '' ? null : v))
+  .pipe(z.string().uuid().nullable());
+
+const createContentFormSchema = z.object({
+  organizationId: z.string().uuid(),
+  title: z.string().min(1, 'Title is required'),
+  slug: z.string().min(1, 'Slug is required'),
+  description: optionalString,
+  contentType: z.enum(['video', 'audio', 'written']),
+  mediaItemId: optionalUuid,
+  contentBody: optionalString,
+  visibility: z.enum(['public', 'private', 'members_only', 'purchased_only']),
+  price: z.string().transform((v) => {
+    const parsed = parseFloat(v || '0');
+    return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
+  }),
+});
+
+/**
+ * Create content form (progressive enhancement)
+ *
+ * Sends data to POST /api/content. Price input is in dollars,
+ * transformed to cents by the schema.
+ */
+export const createContentForm = form(
+  createContentFormSchema,
+  async ({
+    organizationId,
+    title,
+    slug,
+    description,
+    contentType,
+    mediaItemId,
+    contentBody,
+    visibility,
+    price,
+  }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    try {
+      const result = await api.content.create({
+        title,
+        slug,
+        description,
+        contentType,
+        mediaItemId,
+        contentBody,
+        visibility,
+        organizationId,
+        priceCents: price,
+      });
+
+      return { success: true as const, contentId: result.id };
+    } catch (error) {
+      return {
+        success: false as const,
+        error:
+          error instanceof Error ? error.message : 'Failed to create content',
+      };
+    }
+  }
+);
+
+const updateContentFormSchema = z.object({
+  contentId: z.string().uuid(),
+  organizationId: z.string().uuid(),
+  title: z.string().min(1, 'Title is required'),
+  slug: z.string().min(1, 'Slug is required'),
+  description: optionalString,
+  contentType: z.enum(['video', 'audio', 'written']),
+  mediaItemId: optionalUuid,
+  contentBody: optionalString,
+  visibility: z.enum(['public', 'private', 'members_only', 'purchased_only']),
+  price: z.string().transform((v) => {
+    const parsed = parseFloat(v || '0');
+    return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
+  }),
+});
+
+/**
+ * Update content form (progressive enhancement)
+ *
+ * Sends data to PATCH /api/content/:id.
+ */
+export const updateContentForm = form(
+  updateContentFormSchema,
+  async ({
+    contentId,
+    organizationId,
+    title,
+    slug,
+    description,
+    contentType,
+    mediaItemId,
+    contentBody,
+    visibility,
+    price,
+  }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    try {
+      const result = await api.content.update(contentId, {
+        title,
+        slug,
+        description,
+        contentType,
+        mediaItemId,
+        contentBody,
+        visibility,
+        organizationId,
+        priceCents: price,
+      });
+
+      return { success: true as const, data: result };
+    } catch (error) {
+      return {
+        success: false as const,
+        error:
+          error instanceof Error ? error.message : 'Failed to update content',
+      };
+    }
+  }
+);

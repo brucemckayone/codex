@@ -10,6 +10,9 @@
   <meta property="og:title" content="Pricing - Codex" />
   <meta property="og:description" content="Explore Codex pricing plans for creators and learners." />
   <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Pricing - Codex" />
+  <meta name="twitter:description" content="Explore Codex pricing plans for creators and learners." />
 </svelte:head>
 
 <div class="pricing">
@@ -91,7 +94,7 @@
     margin: 0 auto;
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .plans-grid {
       grid-template-columns: repeat(3, 1fr);
     }
@@ -169,7 +172,7 @@
 
   .plan-cta-primary {
     background-color: var(--color-primary-500);
-    color: white;
+    color: var(--color-text-inverse);
   }
 
   .plan-cta-primary:hover {

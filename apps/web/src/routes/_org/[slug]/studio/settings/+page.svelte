@@ -17,7 +17,16 @@
   let { data } = $props();
 
   const orgId = $derived(data.orgId);
-  const contact = $derived(data.contact);
+  const contact = $derived(data.contact ?? {
+    platformName: '',
+    supportEmail: '',
+    contactUrl: '',
+    timezone: 'UTC',
+    twitterUrl: '',
+    youtubeUrl: '',
+    instagramUrl: '',
+    tiktokUrl: '',
+  });
 
   // ─── Success/Error Messages ──────────────────────────────────────────────
 

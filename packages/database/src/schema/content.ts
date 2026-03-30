@@ -159,8 +159,10 @@ export const mediaItems = pgTable(
     // Transcoding Job Tracking
     runpodJobId: varchar('runpod_job_id', { length: 255 }), // RunPod job ID for tracking
     transcodingError: varchar('transcoding_error', { length: 2000 }), // Error message (max 2KB to prevent DoS)
-    transcodingAttempts: integer('transcoding_attempts').default(0).notNull(), // Retry count (max 1)
+    transcodingAttempts: integer('transcoding_attempts').default(0).notNull(), // Retry count (max 3, enforced by CHECK constraint)
     transcodingPriority: integer('transcoding_priority').default(2).notNull(), // 0=urgent, 2=normal, 4=backlog
+    transcodingProgress: integer('transcoding_progress'), // 0-100, null when not transcoding
+    transcodingStep: varchar('transcoding_step', { length: 50 }), // Current step label, null when not transcoding
 
     // Mezzanine/Archive (extensibility)
     mezzanineKey: varchar('mezzanine_key', { length: 500 }), // Archive-quality intermediate
@@ -212,6 +214,10 @@ export const mediaItems = pgTable(
     check(
       'check_max_transcoding_attempts',
       sql`${table.transcodingAttempts} >= 0 AND ${table.transcodingAttempts} <= 3`
+    ),
+    check(
+      'check_transcoding_progress_range',
+      sql`${table.transcodingProgress} IS NULL OR (${table.transcodingProgress} >= 0 AND ${table.transcodingProgress} <= 100)`
     ),
 
     // Media lifecycle constraint: status='ready' requires transcoding outputs

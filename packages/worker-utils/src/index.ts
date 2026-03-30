@@ -78,6 +78,7 @@ export {
   type MultipartProcedureContext,
   multipartProcedure,
   type OrganizationMembership,
+  PaginatedResult,
   type ProcedureConfig,
   type ProcedureContext,
   type ProcedureHandler,
@@ -102,7 +103,6 @@ export {
 export type {
   ErrorResponse,
   HealthCheckResponse,
-  SuccessResponse,
 } from './types';
 // Worker factory
 export {

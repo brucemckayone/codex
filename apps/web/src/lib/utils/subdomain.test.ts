@@ -22,6 +22,16 @@ describe('Subdomain Utilities', () => {
       expect(extractSubdomain('creators.localhost:3000')).toBe('creators');
     });
 
+    it('returns null for bare lvh.me', () => {
+      expect(extractSubdomain('lvh.me:3000')).toBeNull();
+      expect(extractSubdomain('lvh.me')).toBeNull();
+    });
+
+    it('returns subdomain from lvh.me', () => {
+      expect(extractSubdomain('bruce-studio.lvh.me:3000')).toBe('bruce-studio');
+      expect(extractSubdomain('creators.lvh.me:3000')).toBe('creators');
+    });
+
     it('handles www alias', () => {
       // Logic might return 'www' and let context handler deal with it
       expect(extractSubdomain('www.revelations.studio')).toBe('www');
@@ -39,6 +49,9 @@ describe('Subdomain Utilities', () => {
       expect(getSubdomainContext('localhost:3000')).toEqual({
         type: 'platform',
       });
+      expect(getSubdomainContext('lvh.me:3000')).toEqual({
+        type: 'platform',
+      });
     });
 
     it('identifies creators context', () => {
@@ -48,11 +61,22 @@ describe('Subdomain Utilities', () => {
       expect(getSubdomainContext('creators.localhost:3000')).toEqual({
         type: 'creators',
       });
+      expect(getSubdomainContext('creators.lvh.me:3000')).toEqual({
+        type: 'creators',
+      });
     });
 
     it('identifies organization context', () => {
       const result = getSubdomainContext('yoga-studio.revelations.studio');
       expect(result).toEqual({ type: 'organization', slug: 'yoga-studio' });
+    });
+
+    it('identifies organization context from lvh.me', () => {
+      const result = getSubdomainContext('bruce-studio.lvh.me:3000');
+      expect(result).toEqual({
+        type: 'organization',
+        slug: 'bruce-studio',
+      });
     });
 
     it('identifies reserved subdomains', () => {

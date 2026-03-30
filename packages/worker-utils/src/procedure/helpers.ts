@@ -401,29 +401,22 @@ export async function enforcePolicyInline(
     let organizationId: string | null = null;
     let skipMembershipCheck = false;
 
-    // Check if org ID is provided via URL param (e.g., :id in path)
+    // Check if org ID is provided via URL param (e.g., :id, :orgId, or :organizationId in path)
     const params = c.req.param();
-    const idParam = params.id;
+    const idParam = params.id || params.orgId || params.organizationId;
 
     if (idParam && uuidSchema.safeParse(idParam).success) {
-      // URL param org access is ONLY allowed for platform owners (superadmin)
-      if (user?.role !== AUTH_ROLES.PLATFORM_OWNER) {
-        throw new ForbiddenError(
-          'Organization access via URL parameter is not allowed',
-          {
-            organizationId: idParam,
-            userId: user.id,
-          }
-        );
-      }
-
-      // Platform owner - allow access to any org without membership check
       organizationId = idParam;
-      skipMembershipCheck = true;
-      obs?.info('Platform owner accessing org via param', {
-        organizationId,
-        userId: user.id,
-      });
+
+      // Platform owners bypass membership check (superadmin access to any org)
+      if (user?.role === AUTH_ROLES.PLATFORM_OWNER) {
+        skipMembershipCheck = true;
+        obs?.info('Platform owner accessing org via param', {
+          organizationId,
+          userId: user.id,
+        });
+      }
+      // Regular users: org ID resolved from URL param, membership check runs below
     }
 
     // Fall back to subdomain extraction for regular users
@@ -434,6 +427,20 @@ export async function enforcePolicyInline(
         c.env,
         obs
       );
+    }
+
+    // Fall back to organizationId query parameter (used by SSR server-to-worker calls
+    // where the request goes to localhost and subdomain extraction is unavailable).
+    // This is safe because the membership check below still validates the user's access.
+    if (!organizationId) {
+      const queryOrgId = c.req.query('organizationId');
+      if (queryOrgId && uuidSchema.safeParse(queryOrgId).success) {
+        organizationId = queryOrgId;
+        obs?.info('Organization resolved from query parameter', {
+          organizationId,
+          userId: user.id,
+        });
+      }
     }
 
     if (!organizationId) {

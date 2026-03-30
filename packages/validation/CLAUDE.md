@@ -158,6 +158,22 @@ createOrganizationSchema.parse({
 
 **Implementation**: The slug validation is built into `createOrganizationSchema` using `organizationSlugSchema` (internal to content-schemas.ts)
 
+## Strict Rules
+
+- **MUST** validate ALL user input (body, query, params) with Zod schemas via `procedure({ input })` — no unvalidated input reaches handlers
+- **MUST** use existing primitive schemas (`uuidSchema`, `slugSchema`, `urlSchema`, `emailSchema`) — NEVER write ad-hoc regex validation
+- **MUST** use `sanitizeSvgContent()` for ALL SVG uploads — SVGs without sanitization are XSS vectors
+- **MUST** use `urlSchema` for ALL user-provided URLs — blocks `javascript:`, `data:` protocols
+- **MUST** match Zod schema constraints to database column constraints (string lengths, enum values)
+- **MUST** validate org slugs against `RESERVED_SUBDOMAINS_SET` from `@codex/constants` (built into `createOrganizationSchema`)
+- **NEVER** write ad-hoc validation in route handlers — define schemas in this package
+- **NEVER** trust user input without validation, even in internal/admin endpoints
+
+## Integration
+
+- **Depends on**: Zod, `@codex/constants` (reserved subdomains)
+- **Used by**: `@codex/worker-utils` (procedure input validation), all service packages (defensive validation)
+
 ## Standards
 
 ### Validation Best Practices

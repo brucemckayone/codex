@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { LayoutUser } from '$lib/types';
+  import { page } from '$app/state';
+  import { buildCreatorsUrl } from '$lib/utils/subdomain';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
@@ -49,7 +51,7 @@
       <a href="/library">
         <DropdownMenuItem>Library</DropdownMenuItem>
       </a>
-      <a href="/studio">
+      <a href={buildCreatorsUrl(page.url, '/studio')}>
         <DropdownMenuItem>Studio</DropdownMenuItem>
       </a>
       <DropdownMenuSeparator />
@@ -93,7 +95,7 @@
     display: none;
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .user-name {
       display: inline;
     }

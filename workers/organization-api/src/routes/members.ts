@@ -21,7 +21,7 @@ import {
   userIdSchema,
   uuidSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -44,10 +44,11 @@ app.get(
       query: listMembersQuerySchema,
     },
     handler: async (ctx) => {
-      return await ctx.services.organization.listMembers(
+      const result = await ctx.services.organization.listMembers(
         ctx.input.params.id,
         ctx.input.query
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );

@@ -119,17 +119,19 @@ export function createAuthInstance(options: AuthConfigOptions) {
       env.WEB_APP_URL,
       env.API_URL,
       'http://localhost:42069', // Auth worker's own URL for E2E tests
+      'http://lvh.me:3000', // Dev app (cross-subdomain cookies)
+      'http://lvh.me:5173', // Vite dev server
     ].filter((url): url is string => Boolean(url)),
 
     // Cross-subdomain cookie support
-    // Allows sessions from localhost:3000 to work on {slug}.localhost:3000
+    // Allows sessions from lvh.me:3000 to work on {slug}.lvh.me:3000
     // In production: sessions from revelations.studio work on {slug}.revelations.studio
     advanced: {
       crossSubDomainCookies: {
         enabled: true,
         domain:
           env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
-            ? '.localhost'
+            ? `.${DOMAINS.DEV}` // .lvh.me — browsers accept this unlike .localhost
             : env.ENVIRONMENT === ENV_NAMES.TEST
               ? undefined // Tests use exact origin
               : `.${DOMAINS.PROD}`,

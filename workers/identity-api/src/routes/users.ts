@@ -51,11 +51,9 @@ app.post(
       );
 
       return {
-        data: {
-          avatarUrl: result.url,
-          size: result.size,
-          mimeType: result.mimeType,
-        },
+        avatarUrl: result.url,
+        size: result.size,
+        mimeType: result.mimeType,
       };
     },
   })

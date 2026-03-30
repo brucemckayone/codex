@@ -475,12 +475,20 @@ export class ContentAccessService {
 
     const offset = (input.page - 1) * input.limit;
 
+    // Build where conditions — always filter by customer + completed status
+    const conditions = [
+      eq(purchases.customerId, userId),
+      eq(purchases.status, 'completed'),
+    ];
+
+    // Optionally scope to a specific organization
+    if (input.organizationId) {
+      conditions.push(eq(purchases.organizationId, input.organizationId));
+    }
+
     // Step 1: Get purchases with content and media details
     const purchaseRecords = await db.query.purchases.findMany({
-      where: and(
-        eq(purchases.customerId, userId),
-        eq(purchases.status, 'completed')
-      ),
+      where: and(...conditions),
       with: {
         content: {
           with: {

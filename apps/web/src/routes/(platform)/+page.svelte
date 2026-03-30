@@ -148,7 +148,7 @@
     gap: var(--space-8);
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .feature-grid {
       grid-template-columns: repeat(3, 1fr);
     }

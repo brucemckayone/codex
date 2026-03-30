@@ -7,13 +7,13 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import * as m from '$paraglide/messages';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import ContentTable from '$lib/components/studio/ContentTable.svelte';
   import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
 
   let { data }: { data: PageData } = $props();
 
-  const orgSlug = $derived($page.params.slug);
+  const orgSlug = $derived(page.params.slug);
   const currentPage = $derived(data.content.pagination.page);
   const totalPages = $derived(
     Math.max(1, data.content.pagination.totalPages)
@@ -22,7 +22,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.studio_content_title()} | {orgSlug}</title>
+  <title>{m.studio_content_title()} | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -79,7 +79,7 @@
     gap: var(--space-4);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .page-header {
       flex-direction: row;
       align-items: center;

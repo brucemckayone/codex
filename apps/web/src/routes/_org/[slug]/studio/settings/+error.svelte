@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
 
-  const orgSlug = $derived($page.params.slug);
+  const orgSlug = $derived(page.params.slug);
 </script>
 
 <svelte:head>
@@ -22,8 +22,8 @@
     <h1 class="error-title">{m.settings_error_title()}</h1>
     <p class="error-description">{m.settings_error_description()}</p>
 
-    {#if $page.error?.message}
-      <p class="error-detail">{$page.error.message}</p>
+    {#if page.error?.message}
+      <p class="error-detail">{page.error.message}</p>
     {/if}
 
     <div class="error-actions">
@@ -109,15 +109,15 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .error-icon {
+  :global([data-theme='dark']) .error-icon {
     color: var(--color-text-muted-dark);
   }
 
-  [data-theme='dark'] .error-title {
+  :global([data-theme='dark']) .error-title {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .back-link {
+  :global([data-theme='dark']) .back-link {
     background-color: var(--color-surface-dark);
     border-color: var(--color-border-dark);
     color: var(--color-text-dark);

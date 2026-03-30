@@ -117,7 +117,14 @@ app.get('/api/test/verification-token/:email', async (c) => {
 
     return c.json({ token, email });
   } catch (error) {
-    console.error('[TEST] Failed to retrieve verification token:', error);
+    const obs = c.get('obs');
+    if (obs) {
+      obs.error('[TEST] Failed to retrieve verification token', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } else {
+      console.error('[TEST] Failed to retrieve verification token:', error);
+    }
     return c.json({ error: 'Failed to retrieve token' }, 500);
   }
 });
@@ -204,7 +211,14 @@ app.post('/api/test/fast-register', async (c) => {
       headers,
     });
   } catch (error) {
-    console.error('[TEST] fast-register failed:', error);
+    const obs = c.get('obs');
+    if (obs) {
+      obs.error('[TEST] fast-register failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } else {
+      console.error('[TEST] fast-register failed:', error);
+    }
     return c.json(
       {
         error: 'Fast registration failed',

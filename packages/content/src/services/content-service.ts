@@ -98,7 +98,10 @@ export class ContentService extends BaseService {
     try {
       await this.cachePurge.purgeByUrls([`${this.webAppUrl}/content/${slug}`]);
     } catch (error) {
-      console.error('Cache purge failed:', error);
+      this.obs.warn('Cache purge failed', {
+        slug,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

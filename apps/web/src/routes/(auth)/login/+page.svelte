@@ -26,16 +26,22 @@
   <title>{m.auth_signin_title()} | Codex</title>
 </svelte:head>
 
+<a href="/" class="auth-logo">codex</a>
+
 <h1>{m.auth_signin_title()}</h1>
 
-<form method="POST" use:enhance={handleSubmit}>
+<form method="POST" use:enhance={handleSubmit} class="auth-form">
+  {#if data.redirect}
+    <input type="hidden" name="redirect" value={data.redirect} />
+  {/if}
+
   {#if form?.error}
-    <div role="alert">
+    <div class="auth-error" role="alert">
       <p>{form.error}</p>
     </div>
   {/if}
 
-  <div>
+  <div class="field">
     <Label for="email">{m.auth_email_label()}</Label>
     <Input
       id="email"
@@ -47,7 +53,7 @@
     />
   </div>
 
-  <div>
+  <div class="field">
     <Label for="password">{m.auth_password_label()}</Label>
     <Input
       id="password"
@@ -58,22 +64,108 @@
     />
   </div>
 
-  <Button type="submit" {loading}>
+  <Button type="submit" {loading} class="auth-submit">
     {loading ? m.common_loading() : m.auth_signin_button()}
   </Button>
 
-  <a href="/forgot-password">
+  <a href="/forgot-password" class="forgot-link">
     {m.auth_forgot_password()}
   </a>
 </form>
 
-<div>
+<div class="divider">
   <span>{m.common_or()}</span>
 </div>
 
-<p>
+<p class="auth-footer">
   {m.auth_no_account()}
-  <a href="/register{data.redirect ? `?redirect=${encodeURIComponent(data.redirect)}` : ''}">
+  <a href="/register{data.redirect ? `?redirect=${encodeURIComponent(data.redirect)}` : ''}" class="auth-link">
     {m.auth_signup_link()}
   </a>
 </p>
+
+<style>
+  .auth-logo {
+    display: block;
+    font-family: var(--font-heading);
+    font-size: var(--text-xl);
+    font-weight: var(--font-bold);
+    color: var(--color-primary-500);
+    text-transform: lowercase;
+    letter-spacing: var(--tracking-tight);
+    margin-bottom: var(--space-6);
+  }
+
+  h1 {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
+    margin-bottom: var(--space-6);
+  }
+
+  .auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .auth-error {
+    padding: var(--space-3);
+    background-color: var(--color-error-50);
+    border: var(--border-width) var(--border-style) var(--color-error-200);
+    border-radius: var(--radius-md);
+    color: var(--color-error-700);
+    font-size: var(--text-sm);
+  }
+
+  :global(.auth-submit) {
+    width: 100%;
+  }
+
+  .forgot-link {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    text-align: center;
+  }
+
+  .forgot-link:hover {
+    color: var(--color-primary-500);
+  }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: var(--space-4) 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .divider::before,
+  .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--color-border);
+  }
+
+  .auth-footer {
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .auth-link {
+    color: var(--color-primary-500);
+    font-weight: var(--font-medium);
+  }
+
+  .auth-link:hover {
+    color: var(--color-primary-600);
+  }
+</style>

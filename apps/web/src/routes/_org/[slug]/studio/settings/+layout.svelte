@@ -10,18 +10,27 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { page } from '$app/stores';
+  import { navigating, page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { SETTINGS_NAV } from '$lib/config/navigation';
   import type { LayoutData } from './$types';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
-  const slug = $derived($page.params.slug);
+  const slug = $derived(page.params.slug);
 
   // Derive active tab from pathname
   const activeTab = $derived(
-    $page.url.pathname.endsWith('/branding') ? 'branding' : 'general'
+    page.url.pathname.endsWith('/branding') ? 'branding' : 'general'
+  );
+
+  // Derive loading tab from pending navigation
+  const loadingTab = $derived(
+    navigating?.to?.url.pathname?.endsWith('/branding')
+      ? 'branding'
+      : navigating?.to?.url.pathname?.endsWith('/settings')
+        ? 'general'
+        : null
   );
 
   // Map nav items to tab config with i18n labels
@@ -55,6 +64,7 @@
           href={tab.href}
           class="tab-trigger"
           class:active={activeTab === tab.value}
+          class:loading={loadingTab === tab.value}
           role="tab"
           aria-selected={activeTab === tab.value}
           aria-current={activeTab === tab.value ? 'page' : undefined}
@@ -125,6 +135,11 @@
     border-radius: var(--radius-sm);
   }
 
+  .tab-trigger.loading {
+    color: var(--color-text);
+    border-bottom-color: var(--color-neutral-300);
+  }
+
   .tab-trigger.active {
     color: var(--color-primary-500);
     border-bottom-color: var(--color-primary-500);
@@ -136,7 +151,7 @@
   }
 
   /* Mobile: stack tabs vertically */
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .tabs-list {
       flex-direction: column;
       gap: var(--space-1);
@@ -165,7 +180,7 @@
     border-bottom-color: var(--color-primary-400);
   }
 
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     :global([data-theme='dark']) .tab-trigger.active {
       background-color: var(--color-primary-900);
       border-bottom-color: transparent;

@@ -7,27 +7,23 @@
  */
 
 import { redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
 
 const LIBRARY_LIMIT = 12;
 
-/** Map URL sort param to API sortBy/sortOrder */
-function parseSortParam(sort: string | null): {
-  sortBy: 'addedAt' | 'title' | 'lastPlayed';
-  sortOrder: 'asc' | 'desc';
-} {
+/** Map URL sort param to API sortBy value (must match listUserLibrarySchema) */
+function parseSortParam(sort: string | null): 'recent' | 'title' | 'duration' {
   switch (sort) {
-    case 'watched':
-      return { sortBy: 'lastPlayed', sortOrder: 'desc' };
     case 'az':
-      return { sortBy: 'title', sortOrder: 'asc' };
     case 'za':
-      return { sortBy: 'title', sortOrder: 'desc' };
+      return 'title';
+    case 'watched':
     case 'recent':
     default:
-      return { sortBy: 'addedAt', sortOrder: 'desc' };
+      return 'recent';
   }
 }
 
@@ -51,16 +47,15 @@ export const load: PageServerLoad = async ({
     parseInt(url.searchParams.get('page') || '1', 10) || 1
   );
   const sortParam = url.searchParams.get('sort') ?? 'recent';
-  const { sortBy, sortOrder } = parseSortParam(sortParam);
+  const sortBy = parseSortParam(sortParam);
 
   const api = createServerApi(platform, cookies);
 
-  // Build query params
+  // Build query params (must match listUserLibrarySchema: page, limit, sortBy, filter)
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(LIBRARY_LIMIT));
   params.set('sortBy', sortBy);
-  params.set('sortOrder', sortOrder);
 
   try {
     const library = await api.access.getUserLibrary(params);
@@ -73,13 +68,18 @@ export const load: PageServerLoad = async ({
       },
       sort: sortParam,
       error: false,
+      errorCode: null as string | null,
     };
-  } catch (error) {
-    console.error('Failed to load library:', error);
+  } catch (err) {
+    const { ApiError } = await import('$lib/server/errors');
+    const code = err instanceof ApiError ? String(err.status) : 'UNKNOWN';
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to load library [${code}]: ${msg}`);
     return {
       library: { items: [], total: 0, page: 1, limit: LIBRARY_LIMIT },
       sort: sortParam,
       error: true,
+      errorCode: code,
     };
   }
 };

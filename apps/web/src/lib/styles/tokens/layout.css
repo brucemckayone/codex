@@ -7,8 +7,9 @@
   /* ========================================
    * BREAKPOINT TOKENS
    * ========================================
-   * Use in @media queries as: @media (min-width: var(--breakpoint-md))
-   * These match the breakpoint primitives defined in theme/tokens/primitives.css
+   * Use in @media queries as: @media (--breakpoint-md)
+   * See breakpoints.css for @custom-media definitions (processed by PostCSS at build time).
+   * CSS custom properties (var()) CANNOT be used in @media conditions.
    */
   --breakpoint-sm: 40rem;   /* 640px */
   --breakpoint-md: 48rem;   /* 768px */

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
 
   const statusConfig: Record<number, { title: () => string; description: () => string; icon: 'search' | 'lock' | 'warning' }> = {
@@ -20,15 +20,15 @@
     }
   };
 
-  const config = $derived(statusConfig[$page.status] ?? {
+  const config = $derived(statusConfig[page.status] ?? {
     title: () => m.errors_generic(),
-    description: () => $page.error?.message ?? m.errors_generic_description(),
+    description: () => page.error?.message ?? m.errors_generic_description(),
     icon: 'warning' as const
   });
 </script>
 
 <svelte:head>
-  <title>{$page.status} {config.title()} | Codex</title>
+  <title>{page.status} {config.title()} | Codex</title>
 </svelte:head>
 
 <div class="error-page">
@@ -54,18 +54,18 @@
       {/if}
     </div>
 
-    <h1 class="error-code">{$page.status}</h1>
+    <h1 class="error-code">{page.status}</h1>
     <h2 class="error-title">{config.title()}</h2>
     <p class="error-description">{config.description()}</p>
 
     <div class="error-actions">
       <a href="/" class="btn btn-primary">{m.errors_go_home()}</a>
 
-      {#if $page.status === 404}
+      {#if page.status === 404}
         <button class="btn btn-secondary" onclick={() => history.back()}>{m.errors_go_back()}</button>
-      {:else if $page.status === 403}
+      {:else if page.status === 403}
         <a href="/login" class="btn btn-secondary">{m.errors_sign_in()}</a>
-      {:else if $page.status === 500}
+      {:else if page.status === 500}
         <button class="btn btn-secondary" onclick={() => location.reload()}>{m.errors_try_again()}</button>
       {/if}
     </div>

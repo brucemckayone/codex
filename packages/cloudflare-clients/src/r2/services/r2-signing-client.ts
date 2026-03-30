@@ -13,6 +13,7 @@
 import {
   GetObjectCommand,
   HeadObjectCommand,
+  PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -52,6 +53,28 @@ export class R2SigningClient {
     const command = new GetObjectCommand({
       Bucket: this.bucketName,
       Key: r2Key,
+    });
+
+    return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });
+  }
+
+  /**
+   * Generate a presigned URL for uploading (PUT) an object to R2.
+   *
+   * @param r2Key - The object key in the bucket
+   * @param contentType - MIME type of the file being uploaded
+   * @param expirySeconds - URL validity in seconds (default: 3600 = 1 hour)
+   * @returns Presigned upload URL string
+   */
+  async generateSignedUploadUrl(
+    r2Key: string,
+    contentType: string,
+    expirySeconds = 3600
+  ): Promise<string> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucketName,
+      Key: r2Key,
+      ContentType: contentType,
     });
 
     return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });

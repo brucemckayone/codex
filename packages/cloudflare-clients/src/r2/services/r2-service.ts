@@ -1,6 +1,10 @@
 // r2-single-bucket.ts
 
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type {
   R2Bucket,
@@ -159,6 +163,36 @@ export class R2Service {
     const command = new GetObjectCommand({
       Bucket: this.bucketName,
       Key: r2Key,
+    });
+
+    return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });
+  }
+
+  /**
+   * Generate a presigned URL for uploading (PUT) an object to R2.
+   * Requires R2SigningConfig to be provided in constructor.
+   *
+   * @param r2Key - The object key in the bucket
+   * @param contentType - MIME type of the file being uploaded
+   * @param expirySeconds - URL validity in seconds (default: 3600 = 1 hour)
+   * @returns Presigned upload URL string
+   */
+  async generateSignedUploadUrl(
+    r2Key: string,
+    contentType: string,
+    expirySeconds = 3600
+  ): Promise<string> {
+    if (!this.s3Client || !this.bucketName) {
+      throw new Error(
+        'R2 signing config required for presigned URLs. ' +
+          'Provide R2SigningConfig (accountId, accessKeyId, secretAccessKey, bucketName) in constructor.'
+      );
+    }
+
+    const command = new PutObjectCommand({
+      Bucket: this.bucketName,
+      Key: r2Key,
+      ContentType: contentType,
     });
 
     return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });

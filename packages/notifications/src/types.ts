@@ -12,7 +12,11 @@ import type {
   TemplateScope,
   TemplateStatus,
 } from '@codex/database/schema';
-import type { SingleItemResponse } from '@codex/shared-types';
+import type {
+  PaginationParams,
+  SingleItemResponse,
+  SortOrder,
+} from '@codex/shared-types';
 import type { EmailProvider, SendResult } from './providers/types';
 
 // ============================================================================
@@ -31,21 +35,8 @@ export type TestSendResponse = SingleItemResponse<SendResult>;
 
 export type Database = typeof dbHttp | typeof dbWs;
 
-/**
- * Transaction type for Drizzle ORM
- * Used for multi-step database operations
- */
-export type DatabaseTransaction = Parameters<
-  Parameters<typeof dbHttp.transaction>[0]
->[0];
-
-/**
- * Configuration for service initialization
- */
-export interface ServiceConfig {
-  db: Database;
-  environment: string;
-}
+import type { ServiceConfig } from '@codex/service-errors';
+export type { ServiceConfig };
 
 /**
  * Configuration for NotificationsService initialization
@@ -67,36 +58,7 @@ export interface NotificationsServiceConfig extends ServiceConfig {
   };
 }
 
-/**
- * Pagination parameters for list queries
- */
-export interface PaginationParams {
-  page: number;
-  limit: number;
-}
-
-/**
- * Pagination metadata in responses
- */
-export interface PaginationMetadata {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
-/**
- * Paginated response structure
- */
-export interface PaginatedResponse<T> {
-  items: T[];
-  pagination: PaginationMetadata;
-}
-
-/**
- * Sort order enum
- */
-export type SortOrder = 'asc' | 'desc';
+export type { PaginationParams, SortOrder };
 
 /**
  * Template query filters
@@ -140,3 +102,12 @@ export type {
  * Re-export database types for convenience
  */
 export type { EmailTemplate, NewEmailTemplate, TemplateScope, TemplateStatus };
+
+/**
+ * Response for GET/PUT /api/user/notification-preferences
+ */
+export interface NotificationPreferencesResponse {
+  emailMarketing: boolean;
+  emailTransactional: boolean;
+  emailDigest: boolean;
+}

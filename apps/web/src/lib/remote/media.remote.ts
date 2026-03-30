@@ -63,29 +63,17 @@ export const listMedia = query(mediaListQuerySchema, async (params) => {
 
 const createMediaSchema = z.object({
   title: z.string().min(1).max(255),
+  description: z.string().max(2000).optional(),
   mediaType: z.enum(['video', 'audio']),
   mimeType: z.string().min(1),
   fileSizeBytes: z.number().int().min(1),
-  r2Key: z.string().min(1),
 });
 
 /**
  * Create a new media item
  *
- * Returns the created media item (with ID for subsequent upload).
- *
- * Usage:
- * ```svelte
- * <script>
- *   const result = await createMedia({
- *     title: 'My Video',
- *     mediaType: 'video',
- *     mimeType: 'video/mp4',
- *     fileSizeBytes: 1024000,
- *     r2Key: 'originals/abc/video.mp4',
- *   });
- * </script>
- * ```
+ * Returns the created media item with presigned upload URL.
+ * The r2Key is generated server-side (creator-scoped via paths.ts SSOT).
  */
 export const createMedia = command(createMediaSchema, async (data) => {
   const { platform, cookies } = getRequestEvent();
@@ -93,6 +81,31 @@ export const createMedia = command(createMediaSchema, async (data) => {
 
   return api.media.create(data as Record<string, unknown>);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Upload Media File Command (fallback for local dev without presigned URLs)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const uploadMediaSchema = z.object({
+  mediaId: z.string().uuid(),
+  file: z.instanceof(File),
+});
+
+/**
+ * Upload a media file to R2 via the content-api worker.
+ *
+ * Used as a fallback when presigned URLs are unavailable (local dev).
+ * In production, the client PUTs directly to the presigned R2 URL instead.
+ */
+export const uploadMedia = command(
+  uploadMediaSchema,
+  async ({ mediaId, file }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    return api.media.upload(mediaId, file);
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update Media Command
@@ -134,6 +147,24 @@ export const deleteMedia = command(z.string().uuid(), async (id) => {
   await api.media.delete(id);
   return { success: true };
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transcoding Status Query
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get transcoding status and progress for a media item
+ * Used by MediaCard to poll progress during transcoding
+ */
+export const getTranscodingStatus = query(
+  z.string().uuid(),
+  async (mediaId) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    return api.media.transcodingStatus(mediaId);
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Complete Upload Command

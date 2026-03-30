@@ -3,6 +3,9 @@
 .env.*
 **/.env
 **/.env.*
+
+# Vite temp files
+**/vite.config.ts.timestamp-*.mjs
 .dev.vars
 .dev.vars.*
 **/.dev.vars

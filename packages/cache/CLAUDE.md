@@ -278,6 +278,20 @@ describe('VersionedCache', () => {
 });
 ```
 
+## Strict Rules
+
+- **MUST** invalidate AFTER successful database update — NEVER before (risks serving stale data if DB write fails)
+- **MUST** use `CacheType` enum for cache keys — NEVER construct cache keys manually
+- **MUST** provide a `fetcher` function for cache-aside — the fetcher is the authoritative data source
+- **MUST** use fire-and-forget for cache writes — NEVER block responses on cache operations
+- **NEVER** cache auth/session decisions, access control, or prices client-side
+- **NEVER** throw errors from cache operations — always degrade gracefully to fetcher
+
+## Integration
+
+- **Depends on**: Cloudflare KV, `@codex/observability` (optional logging)
+- **Used by**: Workers (server-side caching), web app (version invalidation lifecycle)
+
 ## Files
 
 - `src/versioned-cache.ts`: Main VersionedCache class

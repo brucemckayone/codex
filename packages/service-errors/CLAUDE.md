@@ -41,9 +41,10 @@ export class ContentService extends BaseService {
     super(config); // Initializes db, environment, obs
   }
 
-  async getContent(id: string) {
+  async getContent(id: string, creatorId: string) {
+    // ALWAYS scope queries — see @codex/database CLAUDE.md
     const content = await this.db.query.content.findFirst({
-      where: eq(schema.content.id, id)
+      where: and(eq(schema.content.id, id), scopedNotDeleted(schema.content, creatorId))
     });
     if (!content) {
       throw new NotFoundError('Content not found', { contentId: id });
@@ -173,6 +174,30 @@ try {
   this.handleError(err, 'external-api-call'); // Wraps as InternalServiceError
 }
 ```
+
+## Strict Rules
+
+- **MUST** throw typed `ServiceError` subclasses — NEVER throw raw strings or generic `Error`
+- **MUST** extend `BaseService` for all service classes — provides `db`, `environment`, `obs`
+- **MUST** include correlation IDs in error context (`contentId`, `userId`, `organizationId`)
+- **MUST** use `handleError()` for wrapping unknown/external errors
+- **MUST** let errors propagate to `procedure()` — it calls `mapErrorToResponse()` automatically
+- **NEVER** catch and swallow errors in services — let them propagate
+- **NEVER** catch inside `db.transaction()` unless you want partial commit
+- **NEVER** include PII in error context (passwords, emails, tokens)
+- **NEVER** expose internal details in error messages (DB URLs, SQL, stack traces)
+
+## Integration
+
+- **Depends on**: `@codex/database`, `@codex/observability`
+- **Used by**: All service packages, `@codex/worker-utils` (`mapErrorToResponse`)
+
+## Reference Files
+
+- `packages/service-errors/src/base-errors.ts` — `ServiceError` and all error subclasses
+- `packages/service-errors/src/error-mapper.ts` — `mapErrorToResponse`
+- `packages/service-errors/src/base-service.ts` — `BaseService` abstract class
+- `packages/service-errors/src/helpers.ts` — `wrapError`, `isServiceError`, `isKnownError`
 
 ### In Workers (HTTP Layer)
 **Let `procedure()` handle errors automatically**. If using `procedure()` from `@codex/worker-utils`, errors are auto-mapped:

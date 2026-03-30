@@ -5,11 +5,21 @@
   Displays the org's identity and up to 6 newest content items.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { hydrateIfNeeded } from '$lib/collections';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
+
+  // Seed content collection with SSR data so subsequent navigations
+  // (e.g., content detail → back) find metadata already cached.
+  onMount(() => {
+    if (data.featuredContent?.length) {
+      hydrateIfNeeded('content', data.featuredContent);
+    }
+  });
 
   const brandPrimary = $derived(data.org?.brandColors?.primary ?? '#6366f1');
   const brandSecondary = $derived(data.org?.brandColors?.secondary ?? '#4f46e5');
@@ -29,6 +39,11 @@
   <meta property="og:type" content="website" />
   {#if logoUrl}
     <meta property="og:image" content={logoUrl} />
+  {/if}
+  <meta name="twitter:card" content={logoUrl ? 'summary_large_image' : 'summary'} />
+  <meta name="twitter:title" content={orgName} />
+  {#if orgDescription}
+    <meta name="twitter:description" content={orgDescription} />
   {/if}
 </svelte:head>
 
@@ -228,13 +243,13 @@
     gap: var(--space-6, 1.5rem);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .featured__grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .featured__grid {
       grid-template-columns: repeat(3, 1fr);
     }
@@ -269,7 +284,7 @@
   }
 
   /* ── Responsive Hero ── */
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .hero {
       padding: var(--space-10, 2.5rem) var(--space-4, 1rem);
     }

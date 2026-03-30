@@ -165,7 +165,14 @@ export function createEnvValidationMiddleware(config: EnvValidationConfig) {
         validated = true;
       } catch (error) {
         // Log error and return 500 - worker cannot function without required vars
-        console.error(error);
+        const obs = c.get('obs');
+        if (obs) {
+          obs.error('Environment validation failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } else {
+          console.error(error);
+        }
         return c.json(
           {
             error: {

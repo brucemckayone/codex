@@ -9,7 +9,7 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import { optionalUrlSchema, uuidSchema } from '@codex/validation';
+import { uuidSchema } from '@codex/validation';
 import { invalid, isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { form, getRequestEvent, query } from '$app/server';
@@ -21,19 +21,11 @@ import { ApiError } from '$lib/server/errors';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Helper schema for optional text fields
- * Converts empty strings to undefined before validation
- * This allows form fields to be left blank without validation errors
- */
-const optionalTextField = (max: number) =>
-  z
-    .string()
-    .transform((val) => (val === '' ? undefined : val))
-    .pipe(z.string().max(max).optional());
-
-/**
  * Profile update form schema
- * Social links are now truly optional - empty strings are treated as undefined
+ *
+ * Uses simple Zod types (no .transform().pipe()) so SvelteKit's form()
+ * can introspect field types for the remote function export marker.
+ * Empty-string → undefined conversion is handled in the form handler instead.
  */
 const updateProfileFormSchema = z.object({
   displayName: z
@@ -50,11 +42,15 @@ const updateProfileFormSchema = z.object({
       'Username must be lowercase letters, numbers, and hyphens'
     )
     .optional(),
-  bio: optionalTextField(500),
-  website: optionalUrlSchema('Invalid website URL'),
-  twitter: optionalUrlSchema('Invalid Twitter URL'),
-  youtube: optionalUrlSchema('Invalid YouTube URL'),
-  instagram: optionalUrlSchema('Invalid Instagram URL'),
+  bio: z.string().max(500).optional(),
+  website: z.string().url('Invalid website URL').or(z.literal('')).optional(),
+  twitter: z.string().url('Invalid Twitter URL').or(z.literal('')).optional(),
+  youtube: z.string().url('Invalid YouTube URL').or(z.literal('')).optional(),
+  instagram: z
+    .string()
+    .url('Invalid Instagram URL')
+    .or(z.literal(''))
+    .optional(),
 });
 
 const updateNotificationsFormSchema = z.object({
@@ -87,16 +83,19 @@ export const updateProfileForm = form(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
+    // Convert empty strings to undefined (form fields submit '' when blank)
+    const emptyToUndef = (v: string | undefined) => (v === '' ? undefined : v);
+
     try {
       const response = await api.account.updateProfile({
         displayName,
         username,
-        bio,
+        bio: emptyToUndef(bio),
         socialLinks: {
-          website: website,
-          twitter: twitter,
-          youtube: youtube,
-          instagram: instagram,
+          website: emptyToUndef(website),
+          twitter: emptyToUndef(twitter),
+          youtube: emptyToUndef(youtube),
+          instagram: emptyToUndef(instagram),
         },
       });
 
@@ -104,7 +103,7 @@ export const updateProfileForm = form(
 
       return {
         success: true,
-        data: response.data,
+        data: response,
       };
     } catch (error) {
       // Handle field-level validation errors from the backend.
@@ -194,9 +193,12 @@ export const getProfile = query(async () => {
 
   try {
     const response = await api.account.getProfile();
-    return response.data;
-  } catch {
-    return null;
+    return response;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
   }
 });
 
@@ -222,14 +224,16 @@ export const getNotificationPreferences = query(async () => {
 
   try {
     const response = await api.account.getNotificationPreferences();
-    return response.data;
-  } catch {
-    // Return defaults if not set
-    return {
-      emailMarketing: false,
-      emailTransactional: true,
-      emailDigest: false,
-    };
+    return response;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return {
+        emailMarketing: false,
+        emailTransactional: true,
+        emailDigest: false,
+      };
+    }
+    throw error;
   }
 });
 
@@ -269,12 +273,12 @@ export const portalSessionForm = form(z.object({}), async (_data) => {
     });
 
     // Validate the redirect URL to prevent open redirect attacks
-    const portalUrl = new URL(result.data.url);
+    const portalUrl = new URL(result.url);
     if (!portalUrl.hostname.endsWith('.stripe.com')) {
       throw new Error('Invalid billing portal URL');
     }
 
-    redirect(303, result.data.url);
+    redirect(303, result.url);
   } catch (error) {
     if (isRedirect(error)) throw error;
     return {

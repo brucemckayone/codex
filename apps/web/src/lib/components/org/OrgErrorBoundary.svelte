@@ -7,7 +7,7 @@
   @prop {OrganizationData | null} org - Organization data for context
 -->
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import type { OrganizationData } from '$lib/types';
 
@@ -43,7 +43,7 @@
   };
 
   const config = $derived(
-    statusConfig[$page.status] ?? {
+    statusConfig[page.status] ?? {
       titleKey: 'org_error_unknown',
       descriptionKey: 'org_error_unknown_description',
       icon: 'warning',
@@ -65,7 +65,7 @@
 </script>
 
 <svelte:head>
-  <title>{$page.status} {getMessage(config.titleKey)} | {org?.name ?? 'Org'}</title>
+  <title>{page.status} {getMessage(config.titleKey)} | {org?.name ?? 'Org'}</title>
 </svelte:head>
 
 <div class="org-error-page" role="alert" aria-live="polite">
@@ -74,16 +74,16 @@
       {@html icons[config.icon]}
     </div>
 
-    <h1 class="error-code">{$page.status}</h1>
+    <h1 class="error-code">{page.status}</h1>
     <h2 class="error-title">{getMessage(config.titleKey)}</h2>
     <p class="error-description">{getMessage(config.descriptionKey)}</p>
 
-    {#if $page.error?.message}
-      <p class="error-detail">{$page.error.message}</p>
+    {#if page.error?.message}
+      <p class="error-detail">{page.error.message}</p>
     {/if}
 
     <div class="error-actions">
-      {#if $page.status === 401 || $page.status === 403}
+      {#if page.status === 401 || page.status === 403}
         <a href="/login" class="btn btn-primary">{getMessage(config.actionKey)}</a>
       {:else}
         <a href={homeUrl} class="btn btn-primary">{getMessage(config.actionKey)}</a>
@@ -202,34 +202,34 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .org-error-page {
+  :global([data-theme='dark']) .org-error-page {
     background: var(--color-background-dark);
   }
 
-  [data-theme='dark'] .org-error-card {
+  :global([data-theme='dark']) .org-error-card {
     background: var(--color-surface-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .error-icon {
+  :global([data-theme='dark']) .error-icon {
     color: var(--color-text-muted-dark);
   }
 
-  [data-theme='dark'] .error-code,
-  [data-theme='dark'] .error-title {
+  :global([data-theme='dark']) .error-code,
+  :global([data-theme='dark']) .error-title {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .error-description {
+  :global([data-theme='dark']) .error-description {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .btn-secondary {
+  :global([data-theme='dark']) .btn-secondary {
     border-color: var(--color-border-dark);
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .btn-secondary:hover {
+  :global([data-theme='dark']) .btn-secondary:hover {
     background: var(--color-surface-variant);
     color: var(--color-text-dark);
   }

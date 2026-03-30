@@ -9,16 +9,30 @@
 	import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
 	import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
 
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
 
 	// Use server-loaded profile data (no client-side fetch needed)
 	let { data } = $props();
 	const profile = $derived(data.profile);
 
+	// Track email separately since it's a read-only field not managed by form()
+	let email = $state('');
+	$effect(() => {
+		if (profile?.email) email = profile.email;
+	});
+
 	// Avatar preview state
-	let avatarPreview = $state(profile?.image as string | null);
+	let avatarPreview = $state<string | null>(null);
 	let hasSelectedFile = $state(false);
 	let fileInput: HTMLInputElement;
+
+	// Sync avatar preview with server profile (unless user has selected a file)
+	$effect(() => {
+		if (!hasSelectedFile) {
+			avatarPreview = profile?.image ?? null;
+		}
+	});
 
 	const showDeleteAvatar = $derived(!!avatarPreview && !hasSelectedFile);
 
@@ -49,6 +63,7 @@
 	// Success message state
 	let showSuccess = $state(false);
 	let successTimeout: ReturnType<typeof setTimeout> | null = null;
+	let lastHandledResult: unknown = null;
 
 	function showSuccessMessage() {
 		showSuccess = true;
@@ -60,15 +75,35 @@
 		if (successTimeout) clearTimeout(successTimeout);
 	});
 
-	// Sync state after profile update
+	// Repopulate form and show success after profile update
 	$effect(() => {
-		if (updateProfileForm.result?.success && !updateProfileForm.pending) {
+		const result = updateProfileForm.result;
+		if (result?.success && !updateProfileForm.pending && result !== lastHandledResult) {
+			lastHandledResult = result;
 			showSuccessMessage();
-			// Sync avatar preview if it was updated
-			const resultData = updateProfileForm.result.data;
-			if (resultData?.image) {
-				avatarPreview = resultData.image  ?? avatarPreview;
+			// Re-run all server loads so the header picks up the new name/image
+			void invalidateAll();
+			if (result.data?.image) {
+				avatarPreview = result.data.image;
 			}
+			// Repopulate after form's internal reset completes.
+			// Use setTimeout to ensure this runs after SvelteKit's form reset cycle.
+			setTimeout(() => {
+				const d = result.data;
+				if (d) {
+					updateProfileForm.fields.set({
+						displayName: d.name ?? '',
+						username: d.username ?? '',
+						bio: d.bio ?? '',
+						website: d.socialLinks?.website ?? '',
+						twitter: d.socialLinks?.twitter ?? '',
+						youtube: d.socialLinks?.youtube ?? '',
+						instagram: d.socialLinks?.instagram ?? '',
+					});
+					// Also restore the read-only email field
+					if (d.email) email = d.email;
+				}
+			}, 100);
 		}
 	});
 
@@ -81,6 +116,7 @@
 			}
 			hasSelectedFile = false;
 			if (fileInput) fileInput.value = '';
+			void invalidateAll();
 		}
 	});
 
@@ -89,26 +125,28 @@
 		if (avatarDeleteForm.result?.success && !avatarDeleteForm.pending) {
 			avatarPreview = null;
 			hasSelectedFile = false;
+			void invalidateAll();
 		}
 	});
 
-	// Destructure form fields for cleaner template
+	// Destructure form fields for template binding
 	const { displayName, username, bio, website, twitter, youtube, instagram } =
 		updateProfileForm.fields;
 
-
-		// Populate form fields once with initial profile data
-	if (profile) {
-		updateProfileForm.fields.set({
-			displayName: profile.name,
-			username: profile.username,
-			bio: profile.bio,
-			website: profile.socialLinks?.website ?? undefined,
-			twitter: profile.socialLinks?.twitter ?? undefined,
-			youtube: profile.socialLinks?.youtube ?? undefined,
-			instagram: profile.socialLinks?.instagram ?? undefined,
-		});
-	}
+	// Populate form fields from profile data on mount and after load re-runs
+	$effect(() => {
+		if (profile) {
+			updateProfileForm.fields.set({
+				displayName: profile.name ?? '',
+				username: profile.username ?? '',
+				bio: profile.bio ?? '',
+				website: profile.socialLinks?.website ?? '',
+				twitter: profile.socialLinks?.twitter ?? '',
+				youtube: profile.socialLinks?.youtube ?? '',
+				instagram: profile.socialLinks?.instagram ?? '',
+			});
+		}
+	});
 </script>
 
 <svelte:head>
@@ -238,7 +276,7 @@
 		<!-- Email (read-only) -->
 		<div class="form-group">
 			<Label for="email">{m.account_email()}</Label>
-			<Input id="email" name="email" value={profile?.email ?? ''} disabled />
+			<Input id="email" name="email" bind:value={email} disabled />
 			<p class="form-help">{m.account_email_change_disclaimer()}</p>
 		</div>
 
@@ -402,7 +440,7 @@
 		align-items: flex-start;
 	}
 
-	@media (min-width: 640px) {
+	@media (--breakpoint-sm) {
 		.avatar-container {
 			flex-direction: row;
 			align-items: center;

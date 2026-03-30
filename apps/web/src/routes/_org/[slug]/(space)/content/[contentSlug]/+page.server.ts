@@ -1,73 +1,116 @@
 /**
- * Content detail page - server load
+ * Content detail page - server load + checkout action
  *
  * Fetches content by slug, checks user access, and optionally
  * loads streaming URL and playback progress.
+ *
+ * Form actions:
+ * - purchase: Creates a Stripe checkout session and returns the redirect URL
  */
-import { error } from '@sveltejs/kit';
-import { getContentBySlug } from '$lib/remote/content.remote';
+import { error, fail } from '@sveltejs/kit';
+import { getPublicContent } from '$lib/remote/content.remote';
 import {
   getPlaybackProgress,
   getStreamingUrl,
 } from '$lib/remote/library.remote';
+import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
-import type { PageServerLoad } from './$types';
+import { ApiError } from '$lib/server/errors';
+import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, parent, setHeaders }) => {
-  const { org } = await parent();
+  const parentData = await parent();
+  const { org } = parentData;
   const { contentSlug } = params;
 
-  // Always private — response varies by auth state
-  setHeaders(CACHE_HEADERS.PRIVATE);
+  // Public visitors get CDN caching; authenticated responses vary by access state
+  setHeaders(
+    parentData.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
+  );
 
-  // Fetch content by org + content slug
-  const contentResult = await getContentBySlug({
-    orgSlug: org.slug,
-    contentSlug,
+  // Fetch content via public endpoint with org.id + slug — 1 API call.
+  // The old getContentBySlug() made 2 sequential HTTP calls:
+  //   1. api.org.getBySlug(orgSlug) — redundant (org already resolved by layout)
+  //   2. api.content.list({ organizationId, slug })
+  // Now: single public call, no auth needed, CDN-cacheable.
+  const contentResult = await getPublicContent({
+    orgId: org.id,
+    slug: contentSlug,
+    limit: 1,
   }).catch(() => null);
 
-  const content = contentResult?.data;
+  const content = contentResult?.items?.[0];
   if (!content) {
     error(404, 'Content not found');
   }
 
-  // Check access for logged-in users
-  let hasAccess = false;
-  let streamingUrl: string | null = null;
-  let progress: {
-    positionSeconds: number;
-    durationSeconds: number;
-    completed: boolean;
-  } | null = null;
-
-  const parentData = await parent();
-  if (parentData.user) {
-    try {
-      const streamResult = await getStreamingUrl(content.id);
-      if (streamResult?.streamingUrl) {
-        hasAccess = true;
-        streamingUrl = streamResult.streamingUrl;
-
-        // Only fetch progress if user has access
-        const progressResult = await getPlaybackProgress(content.id);
-        if (progressResult) {
-          progress = {
-            positionSeconds: progressResult.positionSeconds,
-            durationSeconds: progressResult.durationSeconds,
-            completed: progressResult.completed,
-          };
-        }
-      }
-    } catch {
-      // Access denied or error — user doesn't have access
-      hasAccess = false;
-    }
+  // For unauthenticated visitors, return immediately — no access checks needed
+  if (!parentData.user) {
+    return { content, hasAccess: false, streamingUrl: null, progress: null };
   }
 
-  return {
-    content,
-    hasAccess,
-    streamingUrl,
-    progress,
-  };
+  // For authenticated users, fetch streaming URL + progress in parallel.
+  // Previously these were sequential (streaming URL → then progress).
+  // getStreamingUrl doubles as access check (returns null if no access).
+  const [streamResult, progressResult] = await Promise.all([
+    getStreamingUrl(content.id).catch(() => null),
+    getPlaybackProgress(content.id).catch(() => null),
+  ]);
+
+  const hasAccess = !!streamResult?.streamingUrl;
+  const streamingUrl = streamResult?.streamingUrl ?? null;
+  const progress = progressResult
+    ? {
+        positionSeconds: progressResult.positionSeconds,
+        durationSeconds: progressResult.durationSeconds,
+        completed: progressResult.completed,
+      }
+    : null;
+
+  return { content, hasAccess, streamingUrl, progress };
+};
+
+export const actions: Actions = {
+  /**
+   * Create a Stripe checkout session for content purchase.
+   *
+   * Returns { sessionUrl } on success for client-side redirect to Stripe.
+   * The successUrl points to /checkout/success on the same org subdomain.
+   * The cancelUrl returns the user to this content detail page.
+   */
+  purchase: async ({ request, url, params, platform, cookies }) => {
+    const api = createServerApi(platform, cookies);
+    const formData = await request.formData();
+    const contentId = formData.get('contentId');
+
+    if (!contentId || typeof contentId !== 'string') {
+      return fail(400, { checkoutError: 'Missing content ID' });
+    }
+
+    const origin = url.origin;
+    // Stripe replaces {CHECKOUT_SESSION_ID} with the real session ID at redirect time.
+    // contentSlug lets the success page link back to the content detail.
+    const successUrl = `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&contentSlug=${encodeURIComponent(params.contentSlug)}`;
+    const cancelUrl = url.href;
+
+    try {
+      const result = await api.checkout.create({
+        contentId,
+        successUrl,
+        cancelUrl,
+      });
+
+      return { sessionUrl: result.sessionUrl };
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        return fail(409, {
+          checkoutError: 'You already have access to this content.',
+        });
+      }
+
+      return fail(500, {
+        checkoutError: 'Failed to create checkout session. Please try again.',
+      });
+    }
+  },
 };

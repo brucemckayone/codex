@@ -9,24 +9,85 @@ import type { SessionData, UserData } from '@codex/shared-types';
 
 // Re-export database types
 export type { Content, Organization, User } from '@codex/database/schema';
-// Re-export admin types from @codex/shared-types (single source of truth)
 // Re-export shared types
 export type {
-  AdminContentItem,
-  AdminContentStatus,
-  CustomerDetails,
-  CustomerStats,
-  CustomerWithStats,
-  DailyRevenue,
   ErrorResponse,
   PaginatedListResponse,
-  PurchaseHistoryItem,
-  RevenueStats,
   SessionData,
   SingleItemResponse,
-  TopContentItem,
   UserData,
 } from '@codex/shared-types';
+
+// Admin domain types — defined locally to avoid cycle (test-utils can't depend on @codex/admin)
+// Canonical definitions live in @codex/admin/src/types.ts
+export type AdminContentStatus = 'draft' | 'published' | 'archived';
+
+export interface AdminContentItem {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  status: AdminContentStatus;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  publishedAt: Date | string | null;
+  creator?: { id: string; email: string; name: string | null };
+}
+
+export interface DailyRevenue {
+  date: string;
+  revenueCents: number;
+  purchaseCount: number;
+}
+
+export interface RevenueStats {
+  totalRevenueCents: number;
+  totalPurchases: number;
+  averageOrderValueCents: number;
+  platformFeeCents: number;
+  organizationFeeCents: number;
+  creatorPayoutCents: number;
+  revenueByDay: DailyRevenue[];
+}
+
+export interface CustomerStats {
+  totalCustomers: number;
+  newCustomersLast30Days: number;
+}
+
+export interface TopContentItem {
+  contentId: string;
+  contentTitle: string;
+  revenueCents: number;
+  purchaseCount: number;
+}
+
+export interface CustomerWithStats {
+  userId: string;
+  email: string;
+  name: string | null;
+  createdAt: Date | string;
+  totalPurchases: number;
+  totalSpentCents: number;
+}
+
+export interface PurchaseHistoryItem {
+  purchaseId: string;
+  contentId: string;
+  contentTitle: string;
+  amountPaidCents: number;
+  purchasedAt: Date | string;
+}
+
+export interface CustomerDetails {
+  userId: string;
+  email: string;
+  name: string | null;
+  createdAt: Date | string;
+  totalPurchases: number;
+  totalSpentCents: number;
+  purchaseHistory: PurchaseHistoryItem[];
+}
 
 /**
  * Registered user with session cookie (e2e-specific)

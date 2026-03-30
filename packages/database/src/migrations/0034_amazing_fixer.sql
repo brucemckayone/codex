@@ -1,0 +1,3 @@
+ALTER TABLE "media_items" ADD COLUMN "transcoding_progress" integer;--> statement-breakpoint
+ALTER TABLE "media_items" ADD COLUMN "transcoding_step" varchar(50);--> statement-breakpoint
+ALTER TABLE "media_items" ADD CONSTRAINT "check_transcoding_progress_range" CHECK ("media_items"."transcoding_progress" IS NULL OR ("media_items"."transcoding_progress" >= 0 AND "media_items"."transcoding_progress" <= 100));

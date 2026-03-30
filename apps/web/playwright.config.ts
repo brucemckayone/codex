@@ -41,7 +41,7 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
+        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://lvh.me:5173',
       },
     },
     // Accessibility tests against Storybook
@@ -61,7 +61,7 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
+        baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://lvh.me:5173',
       },
     },
   ],
@@ -73,8 +73,8 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: 'pnpm dev --port 5173 --strictPort',
-          url: 'http://localhost:5173',
+          command: 'pnpm dev --port 5173 --host lvh.me --strictPort',
+          url: 'http://lvh.me:5173',
           timeout: 180000, // 3 minutes - SvelteKit can take time to start
           reuseExistingServer: true,
         },
@@ -104,6 +104,20 @@ export default defineConfig({
             'cd ../../workers/content-api && npx wrangler dev --env test --port 4001',
           url: 'http://localhost:4001/health', // Use health endpoint for ready detection
           timeout: 90000, // 90 seconds - Workers start faster
+          reuseExistingServer: true,
+        },
+        {
+          command:
+            'cd ../../workers/organization-api && npx wrangler dev --env test --port 42075',
+          url: 'http://localhost:42075/health',
+          timeout: 90000,
+          reuseExistingServer: true,
+        },
+        {
+          command:
+            'cd ../../workers/media-api && npx wrangler dev --env test --port 42076',
+          url: 'http://localhost:42076/health',
+          timeout: 90000,
           reuseExistingServer: true,
         },
       ],

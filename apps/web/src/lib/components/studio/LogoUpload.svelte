@@ -1,13 +1,17 @@
 <!--
   @component LogoUpload
 
-  Drag-and-drop logo upload zone with preview, delete, and client-side validation.
+  Form-based logo upload with drag-and-drop, preview, and delete.
+  Uses native FormData submission via form() remote functions so File
+  objects are sent correctly (command()/devalue cannot serialize Files).
+
   Supports PNG, JPEG, WebP, and SVG files up to 5MB.
 
   @prop {string | null} [logoUrl] - Current logo URL for preview
   @prop {boolean} [loading] - Whether an upload/delete is in progress
-  @prop {(file: File) => void} onUpload - Callback when a valid file is selected
-  @prop {() => void} onDelete - Callback to delete the current logo
+  @prop {string} orgId - Organization ID (sent as hidden field)
+  @prop {object} uploadFormAttrs - Spread attrs from uploadLogoForm
+  @prop {object} deleteFormAttrs - Spread attrs from deleteLogoForm
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -15,19 +19,24 @@
   interface Props {
     logoUrl?: string | null;
     loading?: boolean;
-    onUpload: (file: File) => void;
+    orgId: string;
+    uploadFormAttrs: Record<string, unknown>;
     onDelete: () => void;
   }
 
-  const { logoUrl = null, loading = false, onUpload, onDelete }: Props = $props();
+  const {
+    logoUrl = null,
+    loading = false,
+    orgId,
+    uploadFormAttrs,
+    onDelete,
+  }: Props = $props();
 
   let isDragging = $state(false);
   let validationError = $state<string | null>(null);
   let fileInput: HTMLInputElement | undefined = $state();
+  let uploadFormEl: HTMLFormElement | undefined = $state();
 
-  /**
-   * Allowed MIME types for logo uploads
-   */
   const ALLOWED_TYPES = [
     'image/png',
     'image/jpeg',
@@ -35,16 +44,10 @@
     'image/svg+xml',
   ];
 
-  /**
-   * Maximum file size: 5MB
-   */
   const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
   const hasLogo = $derived(!!logoUrl);
 
-  /**
-   * Validate a file against MIME type and size constraints
-   */
   function validateFile(file: File): string | null {
     if (!ALLOWED_TYPES.includes(file.type)) {
       return 'Logo must be PNG, JPEG, WebP, or SVG';
@@ -55,9 +58,6 @@
     return null;
   }
 
-  /**
-   * Handle file selection from input or drop
-   */
   function handleFile(file: File) {
     const error = validateFile(file);
     if (error) {
@@ -65,7 +65,14 @@
       return;
     }
     validationError = null;
-    onUpload(file);
+
+    // Set the file on the hidden input and submit the form
+    if (fileInput && uploadFormEl) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      uploadFormEl.requestSubmit();
+    }
   }
 
   // ─── Event Handlers ──────────────────────────────────────────────────────
@@ -95,16 +102,10 @@
     if (file) {
       handleFile(file);
     }
-    target.value = '';
   }
 
   function handleBrowseClick() {
     fileInput?.click();
-  }
-
-  function handleDeleteClick() {
-    validationError = null;
-    onDelete();
   }
 </script>
 
@@ -131,7 +132,7 @@
       <button
         type="button"
         class="btn btn-danger btn-sm"
-        onclick={handleDeleteClick}
+        onclick={onDelete}
         disabled={loading}
       >
         {m.branding_logo_delete()}
@@ -182,16 +183,24 @@
     </div>
   {/if}
 
-  <!-- Hidden file input -->
-  <input
-    bind:this={fileInput}
-    type="file"
-    accept={ALLOWED_TYPES.join(',')}
-    class="file-input"
-    onchange={handleFileSelect}
-    tabindex="-1"
-    aria-hidden="true"
-  />
+  <!-- Hidden upload form (native FormData for File serialization) -->
+  <form
+    bind:this={uploadFormEl}
+    {...uploadFormAttrs}
+    enctype="multipart/form-data"
+    class="hidden-form"
+  >
+    <input type="hidden" name="orgId" value={orgId} />
+    <input
+      bind:this={fileInput}
+      type="file"
+      name="logo"
+      accept={ALLOWED_TYPES.join(',')}
+      onchange={handleFileSelect}
+      tabindex="-1"
+      aria-hidden="true"
+    />
+  </form>
 
   <!-- Loading indicator -->
   {#if loading}
@@ -232,6 +241,7 @@
   .logo-actions {
     display: flex;
     gap: var(--space-2);
+    align-items: center;
   }
 
   .drop-zone {
@@ -288,7 +298,17 @@
     margin: 0;
   }
 
-  .file-input {
+  .hidden-form {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .hidden-form input[type="file"] {
     position: absolute;
     width: 1px;
     height: 1px;

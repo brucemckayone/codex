@@ -1,92 +1,97 @@
 # @codex/shared-types
 
-TS definitions only. Source of truth.
+TypeScript definitions only. Single source of truth for API contracts and shared types.
 
-## Contents
-- **HonoEnv**: `Bindings` (R2, KV, DB), `Variables` (user, session).
-- **Response Types**:
-  - `SingleItemResponse<T>` - Single item wrapped in `{ data: T }`
-  - `PaginatedListResponse<T>` - List with `{ items: T[], pagination: {...} }`
-  - `ErrorResponse` - Error response format
-- **Context**: `AuthenticatedContext`, `EnrichedAuthContext`.
-- **Domain**: `ContentResponse`, `MediaResponse`, `OrgResponse`.
+## Key Exports
 
-## Usage
+### HonoEnv
+Type definition for all Cloudflare Worker Hono apps:
 ```ts
-const app = new Hono<HonoEnv>();
-app.get('/', (c) => {
-  const user = c.get('user'); // Typed
-  return c.json({ data: ... } satisfies ContentResponse);
-});
+interface HonoEnv {
+  Bindings: {
+    DATABASE_URL: string;
+    AUTH_SESSION_KV: KVNamespace;
+    MEDIA_BUCKET: R2Bucket;
+    CACHE_KV: KVNamespace;
+    WORKER_SHARED_SECRET: string;
+    // ... additional per-worker bindings
+  };
+  Variables: {
+    user: UserData | null;
+    session: SessionData | null;
+    requestId: string;
+  };
+}
 ```
 
-## Standards
-- **Assert**: Use `invariant()` for internal consistency.
-- **Types**: Strict TS. Single Source of Truth.
-- **Pure**: No side-effects or business logic.
+### API Response Types
 
-## API Response Type Standards
+| Type | Shape | Used For |
+|---|---|---|
+| `SingleItemResponse<T>` | `{ data: T }` | GET single, POST create, PATCH update |
+| `PaginatedListResponse<T>` | `{ items: T[], pagination: PaginationMetadata }` | GET list endpoints |
+| `ErrorResponse` | `{ error: { code, message, details? } }` | All error responses |
 
-All API endpoints should return responses in one of the following formats:
-
-### 1. Single Item Response
-Use for endpoints that return a single resource.
-```typescript
-// Type definition
-export interface SingleItemResponse<T> {
-  data: T;
-}
-
-// Example usage in API client
-request<SingleItemResponse<UserData>>('identity', '/api/user/profile')
-// Returns: { data: { id, email, name, ... } }
-```
-
-### 2. Paginated List Response
-Use for endpoints that return a list with pagination metadata.
-```typescript
-// Type definition
-export interface PaginatedListResponse<T> {
-  items: T[];
-  pagination: PaginationMetadata;
-}
-
-export interface PaginationMetadata {
+```ts
+interface PaginationMetadata {
   page: number;
   limit: number;
   total: number;
   totalPages: number;
 }
-
-// Example usage in API client
-request<PaginatedListResponse<ContentItem>>('content', '/api/content')
-// Returns: { items: [...], pagination: { page: 1, limit: 20, total: 145, totalPages: 8 } }
 ```
 
-### 3. Null Response
-Use for endpoints that return 204 No Content.
-```typescript
-// Example: DELETE endpoints
-request<void>('content', `/api/content/${id}`, { method: 'DELETE' })
-// Returns: null
+### Context Types
+| Type | Description |
+|---|---|
+| `AuthenticatedContext` | Context with guaranteed `user` and `session` |
+| `EnrichedAuthContext` | Extended context with org membership data |
+
+### Domain Response Types
+- `ContentResponse` — content item with relations
+- `MediaResponse` — media item with status/variants
+- `OrgResponse` — organization with branding
+
+### Worker Communication Types
+- `WorkerRequestHeaders` — HMAC signature headers for worker-to-worker calls
+- `TranscodeRequest` / `TranscodeResponse` — media-api transcoding contract
+
+## Usage
+
+```ts
+import type { HonoEnv, SingleItemResponse } from '@codex/shared-types';
+
+const app = new Hono<HonoEnv>();
+
+app.get('/', (c) => {
+  const user = c.get('user');  // Typed as UserData | null
+  return c.json({ data: result } satisfies SingleItemResponse<typeof result>);
+});
 ```
 
-### 4. Custom Response
-Use only when the response structure fundamentally differs from the standard patterns.
-Examples include:
-- Aggregated analytics (e.g., `{ totalRevenueCents, totalPurchases, ... }`)
-- Success confirmations (e.g., `{ success: true, message: "..." }`)
-- Boolean responses (e.g., `{ available: true }`)
+## Exceptions
 
-Custom responses must have JSDoc documentation with examples.
-
-### Exceptions
-
-**BetterAuth Endpoints**: The Auth worker uses BetterAuth which has its own response format.
-```typescript
-// BetterAuth returns this format directly, not wrapped
-request<{ user?: UserData; session?: SessionData } | null>('auth', '/api/auth/get-session')
-// Returns: { user: {...}, session: {...} } or null
+**BetterAuth endpoints**: The Auth worker uses BetterAuth which has its own response format — NOT wrapped in `{ data: T }`:
+```ts
+// BetterAuth returns directly, not wrapped
+{ user?: UserData; session?: SessionData } | null
 ```
-
 This is a documented exception because BetterAuth owns the response contract.
+
+## Strict Rules
+
+- **MUST** use `HonoEnv` as the type parameter for all Hono apps — NEVER define custom env types per worker
+- **MUST** use `SingleItemResponse<T>` / `PaginatedListResponse<T>` for typing API responses — NEVER invent custom response shapes
+- **NEVER** add business logic to this package — it is types-only, zero runtime code
+- **NEVER** import from this package at runtime in the web app — these types are for workers only
+
+## Integration
+
+- **Depends on**: Nothing (types-only package)
+- **Used by**: All workers (via `HonoEnv`), `@codex/worker-utils` (response types)
+
+## Reference Files
+
+- `packages/shared-types/src/api-responses.ts` — response types
+- `packages/shared-types/src/worker-types.ts` — worker communication types
+- `packages/shared-types/src/index.ts` — barrel export

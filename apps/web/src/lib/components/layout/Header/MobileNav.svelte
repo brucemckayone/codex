@@ -75,8 +75,9 @@
           <span class="user-email">{user.email}</span>
         </div>
         <a href="/account" class="nav-item" onclick={close}>Account</a>
-        <a href="/library" class="nav-item" onclick={close}>Library</a>
-        <a href="/studio" class="nav-item" onclick={close}>Studio</a>
+        {#if variant === 'org'}
+          <a href="/studio" class="nav-item" onclick={close}>Studio</a>
+        {/if}
         <form method="POST" action="/logout">
           <button type="submit" class="nav-item logout-item">Log out</button>
         </form>
@@ -105,7 +106,7 @@
     background-color: var(--color-surface-secondary);
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .hamburger {
       display: none;
     }
@@ -155,7 +156,7 @@
     box-shadow: var(--shadow-xl);
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .overlay,
     .drawer {
       display: none;

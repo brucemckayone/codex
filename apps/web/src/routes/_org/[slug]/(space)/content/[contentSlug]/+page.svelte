@@ -2,24 +2,44 @@
   @component ContentDetailPage
 
   Displays content details including video player (if user has access),
-  content metadata, and a purchase CTA when access is not granted.
+  content metadata, price/purchase CTA, and a purchase form action
+  for paid content that redirects to Stripe checkout.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { enhance } from '$app/forms';
   import * as m from '$paraglide/messages';
   import VideoPlayer from '$lib/components/VideoPlayer/VideoPlayer.svelte';
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
+  import { hydrateIfNeeded } from '$lib/collections';
   import type { PageData } from './$types';
 
   interface Props {
     data: PageData;
+    form: { sessionUrl?: string; checkoutError?: string } | null;
   }
 
-  const { data }: Props = $props();
+  const { data, form }: Props = $props();
+
+  // Seed content collection with this item so navigating away and back
+  // finds the metadata already cached — instant title/thumbnail rendering.
+  onMount(() => {
+    if (data.content) {
+      hydrateIfNeeded('content', [data.content]);
+    }
+  });
+
+  let purchasing = $state(false);
 
   function formatDuration(seconds: number): string {
     if (seconds < 60) return `${seconds}s`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  }
+
+  function formatPrice(cents: number | null): string {
+    if (!cents) return m.content_price_free();
+    return `$${(cents / 100).toFixed(2)}`;
   }
 
   const contentTypeBadge = $derived(
@@ -34,6 +54,15 @@
   const description = $derived(data.content.description ?? '');
   const thumbnailUrl = $derived(data.content.mediaItem?.thumbnailUrl ?? undefined);
   const duration = $derived(data.content.mediaItem?.durationSeconds ?? 0);
+  const priceCents = $derived(data.content.priceCents ?? null);
+  const isPaid = $derived(
+    data.content.visibility === 'purchased_only' && !!priceCents && priceCents > 0
+  );
+  const isFree = $derived(
+    data.content.visibility === 'public' ||
+    (data.content.visibility === 'purchased_only' && (!priceCents || priceCents === 0))
+  );
+  const needsPurchase = $derived(!data.hasAccess && isPaid);
 
   const previewUrl = $derived(data.content.mediaItem?.hlsPreviewKey ?? undefined);
   const accessState = $derived(
@@ -43,17 +72,36 @@
       isAuthenticated: !!data.user,
     })
   );
+
+  function handlePurchase() {
+    purchasing = true;
+    return async ({ result, update }: { result: any; update: () => Promise<void> }) => {
+      purchasing = false;
+      if (result.type === 'success' && result.data?.sessionUrl) {
+        // Redirect to Stripe checkout (external domain)
+        window.location.href = result.data.sessionUrl;
+        return;
+      }
+      await update();
+    };
+  }
 </script>
 
 <svelte:head>
   <title>{data.content.title} | {data.org?.name ?? 'Codex'}</title>
   <meta property="og:title" content={data.content.title} />
   {#if description}
+    <meta name="description" content={description} />
     <meta property="og:description" content={description} />
   {/if}
   <meta property="og:type" content="video.other" />
   {#if thumbnailUrl}
     <meta property="og:image" content={thumbnailUrl} />
+  {/if}
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content={data.content.title} />
+  {#if description}
+    <meta name="twitter:description" content={description} />
   {/if}
 </svelte:head>
 
@@ -151,6 +199,52 @@
 
     {#if data.progress?.completed}
       <span class="content-detail__completed-badge">{m.content_progress_completed()}</span>
+    {/if}
+
+    <!-- Purchase Section -->
+    {#if needsPurchase}
+      <div class="content-detail__purchase">
+        <div class="content-detail__price">
+          <span class="content-detail__price-amount">{formatPrice(priceCents)}</span>
+          <span class="content-detail__price-label">{m.content_detail_purchase_cta_description()}</span>
+        </div>
+
+        {#if form?.checkoutError}
+          <p class="content-detail__purchase-error" role="alert">{form.checkoutError}</p>
+        {/if}
+
+        {#if data.user}
+          <form method="POST" action="?/purchase" use:enhance={handlePurchase}>
+            <input type="hidden" name="contentId" value={data.content.id} />
+            <button
+              type="submit"
+              class="content-detail__purchase-btn"
+              disabled={purchasing}
+            >
+              {#if purchasing}
+                {m.checkout_processing()}
+              {:else}
+                {m.checkout_purchase_button({ price: formatPrice(priceCents) })}
+              {/if}
+            </button>
+          </form>
+        {:else}
+          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+            {m.checkout_signin_to_purchase()}
+          </a>
+        {/if}
+      </div>
+    {:else if isFree && !data.hasAccess}
+      <div class="content-detail__purchase">
+        <div class="content-detail__price">
+          <span class="content-detail__price-amount content-detail__price-amount--free">{m.content_price_free()}</span>
+        </div>
+        {#if !data.user}
+          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+            {m.checkout_signin_to_purchase()}
+          </a>
+        {/if}
+      </div>
     {/if}
 
     {#if description}
@@ -294,6 +388,78 @@
     width: fit-content;
   }
 
+  /* Purchase Section */
+  .content-detail__purchase {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-5);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  .content-detail__price {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .content-detail__price-amount {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text);
+  }
+
+  .content-detail__price-amount--free {
+    color: var(--color-success-600, #16a34a);
+  }
+
+  .content-detail__price-label {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .content-detail__purchase-error {
+    font-size: var(--text-sm);
+    color: var(--color-error-600, #dc2626);
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-error-50, #fef2f2);
+    border-radius: var(--radius-md);
+  }
+
+  .content-detail__purchase-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3) var(--space-6);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    transition: var(--transition-colors, background-color 0.15s);
+    font-family: inherit;
+    background: var(--color-primary-500, #c24129);
+    color: #ffffff;
+    text-decoration: none;
+    width: 100%;
+  }
+
+  .content-detail__purchase-btn:hover:not(:disabled) {
+    background: var(--color-primary-600, #b23720);
+  }
+
+  .content-detail__purchase-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  .content-detail__purchase-btn--link {
+    text-align: center;
+  }
+
   .content-detail__description {
     margin-top: var(--space-2);
   }
@@ -314,13 +480,17 @@
   }
 
   /* Responsive */
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .content-detail {
       padding: var(--space-6) var(--space-6) var(--space-10);
     }
 
     .content-detail__title {
       font-size: var(--text-3xl);
+    }
+
+    .content-detail__purchase-btn {
+      width: auto;
     }
   }
 
@@ -350,5 +520,23 @@
   :global([data-theme='dark']) .content-detail__completed-badge {
     background: var(--color-success-900, #14532d);
     color: var(--color-success-200, #bbf7d0);
+  }
+
+  :global([data-theme='dark']) .content-detail__purchase {
+    background: var(--color-surface-dark, #262626);
+    border-color: var(--color-border-dark, #404040);
+  }
+
+  :global([data-theme='dark']) .content-detail__price-amount {
+    color: var(--color-text-dark);
+  }
+
+  :global([data-theme='dark']) .content-detail__price-label {
+    color: var(--color-text-secondary-dark);
+  }
+
+  :global([data-theme='dark']) .content-detail__purchase-error {
+    background: rgba(220, 38, 38, 0.1);
+    color: #fca5a5;
   }
 </style>

@@ -12,7 +12,7 @@ export const load: LayoutServerLoad = async ({ parent, params }) => {
 
   // Settings are restricted to admin and owner roles
   if (userRole !== 'admin' && userRole !== 'owner') {
-    redirect(302, `/${params.slug}/studio`);
+    redirect(302, '/studio');
   }
 
   return {

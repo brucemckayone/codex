@@ -20,7 +20,7 @@
     gap: var(--space-2);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .dialog-footer {
       flex-direction: row;
       justify-content: flex-end;

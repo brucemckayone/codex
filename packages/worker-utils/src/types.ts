@@ -18,26 +18,6 @@ export interface HealthCheckResponse {
 }
 
 /**
- * Standard error response format
- * Consistent error structure across all workers
+ * Standard error response format — re-exported from @codex/shared-types (canonical source)
  */
-export interface ErrorResponse {
-  error: {
-    code: string;
-    message: string;
-    details?: unknown;
-    stack?: string;
-    internalMessage?: string;
-  };
-}
-
-/**
- * Success response with data
- */
-export interface SuccessResponse<T = unknown> {
-  data: T;
-  meta?: {
-    timestamp?: number;
-    requestId?: string;
-  };
-}
+export type { ErrorResponse } from '@codex/shared-types';

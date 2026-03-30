@@ -16,14 +16,10 @@
  * - PurchaseService - Queries purchases from database
  */
 
-import type { Purchase } from '@codex/purchase';
-import type {
-  HonoEnv,
-  PaginatedListResponse,
-  PurchaseListItem,
-} from '@codex/shared-types';
+import type { Purchase, PurchaseListItem } from '@codex/purchase';
+import type { HonoEnv, PaginatedListResponse } from '@codex/shared-types';
 import { createIdParamsSchema, purchaseQuerySchema } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 // ============================================================================
@@ -61,13 +57,13 @@ purchases.get(
   procedure({
     policy: { auth: 'required' },
     input: { query: purchaseQuerySchema },
-    handler: async (ctx): Promise<PaginatedListResponse<PurchaseListItem>> => {
-      const result = await ctx.services.purchase.getPurchaseHistory(
+    handler: async (ctx) => {
+      const raw = await ctx.services.purchase.getPurchaseHistory(
         ctx.user.id,
         ctx.input.query
       );
-
-      return ctx.services.purchase.formatPurchasesForClient(result);
+      const result = ctx.services.purchase.formatPurchasesForClient(raw);
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );

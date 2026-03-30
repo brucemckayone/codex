@@ -32,13 +32,13 @@ export const load: PageServerLoad = async ({ locals, platform, cookies }) => {
       const result = await cache.getWithResult(
         locals.user.id,
         CacheType.USER_PREFERENCES,
-        async () => (await api.account.getNotificationPreferences()).data,
+        async () => await api.account.getNotificationPreferences(),
         { ttl: 600 }
       );
       preferences = result.data;
     } else {
       const response = await api.account.getNotificationPreferences();
-      preferences = response.data;
+      preferences = response;
     }
   } catch {
     preferences = null;

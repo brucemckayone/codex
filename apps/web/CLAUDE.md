@@ -3,15 +3,55 @@
 Frontend SvelteKit application for the Codex platform.
 **Stack**: Svelte 5, SvelteKit, TanStack DB, Vite, Cloudflare Pages.
 
+## Strict Rules
+
+### Components
+- **MUST** use `$props()` rune with typed `Props` interface — NEVER Svelte 4 `export let`
+- **MUST** use `$app/state` (`page`, `navigating`) — NEVER `$app/stores` (`$page`, `$navigating`)
+- **MUST** use `$state()` for reactive primitives, `$derived()` for computed, `$effect()` for side effects
+- **MUST** use `Snippet` type for content slots and `{@render children()}` to invoke them
+- **MUST** extend HTML element types in Props (`HTMLButtonAttributes`, `HTMLInputAttributes`) when wrapping native elements
+
+### Data & Caching
+- **MUST** guard all collections with `browser` check — they are `undefined` on server
+- **MUST** use `useLiveQuery()` with `ssrData` option for SSR safety — NEVER call `useLiveQuery` without it
+- **MUST** hydrate collections in `onMount()` — NEVER before first client render
+- **MUST** call `depends('cache:versions')` in layout server loads that participate in staleness
+- **MUST** call `initProgressSync()` ONLY in `(platform)/+layout.svelte` — NEVER in nested layouts
+- **NEVER** destructure `useLiveQuery` result directly — it loses reactivity. Use `query.data`, or `$derived(query)`
+- **NEVER** call collection methods outside `onMount` or `$effect`
+
+### Routing
+- **MUST** keep paths root-relative on org subdomains — slug is in hostname, not URL path
+- **MUST** use `buildOrgUrl()` for cross-org navigation — different org = different origin
+- **NEVER** include route group names (`(platform)`, `(space)`, `(auth)`) in hrefs or `goto()`
+
+### Styling
+- **MUST** use design tokens for ALL CSS values — NEVER hardcode px, hex colors, or raw values
+- **MUST** use spacing scale (`--space-1` through `--space-24`) — NEVER hardcode padding/margin
+
+### API & Auth
+- **MUST** use `createServerApi(platform, cookies)` for all backend calls — NEVER call `fetch()` directly
+- **MUST** check `locals.user` in `+page.server.ts` for auth gates — NEVER trust client-side auth
+- **MUST** use `getCookieConfig()` when deleting cookies — cross-subdomain cookies need matching `domain`
+- **MUST** prefix sensitive form fields with `_` (e.g., `_password`) to prevent repopulation on error
+
+### Currency
+- Default currency is **GBP (£)**, not USD ($)
+
+---
+
 ## Subdomain Routing
 
 The platform uses subdomain-based routing via `src/hooks.ts` `reroute()`:
 
 | Subdomain | Internal Route | Example |
 |---|---|---|
-| `localhost:3000` (none) | `(platform)/*` | Homepage, discover, library, account |
-| `creators.localhost:3000` | `_creators/*` | Creator profiles, content catalogs |
-| `{slug}.localhost:3000` | `_org/[slug]/*` | Org landing, explore, studio, settings |
+| `lvh.me:3000` (none) | `(platform)/*` | Homepage, discover, library, account |
+| `creators.lvh.me:3000` | `_creators/*` | Creator profiles, content catalogs |
+| `{slug}.lvh.me:3000` | `_org/[slug]/*` | Org landing, explore, studio, settings |
+
+> **Dev note:** Local dev uses `lvh.me` (a wildcard DNS resolving to 127.0.0.1) instead of `localhost` because browsers reject `Domain=.localhost` cookies per RFC 6761, breaking cross-subdomain auth.
 
 ### CRITICAL: No Slug in URL Paths
 
@@ -19,6 +59,7 @@ On org subdomains, the org slug is in the **hostname**, NOT the URL path. All `h
 
 ```svelte
 <!-- CORRECT: paths are root-relative on org subdomains -->
+<!-- e.g. on bruce-studio.lvh.me:3000 -->
 <a href="/">Home</a>
 <a href="/explore">Explore</a>
 <a href="/studio">Studio</a>
@@ -33,8 +74,8 @@ goto('/studio/analytics?dateFrom=...')
 ```
 
 The `reroute()` hook maps these root-relative paths to the correct internal routes:
-- `bruce-studio.localhost:3000/explore` → `_org/bruce-studio/explore` → matches `(space)/explore/+page.svelte`
-- `bruce-studio.localhost:3000/studio` → `_org/bruce-studio/studio` → matches `studio/+page.svelte`
+- `bruce-studio.lvh.me:3000/explore` → `_org/bruce-studio/explore` → matches `(space)/explore/+page.svelte`
+- `bruce-studio.lvh.me:3000/studio` → `_org/bruce-studio/studio` → matches `studio/+page.svelte`
 
 **Exception:** Cross-org navigation (e.g., StudioSwitcher) needs full subdomain URLs since it navigates to a different origin.
 
@@ -42,7 +83,7 @@ The `reroute()` hook maps these root-relative paths to the correct internal rout
 
 ### Public Endpoints for Cross-Subdomain Data
 
-Session cookies set on `localhost:3000` don't propagate to `{slug}.localhost:3000`. For data needed by the org layout (which runs on the org subdomain), use public (no-auth) API endpoints:
+For data needed by the org layout (which runs on the org subdomain), use public (no-auth) API endpoints. While `lvh.me` enables cross-subdomain cookie sharing in dev, public endpoints remain useful for unauthenticated visitors:
 
 - `GET /api/organizations/public/:slug/info` — org identity + branding (used by org layout)
 - `GET /api/organizations/public/:slug/creators` — public creator list
@@ -133,19 +174,63 @@ export const load: PageServerLoad = async ({ locals }) => {
 </script>
 ```
 
-### Remote Functions
+### API Client (`createServerApi`)
 
-Calls to backend workers use the `$lib/remote` layer:
+All backend calls go through `$lib/server/api.ts`:
 
 ```typescript
-import { getUserLibrary } from '$lib/remote/library.remote';
+import { createServerApi } from '$lib/server/api';
 
-const result = await getUserLibrary({ limit: 10 });
+// In +page.server.ts or remote functions
+const api = createServerApi(platform, cookies);
+const content = await api.content.get(id);
+const library = await api.access.listLibrary(params);
 ```
 
-**Structure:**
-- `$lib/remote/*.remote.ts` - Typed remote function wrappers
-- Uses `request()` from `$lib/server/api.ts` for fetch with auth
+**Key behaviors:**
+- Resolves worker URLs via `getServiceUrl()` from `@codex/constants`
+- Forwards session cookie in both `CODEX_SESSION` and `better-auth.session_token` headers
+- **Envelope unwrapping**: `{ data: T }` → unwrapped to `T`, `{ items, pagination }` → returned as-is, 204 → `null`
+- 10-second fetch timeout prevents hangs on cold workers
+- **NEVER** encode cookies — JWT tokens use URL-safe base64, encoding corrupts them
+
+### Remote Functions
+
+Three types of remote functions in `$lib/remote/*.remote.ts`:
+
+**`query()` — cached reads:**
+```typescript
+export const getContent = query(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.content.get(id);
+});
+// Usage: {#await getContent(id)} ... {:then content} ... {/await}
+```
+
+**`command()` — mutations without forms:**
+```typescript
+export const deleteContent = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  return createServerApi(platform, cookies).content.delete(id);
+});
+```
+
+**`form()` — progressive enhancement:**
+```typescript
+export const createContentForm = form(createContentFormSchema, async (input) => {
+  const { platform, cookies } = getRequestEvent();
+  try {
+    const result = await createServerApi(platform, cookies).content.create(input);
+    return { success: true as const, contentId: result.id };
+  } catch (error) {
+    return { success: false as const, error: error.message };
+  }
+});
+// Usage: <form {...createContentForm}> ... </form>
+```
+
+**Security note:** Prefix sensitive fields with `_` (e.g., `_password`) — they are NOT repopulated on validation failure.
 
 ### Collection Mutations
 
@@ -408,6 +493,62 @@ onMount(() => {
 - **E2E tests**: `pnpm test:e2e`
 - **Unit tests**: `pnpm test`
 
+## Styling Rules
+
+**Never hardcode CSS values.** Always use design tokens from `$lib/styles/tokens/`:
+
+```css
+/* CORRECT — uses tokens */
+border: var(--border-width) var(--border-style) var(--color-error-200);
+background-color: var(--color-error-50);
+padding: var(--space-3);
+border-radius: var(--radius-md);
+
+/* WRONG — hardcoded values */
+border: 1px solid #fecaca;
+background-color: #fef2f2;
+padding: 12px;
+border-radius: 8px;
+```
+
+Available border tokens: `--border-width` (1px), `--border-width-thick` (2px), `--border-style` (solid), `--border-default` (shorthand with `--color-border`).
+
+Error/success alert pattern:
+```css
+.auth-error {
+  padding: var(--space-3);
+  background-color: var(--color-error-50);
+  border: var(--border-width) var(--border-style) var(--color-error-200);
+  border-radius: var(--radius-md);
+  color: var(--color-error-700);
+  font-size: var(--text-sm);
+}
+```
+
+## Svelte 5 Standards
+
+**Always use `$app/state` (runes), not `$app/stores` (legacy):**
+
+```svelte
+<!-- CORRECT — Svelte 5 runes -->
+<script>
+  import { page } from '$app/state';
+  import { goto, invalidate } from '$app/navigation';
+
+  // Access directly — no $ prefix
+  const url = page.url;
+  const params = page.params;
+</script>
+
+<!-- WRONG — Svelte 4 stores -->
+<script>
+  import { page } from '$app/stores';
+  // $page.url — requires $ prefix, legacy pattern
+</script>
+```
+
+**Always verify with MCPs:** Use the Svelte MCP (`mcp__svelte__get-documentation`) and Context7 MCP to check correct Svelte 5 / SvelteKit / Melt UI / TanStack DB usage. Don't guess — look it up.
+
 ## Key Gotchas
 
 1. **Collections are undefined on server** - Always use `useLiveQuery` with `ssrData` option
@@ -428,6 +569,200 @@ onMount(() => {
 3. **QueryClient is per-browser-instance** - Not shared across requests (SSR safety)
 4. **`hydrateIfNeeded` is a no-op on return visits for localStorage collections** — localStorage survives refresh, so `isCollectionHydrated` returns true before SSR data is inserted. Server data only enters the collection via `invalidateCollection`. This is intentional.
 5. **`initProgressSync` lives only in `(platform)/+layout.svelte`** — do not call it again in nested layouts or pages.
+
+## Layout Hierarchy & Responsibilities
+
+The layout chain determines what each page inherits. **Never duplicate parent responsibilities in child layouts.**
+
+```
++layout.svelte (root)
+├── SkipLink, NavigationProgress, Toaster, view transitions
+├── Passes data.user to all children
+│
+├── (platform)/+layout.svelte ★ CRITICAL ORCHESTRATOR
+│   ├── PlatformHeader (sticky, UserMenu, MobileNav)
+│   ├── PageContainer + Footer
+│   ├── Version staleness $effect (getStaleKeys → invalidateCollection)
+│   ├── visibilitychange → invalidate('cache:versions')
+│   ├── initProgressSync(userId) — ONLY called here
+│   └── Server load: depends('cache:versions'), reads KV library version
+│
+├── _org/[slug]/+layout.svelte
+│   ├── Resolves org from subdomain slug (two-tier: public then auth endpoint)
+│   ├── Applies org branding as CSS custom properties
+│   ├── OrgHeader + org footer
+│   ├── id="main-content" on <main> (skip link target)
+│   └── Server load: org version keys, depends('cache:versions')
+│       │
+│       └── studio/+layout.svelte
+│           ├── Auth guard (redirect to /login)
+│           ├── Role guard (member → redirect to /?error=access_denied)
+│           ├── StudioSidebar (role-based links) + StudioSwitcher
+│           └── Server load: getMyMembership, getMyOrganizations
+│               │
+│               └── settings/+layout.svelte
+│                   └── SETTINGS_NAV tabs (General, Branding)
+│
+├── (auth)/+layout.svelte
+│   └── Centered card layout for login/register/forgot-pw/reset-pw/verify-email
+│
+└── _creators/+layout.svelte
+    └── Creator subdomain layout (needs work — currently minimal)
+```
+
+**Rules:**
+- `initProgressSync` lives ONLY in `(platform)/+layout.svelte`
+- Version staleness check: platform layout does library, org layout does org-specific keys
+- `depends('cache:versions')` MUST be in server loads that participate in staleness
+- Each layout's `<main>` needs `id="main-content"` for the skip link
+
+## Cookie Management
+
+**CRITICAL:** Cross-subdomain cookies require `domain` when deleting. Always use `getCookieConfig()` for both setting AND deleting cookies:
+
+```typescript
+// CORRECT — matches the domain used when setting the cookie
+import { COOKIES, getCookieConfig } from '@codex/constants';
+const host = request.headers.get('host') ?? undefined;
+const cookieConfig = getCookieConfig(platform?.env, host);
+cookies.delete(COOKIES.SESSION_NAME, {
+  path: cookieConfig.path,
+  domain: cookieConfig.domain,
+});
+
+// WRONG — won't delete cross-subdomain cookies (domain mismatch)
+cookies.delete(COOKIES.SESSION_NAME, { path: '/' });
+```
+
+The session cookie is set with `domain: .lvh.me` (dev) or `.revelations.studio` (prod). Deleting without the domain creates a new cookie on the bare hostname instead of removing the original.
+
+## Component Patterns
+
+### Props Pattern (Svelte 5)
+
+```svelte
+<script lang="ts">
+  import type { Snippet } from 'svelte';
+  import type { HTMLButtonAttributes } from 'svelte/elements';
+
+  interface Props extends HTMLButtonAttributes {
+    variant?: 'primary' | 'secondary' | 'ghost' | 'destructive';
+    size?: 'sm' | 'md' | 'lg';
+    loading?: boolean;
+    children: Snippet;
+  }
+
+  const {
+    variant = 'primary',
+    size = 'md',
+    loading = false,
+    children,
+    class: className,
+    ...restProps
+  }: Props = $props();
+</script>
+
+<button class="button {className ?? ''}" data-variant={variant} data-size={size} {...restProps}>
+  {@render children()}
+</button>
+```
+
+**Key rules:**
+- Always define `Props` interface extending the HTML element type
+- Use `$props()` for destructuring — required for reactivity
+- Use `class: className` to accept class prop
+- Spread `...restProps` to pass through HTML attributes
+- Use `$bindable()` for two-way binding (e.g., input value)
+- Use `Snippet<[T]>` for typed content slots
+
+### Reactive State
+
+```svelte
+<script>
+  let count = $state(0);                    // Reactive primitive
+  const doubled = $derived(count * 2);      // Computed value
+  $effect(() => { console.log(count); });   // Side effect
+</script>
+```
+
+## Error Handling
+
+### ErrorBoundary Component
+
+```svelte
+<ErrorBoundary fallback={snippet}>
+  <ChildComponent />
+</ErrorBoundary>
+```
+
+Uses `<svelte:boundary onerror={handler}>` internally. Logs errors with context.
+
+### +error.svelte Pages
+
+Each route group has its own `+error.svelte`:
+- `(platform)/account/+error.svelte` — account-specific errors
+- `_org/[slug]/+error.svelte` — org-level errors
+- `_org/[slug]/studio/+error.svelte` — studio-specific errors
+- `+error.svelte` (root) — catch-all
+
+## Auth on Frontend
+
+### Session Validation (every request)
+
+`hooks.server.ts` validates the session cookie on every request:
+```typescript
+// Extracts codex-session cookie
+// Calls auth worker GET /api/auth/session
+// Sets event.locals.user and event.locals.session
+// Fails gracefully — treats auth worker unavailable as unauthenticated
+```
+
+### Protected Routes
+
+```typescript
+// +page.server.ts
+export const load: PageServerLoad = async ({ locals }) => {
+  if (!locals.user) throw redirect(303, '/login');
+  return { user: locals.user };
+};
+```
+
+### Role Guards (Studio)
+
+```typescript
+// studio/+layout.server.ts
+export const load: LayoutServerLoad = async ({ locals, params }) => {
+  if (!locals.user) throw redirect(303, '/login');
+  const membership = await api.org.getMyMembership(params.slug);
+  if (!membership) throw redirect(303, '/?error=access_denied');
+  return { membership };
+};
+```
+
+## Design Token Categories
+
+NEVER hardcode CSS values. Use tokens from `$lib/styles/tokens/`:
+
+| Category | Examples | Token Pattern |
+|---|---|---|
+| **Colors** | Primary, error, success, text, surface | `--color-primary-500`, `--color-error-50`, `--color-text` |
+| **Spacing** | Padding, margin, gap | `--space-1` (4px) through `--space-24` |
+| **Typography** | Font family, size, weight | `--font-sans`, `--text-sm`, `--font-medium` |
+| **Borders** | Width, style, radius | `--border-width`, `--radius-md`, `--border-default` |
+| **Shadows** | Box shadows | `--shadow-sm`, `--shadow-md` |
+| **Transitions** | Animation timing | `--transition-colors`, `--transition-shadow` |
+| **Z-index** | Stacking | `--z-sticky`, `--z-modal` |
+| **Layout** | Container widths, breakpoints | `--layout-max-width`, `--breakpoint-md` |
+
+### Org Branding
+
+Org branding is injected as CSS custom properties in `_org/[slug]/+layout.svelte`:
+```css
+--org-brand-primary: var(--brand-primary-color);
+--org-brand-density: var(--brand-density-scale, 1);
+```
+
+Density scaling affects all spacing tokens via `--space-unit: calc(0.25rem * var(--brand-density-scale, 1))`.
 
 ## Related
 

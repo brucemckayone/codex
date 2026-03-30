@@ -12,7 +12,9 @@ export const load: PageServerLoad = async ({
   url,
   platform,
   cookies,
+  depends,
 }) => {
+  depends('cache:studio-page:content');
   const { org } = await parent();
 
   // Parse pagination from URL params with validation
@@ -33,26 +35,23 @@ export const load: PageServerLoad = async ({
   params.set('sortBy', 'createdAt');
   params.set('sortOrder', 'desc');
 
+  const fallbackPagination = { page: 1, limit: 20, total: 0, totalPages: 0 };
+
   try {
     const api = createServerApi(platform, cookies);
     const result = await api.content.list(params);
 
     return {
       content: {
-        items: result.items,
-        pagination: result.pagination,
+        items: result?.items ?? [],
+        pagination: result?.pagination ?? fallbackPagination,
       },
     };
   } catch {
     return {
       content: {
         items: [],
-        pagination: {
-          page: 1,
-          limit: 20,
-          total: 0,
-          totalPages: 0,
-        },
+        pagination: fallbackPagination,
       },
     };
   }

@@ -10,7 +10,7 @@
  * - Session cookies are HTTPOnly and Secure in production
  */
 
-import { COOKIES } from '@codex/constants';
+import { COOKIES, getCookieConfig } from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { dev } from '$app/environment';
@@ -79,8 +79,14 @@ function extractAndSetSessionCookie(
   const token = extractSessionToken(response);
   if (!token) return false;
 
+  // Use getCookieConfig for cross-subdomain cookie domain (matches logout)
+  const { request, platform } = getRequestEvent();
+  const host = request.headers.get('host') ?? undefined;
+  const cookieConfig = getCookieConfig(platform?.env, host);
+
   cookies.set(COOKIES.SESSION_NAME, token, {
-    path: '/',
+    path: cookieConfig.path,
+    domain: cookieConfig.domain,
     httpOnly: true,
     secure: isSecure,
     sameSite: 'lax',
@@ -285,10 +291,15 @@ export const getSession = query(async () => {
  * ```
  */
 export const logout = command(async () => {
-  const { cookies } = getRequestEvent();
+  const { cookies, request, platform } = getRequestEvent();
 
-  // Clear the session cookie
-  cookies.delete(COOKIES.SESSION_NAME, { path: '/' });
+  // Clear the session cookie — must include domain to match cross-subdomain cookie
+  const host = request.headers.get('host') ?? undefined;
+  const cookieConfig = getCookieConfig(platform?.env, host);
+  cookies.delete(COOKIES.SESSION_NAME, {
+    path: cookieConfig.path,
+    domain: cookieConfig.domain,
+  });
 
   redirect(303, '/login');
 });

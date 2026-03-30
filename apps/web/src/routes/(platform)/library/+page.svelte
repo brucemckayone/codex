@@ -154,10 +154,15 @@
   <h1 class="library-title">My Library</h1>
 
   {#if data.error}
-    <ErrorBanner title="Failed to load library" description="Your library could not be loaded. Please try refreshing the page." />
-  {/if}
-
-  {#if libraryQuery.isLoading && !data.library?.items?.length}
+    <ErrorBanner
+      title="Failed to load library"
+      description={data.errorCode === '401'
+        ? 'Your session may have expired. Please sign in again.'
+        : data.errorCode === '503'
+          ? 'The service is temporarily unavailable. Please try again shortly.'
+          : 'Your library could not be loaded. Please try refreshing the page.'}
+    />
+  {:else if libraryQuery.isLoading && !data.library?.items?.length}
     <div class="content-grid">
       {#each Array(6) as _}
         <div class="skeleton-card">
@@ -219,6 +224,7 @@
                   src={item.content.thumbnailUrl}
                   alt={item.content.title}
                   class="thumb-img"
+                  onerror={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
                 {#if item.progress}
                   <div class="progress-track">
@@ -292,13 +298,13 @@
     gap: var(--space-4);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .content-grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .content-grid {
       grid-template-columns: repeat(3, 1fr);
     }

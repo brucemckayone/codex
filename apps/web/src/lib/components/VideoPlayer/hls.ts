@@ -23,6 +23,7 @@ export interface HlsPlayerOptions {
  * Check if the browser supports native HLS playback (Safari, iOS)
  */
 function supportsNativeHls(): boolean {
+  if (typeof document === 'undefined') return false;
   const video = document.createElement('video');
   return video.canPlayType('application/vnd.apple.mpegurl') !== '';
 }

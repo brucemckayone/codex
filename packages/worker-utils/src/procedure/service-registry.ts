@@ -16,7 +16,7 @@ import {
   AdminCustomerManagementService,
 } from '@codex/admin';
 import { VersionedCache } from '@codex/cache';
-import { R2Service } from '@codex/cloudflare-clients';
+import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 // Service imports
 import { ContentService, MediaItemService } from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
@@ -139,42 +139,49 @@ export function createServiceRegistry(
     get media() {
       if (!_media) {
         // Build R2Service for media uploads.
-        // Signing config is optional — presigned URLs only work when
-        // R2 S3-compatible credentials are configured (not in local dev).
+        // Signing config generates presigned URLs for direct browser→R2 uploads.
+        // In development, skip signing so the client uses the proxy upload
+        // route (POST /api/media/:id/upload) through the worker instead —
+        // real R2 endpoints reject dev origins with CORS errors.
         let mediaR2: R2Service | undefined;
         if (env.MEDIA_BUCKET) {
-          const accountId =
-            typeof env.R2_ACCOUNT_ID === 'string'
-              ? env.R2_ACCOUNT_ID
-              : undefined;
-          const accessKeyId =
-            typeof env.R2_ACCESS_KEY_ID === 'string'
-              ? env.R2_ACCESS_KEY_ID
-              : undefined;
-          const secretAccessKey =
-            typeof env.R2_SECRET_ACCESS_KEY === 'string'
-              ? env.R2_SECRET_ACCESS_KEY
-              : undefined;
-          const bucketName =
-            typeof env.R2_BUCKET_MEDIA === 'string'
-              ? env.R2_BUCKET_MEDIA
-              : undefined;
+          const isDev = getEnvironment() === 'development';
+          let signingConfig: R2SigningConfig | undefined;
 
-          const signingConfig =
-            accountId && accessKeyId && secretAccessKey && bucketName
-              ? { accountId, accessKeyId, secretAccessKey, bucketName }
-              : undefined;
+          if (!isDev) {
+            const accountId =
+              typeof env.R2_ACCOUNT_ID === 'string'
+                ? env.R2_ACCOUNT_ID
+                : undefined;
+            const accessKeyId =
+              typeof env.R2_ACCESS_KEY_ID === 'string'
+                ? env.R2_ACCESS_KEY_ID
+                : undefined;
+            const secretAccessKey =
+              typeof env.R2_SECRET_ACCESS_KEY === 'string'
+                ? env.R2_SECRET_ACCESS_KEY
+                : undefined;
+            const bucketName =
+              typeof env.R2_BUCKET_MEDIA === 'string'
+                ? env.R2_BUCKET_MEDIA
+                : undefined;
 
-          if (!signingConfig) {
-            _obs?.warn(
-              'R2 signing config unavailable — presigned upload URLs will not be generated',
-              {
-                hasAccountId: !!accountId,
-                hasAccessKeyId: !!accessKeyId,
-                hasSecretKey: !!secretAccessKey,
-                hasBucketName: !!bucketName,
-              }
-            );
+            signingConfig =
+              accountId && accessKeyId && secretAccessKey && bucketName
+                ? { accountId, accessKeyId, secretAccessKey, bucketName }
+                : undefined;
+
+            if (!signingConfig) {
+              _obs?.warn(
+                'R2 signing config unavailable — presigned upload URLs will not be generated',
+                {
+                  hasAccountId: !!accountId,
+                  hasAccessKeyId: !!accessKeyId,
+                  hasSecretKey: !!secretAccessKey,
+                  hasBucketName: !!bucketName,
+                }
+              );
+            }
           }
 
           mediaR2 = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);

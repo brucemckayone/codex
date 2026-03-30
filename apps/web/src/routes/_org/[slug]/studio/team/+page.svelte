@@ -8,6 +8,7 @@
   @prop {PageData} data - Server-loaded member data + org info from parent
 -->
 <script lang="ts">
+  import { browser } from '$app/environment';
   import { invalidateAll } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import MemberTable from '$lib/components/studio/MemberTable.svelte';
@@ -53,7 +54,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.team_title()} | {data.org.name} Studio</title>
+  <title>{m.team_title()} | {data.org.name}</title>
 </svelte:head>
 
 <div class="team-page">
@@ -91,10 +92,12 @@
     />
   </section>
 
-  <InviteMemberDialog
-    bind:open={inviteDialogOpen}
-    onInvite={handleInvite}
-  />
+  {#if browser}
+    <InviteMemberDialog
+      bind:open={inviteDialogOpen}
+      onInvite={handleInvite}
+    />
+  {/if}
 </div>
 
 <style>

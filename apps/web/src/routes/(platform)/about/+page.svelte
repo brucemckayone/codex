@@ -94,7 +94,7 @@
     align-items: center;
     padding: var(--space-3) var(--space-6);
     background-color: var(--color-primary-500);
-    color: white;
+    color: var(--color-text-inverse);
     border-radius: var(--radius-lg);
     font-size: var(--text-base);
     font-weight: var(--font-semibold);

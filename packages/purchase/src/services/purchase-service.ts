@@ -63,15 +63,13 @@ function isStripeError(error: unknown): error is Error & { type: string } {
   );
 }
 
-import type {
-  PaginatedListResponse,
-  PurchaseListItem,
-} from '@codex/shared-types';
+import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CheckoutSessionResult,
   CheckoutSessionVerifyResult,
   CompletePurchaseMetadata,
   Purchase,
+  PurchaseListItem,
   PurchaseWithContent,
 } from '../types';
 import {
@@ -200,7 +198,7 @@ export class PurchaseService extends BaseService {
         line_items: [
           {
             price_data: {
-              currency: CURRENCY.USD,
+              currency: CURRENCY.GBP,
               unit_amount: contentRecord.priceCents,
               product_data: {
                 name: contentRecord.title,
@@ -357,7 +355,7 @@ export class PurchaseService extends BaseService {
             contentId: metadata.contentId,
             organizationId: organizationId, // Fetched from content if needed
             amountPaidCents: metadata.amountPaidCents,
-            currency: metadata.currency || CURRENCY.USD,
+            currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
             status: PURCHASE_STATUS.COMPLETED,
             purchasedAt: new Date(),
@@ -488,30 +486,30 @@ export class PurchaseService extends BaseService {
       // Calculate offset
       const offset = (validated.page - 1) * validated.limit;
 
-      // Get purchases with content
-      const items = await this.db.query.purchases.findMany({
-        where: and(...conditions),
-        limit: validated.limit,
-        offset,
-        orderBy: [desc(purchases.purchasedAt)],
-        with: {
-          content: {
-            columns: {
-              id: true,
-              title: true,
-              slug: true,
-              thumbnailUrl: true,
-              contentType: true,
+      // Run paginated SELECT and COUNT in parallel to cut one DB round-trip
+      const [items, countResult] = await Promise.all([
+        this.db.query.purchases.findMany({
+          where: and(...conditions),
+          limit: validated.limit,
+          offset,
+          orderBy: [desc(purchases.purchasedAt)],
+          with: {
+            content: {
+              columns: {
+                id: true,
+                title: true,
+                slug: true,
+                thumbnailUrl: true,
+                contentType: true,
+              },
             },
           },
-        },
-      });
-
-      // Get total count
-      const countResult = await this.db
-        .select({ total: count() })
-        .from(purchases)
-        .where(and(...conditions));
+        }),
+        this.db
+          .select({ total: count() })
+          .from(purchases)
+          .where(and(...conditions)),
+      ]);
       const total = countResult[0]?.total ?? 0;
 
       return {

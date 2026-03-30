@@ -238,7 +238,7 @@ export const purchases = pgTable(
 
     // Payment (stored as integer cents to avoid rounding errors)
     amountPaidCents: integer('amount_paid_cents').notNull(),
-    currency: varchar('currency', { length: 3 }).notNull().default('usd'),
+    currency: varchar('currency', { length: 3 }).notNull().default('gbp'),
 
     // Revenue split snapshot (immutable - calculated at purchase time)
     // Phase 1: platformFeeCents = 10%, organizationFeeCents = 0%, creatorPayoutCents = 90%
@@ -299,6 +299,12 @@ export const purchases = pgTable(
     index('idx_purchases_platform_agreement').on(table.platformAgreementId),
     index('idx_purchases_creator_org_agreement').on(
       table.creatorOrgAgreementId
+    ),
+
+    // Composite index for customer purchase history (filtered by customer, sorted by date)
+    index('idx_purchases_customer_purchased').on(
+      table.customerId,
+      table.purchasedAt
     ),
 
     // Composite index for admin analytics queries (revenue by org + status + date)

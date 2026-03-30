@@ -5,21 +5,11 @@
  * Validates username, URLs, and file upload rules.
  */
 
-import { optionalUrlSchema } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-/**
- * Helper schema for optional text fields
- * Converts empty strings to undefined before validation
- */
-const optionalTextField = (max: number) =>
-  z
-    .string()
-    .transform((val) => (val === '' ? undefined : val))
-    .pipe(z.string().max(max).optional());
-
 // Define the schemas inline for testing (matching account.remote.ts)
+// Uses simple Zod types — no .transform().pipe() — to stay compatible with SvelteKit form()
 const updateProfileFormSchema = z.object({
   displayName: z
     .string()
@@ -35,11 +25,15 @@ const updateProfileFormSchema = z.object({
       'Username must be lowercase letters, numbers, and hyphens'
     )
     .optional(),
-  bio: optionalTextField(500),
-  website: optionalUrlSchema('Invalid website URL'),
-  twitter: optionalUrlSchema('Invalid Twitter URL'),
-  youtube: optionalUrlSchema('Invalid YouTube URL'),
-  instagram: optionalUrlSchema('Invalid Instagram URL'),
+  bio: z.string().max(500).optional(),
+  website: z.string().url('Invalid website URL').or(z.literal('')).optional(),
+  twitter: z.string().url('Invalid Twitter URL').or(z.literal('')).optional(),
+  youtube: z.string().url('Invalid YouTube URL').or(z.literal('')).optional(),
+  instagram: z
+    .string()
+    .url('Invalid Instagram URL')
+    .or(z.literal(''))
+    .optional(),
 });
 
 const updateNotificationsFormSchema = z.object({
@@ -206,11 +200,11 @@ describe('Account Schemas', () => {
         expect(result.success).toBe(true);
       });
 
-      it('accepts empty string for bio (treated as missing)', () => {
+      it('accepts empty string for bio', () => {
         const result = updateProfileFormSchema.safeParse({
           bio: '',
         });
-        // Empty string is converted to undefined by optionalTextField
+        // Empty string passes validation; form handler converts to undefined
         expect(result.success).toBe(true);
       });
     });
@@ -277,14 +271,14 @@ describe('Account Schemas', () => {
         expect(result.success).toBe(false);
       });
 
-      it('accepts empty string for social links (treated as missing)', () => {
+      it('accepts empty string for social links', () => {
         const result = updateProfileFormSchema.safeParse({
           website: '',
           twitter: '',
           youtube: '',
           instagram: '',
         });
-        // Empty strings are converted to undefined by optionalUrlSchema
+        // Empty strings accepted via .or(z.literal('')); form handler converts to undefined
         expect(result.success).toBe(true);
       });
 

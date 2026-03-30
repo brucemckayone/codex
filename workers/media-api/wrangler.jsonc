@@ -56,8 +56,11 @@
   "vars": {
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
-    "WEB_APP_URL": "http://localhost:3000",
-    "API_URL": "http://localhost:8787"
+    "WEB_APP_URL": "http://lvh.me:3000",
+    "API_URL": "http://localhost:4002",
+    // Local container: /runsync processes synchronously (/run doesn't work locally)
+    // Uses LAN IP because workerd blocks outbound fetches to localhost/127.0.0.1
+    "RUNPOD_DIRECT_URL": "http://192.168.1.132:8000/runsync"
   },
 
   // Environment configurations
@@ -76,13 +79,13 @@
       },
       "vars": {
         "ENVIRONMENT": "test",
-        "WEB_APP_URL": "http://localhost:3000",
+        "WEB_APP_URL": "http://lvh.me:3000",
         "API_URL": "http://localhost:8787",
         "DATABASE_URL": "postgres://postgres:postgres@db.localtest.me:5432/main",
         "RUNPOD_API_KEY": "test-api-key",
         "RUNPOD_ENDPOINT_ID": "test-endpoint-id",
         "RUNPOD_WEBHOOK_SECRET": "test-webhook-secret",
-        "RUNPOD_API_URL": "http://localhost:4002/internal/mock-runpod",
+        "RUNPOD_DIRECT_URL": "http://localhost:8000/runsync",
         "WORKER_SHARED_SECRET": "test-worker-shared-secret",
         "B2_ENDPOINT": "https://s3.us-west-000.backblazeb2.com",
         "B2_KEY_ID": "test-b2-key-id",

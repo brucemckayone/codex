@@ -37,6 +37,10 @@
   {#if avatar}
     <meta property="og:image" content={avatar} />
   {/if}
+  <meta name="description" content={bio} />
+  <meta name="twitter:card" content={avatar ? 'summary_large_image' : 'summary'} />
+  <meta name="twitter:title" content="{displayName} | Revelations Creators" />
+  <meta name="twitter:description" content={bio} />
 </svelte:head>
 
 <div class="profile">
@@ -277,13 +281,13 @@
     gap: var(--space-6, 1.5rem);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .content-grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .content-grid {
       grid-template-columns: repeat(3, 1fr);
     }
@@ -312,7 +316,7 @@
   }
 
   /* ── Responsive ── */
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .profile {
       padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
       gap: var(--space-8, 2rem);

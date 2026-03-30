@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@codex/access": "workspace:*",
+    "@codex/cache": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",

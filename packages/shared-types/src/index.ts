@@ -9,67 +9,26 @@
  * to avoid circular dependencies.
  */
 
-// Admin dashboard types
+// API response types (generic wrappers and cross-cutting types)
 export type {
-  AdminContentItem,
-  AdminContentStatus,
-  CustomerDetails,
-  CustomerStats,
-  CustomerWithStats,
-  DailyRevenue,
-  DashboardStats,
-  DashboardStatsOptions,
-  PurchaseHistoryItem,
-  RevenueQueryOptions,
-  RevenueStats,
-  TopContentItem,
-} from './admin-types';
-// API query parameter types (for documentation - see api-queries.ts)
-export type {
-  AdminActivityQueryInput,
-  AdminContentListQueryInput,
-  AdminCustomerListQueryInput,
-  AdminDashboardStatsQueryInput,
-  AdminRevenueQueryInput,
-  AdminTopContentQueryInput,
-  ContentQueryInput,
-  ListMembersQueryInput,
-  ListTemplatesQuery,
-  MediaQueryInput,
-  OrganizationQueryInput,
-  PaginationInput,
-  PublicMembersQueryInput,
-  PurchaseQueryInput,
-} from './api-queries';
-// API response types (generic wrappers and non-entity-specific types)
-export type {
-  ActivityFeedResponse,
-  ActivityItem,
-  ActivityItemType,
   AllSettingsResponse,
-  AvatarUploadResponse,
+  ApiErrorEnvelope,
+  ApiListEnvelope,
+  ApiSingleEnvelope,
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
-  CustomerListItem,
   DeleteOrganizationResponse,
   FeatureSettingsResponse,
   MembershipLookupResponse,
   MyMembershipResponse,
-  NotificationPreferencesResponse,
   OrganizationWithRole,
   PaginatedListResponse,
   PaginationMetadata,
-  PlaybackProgressResponse,
+  PaginationParams,
   PublicBrandingResponse,
-  PurchaseListItem,
-  RevenueAnalyticsResponse,
-  RevenueByDay,
   SingleItemResponse,
-  StreamingUrlResponse,
-  TopContentAnalyticsResponse,
-  UpdatePlaybackProgressResponse,
-  UserLibraryResponse,
+  SortOrder,
 } from './api-responses';
 
 // Organization and Member types
@@ -85,7 +44,6 @@ export type {
   HonoEnv,
   ProgressData,
   SessionData,
-  SuccessResponse,
   UserData,
   UserProfile,
   Variables,

@@ -15,6 +15,7 @@
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
  */
 
+import { CacheType, VersionedCache } from '@codex/cache';
 import { AUTH_ROLES } from '@codex/constants';
 import type {
   ContentListResponse,
@@ -37,8 +38,45 @@ import {
 } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
-import { multipartProcedure, procedure } from '@codex/worker-utils';
+import {
+  multipartProcedure,
+  PaginatedResult,
+  procedure,
+} from '@codex/worker-utils';
 import { Hono } from 'hono';
+
+/** Minimal logger interface to avoid direct @codex/observability dependency */
+interface Logger {
+  warn(message: string, metadata?: Record<string, unknown>): void;
+}
+
+/**
+ * Bump the org content version in KV after publish/unpublish/delete.
+ * Fire-and-forget via waitUntil — does not block the response.
+ */
+function bumpOrgContentVersion(
+  env: HonoEnv['Bindings'],
+  executionCtx: ExecutionContext,
+  organizationId: string | null | undefined,
+  obs?: Logger
+): void {
+  if (!organizationId || !env.CACHE_KV) return;
+  const cache = new VersionedCache({ kv: env.CACHE_KV });
+  executionCtx.waitUntil(
+    cache
+      .invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId))
+      .catch((err: unknown) => {
+        const msg = 'Cache invalidation failed';
+        if (obs) {
+          obs.warn(msg, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } else {
+          console.error(msg, err);
+        }
+      })
+  );
+}
 
 const app = new Hono<HonoEnv>();
 
@@ -129,8 +167,12 @@ app.get(
   procedure({
     policy: { auth: 'required' },
     input: { query: contentQuerySchema },
-    handler: async (ctx): Promise<ContentListResponse> => {
-      return await ctx.services.content.list(ctx.user.id, ctx.input.query);
+    handler: async (ctx) => {
+      const result = await ctx.services.content.list(
+        ctx.user.id,
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -151,10 +193,17 @@ app.post(
     },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<PublishContentResponse['data']> => {
-      return await ctx.services.content.publish(
+      const result = await ctx.services.content.publish(
         ctx.input.params.id,
         ctx.user.id
       );
+      bumpOrgContentVersion(
+        ctx.env,
+        ctx.executionCtx,
+        result.organizationId,
+        ctx.obs
+      );
+      return result;
     },
   })
 );
@@ -175,10 +224,17 @@ app.post(
     },
     input: { params: createIdParamsSchema() },
     handler: async (ctx): Promise<UnpublishContentResponse['data']> => {
-      return await ctx.services.content.unpublish(
+      const result = await ctx.services.content.unpublish(
         ctx.input.params.id,
         ctx.user.id
       );
+      bumpOrgContentVersion(
+        ctx.env,
+        ctx.executionCtx,
+        result.organizationId,
+        ctx.obs
+      );
+      return result;
     },
   })
 );
@@ -201,7 +257,19 @@ app.delete(
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx): Promise<DeleteContentResponse> => {
+      // Read org before delete so we can bump its version
+      let organizationId: string | undefined;
+      try {
+        const content = await ctx.services.content.get(
+          ctx.input.params.id,
+          ctx.user.id
+        );
+        organizationId = content?.organizationId;
+      } catch {
+        // Pre-fetch for cache invalidation is non-critical
+      }
       await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
+      bumpOrgContentVersion(ctx.env, ctx.executionCtx, organizationId, ctx.obs);
       return null;
     },
   })
@@ -247,11 +315,9 @@ app.post(
       );
 
       return {
-        data: {
-          thumbnailUrl: result.url,
-          size: result.size,
-          mimeType: result.mimeType,
-        },
+        thumbnailUrl: result.url,
+        size: result.size,
+        mimeType: result.mimeType,
       };
     },
   })

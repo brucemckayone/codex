@@ -3,14 +3,14 @@ import type {
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
-} from '@codex/shared-types';
+} from '@codex/access';
 import {
   createIdParamsSchema,
   getStreamingUrlSchema,
   listUserLibrarySchema,
   savePlaybackProgressSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono();
@@ -149,11 +149,12 @@ app.get(
     input: {
       query: listUserLibrarySchema,
     },
-    handler: async (ctx): Promise<UserLibraryResponse> => {
-      return await ctx.services.access.listUserLibrary(
+    handler: async (ctx) => {
+      const result = await ctx.services.access.listUserLibrary(
         ctx.user.id,
         ctx.input.query
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );

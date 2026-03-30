@@ -10,18 +10,26 @@ import { redirect } from '@sveltejs/kit';
 import { getOrgMembers } from '$lib/remote/org.remote';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ parent, params }) => {
+export const load: PageServerLoad = async ({ parent, depends }) => {
+  depends('cache:studio-page:team');
   const { org, userRole } = await parent();
 
   // Admin/owner guard
   if (userRole !== 'admin' && userRole !== 'owner') {
-    redirect(302, `/${params.slug}/studio`);
+    redirect(302, '/studio');
   }
 
-  const membersResult = await getOrgMembers({ orgId: org.id, limit: 50 });
+  try {
+    const membersResult = await getOrgMembers({ orgId: org.id, limit: 50 });
 
-  return {
-    members: membersResult?.items ?? [],
-    pagination: membersResult?.pagination ?? null,
-  };
+    return {
+      members: membersResult?.items ?? [],
+      pagination: membersResult?.pagination ?? null,
+    };
+  } catch {
+    return {
+      members: [],
+      pagination: null,
+    };
+  }
 };

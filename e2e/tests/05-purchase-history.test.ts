@@ -392,7 +392,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(response);
       const json = await response.json();
-      const data = json.data; // Unwrap { data: { items, pagination } }
+      const data = json; // List envelope: { items, pagination } at top level
 
       // Verify response structure
       expect(data.items).toBeDefined();
@@ -428,7 +428,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(response);
       const json = await response.json();
-      const data = json.data;
+      const data = json; // List envelope: { items, pagination } at top level
 
       // All items should have completed status
       expect(data.items.length).toBeGreaterThan(0);
@@ -450,7 +450,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(response);
       const json = await response.json();
-      const data = json.data;
+      const data = json; // List envelope
 
       // Should have exactly one purchase for this content
       expect(data.items.length).toBe(1);
@@ -471,7 +471,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(response);
       const json = await response.json();
-      const data = json.data;
+      const data = json; // List envelope
 
       expect(data.items.length).toBe(1);
       expect(data.pagination.page).toBe(1);
@@ -493,7 +493,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(response);
       const json = await response.json();
-      const data = json.data;
+      const data = json; // List envelope
 
       expect(data.items).toEqual([]);
       expect(data.pagination.page).toBe(999);
@@ -509,7 +509,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(response);
       const json = await response.json();
-      const data = json.data;
+      const data = json; // List envelope
 
       expect(data.items).toEqual([]);
       expect(data.pagination.total).toBe(0);
@@ -663,7 +663,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(buyerResponse);
       const buyerJson = await buyerResponse.json();
-      const buyerData = buyerJson.data;
+      const buyerData = buyerJson; // List envelope
 
       // Verify all purchases belong to buyer
       for (const purchase of buyerData.items) {
@@ -683,7 +683,7 @@ describe('Purchase History API', () => {
 
       await expectSuccessResponse(otherResponse);
       const otherJson = await otherResponse.json();
-      const otherData = otherJson.data;
+      const otherData = otherJson; // List envelope
 
       expect(otherData.items.length).toBe(0);
     });

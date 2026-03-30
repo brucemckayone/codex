@@ -324,7 +324,7 @@
 
   .pagination__page.active {
     background: var(--color-primary-500);
-    color: #ffffff;
+    color: var(--color-text-inverse);
     border-color: var(--color-primary-500);
   }
 
@@ -344,25 +344,25 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .pagination__btn,
-  [data-theme='dark'] .pagination__page {
+  :global([data-theme='dark']) .pagination__btn,
+  :global([data-theme='dark']) .pagination__page {
     background: var(--color-surface-dark);
     border-color: var(--color-border-dark);
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .pagination__btn:hover:not(:disabled):not(.pagination__btn--disabled),
-  [data-theme='dark'] .pagination__page:hover {
+  :global([data-theme='dark']) .pagination__btn:hover:not(:disabled):not(.pagination__btn--disabled),
+  :global([data-theme='dark']) .pagination__page:hover {
     background: var(--color-surface-variant);
   }
 
-  [data-theme='dark'] .pagination__page.active {
+  :global([data-theme='dark']) .pagination__page.active {
     background: var(--color-primary-500);
     border-color: var(--color-primary-500);
   }
 
-  [data-theme='dark'] .pagination__info,
-  [data-theme='dark'] .pagination__ellipsis {
+  :global([data-theme='dark']) .pagination__info,
+  :global([data-theme='dark']) .pagination__ellipsis {
     color: var(--color-text-secondary-dark);
   }
 </style>

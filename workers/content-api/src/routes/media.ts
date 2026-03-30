@@ -32,9 +32,14 @@ import {
   updateMediaItemSchema,
 } from '@codex/content';
 import { workerFetch } from '@codex/security';
+import { ConflictError, InternalServiceError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
-import { binaryUploadProcedure, procedure } from '@codex/worker-utils';
+import {
+  binaryUploadProcedure,
+  PaginatedResult,
+  procedure,
+} from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
@@ -133,8 +138,12 @@ app.get(
   procedure({
     policy: { auth: 'required' },
     input: { query: mediaQuerySchema },
-    handler: async (ctx): Promise<MediaListResponse> => {
-      return await ctx.services.media.list(ctx.user.id, ctx.input.query);
+    handler: async (ctx) => {
+      const result = await ctx.services.media.list(
+        ctx.user.id,
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -215,66 +224,75 @@ app.post(
         throw new MediaNotFoundError(mediaId);
       }
 
-      // 2. Ensure media is in 'uploading' state
-      if (media.status !== MEDIA_STATUS.UPLOADING) {
-        throw new Error(
-          `Cannot mark upload complete: media is already '${media.status}'`
+      // 2. Idempotent: if already uploaded, skip status update and re-trigger transcoding.
+      // This handles the case where upload succeeded but transcoding trigger failed.
+      if (
+        media.status !== MEDIA_STATUS.UPLOADING &&
+        media.status !== MEDIA_STATUS.UPLOADED
+      ) {
+        throw new ConflictError(
+          `Cannot mark upload complete: media is in '${media.status}' state`
         );
       }
 
-      // 3. Update status to 'uploaded'
-      await ctx.services.media.updateStatus(
-        mediaId,
-        MEDIA_STATUS.UPLOADED,
-        creatorId
-      );
+      // 3. Update status to 'uploaded' (no-op if already uploaded)
+      if (media.status === MEDIA_STATUS.UPLOADING) {
+        await ctx.services.media.updateStatus(
+          mediaId,
+          MEDIA_STATUS.UPLOADED,
+          creatorId
+        );
+      }
 
-      // 4. Trigger transcoding via media-api worker
+      // 4. Trigger transcoding via media-api worker (fire-and-forget)
+      // The media-api call blocks until RunPod completes (minutes on /runsync),
+      // so we dispatch it via waitUntil and return immediately to the client.
       const mediaApiUrl = ctx.env.MEDIA_API_URL;
       if (!mediaApiUrl) {
-        throw new Error('MEDIA_API_URL not configured');
-      }
-
-      try {
-        const response = await workerFetch(
-          `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ creatorId }),
-          },
-          ctx.env.WORKER_SHARED_SECRET || ''
+        throw new InternalServiceError(
+          'Media transcoding service URL not configured'
         );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          ctx.obs?.error('Failed to trigger transcoding', {
-            mediaId,
-            statusCode: response.status,
-            error: errorText,
-          });
-          return {
-            success: true,
-            transcodingTriggered: false,
-            status: MEDIA_STATUS.UPLOADED,
-          };
-        }
-
-        return {
-          success: true,
-          transcodingTriggered: true,
-          status: MEDIA_STATUS.TRANSCODING,
-        };
-      } catch (error) {
-        ctx.obs?.error('Transcoding trigger failed', {
-          mediaId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          success: true,
-          transcodingTriggered: false,
-          status: MEDIA_STATUS.UPLOADED,
-        };
       }
+
+      const workerSecret = ctx.env.WORKER_SHARED_SECRET;
+      if (!workerSecret) {
+        throw new InternalServiceError('Worker shared secret not configured');
+      }
+
+      const triggerPromise = workerFetch(
+        `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ creatorId }),
+        },
+        workerSecret
+      )
+        .then(async (response) => {
+          if (!response.ok) {
+            const errorText = await response.text();
+            ctx.obs?.error('Failed to trigger transcoding', {
+              mediaId,
+              statusCode: response.status,
+              error: errorText,
+            });
+          }
+        })
+        .catch((error) => {
+          ctx.obs?.error('Transcoding trigger failed', {
+            mediaId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+      ctx.executionCtx.waitUntil(triggerPromise);
+
+      // Note: transcoding dispatch runs in background via waitUntil.
+      // Frontend should poll media status rather than relying on this field.
+      return {
+        success: true,
+        transcodingTriggered: true,
+        status: MEDIA_STATUS.UPLOADED,
+      };
     },
   })
 );

@@ -14,6 +14,7 @@ export const SERVICE_PORTS = {
 export const DOMAINS = {
   PROD: 'revelations.studio',
   STAGING: 'staging.revelations.studio',
+  DEV: 'lvh.me', // *.lvh.me → 127.0.0.1, supports cross-subdomain cookie sharing
   LOCAL: 'localhost',
 } as const;
 

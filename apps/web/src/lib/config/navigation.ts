@@ -25,7 +25,7 @@ export const PLATFORM_NAV: NavLink[] = [
 export function getOrgNav(_slug: string): NavLink[] {
   // On org subdomains, the slug is in the hostname — paths are relative to root
   return [
-    { href: '/', label: 'Explore' },
+    { href: '/explore', label: 'Explore' },
     { href: '/creators', label: 'Creators' },
     { href: '/library', label: 'Library' },
   ];

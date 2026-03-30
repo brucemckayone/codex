@@ -8,6 +8,18 @@
  * - Helper methods for common endpoints
  */
 
+import type {
+  PlaybackProgressResponse,
+  StreamingUrlResponse,
+  UpdatePlaybackProgressResponse,
+  UserLibraryResponse,
+} from '@codex/access';
+import type {
+  ActivityFeedResponse,
+  CustomerListItem,
+  RevenueAnalyticsResponse,
+  TopContentAnalyticsResponse,
+} from '@codex/admin';
 import {
   COOKIES,
   getServiceUrl,
@@ -16,27 +28,19 @@ import {
   type ServiceName,
 } from '@codex/constants';
 import type { MediaItem } from '@codex/database/schema';
+import type { AvatarUploadResponse } from '@codex/identity';
+import type { NotificationPreferencesResponse } from '@codex/notifications';
+import type { PurchaseListItem } from '@codex/purchase';
 import type {
-  ActivityFeedResponse,
   AllSettingsResponse,
-  AvatarUploadResponse,
   BrandingSettingsResponse,
   ContactSettingsResponse,
-  CustomerListItem,
   MyMembershipResponse,
-  NotificationPreferencesResponse,
   OrganizationWithRole,
   PaginatedListResponse,
-  PlaybackProgressResponse,
-  PurchaseListItem,
-  RevenueAnalyticsResponse,
+  PublicBrandingResponse,
   SessionData,
-  SingleItemResponse,
-  StreamingUrlResponse,
-  TopContentAnalyticsResponse,
-  UpdatePlaybackProgressResponse,
   UserData,
-  UserLibraryResponse,
 } from '@codex/shared-types';
 import type {
   CreateCheckoutInput,
@@ -48,6 +52,7 @@ import type {
 } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
+import { logger } from '$lib/observability';
 // Import local types that extend DB types with relations
 import type {
   CheckoutResponse,
@@ -152,11 +157,13 @@ export function createServerApi(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+    const timer = logger.startTimer(`api:${worker}${path}`);
     const response = await fetch(url, {
       ...options,
       signal: controller.signal,
       headers,
     }).finally(() => clearTimeout(timeoutId));
+    timer.end({ method: options?.method ?? 'GET', status: response.status });
 
     if (!response.ok) {
       const error = (await response
@@ -177,7 +184,25 @@ export function createServerApi(
       return null as T;
     }
 
-    return response.json();
+    const json = await response.json();
+    // Unwrap procedure() envelope to give callers the inner payload.
+    //
+    // Response shapes:
+    //   List:   { items: T[], pagination: {...} }  → return as-is (PaginatedListResponse)
+    //   Single: { data: T }                        → unwrap to T
+    //   Other:  { user, session } (BetterAuth)     → return as-is
+    if (json == null || typeof json !== 'object') return json as T;
+    const record = json as Record<string, unknown>;
+    // List envelope: { items, pagination } — return as-is, matches PaginatedListResponse<T>
+    if (Array.isArray(record.items) && record.pagination != null) {
+      return json as T;
+    }
+    // Single-item envelope: { data: T } — unwrap
+    if ('data' in record) {
+      return record.data as T;
+    }
+    // Fallback: BetterAuth, raw endpoints
+    return json as T;
   }
 
   return {
@@ -205,10 +230,17 @@ export function createServerApi(
           `${COOKIES.SESSION_NAME}=${cookieToUse}; better-auth.session_token=${cookieToUse}`;
       }
 
+      // AbortController timeout — matches request() to prevent indefinite hangs
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const timer = logger.startTimer(`api.fetch:${worker}${path}`);
       const response = await fetch(url, {
         ...options,
+        signal: controller.signal,
         headers,
-      });
+      }).finally(() => clearTimeout(timeoutId));
+      timer.end({ method: options?.method ?? 'GET', status: response.status });
 
       if (!response.ok) {
         const error = (await response
@@ -228,7 +260,16 @@ export function createServerApi(
         return null as T;
       }
 
-      return response.json();
+      const json = await response.json();
+      if (json == null || typeof json !== 'object') return json as T;
+      const record = json as Record<string, unknown>;
+      if (Array.isArray(record.items) && record.pagination != null) {
+        return json as T;
+      }
+      if ('data' in record) {
+        return record.data as T;
+      }
+      return json as T;
     },
 
     /**
@@ -252,14 +293,13 @@ export function createServerApi(
       /**
        * Get user profile
        */
-      getProfile: () =>
-        request<SingleItemResponse<UserData>>('identity', '/api/user/profile'),
+      getProfile: () => request<UserData>('identity', '/api/user/profile'),
 
       /**
        * Update user profile
        */
       updateProfile: (data: UpdateProfileInput) =>
-        request<SingleItemResponse<UserData>>('identity', '/api/user/profile', {
+        request<UserData>('identity', '/api/user/profile', {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
@@ -268,7 +308,7 @@ export function createServerApi(
        * Get notification preferences
        */
       getNotificationPreferences: () =>
-        request<SingleItemResponse<NotificationPreferencesResponse>>(
+        request<NotificationPreferencesResponse>(
           'identity',
           '/api/user/notification-preferences'
         ),
@@ -279,7 +319,7 @@ export function createServerApi(
       updateNotificationPreferences: (
         data: UpdateNotificationPreferencesInput
       ) =>
-        request<SingleItemResponse<NotificationPreferencesResponse>>(
+        request<NotificationPreferencesResponse>(
           'identity',
           '/api/user/notification-preferences',
           {
@@ -289,8 +329,7 @@ export function createServerApi(
         ),
 
       /**
-       * Upload avatar (multipart - handled differently from request())
-       * Use direct fetch with FormData instead of request()
+       * Upload avatar (multipart - uses raw fetch for FormData, then unwraps procedure envelope)
        */
       uploadAvatar: (file: File): Promise<AvatarUploadResponse> => {
         const url = `${serverApiUrl(platform, 'identity')}/api/user/avatar`;
@@ -305,7 +344,13 @@ export function createServerApi(
           body: formData,
         }).then(async (res) => {
           if (!res.ok) throw new ApiError(res.status, 'Upload failed');
-          return res.json() as Promise<AvatarUploadResponse>;
+          const json = await res.json();
+          // Unwrap single-item envelope: { data: T } → T
+          const record = json as Record<string, unknown>;
+          if ('data' in record && record.data != null) {
+            return record.data as AvatarUploadResponse;
+          }
+          return json as AvatarUploadResponse;
         });
       },
 
@@ -352,10 +397,7 @@ export function createServerApi(
        * @returns Single content item with relations (media, organization, etc.)
        */
       get: (id: string) =>
-        request<SingleItemResponse<ContentWithRelations>>(
-          'content',
-          `/api/content/${id}`
-        ),
+        request<ContentWithRelations>('content', `/api/content/${id}`),
 
       /**
        * List content with pagination and filtering
@@ -394,27 +436,19 @@ export function createServerApi(
        * Create new content
        */
       create: (data: unknown) =>
-        request<SingleItemResponse<ContentWithRelations>>(
-          'content',
-          '/api/content',
-          {
-            method: 'POST',
-            body: JSON.stringify(data),
-          }
-        ),
+        request<ContentWithRelations>('content', '/api/content', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
 
       /**
        * Update content
        */
       update: (id: string, data: unknown) =>
-        request<SingleItemResponse<ContentWithRelations>>(
-          'content',
-          `/api/content/${id}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify(data),
-          }
-        ),
+        request<ContentWithRelations>('content', `/api/content/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }),
 
       /**
        * Delete content
@@ -510,10 +544,7 @@ export function createServerApi(
        * Get organization by slug
        */
       getBySlug: (slug: string) =>
-        request<SingleItemResponse<OrganizationData>>(
-          'org',
-          `/api/organizations/slug/${slug}`
-        ),
+        request<OrganizationData>('org', `/api/organizations/slug/${slug}`),
 
       /**
        * Get organization settings
@@ -550,7 +581,7 @@ export function createServerApi(
         ),
 
       /**
-       * Upload organization logo (multipart form data)
+       * Upload organization logo (multipart - uses raw fetch for FormData, then unwraps procedure envelope)
        */
       uploadLogo: (
         id: string,
@@ -568,7 +599,13 @@ export function createServerApi(
           body: formData,
         }).then(async (res) => {
           if (!res.ok) throw new ApiError(res.status, 'Logo upload failed');
-          return res.json() as Promise<BrandingSettingsResponse>;
+          const json = await res.json();
+          // Unwrap single-item envelope: { data: T } → T
+          const record = json as Record<string, unknown>;
+          if ('data' in record && record.data != null) {
+            return record.data as BrandingSettingsResponse;
+          }
+          return json as BrandingSettingsResponse;
         });
       },
 
@@ -594,13 +631,24 @@ export function createServerApi(
         ),
 
       /**
+       * Get public branding by slug (no auth required)
+       *
+       * Returns minimal branding fields: { logoUrl, primaryColorHex }
+       */
+      getPublicBranding: (slug: string) =>
+        request<PublicBrandingResponse>(
+          'org',
+          `/api/organizations/public/${slug}`
+        ),
+
+      /**
        * Get public org info by slug (no auth required)
        *
        * Returns org identity + branding for the org layout.
        * Works across subdomains without session cookies.
        */
       getPublicInfo: (slug: string) =>
-        request<SingleItemResponse<OrganizationData>>(
+        request<OrganizationData>(
           'org',
           `/api/organizations/public/${slug}/info`
         ),
@@ -723,23 +771,43 @@ export function createServerApi(
        * Create Stripe checkout session
        */
       create: (data: CreateCheckoutInput) =>
-        request<SingleItemResponse<CheckoutResponse>>(
-          'ecom',
-          '/checkout/create',
-          {
-            method: 'POST',
-            body: JSON.stringify(data),
-          }
-        ),
+        request<CheckoutResponse>('ecom', '/checkout/create', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
 
       createPortalSession: (data: CreatePortalSessionInput) =>
-        request<SingleItemResponse<{ url: string }>>(
+        request<{ url: string }>('ecom', '/checkout/portal-session', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Verify Stripe checkout session status
+       *
+       * Called on the checkout success page to confirm payment.
+       * Returns session status, purchase record, and content details.
+       *
+       * @param sessionId - Stripe checkout session ID (cs_xxx)
+       */
+      verify: (sessionId: string) =>
+        request<{
+          sessionStatus: 'complete' | 'expired' | 'open';
+          purchase?: {
+            id: string;
+            contentId: string;
+            amountPaidCents: number;
+            purchasedAt: string;
+          };
+          content?: {
+            id: string;
+            title: string;
+            thumbnailUrl?: string;
+            contentType: string;
+          };
+        }>(
           'ecom',
-          '/checkout/portal-session',
-          {
-            method: 'POST',
-            body: JSON.stringify(data),
-          }
+          `/checkout/verify?session_id=${encodeURIComponent(sessionId)}`
         ),
     },
 
@@ -811,7 +879,7 @@ export function createServerApi(
        * @returns Created media item
        */
       create: (data: Record<string, unknown>) =>
-        request<SingleItemResponse<MediaItem>>('content', '/api/media', {
+        request<MediaItem>('content', '/api/media', {
           method: 'POST',
           body: JSON.stringify(data),
         }),
@@ -837,16 +905,13 @@ export function createServerApi(
        * Get a single media item by ID
        */
       get: (id: string) =>
-        request<SingleItemResponse<MediaItemWithRelations>>(
-          'content',
-          `/api/media/${id}`
-        ),
+        request<MediaItemWithRelations>('content', `/api/media/${id}`),
 
       /**
        * Update media item metadata
        */
       update: (id: string, data: unknown) =>
-        request<SingleItemResponse<MediaItem>>('content', `/api/media/${id}`, {
+        request<MediaItem>('content', `/api/media/${id}`, {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
@@ -860,6 +925,19 @@ export function createServerApi(
         }),
 
       /**
+       * Get transcoding status and progress for a media item
+       * Calls media-api worker (not content-api)
+       */
+      transcodingStatus: (id: string) =>
+        request<{
+          status: string;
+          transcodingProgress: number | null;
+          transcodingStep: string | null;
+          transcodingAttempts: number;
+          transcodingError: string | null;
+        }>('media', `/api/transcoding/status/${id}`),
+
+      /**
        * Mark upload as complete and trigger transcoding
        */
       uploadComplete: (id: string) =>
@@ -870,6 +948,30 @@ export function createServerApi(
             method: 'POST',
           }
         ),
+
+      /**
+       * Upload a media file to R2 via the content-api worker.
+       * Fallback for local dev when presigned URLs are unavailable.
+       */
+      upload: (id: string, file: File): Promise<{ success: boolean }> => {
+        const url = `${serverApiUrl(platform, 'content')}/api/media/${id}/upload`;
+        return fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': file.type,
+            'X-Filename': encodeURIComponent(file.name),
+            ...(sessionCookie
+              ? {
+                  Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}; better-auth.session_token=${sessionCookie}`,
+                }
+              : {}),
+          },
+          body: file,
+        }).then(async (res) => {
+          if (!res.ok) throw new ApiError(res.status, 'Upload failed');
+          return res.json() as Promise<{ success: boolean }>;
+        });
+      },
     },
 
     /**

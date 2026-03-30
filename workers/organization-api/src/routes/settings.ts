@@ -19,6 +19,7 @@
 import { VersionedCache } from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient, eq, schema } from '@codex/database';
+import { InternalServiceError } from '@codex/service-errors';
 import type {
   AllSettingsResponse,
   Bindings,
@@ -38,6 +39,13 @@ import {
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 
 import { Hono } from 'hono';
+
+/** Minimal logger interface to avoid direct @codex/observability dependency */
+interface Logger {
+  warn(message: string, metadata?: Record<string, unknown>): void;
+  error(message: string, metadata?: Record<string, unknown>): void;
+}
+
 import { z } from 'zod';
 
 /**
@@ -51,7 +59,8 @@ import { z } from 'zod';
  */
 export async function updateBrandCache(
   env: Bindings,
-  organizationId: string
+  organizationId: string,
+  obs?: Logger
 ): Promise<void> {
   const kv = env.BRAND_KV;
   if (!kv) return;
@@ -95,9 +104,12 @@ export async function updateBrandCache(
       });
 
       if (!org) {
-        console.warn(
-          `[BrandCache] Skip update - Org not found: ${organizationId}`
-        );
+        const msg = `Skip update - Org not found: ${organizationId}`;
+        if (obs) {
+          obs.warn(msg, { organizationId });
+        } else {
+          console.warn(`[BrandCache] ${msg}`);
+        }
         return;
       }
 
@@ -117,10 +129,15 @@ export async function updateBrandCache(
       expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS,
     });
   } catch (err) {
-    console.error(
-      `[BrandCache] Failed to update cache for org ${organizationId}:`,
-      err
-    );
+    const msg = `Failed to update cache for org ${organizationId}`;
+    if (obs) {
+      obs.error(msg, {
+        organizationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } else {
+      console.error(`[BrandCache] ${msg}`, err);
+    }
   }
 }
 
@@ -133,9 +150,10 @@ function invalidateBrandAndCache(
     env: Bindings;
     executionCtx: { waitUntil(promise: Promise<unknown>): void };
   },
-  orgId: string
+  orgId: string,
+  obs?: Logger
 ) {
-  const tasks: Promise<unknown>[] = [updateBrandCache(ctx.env, orgId)];
+  const tasks: Promise<unknown>[] = [updateBrandCache(ctx.env, orgId, obs)];
   if (ctx.env.CACHE_KV) {
     const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
     tasks.push(cache.invalidate(orgId));
@@ -197,7 +215,7 @@ app.put(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       const result = await ctx.services.settings.updateBranding(ctx.input.body);
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id);
+      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },
@@ -246,7 +264,7 @@ app.post(
         size: logoFile.size,
       });
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id);
+      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },
@@ -265,11 +283,11 @@ app.delete(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       // Check if R2 bucket is configured
       if (!ctx.env.MEDIA_BUCKET) {
-        throw new Error('Logo operations not configured');
+        throw new InternalServiceError('Logo operations not configured');
       }
       const result = await ctx.services.settings.deleteLogo();
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id);
+      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },

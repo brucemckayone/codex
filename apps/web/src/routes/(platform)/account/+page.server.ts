@@ -16,7 +16,7 @@ export const load: PageServerLoad = async ({ locals, platform, cookies }) => {
   try {
     const api = createServerApi(platform, cookies);
     const response = await api.account.getProfile();
-    return { profile: response.data };
+    return { profile: response };
   } catch {
     return { profile: null };
   }

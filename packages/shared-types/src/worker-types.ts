@@ -440,20 +440,6 @@ export type ErrorResponse = {
 };
 
 /**
- * Standard API Success Response
- */
-export type SuccessResponse<T> = {
-  data: T;
-  meta?: {
-    page?: number;
-    limit?: number;
-    total?: number;
-    hasMore?: boolean;
-    [key: string]: unknown;
-  };
-};
-
-/**
  * Hono Environment Type
  * Combines Bindings and Variables for type-safe context
  */

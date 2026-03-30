@@ -43,7 +43,7 @@ export const getBrandingSettings = query(
     const api = createServerApi(platform, cookies);
 
     const settings = await api.org.getSettings(orgId);
-    return settings.branding;
+    return settings?.branding ?? null;
   }
 );
 
@@ -92,7 +92,11 @@ export const updateBrandingForm = form(
         await cache.invalidate(orgId);
       }
 
-      await getBrandingSettings(orgId).refresh();
+      try {
+        await getBrandingSettings(orgId).refresh();
+      } catch {
+        /* non-critical */
+      }
 
       return {
         success: true,
@@ -109,12 +113,12 @@ export const updateBrandingForm = form(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Upload Logo Command
+// Upload Logo Form
 // ─────────────────────────────────────────────────────────────────────────────
 
 const uploadLogoSchema = z.object({
   orgId: z.string().uuid(),
-  file: z
+  logo: z
     .instanceof(File)
     .refine(
       (file) =>
@@ -132,36 +136,51 @@ const uploadLogoSchema = z.object({
 /**
  * Upload organization logo
  *
- * Sends multipart FormData to POST /api/organizations/:id/settings/branding/logo
+ * Uses form() for native FormData submission (File objects cannot be
+ * serialized by command()/devalue).
  *
  * Usage:
  * ```svelte
- * <script>
- *   async function handleUpload(file: File) {
- *     const result = await uploadLogo({ orgId, file });
- *   }
- * </script>
+ * <form {...uploadLogoForm} enctype="multipart/form-data">
+ *   <input type="hidden" name="orgId" value={orgId} />
+ *   <input type="file" name="logo" accept="image/*" />
+ *   <button>Upload</button>
+ * </form>
  * ```
  */
-export const uploadLogo = command(uploadLogoSchema, async ({ orgId, file }) => {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
+export const uploadLogoForm = form(
+  uploadLogoSchema,
+  async ({ orgId, logo }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
 
-  const result = await api.org.uploadLogo(orgId, file);
+    try {
+      const result = await api.org.uploadLogo(orgId, logo);
 
-  // Invalidate cache so layout picks up the new logo
-  const cache = platform?.env?.CACHE_KV
-    ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
-    : null;
+      // Invalidate cache so layout picks up the new logo
+      const cache = platform?.env?.CACHE_KV
+        ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
+        : null;
 
-  if (cache) {
-    await cache.invalidate(orgId);
+      if (cache) {
+        await cache.invalidate(orgId);
+      }
+
+      try {
+        await getBrandingSettings(orgId).refresh();
+      } catch {
+        /* non-critical */
+      }
+
+      return { success: true, data: result };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to upload logo',
+      };
+    }
   }
-
-  await getBrandingSettings(orgId).refresh();
-
-  return result;
-});
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Delete Logo Command
@@ -170,16 +189,7 @@ export const uploadLogo = command(uploadLogoSchema, async ({ orgId, file }) => {
 /**
  * Delete organization logo
  *
- * Sends DELETE to /api/organizations/:id/settings/branding/logo
- *
- * Usage:
- * ```svelte
- * <script>
- *   async function handleDelete() {
- *     await deleteLogo(orgId);
- *   }
- * </script>
- * ```
+ * Uses command() since only an orgId string is sent (devalue-serializable).
  */
 export const deleteLogo = command(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
@@ -196,7 +206,11 @@ export const deleteLogo = command(z.string().uuid(), async (orgId) => {
     await cache.invalidate(orgId);
   }
 
-  await getBrandingSettings(orgId).refresh();
+  try {
+    await getBrandingSettings(orgId).refresh();
+  } catch {
+    /* non-critical */
+  }
 
   return result;
 });

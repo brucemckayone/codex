@@ -39,7 +39,6 @@ export const getOrganization = query(z.string().min(1), async (slug) => {
 interface PublicBrandingData {
   logoUrl: string | null;
   primaryColorHex: string;
-  platformName: string;
 }
 
 /**
@@ -59,13 +58,15 @@ interface PublicBrandingData {
  * ```
  */
 export const getPublicBranding = query(z.string().min(1), async (slug) => {
-  const { platform } = getRequestEvent();
-  const orgApiUrl = serverApiUrl(platform, 'org');
-
-  const response = await fetch(`${orgApiUrl}/api/organizations/public/${slug}`);
-  if (!response.ok) return null;
-
-  return (await response.json()) as PublicBrandingData;
+  const { platform, cookies } = getRequestEvent();
+  try {
+    const api = createServerApi(platform, cookies);
+    const result = await api.org.getPublicBranding(slug);
+    if (!result) return null;
+    return result as PublicBrandingData;
+  } catch {
+    return null;
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,10 +94,7 @@ export const getPublicOrgInfo = query(z.string().min(1), async (slug) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   const result = await api.org.getPublicInfo(slug);
-  // procedure() wraps handler return in { data: ... }
-  const inner = (result as { data: { data: PublicOrgInfo } })?.data;
-  const org = inner?.data ?? inner;
-  return { data: org as PublicOrgInfo };
+  return result as PublicOrgInfo;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,7 +254,8 @@ export const getOrganizationById = query(z.string().uuid(), async (id) => {
 export const getMyOrganizations = query(async () => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.org.getMyOrganizations();
+  const response = await api.org.getMyOrganizations();
+  return response;
 }) as unknown as () => Promise<OrganizationWithRole[] | null>;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,7 +271,8 @@ export const getMyOrganizations = query(async () => {
 export const getMyMembership = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.org.getMyMembership(orgId);
+  const response = await api.org.getMyMembership(orgId);
+  return response;
 }) as unknown as (
   orgId: string
 ) => Promise<{ role: string | null; joinedAt: string | null }>;

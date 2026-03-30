@@ -139,10 +139,10 @@ export class MediaItemService extends BaseService {
           );
         } catch (err) {
           // Log so signing config issues are visible — but don't fail the create
-          console.error(
-            '[MediaItemService] Failed to generate presigned upload URL:',
-            err
-          );
+          this.obs.error('Failed to generate presigned upload URL', {
+            r2Key: newMediaItem.r2Key,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
 
@@ -299,8 +299,10 @@ export class MediaItemService extends BaseService {
       if (error instanceof MediaNotFoundError) {
         throw error;
       }
-      // Debug: Log actual error before wrapping
-      console.error('[MediaItemService.update] Error:', error);
+      this.obs.error('Media item update failed', {
+        mediaItemId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw wrapError(error, { mediaItemId: id, creatorId, input: validated });
     }
   }
@@ -470,34 +472,12 @@ export class MediaItemService extends BaseService {
       | typeof MEDIA_STATUS.FAILED,
     creatorId: string
   ): Promise<MediaItem> {
-    // Validate status transition before attempting DB update
-    const media = await this.get(id, creatorId);
-    if (media) {
-      const currentStatus = media.status;
-      if (!this.isValidTransition(currentStatus, status)) {
-        throw new ValidationError(
-          `Invalid status transition: '${currentStatus}' → '${status}'`
-        );
-      }
-    }
+    // State transitions are enforced by:
+    // 1. DB CHECK constraint (status_ready_requires_keys) for the critical ready path
+    // 2. TranscodingService atomic WHERE (eq(status, 'transcoding')) for webhook updates
+    // 3. upload-complete handler checking current status before calling this
+    // No extra DB roundtrip here — avoids Neon proxy hang in workerd.
     return this.update(id, { status }, creatorId);
-  }
-
-  /**
-   * Valid status transitions (state machine):
-   *   uploading → uploaded
-   *   uploaded → transcoding
-   *   transcoding → ready | failed
-   *   failed → transcoding (retry)
-   */
-  private isValidTransition(from: string, to: string): boolean {
-    const VALID_TRANSITIONS: Record<string, string[]> = {
-      [MEDIA_STATUS.UPLOADING]: [MEDIA_STATUS.UPLOADED],
-      [MEDIA_STATUS.UPLOADED]: [MEDIA_STATUS.TRANSCODING],
-      [MEDIA_STATUS.TRANSCODING]: [MEDIA_STATUS.READY, MEDIA_STATUS.FAILED],
-      [MEDIA_STATUS.FAILED]: [MEDIA_STATUS.TRANSCODING],
-    };
-    return VALID_TRANSITIONS[from]?.includes(to) ?? false;
   }
 
   /**

@@ -42,6 +42,7 @@
     "@codex/organization": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
+    "@codex/transcoding": "workspace:*",
     "@codex/validation": "workspace:*",
     "drizzle-orm": "0.44.7"
   },

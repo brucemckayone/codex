@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { navigating, page } from '$app/state';
   import {
     SIDEBAR_BASE_LINKS,
     SIDEBAR_ADMIN_LINKS,
@@ -37,8 +37,9 @@
           <a
             href={link.href}
             class="nav-item"
-            class:active={isActive(link.href, $page.url.pathname)}
-            aria-current={isActive(link.href, $page.url.pathname) ? 'page' : undefined}
+            class:active={isActive(link.href, page.url.pathname)}
+            class:loading={navigating?.to?.url.pathname != null && isActive(link.href, navigating.to.url.pathname)}
+            aria-current={isActive(link.href, page.url.pathname) ? 'page' : undefined}
           >
             <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               {#if link.icon === 'dashboard'}
@@ -66,8 +67,8 @@
             <a
               href={link.href}
               class="nav-item"
-              class:active={isActive(link.href, $page.url.pathname)}
-              aria-current={isActive(link.href, $page.url.pathname) ? 'page' : undefined}
+              class:active={isActive(link.href, page.url.pathname)}
+              aria-current={isActive(link.href, page.url.pathname) ? 'page' : undefined}
             >
               <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 {#if link.icon === 'team'}
@@ -94,8 +95,8 @@
             <a
               href={link.href}
               class="nav-item"
-              class:active={isActive(link.href, $page.url.pathname)}
-              aria-current={isActive(link.href, $page.url.pathname) ? 'page' : undefined}
+              class:active={isActive(link.href, page.url.pathname)}
+              aria-current={isActive(link.href, page.url.pathname) ? 'page' : undefined}
             >
               <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/>
@@ -118,13 +119,6 @@
     padding: var(--space-4) 0;
     flex-shrink: 0;
     overflow-y: auto;
-    display: none;
-  }
-
-  @media (min-width: var(--breakpoint-md)) {
-    .sidebar {
-      display: block;
-    }
   }
 
   .sidebar-nav {
@@ -154,6 +148,11 @@
   }
 
   .nav-item:hover {
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text);
+  }
+
+  .nav-item.loading {
     background-color: var(--color-surface-secondary);
     color: var(--color-text);
   }

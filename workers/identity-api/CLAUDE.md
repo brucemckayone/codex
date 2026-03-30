@@ -1,28 +1,25 @@
-# Identity API (42071)
+# Identity-API Worker (port 42074)
 
-Organization Management (User ID placeholder).
+User identity, profiles, and user-facing platform settings lookup.
 
 ## Endpoints
-### Organizations
-- **POST /organizations**: Create.
-- **GET /organizations/:id**: Details.
-- **GET /organizations/slug/:slug**: Lookup.
-- **GET /organizations/check-slug/:slug**: Availability.
-- **PATCH /organizations/:id**: Update.
-- **DELETE /organizations/:id**: Soft delete.
 
-### Settings
-- **GET/PUT /organizations/:id/settings/branding**: Logo/Color.
-- **GET/PUT /organizations/:id/settings/contact**: Info.
-- **GET/PUT /organizations/:id/settings/features**: Toggles.
+| Method | Path | Policy | Input | Success | Response |
+|---|---|---|---|---|---|
+| GET | `/api/user/profile` | `auth: 'required'` | — | 200 | `{ data: UserProfile }` |
+| PATCH | `/api/user/profile` | `auth: 'required'` | body: update schema | 200 | `{ data: UserProfile }` |
 
-## Architecture
-- **Service**: `OrganizationService`, `PlatformSettingsFacade`.
-- **Security**: Auth required. Settings require Org Membership.
-- **Flow**: Creator makes Org -> Manages Settings -> Assigns Content.
+> Note: This worker handles user-facing identity operations. Organization CRUD and settings have been moved to the **organization-api** worker (port 42071).
 
-## Standards
-- **Validation**: Zod schema for every input.
-- **Assert**: `invariant(ctx.user, "Auth required")`.
-- **No Logic**: Route -> Service -> Response only.
-- **Errors**: Map Service Errors to HTTP codes.
+## Services Used
+
+- `IdentityService` (`@codex/identity`) — user profile management
+
+## Strict Rules
+
+- **MUST** scope all queries to the authenticated user
+- **NEVER** expose other users' profile data
+
+## Reference Files
+
+- `workers/identity-api/src/routes/users.ts` — user profile routes

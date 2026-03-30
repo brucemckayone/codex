@@ -35,12 +35,13 @@ export function getCookieConfig(
 ): CookieConfig {
   const devMode = isDev(env);
 
-  // Only allow insecure cookies for localhost in dev mode
+  // Only allow insecure cookies for localhost/lvh.me in dev mode
   const isLocalhost =
     host === 'localhost' ||
     host === '127.0.0.1' ||
     host?.startsWith('localhost:') ||
-    host?.startsWith('127.0.0.1:');
+    host?.startsWith('127.0.0.1:') ||
+    host?.includes('lvh.me');
   const secureCookie = devMode ? !isLocalhost : true;
 
   const config: CookieConfig = {
@@ -56,6 +57,10 @@ export function getCookieConfig(
     const envBindings = typeof env === 'object' ? env : undefined;
     config.domain =
       (envBindings?.COOKIE_DOMAIN as string) ?? `.${DOMAINS.PROD}`;
+  } else if (devMode && host?.includes('lvh.me') && !config.domain) {
+    // lvh.me resolves to 127.0.0.1 and supports cross-subdomain cookies
+    // unlike localhost which browsers reject Domain=.localhost per RFC 6761
+    config.domain = `.${DOMAINS.DEV}`;
   }
 
   return config;

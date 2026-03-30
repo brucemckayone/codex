@@ -5,6 +5,7 @@
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
 
+
   // Observability configuration
   "observability": {
     "enabled": true
@@ -44,10 +45,10 @@
   "vars": {
     "ENVIRONMENT": "development",
     "DB_METHOD": "LOCAL_PROXY",
-    "WEB_APP_URL": "http://localhost:3000",
+    "WEB_APP_URL": "http://lvh.me:3000",
     "API_URL": "http://localhost:8787",
     "MEDIA_API_URL": "http://localhost:4002",
-    "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio"
+    "R2_PUBLIC_URL_BASE": "http://localhost:4100"
   },
 
   // Environment configurations
@@ -59,10 +60,10 @@
       "vars": {
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
-        "WEB_APP_URL": "http://localhost:3000",
+        "WEB_APP_URL": "http://lvh.me:3000",
         "API_URL": "http://localhost:8787",
         "MEDIA_API_URL": "http://localhost:4002",
-        "R2_PUBLIC_URL_BASE": "https://cdn-dev.revelations.studio"
+        "R2_PUBLIC_URL_BASE": "http://localhost:4100"
       },
       "kv_namespaces": [
         {

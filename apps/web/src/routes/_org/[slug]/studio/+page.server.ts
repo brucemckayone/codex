@@ -8,7 +8,8 @@
 import { getActivityFeed, getDashboardStats } from '$lib/remote/admin.remote';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ parent }) => {
+export const load: PageServerLoad = async ({ parent, depends }) => {
+  depends('cache:studio-page:dashboard');
   const { org } = await parent();
 
   const [stats, activity] = await Promise.all([

@@ -181,6 +181,69 @@ export class ObservabilityClient {
       });
     }
   }
+
+  /**
+   * Track performance timing.
+   *
+   * Logs at 'warn' level when durationMs exceeds threshold (signals a
+   * problem worth investigating in any environment). Logs at 'debug'
+   * level otherwise (dev-only visibility for routine timings).
+   *
+   * @param label  - Human-readable operation name, e.g. "session-validation"
+   * @param durationMs - Measured duration in milliseconds
+   * @param options.threshold - Warn threshold in ms (default 2000)
+   * @param options.metadata - Extra context to attach to the log entry
+   */
+  perf(
+    label: string,
+    durationMs: number,
+    options?: { threshold?: number; metadata?: Record<string, unknown> }
+  ): void {
+    const threshold = options?.threshold ?? 2000;
+    const rounded = Math.round(durationMs);
+    const level = durationMs > threshold ? 'warn' : 'debug';
+
+    // debug() already gates on environment, but we call log() directly
+    // so both levels flow through the same structured output path.
+    if (level === 'debug' && this.environment !== 'development') return;
+
+    this.log({
+      level,
+      message: `perf: ${label}`,
+      timestamp: new Date(),
+      metadata: { durationMs: rounded, threshold, ...options?.metadata },
+    });
+  }
+
+  /**
+   * Start a performance timer.
+   *
+   * Returns an object whose `end()` method logs the elapsed time via
+   * `perf()` and returns the duration in milliseconds.
+   *
+   * @example
+   * ```ts
+   * const timer = logger.startTimer('org-layout', { threshold: 3000 });
+   * const org = await api.org.getPublicInfo(slug);
+   * const ms = timer.end({ slug });
+   * ```
+   */
+  startTimer(
+    label: string,
+    options?: { threshold?: number }
+  ): { end: (metadata?: Record<string, unknown>) => number } {
+    const start = performance.now();
+    return {
+      end: (metadata?: Record<string, unknown>) => {
+        const durationMs = performance.now() - start;
+        this.perf(label, durationMs, {
+          threshold: options?.threshold,
+          metadata,
+        });
+        return durationMs;
+      },
+    };
+  }
 }
 
 /**

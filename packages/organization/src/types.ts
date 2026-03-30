@@ -14,39 +14,13 @@ import type { NewOrganization, Organization } from '@codex/database/schema';
  */
 export type Database = typeof dbHttp | typeof dbWs;
 
-/**
- * Transaction type for Drizzle ORM
- * Used for multi-step database operations
- */
-export type DatabaseTransaction = Parameters<
-  Parameters<typeof dbHttp.transaction>[0]
->[0];
-
-/**
- * Configuration for service initialization
- */
-export interface ServiceConfig {
-  db: Database;
-  environment: string;
-}
-
+import type { ServiceConfig } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
+  PaginationParams,
   SingleItemResponse,
+  SortOrder,
 } from '@codex/shared-types';
-
-/**
- * Pagination parameters for list queries
- */
-export interface PaginationParams {
-  page: number;
-  limit: number;
-}
-
-/**
- * Sort order enum
- */
-export type SortOrder = 'asc' | 'desc';
 
 /**
  * Organization query filters
@@ -61,6 +35,7 @@ export interface OrganizationFilters {
  * Re-export database types for convenience
  */
 export type { Organization, NewOrganization };
+export type { PaginationParams, SortOrder };
 
 // ============================================================================
 // API Response Types

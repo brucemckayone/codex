@@ -28,31 +28,13 @@ export type DatabaseTransaction = Parameters<
   Parameters<typeof dbHttp.transaction>[0]
 >[0];
 
-/**
- * Configuration for service initialization
- */
-export interface ServiceConfig {
-  db: Database;
-  environment: string;
-}
-
+import type { ServiceConfig } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
+  PaginationParams,
   SingleItemResponse,
+  SortOrder,
 } from '@codex/shared-types';
-
-/**
- * Pagination parameters for list queries
- */
-export interface PaginationParams {
-  page: number;
-  limit: number;
-}
-
-/**
- * Sort order enum
- */
-export type SortOrder = 'asc' | 'desc';
 
 /**
  * Content query filters
@@ -114,6 +96,7 @@ export interface MediaItemWithRelations extends MediaItem {
  */
 export type { Content, MediaItem };
 export type { NewContent, NewMediaItem };
+export type { PaginationParams, SortOrder };
 
 // ============================================================================
 // API Response Types

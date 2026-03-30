@@ -29,6 +29,7 @@ import {
   getClientIP,
   validateInput,
 } from './helpers';
+import { PaginatedResult } from './paginated-result';
 
 import { createServiceRegistry } from './service-registry';
 import type {
@@ -173,6 +174,14 @@ export function procedure<
         return c.body(null, 204);
       }
 
+      // List responses: PaginatedResult emits { items, pagination } at top level
+      if (result instanceof PaginatedResult) {
+        return c.json(
+          { items: result.items, pagination: result.pagination },
+          successStatus
+        );
+      }
+      // Single-item responses: wrapped in { data: T }
       return c.json({ data: result }, successStatus);
     } catch (error) {
       // ====================================================================

@@ -17,7 +17,9 @@ export const load: PageServerLoad = async ({
   url,
   platform,
   cookies,
+  depends,
 }) => {
+  depends('cache:studio-page:customers');
   const { org, userRole } = await parent();
 
   // Admin/owner only guard
@@ -37,26 +39,28 @@ export const load: PageServerLoad = async ({
   params.set('page', String(page));
   params.set('limit', String(CUSTOMERS_LIMIT));
 
+  const fallbackPagination = {
+    page: 1,
+    limit: CUSTOMERS_LIMIT,
+    total: 0,
+    totalPages: 0,
+  };
+
   try {
     const api = createServerApi(platform, cookies);
     const result = await api.admin.getCustomers(params);
 
     return {
       customers: {
-        items: result.items,
-        pagination: result.pagination,
+        items: result.items ?? [],
+        pagination: result.pagination ?? fallbackPagination,
       },
     };
   } catch {
     return {
       customers: {
         items: [],
-        pagination: {
-          page: 1,
-          limit: CUSTOMERS_LIMIT,
-          total: 0,
-          totalPages: 0,
-        },
+        pagination: fallbackPagination,
       },
     };
   }

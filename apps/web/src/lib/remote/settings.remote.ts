@@ -122,8 +122,6 @@ export const updateContactForm = form(
         tiktokUrl,
       });
 
-      await getContactSettings(orgId).refresh();
-
       return {
         success: true,
         data: result,

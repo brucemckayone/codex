@@ -1,11 +1,19 @@
 /**
  * Discover page - server load
- * Fetches published public content for the discover grid.
+ * Fetches all published public content across all orgs using the public endpoint.
+ * No auth required — uses getPublicContent (GET /api/content/public) without orgId
+ * to aggregate content platform-wide.
  */
 
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
+
+const EMPTY_CONTENT = {
+  items: [],
+  pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+};
 
 export const load: PageServerLoad = async ({
   platform,
@@ -13,13 +21,13 @@ export const load: PageServerLoad = async ({
   url,
   setHeaders,
 }) => {
+  // Public endpoint — cacheable for all visitors
   setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
 
   const api = createServerApi(platform, cookies);
 
   const params = new URLSearchParams();
-  params.set('status', 'published');
-  params.set('visibility', 'public');
+  params.set('sort', 'newest');
 
   const search = url.searchParams.get('q')?.slice(0, 200) ?? '';
   if (search) {
@@ -35,18 +43,16 @@ export const load: PageServerLoad = async ({
   }
 
   try {
-    const content = await api.content.list(params);
+    const content = await api.content.getPublicContent(params);
     return {
-      content: content ?? { data: [], total: 0, page: 1, limit: 20 },
+      content: content ?? EMPTY_CONTENT,
       search,
       error: false,
     };
-  } catch (error) {
-    console.error('Failed to load discover content:', error);
-    return {
-      content: { data: [], total: 0, page: 1, limit: 20 },
-      search,
-      error: true,
-    };
+  } catch (err) {
+    logger.warn('Failed to load discover content', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { content: EMPTY_CONTENT, search, error: true };
   }
 };

@@ -1,2 +1,1 @@
-// KV-specific types
-export type KVDummy = Record<string, never>;
+// KV-specific types (placeholder removed — types defined in service files)

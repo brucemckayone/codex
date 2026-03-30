@@ -9,6 +9,7 @@
 
 import type { EmailProvider } from '@codex/notifications';
 import { createEmailProvider } from '@codex/notifications';
+import type { ObservabilityClient } from '@codex/observability';
 import type { AuthBindings } from './types';
 
 let cachedProvider: EmailProvider | null = null;
@@ -48,7 +49,8 @@ export function getEmailProvider(env: AuthBindings): EmailProvider {
 export async function sendVerificationEmail(
   env: AuthBindings,
   user: { name?: string | null; email: string },
-  token: string
+  token: string,
+  obs?: ObservabilityClient
 ): Promise<void> {
   const provider = getEmailProvider(env);
   const verificationUrl = `${env.WEB_APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
@@ -69,9 +71,12 @@ export async function sendVerificationEmail(
   );
 
   if (!result.success) {
-    console.error(
-      `[Auth Email] Failed to send verification email to ${user.email}: ${result.error}`
-    );
+    const msg = `Failed to send verification email for user ${user.id}: ${result.error}`;
+    if (obs) {
+      obs.error(msg);
+    } else {
+      console.error(`[Auth Email] ${msg}`);
+    }
   }
 }
 

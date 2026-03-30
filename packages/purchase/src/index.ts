@@ -78,5 +78,6 @@ export type {
   CompletePurchaseMetadata,
   NewPurchaseInput,
   Purchase,
+  PurchaseListItem,
   PurchaseWithContent,
 } from './types';

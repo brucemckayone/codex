@@ -36,14 +36,14 @@
     max-width: var(--pc-max-width, 1280px);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .page-container {
       padding-left: var(--pc-padding, var(--space-6));
       padding-right: var(--pc-padding, var(--space-6));
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (--breakpoint-lg) {
     .page-container {
       padding-left: var(--pc-padding, var(--space-8));
       padding-right: var(--pc-padding, var(--space-8));

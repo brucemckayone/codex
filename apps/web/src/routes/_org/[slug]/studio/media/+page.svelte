@@ -10,6 +10,7 @@
   import MediaGrid from '$lib/components/studio/MediaGrid.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { deleteMedia } from '$lib/remote/media.remote';
+  import { logger } from '$lib/observability';
   import * as m from '$paraglide/messages';
 
   let { data } = $props();
@@ -34,7 +35,7 @@
    */
   function handleEdit(id: string) {
     // Future: open edit dialog
-    console.log('Edit media:', id);
+    logger.debug(`Edit media: ${id}`);
   }
 
   /**
@@ -57,7 +58,7 @@
       deleteTargetId = null;
       void invalidateAll();
     } catch (error) {
-      console.error('Failed to delete media:', error);
+      logger.error('Failed to delete media', { error: error instanceof Error ? error.message : String(error) });
     } finally {
       isDeleting = false;
     }
@@ -82,7 +83,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.media_title()} | {data.org.name} Studio</title>
+  <title>{m.media_title()} | {data.org.name}</title>
 </svelte:head>
 
 <div class="media-page">
@@ -269,33 +270,33 @@
   }
 
   /* Dark mode */
-  [data-theme='dark'] .page-title {
+  :global([data-theme='dark']) .page-title {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .page-subtitle {
+  :global([data-theme='dark']) .page-subtitle {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .dialog {
+  :global([data-theme='dark']) .dialog {
     background-color: var(--color-surface-dark);
   }
 
-  [data-theme='dark'] .dialog-title {
+  :global([data-theme='dark']) .dialog-title {
     color: var(--color-text-dark);
   }
 
-  [data-theme='dark'] .dialog-description {
+  :global([data-theme='dark']) .dialog-description {
     color: var(--color-text-secondary-dark);
   }
 
-  [data-theme='dark'] .btn--secondary {
+  :global([data-theme='dark']) .btn--secondary {
     background-color: var(--color-surface-dark);
     color: var(--color-text-dark);
     border-color: var(--color-border-dark);
   }
 
-  [data-theme='dark'] .btn--secondary:hover:not(:disabled) {
+  :global([data-theme='dark']) .btn--secondary:hover:not(:disabled) {
     background-color: var(--color-surface-variant);
   }
 </style>

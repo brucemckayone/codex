@@ -2,89 +2,79 @@
   @component BrandingSettings
 
   Branding settings page for organization admins.
-  Allows uploading/deleting a logo and setting the primary brand color.
+  Allows uploading a logo and setting a primary brand color.
 
-  Uses:
-  - LogoUpload component for drag-and-drop logo management
-  - ColorPicker component for primary color selection
-  - Progressive enhancement form for color save
-  - command() remote functions for logo upload/delete
+  Uses form() for color updates (progressive enhancement) and
+  command() for logo upload/delete.
 
   @prop {PageData} data - Server-loaded branding settings + orgId from parent
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { invalidateAll } from '$app/navigation';
   import * as m from '$paraglide/messages';
+  import {
+    updateBrandingForm,
+    uploadLogoForm,
+    deleteLogo,
+  } from '$lib/remote/branding.remote';
   import LogoUpload from '$lib/components/studio/LogoUpload.svelte';
   import ColorPicker from '$lib/components/studio/ColorPicker.svelte';
-  import { updateBrandingForm } from '$lib/remote/branding.remote';
-  import { uploadLogo, deleteLogo } from '$lib/remote/branding.remote';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
 
   let { data } = $props();
 
   const orgId = $derived(data.orgId);
-  const branding = $derived(data.branding);
+  const branding = $derived(data.branding ?? {
+    logoUrl: null,
+    primaryColorHex: '#3B82F6',
+  });
 
-  // ─── Logo State ──────────────────────────────────────────────────────────
+  // ─── Color State ──────────────────────────────────────────────────────────
 
-  /**
-   * Local logo override: set by upload/delete operations.
-   * When null, falls back to the server-provided branding.logoUrl.
-   * Uses a sentinel to distinguish "explicitly set to null" (deleted) from "not overridden".
-   */
-  const LOGO_NOT_OVERRIDDEN = Symbol('not-overridden');
-  let logoOverride = $state<string | null | typeof LOGO_NOT_OVERRIDDEN>(LOGO_NOT_OVERRIDDEN);
-  const logoUrl = $derived(logoOverride !== LOGO_NOT_OVERRIDDEN ? logoOverride : branding.logoUrl);
+  let primaryColor = $state('#3B82F6');
 
-  let logoLoading = $state(false);
-  let logoError = $state<string | null>(null);
-
-  async function handleLogoUpload(file: File) {
-    logoLoading = true;
-    logoError = null;
-
-    try {
-      const result = await uploadLogo({ orgId, file });
-      if (result?.logoUrl) {
-        logoOverride = result.logoUrl;
-      }
-    } catch (error) {
-      logoError =
-        error instanceof Error ? error.message : 'Failed to upload logo';
-    } finally {
-      logoLoading = false;
-    }
-  }
-
-  async function handleLogoDelete() {
-    logoLoading = true;
-    logoError = null;
-
-    try {
-      await deleteLogo(orgId);
-      logoOverride = null;
-    } catch (error) {
-      logoError =
-        error instanceof Error ? error.message : 'Failed to delete logo';
-    } finally {
-      logoLoading = false;
-    }
-  }
-
-  // ─── Color State ─────────────────────────────────────────────────────────
-
-  /**
-   * Local color override: set when user picks a new color.
-   * Falls back to branding.primaryColorHex from server data.
-   */
-  let colorOverride = $state<string | null>(null);
-  const primaryColor = $derived(colorOverride ?? branding.primaryColorHex ?? '#3B82F6');
+  // Sync color from branding data
+  $effect(() => {
+    primaryColor = branding.primaryColorHex ?? '#3B82F6';
+  });
 
   function handleColorChange(color: string) {
-    colorOverride = color;
+    primaryColor = color;
   }
 
-  // ─── Success/Error Messages ──────────────────────────────────────────────
+  // ─── Logo Upload/Delete ───────────────────────────────────────────────────
+
+  let deleteLoading = $state(false);
+  const logoLoading = $derived(uploadLogoForm.pending > 0 || deleteLoading);
+
+  // Watch upload result — invalidate after short delay to let query cache settle
+  $effect(() => {
+    if (uploadLogoForm.result && !uploadLogoForm.pending) {
+      if (uploadLogoForm.result.success) {
+        toast.success(m.branding_saved());
+        setTimeout(() => void invalidateAll(), 200);
+      } else if (uploadLogoForm.result.error) {
+        toast.error(uploadLogoForm.result.error);
+      }
+    }
+  });
+
+  async function handleLogoDelete() {
+    deleteLoading = true;
+    try {
+      await deleteLogo(orgId);
+      toast.success(m.branding_saved());
+      setTimeout(() => void invalidateAll(), 200);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : m.branding_error();
+      toast.error(message);
+    } finally {
+      deleteLoading = false;
+    }
+  }
+
+  // ─── Form Result Handling ─────────────────────────────────────────────────
 
   let showSuccess = $state(false);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -99,26 +89,15 @@
     if (successTimeout) clearTimeout(successTimeout);
   });
 
-  // React to form submission result
   $effect(() => {
     if (updateBrandingForm.result?.success && !updateBrandingForm.pending) {
       showSuccessMessage();
-      // Reset color override after successful save so server value takes over
-      colorOverride = null;
     }
-  });
-
-  // Populate form fields reactively when orgId or branding changes
-  $effect(() => {
-    updateBrandingForm.fields.set({
-      orgId,
-      primaryColorHex: branding.primaryColorHex ?? '#3B82F6',
-    });
   });
 </script>
 
 <svelte:head>
-  <title>{m.branding_title()} | {m.settings_title()}</title>
+  <title>{m.settings_branding()} | {m.settings_title()}</title>
 </svelte:head>
 
 <div class="branding-page">
@@ -127,14 +106,12 @@
     <p class="page-description">{m.branding_description()}</p>
   </div>
 
-  <!-- Success message -->
   {#if showSuccess}
     <div class="success-message" role="status" aria-live="polite">
       {m.branding_saved()}
     </div>
   {/if}
 
-  <!-- Form-level error -->
   {#if updateBrandingForm.result?.error}
     <div class="error-message" role="alert">
       {updateBrandingForm.result.error}
@@ -147,36 +124,24 @@
     <p class="card-description">{m.branding_logo_description()}</p>
 
     <LogoUpload
-      {logoUrl}
+      logoUrl={branding.logoUrl}
       loading={logoLoading}
-      onUpload={handleLogoUpload}
+      {orgId}
+      uploadFormAttrs={uploadLogoForm}
       onDelete={handleLogoDelete}
     />
-
-    {#if logoError}
-      <div class="error-message" role="alert">{logoError}</div>
-    {/if}
   </section>
 
-  <!-- Color Section -->
+  <!-- Brand Color Section -->
   <section class="settings-card">
     <h3 class="card-title">{m.branding_color_title()}</h3>
     <p class="card-description">{m.branding_color_description()}</p>
 
-    <div class="color-field">
-      <label class="field-label" for="primaryColorHex">
-        {m.branding_color_primary()}
-      </label>
-      <ColorPicker
-        value={primaryColor}
-        onchange={handleColorChange}
-      />
-    </div>
-
-    <!-- Save form for color (progressive enhancement) -->
     <form {...updateBrandingForm} class="color-form" novalidate>
       <input type="hidden" name="orgId" value={orgId} />
       <input type="hidden" name="primaryColorHex" value={primaryColor} />
+
+      <ColorPicker value={primaryColor} onchange={handleColorChange} />
 
       <div class="form-actions">
         <button
@@ -227,6 +192,9 @@
     border-radius: var(--radius-lg);
     background-color: var(--color-surface);
     border: var(--border-width) var(--border-style) var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
   }
 
   .card-title {
@@ -234,34 +202,24 @@
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
     color: var(--color-text);
-    margin: 0 0 var(--space-1) 0;
+    margin: 0;
   }
 
   .card-description {
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  .color-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .field-label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text);
+    margin: 0;
   }
 
   .color-form {
-    margin-top: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
   }
 
   .form-actions {
-    padding-top: var(--space-4);
-    border-top: var(--border-width) var(--border-style) var(--color-border);
+    display: flex;
+    justify-content: flex-start;
   }
 
   .success-message {
@@ -280,10 +238,8 @@
     border: var(--border-width) var(--border-style) var(--color-error-200);
     color: var(--color-error-700);
     font-size: var(--text-sm);
-    margin-top: var(--space-3);
   }
 
-  /* Buttons */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -319,17 +275,12 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .page-title,
-  :global([data-theme='dark']) .card-title,
-  :global([data-theme='dark']) .field-label {
+  :global([data-theme='dark']) .card-title {
     color: var(--color-text-dark);
   }
 
   :global([data-theme='dark']) .settings-card {
     background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-  }
-
-  :global([data-theme='dark']) .form-actions {
     border-color: var(--color-border-dark);
   }
 

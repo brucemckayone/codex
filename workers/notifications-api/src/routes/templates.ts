@@ -21,7 +21,7 @@ import {
   updateTemplateSchema,
   uuidSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -41,7 +41,10 @@ app.get(
     policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
-      return ctx.services.templates.listGlobalTemplates(ctx.input.query);
+      const result = await ctx.services.templates.listGlobalTemplates(
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -140,17 +143,18 @@ const orgTemplateIdParamSchema = z.object({
 app.get(
   '/organizations/:orgId',
   procedure({
-    policy: { auth: 'required' },
+    policy: { auth: 'required', requireOrgMembership: true },
     input: {
       params: orgIdParamSchema,
       query: listTemplatesQuerySchema,
     },
     handler: async (ctx) => {
-      return ctx.services.templates.listOrgTemplates(
+      const result = await ctx.services.templates.listOrgTemplates(
         ctx.input.params.orgId,
         ctx.user.id,
         ctx.input.query
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -162,7 +166,11 @@ app.get(
 app.post(
   '/organizations/:orgId',
   procedure({
-    policy: { auth: 'required' },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: {
       params: orgIdParamSchema,
       body: createOrgTemplateSchema,
@@ -185,7 +193,11 @@ app.post(
 app.patch(
   '/organizations/:orgId/:id',
   procedure({
-    policy: { auth: 'required' },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: {
       params: orgTemplateIdParamSchema,
       body: updateTemplateSchema,
@@ -208,7 +220,11 @@ app.patch(
 app.delete(
   '/organizations/:orgId/:id',
   procedure({
-    policy: { auth: 'required' },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { params: orgTemplateIdParamSchema },
     successStatus: 204,
     handler: async (ctx) => {
@@ -236,10 +252,11 @@ app.get(
     policy: { auth: 'required', roles: [AUTH_ROLES.CREATOR] },
     input: { query: listTemplatesQuerySchema },
     handler: async (ctx) => {
-      return ctx.services.templates.listCreatorTemplates(
+      const result = await ctx.services.templates.listCreatorTemplates(
         ctx.user.id,
         ctx.input.query
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );

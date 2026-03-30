@@ -142,3 +142,23 @@ app.use('*', async (c, next) => {
 ```
 
 All subsequent logs in the request lifecycle will include this `requestId` for tracing.
+
+## Strict Rules
+
+- **MUST** use `ObservabilityClient` for ALL logging — NEVER use `console.log` directly
+- **MUST** use `redactSensitiveData()` before logging any user-provided data
+- **MUST** include `requestId` for log correlation — set early in middleware
+- **MUST** use `trackError()` for all caught errors before re-throwing
+- **MUST** use `info()` for business events, `warn()` for recoverable issues, `error()` for failures
+- **NEVER** log passwords, session tokens, API keys, or full email addresses
+- **NEVER** log full request/response bodies — use summaries or sampling
+- **NEVER** use `trackError()` for expected business logic errors (use `warn()` instead)
+
+## Integration
+
+- **Depends on**: Nothing (standalone)
+- **Used by**: `@codex/service-errors` (BaseService auto-creates obs), all workers (request tracking)
+
+## Reference Files
+
+- `packages/observability/src/index.ts` — ObservabilityClient, redaction, helpers

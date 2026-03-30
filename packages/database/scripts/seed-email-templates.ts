@@ -210,7 +210,7 @@ If you have any questions, please contact our support team at {{supportEmail}}.
   },
 ];
 
-async function seedTemplates() {
+export async function seedTemplates() {
   console.log('🌱 Seeding email templates...');
 
   try {
@@ -246,9 +246,12 @@ async function seedTemplates() {
   }
 }
 
-seedTemplates()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error('Seed process failed:', err);
-    process.exit(1);
-  });
+// Run directly when executed as a standalone script
+if (process.argv[1] === __filename) {
+  seedTemplates()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('Seed process failed:', err);
+      process.exit(1);
+    });
+}

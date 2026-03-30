@@ -232,6 +232,20 @@
       "when": 1771413610987,
       "tag": "0032_living_the_anarchist",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1774278824815,
+      "tag": "0033_tidy_crystal",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1774737633803,
+      "tag": "0034_amazing_fixer",
+      "breakpoints": true
     }
   ]
 }

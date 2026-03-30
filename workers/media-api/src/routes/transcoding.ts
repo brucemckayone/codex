@@ -48,8 +48,12 @@ app.post(
       const { id } = ctx.input.params;
       const { priority } = ctx.input.body;
 
-      // Use internal method that doesn't require creatorId (workerAuth is auth layer)
-      await ctx.services.transcoding.triggerJobInternal(id, priority);
+      // Validates media + updates DB to 'transcoding' synchronously.
+      // The RunPod dispatch runs in the background via waitUntil.
+      const { dispatchPromise } =
+        await ctx.services.transcoding.triggerJobInternal(id, priority);
+
+      ctx.executionCtx.waitUntil(dispatchPromise);
 
       return { message: 'Transcoding job triggered', mediaId: id };
     },
@@ -109,7 +113,7 @@ app.get(
         ctx.user.id
       );
 
-      return { data: status };
+      return status;
     },
   })
 );

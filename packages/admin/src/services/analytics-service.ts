@@ -354,7 +354,12 @@ export class AdminAnalyticsService extends BaseService {
 
       return {
         items,
-        pagination: { page, limit, total },
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
       };
     } catch (error) {
       if (error instanceof NotFoundError) {

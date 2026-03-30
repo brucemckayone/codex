@@ -5,11 +5,11 @@
  * Defines admin-specific domain types only.
  */
 
-import type { PaginationParams } from '@codex/content';
 import type { Content, Purchase, User } from '@codex/database/schema';
 import type {
   PaginatedListResponse,
   PaginationMetadata,
+  PaginationParams,
 } from '@codex/shared-types';
 
 // Re-export ServiceConfig from service-errors (standard pattern)
@@ -170,30 +170,85 @@ export interface CustomerDetails {
 }
 
 // ============================================================================
+// Analytics Response Types (canonical home — moved from @codex/shared-types)
+// ============================================================================
+
+/**
+ * Revenue data point for a specific day
+ */
+export interface RevenueByDay {
+  date: string;
+  revenueCents: number;
+  purchaseCount: number;
+}
+
+/**
+ * Response for GET /api/admin/analytics/revenue
+ */
+export interface RevenueAnalyticsResponse {
+  totalRevenueCents: number;
+  totalPurchases: number;
+  averageOrderValueCents: number;
+  platformFeeCents: number;
+  organizationFeeCents: number;
+  creatorPayoutCents: number;
+  revenueByDay: RevenueByDay[];
+}
+
+/**
+ * Response for GET /api/admin/analytics/top-content
+ */
+export type TopContentAnalyticsResponse = PaginatedListResponse<{
+  contentId: string;
+  contentTitle: string;
+  revenueCents: number;
+  purchaseCount: number;
+}>;
+
+/**
+ * Customer list item for admin dashboard
+ */
+export interface CustomerListItem {
+  userId: string;
+  email: string;
+  name: string | null;
+  createdAt: string;
+  totalPurchases: number;
+  totalSpentCents: number;
+}
+
+// ============================================================================
 // Activity Feed Types
 // ============================================================================
 
 /**
- * Single activity feed item
+ * Activity feed item type
  */
-export interface ActivityFeedItem {
+export type ActivityItemType =
+  | 'purchase'
+  | 'content_published'
+  | 'member_joined';
+
+/**
+ * Individual activity feed item
+ */
+export interface ActivityItem {
   id: string;
-  type: 'purchase' | 'content_published' | 'member_joined';
+  type: ActivityItemType;
   title: string;
   description: string | null;
   timestamp: string;
 }
 
+// Keep legacy alias
+export type { ActivityItem as ActivityFeedItem };
+
 /**
- * Activity feed response with pagination
+ * Response for GET /api/admin/activity
  */
 export interface ActivityFeedResponse {
-  items: ActivityFeedItem[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-  };
+  items: ActivityItem[];
+  pagination: PaginationMetadata;
 }
 
 // ============================================================================

@@ -20,13 +20,14 @@ export const load: PageServerLoad = async ({
     const api = createServerApi(platform, cookies);
     const result = await api.content.get(params.contentId);
 
-    if (!result?.data) {
+    if (!result) {
       error(404, 'Content not found');
     }
 
     return {
-      content: result.data,
+      content: result,
       organizationId: org.id,
+      orgSlug: org.slug,
     };
   } catch (err) {
     // Re-throw SvelteKit errors (404, etc.)

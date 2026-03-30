@@ -14,12 +14,12 @@
  *
  * All endpoints require:
  * 1. Valid session (authenticated user)
- * 2. User role = 'platform_owner'
+ * 2. Organization membership with 'owner' or 'admin' role
  *
  * Uses the procedure() pattern for unified policy, validation, and error handling.
  */
 
-import { AUTH_ROLES, type CONTENT_STATUS } from '@codex/constants';
+import type { CONTENT_STATUS } from '@codex/constants';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
   adminActivityQuerySchema,
@@ -35,6 +35,7 @@ import {
 import {
   createKvCheck,
   createWorker,
+  PaginatedResult,
   procedure,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
@@ -48,7 +49,7 @@ import type { AdminApiEnv } from './types';
  * Create worker with standard middleware
  *
  * Configuration:
- * - enableGlobalAuth: false (admin routes use platform_owner policy)
+ * - enableGlobalAuth: false (admin routes use org management policy)
  * - healthCheck: database and KV checks
  */
 const app = createWorker<AdminApiEnv>({
@@ -84,7 +85,11 @@ app.use('/api/*', (c, next) => {
 app.get(
   '/api/admin/analytics/revenue',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { query: adminRevenueQuerySchema },
     handler: async (ctx) => {
       return await ctx.services.adminAnalytics.getRevenueStats(
@@ -102,7 +107,11 @@ app.get(
 app.get(
   '/api/admin/analytics/customers',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     handler: async (ctx) => {
       return await ctx.services.adminAnalytics.getCustomerStats(
         ctx.organizationId
@@ -118,13 +127,18 @@ app.get(
 app.get(
   '/api/admin/analytics/top-content',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { query: adminTopContentQuerySchema },
     handler: async (ctx) => {
-      return await ctx.services.adminAnalytics.getTopContent(
+      const result = await ctx.services.adminAnalytics.getTopContent(
         ctx.organizationId,
         ctx.input.query.limit
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -136,7 +150,11 @@ app.get(
 app.get(
   '/api/admin/analytics/dashboard-stats',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { query: adminDashboardStatsQuerySchema },
     handler: async (ctx) => {
       return await ctx.services.adminAnalytics.getDashboardStats(
@@ -155,13 +173,18 @@ app.get(
 app.get(
   '/api/admin/activity',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { query: adminActivityQuerySchema },
     handler: async (ctx) => {
-      return await ctx.services.adminAnalytics.getRecentActivity(
+      const result = await ctx.services.adminAnalytics.getRecentActivity(
         ctx.organizationId,
         ctx.input.query
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -177,14 +200,18 @@ app.get(
 app.get(
   '/api/admin/content',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { query: adminContentListQuerySchema },
     handler: async (ctx) => {
       // Map 'all' status to undefined for service layer
       const statusFilter =
         ctx.input.query.status === 'all' ? undefined : ctx.input.query.status;
 
-      return await ctx.services.adminContent.listAllContent(
+      const result = await ctx.services.adminContent.listAllContent(
         ctx.organizationId,
         {
           page: ctx.input.query.page,
@@ -196,6 +223,7 @@ app.get(
             | undefined,
         }
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -207,7 +235,11 @@ app.get(
 app.post(
   '/api/admin/content/:id/publish',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { params: adminContentIdParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.adminContent.publishContent(
@@ -225,7 +257,11 @@ app.post(
 app.post(
   '/api/admin/content/:id/unpublish',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { params: adminContentIdParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.adminContent.unpublishContent(
@@ -243,7 +279,11 @@ app.post(
 app.delete(
   '/api/admin/content/:id',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { params: adminContentIdParamsSchema },
     successStatus: 204,
     handler: async (ctx) => {
@@ -267,13 +307,18 @@ app.delete(
 app.get(
   '/api/admin/customers',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { query: adminCustomerListQuerySchema },
     handler: async (ctx) => {
-      return await ctx.services.adminCustomer.listCustomers(
+      const result = await ctx.services.adminCustomer.listCustomers(
         ctx.organizationId,
         ctx.input.query
       );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );
@@ -285,7 +330,11 @@ app.get(
 app.get(
   '/api/admin/customers/:id',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { params: adminCustomerIdParamsSchema },
     handler: async (ctx) => {
       return await ctx.services.adminCustomer.getCustomerDetails(
@@ -303,7 +352,11 @@ app.get(
 app.post(
   '/api/admin/customers/:customerId/grant-access/:contentId',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     input: { params: adminGrantAccessParamsSchema },
     handler: async (ctx) => {
       await ctx.services.adminCustomer.grantContentAccess(
@@ -323,7 +376,11 @@ app.post(
 app.get(
   '/api/admin/status',
   procedure({
-    policy: { auth: AUTH_ROLES.PLATFORM_OWNER },
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
     handler: async (ctx) => {
       return {
         status: 'ok',

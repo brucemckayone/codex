@@ -91,7 +91,7 @@ export const test = base.extend<AuthFixtures>({
         browserCookies.push({
           name,
           value,
-          domain: 'localhost',
+          domain: 'lvh.me',
           path: '/',
           httpOnly: true,
           secure: false,
@@ -104,7 +104,7 @@ export const test = base.extend<AuthFixtures>({
           browserCookies.push({
             name: COOKIES.SESSION_NAME,
             value,
-            domain: 'localhost',
+            domain: 'lvh.me',
             path: '/',
             httpOnly: true,
             secure: false,

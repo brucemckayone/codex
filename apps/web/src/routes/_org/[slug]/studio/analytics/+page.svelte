@@ -8,14 +8,14 @@
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import RevenueChart from '$lib/components/studio/RevenueChart.svelte';
   import TopContentTable from '$lib/components/studio/TopContentTable.svelte';
 
   let { data } = $props();
 
-  const slug = $derived($page.params.slug);
+  const slug = $derived(page.params.slug);
 
   // Derive chart data from revenue response
   const chartData = $derived(
@@ -67,18 +67,18 @@
   /**
    * Format cents to currency string (GBP)
    */
-  function formatRevenue(cents: number): string {
+  function formatRevenue(cents: number | undefined | null): string {
     return new Intl.NumberFormat('en-GB', {
       style: 'currency',
       currency: 'GBP',
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
-    }).format(cents / 100);
+    }).format((cents ?? 0) / 100);
   }
 </script>
 
 <svelte:head>
-  <title>{m.analytics_title()} | {data.org.name} Studio</title>
+  <title>{m.analytics_title()} | {data.org.name}</title>
 </svelte:head>
 
 <div class="analytics-page">

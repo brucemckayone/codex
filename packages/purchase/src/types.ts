@@ -59,6 +59,19 @@ export interface CompletePurchaseMetadata {
 }
 
 /**
+ * Purchase list item for account payment history
+ */
+export interface PurchaseListItem {
+  id: string;
+  customerId: string;
+  createdAt: string; // ISO 8601 timestamp
+  contentId: string;
+  contentTitle: string;
+  amountCents: number;
+  status: 'completed' | 'pending' | 'failed' | 'refunded';
+}
+
+/**
  * Checkout session verification result
  *
  * Session status values from Stripe API (2025):

@@ -16,9 +16,11 @@
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
-  const user: LayoutUser | null = data.user
-    ? { name: data.user.name ?? '', email: data.user.email ?? '', image: data.user.image ?? undefined }
-    : null;
+  const user = $derived<LayoutUser | null>(
+    data.user
+      ? { name: data.user.name ?? '', email: data.user.email ?? '', image: data.user.image ?? undefined }
+      : null
+  );
 
   // Reactive staleness check — runs on mount AND whenever data.versions changes.
   // data.versions changes after invalidate('cache:versions') re-runs the server load,

@@ -29,22 +29,21 @@ import { createServerApi } from '$lib/server/api';
  * ```
  */
 export const portalSessionForm = form(z.object({}), async (_data) => {
-  const { platform, cookies, url, params } = getRequestEvent();
+  const { platform, cookies, url } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  const slug = params.slug;
 
   try {
     const result = await api.checkout.createPortalSession({
-      returnUrl: `${url.origin}/${slug}/studio/billing`,
+      returnUrl: `${url.origin}/studio/billing`,
     });
 
     // Validate the redirect URL to prevent open redirect attacks
-    const portalUrl = new URL(result.data.url);
+    const portalUrl = new URL(result.url);
     if (!portalUrl.hostname.endsWith('.stripe.com')) {
       throw new Error('Invalid billing portal URL');
     }
 
-    redirect(303, result.data.url);
+    redirect(303, result.url);
   } catch (error) {
     if (isRedirect(error)) throw error;
     return {

@@ -6,7 +6,7 @@
 	import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
 	import Button from '$lib/components/ui/Button/Button.svelte';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
 
 	/**
@@ -18,8 +18,8 @@
 	let { data }: { data: PageData } = $props();
 
 	// Get current filter status from URL
-	let currentStatus = $derived($page.url.searchParams.get('status') || 'all');
-	let currentPage = $derived(Math.max(1, parseInt($page.url.searchParams.get('page') || '1', 10)));
+	let currentStatus = $derived(page.url.searchParams.get('status') || 'all');
+	let currentPage = $derived(Math.max(1, parseInt(page.url.searchParams.get('page') || '1', 10)));
 
 	// Map purchase status to badge variant
 	function getStatusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
@@ -270,7 +270,7 @@
 		margin-bottom: var(--space-6);
 	}
 
-	@media (min-width: 640px) {
+	@media (--breakpoint-sm) {
 		.history-header {
 			flex-direction: row;
 			align-items: center;

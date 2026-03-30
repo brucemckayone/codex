@@ -45,6 +45,7 @@ import {
   getClientIP,
   validateInput,
 } from './helpers';
+import { PaginatedResult } from './paginated-result';
 import { createServiceRegistry } from './service-registry';
 import type {
   InputSchema,
@@ -290,6 +291,12 @@ export function multipartProcedure<
         return c.body(null, 204);
       }
 
+      if (result instanceof PaginatedResult) {
+        return c.json(
+          { items: result.items, pagination: result.pagination },
+          successStatus
+        );
+      }
       return c.json({ data: result }, successStatus);
     } catch (error) {
       // ====================================================================

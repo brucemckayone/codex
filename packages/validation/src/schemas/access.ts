@@ -40,6 +40,7 @@ export const getPlaybackProgressSchema = z.object({
 });
 
 export const listUserLibrarySchema = paginationSchema.extend({
+  organizationId: uuidSchema.optional(),
   filter: z.enum(['all', 'in-progress', 'completed']).optional().default('all'),
   sortBy: z.enum(['recent', 'title', 'duration']).optional().default('recent'),
 });

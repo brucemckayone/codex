@@ -1,0 +1,1 @@
+CREATE INDEX "idx_purchases_customer_purchased" ON "purchases" USING btree ("customer_id","purchased_at");

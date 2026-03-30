@@ -7,13 +7,13 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import * as m from '$paraglide/messages';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import { ErrorBoundary } from '$lib/components/ui';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
 
   let { data }: { data: PageData } = $props();
 
-  const orgSlug = $derived($page.params.slug);
+  const orgSlug = $derived(page.params.slug);
 </script>
 
 <svelte:head>
@@ -25,5 +25,6 @@
   <ContentForm
     content={data.content}
     organizationId={data.organizationId}
+    orgSlug={data.orgSlug}
   />
 </ErrorBoundary>

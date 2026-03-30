@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
 
-  const orgSlug = $derived($page.params.slug);
+  const orgSlug = $derived(page.params.slug);
 </script>
 
 <svelte:head>
@@ -22,8 +22,8 @@
     <h1 class="error-title">{m.studio_content_error_title()}</h1>
     <p class="error-description">{m.studio_content_error_description()}</p>
 
-    {#if $page.error?.message}
-      <p class="error-detail">{$page.error.message}</p>
+    {#if page.error?.message}
+      <p class="error-detail">{page.error.message}</p>
     {/if}
 
     <div class="error-actions">
