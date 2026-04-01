@@ -21,8 +21,13 @@
   const { items }: Props = $props();
 
   let togglingId = $state<string | null>(null);
+  let statusOverrides = $state<Record<string, string>>({});
 
   const isEmpty = $derived(items.length === 0);
+
+  function getItemStatus(item: ContentWithRelations): string {
+    return statusOverrides[item.id] ?? item.status;
+  }
 
   function getStatusVariant(status: string): 'published' | 'draft' | 'archived' {
     if (status === 'published') return 'published';
@@ -50,19 +55,19 @@
 
   async function handlePublishToggle(item: ContentWithRelations) {
     togglingId = item.id;
-    const previousStatus = item.status;
+    const currentStatus = getItemStatus(item);
     try {
-      if (item.status === 'published') {
-        item.status = 'draft';
+      if (currentStatus === 'published') {
+        statusOverrides[item.id] = 'draft';
         await unpublishContent(item.id);
         toast.success(m.studio_content_form_unpublish_success());
       } else {
-        item.status = 'published';
+        statusOverrides[item.id] = 'published';
         await publishContent(item.id);
         toast.success(m.studio_content_form_publish_success());
       }
     } catch (err) {
-      item.status = previousStatus;
+      delete statusOverrides[item.id];
       const message = err instanceof Error ? err.message : m.studio_content_form_publish_error();
       toast.error(message);
     } finally {
@@ -110,23 +115,25 @@
               <span class="type-badge">{getTypeText(item.contentType)}</span>
             </td>
             <td>
-              <span class="status-dot" data-status={getStatusVariant(item.status)}></span>
-              <span class="status-text" data-status={getStatusVariant(item.status)}>
-                {getStatusText(item.status)}
+              {@const status = getItemStatus(item)}
+              <span class="status-dot" data-status={getStatusVariant(status)}></span>
+              <span class="status-text" data-status={getStatusVariant(status)}>
+                {getStatusText(status)}
               </span>
             </td>
             <td class="cell-date">{formatDate(item.createdAt)}</td>
             <td class="cell-actions">
+              {@const status = getItemStatus(item)}
               <button
                 type="button"
                 class="action-btn"
-                data-action={item.status === 'published' ? 'unpublish' : 'publish'}
+                data-action={status === 'published' ? 'unpublish' : 'publish'}
                 disabled={togglingId === item.id}
                 onclick={() => handlePublishToggle(item)}
               >
                 {#if togglingId === item.id}
                   <Spinner size="sm" />
-                {:else if item.status === 'published'}
+                {:else if status === 'published'}
                   {m.studio_content_form_unpublish()}
                 {:else}
                   {m.studio_content_form_publish()}
