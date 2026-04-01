@@ -1,4 +1,5 @@
 import { AUTH_COOKIES, COOKIES } from '@codex/constants';
+import { logger } from '$lib/observability';
 import { serverApiUrl } from './api';
 
 /**
@@ -55,8 +56,10 @@ export async function invalidateAuthSession(
       },
       body: '{}',
     });
-  } catch {
-    // Auth worker unavailable — caller should still delete the cookie
+  } catch (err) {
+    logger.warn('Failed to invalidate auth session server-side', {
+      error: err instanceof Error ? err.message : 'unknown',
+    });
   }
 }
 
