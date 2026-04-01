@@ -400,37 +400,30 @@ export class MediaItemService extends BaseService {
           ? desc(mediaItems[sortColumn])
           : asc(mediaItems[sortColumn]);
 
-      // Get items
-      const items = await this.db.query.mediaItems.findMany({
-        where: and(...whereConditions),
-        limit,
-        offset,
-        orderBy: [orderByClause],
-        with: {
-          creator: {
-            columns: {
-              id: true,
-              email: true,
-              name: true,
+      // Run items + count queries concurrently (independent queries)
+      const [items, countResult] = await Promise.all([
+        this.db.query.mediaItems.findMany({
+          where: and(...whereConditions),
+          limit,
+          offset,
+          orderBy: [orderByClause],
+          with: {
+            creator: {
+              columns: {
+                id: true,
+                email: true,
+                name: true,
+              },
             },
           },
-        },
-      });
+        }),
+        this.db
+          .select({ total: count() })
+          .from(mediaItems)
+          .where(and(...whereConditions)),
+      ]);
 
-      // Get total count
-      const countResult = await this.db
-        .select({ total: count() })
-        .from(mediaItems)
-        .where(and(...whereConditions));
-
-      const totalRecord = countResult[0];
-      if (!totalRecord) {
-        throw new Error('Failed to get media item count');
-      }
-
-      const { total } = totalRecord;
-
-      const totalCount = Number(total);
+      const totalCount = Number(countResult[0]?.total ?? 0);
       const totalPages = Math.ceil(totalCount / limit);
 
       return {

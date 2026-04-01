@@ -281,7 +281,7 @@ export class PurchaseService extends BaseService {
    *     customerId: 'customer-456',
    *     organizationId: 'org-789',
    *     amountPaidCents: 2999,
-   *     currency: 'usd',
+   *     currency: 'gbp',
    *   }
    * );
    * // Returns: Purchase with status='completed', revenue split calculated

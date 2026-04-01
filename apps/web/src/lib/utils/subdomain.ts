@@ -131,6 +131,33 @@ export function buildPlatformUrl(currentUrl: URL, path = '/'): string {
   return `${protocol}//${baseDomain}${portSuffix}${path}`;
 }
 
+/**
+ * Build a URL to a content detail page, handling cross-org subdomain routing.
+ *
+ * - On the content's own org subdomain → root-relative `/content/{slug}`
+ * - On a different origin (platform, other org) → full URL via buildOrgUrl()
+ * - Falls back to content ID if slug is unavailable
+ */
+export function buildContentUrl(
+  currentUrl: URL,
+  content: {
+    slug?: string | null;
+    id: string;
+    organizationSlug?: string | null;
+  }
+): string {
+  const contentPath = `/content/${content.slug ?? content.id}`;
+
+  if (content.organizationSlug) {
+    const currentSubdomain = extractSubdomain(currentUrl.hostname);
+    if (currentSubdomain !== content.organizationSlug) {
+      return buildOrgUrl(currentUrl, content.organizationSlug, contentPath);
+    }
+  }
+
+  return contentPath;
+}
+
 export function getSubdomainContext(hostname: string): SubdomainContext {
   const subdomain = extractSubdomain(hostname);
 

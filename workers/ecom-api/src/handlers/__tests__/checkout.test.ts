@@ -148,7 +148,7 @@ describe('handleCheckoutCompleted', () => {
           contentId: 'content_456',
           organizationId: 'org_789',
           amountPaidCents: 2999,
-          currency: CURRENCY.USD,
+          currency: CURRENCY.GBP,
         })
       );
 
@@ -613,7 +613,7 @@ describe('handleCheckoutCompleted', () => {
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          currency: CURRENCY.USD,
+          currency: CURRENCY.GBP,
         })
       );
     });

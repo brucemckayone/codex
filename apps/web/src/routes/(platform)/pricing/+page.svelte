@@ -2,6 +2,7 @@
   /**
    * Pricing page - plans and pricing information
    */
+  import * as m from '$paraglide/messages';
 </script>
 
 <svelte:head>
@@ -17,46 +18,46 @@
 
 <div class="pricing">
   <section class="pricing-hero">
-    <h1>Simple, Transparent Pricing</h1>
-    <p class="lead">Pay only for what you need. No hidden fees.</p>
+    <h1>{m.pricing_title()}</h1>
+    <p class="lead">{m.pricing_subtitle()}</p>
   </section>
 
   <div class="plans-grid">
     <div class="plan-card">
-      <h2 class="plan-name">Free</h2>
-      <p class="plan-price"><span class="price-amount">$0</span><span class="price-period">/month</span></p>
+      <h2 class="plan-name">{m.pricing_plan_free()}</h2>
+      <p class="plan-price"><span class="price-amount">{m.pricing_plan_free_price()}</span><span class="price-period">{m.pricing_plan_period()}</span></p>
       <ul class="plan-features">
-        <li>Access free content</li>
-        <li>Track your progress</li>
-        <li>Build your library</li>
+        <li>{m.pricing_plan_free_feature_1()}</li>
+        <li>{m.pricing_plan_free_feature_2()}</li>
+        <li>{m.pricing_plan_free_feature_3()}</li>
       </ul>
-      <a href="/register" class="plan-cta plan-cta-secondary">Get Started</a>
+      <a href="/register" class="plan-cta plan-cta-secondary">{m.pricing_plan_free_cta()}</a>
     </div>
 
     <div class="plan-card plan-featured">
-      <h2 class="plan-name">Creator</h2>
-      <p class="plan-price"><span class="price-amount">$19</span><span class="price-period">/month</span></p>
+      <h2 class="plan-name">{m.pricing_plan_creator()}</h2>
+      <p class="plan-price"><span class="price-amount">{m.pricing_plan_creator_price()}</span><span class="price-period">{m.pricing_plan_period()}</span></p>
       <ul class="plan-features">
-        <li>Create an organization</li>
-        <li>Upload unlimited content</li>
-        <li>Adaptive HLS streaming</li>
-        <li>Analytics dashboard</li>
-        <li>Custom branding</li>
+        <li>{m.pricing_plan_creator_feature_1()}</li>
+        <li>{m.pricing_plan_creator_feature_2()}</li>
+        <li>{m.pricing_plan_creator_feature_3()}</li>
+        <li>{m.pricing_plan_creator_feature_4()}</li>
+        <li>{m.pricing_plan_creator_feature_5()}</li>
       </ul>
-      <a href="/register" class="plan-cta plan-cta-primary">Start Creating</a>
+      <a href="/register" class="plan-cta plan-cta-primary">{m.pricing_plan_creator_cta()}</a>
     </div>
 
     <div class="plan-card">
-      <h2 class="plan-name">Enterprise</h2>
-      <p class="plan-price"><span class="price-amount">Custom</span></p>
+      <h2 class="plan-name">{m.pricing_plan_enterprise()}</h2>
+      <p class="plan-price"><span class="price-amount">{m.pricing_plan_enterprise_price()}</span></p>
       <ul class="plan-features">
-        <li>Everything in Creator</li>
-        <li>Multiple organizations</li>
-        <li>Priority support</li>
-        <li>Custom integrations</li>
-        <li>SLA guarantee</li>
+        <li>{m.pricing_plan_enterprise_feature_1()}</li>
+        <li>{m.pricing_plan_enterprise_feature_2()}</li>
+        <li>{m.pricing_plan_enterprise_feature_3()}</li>
+        <li>{m.pricing_plan_enterprise_feature_4()}</li>
+        <li>{m.pricing_plan_enterprise_feature_5()}</li>
       </ul>
-      <a href="/about" class="plan-cta plan-cta-secondary">Contact Us</a>
+      <a href="/about" class="plan-cta plan-cta-secondary">{m.pricing_plan_enterprise_cta()}</a>
     </div>
   </div>
 </div>

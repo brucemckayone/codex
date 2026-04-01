@@ -5,6 +5,7 @@ import { RESERVED_SUBDOMAINS_SET } from '@codex/constants';
  */
 export const AUTH_PATHS = new Set([
   '/login',
+  '/logout',
   '/register',
   '/forgot-password',
   '/reset-password',

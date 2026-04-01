@@ -11,12 +11,11 @@
  * - Validation: packages/validation/src/schemas/settings.ts
  */
 
-import type { KVNamespace } from '@cloudflare/workers-types';
-import { VersionedCache } from '@codex/cache';
 import type { BrandingSettingsResponse } from '@codex/shared-types';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
+import { invalidateCache } from '$lib/server/cache';
 import { ApiError } from '$lib/server/errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,13 +83,7 @@ export const updateBrandingForm = form(
       const result = await api.org.updateBranding(orgId, { primaryColorHex });
 
       // Invalidate cache so layout picks up the new color
-      const cache = platform?.env?.CACHE_KV
-        ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
-        : null;
-
-      if (cache) {
-        await cache.invalidate(orgId);
-      }
+      await invalidateCache(platform, orgId);
 
       try {
         await getBrandingSettings(orgId).refresh();
@@ -158,13 +151,7 @@ export const uploadLogoForm = form(
       const result = await api.org.uploadLogo(orgId, logo);
 
       // Invalidate cache so layout picks up the new logo
-      const cache = platform?.env?.CACHE_KV
-        ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
-        : null;
-
-      if (cache) {
-        await cache.invalidate(orgId);
-      }
+      await invalidateCache(platform, orgId);
 
       try {
         await getBrandingSettings(orgId).refresh();
@@ -198,13 +185,7 @@ export const deleteLogo = command(z.string().uuid(), async (orgId) => {
   const result = await api.org.deleteLogo(orgId);
 
   // Invalidate cache so layout picks up logo removal
-  const cache = platform?.env?.CACHE_KV
-    ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
-    : null;
-
-  if (cache) {
-    await cache.invalidate(orgId);
-  }
+  await invalidateCache(platform, orgId);
 
   try {
     await getBrandingSettings(orgId).refresh();

@@ -1,0 +1,126 @@
+- generic [ref=e2]:
+  - link "Skip to main content" [ref=e3] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=e31]:
+    - banner [ref=e32]:
+      - generic [ref=e33]:
+        - link "Codex" [ref=e34] [cursor=pointer]:
+          - /url: /
+        - navigation "Main" [ref=e35]:
+          - link "Discover" [ref=e36] [cursor=pointer]:
+            - /url: /discover
+          - link "Pricing" [ref=e37] [cursor=pointer]:
+            - /url: /pricing
+          - link "Library" [ref=e38] [cursor=pointer]:
+            - /url: /library
+        - navigation "Account" [ref=e41]:
+          - link "Sign In" [ref=e42] [cursor=pointer]:
+            - /url: /login
+          - link "Register" [ref=e43] [cursor=pointer]:
+            - /url: /register
+    - main [ref=e44]:
+      - generic [ref=e46]:
+        - heading "My Library" [level=1] [ref=e47]
+        - generic [ref=e48]:
+          - generic [ref=e49]: Sort by
+          - combobox "Sort by" [ref=e50] [cursor=pointer]:
+            - option "Recently Purchased" [selected]
+            - option "Recently Watched"
+            - option "A-Z"
+            - option "Z-A"
+        - generic [ref=e51]:
+          - generic [ref=e52]:
+            - generic [ref=e53]:
+              - button "All" [ref=e54] [cursor=pointer]
+              - button "Video" [ref=e55] [cursor=pointer]
+              - button "Audio" [ref=e56] [cursor=pointer]
+              - button "Article" [ref=e57] [cursor=pointer]
+            - generic [ref=e58]:
+              - button "All" [ref=e59] [cursor=pointer]
+              - button "Not Started" [ref=e60] [cursor=pointer]
+              - button "In Progress" [ref=e61] [cursor=pointer]
+              - button "Completed" [ref=e62] [cursor=pointer]
+            - generic [ref=e63]:
+              - button "All" [ref=e64] [cursor=pointer]
+              - button "Purchased" [ref=e65] [cursor=pointer]
+              - button "Member Access" [ref=e66] [cursor=pointer]
+          - textbox "Search your library..." [ref=e68]
+        - generic [ref=e69]:
+          - heading "Continue Watching" [level=2] [ref=e70]
+          - generic [ref=e71]:
+            - link "Intro to TypeScript 50 Intro to TypeScript Resume from 15:00" [ref=e72] [cursor=pointer]:
+              - /url: http://studio-alpha.lvh.me:3000/content/intro-to-typescript
+              - generic [ref=e73]:
+                - img "Intro to TypeScript" [ref=e74]
+                - progressbar [ref=e75]
+              - generic [ref=e77]:
+                - heading "Intro to TypeScript" [level=3] [ref=e78]
+                - paragraph [ref=e79]: Resume from 15:00
+            - link "Tech Podcast Ep 1 5 Tech Podcast Ep 1 Resume from 2:00" [ref=e80] [cursor=pointer]:
+              - /url: http://studio-alpha.lvh.me:3000/content/tech-podcast-ep-1
+              - generic [ref=e81]:
+                - img "Tech Podcast Ep 1" [ref=e82]
+                - progressbar [ref=e83]
+              - generic [ref=e85]:
+                - heading "Tech Podcast Ep 1" [level=3] [ref=e86]
+                - paragraph [ref=e87]: Resume from 2:00
+        - generic [ref=e88]:
+          - link "aereargaergaergaerg aergaergaerg" [ref=e89] [cursor=pointer]:
+            - /url: http://studio-alpha.lvh.me:3000/content/aereargaergaergaerg
+            - generic [ref=e91]:
+              - heading "aereargaergaergaerg" [level=2] [ref=e92]
+              - paragraph [ref=e93]: aergaergaerg
+          - link "hjtoijoitoijgoijsrtoijgoq oijsrtohijhoroijtoijhrtshsrth" [ref=e94] [cursor=pointer]:
+            - /url: http://studio-alpha.lvh.me:3000/content/hjtoijoitoijgoijsrtoijgoq
+            - generic [ref=e96]:
+              - heading "hjtoijoitoijgoijsrtoijgoq" [level=2] [ref=e97]
+              - paragraph [ref=e98]: oijsrtohijhoroijtoijhrtshsrth
+          - link "Building APIs with Hono Building APIs with Hono Learn to build fast, type-safe REST APIs with Hono on Cloudflare Workers. Covers routing, middleware, validation, and deployment." [ref=e99] [cursor=pointer]:
+            - /url: http://studio-beta.lvh.me:3000/content/building-apis-with-hono
+            - img "Building APIs with Hono" [ref=e101]
+            - generic [ref=e102]:
+              - heading "Building APIs with Hono" [level=2] [ref=e103]
+              - paragraph [ref=e104]: Learn to build fast, type-safe REST APIs with Hono on Cloudflare Workers. Covers routing, middleware, validation, and deployment.
+          - 'link "No thumbnail Written Tutorial: Getting Started A thorough written guide to getting started with modern web development, covering the essential tools and patterns." [ref=e105] [cursor=pointer]':
+            - /url: http://studio-beta.lvh.me:3000/content/written-tutorial-getting-started
+            - generic [ref=e107]: No thumbnail
+            - generic [ref=e108]:
+              - 'heading "Written Tutorial: Getting Started" [level=2] [ref=e109]'
+              - paragraph [ref=e110]: A thorough written guide to getting started with modern web development, covering the essential tools and patterns.
+          - link "Members Only Workshop Members Only Workshop Exclusive workshop for members covering real-world project architecture, testing strategies, and deployment pipelines." [ref=e111] [cursor=pointer]:
+            - /url: http://studio-alpha.lvh.me:3000/content/members-only-workshop
+            - img "Members Only Workshop" [ref=e113]
+            - generic [ref=e114]:
+              - heading "Members Only Workshop" [level=2] [ref=e115]
+              - paragraph [ref=e116]: Exclusive workshop for members covering real-world project architecture, testing strategies, and deployment pipelines.
+          - link "Intro to TypeScript Intro to TypeScript A comprehensive introduction to TypeScript covering type annotations, interfaces, generics, and practical patterns for building type-safe applications. 50% watched" [ref=e117] [cursor=pointer]:
+            - /url: http://studio-alpha.lvh.me:3000/content/intro-to-typescript
+            - img "Intro to TypeScript" [ref=e119]
+            - generic [ref=e122]:
+              - heading "Intro to TypeScript" [level=2] [ref=e123]
+              - paragraph [ref=e124]: A comprehensive introduction to TypeScript covering type annotations, interfaces, generics, and practical patterns for building type-safe applications.
+              - generic [ref=e125]: 50% watched
+          - link "Advanced Svelte Patterns Advanced Svelte Patterns Deep dive into Svelte 5 runes, advanced reactivity patterns, component composition, and performance optimisation techniques for production apps. Completed" [ref=e126] [cursor=pointer]:
+            - /url: http://studio-alpha.lvh.me:3000/content/advanced-svelte-patterns
+            - img "Advanced Svelte Patterns" [ref=e128]
+            - generic [ref=e131]:
+              - heading "Advanced Svelte Patterns" [level=2] [ref=e132]
+              - paragraph [ref=e133]: Deep dive into Svelte 5 runes, advanced reactivity patterns, component composition, and performance optimisation techniques for production apps.
+              - generic [ref=e134]: Completed
+          - link "Tech Podcast Ep 1 First episode discussing the modern web development landscape — TypeScript adoption, edge computing, and the rise of serverless architectures. 5% watched" [ref=e135] [cursor=pointer]:
+            - /url: http://studio-alpha.lvh.me:3000/content/tech-podcast-ep-1
+            - generic [ref=e139]:
+              - heading "Tech Podcast Ep 1" [level=2] [ref=e140]
+              - paragraph [ref=e141]: First episode discussing the modern web development landscape — TypeScript adoption, edge computing, and the rise of serverless architectures.
+              - generic [ref=e142]: 5% watched
+    - contentinfo [ref=e143]:
+      - generic [ref=e144]:
+        - paragraph [ref=e145]: © 2026 Codex. All rights reserved.
+        - navigation "Footer" [ref=e146]:
+          - link "About" [ref=e147] [cursor=pointer]:
+            - /url: /about
+          - link "Terms" [ref=e148] [cursor=pointer]:
+            - /url: /terms
+          - link "Privacy" [ref=e149] [cursor=pointer]:
+            - /url: /privacy
+  - generic [ref=e30]: My Library - Codex

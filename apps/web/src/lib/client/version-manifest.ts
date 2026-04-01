@@ -12,6 +12,28 @@ import { browser } from '$app/environment';
 
 const MANIFEST_KEY = 'codex-versions';
 
+/** All localStorage keys owned by Codex client state */
+const CODEX_STORAGE_KEYS = [
+  'codex-versions',
+  'codex-library',
+  'codex-playback-progress',
+] as const;
+
+/**
+ * Clear all Codex client state from localStorage.
+ * Called on logout to prevent stale user data persisting.
+ */
+export function clearClientState(): void {
+  if (!browser) return;
+  for (const key of CODEX_STORAGE_KEYS) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // localStorage blocked — silent fail
+    }
+  }
+}
+
 export type VersionMap = Record<string, string | null>;
 
 /**

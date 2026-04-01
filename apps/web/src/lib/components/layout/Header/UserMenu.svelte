@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { LayoutUser } from '$lib/types';
   import { page } from '$app/state';
-  import { buildCreatorsUrl } from '$lib/utils/subdomain';
+  import { submitFormPost } from '$lib/utils/navigation';
+  import { buildCreatorsUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import * as m from '$paraglide/messages';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
@@ -45,27 +47,25 @@
         <span class="user-info-email">{user.email}</span>
       </div>
       <DropdownMenuSeparator />
-      <a href="/account">
-        <DropdownMenuItem>Account</DropdownMenuItem>
+      <a href={buildPlatformUrl(page.url, '/account')}>
+        <DropdownMenuItem>{m.nav_account()}</DropdownMenuItem>
       </a>
-      <a href="/library">
-        <DropdownMenuItem>Library</DropdownMenuItem>
+      <a href={buildPlatformUrl(page.url, '/library')}>
+        <DropdownMenuItem>{m.nav_library()}</DropdownMenuItem>
       </a>
       <a href={buildCreatorsUrl(page.url, '/studio')}>
-        <DropdownMenuItem>Studio</DropdownMenuItem>
+        <DropdownMenuItem>{m.nav_studio()}</DropdownMenuItem>
       </a>
       <DropdownMenuSeparator />
-      <form method="POST" action="/logout">
-        <button type="submit" class="logout-button">
-          <DropdownMenuItem>Log out</DropdownMenuItem>
-        </button>
-      </form>
+      <button type="button" class="logout-button" onclick={() => submitFormPost('/logout')}>
+        <DropdownMenuItem>{m.nav_log_out()}</DropdownMenuItem>
+      </button>
     </DropdownMenuContent>
   </DropdownMenu>
 {:else}
   <nav class="auth-links" aria-label="Account">
-    <a href="/login" class="auth-link">Sign In</a>
-    <a href="/register" class="auth-link auth-link--register">Register</a>
+    <a href="/login" class="auth-link">{m.common_sign_in()}</a>
+    <a href="/register" class="auth-link auth-link--register">{m.nav_register()}</a>
   </nav>
 {/if}
 

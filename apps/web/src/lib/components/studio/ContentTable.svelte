@@ -1,16 +1,18 @@
 <!--
   @component ContentTable
 
-  Displays a table of content items for the studio content management page.
+  Displays a compact data table of content items for studio content management.
   Shows title (linked to edit), type badge, status badge, created date, and actions.
 
   @prop {ContentWithRelations[]} items - Array of content items to display
 -->
 <script lang="ts">
   import type { ContentWithRelations } from '$lib/types';
-  import * as Table from '$lib/components/ui/Table';
-  import Badge from '$lib/components/ui/Badge/Badge.svelte';
   import * as m from '$paraglide/messages';
+  import { publishContent, unpublishContent } from '$lib/remote/content.remote';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
+  import { formatDate } from '$lib/utils/format';
+  import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
 
   interface Props {
     items: ContentWithRelations[];
@@ -18,65 +20,54 @@
 
   const { items }: Props = $props();
 
+  let togglingId = $state<string | null>(null);
+
   const isEmpty = $derived(items.length === 0);
 
-  /**
-   * Map content status to Badge variant
-   */
-  function getStatusVariant(status: string): 'success' | 'warning' | 'neutral' {
-    switch (status) {
-      case 'published':
-        return 'success';
-      case 'draft':
-        return 'warning';
-      case 'archived':
-        return 'neutral';
-      default:
-        return 'neutral';
-    }
+  function getStatusVariant(status: string): 'published' | 'draft' | 'archived' {
+    if (status === 'published') return 'published';
+    if (status === 'draft') return 'draft';
+    return 'archived';
   }
 
-  /**
-   * Get localized status text
-   */
   function getStatusText(status: string): string {
     switch (status) {
-      case 'published':
-        return m.studio_content_status_published();
-      case 'draft':
-        return m.studio_content_status_draft();
-      case 'archived':
-        return m.studio_content_status_archived();
-      default:
-        return status;
+      case 'published': return m.studio_content_status_published();
+      case 'draft': return m.studio_content_status_draft();
+      case 'archived': return m.studio_content_status_archived();
+      default: return status;
     }
   }
 
-  /**
-   * Get localized content type text
-   */
   function getTypeText(contentType: string): string {
     switch (contentType) {
-      case 'video':
-        return m.content_type_video();
-      case 'audio':
-        return m.content_type_audio();
-      case 'written':
-        return m.content_type_article();
-      default:
-        return contentType;
+      case 'video': return m.content_type_video();
+      case 'audio': return m.content_type_audio();
+      case 'written': return m.content_type_article();
+      default: return contentType;
     }
   }
 
-  /**
-   * Format a date string for display
-   */
-  function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  async function handlePublishToggle(item: ContentWithRelations) {
+    togglingId = item.id;
+    const previousStatus = item.status;
+    try {
+      if (item.status === 'published') {
+        item.status = 'draft';
+        await unpublishContent(item.id);
+        toast.success(m.studio_content_form_unpublish_success());
+      } else {
+        item.status = 'published';
+        await publishContent(item.id);
+        toast.success(m.studio_content_form_publish_success());
+      }
+    } catch (err) {
+      item.status = previousStatus;
+      const message = err instanceof Error ? err.message : m.studio_content_form_publish_error();
+      toast.error(message);
+    } finally {
+      togglingId = null;
+    }
   }
 </script>
 
@@ -89,53 +80,261 @@
     <h3 class="empty-title">{m.studio_content_empty()}</h3>
   </div>
 {:else}
-  <div class="table-wrapper">
-    <Table.Root>
-      <Table.Header>
-        <Table.Row>
-          <Table.Head>{m.studio_content_col_title()}</Table.Head>
-          <Table.Head>{m.studio_content_col_type()}</Table.Head>
-          <Table.Head>{m.studio_content_col_status()}</Table.Head>
-          <Table.Head>{m.studio_content_col_created()}</Table.Head>
-          <Table.Head>{m.studio_content_col_actions()}</Table.Head>
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
+  <div class="table-wrap">
+    <table class="content-table">
+      <colgroup>
+        <col class="col-title" />
+        <col class="col-type" />
+        <col class="col-status" />
+        <col class="col-date" />
+        <col class="col-actions" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>{m.studio_content_col_title()}</th>
+          <th>{m.studio_content_col_type()}</th>
+          <th>{m.studio_content_col_status()}</th>
+          <th>{m.studio_content_col_created()}</th>
+          <th class="th-actions"></th>
+        </tr>
+      </thead>
+      <tbody>
         {#each items as item (item.id)}
-          <Table.Row>
-            <Table.Cell class="title-cell">
-              <a href="/studio/content/{item.id}" class="title-link">
+          <tr class="row">
+            <td class="cell-title">
+              <a href="/studio/content/{item.id}/edit" class="title-link">
                 {item.title}
               </a>
-            </Table.Cell>
-            <Table.Cell>
-              <Badge variant="neutral">{getTypeText(item.contentType)}</Badge>
-            </Table.Cell>
-            <Table.Cell>
-              <Badge variant={getStatusVariant(item.status)}>
+            </td>
+            <td>
+              <span class="type-badge">{getTypeText(item.contentType)}</span>
+            </td>
+            <td>
+              <span class="status-dot" data-status={getStatusVariant(item.status)}></span>
+              <span class="status-text" data-status={getStatusVariant(item.status)}>
                 {getStatusText(item.status)}
-              </Badge>
-            </Table.Cell>
-            <Table.Cell class="date-cell">
-              {formatDate(item.createdAt)}
-            </Table.Cell>
-            <Table.Cell>
-              <a href="/studio/content/{item.id}" class="edit-link">
+              </span>
+            </td>
+            <td class="cell-date">{formatDate(item.createdAt)}</td>
+            <td class="cell-actions">
+              <button
+                type="button"
+                class="action-btn"
+                data-action={item.status === 'published' ? 'unpublish' : 'publish'}
+                disabled={togglingId === item.id}
+                onclick={() => handlePublishToggle(item)}
+              >
+                {#if togglingId === item.id}
+                  <Spinner size="sm" />
+                {:else if item.status === 'published'}
+                  {m.studio_content_form_unpublish()}
+                {:else}
+                  {m.studio_content_form_publish()}
+                {/if}
+              </button>
+              <a href="/studio/content/{item.id}/edit" class="action-edit">
                 {m.studio_content_edit()}
               </a>
-            </Table.Cell>
-          </Table.Row>
+            </td>
+          </tr>
         {/each}
-      </Table.Body>
-    </Table.Root>
+      </tbody>
+    </table>
   </div>
 {/if}
 
 <style>
-  .table-wrapper {
+  /* ── Layout ────────────────────────────────────── */
+  .table-wrap {
     overflow-x: auto;
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-lg);
   }
 
+  .content-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+  }
+
+  /* ── Column widths ─────────────────────────────── */
+  .col-title   { width: auto; }
+  .col-type    { width: var(--space-24); }
+  .col-status  { width: calc(var(--space-24) + var(--space-4)); }
+  .col-date    { width: calc(var(--space-24) + var(--space-6)); }
+  .col-actions { width: calc(var(--space-24) * 2); }
+
+  /* ── Header ────────────────────────────────────── */
+  thead {
+    border-bottom: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  th {
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    font-weight: var(--font-medium);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide, 0.05em);
+    white-space: nowrap;
+  }
+
+  .th-actions {
+    text-align: right;
+  }
+
+  /* ── Rows ──────────────────────────────────────── */
+  .row {
+    border-bottom: var(--border-width) var(--border-style) var(--color-border);
+    transition: var(--transition-colors);
+  }
+
+  .row:last-child {
+    border-bottom: none;
+  }
+
+  .row:hover {
+    background-color: var(--color-surface-secondary);
+  }
+
+  td {
+    padding: var(--space-2) var(--space-3);
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  /* ── Title cell ────────────────────────────────── */
+  .cell-title {
+    white-space: normal;
+    max-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .title-link {
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+    text-decoration: none;
+    transition: var(--transition-colors);
+  }
+
+  .title-link:hover {
+    color: var(--color-primary-500);
+  }
+
+  .title-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+  }
+
+  /* ── Type badge ────────────────────────────────── */
+  .type-badge {
+    display: inline-block;
+    padding: var(--space-0-5) var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    background-color: var(--color-surface-raised, var(--color-surface));
+    border-radius: var(--radius-full);
+    border: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  /* ── Status ────────────────────────────────────── */
+  .status-dot {
+    display: inline-block;
+    width: var(--space-2);
+    height: var(--space-2);
+    border-radius: var(--radius-full);
+    margin-right: var(--space-1);
+    vertical-align: middle;
+  }
+
+  .status-dot[data-status='published'] { background-color: var(--color-success-500); }
+  .status-dot[data-status='draft']     { background-color: var(--color-warning-400); }
+  .status-dot[data-status='archived']  { background-color: var(--color-text-muted); }
+
+  .status-text {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  /* ── Date cell ─────────────────────────────────── */
+  .cell-date {
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+  }
+
+  /* ── Actions cell ──────────────────────────────── */
+  .cell-actions {
+    text-align: right;
+  }
+
+  .action-btn {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-md);
+    border: none;
+    background-color: transparent;
+    cursor: pointer;
+    transition: var(--transition-colors);
+    vertical-align: middle;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .action-btn[data-action='publish'] {
+    color: var(--color-success-600);
+  }
+
+  .action-btn[data-action='publish']:hover:not(:disabled) {
+    background-color: var(--color-success-50);
+  }
+
+  .action-btn[data-action='unpublish'] {
+    color: var(--color-text-muted);
+  }
+
+  .action-btn[data-action='unpublish']:hover:not(:disabled) {
+    background-color: var(--color-surface-raised, var(--color-surface));
+    color: var(--color-warning-600);
+  }
+
+  .action-btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+  }
+
+  .action-edit {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-primary-500);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-md);
+    transition: var(--transition-colors);
+    vertical-align: middle;
+  }
+
+  .action-edit:hover {
+    background-color: var(--color-primary-50);
+    color: var(--color-primary-600);
+  }
+
+  .action-edit:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+  }
+
+  /* ── Empty state ───────────────────────────────── */
   .empty-state {
     display: flex;
     flex-direction: column;
@@ -158,62 +357,59 @@
     margin: 0;
   }
 
-  .title-link {
-    font-weight: var(--font-medium);
-    color: var(--color-text);
-    text-decoration: none;
-    transition: var(--transition-colors);
+  /* ── Dark mode ─────────────────────────────────── */
+  :global([data-theme='dark']) .content-table {
+    color: var(--color-text-dark);
   }
 
-  .title-link:hover {
-    color: var(--color-primary-500);
+  :global([data-theme='dark']) .table-wrap {
+    border-color: var(--color-border-dark);
   }
 
-  .title-link:focus-visible {
-    outline: 2px solid var(--color-primary-500);
-    outline-offset: 2px;
-    border-radius: var(--radius-sm);
+  :global([data-theme='dark']) thead {
+    border-color: var(--color-border-dark);
   }
 
-  .edit-link {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-primary-500);
-    text-decoration: none;
-    transition: var(--transition-colors);
+  :global([data-theme='dark']) .row {
+    border-color: var(--color-border-dark);
   }
 
-  .edit-link:hover {
-    color: var(--color-primary-600);
+  :global([data-theme='dark']) .row:hover {
+    background-color: var(--color-surface-secondary);
   }
 
-  .edit-link:focus-visible {
-    outline: 2px solid var(--color-primary-500);
-    outline-offset: 2px;
-    border-radius: var(--radius-sm);
+  :global([data-theme='dark']) .title-link {
+    color: var(--color-text-dark);
   }
 
-  /* Cell styles via :global since classes are passed as props to Table components */
-  :global(.title-cell) {
-    font-weight: var(--font-medium);
-    color: var(--color-text);
+  :global([data-theme='dark']) .type-badge {
+    background-color: var(--color-surface-dark);
+    border-color: var(--color-border-dark);
+    color: var(--color-text-secondary-dark, var(--color-text-muted));
   }
 
-  :global(.date-cell) {
-    color: var(--color-text-secondary);
-    font-variant-numeric: tabular-nums;
+  :global([data-theme='dark']) .action-btn[data-action='publish'] {
+    color: var(--color-success-400);
   }
 
-  /* Dark mode */
+  :global([data-theme='dark']) .action-btn[data-action='publish']:hover:not(:disabled) {
+    background-color: var(--color-success-900);
+  }
+
+  :global([data-theme='dark']) .action-btn[data-action='unpublish']:hover:not(:disabled) {
+    background-color: var(--color-surface-dark);
+    color: var(--color-warning-400);
+  }
+
+  :global([data-theme='dark']) .action-edit:hover {
+    background-color: var(--color-primary-900);
+  }
+
   :global([data-theme='dark']) .empty-icon {
     color: var(--color-text-muted-dark);
   }
 
   :global([data-theme='dark']) .empty-title {
-    color: var(--color-text-dark);
-  }
-
-  :global([data-theme='dark']) .title-link {
     color: var(--color-text-dark);
   }
 </style>

@@ -4,11 +4,10 @@
  * Handles avatar deletion using SvelteKit remote functions.
  */
 
-import type { KVNamespace } from '@cloudflare/workers-types';
-import { VersionedCache } from '@codex/cache';
 import { z } from 'zod';
 import { form, getRequestEvent } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { invalidateCache } from '$lib/server/cache';
 
 /**
  * Avatar delete schema (no fields needed)
@@ -33,12 +32,8 @@ export const avatarDeleteForm = form(avatarDeleteSchema, async () => {
     await api.account.deleteAvatar();
 
     // Invalidate web app's cache after successful delete
-    const cache = platform?.env?.CACHE_KV
-      ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
-      : null;
-
-    if (cache && locals?.user?.id) {
-      await cache.invalidate(locals.user.id);
+    if (locals?.user?.id) {
+      await invalidateCache(platform, locals.user.id);
     }
 
     return {

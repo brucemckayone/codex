@@ -26,5 +26,6 @@
     content={data.content}
     organizationId={data.organizationId}
     orgSlug={data.orgSlug}
+    mediaItems={data.mediaItems}
   />
 </ErrorBoundary>

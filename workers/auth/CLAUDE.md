@@ -9,7 +9,7 @@ Authentication and session management via BetterAuth. The only worker that doesn
 | POST | `/api/auth/email/register` | None | `auth` (5/15min) | `{ user, session }` + Set-Cookie |
 | POST | `/api/auth/email/login` | None | `auth` (5/15min) | `{ user, session }` + Set-Cookie |
 | GET | `/api/auth/session` | Cookie | — | `{ user, session }` or `null` |
-| POST | `/api/auth/signout` | Cookie | — | Clear cookie |
+| POST | `/api/auth/sign-out` | Cookie | — | Clear cookie |
 | POST | `/api/auth/email/verify-email` | Token | — | Redirect |
 | POST | `/api/auth/email/send-reset-password-email` | None | `auth` | — |
 | POST | `/api/auth/email/reset-password` | Token | — | — |

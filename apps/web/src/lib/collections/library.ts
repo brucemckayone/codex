@@ -11,6 +11,7 @@
  */
 
 import type { UserLibraryResponse } from '@codex/access';
+import { VIDEO_PROGRESS } from '@codex/constants';
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
 import { logger } from '$lib/observability';
@@ -112,7 +113,7 @@ export function updateProgress(
 ): void {
   if (!libraryCollection) return;
   const completed =
-    durationSeconds > 0 && positionSeconds / durationSeconds > 0.9;
+    durationSeconds > 0 && positionSeconds / durationSeconds >= VIDEO_PROGRESS.COMPLETION_THRESHOLD;
   const percentComplete =
     durationSeconds > 0
       ? Math.round((positionSeconds / durationSeconds) * 100)

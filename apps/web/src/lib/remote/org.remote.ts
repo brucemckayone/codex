@@ -229,19 +229,6 @@ export const removeMember = command(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Organization by ID
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Get organization by ID (for internal use)
- */
-export const getOrganizationById = query(z.string().uuid(), async (id) => {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-  return api.fetch('org', `/api/organizations/${id}`);
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // My Organizations
 // ─────────────────────────────────────────────────────────────────────────────
 

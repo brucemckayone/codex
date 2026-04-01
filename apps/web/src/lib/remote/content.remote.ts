@@ -309,6 +309,33 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Content Status Transitions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Publish content (draft -> published)
+ *
+ * Calls POST /api/content/:id/publish. The backend enforces business rules
+ * (e.g., media must be ready for video/audio content before publishing).
+ */
+export const publishContent = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.content.publish(id);
+});
+
+/**
+ * Unpublish content (published -> draft)
+ *
+ * Calls POST /api/content/:id/unpublish.
+ */
+export const unpublishContent = command(z.string().uuid(), async (id) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.content.unpublish(id);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Content Form (progressive enhancement)
 // ─────────────────────────────────────────────────────────────────────────────
 

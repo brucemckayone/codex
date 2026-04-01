@@ -271,72 +271,72 @@ export class AdminAnalyticsService extends BaseService {
       const memberFilter =
         !type || type === 'member_joined' ? sql`true` : sql`false`;
 
-      // UNION ALL query across 3 tables
-      const result = await this.db.execute(sql`
-        WITH activity AS (
-          SELECT
-            p.id::text AS id,
-            'purchase' AS type,
-            COALESCE(u.name, u.email) AS title,
-            c.title AS description,
-            p.created_at AS timestamp
-          FROM purchases p
-          JOIN users u ON p.customer_id = u.id
-          JOIN content c ON p.content_id = c.id
-          WHERE p.organization_id = ${organizationId}
-            AND ${purchaseFilter}
+      // Run items + count queries concurrently (independent queries)
+      const [result, countResult] = await Promise.all([
+        this.db.execute(sql`
+          WITH activity AS (
+            SELECT
+              p.id::text AS id,
+              'purchase' AS type,
+              COALESCE(u.name, u.email) AS title,
+              c.title AS description,
+              p.created_at AS timestamp
+            FROM purchases p
+            JOIN users u ON p.customer_id = u.id
+            JOIN content c ON p.content_id = c.id
+            WHERE p.organization_id = ${organizationId}
+              AND ${purchaseFilter}
 
-          UNION ALL
+            UNION ALL
 
-          SELECT
-            c.id::text AS id,
-            'content_published' AS type,
-            c.title AS title,
-            COALESCE(u.name, u.email) AS description,
-            c.published_at AS timestamp
-          FROM content c
-          JOIN users u ON c.creator_id = u.id
-          WHERE c.organization_id = ${organizationId}
-            AND c.published_at IS NOT NULL
-            AND c.deleted_at IS NULL
-            AND ${contentFilter}
+            SELECT
+              c.id::text AS id,
+              'content_published' AS type,
+              c.title AS title,
+              COALESCE(u.name, u.email) AS description,
+              c.published_at AS timestamp
+            FROM content c
+            JOIN users u ON c.creator_id = u.id
+            WHERE c.organization_id = ${organizationId}
+              AND c.published_at IS NOT NULL
+              AND c.deleted_at IS NULL
+              AND ${contentFilter}
 
-          UNION ALL
+            UNION ALL
 
-          SELECT
-            om.id::text AS id,
-            'member_joined' AS type,
-            COALESCE(u.name, u.email) AS title,
-            om.role AS description,
-            om.created_at AS timestamp
-          FROM organization_memberships om
-          JOIN users u ON om.user_id = u.id
-          WHERE om.organization_id = ${organizationId}
-            AND ${memberFilter}
-        )
-        SELECT id, type, title, description, timestamp::text
-        FROM activity
-        ORDER BY timestamp DESC
-        LIMIT ${limit}
-        OFFSET ${offset}
-      `);
-
-      // Get total count
-      const countResult = await this.db.execute(sql`
-        SELECT (
-          (SELECT COUNT(*) FROM purchases
-            WHERE organization_id = ${organizationId} AND ${purchaseFilter})
-          +
-          (SELECT COUNT(*) FROM content
-            WHERE organization_id = ${organizationId}
-              AND published_at IS NOT NULL
-              AND deleted_at IS NULL
-              AND ${contentFilter})
-          +
-          (SELECT COUNT(*) FROM organization_memberships
-            WHERE organization_id = ${organizationId} AND ${memberFilter})
-        )::int AS total
-      `);
+            SELECT
+              om.id::text AS id,
+              'member_joined' AS type,
+              COALESCE(u.name, u.email) AS title,
+              om.role AS description,
+              om.created_at AS timestamp
+            FROM organization_memberships om
+            JOIN users u ON om.user_id = u.id
+            WHERE om.organization_id = ${organizationId}
+              AND ${memberFilter}
+          )
+          SELECT id, type, title, description, timestamp::text
+          FROM activity
+          ORDER BY timestamp DESC
+          LIMIT ${limit}
+          OFFSET ${offset}
+        `),
+        this.db.execute(sql`
+          SELECT (
+            (SELECT COUNT(*) FROM purchases
+              WHERE organization_id = ${organizationId} AND ${purchaseFilter})
+            +
+            (SELECT COUNT(*) FROM content
+              WHERE organization_id = ${organizationId}
+                AND published_at IS NOT NULL
+                AND deleted_at IS NULL
+                AND ${contentFilter})
+            +
+            (SELECT COUNT(*) FROM organization_memberships
+              WHERE organization_id = ${organizationId} AND ${memberFilter})
+          )::int AS total
+        `),
+      ]);
 
       const total = Number(
         (countResult.rows[0] as { total: number })?.total ?? 0

@@ -6,8 +6,10 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { buildContentUrl } from '$lib/utils/subdomain';
   import { hydrateIfNeeded } from '$lib/collections';
   import type { PageData } from './$types';
 
@@ -98,7 +100,7 @@
               username: item.creator.name ?? undefined,
               displayName: item.creator.name ?? undefined,
             } : undefined}
-            href="/content/{item.slug}"
+            href={buildContentUrl(page.url, item)}
             price={item.priceCents != null ? {
               amount: item.priceCents,
               currency: 'GBP',

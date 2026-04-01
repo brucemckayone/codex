@@ -6,7 +6,9 @@
   is still pending (webhook may be async).
 -->
 <script lang="ts">
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
+  import { buildContentUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
 
   interface Props {
@@ -61,7 +63,7 @@
       </div>
 
       <div class="checkout-success__actions">
-        <a href="/content/{contentSlug ?? content.id}" class="checkout-success__btn checkout-success__btn--primary">
+        <a href={buildContentUrl(page.url, { slug: contentSlug, id: content.id })} class="checkout-success__btn checkout-success__btn--primary">
           {m.checkout_success_watch_now()}
         </a>
         <a href="/explore" class="checkout-success__btn checkout-success__btn--secondary">

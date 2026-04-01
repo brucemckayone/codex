@@ -33,16 +33,20 @@ export interface UserLibraryResponse {
   items: Array<{
     content: {
       id: string;
+      slug: string;
       title: string;
       description: string;
       thumbnailUrl: string | null;
       contentType: string;
       durationSeconds: number;
+      organizationSlug: string | null;
     };
+    /** Access type: 'purchased' = bought, 'membership' = org member access */
+    accessType: 'purchased' | 'membership';
     purchase: {
       purchasedAt: string; // ISO 8601 timestamp
       priceCents: number;
-    };
+    } | null;
     progress: (ProgressData & { percentComplete: number }) | null;
   }>;
   pagination: PaginationMetadata;

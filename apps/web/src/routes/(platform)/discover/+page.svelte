@@ -5,8 +5,9 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import type { PageData } from './$types';
-  import { buildOrgUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl } from '$lib/utils/subdomain';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
+  import * as m from '$paraglide/messages';
 
   const { data }: { data: PageData } = $props();
 
@@ -35,31 +36,29 @@
 
 <div class="discover">
   <section class="discover-header">
-    <h1>Discover Content</h1>
-    <p class="subtitle">Browse premium content from creators and organizations.</p>
+    <h1>{m.discover_title()}</h1>
+    <p class="subtitle">{m.discover_subtitle()}</p>
   </section>
 
   <form class="search-bar" onsubmit={handleSearch}>
     <input
       type="search"
       bind:value={searchValue}
-      placeholder="Search content..."
+      placeholder={m.explore_search_placeholder()}
       class="search-input"
-      aria-label="Search content"
+      aria-label={m.discover_search_aria()}
     />
-    <button type="submit" class="search-btn">Search</button>
+    <button type="submit" class="search-btn">{m.discover_search_button()}</button>
   </form>
 
   {#if data.error}
-    <ErrorBanner title="Failed to load content" description="Some content could not be loaded. Please try refreshing the page." />
+    <ErrorBanner title={m.discover_error_title()} description={m.discover_error_description()} />
   {/if}
 
   <section class="content-grid" aria-label="Content results">
     {#if data.content.items && data.content.items.length > 0}
       {#each data.content.items as item (item.id)}
-        <a href={item.organization?.slug
-          ? buildOrgUrl(page.url, item.organization.slug, `/content/${item.slug}`)
-          : `/content/${item.slug ?? item.id}`} class="content-card">
+        <a href={buildContentUrl(page.url, { slug: item.slug, id: item.id, organizationSlug: item.organization?.slug })} class="content-card">
           <div class="card-thumb">
             {#if item.mediaItem?.thumbnailUrl}
               <img src={item.mediaItem.thumbnailUrl} alt="" class="thumb-img" />
@@ -80,7 +79,7 @@
       {/each}
     {:else}
       <div class="empty-state">
-        <p>No content found{data.search ? ` for "${data.search}"` : ''}. Check back soon.</p>
+        <p>{data.search ? m.discover_empty_search({ query: data.search }) : m.discover_empty()}</p>
       </div>
     {/if}
   </section>

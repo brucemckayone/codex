@@ -5,8 +5,10 @@
   and a grid of their published content.
 -->
 <script lang="ts">
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { buildContentUrl } from '$lib/utils/subdomain';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import type { PageData } from './$types';
 
@@ -146,7 +148,7 @@
             description={item.description}
             contentType={item.contentType === 'written' ? 'article' : item.contentType}
             duration={item.mediaItem?.durationSeconds ?? null}
-            href="/content/{item.slug}"
+            href={buildContentUrl(page.url, item)}
             price={item.priceCents != null ? {
               amount: item.priceCents,
               currency: 'GBP',

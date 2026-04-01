@@ -10,6 +10,7 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Pagination } from '$lib/components/ui/Pagination';
+  import { buildContentUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -166,7 +167,7 @@
             username: item.creator.name ?? undefined,
             displayName: item.creator.name ?? undefined,
           } : undefined}
-          href="/content/{item.slug}"
+          href={buildContentUrl(page.url, item)}
           price={item.priceCents != null ? {
             amount: item.priceCents,
             currency: 'GBP',

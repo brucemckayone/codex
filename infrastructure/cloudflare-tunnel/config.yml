@@ -1,16 +1,23 @@
 # Cloudflare Tunnel Configuration for Local Development
-# This allows you to test your local app at https://local.revelations.studio
-# which is crucial for testing Stripe webhooks and other integrations
+# Tunnel: cognitive-bot (d9ae2bcf-194e-4194-99fc-394f01c3a07f)
+# Exposes local services at *.local.revelations.studio for external integrations (e.g. Stripe webhooks)
 
-tunnel: 3bbd7b3c-f529-4b58-9ca2-089004592373
-credentials-file: /Users/brucemckay/.cloudflared/3bbd7b3c-f529-4b58-9ca2-089004592373.json
+tunnel: d9ae2bcf-194e-4194-99fc-394f01c3a07f
+credentials-file: /Users/brucemckay/.cloudflared/d9ae2bcf-194e-4194-99fc-394f01c3a07f.json
+protocol: http2
 
 ingress:
-  # Route all traffic from local.revelations.studio to localhost:5173
-  - hostname: local.revelations.studio
-    service: http://localhost:5173
+  # Ecom-API for Stripe webhook forwarding (localhost:42072)
+  - hostname: ecom-api-local.revelations.studio
+    service: http://localhost:42072
     originRequest:
       noTLSVerify: true
 
-  # Catch-all rule (required)
+  # SvelteKit app (localhost:3000)
+  - hostname: local.revelations.studio
+    service: http://localhost:3000
+    originRequest:
+      noTLSVerify: true
+
+  # Catch-all rule (required by cloudflared)
   - service: http_status:404

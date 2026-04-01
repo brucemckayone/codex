@@ -1,17 +1,18 @@
 <script lang="ts">
   import { PageContainer } from '../index';
+  import * as m from '$paraglide/messages';
 </script>
 
 <footer class="footer">
   <PageContainer class="footer-inner">
     <p class="copyright">
-      &copy; {new Date().getFullYear()} Codex. All rights reserved.
+      {m.footer_copyright()}
     </p>
 
     <nav class="links" aria-label="Footer">
-      <a href="/about" class="footer-link">About</a>
-      <a href="/terms" class="footer-link">Terms</a>
-      <a href="/privacy" class="footer-link">Privacy</a>
+      <a href="/about" class="footer-link">{m.footer_about()}</a>
+      <a href="/terms" class="footer-link">{m.footer_terms()}</a>
+      <a href="/privacy" class="footer-link">{m.footer_privacy()}</a>
     </nav>
   </PageContainer>
 </footer>

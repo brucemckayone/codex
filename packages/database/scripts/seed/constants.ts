@@ -50,6 +50,13 @@ export const USERS = {
     role: 'admin',
     username: 'jordanadmin',
   },
+  fresh: {
+    id: seedTextId('seed-user-fresh'),
+    name: 'Fresh User',
+    email: 'fresh@test.com',
+    role: 'customer',
+    username: 'freshuser',
+  },
 } as const;
 
 // ── Accounts (BetterAuth credential entries) ─────────────────
@@ -57,6 +64,7 @@ export const ACCOUNTS = {
   creator: { id: seedTextId('seed-account-creator') },
   viewer: { id: seedTextId('seed-account-viewer') },
   admin: { id: seedTextId('seed-account-admin') },
+  fresh: { id: seedTextId('seed-account-fresh') },
 } as const;
 
 // ── Sessions ─────────────────────────────────────────────────
@@ -72,6 +80,10 @@ export const SESSIONS = {
   admin: {
     id: seedTextId('seed-session-admin'),
     token: seedTextId('seed-token-admin'),
+  },
+  fresh: {
+    id: seedTextId('seed-session-fresh'),
+    token: seedTextId('seed-token-fresh'),
   },
 } as const;
 

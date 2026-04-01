@@ -90,6 +90,7 @@ export type {
   NewContent,
   NewMediaItem,
   PaginationParams,
+  PublicContentItem,
   PublicContentListResponse,
   PublishContentResponse,
   SortOrder,

@@ -12,6 +12,7 @@
   interface FilterValues {
     contentType: string;
     progressStatus: string;
+    accessType: string;
     search: string;
   }
 
@@ -23,22 +24,29 @@
 
   let contentType = $state('all');
   let progressStatus = $state('all');
+  let accessType = $state('all');
   let searchInput = $state('');
   let searchDebounced = $state('');
 
-  const contentTypeOptions = $derived([
+  const contentTypeOptions = [
     { value: 'all', label: m.library_filter_all_types() },
     { value: 'video', label: m.library_filter_video() },
     { value: 'audio', label: m.library_filter_audio() },
     { value: 'article', label: m.library_filter_article() },
-  ]);
+  ];
 
-  const progressOptions = $derived([
+  const progressOptions = [
     { value: 'all', label: m.library_filter_all_progress() },
     { value: 'not_started', label: m.library_filter_not_started() },
     { value: 'in_progress', label: m.library_filter_in_progress() },
     { value: 'completed', label: m.library_filter_completed() },
-  ]);
+  ];
+
+  const accessTypeOptions = [
+    { value: 'all', label: m.library_filter_all_access() },
+    { value: 'purchased', label: m.library_filter_purchased() },
+    { value: 'membership', label: m.library_filter_membership() },
+  ];
 
   // Debounce search input by 300ms
   $effect(() => {
@@ -54,6 +62,7 @@
     onFilterChange({
       contentType,
       progressStatus,
+      accessType,
       search: searchDebounced,
     });
   });
@@ -61,6 +70,7 @@
   export function clearAll() {
     contentType = 'all';
     progressStatus = 'all';
+    accessType = 'all';
     searchInput = '';
     searchDebounced = '';
   }
@@ -87,6 +97,19 @@
           class="filter-btn"
           class:filter-btn--active={progressStatus === option.value}
           onclick={() => (progressStatus = option.value)}
+          type="button"
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
+
+    <div class="filter-group">
+      {#each accessTypeOptions as option (option.value)}
+        <button
+          class="filter-btn"
+          class:filter-btn--active={accessType === option.value}
+          onclick={() => (accessType = option.value)}
           type="button"
         >
           {option.label}
@@ -163,8 +186,8 @@
   }
 
   .filter-btn:focus-visible {
-    outline: 2px solid var(--color-primary-500);
-    outline-offset: 2px;
+    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline-offset: var(--border-width-thick);
   }
 
   .search-row {

@@ -19,7 +19,6 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import 'media-chrome';
   import { createHlsPlayer } from './hls';
   import { createProgressTracker } from './progress.svelte.ts';
   import './styles.css';
@@ -64,6 +63,9 @@
     errorMessage = '';
 
     try {
+      // Import media-chrome dynamically on the client
+      await import('media-chrome');
+
       hlsInstance = await createHlsPlayer({
         video: videoEl,
         src,

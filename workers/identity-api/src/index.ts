@@ -25,7 +25,6 @@ import {
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 
-import identityRoutes from './routes/identity';
 import membershipRoutes from './routes/membership';
 // Import route modules
 import userRoutes from './routes/users';
@@ -64,7 +63,6 @@ app.use(
 // API Routes
 // ============================================================================
 
-app.route('/api/identity', identityRoutes);
 app.route('/api/organizations', membershipRoutes);
 
 /**

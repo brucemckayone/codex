@@ -632,7 +632,7 @@ describe('Purchase Service Errors', () => {
       const error = new PaymentProcessingError('Stripe error', {
         stripeErrorCode: 'card_declined',
         amount: 2999,
-        currency: 'usd',
+        currency: 'gbp',
         timestamp: '2024-11-24T12:00:00Z',
       });
 
@@ -642,7 +642,7 @@ describe('Purchase Service Errors', () => {
         code: 'PAYMENT_PROCESSING_ERROR',
         stripeErrorCode: 'card_declined',
         amount: 2999,
-        currency: 'usd',
+        currency: 'gbp',
         timestamp: '2024-11-24T12:00:00Z',
       });
     });

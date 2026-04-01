@@ -19,11 +19,6 @@ describe('remote/auth.remote', () => {
     await import('./auth.remote');
   }, 30_000);
 
-  it('exports loginForm', async () => {
-    const { loginForm } = await import('./auth.remote');
-    expect(loginForm).toBeDefined();
-  });
-
   it('exports registerForm', async () => {
     const { registerForm } = await import('./auth.remote');
     expect(registerForm).toBeDefined();
@@ -42,10 +37,5 @@ describe('remote/auth.remote', () => {
   it('exports getSession query', async () => {
     const { getSession } = await import('./auth.remote');
     expect(getSession).toBeDefined();
-  });
-
-  it('exports logout command', async () => {
-    const { logout } = await import('./auth.remote');
-    expect(logout).toBeDefined();
   });
 });

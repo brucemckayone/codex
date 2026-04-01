@@ -1,6 +1,6 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import { MEDIA_TYPES, VIDEO_PROGRESS } from '@codex/constants';
+import { CONTENT_STATUS, ENV_NAMES, MEDIA_STATUS, MEDIA_TYPES, PURCHASE_STATUS, VIDEO_PROGRESS } from '@codex/constants';
 import type { DatabaseWs } from '@codex/database';
 import { createPerRequestDbClient } from '@codex/database';
 import {
@@ -36,21 +36,37 @@ interface R2Signer {
 }
 
 /**
- * User library item with content, purchase, and progress information
+ * Development-only R2Signer that returns unsigned dev-cdn URLs.
+ * Miniflare R2 serves objects by key without signature verification.
+ */
+class DevR2Signer implements R2Signer {
+  constructor(private baseUrl: string) {}
+
+  async generateSignedUrl(r2Key: string, _expirySeconds: number): Promise<string> {
+    return `${this.baseUrl}/${r2Key}`;
+  }
+}
+
+/**
+ * User library item with content, access type, purchase, and progress information
  */
 interface UserLibraryItem {
   content: {
     id: string;
+    slug: string;
     title: string;
     description: string;
     thumbnailUrl: string | null;
     contentType: string;
     durationSeconds: number;
+    organizationSlug: string | null;
   };
+  /** How the user has access: 'purchased' or 'membership' */
+  accessType: 'purchased' | 'membership';
   purchase: {
     purchasedAt: string;
     priceCents: number;
-  };
+  } | null;
   progress: {
     positionSeconds: number;
     durationSeconds: number;
@@ -150,7 +166,7 @@ export class ContentAccessService {
           const contentRecord = await tx.query.content.findFirst({
             where: and(
               eq(content.id, input.contentId),
-              eq(content.status, 'published'),
+              eq(content.status, CONTENT_STATUS.PUBLISHED),
               isNull(content.deletedAt)
             ),
             with: {
@@ -254,7 +270,7 @@ export class ContentAccessService {
 
           // Verify media is ready for streaming (status='ready' with transcoding outputs)
           const mediaStatus = contentRecord.mediaItem.status;
-          if (mediaStatus !== 'ready') {
+          if (mediaStatus !== MEDIA_STATUS.READY) {
             obs.warn('Media not ready for streaming', {
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
@@ -473,111 +489,159 @@ export class ContentAccessService {
       sortBy: input.sortBy,
     });
 
-    const offset = (input.page - 1) * input.limit;
-
-    // Build where conditions — always filter by customer + completed status
-    const conditions = [
+    // ── Step 1 & 2: Fetch purchases and memberships concurrently ─────────
+    const purchaseConditions = [
       eq(purchases.customerId, userId),
-      eq(purchases.status, 'completed'),
+      eq(purchases.status, PURCHASE_STATUS.COMPLETED),
     ];
-
-    // Optionally scope to a specific organization
     if (input.organizationId) {
-      conditions.push(eq(purchases.organizationId, input.organizationId));
+      purchaseConditions.push(eq(purchases.organizationId, input.organizationId));
     }
 
-    // Step 1: Get purchases with content and media details
-    const purchaseRecords = await db.query.purchases.findMany({
-      where: and(...conditions),
-      with: {
-        content: {
-          with: {
-            mediaItem: true,
-          },
-        },
-      },
-      orderBy: [desc(purchases.createdAt)],
-      limit: input.limit + 1, // Fetch one extra to check if there's more
-      offset,
-    });
-
-    // Check if there are more pages
-    const hasMore = purchaseRecords.length > input.limit;
-    const resolvedPurchases = hasMore
-      ? purchaseRecords.slice(0, input.limit)
-      : purchaseRecords;
-
-    if (resolvedPurchases.length === 0) {
-      return {
-        items: [],
-        pagination: {
-          page: input.page,
-          limit: input.limit,
-          total: 0,
-          totalPages: 0,
-        },
-      };
+    const membershipConditions = [
+      eq(organizationMemberships.userId, userId),
+      eq(organizationMemberships.status, 'active'),
+    ];
+    if (input.organizationId) {
+      membershipConditions.push(
+        eq(organizationMemberships.organizationId, input.organizationId)
+      );
     }
 
-    // Step 2: Get playback progress for all content in batch
-    const contentIds = resolvedPurchases.map((p) => p.contentId);
-    const progressRecords = await db.query.videoPlayback.findMany({
-      where: and(
-        eq(videoPlayback.userId, userId),
-        inArray(videoPlayback.contentId, contentIds)
-      ),
-    });
-
-    const progressMap = new Map(progressRecords.map((p) => [p.contentId, p]));
-
-    // Step 3: Build response items
-    let items = resolvedPurchases
-      .filter((p) => p.content) // Filter out purchases with no content
-      .map((purchase) => {
-        const progress = progressMap.get(purchase.contentId);
-        const { content } = purchase;
-        const { mediaItem } = content;
-
-        return {
+    const [purchaseRecords, activeMemberships] = await Promise.all([
+      db.query.purchases.findMany({
+        where: and(...purchaseConditions),
+        with: {
           content: {
-            id: content.id,
-            title: content.title,
-            description: content.description || '',
-            thumbnailUrl:
-              content.thumbnailUrl ?? mediaItem?.thumbnailKey ?? null,
-            contentType: mediaItem?.mediaType ?? 'video',
-            durationSeconds: mediaItem?.durationSeconds ?? 0,
+            with: {
+              mediaItem: true,
+              organization: true,
+            },
           },
-          purchase: {
-            purchasedAt: purchase.createdAt.toISOString(),
-            priceCents: purchase.amountPaidCents,
-          },
-          progress: progress
-            ? {
-                positionSeconds: progress.positionSeconds,
-                durationSeconds: progress.durationSeconds,
-                completed: progress.completed,
-                percentComplete: Math.round(
-                  (progress.positionSeconds / progress.durationSeconds) * 100
-                ),
-                updatedAt: progress.updatedAt.toISOString(),
-              }
-            : null,
-        };
+        },
+        orderBy: [desc(purchases.createdAt)],
+      }),
+      db.query.organizationMemberships.findMany({
+        where: and(...membershipConditions),
+        columns: { organizationId: true },
+      }),
+    ]);
+
+    const memberOrgIds = activeMemberships.map((m) => m.organizationId);
+
+    let membershipContentRecords: Array<{
+      id: string;
+      slug: string;
+      title: string;
+      description: string | null;
+      thumbnailUrl: string | null;
+      contentType: string;
+      organizationId: string | null;
+      createdAt: Date;
+      mediaItem: { mediaType: string; durationSeconds: number | null; thumbnailKey: string | null } | null;
+      organization: { slug: string } | null;
+    }> = [];
+
+    if (memberOrgIds.length > 0) {
+      membershipContentRecords = await db.query.content.findMany({
+        where: and(
+          inArray(content.organizationId, memberOrgIds),
+          eq(content.status, CONTENT_STATUS.PUBLISHED),
+          isNull(content.deletedAt)
+        ),
+        with: {
+          mediaItem: true,
+          organization: true,
+        },
+        orderBy: [desc(content.createdAt)],
       });
+    }
 
-    // Step 4: Apply filter
-    items = items.filter((item) => {
-      if (input.filter === 'in-progress') {
-        return item.progress && !item.progress.completed;
-      }
-      if (input.filter === 'completed') {
-        return item.progress?.completed === true;
-      }
-      return true; // 'all'
-    });
+    const purchasedContentIds = new Set(
+      purchaseRecords.map((p) => p.contentId)
+    );
 
-    // Step 5: Apply sort (after filter for accuracy)
+    let items: UserLibraryItem[] = [];
+
+    for (const purchase of purchaseRecords) {
+      if (!purchase.content) continue;
+      const { content: c, ...rest } = purchase;
+      const { mediaItem, organization } = c;
+      items.push({
+        content: {
+          id: c.id,
+          slug: c.slug,
+          title: c.title,
+          description: c.description || '',
+          thumbnailUrl: c.thumbnailUrl ?? mediaItem?.thumbnailKey ?? null,
+          contentType: mediaItem?.mediaType ?? 'video',
+          durationSeconds: mediaItem?.durationSeconds ?? 0,
+          organizationSlug: organization?.slug ?? null,
+        },
+        accessType: 'purchased',
+        purchase: {
+          purchasedAt: rest.createdAt.toISOString(),
+          priceCents: rest.amountPaidCents,
+        },
+        progress: null, // Filled in Step 4
+      });
+    }
+
+    for (const c of membershipContentRecords) {
+      if (purchasedContentIds.has(c.id)) continue;
+      const { mediaItem, organization } = c;
+      items.push({
+        content: {
+          id: c.id,
+          slug: c.slug,
+          title: c.title,
+          description: c.description || '',
+          thumbnailUrl: c.thumbnailUrl ?? mediaItem?.thumbnailKey ?? null,
+          contentType: mediaItem?.mediaType ?? 'video',
+          durationSeconds: mediaItem?.durationSeconds ?? 0,
+          organizationSlug: organization?.slug ?? null,
+        },
+        accessType: 'membership',
+        purchase: null,
+        progress: null, // Filled in Step 4
+      });
+    }
+
+    const allContentIds = items.map((i) => i.content.id);
+    if (allContentIds.length > 0) {
+      const progressRecords = await db.query.videoPlayback.findMany({
+        where: and(
+          eq(videoPlayback.userId, userId),
+          inArray(videoPlayback.contentId, allContentIds)
+        ),
+      });
+      const progressMap = new Map(progressRecords.map((p) => [p.contentId, p]));
+
+      for (const item of items) {
+        const progress = progressMap.get(item.content.id);
+        if (progress) {
+          item.progress = {
+            positionSeconds: progress.positionSeconds,
+            durationSeconds: progress.durationSeconds,
+            completed: progress.completed,
+            percentComplete:
+              progress.durationSeconds > 0
+                ? Math.round(
+                    (progress.positionSeconds / progress.durationSeconds) * 100
+                  )
+                : 0,
+            updatedAt: progress.updatedAt.toISOString(),
+          };
+        }
+      }
+    }
+
+    if (input.filter === 'in-progress') {
+      items = items.filter((item) => item.progress && !item.progress.completed);
+    } else if (input.filter === 'completed') {
+      items = items.filter((item) => item.progress?.completed === true);
+    }
+
     if (input.sortBy === 'title') {
       items.sort((a, b) => a.content.title.localeCompare(b.content.title));
     } else if (input.sortBy === 'duration') {
@@ -586,16 +650,17 @@ export class ContentAccessService {
           (b.content.durationSeconds ?? 0) - (a.content.durationSeconds ?? 0)
       );
     }
-    // 'recent' is already sorted by purchase.createdAt DESC
-
-    const totalPages = Math.ceil(items.length / input.limit);
+    const total = items.length;
+    const totalPages = Math.max(1, Math.ceil(total / input.limit));
+    const offset = (input.page - 1) * input.limit;
+    items = items.slice(offset, offset + input.limit);
 
     return {
       items,
       pagination: {
         page: input.page,
         limit: input.limit,
-        total: items.length,
+        total,
         totalPages,
       },
     };
@@ -621,6 +686,8 @@ export interface ContentAccessEnv {
   R2_SECRET_ACCESS_KEY?: string;
   /** R2 bucket name for media (e.g., codex-media-production) */
   R2_BUCKET_MEDIA?: string;
+  /** Base URL for dev-cdn proxy (local development only, e.g. http://localhost:4100) */
+  R2_PUBLIC_URL_BASE?: string;
   /** Stripe secret key for purchase verification */
   STRIPE_SECRET_KEY?: string;
   /** Database connection method (LOCAL_PROXY, NEON_BRANCH, PRODUCTION) */
@@ -643,36 +710,40 @@ export function createContentAccessService(env: ContentAccessEnv): {
   service: ContentAccessService;
   cleanup: () => Promise<void>;
 } {
-  // Validate required environment variables
-  if (!env.MEDIA_BUCKET) {
-    throw new Error('MEDIA_BUCKET binding is required');
-  }
-  if (!env.R2_ACCOUNT_ID) {
-    throw new Error('R2_ACCOUNT_ID environment variable is required');
-  }
-  if (!env.R2_ACCESS_KEY_ID) {
-    throw new Error('R2_ACCESS_KEY_ID environment variable is required');
-  }
-  if (!env.R2_SECRET_ACCESS_KEY) {
-    throw new Error('R2_SECRET_ACCESS_KEY environment variable is required');
-  }
-  if (!env.R2_BUCKET_MEDIA) {
-    throw new Error('R2_BUCKET_MEDIA environment variable is required');
-  }
-
   const obs = new ObservabilityClient(
     SERVICE_NAME,
     env.ENVIRONMENT ?? 'development'
   );
 
-  const signingConfig: R2SigningConfig = {
-    accountId: env.R2_ACCOUNT_ID,
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-    bucketName: env.R2_BUCKET_MEDIA,
-  };
+  let r2: R2Signer;
+  if (env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT && env.R2_PUBLIC_URL_BASE) {
+    r2 = new DevR2Signer(env.R2_PUBLIC_URL_BASE);
+  } else {
+    if (!env.MEDIA_BUCKET) {
+      throw new Error('MEDIA_BUCKET binding is required');
+    }
+    if (!env.R2_ACCOUNT_ID) {
+      throw new Error('R2_ACCOUNT_ID environment variable is required');
+    }
+    if (!env.R2_ACCESS_KEY_ID) {
+      throw new Error('R2_ACCESS_KEY_ID environment variable is required');
+    }
+    if (!env.R2_SECRET_ACCESS_KEY) {
+      throw new Error('R2_SECRET_ACCESS_KEY environment variable is required');
+    }
+    if (!env.R2_BUCKET_MEDIA) {
+      throw new Error('R2_BUCKET_MEDIA environment variable is required');
+    }
 
-  const r2 = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);
+    const signingConfig: R2SigningConfig = {
+      accountId: env.R2_ACCOUNT_ID,
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+      bucketName: env.R2_BUCKET_MEDIA,
+    };
+
+    r2 = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);
+  }
 
   // Create per-request database client with WebSocket support for transactions
   const { db, cleanup } = createPerRequestDbClient(env);

@@ -7,8 +7,10 @@
   @prop {import('$lib/collections').LibraryItem} item - Library item with progress
 -->
 <script lang="ts">
+  import { page } from '$app/state';
   import type { LibraryItem } from '$lib/collections';
   import * as m from '$paraglide/messages';
+  import { buildContentUrl } from '$lib/utils/subdomain';
 
   interface Props {
     item: LibraryItem;
@@ -32,7 +34,7 @@
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   });
 
-  const href = $derived(`/content/${item.content.id}`);
+  const href = $derived(buildContentUrl(page.url, item.content));
 </script>
 
 <a {href} class="cw-card">

@@ -260,8 +260,9 @@ const purchaseHistoryQuerySchema = z.object({
 
 /**
  * Open Stripe Customer Portal
- * No user input needed — returnUrl is derived from the current origin.
+ * No user input needed — returnUrl is derived from the current page URL.
  * Redirects directly to the Stripe billing portal on success.
+ * Shared by account payment and studio billing pages.
  */
 export const portalSessionForm = form(z.object({}), async (_data) => {
   const { platform, cookies, url } = getRequestEvent();
@@ -269,7 +270,7 @@ export const portalSessionForm = form(z.object({}), async (_data) => {
 
   try {
     const result = await api.checkout.createPortalSession({
-      returnUrl: `${url.origin}/account/payment`,
+      returnUrl: url.href,
     });
 
     // Validate the redirect URL to prevent open redirect attacks

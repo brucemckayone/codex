@@ -18,9 +18,12 @@
     createContentForm,
     updateContentForm,
     deleteContent,
+    publishContent,
+    unpublishContent,
   } from '$lib/remote/content.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { ContentWithRelations } from '$lib/types';
+  import MediaPicker from './MediaPicker.svelte';
 
   interface MediaItemOption {
     id: string;
@@ -45,15 +48,16 @@
   let slugManuallyEdited = $state(!!content);
   let showDeleteConfirm = $state(false);
   let deleting = $state(false);
+  let publishing = $state(false);
+  let currentStatus = $state(content?.status ?? 'draft');
   let showSuccess = $state(false);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  // Track content type locally for conditional section rendering
   let currentContentType = $state(content?.contentType ?? 'video');
-  // Track visibility locally for description text
   let currentVisibility = $state(content?.visibility ?? 'public');
-  // Track slug locally for preview
+  let selectedMediaId = $state<string | null>(content?.mediaItemId ?? null);
   let currentSlug = $state(content?.slug ?? '');
+  let slugInputRef = $state<HTMLInputElement | null>(null);
 
   onDestroy(() => {
     if (successTimeout) clearTimeout(successTimeout);
@@ -109,9 +113,7 @@
         .replace(/[^a-z0-9-]/g, '');
       currentSlug = generated;
 
-      // Update the slug input value directly
-      const slugInput = document.getElementById('slug') as HTMLInputElement;
-      if (slugInput) slugInput.value = generated;
+      if (slugInputRef) slugInputRef.value = generated;
     }
   }
 
@@ -136,21 +138,33 @@
     purchased_only: () => m.studio_content_form_visibility_purchased_only_desc(),
   };
 
-  // ── Media helpers ─────────────────────────────────────────────────────
-  function formatDuration(seconds: number | null | undefined): string {
-    if (!seconds) return '';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${String(secs).padStart(2, '0')}`;
+  // ── Publish / Unpublish ───────────────────────────────────────────────
+  async function handlePublishToggle() {
+    if (!content) return;
+    publishing = true;
+    try {
+      if (currentStatus === 'published') {
+        await unpublishContent(content.id);
+        currentStatus = 'draft';
+        toast.success(m.studio_content_form_unpublish_success());
+      } else {
+        await publishContent(content.id);
+        currentStatus = 'published';
+        toast.success(m.studio_content_form_publish_success());
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : currentStatus === 'published'
+            ? m.studio_content_form_unpublish_error()
+            : m.studio_content_form_publish_error();
+      toast.error(message);
+    } finally {
+      publishing = false;
+    }
   }
 
-  function formatFileSize(bytes: number | null | undefined): string {
-    if (!bytes) return '';
-    const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(1)} MB`;
-  }
-
-  // ── Delete ────────────────────────────────────────────────────────────
   async function handleDelete() {
     if (!content) return;
     deleting = true;
@@ -239,6 +253,7 @@
             {m.studio_content_form_slug_label()}
           </label>
           <input
+            bind:this={slugInputRef}
             type="text"
             id="slug"
             name="slug"
@@ -295,26 +310,13 @@
 
         <div class="form-fields">
           <div class="form-field">
-            <select
-              id="mediaItemId"
+            <MediaPicker
+              {mediaItems}
+              value={selectedMediaId}
+              onchange={(id) => { selectedMediaId = id; }}
               name="mediaItemId"
-              class="field-input field-select"
-            >
-              <option value="">— Select media —</option>
-              {#each mediaItems as item}
-                <option
-                  value={item.id}
-                  selected={item.id === (content?.mediaItemId ?? '')}
-                >
-                  [{item.mediaType}] {item.title}
-                  {#if item.durationSeconds}({formatDuration(item.durationSeconds)}){/if}
-                  {#if item.fileSizeBytes} — {formatFileSize(item.fileSizeBytes)}{/if}
-                </option>
-              {/each}
-            </select>
-            {#if mediaItems.length === 0}
-              <span class="field-hint">{m.studio_content_form_media_hint()}</span>
-            {/if}
+              {orgSlug}
+            />
           </div>
         </div>
       </section>
@@ -346,6 +348,35 @@
       <h3 class="card-title">{m.studio_content_form_section_publishing()}</h3>
 
       <div class="form-fields">
+        {#if isEdit}
+          <div class="form-field">
+            <span class="field-label">{m.studio_content_form_status_label()}</span>
+            <div class="status-row">
+              <span class="status-badge" data-status={currentStatus}>
+                {currentStatus === 'published'
+                  ? m.studio_content_status_published()
+                  : currentStatus === 'archived'
+                    ? m.studio_content_status_archived()
+                    : m.studio_content_status_draft()}
+              </span>
+              <button
+                type="button"
+                class="btn btn-status"
+                disabled={publishing || deleting || (isEdit ? updateContentForm : createContentForm).pending > 0}
+                onclick={handlePublishToggle}
+              >
+                {#if publishing}
+                  {currentStatus === 'published' ? m.studio_content_form_unpublishing() : m.studio_content_form_publishing()}
+                {:else if currentStatus === 'published'}
+                  {m.studio_content_form_unpublish()}
+                {:else}
+                  {m.studio_content_form_publish()}
+                {/if}
+              </button>
+            </div>
+          </div>
+        {/if}
+
         <div class="form-field">
           <label class="field-label" for="visibility">
             {m.studio_content_form_visibility_label()}
@@ -629,6 +660,55 @@
     outline-offset: 2px;
   }
 
+  /* Status row */
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    border-radius: var(--radius-full, 9999px);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .status-badge[data-status='draft'] {
+    background-color: var(--color-warning-100, var(--color-warning-50));
+    color: var(--color-warning-700);
+  }
+
+  .status-badge[data-status='published'] {
+    background-color: var(--color-success-100, var(--color-success-50));
+    color: var(--color-success-700);
+  }
+
+  .status-badge[data-status='archived'] {
+    background-color: var(--color-neutral-100, var(--color-surface));
+    color: var(--color-text-secondary);
+  }
+
+  .btn-status {
+    background-color: var(--color-surface-raised, var(--color-surface));
+    color: var(--color-text);
+    border: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .btn-status:hover:not(:disabled) {
+    background-color: var(--color-surface);
+    border-color: var(--color-text-secondary);
+  }
+
+  .btn-status:focus-visible {
+    outline: var(--border-width-thick, 2px) solid var(--color-primary-500);
+    outline-offset: 2px;
+  }
+
   /* Success/error messages */
   .success-message {
     padding: var(--space-3);
@@ -670,6 +750,27 @@
     background-color: var(--color-surface-dark);
     border-color: var(--color-border-dark);
     color: var(--color-text-secondary-dark, var(--color-text-muted));
+  }
+
+  :global([data-theme='dark']) .status-badge[data-status='draft'] {
+    background-color: var(--color-warning-900, var(--color-warning-700));
+    color: var(--color-warning-100);
+  }
+
+  :global([data-theme='dark']) .status-badge[data-status='published'] {
+    background-color: var(--color-success-900, var(--color-success-700));
+    color: var(--color-success-100);
+  }
+
+  :global([data-theme='dark']) .status-badge[data-status='archived'] {
+    background-color: var(--color-neutral-800, var(--color-surface-dark));
+    color: var(--color-text-secondary-dark, var(--color-text-muted));
+  }
+
+  :global([data-theme='dark']) .btn-status {
+    background-color: var(--color-surface-dark);
+    border-color: var(--color-border-dark);
+    color: var(--color-text-dark);
   }
 
   :global([data-theme='dark']) .success-message {

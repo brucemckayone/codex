@@ -118,6 +118,7 @@ async function seedData() {
   console.log('    Creator:  creator@test.com  (owner of Studio Alpha)');
   console.log('    Viewer:   viewer@test.com   (member/subscriber)');
   console.log('    Admin:    admin@test.com    (owner of Studio Beta)');
+  console.log('    Fresh:    fresh@test.com    (no orgs, no purchases)');
   console.log('');
   console.log('  Quick test:');
   console.log('    1. Navigate to lvh.me:3000');

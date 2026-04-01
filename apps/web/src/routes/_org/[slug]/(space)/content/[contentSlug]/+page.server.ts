@@ -9,16 +9,12 @@
  */
 import { error, fail } from '@sveltejs/kit';
 import { getPublicContent } from '$lib/remote/content.remote';
-import {
-  getPlaybackProgress,
-  getStreamingUrl,
-} from '$lib/remote/library.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { ApiError } from '$lib/server/errors';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, parent, setHeaders }) => {
+export const load: PageServerLoad = async ({ params, parent, setHeaders, platform, cookies }) => {
   const parentData = await parent();
   const { org } = parentData;
   const { contentSlug } = params;
@@ -50,11 +46,13 @@ export const load: PageServerLoad = async ({ params, parent, setHeaders }) => {
   }
 
   // For authenticated users, fetch streaming URL + progress in parallel.
-  // Previously these were sequential (streaming URL → then progress).
-  // getStreamingUrl doubles as access check (returns null if no access).
+  // getStreamingUrl doubles as access check — 403 means no access (expected for non-owners).
+  // Use direct API calls instead of query() remote functions to ensure 403s are properly caught.
+  const api = createServerApi(platform, cookies);
+
   const [streamResult, progressResult] = await Promise.all([
-    getStreamingUrl(content.id).catch(() => null),
-    getPlaybackProgress(content.id).catch(() => null),
+    api.access.getStreamingUrl(content.id).catch(() => null),
+    api.access.getProgress(content.id).catch(() => null),
   ]);
 
   const hasAccess = !!streamResult?.streamingUrl;

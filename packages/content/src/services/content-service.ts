@@ -635,39 +635,32 @@ export class ContentService extends BaseService {
           ? desc(content[sortColumn])
           : asc(content[sortColumn]);
 
-      // Get items
-      const items = await this.db.query.content.findMany({
-        where: and(...whereConditions),
-        limit,
-        offset,
-        orderBy: [orderByClause],
-        with: {
-          mediaItem: true,
-          organization: true,
-          creator: {
-            columns: {
-              id: true,
-              email: true,
-              name: true,
+      // Run items + count queries concurrently (independent queries)
+      const [items, countResult] = await Promise.all([
+        this.db.query.content.findMany({
+          where: and(...whereConditions),
+          limit,
+          offset,
+          orderBy: [orderByClause],
+          with: {
+            mediaItem: true,
+            organization: true,
+            creator: {
+              columns: {
+                id: true,
+                email: true,
+                name: true,
+              },
             },
           },
-        },
-      });
+        }),
+        this.db
+          .select({ total: count() })
+          .from(content)
+          .where(and(...whereConditions)),
+      ]);
 
-      // Get total count
-      const countResult = await this.db
-        .select({ total: count() })
-        .from(content)
-        .where(and(...whereConditions));
-
-      const totalRecord = countResult[0];
-      if (!totalRecord) {
-        throw new Error('Failed to get content count');
-      }
-
-      const { total } = totalRecord;
-
-      const totalCount = Number(total);
+      const totalCount = Number(countResult[0]?.total ?? 0);
       const totalPages = Math.ceil(totalCount / limit);
 
       return {
@@ -756,37 +749,32 @@ export class ContentService extends BaseService {
             ? asc(content.title)
             : desc(content.createdAt);
 
-      // Get items
-      const items = await this.db.query.content.findMany({
-        where: and(...whereConditions),
-        limit,
-        offset,
-        orderBy: [orderByClause],
-        with: {
-          mediaItem: true,
-          creator: {
-            columns: {
-              id: true,
-              email: true,
-              name: true,
+      // Run items + count queries concurrently (independent queries)
+      const [items, countResult] = await Promise.all([
+        this.db.query.content.findMany({
+          where: and(...whereConditions),
+          limit,
+          offset,
+          orderBy: [orderByClause],
+          with: {
+            mediaItem: true,
+            creator: {
+              columns: {
+                id: true,
+                email: true,
+                name: true,
+              },
             },
+            organization: true,
           },
-          organization: true,
-        },
-      });
+        }),
+        this.db
+          .select({ total: count() })
+          .from(content)
+          .where(and(...whereConditions)),
+      ]);
 
-      // Get total count
-      const countResult = await this.db
-        .select({ total: count() })
-        .from(content)
-        .where(and(...whereConditions));
-
-      const totalRecord = countResult[0];
-      if (!totalRecord) {
-        throw new Error('Failed to get content count');
-      }
-
-      const totalCount = Number(totalRecord.total);
+      const totalCount = Number(countResult[0]?.total ?? 0);
       const totalPages = Math.ceil(totalCount / limit);
 
       return {

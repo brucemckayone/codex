@@ -5,11 +5,10 @@
  * Validates file type and size before uploading.
  */
 
-import type { KVNamespace } from '@cloudflare/workers-types';
-import { VersionedCache } from '@codex/cache';
 import { z } from 'zod';
 import { form, getRequestEvent } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { invalidateCache } from '$lib/server/cache';
 import { getProfile } from './account.remote';
 
 /**
@@ -44,12 +43,8 @@ export const avatarUploadForm = form(avatarUploadSchema, async ({ avatar }) => {
     const result = await api.account.uploadAvatar(avatar);
 
     // Invalidate web app's cache after successful upload
-    const cache = platform?.env?.CACHE_KV
-      ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
-      : null;
-
-    if (cache && locals?.user?.id) {
-      await cache.invalidate(locals.user.id);
+    if (locals?.user?.id) {
+      await invalidateCache(platform, locals.user.id);
     }
 
     await getProfile().refresh();

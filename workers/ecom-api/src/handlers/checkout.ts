@@ -129,7 +129,7 @@ export async function handleCheckoutCompleted(
         contentId: validatedMetadata.contentId,
         organizationId: validatedMetadata.organizationId,
         amountPaidCents: amountTotal,
-        currency: CURRENCY.USD,
+        currency: CURRENCY.GBP,
       });
 
       obs?.info('Purchase completed successfully', {

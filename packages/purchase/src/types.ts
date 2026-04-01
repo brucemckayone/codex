@@ -54,7 +54,7 @@ export interface CompletePurchaseMetadata {
   organizationId: string | null;
   /** Amount paid in cents */
   amountPaidCents: number;
-  /** Currency code (default: 'usd') */
+  /** Currency code (default: 'gbp') */
   currency?: string;
 }
 

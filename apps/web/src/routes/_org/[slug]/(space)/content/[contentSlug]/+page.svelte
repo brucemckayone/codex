@@ -12,6 +12,7 @@
   import VideoPlayer from '$lib/components/VideoPlayer/VideoPlayer.svelte';
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import { hydrateIfNeeded } from '$lib/collections';
+  import { formatPrice } from '$lib/utils/format';
   import type { PageData } from './$types';
 
   interface Props {
@@ -37,9 +38,9 @@
     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   }
 
-  function formatPrice(cents: number | null): string {
+  function displayPrice(cents: number | null): string {
     if (!cents) return m.content_price_free();
-    return `$${(cents / 100).toFixed(2)}`;
+    return formatPrice(cents);
   }
 
   const contentTypeBadge = $derived(
@@ -55,16 +56,11 @@
   const thumbnailUrl = $derived(data.content.mediaItem?.thumbnailUrl ?? undefined);
   const duration = $derived(data.content.mediaItem?.durationSeconds ?? 0);
   const priceCents = $derived(data.content.priceCents ?? null);
-  const isPaid = $derived(
-    data.content.visibility === 'purchased_only' && !!priceCents && priceCents > 0
-  );
-  const isFree = $derived(
-    data.content.visibility === 'public' ||
-    (data.content.visibility === 'purchased_only' && (!priceCents || priceCents === 0))
-  );
+  const isPaid = $derived(!!priceCents && priceCents > 0);
+  const isFree = $derived(!priceCents || priceCents === 0);
   const needsPurchase = $derived(!data.hasAccess && isPaid);
 
-  const previewUrl = $derived(data.content.mediaItem?.hlsPreviewKey ?? undefined);
+  const previewUrl = $derived(data.content.mediaItem?.hlsPreviewUrl ?? undefined);
   const accessState = $derived(
     deriveAccessState({
       hasAccess: data.hasAccess,
@@ -205,7 +201,7 @@
     {#if needsPurchase}
       <div class="content-detail__purchase">
         <div class="content-detail__price">
-          <span class="content-detail__price-amount">{formatPrice(priceCents)}</span>
+          <span class="content-detail__price-amount">{displayPrice(priceCents)}</span>
           <span class="content-detail__price-label">{m.content_detail_purchase_cta_description()}</span>
         </div>
 
@@ -224,7 +220,7 @@
               {#if purchasing}
                 {m.checkout_processing()}
               {:else}
-                {m.checkout_purchase_button({ price: formatPrice(priceCents) })}
+                {m.checkout_purchase_button({ price: displayPrice(priceCents) })}
               {/if}
             </button>
           </form>

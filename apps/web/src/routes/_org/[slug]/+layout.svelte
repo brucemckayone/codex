@@ -37,6 +37,9 @@
     if (staleKeys.some((k) => k.includes(':content'))) {
       void invalidateCollection('content');
     }
+    if (staleKeys.some((k) => k.includes(':library'))) {
+      void invalidateCollection('library');
+    }
     updateStoredVersions(data.versions ?? {});
   });
 

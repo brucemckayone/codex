@@ -11,6 +11,7 @@
  * - Instant UI → no network delay for progress bar
  */
 
+import { VIDEO_PROGRESS } from '@codex/constants';
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
 import { logger } from '$lib/observability';
@@ -76,7 +77,7 @@ export function updateLocalProgress(
   if (!progressCollection) return;
   const now = new Date().toISOString();
   const completed =
-    durationSeconds > 0 && positionSeconds / durationSeconds > 0.9;
+    durationSeconds > 0 && positionSeconds / durationSeconds >= VIDEO_PROGRESS.COMPLETION_THRESHOLD;
   const percentComplete =
     durationSeconds > 0
       ? Math.round((positionSeconds / durationSeconds) * 100)

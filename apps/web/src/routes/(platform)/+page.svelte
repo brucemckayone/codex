@@ -2,6 +2,7 @@
   /**
    * Platform landing page - codex main domain
    */
+  import * as m from '$paraglide/messages';
 </script>
 
 <svelte:head>
@@ -17,16 +18,16 @@
 
 <div class="landing">
   <section class="hero">
-    <h1 class="hero-title">Transform Your Content Journey</h1>
-    <p class="tagline">Discover and stream premium content from independent creators and organizations.</p>
+    <h1 class="hero-title">{m.landing_hero_title()}</h1>
+    <p class="tagline">{m.landing_hero_tagline()}</p>
     <div class="cta-group">
-      <a href="/discover" class="cta cta-primary">Explore Content</a>
-      <a href="/register" class="cta cta-secondary">Join Free</a>
+      <a href="/discover" class="cta cta-primary">{m.landing_hero_explore()}</a>
+      <a href="/register" class="cta cta-secondary">{m.landing_hero_join()}</a>
     </div>
   </section>
 
   <section class="features">
-    <h2 class="features-title">Why Codex?</h2>
+    <h2 class="features-title">{m.landing_features_title()}</h2>
     <div class="feature-grid">
       <div class="feature">
         <div class="feature-icon" aria-hidden="true">
@@ -35,8 +36,8 @@
             <path d="M12 6v6l4 2" />
           </svg>
         </div>
-        <h3>Curated Content</h3>
-        <p>Premium content from verified creators, organized by topic and skill level.</p>
+        <h3>{m.landing_feature_curated_title()}</h3>
+        <p>{m.landing_feature_curated_desc()}</p>
       </div>
       <div class="feature">
         <div class="feature-icon" aria-hidden="true">
@@ -47,8 +48,8 @@
             <path d="M2 12h20" />
           </svg>
         </div>
-        <h3>Organization Spaces</h3>
-        <p>Browse complete content libraries from your favorite organizations.</p>
+        <h3>{m.landing_feature_org_title()}</h3>
+        <p>{m.landing_feature_org_desc()}</p>
       </div>
       <div class="feature">
         <div class="feature-icon" aria-hidden="true">
@@ -57,8 +58,8 @@
             <circle cx="12" cy="7" r="4" />
           </svg>
         </div>
-        <h3>Creator Profiles</h3>
-        <p>Follow creators across multiple organizations and track your progress.</p>
+        <h3>{m.landing_feature_creators_title()}</h3>
+        <p>{m.landing_feature_creators_desc()}</p>
       </div>
     </div>
   </section>

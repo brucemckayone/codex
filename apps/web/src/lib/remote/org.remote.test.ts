@@ -28,8 +28,4 @@ describe('remote/org.remote', () => {
     expect(getOrgSettings).toBeDefined();
   });
 
-  it('exports getOrganizationById query', async () => {
-    const { getOrganizationById } = await import('./org.remote');
-    expect(getOrganizationById).toBeDefined();
-  });
 });

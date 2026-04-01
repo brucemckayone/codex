@@ -2,6 +2,7 @@
   /**
    * About page - platform information
    */
+  import * as m from '$paraglide/messages';
 </script>
 
 <svelte:head>
@@ -14,27 +15,27 @@
 
 <div class="about">
   <section class="about-hero">
-    <h1>About Codex</h1>
-    <p class="lead">Empowering independent creators to share premium content with the world.</p>
+    <h1>{m.about_title()}</h1>
+    <p class="lead">{m.about_lead()}</p>
   </section>
 
   <section class="about-section">
-    <h2>Our Mission</h2>
-    <p>Codex provides a modern platform for creators and organizations to distribute high-quality video content. We handle the infrastructure so creators can focus on what they do best.</p>
+    <h2>{m.about_mission_title()}</h2>
+    <p>{m.about_mission_body()}</p>
   </section>
 
   <section class="about-section">
-    <h2>For Creators</h2>
-    <p>Upload, organize, and monetize your content. Set up your organization, invite team members, and build your audience with powerful tools and analytics.</p>
+    <h2>{m.about_creators_title()}</h2>
+    <p>{m.about_creators_body()}</p>
   </section>
 
   <section class="about-section">
-    <h2>For Learners</h2>
-    <p>Discover content from creators you trust. Track your progress, build your library, and learn at your own pace with adaptive streaming.</p>
+    <h2>{m.about_learners_title()}</h2>
+    <p>{m.about_learners_body()}</p>
   </section>
 
   <section class="about-cta">
-    <a href="/register" class="cta">Get Started</a>
+    <a href="/register" class="cta">{m.about_cta()}</a>
   </section>
 </div>
 

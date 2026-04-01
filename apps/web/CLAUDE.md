@@ -23,7 +23,8 @@ Frontend SvelteKit application for the Codex platform.
 
 ### Routing
 - **MUST** keep paths root-relative on org subdomains — slug is in hostname, not URL path
-- **MUST** use `buildOrgUrl()` for cross-org navigation — different org = different origin
+- **MUST** use `buildContentUrl(page.url, content)` for all content page links — handles cross-org subdomain routing and slug/ID fallback (`$lib/utils/subdomain.ts`)
+- **MUST** use `buildOrgUrl()` for cross-org navigation to non-content pages — different org = different origin
 - **NEVER** include route group names (`(platform)`, `(space)`, `(auth)`) in hrefs or `goto()`
 
 ### Styling
@@ -78,6 +79,20 @@ The `reroute()` hook maps these root-relative paths to the correct internal rout
 - `bruce-studio.lvh.me:3000/studio` → `_org/bruce-studio/studio` → matches `studio/+page.svelte`
 
 **Exception:** Cross-org navigation (e.g., StudioSwitcher) needs full subdomain URLs since it navigates to a different origin.
+
+**Content page links:** Always use `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts` — it handles cross-org subdomain routing automatically:
+
+```svelte
+import { page } from '$app/state';
+import { buildContentUrl } from '$lib/utils/subdomain';
+
+<!-- Automatically handles same-org (root-relative) vs cross-org (full URL) -->
+<a href={buildContentUrl(page.url, item)}>View</a>
+<a href={buildContentUrl(page.url, item.content)}>View</a>
+<a href={buildContentUrl(page.url, { slug: contentSlug, id: content.id })}>View</a>
+```
+
+The function accepts `{ slug?: string | null; id: string; organizationSlug?: string | null }` — uses slug when available, falls back to ID. On the content's own org subdomain it returns root-relative `/content/{slug}`, otherwise builds a full cross-origin URL via `buildOrgUrl()`.
 
 **Route groups like `(space)` are filesystem-only** — never include them in rerouted paths or `href` values.
 

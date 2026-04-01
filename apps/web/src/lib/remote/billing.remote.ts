@@ -6,55 +6,12 @@
  * Uses `query()` for revenue and top content analytics.
  */
 
-import { isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
-import { form, getRequestEvent, query } from '$app/server';
+import { getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Portal Session Form (Studio Billing)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Open Stripe Customer Portal from studio billing page.
- * Return URL points back to /{slug}/studio/billing.
- *
- * Usage:
- * ```svelte
- * <form {...portalSessionForm}>
- *   <button type="submit" disabled={portalSessionForm.pending > 0}>
- *     Manage Billing
- *   </button>
- * </form>
- * ```
- */
-export const portalSessionForm = form(z.object({}), async (_data) => {
-  const { platform, cookies, url } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-
-  try {
-    const result = await api.checkout.createPortalSession({
-      returnUrl: `${url.origin}/studio/billing`,
-    });
-
-    // Validate the redirect URL to prevent open redirect attacks
-    const portalUrl = new URL(result.url);
-    if (!portalUrl.hostname.endsWith('.stripe.com')) {
-      throw new Error('Invalid billing portal URL');
-    }
-
-    redirect(303, result.url);
-  } catch (error) {
-    if (isRedirect(error)) throw error;
-    return {
-      success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to open billing portal',
-    };
-  }
-});
+// Re-export portalSessionForm — shared implementation uses url.href as returnUrl
+export { portalSessionForm } from './account.remote';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Revenue Query

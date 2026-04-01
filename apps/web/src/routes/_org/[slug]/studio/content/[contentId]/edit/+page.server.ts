@@ -1,7 +1,7 @@
 /**
  * Studio Content Edit - server load
  *
- * Loads content by ID for the edit form.
+ * Loads content by ID and available media items for the edit form.
  * Auth is handled by the parent studio layout (redirects to login/join).
  */
 import { error } from '@sveltejs/kit';
@@ -24,10 +24,21 @@ export const load: PageServerLoad = async ({
       error(404, 'Content not found');
     }
 
+    // Load ready media items for the media picker (same pattern as new/+page.server.ts)
+    const mediaParams = new URLSearchParams();
+    mediaParams.set('organizationId', org.id);
+    mediaParams.set('status', 'ready');
+    mediaParams.set('limit', '50');
+    mediaParams.set('sortBy', 'createdAt');
+    mediaParams.set('sortOrder', 'desc');
+
+    const mediaResult = await api.media.list(mediaParams).catch(() => null);
+
     return {
       content: result,
       organizationId: org.id,
       orgSlug: org.slug,
+      mediaItems: mediaResult?.items ?? [],
     };
   } catch (err) {
     // Re-throw SvelteKit errors (404, etc.)

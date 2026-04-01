@@ -40,7 +40,23 @@ app.get(
     input: { query: publicContentQuerySchema },
     handler: async (ctx) => {
       const result = await ctx.services.content.listPublic(ctx.input.query);
-      return new PaginatedResult(result.items, result.pagination);
+      const r2Base = ctx.env.R2_PUBLIC_URL_BASE;
+
+      // Resolve raw R2 keys to full CDN URLs — clients must never see raw keys
+      const items = result.items.map((item) => ({
+        ...item,
+        mediaItem: item.mediaItem
+          ? {
+              ...item.mediaItem,
+              hlsPreviewUrl:
+                item.mediaItem.hlsPreviewKey && r2Base
+                  ? `${r2Base}/${item.mediaItem.hlsPreviewKey}`
+                  : null,
+            }
+          : null,
+      }));
+
+      return new PaginatedResult(items, result.pagination);
     },
   })
 );

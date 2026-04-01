@@ -422,8 +422,9 @@ export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
 /**
  * Public content query schema
- * Used for unauthenticated listing of published content on org explore pages.
- * Extends pagination with org scoping, type filter, search, and sort.
+ * Used for unauthenticated listing of published content.
+ * Extends pagination with optional org scoping, type filter, search, and sort.
+ * orgId is optional — omitting it returns platform-wide published content (discover page).
  */
 export const publicContentQuerySchema = paginationSchema
   .extend({
@@ -433,10 +434,6 @@ export const publicContentQuerySchema = paginationSchema
     search: z.string().max(255).optional(),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
   })
-  .refine(
-    (data) => data.orgId || data.slug,
-    'Either orgId or slug must be provided'
-  )
   .transform((data) => ({
     ...data,
     limit: Math.min(data.limit, 50), // Cap at 50 for public endpoint

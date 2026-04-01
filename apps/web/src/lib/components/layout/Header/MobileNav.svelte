@@ -2,7 +2,8 @@
   import type { Snippet } from 'svelte';
   import type { LayoutUser } from '$lib/types';
   import type { NavLink } from '$lib/config/navigation';
-
+  import { submitFormPost } from '$lib/utils/navigation';
+  import * as m from '$paraglide/messages';
   interface Props {
     variant: 'platform' | 'org' | 'studio';
     user: LayoutUser | null;
@@ -34,7 +35,7 @@
 <button
   class="hamburger"
   onclick={toggle}
-  aria-label={open ? 'Close menu' : 'Open menu'}
+  aria-label={open ? m.nav_close_menu() : m.nav_open_menu()}
   aria-expanded={open}
   aria-controls="mobile-nav"
 >
@@ -49,7 +50,7 @@
 
   <nav id="mobile-nav" class="drawer" aria-label="Mobile navigation">
     <div class="drawer-header">
-      <button class="close-button" onclick={close} aria-label="Close menu">
+      <button class="close-button" onclick={close} aria-label={m.nav_close_menu()}>
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
     </div>
@@ -74,16 +75,14 @@
           <span class="user-name">{user.name}</span>
           <span class="user-email">{user.email}</span>
         </div>
-        <a href="/account" class="nav-item" onclick={close}>Account</a>
+        <a href="/account" class="nav-item" onclick={close}>{m.nav_account()}</a>
         {#if variant === 'org'}
-          <a href="/studio" class="nav-item" onclick={close}>Studio</a>
+          <a href="/studio" class="nav-item" onclick={close}>{m.nav_studio()}</a>
         {/if}
-        <form method="POST" action="/logout">
-          <button type="submit" class="nav-item logout-item">Log out</button>
-        </form>
+        <button type="button" class="nav-item logout-item" onclick={() => submitFormPost('/logout')}>{m.nav_log_out()}</button>
       {:else}
-        <a href="/login" class="nav-item" onclick={close}>Sign In</a>
-        <a href="/register" class="nav-item" onclick={close}>Register</a>
+        <a href="/login" class="nav-item" onclick={close}>{m.common_sign_in()}</a>
+        <a href="/register" class="nav-item" onclick={close}>{m.nav_register()}</a>
       {/if}
     </div>
   </nav>

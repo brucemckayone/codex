@@ -305,28 +305,21 @@ export class OrganizationService extends BaseService {
           ? desc(organizations[sortColumn])
           : asc(organizations[sortColumn]);
 
-      // Get items (secondary sort by id ensures deterministic pagination)
-      const items = await this.db.query.organizations.findMany({
-        where: and(...whereConditions),
-        limit,
-        offset,
-        orderBy: [orderByClause, asc(organizations.id)],
-      });
+      // Run items + count queries concurrently (independent queries)
+      const [items, countResult] = await Promise.all([
+        this.db.query.organizations.findMany({
+          where: and(...whereConditions),
+          limit,
+          offset,
+          orderBy: [orderByClause, asc(organizations.id)],
+        }),
+        this.db
+          .select({ total: count() })
+          .from(organizations)
+          .where(and(...whereConditions)),
+      ]);
 
-      // Get total count
-      const countResult = await this.db
-        .select({ total: count() })
-        .from(organizations)
-        .where(and(...whereConditions));
-
-      const totalRecord = countResult[0];
-      if (!totalRecord) {
-        throw new Error('Failed to get organization count');
-      }
-
-      const { total } = totalRecord;
-
-      const totalCount = Number(total);
+      const totalCount = Number(countResult[0]?.total ?? 0);
       const totalPages = Math.ceil(totalCount / limit);
 
       return {
@@ -414,22 +407,19 @@ export class OrganizationService extends BaseService {
         throw new OrganizationNotFoundError(slug);
       }
 
-      // Get total count for pagination
-      const countResult = await this.db
-        .select({ totalCount: count() })
-        .from(organizationMemberships)
-        .where(
-          and(
-            eq(organizationMemberships.organizationId, org.id),
-            eq(organizationMemberships.status, 'active'),
-            inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
-          )
-        );
-
-      const totalCount = countResult[0]?.totalCount ?? 0;
-
-      // Get members with content count
-      const members = await this.db
+      // Run count + members queries concurrently (both depend on org.id but not each other)
+      const [countResult, members] = await Promise.all([
+        this.db
+          .select({ totalCount: count() })
+          .from(organizationMemberships)
+          .where(
+            and(
+              eq(organizationMemberships.organizationId, org.id),
+              eq(organizationMemberships.status, 'active'),
+              inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+            )
+          ),
+        this.db
         .select({
           name: users.name,
           avatarUrl: users.avatarUrl,
@@ -468,8 +458,10 @@ export class OrganizationService extends BaseService {
         )
         .orderBy(asc(organizationMemberships.createdAt))
         .limit(queryLimit)
-        .offset(offset);
+        .offset(offset),
+      ]);
 
+      const totalCount = countResult[0]?.totalCount ?? 0;
       const totalPages = Math.ceil(totalCount / limit);
 
       return {
@@ -966,30 +958,29 @@ export class OrganizationService extends BaseService {
         conditions.push(eq(organizationMemberships.role, query.role));
       }
 
-      // Get total count for pagination
-      const countResult = await this.db
-        .select({ totalCount: count() })
-        .from(organizationMemberships)
-        .where(and(...conditions));
+      // Run count + members queries concurrently (independent queries)
+      const [countResult, members] = await Promise.all([
+        this.db
+          .select({ totalCount: count() })
+          .from(organizationMemberships)
+          .where(and(...conditions)),
+        this.db
+          .select({
+            name: users.name,
+            avatarUrl: users.avatarUrl,
+            image: users.image,
+            role: organizationMemberships.role,
+            joinedAt: organizationMemberships.createdAt,
+          })
+          .from(organizationMemberships)
+          .innerJoin(users, eq(organizationMemberships.userId, users.id))
+          .where(and(...conditions))
+          .orderBy(asc(organizationMemberships.createdAt))
+          .limit(queryLimit)
+          .offset(offset),
+      ]);
 
       const totalCount = countResult[0]?.totalCount ?? 0;
-
-      // Get members with public info only (no emails)
-      const members = await this.db
-        .select({
-          name: users.name,
-          avatarUrl: users.avatarUrl,
-          image: users.image,
-          role: organizationMemberships.role,
-          joinedAt: organizationMemberships.createdAt,
-        })
-        .from(organizationMemberships)
-        .innerJoin(users, eq(organizationMemberships.userId, users.id))
-        .where(and(...conditions))
-        .orderBy(asc(organizationMemberships.createdAt))
-        .limit(queryLimit)
-        .offset(offset);
-
       const totalPages = Math.ceil(totalCount / limit);
 
       return {

@@ -1,0 +1,155 @@
+- generic [ref=e2]:
+  - link "Skip to main content" [ref=e3] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=e4]:
+    - banner [ref=e5]:
+      - generic [ref=e6]:
+        - link "Studio Alpha" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e8]: Studio Alpha
+        - navigation "Organization" [ref=e9]:
+          - link "Explore" [ref=e10] [cursor=pointer]:
+            - /url: /explore
+          - link "Creators" [ref=e11] [cursor=pointer]:
+            - /url: /creators
+          - link "Library" [ref=e12] [cursor=pointer]:
+            - /url: /library
+        - button "FU Fresh User" [ref=e15] [cursor=pointer]:
+          - generic [ref=e17]: FU
+          - generic [ref=e18]: Fresh User
+          - img [ref=e19]
+    - main [ref=e21]:
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - heading "Explore Content" [level=1] [ref=e24]
+          - paragraph [ref=e25]: 6 results
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - img
+            - searchbox "Search content..." [ref=e28]
+          - generic [ref=e29]:
+            - button "All Types" [pressed] [ref=e30] [cursor=pointer]
+            - button "Video" [ref=e31] [cursor=pointer]
+            - button "Audio" [ref=e32] [cursor=pointer]
+            - button "Article" [ref=e33] [cursor=pointer]
+          - combobox "Sort content" [ref=e34] [cursor=pointer]:
+            - option "Newest" [selected]
+            - option "Oldest"
+            - option "A-Z"
+        - generic [ref=e35]:
+          - article [ref=e36]:
+            - link "View hjtoijoitoijgoijsrtoijgoq" [ref=e37] [cursor=pointer]:
+              - /url: /content/hjtoijoitoijgoijsrtoijgoq
+              - generic [ref=e38]: View hjtoijoitoijgoijsrtoijgoq
+            - generic [ref=e39]:
+              - img [ref=e41]
+              - 'generic "Duration: 1m" [ref=e43]': 1m
+              - generic [ref=e44]: Video
+              - generic [ref=e45]: £320.00
+            - generic [ref=e46]:
+              - heading "hjtoijoitoijgoijsrtoijgoq" [level=3] [ref=e47]:
+                - link "hjtoijoitoijgoijsrtoijgoq" [ref=e48] [cursor=pointer]:
+                  - /url: /content/hjtoijoitoijgoijsrtoijgoq
+              - paragraph [ref=e49]: oijsrtohijhoroijtoijhrtshsrth
+              - link "A Alex Creator" [ref=e51] [cursor=pointer]:
+                - /url: /@Alex Creator
+                - generic [ref=e53]: A
+                - generic [ref=e54]: Alex Creator
+          - article [ref=e55]:
+            - link "View aereargaergaergaerg" [ref=e56] [cursor=pointer]:
+              - /url: /content/aereargaergaergaerg
+              - generic [ref=e57]: View aereargaergaergaerg
+            - generic [ref=e58]:
+              - img [ref=e60]
+              - 'generic "Duration: 14s" [ref=e62]': 14s
+              - generic [ref=e63]: Video
+              - generic [ref=e64]: £56.00
+            - generic [ref=e65]:
+              - heading "aereargaergaergaerg" [level=3] [ref=e66]:
+                - link "aereargaergaergaerg" [ref=e67] [cursor=pointer]:
+                  - /url: /content/aereargaergaergaerg
+              - paragraph [ref=e68]: aergaergaerg
+              - link "A Alex Creator" [ref=e70] [cursor=pointer]:
+                - /url: /@Alex Creator
+                - generic [ref=e72]: A
+                - generic [ref=e73]: Alex Creator
+          - article [ref=e74]:
+            - link "View Intro to TypeScript" [ref=e75] [cursor=pointer]:
+              - /url: /content/intro-to-typescript
+              - generic [ref=e76]: View Intro to TypeScript
+            - generic [ref=e77]:
+              - img [ref=e79]
+              - 'generic "Duration: 30m" [ref=e81]': 30m
+              - generic [ref=e82]: Video
+            - generic [ref=e83]:
+              - heading "Intro to TypeScript" [level=3] [ref=e84]:
+                - link "Intro to TypeScript" [ref=e85] [cursor=pointer]:
+                  - /url: /content/intro-to-typescript
+              - paragraph [ref=e86]: A comprehensive introduction to TypeScript covering type annotations, interfaces, generics, and practical patterns for building type-safe applications.
+              - link "A Alex Creator" [ref=e88] [cursor=pointer]:
+                - /url: /@Alex Creator
+                - generic [ref=e90]: A
+                - generic [ref=e91]: Alex Creator
+          - article [ref=e92]:
+            - link "View Advanced Svelte Patterns" [ref=e93] [cursor=pointer]:
+              - /url: /content/advanced-svelte-patterns
+              - generic [ref=e94]: View Advanced Svelte Patterns
+            - generic [ref=e95]:
+              - img [ref=e97]
+              - 'generic "Duration: 45m" [ref=e99]': 45m
+              - generic [ref=e100]: Video
+              - generic [ref=e101]: £19.99
+            - generic [ref=e102]:
+              - heading "Advanced Svelte Patterns" [level=3] [ref=e103]:
+                - link "Advanced Svelte Patterns" [ref=e104] [cursor=pointer]:
+                  - /url: /content/advanced-svelte-patterns
+              - paragraph [ref=e105]: Deep dive into Svelte 5 runes, advanced reactivity patterns, component composition, and performance optimisation techniques for production apps.
+              - link "A Alex Creator" [ref=e107] [cursor=pointer]:
+                - /url: /@Alex Creator
+                - generic [ref=e109]: A
+                - generic [ref=e110]: Alex Creator
+          - article [ref=e111]:
+            - link "View Tech Podcast Ep 1" [ref=e112] [cursor=pointer]:
+              - /url: /content/tech-podcast-ep-1
+              - generic [ref=e113]: View Tech Podcast Ep 1
+            - generic [ref=e114]:
+              - img [ref=e116]
+              - 'generic "Duration: 40m" [ref=e120]': 40m
+              - generic [ref=e121]: Audio
+            - generic [ref=e122]:
+              - heading "Tech Podcast Ep 1" [level=3] [ref=e123]:
+                - link "Tech Podcast Ep 1" [ref=e124] [cursor=pointer]:
+                  - /url: /content/tech-podcast-ep-1
+              - paragraph [ref=e125]: First episode discussing the modern web development landscape — TypeScript adoption, edge computing, and the rise of serverless architectures.
+              - link "A Alex Creator" [ref=e127] [cursor=pointer]:
+                - /url: /@Alex Creator
+                - generic [ref=e129]: A
+                - generic [ref=e130]: Alex Creator
+          - article [ref=e131]:
+            - link "View Members Only Workshop" [ref=e132] [cursor=pointer]:
+              - /url: /content/members-only-workshop
+              - generic [ref=e133]: View Members Only Workshop
+            - generic [ref=e134]:
+              - img [ref=e136]
+              - 'generic "Duration: 30m" [ref=e138]': 30m
+              - generic [ref=e139]: Video
+            - generic [ref=e140]:
+              - heading "Members Only Workshop" [level=3] [ref=e141]:
+                - link "Members Only Workshop" [ref=e142] [cursor=pointer]:
+                  - /url: /content/members-only-workshop
+              - paragraph [ref=e143]: Exclusive workshop for members covering real-world project architecture, testing strategies, and deployment pipelines.
+              - link "A Alex Creator" [ref=e145] [cursor=pointer]:
+                - /url: /@Alex Creator
+                - generic [ref=e147]: A
+                - generic [ref=e148]: Alex Creator
+    - contentinfo [ref=e149]:
+      - generic [ref=e150]:
+        - paragraph [ref=e151]: Powered by Revelations
+        - navigation [ref=e152]:
+          - link "About" [ref=e153] [cursor=pointer]:
+            - /url: /about
+          - link "Terms" [ref=e154] [cursor=pointer]:
+            - /url: /terms
+          - link "Privacy" [ref=e155] [cursor=pointer]:
+            - /url: /privacy
+        - paragraph [ref=e156]: © 2026 Codex. All rights reserved.

@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { clearClientState } from '$lib/client/version-manifest';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import Input from '$lib/components/ui/Input/Input.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
@@ -8,6 +11,13 @@
 
   const { data, form } = $props();
   let loading = $state(false);
+
+  // Clear client caches after logout redirect
+  onMount(() => {
+    if (page.url.searchParams.has('logout')) {
+      clearClientState();
+    }
+  });
 
   function handleSubmit() {
     loading = true;

@@ -147,6 +147,7 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 ### Implementing Content/Media Features
 
 - Content lifecycle → `@codex/content` `ContentService`
+- Content page URLs → `buildContentUrl(page.url, content)` from `apps/web/src/lib/utils/subdomain.ts` — handles cross-org subdomain routing and slug/ID fallback
 - Media upload/transcode → `@codex/content` `MediaItemService`
 - Streaming URLs → `@codex/access` `ContentAccessService` (signed R2 URLs)
 - Transcoding → `@codex/transcoding` `TranscodingService` → RunPod

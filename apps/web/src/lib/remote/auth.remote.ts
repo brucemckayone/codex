@@ -14,7 +14,7 @@ import { COOKIES, getCookieConfig } from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { dev } from '$app/environment';
-import { command, form, getRequestEvent, query } from '$app/server';
+import { form, getRequestEvent, query } from '$app/server';
 import { logger } from '$lib/observability';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
 import { extractSessionToken } from '$lib/server/auth-utils';
@@ -22,11 +22,6 @@ import { extractSessionToken } from '$lib/server/auth-utils';
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms (use _password prefix to prevent repopulation)
 // ─────────────────────────────────────────────────────────────────────────────
-
-const loginFormSchema = z.object({
-  email: z.string().email('Please enter a valid email address'),
-  _password: z.string().min(1, 'Password is required'),
-});
 
 const registerFormSchema = z
   .object({
@@ -94,52 +89,6 @@ function extractAndSetSessionCookie(
 
   return true;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Login Form
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Login form with progressive enhancement
- *
- * Usage in Svelte:
- * ```svelte
- * <form {...loginForm}>
- *   <input {...loginForm.fields.email.as('email')} />
- *   <input {...loginForm.fields._password.as('password')} />
- *   <button disabled={loginForm.pending}>Sign In</button>
- * </form>
- * ```
- */
-export const loginForm = form(loginFormSchema, async ({ email, _password }) => {
-  const { platform, cookies } = getRequestEvent();
-
-  // Call auth worker directly for Set-Cookie header access
-  const authUrl = serverApiUrl(platform, 'auth');
-  const response = await fetch(`${authUrl}/api/auth/sign-in/email`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: _password }),
-  });
-
-  if (!response.ok) {
-    const error = (await response
-      .json()
-      .catch(() => ({ message: 'Login failed' }))) as { message?: string };
-    return {
-      success: false,
-      error: error.message || 'Invalid email or password',
-    };
-  }
-
-  // Extract and set session cookie
-  const isSecure =
-    !dev && (!platform?.env || platform.env.ENVIRONMENT !== 'development');
-  extractAndSetSessionCookie(response, cookies, isSecure);
-
-  // Redirect to library on success
-  redirect(303, '/library');
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Register Form
@@ -278,28 +227,3 @@ export const getSession = query(async () => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Logout Command
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Logout command - clears session cookie and redirects
- *
- * Usage:
- * ```svelte
- * <button onclick={() => logout()}>Sign Out</button>
- * ```
- */
-export const logout = command(async () => {
-  const { cookies, request, platform } = getRequestEvent();
-
-  // Clear the session cookie — must include domain to match cross-subdomain cookie
-  const host = request.headers.get('host') ?? undefined;
-  const cookieConfig = getCookieConfig(platform?.env, host);
-  cookies.delete(COOKIES.SESSION_NAME, {
-    path: cookieConfig.path,
-    domain: cookieConfig.domain,
-  });
-
-  redirect(303, '/login');
-});

@@ -60,28 +60,28 @@ export class AdminContentManagementService extends BaseService {
       // Calculate pagination
       const { limit: safeLimit, offset } = withPagination({ page, limit });
 
-      // Get items with creator info
-      const items = await this.db.query.content.findMany({
-        where: and(...whereConditions),
-        limit: safeLimit,
-        offset,
-        orderBy: [desc(schema.content.createdAt)],
-        with: {
-          creator: {
-            columns: {
-              id: true,
-              email: true,
-              name: true,
+      // Run items + count queries concurrently (independent queries)
+      const [items, countResult] = await Promise.all([
+        this.db.query.content.findMany({
+          where: and(...whereConditions),
+          limit: safeLimit,
+          offset,
+          orderBy: [desc(schema.content.createdAt)],
+          with: {
+            creator: {
+              columns: {
+                id: true,
+                email: true,
+                name: true,
+              },
             },
           },
-        },
-      });
-
-      // Get total count
-      const countResult = await this.db
-        .select({ total: count() })
-        .from(schema.content)
-        .where(and(...whereConditions));
+        }),
+        this.db
+          .select({ total: count() })
+          .from(schema.content)
+          .where(and(...whereConditions)),
+      ]);
 
       const total = Number(countResult[0]?.total ?? 0);
       const totalPages = Math.ceil(total / safeLimit);

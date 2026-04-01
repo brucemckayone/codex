@@ -12,6 +12,7 @@
  * - On beforeunload (writes to localStorage — synchronous, survives page close)
  */
 
+import { browser } from '$app/environment';
 import { updateLocalProgress } from '$lib/collections/progress';
 
 const SAVE_INTERVAL_MS = 30_000;
@@ -76,8 +77,10 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
     video.addEventListener('ended', handleEnded);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    if (browser) {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    }
 
     // If already playing, start interval
     if (!video.paused) {
@@ -93,8 +96,10 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
       video.removeEventListener('ended', handleEnded);
     }
 
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    window.removeEventListener('beforeunload', handleBeforeUnload);
+    if (browser) {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    }
     stopInterval();
 
     // Final save on detach

@@ -52,48 +52,44 @@ export class AdminCustomerManagementService extends BaseService {
 
       // Get customers with aggregated stats
       // Customer = user with completed purchases from this org
-      const customersQuery = await this.db
-        .select({
-          userId: schema.purchases.customerId,
-          email: schema.users.email,
-          name: schema.users.name,
-          createdAt: schema.users.createdAt,
-          totalPurchases: sql<number>`COUNT(*)::int`,
-          totalSpentCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-        })
-        .from(schema.purchases)
-        .innerJoin(
-          schema.users,
-          eq(schema.purchases.customerId, schema.users.id)
-        )
-        .where(
-          and(
-            eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
-          )
-        )
-        .groupBy(
-          schema.purchases.customerId,
-          schema.users.email,
-          schema.users.name,
-          schema.users.createdAt
-        )
-        .orderBy(desc(sql`SUM(${schema.purchases.amountPaidCents})`))
-        .limit(safeLimit)
-        .offset(offset);
+      // Run items + count queries concurrently (independent queries)
+      const whereCondition = and(
+        eq(schema.purchases.organizationId, organizationId),
+        eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
+      );
 
-      // Get total count of distinct customers
-      const countResult = await this.db
-        .select({
-          total: countDistinct(schema.purchases.customerId),
-        })
-        .from(schema.purchases)
-        .where(
-          and(
-            eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
+      const [customersQuery, countResult] = await Promise.all([
+        this.db
+          .select({
+            userId: schema.purchases.customerId,
+            email: schema.users.email,
+            name: schema.users.name,
+            createdAt: schema.users.createdAt,
+            totalPurchases: sql<number>`COUNT(*)::int`,
+            totalSpentCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
+          })
+          .from(schema.purchases)
+          .innerJoin(
+            schema.users,
+            eq(schema.purchases.customerId, schema.users.id)
           )
-        );
+          .where(whereCondition)
+          .groupBy(
+            schema.purchases.customerId,
+            schema.users.email,
+            schema.users.name,
+            schema.users.createdAt
+          )
+          .orderBy(desc(sql`SUM(${schema.purchases.amountPaidCents})`))
+          .limit(safeLimit)
+          .offset(offset),
+        this.db
+          .select({
+            total: countDistinct(schema.purchases.customerId),
+          })
+          .from(schema.purchases)
+          .where(whereCondition),
+      ]);
 
       const total = Number(countResult[0]?.total ?? 0);
       const totalPages = Math.ceil(total / safeLimit);

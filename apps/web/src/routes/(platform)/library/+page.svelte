@@ -16,11 +16,13 @@
 
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import {
     hydrateIfNeeded,
     libraryCollection,
     useLiveQuery,
   } from '$lib/collections';
+  import { buildContentUrl } from '$lib/utils/subdomain';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import LibraryFilters from '$lib/components/library/LibraryFilters.svelte';
   import ContinueWatching from '$lib/components/library/ContinueWatching.svelte';
@@ -147,20 +149,20 @@
 </script>
 
 <svelte:head>
-  <title>My Library</title>
+  <title>{m.library_title()} - Codex</title>
 </svelte:head>
 
 <div class="library">
-  <h1 class="library-title">My Library</h1>
+  <h1 class="library-title">{m.library_title()}</h1>
 
   {#if data.error}
     <ErrorBanner
-      title="Failed to load library"
+      title={m.library_error_title()}
       description={data.errorCode === '401'
-        ? 'Your session may have expired. Please sign in again.'
+        ? m.library_error_unauthorized()
         : data.errorCode === '503'
-          ? 'The service is temporarily unavailable. Please try again shortly.'
-          : 'Your library could not be loaded. Please try refreshing the page.'}
+          ? m.library_error_unavailable()
+          : m.library_error_default()}
     />
   {:else if libraryQuery.isLoading && !data.library?.items?.length}
     <div class="content-grid">
@@ -175,10 +177,10 @@
   {:else if libraryQuery.data?.length === 0}
     <div class="empty-state">
       <p class="empty-text">
-        Your library is empty.
+        {m.library_empty()}
       </p>
       <a href="/discover" class="browse-btn">
-        Browse Content
+        {m.library_browse()}
       </a>
     </div>
   {:else}
@@ -217,7 +219,7 @@
     {:else}
       <div class="content-grid">
         {#each filteredItems as item (item.content.id)}
-          <a href="/content/{item.content.id}" class="content-card">
+          <a href={buildContentUrl(page.url, item.content)} class="content-card">
             {#if item.content.thumbnailUrl}
               <div class="card-thumb">
                 <img
@@ -237,7 +239,7 @@
               </div>
             {:else}
               <div class="card-thumb thumb-placeholder">
-                <span class="placeholder-text">No thumbnail</span>
+                <span class="placeholder-text">{m.library_no_thumbnail()}</span>
               </div>
             {/if}
 
@@ -255,9 +257,9 @@
               {#if item.progress}
                 <div class="card-progress">
                   {#if item.progress.completed}
-                    <span class="progress-completed">Completed</span>
+                    <span class="progress-completed">{m.content_progress_completed()}</span>
                   {:else}
-                    {item.progress.percentComplete}% watched
+                    {m.content_progress_percent({ percent: item.progress.percentComplete })}
                   {/if}
                 </div>
               {/if}

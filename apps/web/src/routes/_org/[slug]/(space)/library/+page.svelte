@@ -10,7 +10,7 @@
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import LibraryFilters from '$lib/components/library/LibraryFilters.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
-  import { buildPlatformUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildPlatformUrl } from '$lib/utils/subdomain';
   import * as m from '$paraglide/messages';
 
   let { data } = $props();
@@ -60,18 +60,20 @@
   let filters = $state({
     contentType: 'all',
     progressStatus: 'all',
+    accessType: 'all',
     search: '',
   });
 
   let filtersRef: LibraryFilters | undefined = $state();
 
-  function handleFilterChange(newFilters: { contentType: string; progressStatus: string; search: string }) {
+  function handleFilterChange(newFilters: { contentType: string; progressStatus: string; accessType: string; search: string }) {
     filters = newFilters;
   }
 
   const hasActiveFilters = $derived(
     filters.contentType !== 'all' ||
     filters.progressStatus !== 'all' ||
+    filters.accessType !== 'all' ||
     filters.search !== ''
   );
 
@@ -82,10 +84,14 @@
   const filteredItems = $derived.by(() => {
     if (!hasActiveFilters) return allItems;
 
-    return allItems.filter((item: { content: { contentType?: string; title?: string; description?: string }; progress?: { positionSeconds: number; completed: boolean } }) => {
+    return allItems.filter((item: { content: { contentType?: string; title?: string; description?: string }; accessType?: string; progress?: { positionSeconds: number; completed: boolean } }) => {
       if (filters.contentType !== 'all') {
         const type = item.content.contentType?.toLowerCase() ?? '';
         if (type !== filters.contentType) return false;
+      }
+
+      if (filters.accessType !== 'all') {
+        if ((item.accessType ?? 'purchased') !== filters.accessType) return false;
       }
 
       if (filters.progressStatus !== 'all') {
@@ -179,7 +185,7 @@
     {:else}
       <div class="content-grid">
         {#each filteredItems as item (item.content.id)}
-          <a href="/content/{item.content.id}" class="content-card">
+          <a href={buildContentUrl(page.url, item.content)} class="content-card">
             {#if item.content.thumbnailUrl}
               <div class="card-thumb">
                 <img

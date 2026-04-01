@@ -62,7 +62,7 @@ describe('PurchaseService Integration', () => {
       url: `https://checkout.stripe.com/c/pay/${sessionId}`,
       payment_intent: paymentIntentId,
       amount_total: 2999,
-      currency: 'usd',
+      currency: 'gbp',
       metadata: {},
       status: 'complete',
     } as Stripe.Checkout.Session;
@@ -194,7 +194,7 @@ describe('PurchaseService Integration', () => {
             expect.objectContaining({
               price_data: expect.objectContaining({
                 unit_amount: 2999,
-                currency: 'usd',
+                currency: 'gbp',
               }),
               quantity: 1,
             }),
@@ -352,7 +352,7 @@ describe('PurchaseService Integration', () => {
           contentId: content.id,
           organizationId,
           amountPaidCents: 4999,
-          currency: 'usd',
+          currency: 'gbp',
         }
       );
 
@@ -416,7 +416,7 @@ describe('PurchaseService Integration', () => {
         contentId: content.id,
         organizationId,
         amountPaidCents: 2999,
-        currency: 'usd',
+        currency: 'gbp',
       });
 
       expect(purchase.customerId).toBe(otherUserId);
@@ -487,7 +487,7 @@ describe('PurchaseService Integration', () => {
           contentId: content.id,
           organizationId,
           amountPaidCents: 1999,
-          currency: 'usd',
+          currency: 'gbp',
         }
       );
 
@@ -499,7 +499,7 @@ describe('PurchaseService Integration', () => {
           contentId: content.id,
           organizationId,
           amountPaidCents: 1999,
-          currency: 'usd',
+          currency: 'gbp',
         }
       );
 
@@ -552,7 +552,7 @@ describe('PurchaseService Integration', () => {
         contentId: content.id,
         organizationId,
         amountPaidCents: 999,
-        currency: 'usd',
+        currency: 'gbp',
       });
 
       // Verify purchase verification now returns true
@@ -609,7 +609,7 @@ describe('PurchaseService Integration', () => {
         contentId: content.id,
         organizationId,
         amountPaidCents: 1499,
-        currency: 'usd',
+        currency: 'gbp',
       });
 
       const result = await purchaseService.verifyPurchase(
@@ -711,7 +711,7 @@ describe('PurchaseService Integration', () => {
           contentId: content.id,
           organizationId,
           amountPaidCents: 1999,
-          currency: 'usd',
+          currency: 'gbp',
         }
       );
 
@@ -772,7 +772,7 @@ describe('PurchaseService Integration', () => {
             contentId: content.id,
             organizationId,
             amountPaidCents: 999 + i * 100,
-            currency: 'usd',
+            currency: 'gbp',
           }
         );
 
@@ -862,7 +862,7 @@ describe('PurchaseService Integration', () => {
           contentId: content.id,
           organizationId,
           amountPaidCents: 1999,
-          currency: 'usd',
+          currency: 'gbp',
         }
       );
 
@@ -921,7 +921,7 @@ describe('PurchaseService Integration', () => {
           contentId: content.id,
           organizationId,
           amountPaidCents: 2999,
-          currency: 'usd',
+          currency: 'gbp',
         }
       );
 
@@ -1213,7 +1213,7 @@ describe('PurchaseService Integration', () => {
         contentId: verifyContentId,
         organizationId: verifyOrgId,
         amountPaidCents: 999,
-        currency: 'usd',
+        currency: 'gbp',
       });
 
       // Mock retrieve to return session with this payment intent

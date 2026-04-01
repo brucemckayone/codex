@@ -1,4 +1,5 @@
-import { COOKIES } from '@codex/constants';
+import { AUTH_COOKIES, COOKIES } from '@codex/constants';
+import { serverApiUrl } from './api';
 
 /**
  * Extract session token from Set-Cookie header on an auth worker response.
@@ -33,6 +34,30 @@ export function extractSessionToken(res: Response): string | null {
   }
 
   return null;
+}
+
+/**
+ * Invalidate a session server-side by calling BetterAuth's sign-out endpoint.
+ * Deletes the session from PostgreSQL and KV cache.
+ * Fails silently if the auth worker is unreachable.
+ */
+export async function invalidateAuthSession(
+  platform: App.Platform | undefined,
+  sessionCookie: string
+): Promise<void> {
+  try {
+    const authUrl = serverApiUrl(platform, 'auth');
+    await fetch(`${authUrl}/api/auth/sign-out`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}; ${AUTH_COOKIES.BETTER_AUTH}=${sessionCookie}`,
+      },
+      body: '{}',
+    });
+  } catch {
+    // Auth worker unavailable — caller should still delete the cookie
+  }
 }
 
 /**

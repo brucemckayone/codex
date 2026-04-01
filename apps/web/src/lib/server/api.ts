@@ -451,6 +451,22 @@ export function createServerApi(
         }),
 
       /**
+       * Publish content (draft -> published)
+       */
+      publish: (id: string) =>
+        request<ContentWithRelations>('content', `/api/content/${id}/publish`, {
+          method: 'POST',
+        }),
+
+      /**
+       * Unpublish content (published -> draft)
+       */
+      unpublish: (id: string) =>
+        request<ContentWithRelations>('content', `/api/content/${id}/unpublish`, {
+          method: 'POST',
+        }),
+
+      /**
        * Delete content
        */
       delete: (id: string) =>

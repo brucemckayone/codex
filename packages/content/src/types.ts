@@ -115,11 +115,25 @@ export type ContentResponse = SingleItemResponse<ContentWithRelations>;
 export type ContentListResponse = PaginatedListResponse<ContentWithRelations>;
 
 /**
+ * Public content item with resolved media URLs.
+ * The API boundary resolves raw R2 keys (hlsPreviewKey) into
+ * full CDN URLs (hlsPreviewUrl) so clients never see raw keys.
+ */
+export interface PublicContentItem extends Omit<ContentWithRelations, 'mediaItem'> {
+  mediaItem:
+    | (MediaItem & {
+        /** Resolved CDN URL for the 30-second HLS preview clip */
+        hlsPreviewUrl: string | null;
+      })
+    | null;
+}
+
+/**
  * Response for GET /api/content/public
  * Returns paginated list of published content for unauthenticated visitors
  */
 export type PublicContentListResponse =
-  PaginatedListResponse<ContentWithRelations>;
+  PaginatedListResponse<PublicContentItem>;
 
 /**
  * Response for POST /api/content
