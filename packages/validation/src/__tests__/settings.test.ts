@@ -431,6 +431,13 @@ describe('default constants', () => {
       fontHeading: null,
       radiusValue: 0.5,
       densityValue: 1,
+      tokenOverrides: null,
+      textColorHex: null,
+      shadowScale: null,
+      shadowColor: null,
+      textScale: null,
+      headingWeight: null,
+      bodyWeight: null,
     });
     expect(brandingSettingsSchema.parse(DEFAULT_BRANDING)).toEqual(
       DEFAULT_BRANDING

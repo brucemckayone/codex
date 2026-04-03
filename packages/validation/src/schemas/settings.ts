@@ -76,6 +76,14 @@ export const updateBrandingSchema = z.object({
   fontHeading: fontNameSchema.nullable().optional(),
   radiusValue: radiusValueSchema.optional(),
   densityValue: densityValueSchema.optional(),
+  // Brand Editor fine-tune fields
+  tokenOverrides: z.string().nullable().optional(), // JSON string
+  textColorHex: hexColorSchema.nullable().optional(),
+  shadowScale: z.string().max(10).nullable().optional(),
+  shadowColor: z.string().max(20).nullable().optional(),
+  textScale: z.string().max(10).nullable().optional(),
+  headingWeight: z.string().max(10).nullable().optional(),
+  bodyWeight: z.string().max(10).nullable().optional(),
 });
 
 export type UpdateBrandingInput = z.infer<typeof updateBrandingSchema>;
@@ -133,6 +141,13 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
     fontHeading: z.string().nullable(),
     radiusValue: z.number(),
     densityValue: z.number(),
+    tokenOverrides: z.string().nullable(),
+    textColorHex: hexColorSchema.nullable(),
+    shadowScale: z.string().nullable(),
+    shadowColor: z.string().nullable(),
+    textScale: z.string().nullable(),
+    headingWeight: z.string().nullable(),
+    bodyWeight: z.string().nullable(),
   })
   .pipe(
     z.object({
@@ -145,6 +160,13 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
       fontHeading: z.string().nullable(),
       radiusValue: z.number(),
       densityValue: z.number(),
+      tokenOverrides: z.string().nullable(),
+      textColorHex: z.string().nullable(),
+      shadowScale: z.string().nullable(),
+      shadowColor: z.string().nullable(),
+      textScale: z.string().nullable(),
+      headingWeight: z.string().nullable(),
+      bodyWeight: z.string().nullable(),
     })
   );
 
@@ -197,6 +219,13 @@ export const DEFAULT_BRANDING: BrandingSettingsResponse = {
   fontBody: null,
   fontHeading: null,
   radiusValue: 0.5,
+  tokenOverrides: null,
+  textColorHex: null,
+  shadowScale: null,
+  shadowColor: null,
+  textScale: null,
+  headingWeight: null,
+  bodyWeight: null,
   densityValue: 1,
 };
 

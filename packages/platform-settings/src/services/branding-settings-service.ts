@@ -68,6 +68,13 @@ export class BrandingSettingsService extends BaseService {
         fontHeading: schema.brandingSettings.fontHeading,
         radiusValue: schema.brandingSettings.radiusValue,
         densityValue: schema.brandingSettings.densityValue,
+        tokenOverrides: schema.brandingSettings.tokenOverrides,
+        textColorHex: schema.brandingSettings.textColorHex,
+        shadowScale: schema.brandingSettings.shadowScale,
+        shadowColor: schema.brandingSettings.shadowColor,
+        textScale: schema.brandingSettings.textScale,
+        headingWeight: schema.brandingSettings.headingWeight,
+        bodyWeight: schema.brandingSettings.bodyWeight,
       })
       .from(schema.brandingSettings)
       .where(eq(schema.brandingSettings.organizationId, this.organizationId))
@@ -95,6 +102,13 @@ export class BrandingSettingsService extends BaseService {
     fontHeading: string | null;
     radiusValue: string;
     densityValue: string;
+    tokenOverrides: string | null;
+    textColorHex: string | null;
+    shadowScale: string | null;
+    shadowColor: string | null;
+    textScale: string | null;
+    headingWeight: string | null;
+    bodyWeight: string | null;
   }): BrandingSettingsResponse {
     return {
       logoUrl: row.logoUrl,
@@ -106,6 +120,13 @@ export class BrandingSettingsService extends BaseService {
       fontHeading: row.fontHeading,
       radiusValue: parseFloat(row.radiusValue) || 0.5,
       densityValue: parseFloat(row.densityValue) || 1,
+      tokenOverrides: row.tokenOverrides,
+      textColorHex: row.textColorHex,
+      shadowScale: row.shadowScale,
+      shadowColor: row.shadowColor,
+      textScale: row.textScale,
+      headingWeight: row.headingWeight,
+      bodyWeight: row.bodyWeight,
     };
   }
 
@@ -128,6 +149,13 @@ export class BrandingSettingsService extends BaseService {
       fontHeading: 'fontHeading',
       radiusValue: 'radiusValue',
       densityValue: 'densityValue',
+      tokenOverrides: 'tokenOverrides',
+      textColorHex: 'textColorHex',
+      shadowScale: 'shadowScale',
+      shadowColor: 'shadowColor',
+      textScale: 'textScale',
+      headingWeight: 'headingWeight',
+      bodyWeight: 'bodyWeight',
     };
     for (const [dbField, inputField] of Object.entries(fieldMap)) {
       if (input[inputField] !== undefined) {

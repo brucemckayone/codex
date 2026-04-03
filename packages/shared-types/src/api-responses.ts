@@ -206,6 +206,14 @@ export interface BrandingSettingsResponse {
   fontHeading: string | null;
   radiusValue: number;
   densityValue: number;
+  // Brand Editor fine-tune fields
+  tokenOverrides: string | null;
+  textColorHex: string | null;
+  shadowScale: string | null;
+  shadowColor: string | null;
+  textScale: string | null;
+  headingWeight: string | null;
+  bodyWeight: string | null;
 }
 
 /**
