@@ -364,39 +364,4 @@
     background-color: var(--color-error-700, #b91c1c);
     border-color: var(--color-error-700, #b91c1c);
   }
-
-  :global([data-theme='dark']) .page-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .page-subtitle {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .delete-description {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .filter-btn {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .filter-btn:hover {
-    border-color: var(--color-border-strong);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .filter-btn--active {
-    background-color: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-text-inverse);
-  }
-
-  :global([data-theme='dark']) .btn-secondary {
-    background-color: var(--color-surface);
-    color: var(--color-text);
-    border-color: var(--color-border);
-  }
 </style>

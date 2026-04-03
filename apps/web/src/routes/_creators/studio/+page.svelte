@@ -140,12 +140,6 @@
     margin: 0;
     line-height: var(--leading-relaxed);
   }
-
-  :global([data-theme='dark']) .dashboard-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
   :global([data-theme='dark']) .dashboard-card:hover {
     border-color: var(--color-interactive-active);
     background-color: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface));
@@ -154,9 +148,5 @@
   :global([data-theme='dark']) .card-icon {
     background-color: color-mix(in srgb, var(--color-interactive) 15%, var(--color-surface));
     color: var(--color-interactive);
-  }
-
-  :global([data-theme='dark']) .card-title {
-    color: var(--color-text);
   }
 </style>

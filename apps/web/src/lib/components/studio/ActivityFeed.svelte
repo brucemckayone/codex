@@ -175,9 +175,4 @@
     background-color: color-mix(in srgb, var(--color-interactive-active, hsl(210, 80%, 40%)) 20%, transparent);
     color: var(--color-interactive, hsl(210, 80%, 60%));
   }
-
-  :global([data-theme='dark']) .activity-icon.event-signup {
-    background-color: var(--color-neutral-800, hsl(210, 10%, 20%));
-    color: var(--color-neutral-300);
-  }
 </style>

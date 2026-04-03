@@ -733,33 +733,4 @@
     outline: 2px solid var(--color-brand-primary, var(--color-interactive));
     outline-offset: 2px;
   }
-
-  /* ── Dark mode ────────────────────────────────────────── */
-
-  :global([data-theme='dark']) .settings-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .select-input {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .btn-clear:hover {
-    background-color: var(--color-error-900);
-  }
-
-  :global([data-theme='dark']) .success-message {
-    background-color: var(--color-success-900);
-    border-color: var(--color-success-700);
-    color: var(--color-success-100);
-  }
-
-  :global([data-theme='dark']) .error-message {
-    background-color: var(--color-error-900);
-    border-color: var(--color-error-700);
-    color: var(--color-error-100);
-  }
 </style>

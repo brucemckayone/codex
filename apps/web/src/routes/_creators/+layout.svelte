@@ -167,31 +167,4 @@
     color: var(--color-text-muted);
     margin: 0;
   }
-
-  /* Dark mode */
-  :global([data-theme='dark']) .creators-header {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .logo {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .nav-link {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .nav-link:hover {
-    color: var(--color-text);
-    background-color: var(--color-surface-variant);
-  }
-
-  :global([data-theme='dark']) .creators-layout {
-    background-color: var(--color-background);
-  }
-
-  :global([data-theme='dark']) .creators-footer {
-    border-color: var(--color-border);
-  }
 </style>

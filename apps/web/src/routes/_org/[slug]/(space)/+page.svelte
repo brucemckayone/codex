@@ -267,24 +267,6 @@
     margin: 0;
     font-size: var(--text-lg, 1.125rem);
   }
-
-  /* ── Dark Mode ── */
-  :global([data-theme='dark']) .featured__title {
-    color: var(--color-text-primary, #f1f5f9);
-  }
-
-  :global([data-theme='dark']) .featured__view-all {
-    color: var(--color-interactive);
-  }
-
-  :global([data-theme='dark']) .featured__view-all:hover {
-    color: var(--color-brand-primary-subtle);
-  }
-
-  :global([data-theme='dark']) .featured__empty {
-    color: var(--color-text-muted, #94a3b8);
-  }
-
   /* ── Responsive Hero ── */
   @media (--below-sm) {
     .hero {

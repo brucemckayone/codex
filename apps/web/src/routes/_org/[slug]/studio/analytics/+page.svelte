@@ -267,38 +267,4 @@
     background-color: var(--color-surface);
     border: var(--border-width) var(--border-style) var(--color-border);
   }
-
-  /* Dark mode */
-  :global([data-theme='dark']) .page-title,
-  :global([data-theme='dark']) .section-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .summary-card,
-  :global([data-theme='dark']) .chart-card,
-  :global([data-theme='dark']) .table-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .summary-value {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .preset-btn {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .preset-btn:hover {
-    background-color: var(--color-surface);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .preset-btn.active {
-    background-color: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
-  }
 </style>

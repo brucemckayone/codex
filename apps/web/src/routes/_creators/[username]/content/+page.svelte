@@ -354,49 +354,4 @@
       font-size: var(--text-xl, 1.25rem);
     }
   }
-
-  /* ── Dark Mode ── */
-  :global([data-theme='dark']) .catalog-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .back-link {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .back-link:hover {
-    color: var(--color-interactive);
-  }
-
-  :global([data-theme='dark']) .search-input {
-    background: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .search-input::placeholder {
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .type-btn {
-    color: var(--color-text-secondary);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .type-btn:hover {
-    background: var(--color-surface-variant);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .pagination-wrapper {
-    border-top-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .empty-state__icon {
-    color: var(--color-text-muted, #94a3b8);
-  }
-
-  :global([data-theme='dark']) .empty-state__text {
-    color: var(--color-text-muted, #94a3b8);
-  }
 </style>

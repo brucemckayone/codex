@@ -101,19 +101,4 @@
   .back-link:hover {
     background-color: var(--color-surface-secondary);
   }
-
-  /* Dark mode */
-  :global([data-theme='dark']) .error-icon {
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .error-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .back-link {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
 </style>

@@ -199,19 +199,4 @@
     font-size: var(--text-xs);
     color: var(--color-text-tertiary);
   }
-
-  /* Dark mode support */
-  :global([data-theme='dark']) .org-layout {
-    background-color: var(--color-background);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .org-footer {
-    background-color: var(--color-surface);
-    border-top-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .footer-links a:hover {
-    color: var(--color-text);
-  }
 </style>

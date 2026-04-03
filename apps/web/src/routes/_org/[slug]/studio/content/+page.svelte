@@ -166,21 +166,4 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
-
-  /* Dark mode */
-  :global([data-theme='dark']) .page-header h1 {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .empty-icon {
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .empty-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .empty-cta:hover {
-    background-color: var(--color-interactive-active);
-  }
 </style>

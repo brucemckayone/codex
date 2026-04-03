@@ -52,7 +52,6 @@
     }
   );
 
-
   // Get message function dynamically
   const getMessage = (key: string) => {
     const fn = (m as Record<string, () => string>)[key];

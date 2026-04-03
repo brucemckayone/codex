@@ -36,7 +36,6 @@
     });
   });
 
-
 </script>
 
 <svelte:head>

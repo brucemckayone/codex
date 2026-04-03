@@ -70,7 +70,4 @@
   .error-actions { margin-top: var(--space-4); }
   .back-link { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: var(--text-sm); font-weight: var(--font-medium); color: var(--color-text); text-decoration: none; border: var(--border-width) var(--border-style) var(--color-border); border-radius: var(--radius-md); background-color: var(--color-surface); transition: var(--transition-colors); }
   .back-link:hover { background-color: var(--color-surface-secondary); }
-
-  :global([data-theme='dark']) .error-title { color: var(--color-text); }
-  :global([data-theme='dark']) .back-link { background-color: var(--color-surface); border-color: var(--color-border); color: var(--color-text); }
 </style>

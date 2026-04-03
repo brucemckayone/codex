@@ -172,21 +172,4 @@
       font-size: var(--text-2xl, 1.5rem);
     }
   }
-
-  /* ── Dark Mode ── */
-  :global([data-theme='dark']) .creators__title {
-    color: var(--color-text-primary, #f1f5f9);
-  }
-
-  :global([data-theme='dark']) .creators__subtitle {
-    color: var(--color-text-secondary, #94a3b8);
-  }
-
-  :global([data-theme='dark']) .creators__empty-text {
-    color: var(--color-text-muted, #94a3b8);
-  }
-
-  :global([data-theme='dark']) .creators__empty-icon {
-    color: var(--color-text-muted, #94a3b8);
-  }
 </style>
