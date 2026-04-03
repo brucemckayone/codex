@@ -1,4 +1,5 @@
-// Brand Editor - Types
+// Brand Editor - Store
+export { brandEditor } from './brand-editor-store.svelte';
 
 // Brand Editor - CSS Injection
 export {
