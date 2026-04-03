@@ -267,6 +267,13 @@
       "when": 1775083089414,
       "tag": "0037_huge_warhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1775218553441,
+      "tag": "0038_steep_gladiator",
+      "breakpoints": true
     }
   ]
 }

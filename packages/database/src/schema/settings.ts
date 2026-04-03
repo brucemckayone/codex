@@ -69,6 +69,15 @@ export const brandingSettings = pgTable(
       .notNull()
       .default('1'),
 
+    // Brand Editor — Level 2 fine-tune fields
+    tokenOverrides: text('token_overrides'), // JSON: Record<string, string>
+    textColorHex: varchar('text_color_hex', { length: 7 }),
+    shadowScale: varchar('shadow_scale', { length: 10 }).default('1'),
+    shadowColor: varchar('shadow_color', { length: 20 }),
+    textScale: varchar('text_scale', { length: 10 }).default('1'),
+    headingWeight: varchar('heading_weight', { length: 10 }),
+    bodyWeight: varchar('body_weight', { length: 10 }),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
