@@ -11,6 +11,7 @@
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import LibraryFilters from '$lib/components/library/LibraryFilters.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
+  import Select from '$lib/components/ui/Select/Select.svelte';
   import { buildContentUrl, buildPlatformUrl } from '$lib/utils/subdomain';
   import * as m from '$paraglide/messages';
 
@@ -22,12 +23,12 @@
   const fullLibraryUrl = $derived(buildPlatformUrl(page.url, '/library'));
 
   // Sort options
-  const sortOptions = [
+  const sortOptions = $derived([
     { value: 'recent', label: m.library_sort_recent_purchase() },
     { value: 'watched', label: m.library_sort_recent_watched() },
     { value: 'az', label: m.library_sort_az() },
     { value: 'za', label: m.library_sort_za() },
-  ] as const;
+  ]);
 
   const currentSort = $derived(data.sort ?? 'recent');
 
@@ -39,10 +40,10 @@
     return Math.max(1, pagination.totalPages ?? Math.ceil(pagination.total / pagination.limit));
   });
 
-  function handleSortChange(event: Event) {
-    const select = event.target as HTMLSelectElement;
+  function handleSortChange(value: string | undefined) {
+    if (!value) return;
     const params = new URLSearchParams();
-    params.set('sort', select.value);
+    params.set('sort', value);
     void goto(`/library?${params.toString()}`);
   }
 
@@ -152,19 +153,13 @@
   {:else}
     <!-- Sort dropdown -->
     <div class="sort-bar">
-      <label for="library-sort" class="sort-label">{m.library_sort_label()}</label>
-      <select
-        id="library-sort"
-        class="sort-select"
+      <Select
+        options={sortOptions}
         value={currentSort}
-        onchange={handleSortChange}
-      >
-        {#each sortOptions as option (option.value)}
-          <option value={option.value} selected={currentSort === option.value}>
-            {option.label}
-          </option>
-        {/each}
-      </select>
+        onValueChange={handleSortChange}
+        label={m.library_sort_label()}
+        placeholder={m.library_sort_label()}
+      />
     </div>
 
     <LibraryFilters bind:this={filtersRef} onFilterChange={handleFilterChange} />
@@ -447,34 +442,8 @@
 
   /* Sort bar */
   .sort-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
     margin-bottom: var(--space-4);
-  }
-
-  .sort-label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
-    white-space: nowrap;
-  }
-
-  .sort-select {
-    padding: var(--space-1-5) var(--space-3);
-    font-size: var(--text-sm);
-    color: var(--color-text);
-    background: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-colors);
-  }
-
-  .sort-select:focus {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
-    border-color: var(--color-border-focus);
+    max-width: 280px;
   }
 
   /* Pagination */

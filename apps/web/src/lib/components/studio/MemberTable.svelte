@@ -13,6 +13,7 @@
   import type { OrgMemberItem } from '$lib/server/api';
   import * as Table from '$lib/components/ui/Table';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
+  import Select from '$lib/components/ui/Select/Select.svelte';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
@@ -88,11 +89,14 @@
       .toUpperCase();
   }
 
-  const roles = ['admin', 'creator', 'member'] as const;
+  const roleOptions = $derived([
+    { value: 'admin', label: getRoleText('admin') },
+    { value: 'creator', label: getRoleText('creator') },
+    { value: 'member', label: getRoleText('member') },
+  ]);
 
-  function handleRoleChange(userId: string, event: Event) {
-    const target = event.target as HTMLSelectElement;
-    onChangeRole?.(userId, target.value);
+  function handleRoleChange(userId: string, value: string | undefined) {
+    if (value) onChangeRole?.(userId, value);
   }
 
   function handleRemove(userId: string) {
@@ -158,18 +162,12 @@
             <Table.Cell>
               {#if member.role !== 'owner'}
                 <div class="actions">
-                  <select
-                    class="role-select"
+                  <Select
+                    options={roleOptions}
                     value={member.role}
-                    onchange={(e) => handleRoleChange(member.userId, e)}
-                    aria-label={m.team_change_role()}
-                  >
-                    {#each roles as role}
-                      <option value={role} selected={role === member.role}>
-                        {getRoleText(role)}
-                      </option>
-                    {/each}
-                  </select>
+                    onValueChange={(val) => handleRoleChange(member.userId, val)}
+                    placeholder={m.team_change_role()}
+                  />
                   <button
                     class="remove-btn"
                     onclick={() => handleRemove(member.userId)}
@@ -233,21 +231,6 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-  }
-
-  .role-select {
-    font-size: var(--text-xs);
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-md);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-background);
-    color: var(--color-text);
-    cursor: pointer;
-  }
-
-  .role-select:focus {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
   }
 
   .remove-btn {

@@ -15,7 +15,7 @@
 -->
 <script lang="ts">
   import { CheckIcon, CircleIcon } from '$lib/components/ui/Icon';
-  import { Badge } from '$lib/components/ui';
+  import { Badge, Select } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
   import TagsInput from './TagsInput.svelte';
   import type { ContentWithRelations } from '$lib/types';
@@ -58,6 +58,18 @@
 
   function handleTagsChange(newTags: string[]) {
     tags = newTags;
+  }
+
+  // Visibility options for Select component
+  const visibilityOptions = $derived([
+    { value: 'public', label: m.studio_content_form_visibility_public() },
+    { value: 'private', label: m.studio_content_form_visibility_private() },
+    { value: 'members_only', label: m.studio_content_form_visibility_members_only() },
+    { value: 'purchased_only', label: m.studio_content_form_visibility_purchased_only() },
+  ]);
+
+  function handleVisibilityChange(val: string | undefined) {
+    if (val) form.fields.visibility.set(val);
   }
 
   // Visibility descriptions
@@ -177,16 +189,13 @@
   <!-- Visibility -->
   <div class="sidebar-section">
     <h4 class="sidebar-heading">{m.studio_content_form_visibility_label()}</h4>
-    <select
-      {...form.fields.visibility.as('select')}
-      id="visibility"
-      class="field-input field-select"
-    >
-      <option value="public">{m.studio_content_form_visibility_public()}</option>
-      <option value="private">{m.studio_content_form_visibility_private()}</option>
-      <option value="members_only">{m.studio_content_form_visibility_members_only()}</option>
-      <option value="purchased_only">{m.studio_content_form_visibility_purchased_only()}</option>
-    </select>
+    <input type="hidden" name="visibility" value={visibilityVal} />
+    <Select
+      options={visibilityOptions}
+      value={visibilityVal}
+      onValueChange={handleVisibilityChange}
+      placeholder={m.studio_content_form_visibility_label()}
+    />
     <span class="field-hint">
       {visibilityDescriptions[visibilityVal]?.() ?? ''}
     </span>
@@ -408,15 +417,6 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
     border-color: var(--color-border-focus);
-  }
-
-  .field-select {
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right var(--space-3) center;
-    padding-right: var(--space-8);
-    cursor: pointer;
   }
 
   .field-hint {

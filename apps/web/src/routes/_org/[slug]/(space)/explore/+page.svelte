@@ -10,6 +10,7 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Pagination } from '$lib/components/ui/Pagination';
+  import Select from '$lib/components/ui/Select/Select.svelte';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { SearchIcon, SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
@@ -83,11 +84,11 @@
     { value: 'written', label: m.explore_filter_article() },
   ] as const;
 
-  const sortOptions = [
+  const sortOptions = $derived([
     { value: 'newest', label: m.explore_sort_newest() },
     { value: 'oldest', label: m.explore_sort_oldest() },
     { value: 'title', label: m.explore_sort_title() },
-  ] as const;
+  ]);
 </script>
 
 <svelte:head>
@@ -139,16 +140,14 @@
     </div>
 
     <!-- Sort -->
-    <select
-      class="explore__sort"
-      value={filters.sort}
-      onchange={(e) => updateFilter('sort', e.currentTarget.value)}
-      aria-label="Sort content"
-    >
-      {#each sortOptions as option (option.value)}
-        <option value={option.value}>{option.label}</option>
-      {/each}
-    </select>
+    <div class="explore__sort-wrapper">
+      <Select
+        options={sortOptions}
+        value={filters.sort}
+        onValueChange={(val) => updateFilter('sort', val ?? null)}
+        placeholder="Sort content"
+      />
+    </div>
   </div>
 
   <!-- Content Grid -->
@@ -315,25 +314,9 @@
     background: var(--color-interactive-hover);
   }
 
-  /* Sort Select */
-  .explore__sort {
-    padding: var(--space-2, 0.5rem) var(--space-8, 2rem) var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-    font-size: var(--text-sm, 0.875rem);
-    color: var(--color-text);
-    background: var(--color-surface);
-    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
-    border-radius: var(--radius-md, 0.375rem);
-    cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right var(--space-2, 0.5rem) center;
-    outline: none;
-    transition: border-color var(--duration-fast) var(--ease-default);
-  }
-
-  .explore__sort:focus {
-    border-color: var(--color-border-focus);
+  /* Sort Select Wrapper */
+  .explore__sort-wrapper {
+    min-width: 160px;
   }
 
   /* ── Content Grid ── */
@@ -404,7 +387,7 @@
       overflow-x: auto;
     }
 
-    .explore__sort {
+    .explore__sort-wrapper {
       width: 100%;
     }
   }

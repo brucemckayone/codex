@@ -23,7 +23,7 @@
   import LogoUpload from '$lib/components/studio/LogoUpload.svelte';
   import ColorPicker from '$lib/components/studio/ColorPicker.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { Alert, PageHeader } from '$lib/components/ui';
+  import { Alert, PageHeader, Select } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -67,6 +67,11 @@
     'Montserrat', 'Playfair Display', 'Merriweather', 'DM Sans',
     'Source Sans 3', 'Nunito', 'Raleway',
   ];
+
+  const fontSelectOptions = $derived([
+    { value: '', label: m.branding_typography_default() },
+    ...FONT_OPTIONS.slice(1).map(font => ({ value: font, label: font })),
+  ]);
 
   let fontBody = $state('');
   let fontHeading = $state('');
@@ -307,13 +312,12 @@
 
       <div class="typography-fields">
         <div class="select-field">
-          <label class="field-label" for="font-body">{m.branding_typography_body()}</label>
-          <select id="font-body" class="select-input" bind:value={fontBody}>
-            <option value="">{m.branding_typography_default()}</option>
-            {#each FONT_OPTIONS.slice(1) as font}
-              <option value={font}>{font}</option>
-            {/each}
-          </select>
+          <Select
+            options={fontSelectOptions}
+            bind:value={fontBody}
+            label={m.branding_typography_body()}
+            placeholder={m.branding_typography_default()}
+          />
           {#if fontBody}
             <p class="font-preview" style:font-family="'{fontBody}', var(--font-sans)">
               The quick brown fox jumps over the lazy dog
@@ -322,13 +326,12 @@
         </div>
 
         <div class="select-field">
-          <label class="field-label" for="font-heading">{m.branding_typography_heading()}</label>
-          <select id="font-heading" class="select-input" bind:value={fontHeading}>
-            <option value="">{m.branding_typography_default()}</option>
-            {#each FONT_OPTIONS.slice(1) as font}
-              <option value={font}>{font}</option>
-            {/each}
-          </select>
+          <Select
+            options={fontSelectOptions}
+            bind:value={fontHeading}
+            label={m.branding_typography_heading()}
+            placeholder={m.branding_typography_default()}
+          />
           {#if fontHeading}
             <p class="font-preview heading-preview" style:font-family="'{fontHeading}', var(--font-sans)">
               Heading Preview Text
@@ -522,24 +525,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-  }
-
-  .select-input {
-    width: 100%;
-    max-width: 320px;
-    padding: var(--space-2) var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    background-color: var(--color-surface);
-    color: var(--color-text);
-    font-size: var(--text-sm);
-    cursor: pointer;
-  }
-
-  .select-input:focus {
-    border-color: var(--color-brand-primary);
-    outline: none;
-    box-shadow: 0 0 0 1px var(--color-brand-primary);
   }
 
   .font-preview {

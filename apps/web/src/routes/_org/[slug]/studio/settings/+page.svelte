@@ -13,7 +13,7 @@
   import { onDestroy } from 'svelte';
   import * as m from '$paraglide/messages';
   import { updateContactForm } from '$lib/remote/settings.remote';
-  import { Alert, PageHeader } from '$lib/components/ui';
+  import { Alert, PageHeader, Select } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -67,21 +67,28 @@
   });
 
   // Common timezone options
-  const timezones = [
-    'UTC',
-    'Europe/London',
-    'Europe/Paris',
-    'Europe/Berlin',
-    'America/New_York',
-    'America/Chicago',
-    'America/Denver',
-    'America/Los_Angeles',
-    'Asia/Tokyo',
-    'Asia/Shanghai',
-    'Asia/Kolkata',
-    'Australia/Sydney',
-    'Pacific/Auckland',
+  const timezoneOptions = [
+    { value: 'UTC', label: 'UTC' },
+    { value: 'Europe/London', label: 'Europe/London' },
+    { value: 'Europe/Paris', label: 'Europe/Paris' },
+    { value: 'Europe/Berlin', label: 'Europe/Berlin' },
+    { value: 'America/New_York', label: 'America/New_York' },
+    { value: 'America/Chicago', label: 'America/Chicago' },
+    { value: 'America/Denver', label: 'America/Denver' },
+    { value: 'America/Los_Angeles', label: 'America/Los_Angeles' },
+    { value: 'Asia/Tokyo', label: 'Asia/Tokyo' },
+    { value: 'Asia/Shanghai', label: 'Asia/Shanghai' },
+    { value: 'Asia/Kolkata', label: 'Asia/Kolkata' },
+    { value: 'Australia/Sydney', label: 'Australia/Sydney' },
+    { value: 'Pacific/Auckland', label: 'Pacific/Auckland' },
   ];
+
+  let timezoneValue = $state(contact.timezone ?? 'UTC');
+
+  // Sync timezone when contact data changes
+  $effect(() => {
+    timezoneValue = contact.timezone ?? 'UTC';
+  });
 </script>
 
 <svelte:head>
@@ -155,21 +162,13 @@
         </div>
 
         <div class="form-field">
-          <label class="field-label" for="timezone">
-            {m.settings_timezone()}
-          </label>
-          <select
-            id="timezone"
-            name="timezone"
-            class="field-input field-select"
-            value={contact.timezone ?? 'UTC'}
-          >
-            {#each timezones as tz}
-              <option value={tz} selected={tz === (contact.timezone ?? 'UTC')}>
-                {tz}
-              </option>
-            {/each}
-          </select>
+          <input type="hidden" name="timezone" value={timezoneValue} />
+          <Select
+            options={timezoneOptions}
+            bind:value={timezoneValue}
+            label={m.settings_timezone()}
+            placeholder="Select timezone..."
+          />
         </div>
       </div>
     </section>
@@ -315,15 +314,6 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
     border-color: var(--color-border-focus);
-  }
-
-  .field-select {
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right var(--space-3) center;
-    padding-right: var(--space-8);
-    cursor: pointer;
   }
 
   .form-actions {

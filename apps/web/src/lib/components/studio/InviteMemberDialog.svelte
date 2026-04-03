@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
-  import { Alert } from '$lib/components/ui';
+  import { Alert, Select } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -26,9 +26,15 @@
   }: Props = $props();
 
   let email = $state('');
-  let role = $state<'admin' | 'creator' | 'member'>('creator');
+  let role = $state<string>('creator');
   let submitting = $state(false);
   let error = $state<string | null>(null);
+
+  const roleOptions = $derived([
+    { value: 'admin', label: m.team_role_admin() },
+    { value: 'creator', label: m.team_role_creator() },
+    { value: 'member', label: m.team_role_member() },
+  ]);
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
@@ -93,19 +99,12 @@
       </div>
 
       <div class="form-field">
-        <label class="field-label" for="invite-role">
-          {m.team_invite_role()}
-        </label>
-        <select
-          id="invite-role"
-          class="field-input field-select"
+        <Select
+          options={roleOptions}
           bind:value={role}
-          disabled={submitting}
-        >
-          <option value="admin">{m.team_role_admin()}</option>
-          <option value="creator">{m.team_role_creator()}</option>
-          <option value="member">{m.team_role_member()}</option>
-        </select>
+          label={m.team_invite_role()}
+          placeholder={m.team_invite_role()}
+        />
       </div>
 
       <Dialog.Footer>
@@ -168,15 +167,6 @@
   .field-input:disabled {
     opacity: var(--opacity-60);
     cursor: not-allowed;
-  }
-
-  .field-select {
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right var(--space-3) center;
-    padding-right: var(--space-8);
-    cursor: pointer;
   }
 
   .btn {
