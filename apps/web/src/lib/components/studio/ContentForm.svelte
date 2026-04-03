@@ -20,9 +20,8 @@
     createContentForm,
     updateContentForm,
     deleteContent,
-    publishContent,
-    unpublishContent,
   } from '$lib/remote/content.remote';
+  import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { ContentWithRelations } from '$lib/types';
 
@@ -169,24 +168,11 @@
     publishing = true;
     const previousStatus = content.status;
     try {
-      if (content.status === 'published') {
-        content.status = 'draft';
-        await unpublishContent(content.id);
-        toast.success(m.studio_content_form_unpublish_success());
-      } else {
-        content.status = 'published';
-        await publishContent(content.id);
-        toast.success(m.studio_content_form_publish_success());
-      }
-    } catch (err) {
+      const optimistic = content.status === 'published' ? 'draft' : 'published';
+      content.status = optimistic;
+      await togglePublishStatus(content.id, previousStatus as ContentStatus);
+    } catch {
       content.status = previousStatus;
-      const message =
-        err instanceof Error
-          ? err.message
-          : previousStatus === 'published'
-            ? m.studio_content_form_unpublish_error()
-            : m.studio_content_form_publish_error();
-      toast.error(message);
     } finally {
       publishing = false;
     }

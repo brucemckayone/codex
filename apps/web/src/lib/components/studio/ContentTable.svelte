@@ -11,9 +11,8 @@
   import { FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
-  import { publishContent, unpublishContent } from '$lib/remote/content.remote';
-  import { toast } from '$lib/components/ui/Toast/toast-store';
   import { formatDate } from '$lib/utils/format';
+  import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
 
   interface Props {
@@ -59,19 +58,11 @@
     togglingId = item.id;
     const currentStatus = getItemStatus(item);
     try {
-      if (currentStatus === 'published') {
-        statusOverrides[item.id] = 'draft';
-        await unpublishContent(item.id);
-        toast.success(m.studio_content_form_unpublish_success());
-      } else {
-        statusOverrides[item.id] = 'published';
-        await publishContent(item.id);
-        toast.success(m.studio_content_form_publish_success());
-      }
-    } catch (err) {
+      const optimistic = currentStatus === 'published' ? 'draft' : 'published';
+      statusOverrides[item.id] = optimistic;
+      await togglePublishStatus(item.id, currentStatus as ContentStatus);
+    } catch {
       delete statusOverrides[item.id];
-      const message = err instanceof Error ? err.message : m.studio_content_form_publish_error();
-      toast.error(message);
     } finally {
       togglingId = null;
     }
