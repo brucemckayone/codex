@@ -12,6 +12,7 @@
   import * as Table from '$lib/components/ui/Table';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { formatDate, formatPrice } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -21,28 +22,6 @@
   const { customers }: Props = $props();
 
   const isEmpty = $derived(customers.length === 0);
-
-  /**
-   * Format cents to GBP currency string
-   */
-  function formatCurrency(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: 2,
-    }).format(cents / 100);
-  }
-
-  /**
-   * Format a date string for display
-   */
-  function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  }
 </script>
 
 {#if isEmpty}
@@ -72,7 +51,7 @@
               {customer.totalPurchases}
             </Table.Cell>
             <Table.Cell class="spent-cell">
-              {formatCurrency(customer.totalSpentCents)}
+              {formatPrice(customer.totalSpentCents)}
             </Table.Cell>
             <Table.Cell class="date-cell">
               {formatDate(customer.createdAt)}

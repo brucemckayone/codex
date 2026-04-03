@@ -22,6 +22,7 @@
   import type { Snippet, HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
   import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
+  import { formatDurationHuman } from '$lib/utils/format';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
@@ -69,12 +70,6 @@
     class: className,
     ...rest
   }: Props = $props();
-
-  function formatDuration(seconds: number): string {
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  }
 
   function formatPrice(amount: number, currency: string): string {
     if (amount === 0) return m.content_price_free();
@@ -154,8 +149,8 @@
       {/if}
 
       {#if duration}
-        <span class="content-card__duration" aria-label="{m.content_duration()}: {formatDuration(duration)}">
-          {formatDuration(duration)}
+        <span class="content-card__duration" aria-label="{m.content_duration()}: {formatDurationHuman(duration)}">
+          {formatDurationHuman(duration)}
         </span>
       {/if}
 

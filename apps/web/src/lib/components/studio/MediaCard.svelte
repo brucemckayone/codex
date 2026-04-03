@@ -16,6 +16,7 @@
   import type { MediaItemWithRelations } from '$lib/types';
   import { Badge } from '$lib/components/ui/Badge';
   import { PlayIcon, MusicIcon, EditIcon, TrashIcon } from '$lib/components/ui/Icon';
+  import { formatDate } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -139,18 +140,6 @@
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
-  /**
-   * Format date to locale string
-   */
-  function formatDate(date: string | Date | null): string {
-    if (!date) return '--';
-    return new Date(date).toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  }
-
   const isVideo = $derived(media.mediaType === 'video');
 
   const STEP_LABELS: Record<string, () => string> = {
@@ -216,7 +205,7 @@
       <span class="meta-separator" aria-hidden="true">·</span>
       <span>{formatFileSize(media.fileSizeBytes)}</span>
       <span class="meta-separator" aria-hidden="true">·</span>
-      <span>{formatDate(media.createdAt)}</span>
+      <span>{media.createdAt ? formatDate(media.createdAt) : '--'}</span>
     </div>
   </div>
 

@@ -16,6 +16,7 @@
   import Select from '$lib/components/ui/Select/Select.svelte';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { formatDate } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -63,17 +64,6 @@
       default:
         return role;
     }
-  }
-
-  /**
-   * Format a date string for display
-   */
-  function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
   }
 
   /**
