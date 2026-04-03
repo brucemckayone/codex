@@ -6,7 +6,7 @@
     onchange?: (hue: number) => void;
   }
 
-  const {
+  let {
     hue = $bindable(0),
     onchange,
   }: Props = $props();

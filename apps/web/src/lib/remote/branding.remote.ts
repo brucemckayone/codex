@@ -157,6 +157,8 @@ export const updateBrandingForm = form(
 // Update Branding Command (programmatic — for brand editor panel)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const nullableString = z.string().nullable().optional();
+
 const updateBrandingCommandSchema = z.object({
   orgId: z.string().uuid(),
   primaryColorHex: hexColorOptional,
@@ -179,6 +181,16 @@ const updateBrandingCommandSchema = z.object({
     .optional(),
   radiusValue: z.number().min(0).max(2).optional(),
   densityValue: z.number().min(0.75).max(1.25).optional(),
+  // Fine-tune fields
+  tokenOverrides: nullableString, // JSON string of Record<string, string | null>
+  textColorHex: hexColorNullable,
+  shadowScale: nullableString,
+  shadowColor: nullableString,
+  textScale: nullableString,
+  headingWeight: nullableString,
+  bodyWeight: nullableString,
+  // Dark mode overrides
+  darkModeOverrides: nullableString, // JSON string of Partial<ThemeColors>
 });
 
 /**
@@ -199,6 +211,14 @@ export const updateBrandingCommand = command(
     fontHeading,
     radiusValue,
     densityValue,
+    tokenOverrides,
+    textColorHex,
+    shadowScale,
+    shadowColor,
+    textScale,
+    headingWeight,
+    bodyWeight,
+    darkModeOverrides,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -212,6 +232,14 @@ export const updateBrandingCommand = command(
       fontHeading,
       radiusValue,
       densityValue,
+      tokenOverrides,
+      textColorHex,
+      shadowScale,
+      shadowColor,
+      textScale,
+      headingWeight,
+      bodyWeight,
+      darkModeOverrides,
     });
 
     await invalidateCache(platform, orgId);

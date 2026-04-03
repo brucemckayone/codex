@@ -5,8 +5,8 @@
 -->
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
+  import { srgbToHex } from '$lib/brand-editor/oklch-math';
   import ColorInput from '../color-picker/ColorInput.svelte';
-  import Button from '$lib/components/ui/Button/Button.svelte';
 
   // Token override entries — each can be null (auto) or a hex string
   const TOKEN_GROUPS = [
@@ -49,6 +49,29 @@
     delete current[key];
     brandEditor.updateField('tokenOverrides', current);
   }
+
+  /** Read the resolved color for a CSS custom property from the org layout element. */
+  function readComputedColor(key: string): string | null {
+    const orgLayout = document.querySelector('.org-layout');
+    if (!orgLayout) return null;
+
+    // Probe element — set its color to the CSS var, read the resolved rgb()
+    const probe = document.createElement('div');
+    probe.style.color = `var(--color-${key})`;
+    orgLayout.appendChild(probe);
+    const computed = getComputedStyle(probe).color;
+    probe.remove();
+
+    const match = computed.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (!match) return null;
+    return srgbToHex(+match[1], +match[2], +match[3]);
+  }
+
+  /** Switch a token from auto to custom: read current computed color as starting value. */
+  function enableCustomize(key: string) {
+    const hex = readComputedColor(key);
+    if (hex) setOverride(key, hex);
+  }
 </script>
 
 <div class="fine-tune">
@@ -66,7 +89,9 @@
                 Auto
               </button>
             {:else}
-              <span class="fine-tune__auto-tag">Auto</span>
+              <button class="fine-tune__customize-btn" onclick={() => enableCustomize(token.key)}>
+                Customize
+              </button>
             {/if}
           </div>
 
@@ -134,10 +159,20 @@
     background: var(--color-interactive-subtle);
   }
 
-  .fine-tune__auto-tag {
+  .fine-tune__customize-btn {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+    background: none;
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    cursor: pointer;
     padding: var(--space-0-5) var(--space-2);
+    border-radius: var(--radius-sm);
+    transition: var(--transition-colors);
+  }
+
+  .fine-tune__customize-btn:hover {
+    color: var(--color-interactive);
+    border-color: var(--color-interactive);
   }
 
   .fine-tune__auto-hint {

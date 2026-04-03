@@ -93,6 +93,49 @@
   /* ─── TYPOGRAPHY ────────────────────────────────────────────────────── */
   --font-body: var(--brand-font-body, var(--font-sans));
   --font-heading: var(--brand-font-heading, var(--font-sans));
+  /* Re-declare --font-sans at org scope so descendants using it pick up the brand font.
+     At :root, --brand-font-body isn't set (it lives on .org-layout), so :root --font-sans
+     always resolves to the 'Inter' fallback. This override fixes that within org scope. */
+  --font-sans: var(--brand-font-body, 'Inter'), 'Inter-fallback', system-ui, -apple-system, sans-serif;
+  /* Also re-declare font-family and font-weight so all descendants inherit brand values
+     (they would otherwise inherit the :root-resolved Inter/400 from html). */
+  font-family: var(--font-sans);
+  font-weight: var(--font-normal, 400);
+
+  /* ─── TYPOGRAPHY OVERRIDES (from brand editor fine-tune) ───────────── */
+  --text-scale: var(--brand-text-scale, 1);
+  --heading-weight: var(--brand-heading-weight);
+  --body-weight: var(--brand-body-weight);
+
+  /* Re-declare font sizes scaled by --text-scale at org scope */
+  --text-xs: calc(clamp(0.75rem, 0.7rem + 0.25vw, 0.8125rem) * var(--text-scale));
+  --text-sm: calc(clamp(0.875rem, 0.8rem + 0.375vw, 0.9375rem) * var(--text-scale));
+  --text-base: calc(clamp(1rem, 0.9rem + 0.5vw, 1.0625rem) * var(--text-scale));
+  --text-lg: calc(clamp(1.125rem, 1rem + 0.625vw, 1.25rem) * var(--text-scale));
+  --text-xl: calc(clamp(1.25rem, 1.1rem + 0.75vw, 1.5rem) * var(--text-scale));
+  --text-2xl: calc(clamp(1.5rem, 1.3rem + 1vw, 1.875rem) * var(--text-scale));
+  --text-3xl: calc(clamp(1.875rem, 1.5rem + 1.875vw, 2.5rem) * var(--text-scale));
+  --text-4xl: calc(clamp(2.25rem, 1.8rem + 2.25vw, 3rem) * var(--text-scale));
+
+  /* ─── SHADOW OVERRIDES (from brand editor fine-tune) ───────────────── */
+  --shadow-strength: calc(1% * var(--brand-shadow-scale, 1));
+  --shadow-color: var(--brand-shadow-color, 220 3% 15%);
+}
+
+/* Typography weight overrides — re-declare the weight tokens at org scope
+   so all components using var(--font-bold) / var(--font-normal) pick up brand values.
+   This works because Svelte scoped styles use var(--font-bold, 700) etc. */
+[data-org-brand] {
+  --font-bold: var(--heading-weight, 700);
+  --font-normal: var(--body-weight, 400);
+}
+
+/* Apply baseline shadows to content cards so shadow controls have visible effect */
+[data-org-brand] .content-card {
+  box-shadow: var(--shadow-sm);
+}
+[data-org-brand] .content-card:hover {
+  box-shadow: var(--shadow-lg);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -123,23 +166,35 @@
 
 .dark [data-org-brand],
 [data-theme='dark'] [data-org-brand] {
-  --color-brand-primary-hover: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.08) c h);
-  --color-brand-primary-active: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.15) c h);
-  --color-brand-primary-subtle: oklch(from var(--brand-color, var(--color-primary-400)) 0.18 calc(c * 0.3) h);
-  --color-interactive-hover: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.08) c h);
-  --color-interactive-active: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.15) c h);
-  --color-interactive-subtle: oklch(from var(--brand-color, var(--color-primary-400)) 0.15 calc(c * 0.2) h);
-  --color-focus-ring: oklch(from var(--brand-color, var(--color-primary-400)) calc(l - 0.1) calc(c * 0.5) h);
-  --color-primary-100: oklch(from var(--brand-color, var(--color-primary-400)) 0.25 calc(c * 0.3) h);
-  --color-primary-50: oklch(from var(--brand-color, var(--color-primary-400)) 0.18 calc(c * 0.2) h);
+  /* Dark primary: use explicit dark override if set, otherwise auto-derive from light */
+  --color-brand-primary: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --color-interactive: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --color-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --color-primary-500: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+
+  --color-brand-primary-hover: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
+  --color-brand-primary-active: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.15) c h);
+  --color-brand-primary-subtle: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.18 calc(c * 0.3) h);
+  --color-interactive-hover: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
+  --color-interactive-active: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.15) c h);
+  --color-interactive-subtle: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.15 calc(c * 0.2) h);
+  --color-focus-ring: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l - 0.1) calc(c * 0.5) h);
+  --color-primary-100: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.25 calc(c * 0.3) h);
+  --color-primary-50: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.18 calc(c * 0.2) h);
+
+  /* Dark secondary/accent overrides */
+  --color-brand-secondary: var(--brand-secondary-dark, var(--brand-secondary, var(--color-neutral-400)));
+  --color-brand-accent: var(--brand-accent-dark, var(--brand-accent, var(--color-warning)));
 }
 
 .dark [data-org-bg],
 [data-theme='dark'] [data-org-bg] {
-  --color-surface-secondary: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.04) calc(c * 0.5) h);
-  --color-surface-tertiary: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.08) calc(c * 0.5) h);
-  --color-surface-elevated: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.06) calc(c * 0.3) h);
-  --color-border: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.12) calc(c * 0.3) h);
-  --color-border-strong: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.18) calc(c * 0.3) h);
-  --color-border-subtle: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.06) calc(c * 0.2) h);
+  --color-background: var(--brand-bg-dark, var(--brand-bg, #1a1a2e));
+  --color-surface: var(--brand-bg-dark, var(--brand-bg, #1a1a2e));
+  --color-surface-secondary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.04) calc(c * 0.5) h);
+  --color-surface-tertiary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.08) calc(c * 0.5) h);
+  --color-surface-elevated: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.3) h);
+  --color-border: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.12) calc(c * 0.3) h);
+  --color-border-strong: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.18) calc(c * 0.3) h);
+  --color-border-subtle: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.2) h);
 }

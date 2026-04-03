@@ -54,6 +54,14 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
     icon: '◻',
     description: 'Upload and preview',
   },
+  presets: {
+    id: 'presets',
+    depth: 1,
+    label: 'Presets',
+    parent: 'home',
+    icon: '✦',
+    description: 'Quick-apply brand themes',
+  },
   'fine-tune-colors': {
     id: 'fine-tune-colors',
     depth: 2,

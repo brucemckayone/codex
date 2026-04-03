@@ -20,6 +20,7 @@ import type {
   BrandPreset,
   LevelId,
   PanelState,
+  ThemeColorField,
 } from './types';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ const state = $state<{
   pending: BrandEditorState | null;
   level: LevelId;
   originalTheme: string | null;
+  editingTheme: 'light' | 'dark';
 }>({
   panel: 'closed',
   orgId: null,
@@ -42,6 +44,7 @@ const state = $state<{
   pending: null,
   level: 'home',
   originalTheme: null,
+  editingTheme: 'light',
 });
 
 // ── Derived State ─────────────────────────────────────────────────────────
@@ -191,19 +194,56 @@ function setThemePreview(theme: 'light' | 'dark'): void {
   document.documentElement.setAttribute('data-theme', theme);
 }
 
+function setEditingTheme(theme: 'light' | 'dark'): void {
+  state.editingTheme = theme;
+  setThemePreview(theme);
+}
+
+/** Get the effective color for a theme field, respecting the current editing theme. */
+function getThemeColor(field: ThemeColorField): string | null {
+  if (!state.pending) return null;
+  if (
+    state.editingTheme === 'dark' &&
+    state.pending.darkOverrides?.[field] !== undefined
+  ) {
+    return state.pending.darkOverrides[field] ?? null;
+  }
+  return state.pending[field];
+}
+
+/** Set a color field, routing to darkOverrides when editing dark theme. */
+function setThemeColor(field: ThemeColorField, value: string | null): void {
+  if (!state.pending) return;
+  if (state.editingTheme === 'dark') {
+    const overrides = { ...(state.pending.darkOverrides ?? {}) };
+    if (value === null || value === state.pending[field]) {
+      // Same as light value or null → remove override (auto-derive)
+      delete overrides[field];
+    } else {
+      overrides[field] = value;
+    }
+    state.pending.darkOverrides =
+      Object.keys(overrides).length > 0 ? overrides : null;
+  } else {
+    state.pending[field] = value as BrandEditorState[ThemeColorField];
+  }
+}
+
 function discard(): void {
   if (!state.saved) return;
-  state.pending = structuredClone(state.saved);
+  state.pending = $state.snapshot(state.saved) as BrandEditorState;
   clearStorage();
 }
 
 function getSavePayload(): BrandEditorState | null {
-  return state.pending ? structuredClone(state.pending) : null;
+  return state.pending
+    ? ($state.snapshot(state.pending) as BrandEditorState)
+    : null;
 }
 
 function markSaved(): void {
   if (!state.pending) return;
-  state.saved = structuredClone(state.pending);
+  state.saved = $state.snapshot(state.pending) as BrandEditorState;
   clearStorage();
 }
 
@@ -256,6 +296,9 @@ export const brandEditor = {
   get originalTheme() {
     return state.originalTheme;
   },
+  get editingTheme() {
+    return state.editingTheme;
+  },
 
   // Actions
   open,
@@ -267,6 +310,9 @@ export const brandEditor = {
   updateField,
   applyPreset,
   setThemePreview,
+  setEditingTheme,
+  getThemeColor,
+  setThemeColor,
   discard,
   getSavePayload,
   markSaved,

@@ -6,7 +6,7 @@
     onchange?: (hex: string) => void;
   }
 
-  const {
+  let {
     value = $bindable('#000000'),
     onchange,
   }: Props = $props();

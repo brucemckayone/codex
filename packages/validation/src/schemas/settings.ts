@@ -78,6 +78,7 @@ export const updateBrandingSchema = z.object({
   densityValue: densityValueSchema.optional(),
   // Brand Editor fine-tune fields
   tokenOverrides: z.string().nullable().optional(), // JSON string
+  darkModeOverrides: z.string().nullable().optional(), // JSON string: Partial<ThemeColors>
   textColorHex: hexColorSchema.nullable().optional(),
   shadowScale: z.string().max(10).nullable().optional(),
   shadowColor: z.string().max(20).nullable().optional(),
@@ -142,6 +143,7 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
     radiusValue: z.number(),
     densityValue: z.number(),
     tokenOverrides: z.string().nullable(),
+    darkModeOverrides: z.string().nullable(),
     textColorHex: hexColorSchema.nullable(),
     shadowScale: z.string().nullable(),
     shadowColor: z.string().nullable(),
@@ -220,6 +222,7 @@ export const DEFAULT_BRANDING: BrandingSettingsResponse = {
   fontHeading: null,
   radiusValue: 0.5,
   tokenOverrides: null,
+  darkModeOverrides: null,
   textColorHex: null,
   shadowScale: null,
   shadowColor: null,

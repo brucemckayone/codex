@@ -29,6 +29,7 @@
   import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
   import BrandEditorFineTuneColors from '$lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte';
   import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
+  import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
@@ -124,6 +125,7 @@
         density: Number(data.org.brandDensity) || 1,
         logoUrl: data.org.logoUrl ?? null,
         tokenOverrides: {},
+        darkOverrides: data.org.darkModeOverrides ?? null,
       };
       brandEditor.open(data.org.id, saved);
     }
@@ -164,6 +166,9 @@
 
     saving = true;
     try {
+      const overrides = payload.tokenOverrides ?? {};
+      const hasOverrides = Object.keys(overrides).length > 0;
+
       await updateBrandingCommand({
         orgId: brandEditor.orgId,
         primaryColorHex: payload.primaryColor,
@@ -174,6 +179,14 @@
         fontHeading: payload.fontHeading,
         radiusValue: payload.radius,
         densityValue: payload.density,
+        tokenOverrides: hasOverrides ? JSON.stringify(overrides) : null,
+        textColorHex: overrides['text'] ?? null,
+        shadowScale: overrides['shadow-scale'] ?? null,
+        shadowColor: overrides['shadow-color'] ?? null,
+        textScale: overrides['text-scale'] ?? null,
+        headingWeight: overrides['heading-weight'] ?? null,
+        bodyWeight: overrides['body-weight'] ?? null,
+        darkModeOverrides: payload.darkOverrides ? JSON.stringify(payload.darkOverrides) : null,
       });
       brandEditor.markSaved();
       toast.success('Brand settings saved');
@@ -258,6 +271,8 @@
     <BrandEditorShadows />
   {:else if brandEditor.level === 'logo'}
     <BrandEditorLogo />
+  {:else if brandEditor.level === 'presets'}
+    <BrandEditorPresets />
   {:else if brandEditor.level === 'fine-tune-colors'}
     <BrandEditorFineTuneColors />
   {:else if brandEditor.level === 'fine-tune-typography'}

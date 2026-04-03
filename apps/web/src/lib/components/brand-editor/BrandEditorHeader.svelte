@@ -11,9 +11,9 @@
     brandEditor.navigateBack();
   }
 
-  function toggleTheme() {
-    const current = document.documentElement.getAttribute('data-theme') ?? 'light';
-    brandEditor.setThemePreview(current === 'light' ? 'dark' : 'light');
+  function toggleEditingTheme() {
+    const next = brandEditor.editingTheme === 'light' ? 'dark' : 'light';
+    brandEditor.setEditingTheme(next);
   }
 </script>
 
@@ -29,11 +29,14 @@
 
   <div class="editor-header__actions">
     <button
-      class="editor-header__btn"
-      onclick={toggleTheme}
-      aria-label="Toggle theme preview"
-      title="Preview in other theme"
-    >◑</button>
+      class="editor-header__theme-toggle"
+      onclick={toggleEditingTheme}
+      aria-label="Switch editing theme"
+      title="Edit {brandEditor.editingTheme === 'light' ? 'dark' : 'light'} theme"
+    >
+      <span class="editor-header__theme-icon">{brandEditor.editingTheme === 'light' ? '☀' : '☾'}</span>
+      <span class="editor-header__theme-label">{brandEditor.editingTheme === 'light' ? 'Light' : 'Dark'}</span>
+    </button>
     <button
       class="editor-header__btn"
       onclick={() => brandEditor.minimize()}
@@ -122,5 +125,33 @@
   .editor-header__btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
+  }
+
+  .editor-header__theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-0-5) var(--space-2);
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-secondary);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    font-size: var(--text-xs);
+    transition: var(--transition-colors);
+    flex-shrink: 0;
+  }
+
+  .editor-header__theme-toggle:hover {
+    border-color: var(--color-interactive);
+    color: var(--color-interactive);
+  }
+
+  .editor-header__theme-icon {
+    font-size: var(--text-sm);
+  }
+
+  .editor-header__theme-label {
+    font-weight: var(--font-medium);
   }
 </style>

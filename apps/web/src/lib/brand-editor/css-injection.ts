@@ -18,6 +18,16 @@ import type { BrandEditorState, CssVarMapping } from './types';
  *   --brand-font-heading → heading font
  */
 
+/** Override keys that get --brand- prefix (consumed by org-brand.css rules).
+ *  All other override keys get --color- prefix (direct token replacement). */
+const BRAND_PREFIX_KEYS = new Set([
+  'text-scale',
+  'heading-weight',
+  'body-weight',
+  'shadow-scale',
+  'shadow-color',
+]);
+
 /** The CSS variable mappings from editor state to --brand-* properties. */
 const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   {
@@ -46,15 +56,24 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   },
   {
     property: '--brand-font-body',
-    getValue: (s) =>
-      s.fontBody ? `'${s.fontBody}', var(--font-sans)` : undefined,
+    getValue: (s) => (s.fontBody ? `'${s.fontBody}'` : undefined),
   },
   {
     property: '--brand-font-heading',
-    getValue: (s) =>
-      s.fontHeading ? `'${s.fontHeading}', var(--font-sans)` : undefined,
+    getValue: (s) => (s.fontHeading ? `'${s.fontHeading}'` : undefined),
   },
 ];
+
+/** CSS properties set by the base CSS_VAR_MAPPINGS (not token overrides). */
+const BASE_VAR_PROPS = new Set(CSS_VAR_MAPPINGS.map((m) => m.property));
+
+/** Dark mode var props — also not token overrides. */
+const DARK_VAR_PROPS = new Set([
+  '--brand-color-dark',
+  '--brand-secondary-dark',
+  '--brand-accent-dark',
+  '--brand-bg-dark',
+]);
 
 /** Find the org layout element that holds the brand CSS variables. */
 function getOrgLayoutElement(): HTMLElement | null {
@@ -92,6 +111,50 @@ export function injectBrandVars(state: BrandEditorState): void {
   } else {
     el.removeAttribute('data-org-bg');
   }
+
+  // Clear any stale token override CSS properties from previous injection passes.
+  // This ensures removed overrides don't linger on the inline style.
+  const toRemove: string[] = [];
+  for (let i = 0; i < el.style.length; i++) {
+    const prop = el.style[i];
+    if (
+      (prop.startsWith('--color-') || prop.startsWith('--brand-')) &&
+      !BASE_VAR_PROPS.has(prop) &&
+      !DARK_VAR_PROPS.has(prop)
+    ) {
+      toRemove.push(prop);
+    }
+  }
+  for (const prop of toRemove) {
+    el.style.removeProperty(prop);
+  }
+
+  // Inject token overrides from fine-tune panels
+  const overrides = state.tokenOverrides ?? {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value == null) continue;
+    const prop = BRAND_PREFIX_KEYS.has(key)
+      ? `--brand-${key}`
+      : `--color-${key}`;
+    el.style.setProperty(prop, value);
+  }
+
+  // Inject dark mode overrides (consumed by dark-mode rules in org-brand.css)
+  const darkVarMap: Record<string, string> = {
+    primaryColor: '--brand-color-dark',
+    secondaryColor: '--brand-secondary-dark',
+    accentColor: '--brand-accent-dark',
+    backgroundColor: '--brand-bg-dark',
+  };
+  for (const [field, prop] of Object.entries(darkVarMap)) {
+    const darkVal =
+      state.darkOverrides?.[field as keyof typeof state.darkOverrides];
+    if (darkVal) {
+      el.style.setProperty(prop, darkVal);
+    } else {
+      el.style.removeProperty(prop);
+    }
+  }
 }
 
 /**
@@ -104,6 +167,19 @@ export function clearBrandVars(): void {
 
   for (const mapping of CSS_VAR_MAPPINGS) {
     el.style.removeProperty(mapping.property);
+  }
+
+  // Remove any token override CSS vars previously set
+  // Iterate all inline styles and remove --color-* and --brand-* overrides
+  const toRemove: string[] = [];
+  for (let i = 0; i < el.style.length; i++) {
+    const prop = el.style[i];
+    if (prop.startsWith('--color-') || prop.startsWith('--brand-')) {
+      toRemove.push(prop);
+    }
+  }
+  for (const prop of toRemove) {
+    el.style.removeProperty(prop);
   }
 }
 

@@ -208,6 +208,7 @@ export interface BrandingSettingsResponse {
   densityValue: number;
   // Brand Editor fine-tune fields
   tokenOverrides: string | null;
+  darkModeOverrides: string | null;
   textColorHex: string | null;
   shadowScale: string | null;
   shadowColor: string | null;

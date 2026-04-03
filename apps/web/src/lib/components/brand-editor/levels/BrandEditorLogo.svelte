@@ -1,11 +1,27 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
+  import { uploadLogoForm } from '$lib/remote/branding.remote';
   import Button from '$lib/components/ui/Button/Button.svelte';
 
-  // Logo upload reuses the existing LogoUpload component via slot/snippet.
-  // This Level 1 view provides the frame: preview + upload/delete actions.
+  let fileInput: HTMLInputElement;
 
   const logoUrl = $derived(brandEditor.pending?.logoUrl ?? null);
+  const uploading = $derived(uploadLogoForm.pending > 0);
+
+  function handleFileSelect(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (!input.files?.length) return;
+    // Programmatically submit the hidden form
+    input.form?.requestSubmit();
+  }
+
+  // Handle upload success — update store with new logo URL
+  $effect(() => {
+    if (uploadLogoForm.result?.success && !uploading) {
+      const url = uploadLogoForm.result.data?.logoUrl;
+      if (url) brandEditor.updateField('logoUrl', url);
+    }
+  });
 </script>
 
 <div class="logo-level">
@@ -20,15 +36,37 @@
   </div>
 
   <div class="logo-level__actions">
-    <Button variant="secondary" size="sm">
-      Upload Logo
-    </Button>
+    <form {...uploadLogoForm} enctype="multipart/form-data" class="logo-upload-form">
+      <input type="hidden" name="orgId" value={brandEditor.orgId ?? ''} />
+      <input
+        bind:this={fileInput}
+        type="file"
+        {...uploadLogoForm.fields.logo.as('file')}
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        hidden
+        onchange={handleFileSelect}
+      />
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onclick={() => fileInput?.click()}
+        disabled={uploading}
+        loading={uploading}
+      >
+        {uploading ? 'Uploading…' : 'Upload Logo'}
+      </Button>
+    </form>
     {#if logoUrl}
-      <Button variant="ghost" size="sm" onclick={() => brandEditor.updateField('logoUrl', null)}>
+      <Button variant="ghost" size="sm" onclick={() => brandEditor.updateField('logoUrl', null)} disabled={uploading}>
         Remove
       </Button>
     {/if}
   </div>
+
+  {#if uploadLogoForm.result?.error}
+    <p class="logo-level__error">{uploadLogoForm.result.error}</p>
+  {/if}
 
   <p class="logo-level__hint">
     PNG, SVG, or WebP. Max 2MB. Recommended: 400 x 100px.
@@ -71,5 +109,14 @@
   .logo-level__hint {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+  }
+
+  .logo-upload-form {
+    display: contents;
+  }
+
+  .logo-level__error {
+    font-size: var(--text-xs);
+    color: var(--color-error-500);
   }
 </style>

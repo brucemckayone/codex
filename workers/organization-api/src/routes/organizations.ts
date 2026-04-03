@@ -178,6 +178,13 @@ app.get(
       return {
         logoUrl: branding.logoUrl ?? null,
         primaryColorHex: branding.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
+        secondaryColorHex: branding.secondaryColorHex ?? null,
+        accentColorHex: branding.accentColorHex ?? null,
+        backgroundColorHex: branding.backgroundColorHex ?? null,
+        fontBody: branding.fontBody ?? null,
+        fontHeading: branding.fontHeading ?? null,
+        radiusValue: branding.radiusValue ?? 0.5,
+        densityValue: branding.densityValue ?? 1,
       };
     },
   })
@@ -215,14 +222,24 @@ app.get(
         organizationId: organization.id,
       });
 
-      let branding = {
-        logoUrl: null as string | null,
+      let branding: {
+        logoUrl: string | null;
+        primaryColorHex: string;
+        secondaryColorHex: string | null;
+        accentColorHex: string | null;
+        backgroundColorHex: string | null;
+        fontBody: string | null;
+        fontHeading: string | null;
+        radiusValue: number;
+        densityValue: number;
+      } = {
+        logoUrl: null,
         primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
-        secondaryColorHex: null as string | null,
-        accentColorHex: null as string | null,
-        backgroundColorHex: null as string | null,
-        fontBody: null as string | null,
-        fontHeading: null as string | null,
+        secondaryColorHex: null,
+        accentColorHex: null,
+        backgroundColorHex: null,
+        fontBody: null,
+        fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
       };

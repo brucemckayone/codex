@@ -432,6 +432,7 @@ describe('default constants', () => {
       radiusValue: 0.5,
       densityValue: 1,
       tokenOverrides: null,
+      darkModeOverrides: null,
       textColorHex: null,
       shadowScale: null,
       shadowColor: null,

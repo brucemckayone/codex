@@ -97,8 +97,8 @@ export async function updateBrandCache(
         backgroundColorHex: settings.branding?.backgroundColorHex ?? null,
         fontBody: settings.branding?.fontBody ?? null,
         fontHeading: settings.branding?.fontHeading ?? null,
-        radiusValue: settings.branding?.radiusValue ?? 'default',
-        densityValue: settings.branding?.densityValue ?? 'default',
+        radiusValue: settings.branding?.radiusValue ?? 0.5,
+        densityValue: settings.branding?.densityValue ?? 1,
       };
     } else {
       // Fallback: Settings not created yet, fetch org directly
@@ -126,8 +126,8 @@ export async function updateBrandCache(
         backgroundColorHex: null,
         fontBody: null,
         fontHeading: null,
-        radiusValue: 'default',
-        densityValue: 'default',
+        radiusValue: 0.5,
+        densityValue: 1,
       };
     }
 

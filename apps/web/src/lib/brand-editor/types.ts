@@ -8,6 +8,17 @@
 
 // ── Editor State ──────────────────────────────────────────────────────────
 
+/** Color fields that can be overridden per-theme. */
+export interface ThemeColors {
+  primaryColor: string;
+  secondaryColor: string | null;
+  accentColor: string | null;
+  backgroundColor: string | null;
+}
+
+/** Theme color field names. */
+export type ThemeColorField = keyof ThemeColors;
+
 /** The complete state of the brand editor at any point in time. */
 export interface BrandEditorState {
   primaryColor: string;
@@ -21,6 +32,8 @@ export interface BrandEditorState {
   logoUrl: string | null;
   /** Per-token overrides from Level 2 fine-tune. null = auto-derive from primary. */
   tokenOverrides: Record<string, string | null>;
+  /** Dark theme color overrides. null = auto-derive from light values. */
+  darkOverrides: Partial<ThemeColors> | null;
 }
 
 /** The subset of BrandEditorState that gets saved to the API. */
@@ -49,6 +62,7 @@ export type LevelId =
   | 'shape'
   | 'shadows'
   | 'logo'
+  | 'presets'
   | 'fine-tune-colors'
   | 'fine-tune-typography';
 

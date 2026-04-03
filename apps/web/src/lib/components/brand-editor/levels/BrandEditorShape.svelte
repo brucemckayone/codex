@@ -34,7 +34,7 @@
         id="radius-slider"
         type="range"
         min="0"
-        max="1"
+        max="2"
         step="0.05"
         value={radius}
         oninput={handleRadiusInput}
@@ -49,7 +49,8 @@
         Button
       </div>
       <div class="shape-level__preview-card" style="border-radius: {radius * 1.5}rem">
-        Card
+        <span class="shape-level__card-title">Card</span>
+        <span class="shape-level__card-body">Preview content</span>
       </div>
     </div>
   </section>
@@ -64,8 +65,8 @@
       <input
         id="density-slider"
         type="range"
-        min="0.85"
-        max="1.15"
+        min="0.75"
+        max="1.25"
         step="0.05"
         value={density}
         oninput={handleDensityInput}
@@ -129,26 +130,43 @@
 
   .shape-level__previews {
     display: flex;
+    align-items: center;
     gap: var(--space-3);
   }
 
   .shape-level__preview-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: var(--space-2) var(--space-4);
     background: var(--color-interactive);
     color: var(--color-text-on-brand);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     border: none;
-    text-align: center;
+    white-space: nowrap;
+    height: var(--space-9);
   }
 
   .shape-level__preview-card {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
     padding: var(--space-3);
     background: var(--color-surface);
     border: var(--border-width) var(--border-style) var(--color-border);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .shape-level__card-title {
     font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    text-align: center;
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+  }
+
+  .shape-level__card-body {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
   }
 </style>

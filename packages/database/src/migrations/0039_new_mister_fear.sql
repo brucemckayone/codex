@@ -1,0 +1,1 @@
+ALTER TABLE "branding_settings" ADD COLUMN "dark_mode_overrides" text;

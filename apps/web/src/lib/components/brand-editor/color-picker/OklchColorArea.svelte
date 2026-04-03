@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { oklchToSrgb, isInGamut } from '$lib/brand-editor/oklch-math';
+  import { oklchToSrgb, isInGamut, maxChromaForLH } from '$lib/brand-editor/oklch-math';
 
   interface Props {
     /** Current hue (0-360). Canvas re-renders when this changes. */
@@ -12,7 +12,7 @@
     onchange?: (l: number, c: number) => void;
   }
 
-  const {
+  let {
     hue,
     lightness = $bindable(0.6),
     chroma = $bindable(0.15),
@@ -75,6 +75,19 @@
     const tempCtx = tempCanvas.getContext('2d')!;
     tempCtx.putImageData(imageData, 0, 0);
     ctx.drawImage(tempCanvas, 0, 0, CANVAS_W, CANVAS_H);
+
+    // Stroke the sRGB gamut boundary curve
+    ctx.beginPath();
+    for (let y = 0; y < CANVAS_H; y++) {
+      const l = 1 - y / CANVAS_H;
+      const maxC = maxChromaForLH(l, hue);
+      const x = (maxC / MAX_CHROMA) * CANVAS_W;
+      if (y === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   });
 
   function updateFromPosition(clientX: number, clientY: number) {

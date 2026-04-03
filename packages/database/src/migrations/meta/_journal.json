@@ -274,6 +274,13 @@
       "when": 1775218553441,
       "tag": "0038_steep_gladiator",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1775227790929,
+      "tag": "0039_new_mister_fear",
+      "breakpoints": true
     }
   ]
 }

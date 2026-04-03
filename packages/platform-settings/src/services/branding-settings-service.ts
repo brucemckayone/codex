@@ -69,6 +69,7 @@ export class BrandingSettingsService extends BaseService {
         radiusValue: schema.brandingSettings.radiusValue,
         densityValue: schema.brandingSettings.densityValue,
         tokenOverrides: schema.brandingSettings.tokenOverrides,
+        darkModeOverrides: schema.brandingSettings.darkModeOverrides,
         textColorHex: schema.brandingSettings.textColorHex,
         shadowScale: schema.brandingSettings.shadowScale,
         shadowColor: schema.brandingSettings.shadowColor,
@@ -103,6 +104,7 @@ export class BrandingSettingsService extends BaseService {
     radiusValue: string;
     densityValue: string;
     tokenOverrides: string | null;
+    darkModeOverrides: string | null;
     textColorHex: string | null;
     shadowScale: string | null;
     shadowColor: string | null;
@@ -121,6 +123,7 @@ export class BrandingSettingsService extends BaseService {
       radiusValue: parseFloat(row.radiusValue) || 0.5,
       densityValue: parseFloat(row.densityValue) || 1,
       tokenOverrides: row.tokenOverrides,
+      darkModeOverrides: row.darkModeOverrides,
       textColorHex: row.textColorHex,
       shadowScale: row.shadowScale,
       shadowColor: row.shadowColor,
@@ -150,6 +153,7 @@ export class BrandingSettingsService extends BaseService {
       radiusValue: 'radiusValue',
       densityValue: 'densityValue',
       tokenOverrides: 'tokenOverrides',
+      darkModeOverrides: 'darkModeOverrides',
       textColorHex: 'textColorHex',
       shadowScale: 'shadowScale',
       shadowColor: 'shadowColor',

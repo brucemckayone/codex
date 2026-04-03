@@ -71,6 +71,7 @@ export const brandingSettings = pgTable(
 
     // Brand Editor — Level 2 fine-tune fields
     tokenOverrides: text('token_overrides'), // JSON: Record<string, string>
+    darkModeOverrides: text('dark_mode_overrides'), // JSON: Partial<ThemeColors>
     textColorHex: varchar('text_color_hex', { length: 7 }),
     shadowScale: varchar('shadow_scale', { length: 10 }).default('1'),
     shadowColor: varchar('shadow_color', { length: 20 }),

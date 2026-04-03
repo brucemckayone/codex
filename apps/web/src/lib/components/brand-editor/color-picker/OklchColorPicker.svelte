@@ -23,7 +23,7 @@
     swatches?: string[];
   }
 
-  const {
+  let {
     value = $bindable('#6366F1'),
     label,
     onchange,

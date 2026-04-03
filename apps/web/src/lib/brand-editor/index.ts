@@ -9,6 +9,10 @@ export {
 } from './css-injection';
 // Brand Editor - Navigation
 export { getBreadcrumb, HOME_CATEGORIES, LEVELS } from './levels';
+export type { PaletteResult, PaletteStrategy } from './palette-generator';
+// Brand Editor - Palette Generator
+export { generatePalette, PALETTE_STRATEGIES } from './palette-generator';
+export type { CategorizedPreset, PresetCategory } from './presets';
 // Brand Editor - Presets
 export { BRAND_PRESETS } from './presets';
 export type {
@@ -20,4 +24,6 @@ export type {
   LevelId,
   LevelMeta,
   PanelState,
+  ThemeColorField,
+  ThemeColors,
 } from './types';
