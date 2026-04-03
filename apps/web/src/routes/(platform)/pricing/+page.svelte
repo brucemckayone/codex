@@ -113,7 +113,7 @@
   }
 
   .plan-featured {
-    border-color: var(--color-primary-500);
+    border-color: var(--color-interactive);
     box-shadow: var(--shadow-lg);
   }
 
@@ -172,21 +172,21 @@
   }
 
   .plan-cta-primary {
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: var(--color-text-inverse);
   }
 
   .plan-cta-primary:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .plan-cta-secondary {
     background-color: transparent;
-    color: var(--color-primary-500);
-    border: var(--border-width) var(--border-style) var(--color-primary-500);
+    color: var(--color-interactive);
+    border: var(--border-width) var(--border-style) var(--color-interactive);
   }
 
   .plan-cta-secondary:hover {
-    background-color: var(--color-primary-50);
+    background-color: var(--color-interactive-subtle);
   }
 </style>

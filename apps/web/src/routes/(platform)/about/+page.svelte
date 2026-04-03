@@ -94,7 +94,7 @@
     display: inline-flex;
     align-items: center;
     padding: var(--space-3) var(--space-6);
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: var(--color-text-inverse);
     border-radius: var(--radius-lg);
     font-size: var(--text-base);
@@ -104,6 +104,6 @@
   }
 
   .cta:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 </style>

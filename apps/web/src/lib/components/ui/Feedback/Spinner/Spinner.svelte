@@ -15,7 +15,7 @@
     display: inline-block;
     border-radius: 50%;
     border: 2px solid var(--color-neutral-200, #e5e5e5);
-    border-top-color: var(--color-primary-500, #c24129);
+    border-top-color: var(--color-interactive);
     animation: spin 0.6s linear infinite;
   }
 

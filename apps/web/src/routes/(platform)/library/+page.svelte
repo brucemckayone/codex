@@ -363,7 +363,7 @@
 
   .progress-fill {
     height: 100%;
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
   }
 
   .card-body {
@@ -382,7 +382,7 @@
   }
 
   .content-card:hover .card-title {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     transition: var(--transition-colors);
   }
 
@@ -457,7 +457,7 @@
     display: inline-flex;
     align-items: center;
     padding: var(--space-2) var(--space-4);
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: var(--color-text-inverse);
     border-radius: var(--radius-lg);
     text-decoration: none;
@@ -466,7 +466,7 @@
   }
 
   .browse-btn:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .no-results {
@@ -484,8 +484,8 @@
     align-items: center;
     padding: var(--space-2) var(--space-4);
     background-color: transparent;
-    color: var(--color-primary-500);
-    border: var(--border-width) var(--border-style) var(--color-primary-500);
+    color: var(--color-interactive);
+    border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-lg);
     font-weight: var(--font-medium);
     cursor: pointer;
@@ -493,18 +493,18 @@
   }
 
   .clear-filters-btn:hover {
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: var(--color-text-inverse);
   }
 
   .clear-filters-btn:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
   .content-card:focus-visible,
   .browse-btn:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -535,9 +535,9 @@
   }
 
   .sort-select:focus {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
-    border-color: var(--color-primary-500);
+    border-color: var(--color-border-focus);
   }
 
   /* Pagination */

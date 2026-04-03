@@ -57,14 +57,16 @@
     return () => clearTimeout(timeout);
   });
 
-  // Emit filter values whenever any filter changes
+  let mounted = $state(false);
+
   $effect(() => {
-    onFilterChange({
-      contentType,
-      progressStatus,
-      accessType,
-      search: searchDebounced,
-    });
+    // Track all filter values so Svelte subscribes to them
+    const filters = { contentType, progressStatus, accessType, search: searchDebounced };
+    if (!mounted) {
+      mounted = true;
+      return;
+    }
+    onFilterChange(filters);
   });
 
   export function clearAll() {
@@ -174,19 +176,19 @@
   }
 
   .filter-btn--active {
-    background-color: var(--color-primary-500);
-    border-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
+    border-color: var(--color-interactive);
     color: var(--color-text-inverse);
   }
 
   .filter-btn--active:hover {
-    background-color: var(--color-primary-600);
-    border-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
+    border-color: var(--color-interactive-hover);
     color: var(--color-text-inverse);
   }
 
   .filter-btn:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--border-width-thick);
   }
 
@@ -211,8 +213,8 @@
 
   .search-input:focus {
     outline: none;
-    border-color: var(--color-primary-500);
-    box-shadow: 0 0 0 1px var(--color-primary-500);
+    border-color: var(--color-border-focus);
+    box-shadow: 0 0 0 1px var(--color-interactive);
   }
 
   /* Dark mode */
@@ -228,8 +230,8 @@
   }
 
   :global([data-theme='dark']) .filter-btn--active {
-    background-color: var(--color-primary-500);
-    border-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
+    border-color: var(--color-interactive);
     color: var(--color-text-inverse);
   }
 

@@ -32,7 +32,9 @@ export class CachePurgeClient {
       this.apiToken = '';
       this.enabled = false;
     }
-    this.logger = logger;
+    this.logger = logger ?? {
+      warn: (msg, meta) => console.warn(`[CachePurge] ${msg}`, meta ?? ''),
+    };
   }
 
   /**
@@ -64,12 +66,9 @@ export class CachePurgeClient {
     );
     for (const result of results) {
       if (result.status === 'rejected') {
-        const msg = 'Cache purge failed';
-        if (this.logger) {
-          this.logger.warn(msg, { reason: String(result.reason) });
-        } else {
-          console.error(msg, result.reason);
-        }
+        this.logger!.warn('Cache purge failed', {
+          reason: String(result.reason),
+        });
       }
     }
   }
@@ -84,14 +83,9 @@ export class CachePurgeClient {
     try {
       await this.purgeRequest({ purge_everything: true });
     } catch (error) {
-      const msg = 'Cache purge (everything) failed';
-      if (this.logger) {
-        this.logger.warn(msg, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } else {
-        console.error(msg, error);
-      }
+      this.logger!.warn('Cache purge (everything) failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

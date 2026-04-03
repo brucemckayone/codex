@@ -106,7 +106,7 @@
   }
 
   .sidebar-link:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -116,8 +116,8 @@
   }
 
   .sidebar-link.active {
-    color: var(--color-primary-500);
-    background-color: var(--color-primary-50);
+    color: var(--color-interactive);
+    background-color: var(--color-interactive-subtle);
     font-weight: var(--font-medium);
   }
 

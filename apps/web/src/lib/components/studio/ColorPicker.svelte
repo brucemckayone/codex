@@ -183,8 +183,8 @@
   }
 
   .hex-input:focus {
-    border-color: var(--color-primary-500);
-    box-shadow: 0 0 0 1px var(--color-primary-500);
+    border-color: var(--color-border-focus);
+    box-shadow: 0 0 0 1px var(--color-interactive);
   }
 
   .hex-input.invalid {

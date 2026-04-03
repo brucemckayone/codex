@@ -61,6 +61,13 @@ export class BrandingSettingsService extends BaseService {
       .select({
         logoUrl: schema.brandingSettings.logoUrl,
         primaryColorHex: schema.brandingSettings.primaryColorHex,
+        secondaryColorHex: schema.brandingSettings.secondaryColorHex,
+        accentColorHex: schema.brandingSettings.accentColorHex,
+        backgroundColorHex: schema.brandingSettings.backgroundColorHex,
+        fontBody: schema.brandingSettings.fontBody,
+        fontHeading: schema.brandingSettings.fontHeading,
+        radiusValue: schema.brandingSettings.radiusValue,
+        densityValue: schema.brandingSettings.densityValue,
       })
       .from(schema.brandingSettings)
       .where(eq(schema.brandingSettings.organizationId, this.organizationId))
@@ -74,9 +81,31 @@ export class BrandingSettingsService extends BaseService {
       return { ...DEFAULT_BRANDING };
     }
 
+    return this.mapRow(row);
+  }
+
+  /** Map a database row to the response shape */
+  private mapRow(row: {
+    logoUrl: string | null;
+    primaryColorHex: string;
+    secondaryColorHex: string | null;
+    accentColorHex: string | null;
+    backgroundColorHex: string | null;
+    fontBody: string | null;
+    fontHeading: string | null;
+    radiusValue: string;
+    densityValue: string;
+  }): BrandingSettingsResponse {
     return {
       logoUrl: row.logoUrl,
       primaryColorHex: row.primaryColorHex,
+      secondaryColorHex: row.secondaryColorHex,
+      accentColorHex: row.accentColorHex,
+      backgroundColorHex: row.backgroundColorHex,
+      fontBody: row.fontBody,
+      fontHeading: row.fontHeading,
+      radiusValue: parseFloat(row.radiusValue) || 0.5,
+      densityValue: parseFloat(row.densityValue) || 1,
     };
   }
 
@@ -88,10 +117,24 @@ export class BrandingSettingsService extends BaseService {
     // Ensure hub row exists first
     await this.ensurePlatformSettingsExists();
 
-    // Build update values from input
+    // Build update values from input (only include fields that were provided)
     const updateValues: Record<string, unknown> = {};
-    if (input.primaryColorHex !== undefined) {
-      updateValues.primaryColorHex = input.primaryColorHex;
+    const fieldMap: Record<string, keyof UpdateBrandingInput> = {
+      primaryColorHex: 'primaryColorHex',
+      secondaryColorHex: 'secondaryColorHex',
+      accentColorHex: 'accentColorHex',
+      backgroundColorHex: 'backgroundColorHex',
+      fontBody: 'fontBody',
+      fontHeading: 'fontHeading',
+      radiusValue: 'radiusValue',
+      densityValue: 'densityValue',
+    };
+    for (const [dbField, inputField] of Object.entries(fieldMap)) {
+      if (input[inputField] !== undefined) {
+        const val = input[inputField];
+        // Convert numbers to strings for varchar columns (radius/density)
+        updateValues[dbField] = typeof val === 'number' ? String(val) : val;
+      }
     }
 
     // If no updates, just return current state
@@ -125,10 +168,7 @@ export class BrandingSettingsService extends BaseService {
     if (!row) {
       throw new SettingsUpsertError('branding', this.organizationId);
     }
-    return {
-      logoUrl: row.logoUrl,
-      primaryColorHex: row.primaryColorHex,
-    };
+    return this.mapRow(row);
   }
 
   /**
@@ -229,10 +269,7 @@ export class BrandingSettingsService extends BaseService {
         }
       }
 
-      return {
-        logoUrl: row.logoUrl,
-        primaryColorHex: row.primaryColorHex,
-      };
+      return this.mapRow(row);
     } catch (error) {
       // Step 4: Compensation - delete the new logo we just uploaded
       try {

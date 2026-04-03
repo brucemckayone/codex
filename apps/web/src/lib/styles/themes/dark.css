@@ -1,15 +1,45 @@
 /* dark.css */
 [data-theme="dark"] {
+  /* Surfaces */
   --color-background: var(--color-neutral-900);
   --color-surface: var(--color-neutral-800);
   --color-surface-secondary: var(--color-neutral-700);
+  --color-surface-tertiary: var(--color-neutral-600);
   --color-surface-elevated: var(--color-neutral-700);
+  --color-surface-overlay: rgb(0 0 0 / 0.7);
 
+  /* Text */
   --color-text: var(--color-neutral-50);
+  --color-text-primary: var(--color-neutral-50);
   --color-text-secondary: var(--color-neutral-300);
+  --color-text-tertiary: var(--color-neutral-400);
   --color-text-muted: var(--color-neutral-500);
-
+  --color-text-disabled: var(--color-neutral-600);
   --color-text-inverse: var(--color-neutral-900);
+  --color-text-on-brand: #ffffff;
 
+  /* Borders */
   --color-border: var(--color-neutral-700);
+  --color-border-strong: var(--color-neutral-600);
+  --color-border-subtle: var(--color-neutral-800);
+  --color-border-focus: var(--color-primary-400);
+
+  /* Interactive */
+  --color-interactive: var(--color-primary-400);
+  --color-interactive-hover: var(--color-primary-300);
+  --color-interactive-active: var(--color-primary-200);
+  --color-interactive-subtle: var(--color-primary-900);
+
+  /* Focus */
+  --color-focus: var(--color-primary-400);
+  --color-focus-ring: var(--color-primary-800);
+
+  /* Brand defaults (overridden by [data-org-brand]) */
+  --color-brand-primary: var(--color-primary-400);
+  --color-brand-primary-hover: var(--color-primary-300);
+  --color-brand-primary-active: var(--color-primary-200);
+  --color-brand-primary-subtle: var(--color-primary-900);
+  --color-brand-accent: var(--color-warning);
+  --color-brand-accent-hover: var(--color-warning-600);
+  --color-brand-accent-subtle: var(--color-warning-700);
 }

@@ -32,6 +32,16 @@ export function formatFileSize(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Format seconds as human-readable `3s`, `5m`, `1h 5m`. Returns empty string for falsy input. */
+export function formatDurationHuman(
+  seconds: number | null | undefined
+): string {
+  if (!seconds) return '';
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
 /** Format an ISO date string as `1 Jan 2026`. */
 export function formatDate(dateStr: string | Date): string {
   return shortDateFormatter.format(new Date(dateStr));

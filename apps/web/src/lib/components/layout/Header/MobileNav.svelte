@@ -3,6 +3,7 @@
   import type { LayoutUser } from '$lib/types';
   import type { NavLink } from '$lib/config/navigation';
   import { submitFormPost } from '$lib/utils/navigation';
+  import { XIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   interface Props {
     variant: 'platform' | 'org' | 'studio';
@@ -51,7 +52,7 @@
   <nav id="mobile-nav" class="drawer" aria-label="Mobile navigation">
     <div class="drawer-header">
       <button class="close-button" onclick={close} aria-label={m.nav_close_menu()}>
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        <XIcon size={24} />
       </button>
     </div>
 

@@ -2,6 +2,7 @@
   import type { LayoutOrganization } from '$lib/types';
   import { page } from '$app/state';
   import { buildOrgUrl } from '$lib/utils/subdomain';
+  import { UsersIcon, UserIcon, ChevronDownIcon, CheckIcon } from '$lib/components/ui/Icon';
   import DropdownMenu from '$lib/components/ui/DropdownMenu/DropdownMenu.svelte';
   import DropdownMenuTrigger from '$lib/components/ui/DropdownMenu/DropdownMenuTrigger.svelte';
   import DropdownMenuContent from '$lib/components/ui/DropdownMenu/DropdownMenuContent.svelte';
@@ -26,19 +27,19 @@
 
 <DropdownMenu>
   <DropdownMenuTrigger class="switcher-trigger">
-    <svg class="switcher-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    <UsersIcon size={16} class="switcher-icon" />
     <span class="switcher-label">{label}</span>
-    <svg class="switcher-chevron" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    <ChevronDownIcon size={14} class="switcher-chevron" />
   </DropdownMenuTrigger>
   <DropdownMenuContent>
     <a href={buildOrgUrl(page.url, 'creators', '/studio')}>
       <DropdownMenuItem>
         <span class="item-content">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <UserIcon size={16} />
           {m.studio_switcher_personal_studio()}
         </span>
         {#if currentContext === 'personal'}
-          <svg class="check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <CheckIcon size={16} class="check" />
         {/if}
       </DropdownMenuItem>
     </a>
@@ -57,7 +58,7 @@
               {orgItem.name}
             </span>
             {#if currentSlug === orgItem.slug}
-              <svg class="check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <CheckIcon size={16} class="check" />
             {/if}
           </DropdownMenuItem>
         </a>
@@ -105,7 +106,7 @@
   }
 
   .check {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     flex-shrink: 0;
   }
 

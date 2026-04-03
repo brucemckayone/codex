@@ -8,8 +8,9 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
+  import { GlobeIcon, TwitterIcon, YoutubeIcon, InstagramIcon, FileIcon, UsersIcon } from '$lib/components/ui/Icon';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -21,6 +22,7 @@
   const bio = $derived(profile?.bio ?? m.creator_profile_bio_default());
   const socialLinks = $derived(profile?.socialLinks ?? null);
   const contentItems = $derived(data.contentItems ?? []);
+  const organizations = $derived(data.organizations ?? []);
   const initial = $derived(displayName.charAt(0).toUpperCase());
   const hasSocialLinks = $derived(
     socialLinks != null &&
@@ -74,11 +76,7 @@
             class="social-link"
             aria-label={m.creator_visit_website()}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-            </svg>
+            <GlobeIcon size={18} />
           </a>
         {/if}
 
@@ -90,9 +88,7 @@
             class="social-link"
             aria-label={m.creator_visit_twitter()}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2 0 1.6-1 3-2 4 .8.1 2-.2 2-.5-3.2 3.2-8 2-10.5-3C-.4 7.3 3.3 1.2 8.5 1c2.1-.1 4 1.2 5.5 1.2.8 0 2.2-1.2 3.5-1.5z"></path>
-            </svg>
+            <TwitterIcon size={18} />
           </a>
         {/if}
 
@@ -104,10 +100,7 @@
             class="social-link"
             aria-label={m.creator_visit_youtube()}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path>
-              <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon>
-            </svg>
+            <YoutubeIcon size={18} />
           </a>
         {/if}
 
@@ -119,11 +112,7 @@
             class="social-link"
             aria-label={m.creator_visit_instagram()}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-            </svg>
+            <InstagramIcon size={18} />
           </a>
         {/if}
       </div>
@@ -133,6 +122,27 @@
       <a href="/login" class="follow-btn">{m.creator_profile_follow()}</a>
     {/if}
   </section>
+
+  <!-- Organizations Section -->
+  {#if organizations.length > 0}
+    <section class="orgs-section">
+      <h2 class="orgs-section__title">Organizations</h2>
+      <div class="orgs-grid">
+        {#each organizations as org (org.id)}
+          <a href={buildOrgUrl(page.url, org.slug, '/')} class="org-card">
+            <div class="org-card__icon">
+              {#if org.logoUrl}
+                <img src={org.logoUrl} alt="" class="org-card__logo" />
+              {:else}
+                <span class="org-card__initial">{org.name[0]}</span>
+              {/if}
+            </div>
+            <span class="org-card__name">{org.name}</span>
+          </a>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <!-- Content Section -->
   <section class="content-section">
@@ -158,10 +168,7 @@
       </div>
     {:else}
       <div class="empty-state">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-state__icon">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-          <polyline points="14 2 14 8 20 8"></polyline>
-        </svg>
+        <FileIcon size={48} class="empty-state__icon" stroke-width="1.5" />
         <p class="empty-state__text">{m.creator_profile_no_content()}</p>
       </div>
     {/if}
@@ -251,7 +258,7 @@
     font-size: var(--text-sm, 0.875rem);
     font-weight: var(--font-semibold, 600);
     color: #ffffff;
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md, 0.375rem);
     text-decoration: none;
@@ -260,7 +267,74 @@
   }
 
   .follow-btn:hover {
-    background: var(--color-primary-600);
+    background: var(--color-interactive-hover);
+  }
+
+  /* ── Organizations Section ── */
+  .orgs-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4, 1rem);
+  }
+
+  .orgs-section__title {
+    margin: 0;
+    font-size: var(--text-xl, 1.25rem);
+    font-weight: var(--font-bold, 700);
+    color: var(--color-text);
+  }
+
+  .orgs-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3, 0.75rem);
+  }
+
+  .org-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 0.75rem);
+    padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+    border-radius: var(--radius-lg, 0.5rem);
+    background: var(--color-surface);
+    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
+    text-decoration: none;
+    transition: var(--transition-colors);
+  }
+
+  .org-card:hover {
+    border-color: var(--color-brand-primary-subtle);
+    background: var(--color-interactive-subtle);
+  }
+
+  .org-card__icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-10, 2.5rem);
+    height: var(--space-10, 2.5rem);
+    border-radius: var(--radius-md, 0.375rem);
+    background: var(--color-surface-secondary);
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .org-card__logo {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .org-card__initial {
+    font-size: var(--text-base, 1rem);
+    font-weight: var(--font-semibold, 600);
+    color: var(--color-text-secondary);
+  }
+
+  .org-card__name {
+    font-size: var(--text-sm, 0.875rem);
+    font-weight: var(--font-medium, 500);
+    color: var(--color-text);
   }
 
   /* ── Content Section ── */
@@ -330,6 +404,28 @@
   }
 
   /* ── Dark Mode ── */
+  :global([data-theme='dark']) .orgs-section__title {
+    color: var(--color-text-dark);
+  }
+
+  :global([data-theme='dark']) .org-card {
+    background: var(--color-surface-dark);
+    border-color: var(--color-border-dark);
+  }
+
+  :global([data-theme='dark']) .org-card:hover {
+    border-color: var(--color-interactive-active);
+    background: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface-dark));
+  }
+
+  :global([data-theme='dark']) .org-card__initial {
+    color: var(--color-text-secondary-dark);
+  }
+
+  :global([data-theme='dark']) .org-card__name {
+    color: var(--color-text-dark);
+  }
+
   :global([data-theme='dark']) .profile-header {
     border-bottom-color: var(--color-border-dark);
   }

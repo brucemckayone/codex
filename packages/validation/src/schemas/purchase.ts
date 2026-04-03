@@ -37,6 +37,7 @@ const ALLOWED_REDIRECT_DOMAINS = [
   'localhost',
   '127.0.0.1',
   'lvh.me', // Local dev with subdomain routing (*.lvh.me resolves to 127.0.0.1)
+  'nip.io', // Phone testing over LAN (*.{ip}.nip.io resolves to {ip})
 ];
 
 /**

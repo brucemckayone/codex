@@ -167,14 +167,7 @@ export function verifyRunpodSignature(
     // Get webhook secret from environment
     const secret = c.env.RUNPOD_WEBHOOK_SECRET;
     if (!secret) {
-      const obs = c.get('obs');
-      if (obs) {
-        obs.error('RUNPOD_WEBHOOK_SECRET not configured');
-      } else {
-        console.error(
-          '[verifyRunpodSignature] RUNPOD_WEBHOOK_SECRET not configured'
-        );
-      }
+      c.get('obs')?.error('RUNPOD_WEBHOOK_SECRET not configured');
       return c.json(
         {
           error: {

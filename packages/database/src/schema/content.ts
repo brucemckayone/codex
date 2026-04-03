@@ -271,6 +271,8 @@ export const content = pgTable(
 
     // Written content (Phase 2+)
     contentBody: text('content_body'),
+    contentBodyJson:
+      jsonb('content_body_json').$type<Record<string, unknown>>(),
 
     // Organization (simplified for Phase 1)
     category: varchar('category', { length: 100 }), // Simple string category

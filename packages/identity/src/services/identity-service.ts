@@ -11,7 +11,11 @@ import {
   type ImageProcessingResult,
   ImageProcessingService,
 } from '@codex/image-processing';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  BusinessLogicError,
+  type ServiceConfig,
+} from '@codex/service-errors';
 import type { UserProfile } from '@codex/shared-types';
 import { and, eq, ne } from 'drizzle-orm';
 
@@ -313,6 +317,101 @@ export class IdentityService extends BaseService {
       };
     } catch (error) {
       throw this.handleError(error, 'IdentityService.updateProfile');
+    }
+  }
+
+  /**
+   * Upgrade a customer account to creator
+   *
+   * Atomically sets the user's global role to 'creator' and populates
+   * required creator profile fields (username). Validates that the user
+   * is currently a customer and the username is available.
+   *
+   * @param userId - User ID
+   * @param input - Creator profile fields (username required, bio/socialLinks optional)
+   * @returns Updated profile with role
+   */
+  async upgradeToCreator(
+    userId: string,
+    input: {
+      username: string;
+      bio?: string | null;
+      socialLinks?: {
+        website?: string;
+        twitter?: string;
+        youtube?: string;
+        instagram?: string;
+      } | null;
+    }
+  ): Promise<UserProfile & { role: string }> {
+    try {
+      const existing = await this.db.query.users.findFirst({
+        where: and(eq(users.id, userId), whereNotDeleted(users)),
+      });
+
+      if (!existing) {
+        throw new UserNotFoundError(userId);
+      }
+
+      if (existing.role !== 'customer') {
+        throw new BusinessLogicError('Only customers can upgrade to creator', {
+          currentRole: existing.role,
+        });
+      }
+
+      // Username uniqueness check (same pattern as updateProfile)
+      const otherUser = await this.db.query.users.findFirst({
+        where: and(
+          eq(users.username, input.username),
+          ne(users.id, userId),
+          whereNotDeleted(users)
+        ),
+      });
+
+      if (otherUser) {
+        throw new UsernameTakenError(input.username);
+      }
+
+      // Atomic update: role + profile fields
+      const [updated] = await this.db
+        .update(users)
+        .set({
+          role: 'creator',
+          username: input.username,
+          ...(input.bio !== undefined && { bio: input.bio }),
+          ...(input.socialLinks !== undefined && {
+            socialLinks: input.socialLinks,
+          }),
+        })
+        .where(and(eq(users.id, userId), whereNotDeleted(users)))
+        .returning();
+
+      if (!updated) {
+        throw new UserNotFoundError(userId);
+      }
+
+      this.obs.info('User upgraded to creator', {
+        userId,
+        username: input.username,
+      });
+
+      if (this.cache) {
+        await this.cache.invalidate(userId);
+      }
+
+      return {
+        id: updated.id,
+        name: updated.name,
+        email: updated.email,
+        emailVerified: updated.emailVerified,
+        image: updated.avatarUrl ?? updated.image,
+        username: updated.username ?? null,
+        bio: updated.bio ?? null,
+        socialLinks: updated.socialLinks ?? null,
+        role: updated.role,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.upgradeToCreator');
     }
   }
 

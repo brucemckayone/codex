@@ -53,6 +53,8 @@ export interface MiddlewareConfig {
  * - Preview deployments (e.g., codex-preview-123.revelations.studio)
  * - Staging deployments (e.g., codex-staging.revelations.studio)
  * - Local development (localhost on various ports)
+ * - Local dev subdomains (*.lvh.me with any port)
+ * - Phone/LAN testing (*.{ip}.nip.io with any port)
  */
 export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
   return cors({
@@ -83,6 +85,10 @@ export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
         /^https:\/\/[\w-]+-staging\.revelations\.studio$/,
         // Production deployments: *.revelations.studio (any subdomain)
         /^https:\/\/[\w-]+\.revelations\.studio$/,
+        // Local dev: lvh.me or *.lvh.me with any port
+        /^http:\/\/([\w-]+\.)*lvh\.me(:\d+)?$/,
+        // Phone/LAN testing: {ip}.nip.io or *.{ip}.nip.io with any port
+        /^http:\/\/([\w-]+\.)*\d+\.\d+\.\d+\.\d+\.nip\.io(:\d+)?$/,
       ];
 
       for (const pattern of allowedPatterns) {

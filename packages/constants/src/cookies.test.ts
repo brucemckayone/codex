@@ -83,6 +83,24 @@ describe('getCookieConfig', () => {
       expect(config.domain).toBe('.lvh.me');
     });
 
+    it('sets domain to .{ip}.nip.io in dev mode with nip.io host', () => {
+      const config = getCookieConfig(true, '192.168.1.10.nip.io:3000');
+      expect(config.domain).toBe('.192.168.1.10.nip.io');
+    });
+
+    it('sets domain to .{ip}.nip.io for subdomain.{ip}.nip.io in dev mode', () => {
+      const config = getCookieConfig(
+        true,
+        'bruce-studio.192.168.1.10.nip.io:3000'
+      );
+      expect(config.domain).toBe('.192.168.1.10.nip.io');
+    });
+
+    it('sets secure=false for nip.io in dev mode', () => {
+      const config = getCookieConfig(true, '192.168.1.10.nip.io:3000');
+      expect(config.secure).toBe(false);
+    });
+
     it('does not set domain in dev mode even with COOKIE_DOMAIN', () => {
       const config = getCookieConfig({
         dev: true,

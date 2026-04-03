@@ -13,6 +13,8 @@ export { RESERVED_SUBDOMAINS };
  * Extract subdomain from hostname
  *
  * Handles:
+ * - lvh.me variants (e.g., bruce-studio.lvh.me)
+ * - nip.io variants (e.g., bruce-studio.192.168.1.10.nip.io)
  * - localhost variants (e.g., test-org.localhost:3000)
  * - Production domains (e.g., yoga-studio.revelations.studio)
  *
@@ -31,6 +33,18 @@ export function extractSubdomain(hostname: string): string | null {
       return parts[0];
     }
     return null;
+  }
+
+  // nip.io handling: {subdomain}.{ip}.nip.io (phone testing over LAN)
+  // e.g. bruce-studio.192.168.1.10.nip.io → subdomain is 'bruce-studio'
+  // e.g. 192.168.1.10.nip.io → no subdomain
+  if (host.endsWith('nip.io')) {
+    // Match: optional-subdomain.ip-octets.nip.io
+    const nipMatch = host.match(/^(.+?)\.(\d+\.\d+\.\d+\.\d+)\.nip\.io$/);
+    if (nipMatch) {
+      return nipMatch[1]; // subdomain before the IP
+    }
+    return null; // bare {ip}.nip.io = no subdomain
   }
 
   // localhost handling: {subdomain}.localhost
@@ -73,6 +87,7 @@ export type SubdomainContext =
  * @param slug - The org slug to navigate to
  * @param path - The path on the org subdomain (default: '/')
  * @returns Full URL string, e.g. "http://bruce-studio.lvh.me:3000/studio"
+ *          or "http://bruce-studio.192.168.1.10.nip.io:3000/studio"
  */
 export function buildOrgUrl(currentUrl: URL, slug: string, path = '/'): string {
   const host = currentUrl.hostname;
@@ -83,6 +98,10 @@ export function buildOrgUrl(currentUrl: URL, slug: string, path = '/'): string {
 
   if (host.endsWith('lvh.me')) {
     baseDomain = 'lvh.me';
+  } else if (host.endsWith('nip.io')) {
+    // Extract {ip}.nip.io as the base domain
+    const nipMatch = host.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
+    baseDomain = nipMatch ? nipMatch[1] : 'nip.io';
   } else if (host.includes('localhost')) {
     baseDomain = 'localhost';
   } else if (host.endsWith('revelations.studio')) {
@@ -118,6 +137,9 @@ export function buildPlatformUrl(currentUrl: URL, path = '/'): string {
 
   if (host.endsWith('lvh.me')) {
     baseDomain = 'lvh.me';
+  } else if (host.endsWith('nip.io')) {
+    const nipMatch = host.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
+    baseDomain = nipMatch ? nipMatch[1] : 'nip.io';
   } else if (host.includes('localhost')) {
     baseDomain = 'localhost';
   } else if (host.endsWith('revelations.studio')) {

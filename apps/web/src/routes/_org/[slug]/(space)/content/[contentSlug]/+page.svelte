@@ -12,7 +12,8 @@
   import VideoPlayer from '$lib/components/VideoPlayer/VideoPlayer.svelte';
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import { hydrateIfNeeded } from '$lib/collections';
-  import { formatPrice } from '$lib/utils/format';
+  import { formatPrice, formatDurationHuman } from '$lib/utils/format';
+  import { LockIcon } from '$lib/components/ui/Icon';
   import type { PageData } from './$types';
 
   interface Props {
@@ -31,12 +32,6 @@
   });
 
   let purchasing = $state(false);
-
-  function formatDuration(seconds: number): string {
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  }
 
   function displayPrice(cents: number | null): string {
     if (!cents) return m.content_price_free();
@@ -102,7 +97,8 @@
 </svelte:head>
 
 <div class="content-detail">
-  <!-- Player / Preview Section -->
+  <!-- Player / Preview Section (hidden for written content) -->
+  {#if data.content.contentType !== 'written'}
   <div class="content-detail__player">
     {#if data.hasAccess && data.streamingUrl}
       <VideoPlayer
@@ -149,22 +145,7 @@
         {/if}
         <div class="content-detail__preview-overlay">
           <div class="content-detail__preview-cta">
-            <svg
-              class="content-detail__lock-icon"
-              xmlns="http://www.w3.org/2000/svg"
-              width="32"
-              height="32"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-            </svg>
+            <LockIcon size={32} class="content-detail__lock-icon" stroke-width="1.5" />
             <p class="content-detail__cta-text">{m.content_detail_purchase_cta()}</p>
             <p class="content-detail__cta-subtext">{m.content_detail_purchase_cta_description()}</p>
           </div>
@@ -172,6 +153,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 
   <!-- Content Info Section -->
   <div class="content-detail__info">
@@ -181,7 +163,7 @@
         <span class="content-detail__badge">{contentTypeBadge}</span>
         {#if duration > 0}
           <span class="content-detail__duration">
-            {m.content_duration()}: {formatDuration(duration)}
+            {m.content_duration()}: {formatDurationHuman(duration)}
           </span>
         {/if}
       </div>
@@ -248,6 +230,12 @@
         <h2 class="content-detail__description-heading">{m.content_detail_about()}</h2>
         <p>{description}</p>
       </div>
+    {/if}
+
+    {#if data.contentBodyHtml}
+      <article class="content-detail__body prose">
+        {@html data.contentBodyHtml}
+      </article>
     {/if}
   </div>
 </div>
@@ -355,8 +343,8 @@
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
-    background: var(--color-primary-100);
-    color: var(--color-primary-700);
+    background: var(--color-brand-primary-subtle);
+    color: var(--color-interactive-active);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -437,14 +425,14 @@
     cursor: pointer;
     transition: var(--transition-colors, background-color 0.15s);
     font-family: inherit;
-    background: var(--color-primary-500, #c24129);
+    background: var(--color-interactive);
     color: #ffffff;
     text-decoration: none;
     width: 100%;
   }
 
   .content-detail__purchase-btn:hover:not(:disabled) {
-    background: var(--color-primary-600, #b23720);
+    background: var(--color-interactive-hover);
   }
 
   .content-detail__purchase-btn:disabled {
@@ -475,6 +463,29 @@
     white-space: pre-line;
   }
 
+  /* Article body (written content) */
+  .content-detail__body {
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
+    border-top: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .prose :global(h1) { font-size: var(--text-2xl); font-weight: var(--font-bold); margin: var(--space-4) 0 var(--space-2); color: var(--color-text); }
+  .prose :global(h2) { font-size: var(--text-xl); font-weight: var(--font-semibold); margin: var(--space-3) 0 var(--space-2); color: var(--color-text); }
+  .prose :global(h3) { font-size: var(--text-lg); font-weight: var(--font-semibold); margin: var(--space-3) 0 var(--space-2); color: var(--color-text); }
+  .prose :global(p) { margin: var(--space-2) 0; line-height: var(--leading-relaxed); color: var(--color-text-secondary); font-size: var(--text-base); }
+  .prose :global(ul) { padding-left: var(--space-6); margin: var(--space-2) 0; color: var(--color-text-secondary); list-style-type: disc; }
+  .prose :global(ol) { padding-left: var(--space-6); margin: var(--space-2) 0; color: var(--color-text-secondary); list-style-type: decimal; }
+  .prose :global(li) { margin: var(--space-1) 0; }
+  .prose :global(code) { font-family: var(--font-mono, monospace); background-color: var(--color-surface-secondary, var(--color-surface)); padding: var(--space-1); border-radius: var(--radius-sm); font-size: 0.9em; }
+  .prose :global(pre) { background-color: var(--color-surface-secondary, var(--color-surface)); padding: var(--space-4); border-radius: var(--radius-md); overflow-x: auto; margin: var(--space-3) 0; }
+  .prose :global(pre code) { background: none; padding: 0; }
+  .prose :global(blockquote) { border-left: var(--border-width-thick) var(--border-style) var(--color-brand-primary-subtle); padding-left: var(--space-4); margin: var(--space-3) 0; color: var(--color-text-secondary); }
+  .prose :global(a) { color: var(--color-interactive-hover); text-decoration: underline; }
+  .prose :global(strong) { font-weight: var(--font-bold); }
+  .prose :global(hr) { border: none; border-top: var(--border-width) var(--border-style) var(--color-border); margin: var(--space-4) 0; }
+  .prose :global(img) { max-width: 100%; height: auto; border-radius: var(--radius-md); margin: var(--space-3) 0; }
+
   /* Responsive */
   @media (--breakpoint-md) {
     .content-detail {
@@ -492,8 +503,8 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .content-detail__badge {
-    background: var(--color-primary-900, #1e1b4b);
-    color: var(--color-primary-200, #c4b5fd);
+    background: var(--color-interactive-active);
+    color: var(--color-focus-ring);
   }
 
   :global([data-theme='dark']) .content-detail__title {
@@ -519,20 +530,49 @@
   }
 
   :global([data-theme='dark']) .content-detail__purchase {
-    background: var(--color-surface-dark, #262626);
-    border-color: var(--color-border-dark, #404040);
+    background: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .content-detail__price-amount {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .content-detail__price-label {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .content-detail__purchase-error {
-    background: rgba(220, 38, 38, 0.1);
-    color: #fca5a5;
+    background: var(--color-error-50);
+    color: var(--color-error-200);
+  }
+
+  :global([data-theme='dark']) .content-detail__body {
+    border-color: var(--color-border);
+  }
+
+  :global([data-theme='dark']) .prose :global(h1),
+  :global([data-theme='dark']) .prose :global(h2),
+  :global([data-theme='dark']) .prose :global(h3) {
+    color: var(--color-text);
+  }
+
+  :global([data-theme='dark']) .prose :global(p),
+  :global([data-theme='dark']) .prose :global(ul),
+  :global([data-theme='dark']) .prose :global(ol),
+  :global([data-theme='dark']) .prose :global(blockquote) {
+    color: var(--color-text-secondary);
+  }
+
+  :global([data-theme='dark']) .prose :global(a) {
+    color: var(--color-interactive);
+  }
+
+  :global([data-theme='dark']) .prose :global(code) {
+    background-color: var(--color-surface-secondary);
+  }
+
+  :global([data-theme='dark']) .prose :global(pre) {
+    background-color: var(--color-surface-secondary);
   }
 </style>

@@ -92,6 +92,13 @@ export async function updateBrandCache(
           settings.branding?.logoUrl ?? settings.organization.logoUrl ?? null,
         primaryColorHex:
           settings.branding?.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
+        secondaryColorHex: settings.branding?.secondaryColorHex ?? null,
+        accentColorHex: settings.branding?.accentColorHex ?? null,
+        backgroundColorHex: settings.branding?.backgroundColorHex ?? null,
+        fontBody: settings.branding?.fontBody ?? null,
+        fontHeading: settings.branding?.fontHeading ?? null,
+        radiusValue: settings.branding?.radiusValue ?? 'default',
+        densityValue: settings.branding?.densityValue ?? 'default',
       };
     } else {
       // Fallback: Settings not created yet, fetch org directly
@@ -104,19 +111,23 @@ export async function updateBrandCache(
       });
 
       if (!org) {
-        const msg = `Skip update - Org not found: ${organizationId}`;
-        if (obs) {
-          obs.warn(msg, { organizationId });
-        } else {
-          console.warn(`[BrandCache] ${msg}`);
-        }
+        obs?.warn(`Skip update - Org not found: ${organizationId}`, {
+          organizationId,
+        });
         return;
       }
 
       slug = org.slug;
       branding = {
         logoUrl: org.logoUrl ?? null,
-        primaryColorHex: BRAND_COLORS.DEFAULT_BLUE, // Default blue
+        primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
+        secondaryColorHex: null,
+        accentColorHex: null,
+        backgroundColorHex: null,
+        fontBody: null,
+        fontHeading: null,
+        radiusValue: 'default',
+        densityValue: 'default',
       };
     }
 
@@ -129,15 +140,10 @@ export async function updateBrandCache(
       expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS,
     });
   } catch (err) {
-    const msg = `Failed to update cache for org ${organizationId}`;
-    if (obs) {
-      obs.error(msg, {
-        organizationId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    } else {
-      console.error(`[BrandCache] ${msg}`, err);
-    }
+    obs?.error(`Failed to update cache for org ${organizationId}`, {
+      organizationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

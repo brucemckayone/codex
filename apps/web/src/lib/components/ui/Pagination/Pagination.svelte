@@ -18,6 +18,7 @@
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
+  import { ChevronLeftIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
 
   interface Props extends HTMLAttributes<HTMLElement> {
     currentPage: number;
@@ -129,18 +130,14 @@
         data-sveltekit-noscroll
         onclick={(e) => handleLinkClick(currentPage - 1, e)}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="15 18 9 12 15 6"></polyline>
-        </svg>
+        <ChevronLeftIcon size={16} />
         {#if variant === 'default'}
           <span>{m.common_previous()}</span>
         {/if}
       </a>
     {:else}
       <span class="pagination__btn pagination__prev pagination__btn--disabled" aria-disabled="true">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="15 18 9 12 15 6"></polyline>
-        </svg>
+        <ChevronLeftIcon size={16} />
         {#if variant === 'default'}
           <span>{m.common_previous()}</span>
         {/if}
@@ -153,9 +150,7 @@
       aria-label={m.common_previous()}
       onclick={() => goToPage(currentPage - 1)}
     >
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"></polyline>
-      </svg>
+      <ChevronLeftIcon size={16} />
       {#if variant === 'default'}
         <span>{m.common_previous()}</span>
       {/if}
@@ -210,18 +205,14 @@
         {#if variant === 'default'}
           <span>{m.common_next()}</span>
         {/if}
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="9 18 15 12 9 6"></polyline>
-        </svg>
+        <ChevronRightIcon size={16} />
       </a>
     {:else}
       <span class="pagination__btn pagination__next pagination__btn--disabled" aria-disabled="true">
         {#if variant === 'default'}
           <span>{m.common_next()}</span>
         {/if}
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="9 18 15 12 9 6"></polyline>
-        </svg>
+        <ChevronRightIcon size={16} />
       </span>
     {/if}
   {:else}
@@ -234,9 +225,7 @@
       {#if variant === 'default'}
         <span>{m.common_next()}</span>
       {/if}
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
+      <ChevronRightIcon size={16} />
     </button>
   {/if}
 
@@ -323,9 +312,9 @@
   }
 
   .pagination__page.active {
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     color: var(--color-text-inverse);
-    border-color: var(--color-primary-500);
+    border-color: var(--color-interactive);
   }
 
   .pagination__ellipsis {
@@ -357,8 +346,8 @@
   }
 
   :global([data-theme='dark']) .pagination__page.active {
-    background: var(--color-primary-500);
-    border-color: var(--color-primary-500);
+    background: var(--color-interactive);
+    border-color: var(--color-interactive);
   }
 
   :global([data-theme='dark']) .pagination__info,

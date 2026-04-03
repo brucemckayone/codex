@@ -19,6 +19,26 @@ interface AuthConfigOptions {
 }
 
 /**
+ * Derive the cross-subdomain cookie domain from WEB_APP_URL.
+ *
+ * - lvh.me URLs → `.lvh.me`
+ * - nip.io URLs (e.g. `http://192.168.1.10.nip.io:3000`) → `.192.168.1.10.nip.io`
+ * - Fallback → `.lvh.me`
+ */
+function getDevCookieDomain(env: AuthBindings): string {
+  try {
+    const hostname = new URL(env.WEB_APP_URL || '').hostname;
+    if (hostname.endsWith('nip.io')) {
+      const match = hostname.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
+      if (match) return `.${match[1]}`;
+    }
+  } catch {
+    /* fall through to default */
+  }
+  return `.${DOMAINS.DEV}`;
+}
+
+/**
  * Create a configured BetterAuth instance
  *
  * @param options - Configuration options
@@ -121,6 +141,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
       'http://localhost:42069', // Auth worker's own URL for E2E tests
       'http://lvh.me:3000', // Dev app (cross-subdomain cookies)
       'http://lvh.me:5173', // Vite dev server
+      'http://*.nip.io', // Phone/LAN testing (any {ip}.nip.io subdomain)
     ].filter((url): url is string => Boolean(url)),
 
     // Cross-subdomain cookie support
@@ -131,7 +152,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
         enabled: true,
         domain:
           env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
-            ? `.${DOMAINS.DEV}` // .lvh.me — browsers accept this unlike .localhost
+            ? getDevCookieDomain(env) // .lvh.me or .{ip}.nip.io based on WEB_APP_URL
             : env.ENVIRONMENT === ENV_NAMES.TEST
               ? undefined // Tests use exact origin
               : `.${DOMAINS.PROD}`,

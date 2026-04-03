@@ -53,6 +53,21 @@ export const brandingSettings = pgTable(
     primaryColorHex: varchar('primary_color_hex', { length: 7 })
       .notNull()
       .default('#3B82F6'),
+    secondaryColorHex: varchar('secondary_color_hex', { length: 7 }),
+    accentColorHex: varchar('accent_color_hex', { length: 7 }),
+    backgroundColorHex: varchar('background_color_hex', { length: 7 }),
+
+    // Typography (Google Fonts family name, null = platform default)
+    fontBody: varchar('font_body', { length: 50 }),
+    fontHeading: varchar('font_heading', { length: 50 }),
+
+    // Shape & density (continuous values from sliders)
+    radiusValue: varchar('radius_value', { length: 10 })
+      .notNull()
+      .default('0.5'),
+    densityValue: varchar('density_value', { length: 10 })
+      .notNull()
+      .default('1'),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

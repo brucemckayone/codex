@@ -24,6 +24,7 @@
   import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
+  import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     id: string;
@@ -133,33 +134,21 @@
         />
         <div class="content-card__placeholder hidden">
           {#if contentType === 'video'}
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <PlayIcon size={32} />
           {:else if contentType === 'audio'}
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+            <MusicIcon size={32} />
           {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <FileTextIcon size={32} />
           {/if}
         </div>
       {:else}
         <div class="content-card__placeholder">
           {#if contentType === 'video'}
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="5 3 19 12 5 21 5 3"></polygon>
-            </svg>
+            <PlayIcon size={32} />
           {:else if contentType === 'audio'}
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 18V5l12-2v13"></path>
-              <circle cx="6" cy="18" r="3"></circle>
-              <circle cx="18" cy="16" r="3"></circle>
-            </svg>
+            <MusicIcon size={32} />
           {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-              <polyline points="10 9 9 9 8 9"></polyline>
-            </svg>
+            <FileTextIcon size={32} />
           {/if}
         </div>
       {/if}
@@ -326,7 +315,7 @@
     top: var(--space-2);
     right: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
@@ -350,7 +339,7 @@
 
   .content-card__progress-fill {
     height: 100%;
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     transition: width 0.3s ease;
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
@@ -359,7 +348,7 @@
   .content-card__progress-text {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     font-weight: var(--font-medium);
   }
 
@@ -390,7 +379,7 @@
   }
 
   .content-card__title a:hover {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   .content-card__description {
@@ -421,7 +410,7 @@
   }
 
   .content-card__creator-link:hover .content-card__creator-name {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   .content-card__creator-name {
@@ -461,10 +450,10 @@
   }
 
   :global([data-theme='dark']) .content-card__title a:hover {
-    color: var(--color-primary-400);
+    color: var(--color-interactive);
   }
 
   :global([data-theme='dark']) .content-card__progress-text {
-    color: var(--color-primary-400);
+    color: var(--color-interactive);
   }
 </style>

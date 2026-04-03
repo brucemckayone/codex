@@ -10,4 +10,10 @@
   --radius-lg: calc(var(--radius-base) * 1.5);
   --radius-xl: calc(var(--radius-base) * 2);
   --radius-full: 9999px;
+
+  /* Semantic aliases */
+  --radius-button: var(--radius-md);
+  --radius-input: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-modal: var(--radius-xl);
 }

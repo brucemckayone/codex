@@ -42,12 +42,18 @@ export interface SecondaryStorage {
   delete: (key: string) => Promise<void>;
 }
 
+import { ObservabilityClient as ObsClientImpl } from '@codex/observability';
+
 /**
  * ObservabilityClient interface for logging
  */
 export interface ObservabilityClient {
   warn: (message: string, context?: Record<string, unknown>) => void;
 }
+
+const fallbackObs: ObservabilityClient = new ObsClientImpl(
+  'kv-secondary-storage'
+);
 
 /**
  * Create a KV-backed secondary storage adapter for Better Auth
@@ -92,11 +98,7 @@ export function createKVSecondaryStorage(
           error: error instanceof Error ? error.message : String(error),
         };
 
-        if (obs) {
-          obs.warn(errorMessage, context);
-        } else {
-          console.error(errorMessage, context);
-        }
+        (obs ?? fallbackObs).warn(errorMessage, context);
         return null;
       }
     },
@@ -117,11 +119,7 @@ export function createKVSecondaryStorage(
           error: error instanceof Error ? error.message : String(error),
         };
 
-        if (obs) {
-          obs.warn(errorMessage, context);
-        } else {
-          console.error(errorMessage, context);
-        }
+        (obs ?? fallbackObs).warn(errorMessage, context);
       }
     },
 
@@ -136,11 +134,7 @@ export function createKVSecondaryStorage(
           error: error instanceof Error ? error.message : String(error),
         };
 
-        if (obs) {
-          obs.warn(errorMessage, context);
-        } else {
-          console.error(errorMessage, context);
-        }
+        (obs ?? fallbackObs).warn(errorMessage, context);
       }
     },
   };

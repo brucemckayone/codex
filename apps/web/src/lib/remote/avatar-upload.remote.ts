@@ -51,7 +51,7 @@ export const avatarUploadForm = form(avatarUploadSchema, async ({ avatar }) => {
 
     return {
       success: true,
-      data: result.data,
+      data: result,
     };
   } catch (error) {
     return {

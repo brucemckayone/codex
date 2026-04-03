@@ -10,10 +10,12 @@
 -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { browser } from '$app/environment';
   import { getTranscodingStatus } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
   import { Badge } from '$lib/components/ui/Badge';
+  import { PlayIcon, MusicIcon, EditIcon, TrashIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -37,7 +39,7 @@
   function stopPolling() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = null;
-    document.removeEventListener('visibilitychange', onVisibilityChange);
+    if (browser) document.removeEventListener('visibilitychange', onVisibilityChange);
   }
 
   async function pollProgress() {
@@ -70,7 +72,7 @@
   }
 
   function onVisibilityChange() {
-    visible = document.visibilityState === 'visible';
+    visible = browser && document.visibilityState === 'visible';
     if (visible) pollProgress();
   }
 
@@ -172,15 +174,9 @@
 <article class="media-card">
   <div class="media-thumbnail">
     {#if isVideo}
-      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-      </svg>
+      <PlayIcon size={32} stroke-width="1.5" />
     {:else}
-      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M9 18V5l12-2v13"></path>
-        <circle cx="6" cy="18" r="3"></circle>
-        <circle cx="18" cy="16" r="3"></circle>
-      </svg>
+      <MusicIcon size={32} stroke-width="1.5" />
     {/if}
   </div>
 
@@ -231,10 +227,7 @@
         aria-label={m.media_edit_title()}
         onclick={() => onEdit(media.id)}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-        </svg>
+        <EditIcon size={16} />
       </button>
     {/if}
     {#if onDelete}
@@ -243,10 +236,7 @@
         aria-label={m.media_delete_title()}
         onclick={() => onDelete(media.id)}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-        </svg>
+        <TrashIcon size={16} />
       </button>
     {/if}
   </div>
@@ -265,7 +255,7 @@
   }
 
   .media-card:hover {
-    border-color: var(--color-border-hover, var(--color-primary-200));
+    border-color: var(--color-border-hover, var(--color-focus-ring));
   }
 
   .media-thumbnail {
@@ -356,7 +346,7 @@
   }
 
   :global([data-theme='dark']) .media-card:hover {
-    border-color: var(--color-primary-400);
+    border-color: var(--color-focus);
   }
 
   :global([data-theme='dark']) .media-thumbnail {
@@ -397,7 +387,7 @@
 
   .transcoding-progress-fill {
     height: 100%;
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     border-radius: var(--radius-full);
     transition: width 0.5s ease;
   }

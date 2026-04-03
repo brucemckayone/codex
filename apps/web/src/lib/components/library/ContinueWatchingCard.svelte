@@ -9,8 +9,10 @@
 <script lang="ts">
   import { page } from '$app/state';
   import type { LibraryItem } from '$lib/collections';
+  import { PlayIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { formatDuration } from '$lib/utils/format';
 
   interface Props {
     item: LibraryItem;
@@ -27,12 +29,7 @@
     return 0;
   });
 
-  const resumeTime = $derived.by(() => {
-    const seconds = item.progress?.positionSeconds ?? 0;
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  });
+  const resumeTime = $derived(formatDuration(item.progress?.positionSeconds ?? 0));
 
   const href = $derived(buildContentUrl(page.url, item.content));
 </script>
@@ -48,9 +45,7 @@
       />
     {:else}
       <div class="cw-card__placeholder">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="5 3 19 12 5 21 5 3"></polygon>
-        </svg>
+        <PlayIcon size={24} />
       </div>
     {/if}
 
@@ -86,7 +81,7 @@
   }
 
   .cw-card:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -124,7 +119,7 @@
 
   .cw-card__progress-fill {
     height: 100%;
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     transition: width 0.3s ease;
     border-radius: 0 2px 2px 0;
   }
@@ -146,7 +141,7 @@
   }
 
   .cw-card:hover .cw-card__title {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     transition: var(--transition-colors);
   }
 
@@ -175,7 +170,7 @@
   }
 
   :global([data-theme='dark']) .cw-card:hover .cw-card__title {
-    color: var(--color-primary-400);
+    color: var(--color-interactive);
   }
 
   :global([data-theme='dark']) .cw-card__resume {

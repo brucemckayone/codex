@@ -1,0 +1,1 @@
+ALTER TABLE "branding_settings" ADD COLUMN "background_color_hex" varchar(7);

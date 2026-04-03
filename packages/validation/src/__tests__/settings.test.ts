@@ -336,12 +336,29 @@ describe('response schemas', () => {
       const valid = {
         logoUrl: 'https://example.com/logo.png',
         primaryColorHex: '#3B82F6',
+        secondaryColorHex: null,
+        accentColorHex: null,
+        backgroundColorHex: null,
+        fontBody: null,
+        fontHeading: null,
+        radiusValue: 0.5,
+        densityValue: 1,
       };
       expect(brandingSettingsSchema.parse(valid)).toEqual(valid);
     });
 
     it('should accept null logoUrl', () => {
-      const valid = { logoUrl: null, primaryColorHex: '#3B82F6' };
+      const valid = {
+        logoUrl: null,
+        primaryColorHex: '#3B82F6',
+        secondaryColorHex: null,
+        accentColorHex: null,
+        backgroundColorHex: null,
+        fontBody: null,
+        fontHeading: null,
+        radiusValue: 0.5,
+        densityValue: 1,
+      };
       expect(brandingSettingsSchema.parse(valid)).toEqual(valid);
     });
   });
@@ -378,7 +395,17 @@ describe('response schemas', () => {
   describe('allSettingsSchema', () => {
     it('should validate combined settings response', () => {
       const valid = {
-        branding: { logoUrl: null, primaryColorHex: '#3B82F6' },
+        branding: {
+          logoUrl: null,
+          primaryColorHex: '#3B82F6',
+          secondaryColorHex: null,
+          accentColorHex: null,
+          backgroundColorHex: null,
+          fontBody: null,
+          fontHeading: null,
+          radiusValue: 0.5,
+          densityValue: 1,
+        },
         contact: {
           platformName: 'Test',
           supportEmail: 'test@test.com',
@@ -397,6 +424,13 @@ describe('default constants', () => {
     expect(DEFAULT_BRANDING).toEqual({
       logoUrl: null,
       primaryColorHex: '#3B82F6',
+      secondaryColorHex: null,
+      accentColorHex: null,
+      backgroundColorHex: null,
+      fontBody: null,
+      fontHeading: null,
+      radiusValue: 0.5,
+      densityValue: 1,
     });
     expect(brandingSettingsSchema.parse(DEFAULT_BRANDING)).toEqual(
       DEFAULT_BRANDING

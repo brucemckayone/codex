@@ -1,8 +1,8 @@
 /**
  * Discover page - server load
- * Fetches all published public content across all orgs using the public endpoint.
- * No auth required — uses getPublicContent (GET /api/content/public) without orgId
- * to aggregate content platform-wide.
+ * Fetches all published content across all orgs using the dedicated discover endpoint.
+ * No auth required — uses getDiscoverContent (GET /api/content/public/discover)
+ * which is intentionally unscoped for platform-wide browsing.
  */
 
 import { logger } from '$lib/observability';
@@ -43,7 +43,7 @@ export const load: PageServerLoad = async ({
   }
 
   try {
-    const content = await api.content.getPublicContent(params);
+    const content = await api.content.getDiscoverContent(params);
     return {
       content: content ?? EMPTY_CONTENT,
       search,

@@ -162,7 +162,7 @@ export interface ProcedurePolicy {
   /**
    * Role-based access control
    */
-  roles?: Array<'user' | 'creator' | 'admin' | 'system'>;
+  roles?: Array<'user' | 'creator' | 'admin' | 'system' | 'platform_owner'>;
 
   /**
    * Require organization membership

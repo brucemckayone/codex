@@ -4,6 +4,10 @@
    * Wires OrgHeader component and injects org brand colors as CSS variables.
    * Hides org chrome (header/footer) when inside the studio, which has its own layout.
    *
+   * Branding injection: sets `data-org-brand` attribute and `--org-brand-*` CSS
+   * custom properties to override both legacy and modern design tokens. Uses
+   * `color-mix(in oklch, ...)` to derive hover/active/subtle variants from base colors.
+   *
    * Caching: mirrors the platform layout pattern — $effect watches data.versions
    * for staleness, visibilitychange re-runs the server load on tab return.
    */
@@ -27,6 +31,34 @@
 
   // Studio routes have their own header/sidebar — hide the org chrome
   const isStudio = $derived(page.url.pathname.startsWith('/studio'));
+
+  // ── Branding ─────────────────────────────────────────────────────
+  // Raw inputs — the CSS file (org-brand.css) derives the full palette
+  // from these via OKLCH relative color syntax.
+  const brandPrimary = $derived(data.org?.brandColors?.primary ?? undefined);
+  const brandAccent = $derived(data.org?.brandColors?.accent ?? undefined);
+  const brandBackground = $derived(data.org?.brandColors?.background ?? undefined);
+  const brandFontBody = $derived(data.org?.brandFonts?.body ?? undefined);
+  const brandFontHeading = $derived(data.org?.brandFonts?.heading ?? undefined);
+  const brandRadius = $derived.by(() => {
+    const v = Number(data.org?.brandRadius);
+    return Number.isFinite(v) ? `${v}rem` : undefined;
+  });
+  const brandDensity = $derived.by(() => {
+    const v = Number(data.org?.brandDensity);
+    return Number.isFinite(v) ? String(v) : undefined;
+  });
+  const hasBranding = $derived(!!brandPrimary);
+
+  // Build Google Fonts URL from selected font families
+  const googleFontsUrl = $derived.by(() => {
+    const families = [...new Set([brandFontBody, brandFontHeading].filter(Boolean))] as string[];
+    if (families.length === 0) return undefined;
+    const params = families
+      .map((f) => `family=${encodeURIComponent(f)}:wght@400;500;600;700`)
+      .join('&');
+    return `https://fonts.googleapis.com/css2?${params}&display=swap`;
+  });
 
   // Reactive staleness check — runs on mount AND whenever data.versions changes.
   // data.versions changes after invalidate('cache:org-versions') re-runs the server load.
@@ -59,11 +91,25 @@
   });
 </script>
 
+<svelte:head>
+  {#if googleFontsUrl}
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link rel="stylesheet" href={googleFontsUrl} />
+  {/if}
+</svelte:head>
+
 <div
   class="org-layout"
-  style:--brand-primary={data.org?.brandColors?.primary}
-  style:--brand-secondary={data.org?.brandColors?.secondary}
-  style:--brand-accent={data.org?.brandColors?.accent}
+  data-org-brand={hasBranding ? '' : undefined}
+  data-org-bg={brandBackground ? '' : undefined}
+  style:--brand-color={brandPrimary}
+  style:--brand-accent={brandAccent}
+  style:--brand-bg={brandBackground}
+  style:--brand-density={brandDensity}
+  style:--brand-radius={brandRadius}
+  style:--brand-font-body={brandFontBody ? `'${brandFontBody}', var(--font-sans)` : undefined}
+  style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}', var(--font-sans)` : undefined}
 >
   {#if !isStudio}
     <OrgHeader user={data.user} org={data.org} />

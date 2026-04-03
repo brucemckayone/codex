@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import { logger } from '$lib/observability';
   import Button from '../../Button/Button.svelte';
+  import { AlertCircleIcon } from '$lib/components/ui/Icon';
 
   interface Props {
     children: Snippet;
@@ -28,11 +29,7 @@
     {:else}
       <div class="error-boundary" role="alert">
         <div class="error-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
+          <AlertCircleIcon size={24} />
         </div>
 
         <div class="error-content">

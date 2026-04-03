@@ -303,6 +303,32 @@ export const timezoneSchema = z
   .max(100, 'Timezone must be 100 characters or less');
 
 // ============================================================================
+// Branding Presets
+// ============================================================================
+
+/**
+ * Border radius value in rem — controls the base radius for all components.
+ * Range: 0 (sharp) to 2 (very rounded). Default: 0.5
+ */
+export const radiusValueSchema = z.number().min(0).max(2);
+
+/**
+ * Spacing density multiplier — scales the entire spacing system.
+ * Range: 0.75 (compact) to 1.25 (spacious). Default: 1
+ */
+export const densityValueSchema = z.number().min(0.75).max(1.25);
+
+/**
+ * Font family name — alphanumeric + spaces (e.g., "Open Sans", "Playfair Display").
+ * Validated to prevent injection via font-family CSS property.
+ */
+export const fontNameSchema = z
+  .string()
+  .trim()
+  .max(50, 'Font name must be 50 characters or less')
+  .regex(/^[a-zA-Z0-9 ]+$/, 'Font name must be alphanumeric');
+
+// ============================================================================
 // SVG Sanitization
 // ============================================================================
 

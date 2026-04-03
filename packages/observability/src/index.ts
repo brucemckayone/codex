@@ -7,6 +7,104 @@
 
 import { type RedactionOptions, redactSensitiveData } from './redact';
 
+// ── ANSI color helpers (dev console only) ──────────────────────────
+const LEVEL_COLORS = {
+  debug: '\x1b[36m', // cyan
+  info: '\x1b[32m', // green
+  warn: '\x1b[33m', // yellow
+  error: '\x1b[31m', // red
+} as const;
+
+const LEVEL_BADGES = {
+  debug: '🔍 DEBUG',
+  info: 'ℹ️  INFO ',
+  warn: '⚠️  WARN ',
+  error: '🔴 ERROR',
+} as const;
+
+const DIM = '\x1b[2m';
+const BOLD = '\x1b[1m';
+const RESET = '\x1b[0m';
+
+/**
+ * Format a log entry as a colorized, human-readable string for the dev console.
+ * Only used when environment === 'development'.
+ */
+// Fields promoted to the main log line for quick scanning
+const INLINE_KEYS = new Set([
+  'method',
+  'url',
+  'status',
+  'duration',
+  'durationMs',
+  'error',
+]);
+
+function formatDevLog(
+  level: LogEvent['level'],
+  message: string,
+  service: string,
+  timestamp: string,
+  requestId?: string,
+  metadata?: Record<string, unknown>
+): string {
+  const color = LEVEL_COLORS[level];
+  const badge = LEVEL_BADGES[level];
+  const time = new Date(timestamp).toLocaleTimeString('en-GB', {
+    hour12: false,
+  });
+
+  let line = `${DIM}${time}${RESET} ${color}${badge}${RESET} ${BOLD}${message}${RESET} ${DIM}[${service}]${RESET}`;
+
+  if (requestId) {
+    line += ` ${DIM}req:${requestId}${RESET}`;
+  }
+
+  if (metadata && Object.keys(metadata).length > 0) {
+    // Promote key request fields to the main line for quick scanning
+    const inline: string[] = [];
+
+    for (const k of [
+      'method',
+      'url',
+      'status',
+      'duration',
+      'durationMs',
+      'error',
+    ] as const) {
+      const v = (metadata as Record<string, unknown>)[k];
+      if (v === undefined) continue;
+      if (k === 'method' || k === 'status') {
+        inline.push(`${color}${v}${RESET}`);
+      } else if (k === 'url') {
+        inline.push(`${v}`);
+      } else if (k === 'duration' || k === 'durationMs') {
+        inline.push(`${DIM}${v}ms${RESET}`);
+      } else if (k === 'error') {
+        inline.push(`${color}${v}${RESET}`);
+      }
+    }
+
+    if (inline.length > 0) {
+      line += ` ${inline.join(' ')}`;
+    }
+
+    // Show ALL metadata on the detail line — nothing is hidden
+    const allPairs = Object.entries(metadata)
+      .map(([k, v]) => {
+        if (k === 'stack' && typeof v === 'string') {
+          return `${DIM}stack=${RESET}\n    ${v.split('\n').slice(0, 3).join('\n    ')}`;
+        }
+        const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return `${DIM}${k}=${RESET}${val}`;
+      })
+      .join(' ');
+    line += `\n  ${allPairs}`;
+  }
+
+  return line;
+}
+
 export interface LogEvent {
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
@@ -83,20 +181,33 @@ export class ObservabilityClient {
       ...(this.requestId && { requestId: this.requestId }),
     };
 
-    // Current implementation: console logging
-    // TODO: Add integration with external logging service
+    // Dev: colorized human-readable output. Prod/test: structured JSON for log aggregators.
+    // The `environment` constructor parameter is the authoritative source — set from
+    // wrangler ENVIRONMENT var (workers) or explicit config (BaseService, tests).
+    const output =
+      this.environment === 'development'
+        ? formatDevLog(
+            event.level,
+            event.message,
+            this.serviceName,
+            logEntry.timestamp as string,
+            this.requestId,
+            safeMetadata as Record<string, unknown> | undefined
+          )
+        : JSON.stringify(logEntry);
+
     switch (event.level) {
       case 'debug':
-        console.debug(JSON.stringify(logEntry));
+        console.debug(output);
         break;
       case 'info':
-        console.info(JSON.stringify(logEntry));
+        console.info(output);
         break;
       case 'warn':
-        console.warn(JSON.stringify(logEntry));
+        console.warn(output);
         break;
       case 'error':
-        console.error(JSON.stringify(logEntry));
+        console.error(output);
         break;
     }
   }

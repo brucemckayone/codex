@@ -104,8 +104,8 @@
 
   .textarea:focus {
     outline: none;
-    border-color: var(--color-primary-500);
-    box-shadow: 0 0 0 2px var(--color-primary-100);
+    border-color: var(--color-border-focus);
+    box-shadow: var(--shadow-focus-ring);
   }
 
   .textarea[data-error="true"] {

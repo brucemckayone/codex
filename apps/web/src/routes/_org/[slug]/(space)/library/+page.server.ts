@@ -63,9 +63,7 @@ export const load: PageServerLoad = async ({
     return {
       library: library ?? {
         items: [],
-        total: 0,
-        page: 1,
-        limit: LIBRARY_LIMIT,
+        pagination: { page: 1, limit: LIBRARY_LIMIT, total: 0, totalPages: 0 },
       },
       sort: sortParam,
       error: false,
@@ -77,7 +75,10 @@ export const load: PageServerLoad = async ({
     const msg = err instanceof Error ? err.message : String(err);
     logger.error(`Failed to load org library [${code}]: ${msg}`);
     return {
-      library: { items: [], total: 0, page: 1, limit: LIBRARY_LIMIT },
+      library: {
+        items: [],
+        pagination: { page: 1, limit: LIBRARY_LIMIT, total: 0, totalPages: 0 },
+      },
       sort: sortParam,
       error: true,
       errorCode: code,

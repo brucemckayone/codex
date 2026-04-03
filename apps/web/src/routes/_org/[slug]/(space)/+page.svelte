@@ -229,14 +229,14 @@
   .featured__view-all {
     font-size: var(--text-sm, 0.875rem);
     font-weight: var(--font-medium, 500);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     text-decoration: none;
     white-space: nowrap;
     transition: color 0.15s ease;
   }
 
   .featured__view-all:hover {
-    color: var(--color-primary-600);
+    color: var(--color-interactive-hover);
   }
 
   .featured__grid {
@@ -274,11 +274,11 @@
   }
 
   :global([data-theme='dark']) .featured__view-all {
-    color: var(--color-primary-400);
+    color: var(--color-interactive);
   }
 
   :global([data-theme='dark']) .featured__view-all:hover {
-    color: var(--color-primary-300);
+    color: var(--color-brand-primary-subtle);
   }
 
   :global([data-theme='dark']) .featured__empty {

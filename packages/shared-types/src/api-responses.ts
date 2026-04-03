@@ -199,6 +199,13 @@ export interface OrganizationWithRole {
 export interface BrandingSettingsResponse {
   logoUrl: string | null;
   primaryColorHex: string;
+  secondaryColorHex: string | null;
+  accentColorHex: string | null;
+  backgroundColorHex: string | null;
+  fontBody: string | null;
+  fontHeading: string | null;
+  radiusValue: number;
+  densityValue: number;
 }
 
 /**
@@ -239,4 +246,11 @@ export interface AllSettingsResponse {
 export interface PublicBrandingResponse {
   logoUrl: string | null;
   primaryColorHex: string;
+  secondaryColorHex: string | null;
+  accentColorHex: string | null;
+  backgroundColorHex: string | null;
+  fontBody: string | null;
+  fontHeading: string | null;
+  radiusValue: number;
+  densityValue: number;
 }

@@ -70,7 +70,7 @@
     font-family: var(--font-heading);
     font-size: var(--text-xl);
     font-weight: var(--font-bold);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     text-transform: lowercase;
     letter-spacing: var(--tracking-tight);
     margin-bottom: var(--space-6);
@@ -130,7 +130,7 @@
   }
 
   .back-link:hover {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   .auth-footer {
@@ -139,7 +139,7 @@
   }
 
   .auth-link {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     font-weight: var(--font-medium);
   }
 </style>

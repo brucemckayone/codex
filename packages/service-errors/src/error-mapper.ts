@@ -6,7 +6,10 @@
  */
 
 import { ERROR_CODES, STATUS_CODES } from '@codex/constants';
-import type { ObservabilityClient } from '@codex/observability';
+import { ObservabilityClient } from '@codex/observability';
+
+const fallbackObs = new ObservabilityClient('error-mapper');
+
 import { ZodError } from 'zod';
 import { type ErrorStatusCode, isServiceError } from './base-errors';
 
@@ -137,7 +140,9 @@ export function mapErrorToResponse(
         });
       }
     } else {
-      console.error('Unhandled error:', error);
+      fallbackObs.error('Unhandled error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

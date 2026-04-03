@@ -19,7 +19,7 @@
     left: 50%;
     z-index: var(--z-modal);
     padding: var(--space-2) var(--space-4);
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: white;
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -33,7 +33,7 @@
 
   .skip-link:focus {
     transform: translate(-50%, 0);
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 </style>

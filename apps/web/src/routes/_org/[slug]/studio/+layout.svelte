@@ -14,6 +14,7 @@
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import StudioSwitcher from '$lib/components/layout/StudioSidebar/StudioSwitcher.svelte';
   import type { LayoutData } from './$types';
+  import { MenuIcon, XIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
@@ -57,12 +58,15 @@
         aria-expanded={mobileMenuOpen}
         onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="3" x2="21" y1="6" y2="6"/>
-          <line x1="3" x2="21" y1="12" y2="12"/>
-          <line x1="3" x2="21" y1="18" y2="18"/>
-        </svg>
+        <MenuIcon size={24} />
       </button>
+
+      <a href="/studio" class="context-brand">
+        {#if data.org.logoUrl}
+          <img src={data.org.logoUrl} alt="{data.org.name} logo" class="context-logo" />
+        {/if}
+        <span class="context-name">{data.org.name}</span>
+      </a>
 
       <StudioSwitcher
         currentContext="org"
@@ -74,6 +78,12 @@
 
   <!-- Desktop Header -->
   <header class="studio-header desktop">
+    <a href="/studio" class="context-brand">
+      {#if data.org.logoUrl}
+        <img src={data.org.logoUrl} alt="{data.org.name} logo" class="context-logo" />
+      {/if}
+      <span class="context-name">{data.org.name}</span>
+    </a>
     <StudioSwitcher
       currentContext="org"
       currentSlug={data.org.slug}
@@ -97,10 +107,7 @@
         aria-label={m.studio_close_menu()}
         onclick={closeMenu}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" x2="6" y1="6" y2="18"/>
-          <line x1="6" x2="18" y1="6" y2="18"/>
-        </svg>
+        <XIcon size={24} />
       </button>
     </aside>
 
@@ -154,6 +161,29 @@
 
   .menu-toggle:hover {
     background-color: var(--color-surface-secondary);
+  }
+
+  .context-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+    text-decoration: none;
+  }
+
+  .context-logo {
+    height: var(--space-8);
+    width: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+  }
+
+  .context-name {
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    font-weight: var(--font-bold);
+    color: var(--color-text);
+    letter-spacing: var(--tracking-tight);
   }
 
   /* Desktop Header - hidden by default */
@@ -283,6 +313,10 @@
 
   :global([data-theme='dark']) .menu-toggle,
   :global([data-theme='dark']) .sidebar-close {
+    color: var(--color-text-dark);
+  }
+
+  :global([data-theme='dark']) .context-name {
     color: var(--color-text-dark);
   }
 

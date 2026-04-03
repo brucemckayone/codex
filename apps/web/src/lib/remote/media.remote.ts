@@ -114,6 +114,8 @@ export const uploadMedia = command(
 const updateMediaSchema = z.object({
   id: z.string().uuid(),
   data: z.object({
+    title: z.string().min(1).max(255).optional(),
+    description: z.string().max(2000).optional().nullable(),
     status: z
       .enum(['uploading', 'uploaded', 'transcoding', 'ready', 'failed'])
       .optional(),

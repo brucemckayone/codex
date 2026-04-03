@@ -77,6 +77,28 @@ export class ContentService extends BaseService {
     this.cache = cache;
   }
 
+  /**
+   * Parse contentBody to determine if it's Tiptap JSON or legacy markdown.
+   * If JSON, routes to content_body_json column; otherwise keeps in content_body.
+   */
+  private parseContentBody(raw: string | null | undefined): {
+    contentBody: string | null;
+    contentBodyJson: Record<string, unknown> | null;
+  } {
+    if (!raw) return { contentBody: null, contentBodyJson: null };
+    if (raw.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && parsed.type === 'doc') {
+          return { contentBody: null, contentBodyJson: parsed };
+        }
+      } catch {
+        // Not valid JSON — treat as plain text
+      }
+    }
+    return { contentBody: raw, contentBodyJson: null };
+  }
+
   setCachePurge(client: CachePurgeClient, webAppUrl: string): void {
     if (!webAppUrl) {
       throw new ValidationError('webAppUrl must be a non-empty string', {
@@ -155,7 +177,7 @@ export class ContentService extends BaseService {
             slug: validated.slug,
             description: validated.description || null,
             contentType: validated.contentType,
-            contentBody: validated.contentBody || null,
+            ...this.parseContentBody(validated.contentBody),
             category: validated.category || null,
             tags: validated.tags || [],
             thumbnailUrl: validated.thumbnailUrl || null,
@@ -269,11 +291,17 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
 
+        // Route contentBody to the appropriate column (JSON vs legacy text)
+        const { contentBody: _rawBody, ...restValidated } = validated;
+        const bodyFields =
+          _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
+
         // Update content
         const [updated] = await tx
           .update(content)
           .set({
-            ...validated,
+            ...restValidated,
+            ...bodyFields,
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))

@@ -9,6 +9,7 @@
 <script lang="ts">
   import { createMedia, completeUpload, uploadMedia } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
+  import { UploadIcon, XIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   interface UploadItem {
@@ -274,11 +275,7 @@
     onclick={handleBrowseClick}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleBrowseClick(); }}}
   >
-    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="upload-icon" aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-      <polyline points="17 8 12 3 7 8"></polyline>
-      <line x1="12" y1="3" x2="12" y2="15"></line>
-    </svg>
+    <UploadIcon size={40} stroke-width="1.5" class="upload-icon" />
 
     <p class="drop-text">
       {m.media_upload_drop()}
@@ -332,10 +329,7 @@
               aria-label="Remove"
               onclick={() => removeItem(index)}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+              <XIcon size={14} />
             </button>
           {/if}
         </div>
@@ -375,17 +369,17 @@
 
   .drop-zone:hover,
   .drop-zone:focus-visible {
-    border-color: var(--color-primary-400);
-    background-color: var(--color-primary-50, var(--color-surface-secondary));
+    border-color: var(--color-focus);
+    background-color: var(--color-interactive-subtle, var(--color-surface-secondary));
   }
 
   .drop-zone.dragging {
-    border-color: var(--color-primary-500);
-    background-color: var(--color-primary-50, var(--color-surface-secondary));
+    border-color: var(--color-interactive);
+    background-color: var(--color-interactive-subtle, var(--color-surface-secondary));
   }
 
   .drop-zone:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -401,7 +395,7 @@
   }
 
   .browse-link {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     font-weight: var(--font-medium);
     text-decoration: underline;
   }
@@ -469,7 +463,7 @@
 
   .queue-item-status[data-status='uploading'],
   .queue-item-status[data-status='completing'] {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   .queue-item-status[data-status='done'] {
@@ -490,7 +484,7 @@
 
   .progress-fill {
     height: 100%;
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     border-radius: var(--radius-full);
     transition: width 0.2s ease;
   }
@@ -530,7 +524,7 @@
   :global([data-theme='dark']) .drop-zone:hover,
   :global([data-theme='dark']) .drop-zone:focus-visible,
   :global([data-theme='dark']) .drop-zone.dragging {
-    border-color: var(--color-primary-400);
+    border-color: var(--color-focus);
     background-color: var(--color-surface-variant);
   }
 

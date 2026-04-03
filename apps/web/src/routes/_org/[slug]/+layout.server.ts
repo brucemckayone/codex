@@ -45,11 +45,23 @@ export const load: LayoutServerLoad = async ({
         name: string;
         description: string | null;
         logoUrl: string | null;
-        brandColors: { primary?: string; secondary?: string; accent?: string };
+        brandColors: {
+          primary?: string;
+          secondary?: string | null;
+          accent?: string | null;
+          background?: string | null;
+        };
+        brandFonts?: { body?: string | null; heading?: string | null };
+        brandRadius?: number;
+        brandDensity?: number;
       };
 
       // Read version keys for staleness detection on the client
-      const versions = await readOrgVersions(platform, typedOrg.id, locals.user?.id);
+      const versions = await readOrgVersions(
+        platform,
+        typedOrg.id,
+        locals.user?.id
+      );
 
       return {
         org: typedOrg,
@@ -86,6 +98,9 @@ export const load: LayoutServerLoad = async ({
           description: org.description,
           logoUrl: org.logoUrl,
           brandColors: org.brandColors,
+          brandFonts: org.brandFonts,
+          brandRadius: org.brandRadius,
+          brandDensity: org.brandDensity,
         },
         user: locals.user,
         versions,
@@ -123,9 +138,15 @@ async function readOrgVersions(
     });
     const orgConfigKey = CacheType.ORG_CONFIG + ':' + orgId;
     const orgContentKey = CacheType.COLLECTION_ORG_CONTENT(orgId);
-    const libraryKey = userId ? CacheType.COLLECTION_USER_LIBRARY(userId) : null;
+    const libraryKey = userId
+      ? CacheType.COLLECTION_USER_LIBRARY(userId)
+      : null;
 
-    const keys = [orgConfigKey, orgContentKey, ...(libraryKey ? [libraryKey] : [])];
+    const keys = [
+      orgConfigKey,
+      orgContentKey,
+      ...(libraryKey ? [libraryKey] : []),
+    ];
     const results = await Promise.all(keys.map((k) => cache.getVersion(k)));
     for (let i = 0; i < keys.length; i++) {
       versions[keys[i]] = results[i];

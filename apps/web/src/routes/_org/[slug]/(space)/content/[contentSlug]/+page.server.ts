@@ -14,7 +14,38 @@ import { CACHE_HEADERS } from '$lib/server/cache';
 import { ApiError } from '$lib/server/errors';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, parent, setHeaders, platform, cookies }) => {
+/**
+ * Render content body to HTML for written content.
+ * Uses Tiptap generateHTML for JSON content, falls back to marked for legacy markdown.
+ */
+async function renderContentBody(content: {
+  contentType: string;
+  contentBodyJson?: Record<string, unknown> | null;
+  contentBody?: string | null;
+}): Promise<string | null> {
+  if (content.contentType !== 'written') return null;
+
+  if (content.contentBodyJson) {
+    const { generateHTML } = await import('@tiptap/html');
+    const { getRenderExtensions } = await import('$lib/editor/extensions');
+    return generateHTML(content.contentBodyJson, getRenderExtensions('full'));
+  }
+
+  if (content.contentBody) {
+    const { marked } = await import('marked');
+    return marked.parse(content.contentBody, { async: false }) as string;
+  }
+
+  return null;
+}
+
+export const load: PageServerLoad = async ({
+  params,
+  parent,
+  setHeaders,
+  platform,
+  cookies,
+}) => {
   const parentData = await parent();
   const { org } = parentData;
   const { contentSlug } = params;
@@ -40,9 +71,18 @@ export const load: PageServerLoad = async ({ params, parent, setHeaders, platfor
     error(404, 'Content not found');
   }
 
+  // Render written content body to HTML (server-side)
+  const contentBodyHtml = await renderContentBody(content);
+
   // For unauthenticated visitors, return immediately — no access checks needed
   if (!parentData.user) {
-    return { content, hasAccess: false, streamingUrl: null, progress: null };
+    return {
+      content,
+      contentBodyHtml,
+      hasAccess: false,
+      streamingUrl: null,
+      progress: null,
+    };
   }
 
   // For authenticated users, fetch streaming URL + progress in parallel.
@@ -65,7 +105,7 @@ export const load: PageServerLoad = async ({ params, parent, setHeaders, platfor
       }
     : null;
 
-  return { content, hasAccess, streamingUrl, progress };
+  return { content, contentBodyHtml, hasAccess, streamingUrl, progress };
 };
 
 export const actions: Actions = {

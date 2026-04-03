@@ -56,6 +56,6 @@
   }
 
   .footer-link:hover {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 </style>

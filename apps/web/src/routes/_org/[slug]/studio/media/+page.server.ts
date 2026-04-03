@@ -13,10 +13,24 @@ export const load: PageServerLoad = async ({ parent, url }) => {
   const page = Number(url.searchParams.get('page') ?? '1');
   const limit = 12;
 
+  const status = url.searchParams.get('status') as
+    | 'uploading'
+    | 'uploaded'
+    | 'transcoding'
+    | 'ready'
+    | 'failed'
+    | null;
+  const mediaType = url.searchParams.get('mediaType') as
+    | 'video'
+    | 'audio'
+    | null;
+
   const mediaResult = await listMedia({
     organizationId: org.id,
     page,
     limit,
+    ...(status && { status }),
+    ...(mediaType && { mediaType }),
   });
 
   return {
@@ -26,6 +40,10 @@ export const load: PageServerLoad = async ({ parent, url }) => {
       limit,
       total: 0,
       totalPages: 0,
+    },
+    filters: {
+      status: status ?? 'all',
+      mediaType: mediaType ?? 'all',
     },
   };
 };

@@ -2,7 +2,10 @@
 
 import { AUTH_COOKIES, COOKIES } from '@codex/constants';
 import { createDbClient, type DbEnvVars, schema } from '@codex/database';
-import type { ObservabilityClient } from '@codex/observability';
+import { ObservabilityClient } from '@codex/observability';
+
+const fallbackObs = new ObservabilityClient('session-auth');
+
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context, Next } from 'hono';
 
@@ -398,17 +401,10 @@ export function optionalAuth(config?: SessionAuthConfig) {
       }
 
       if (enableLogging) {
-        if (obs) {
-          obs.info('Session authenticated', {
-            userId: sessionData.user.id,
-            method: kv ? 'database' : 'database-only',
-          });
-        } else {
-          console.info('Session authenticated', {
-            userId: sessionData.user.id,
-            method: kv ? 'database' : 'database-only',
-          });
-        }
+        (obs ?? fallbackObs).info('Session authenticated', {
+          userId: sessionData.user.id,
+          method: kv ? 'database' : 'database-only',
+        });
       }
     } else {
       // Invalid or expired session

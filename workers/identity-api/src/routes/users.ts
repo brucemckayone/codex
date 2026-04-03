@@ -16,6 +16,7 @@ import type { HonoEnv } from '@codex/shared-types';
 import {
   updateNotificationPreferencesSchema,
   updateProfileSchema,
+  upgradeToCreatorSchema,
 } from '@codex/validation';
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -111,6 +112,47 @@ app.patch(
         ctx.user.id,
         ctx.input.body
       );
+    },
+  })
+);
+
+/**
+ * POST /api/user/upgrade-to-creator
+ * Upgrade authenticated customer to creator role
+ *
+ * Security: Authenticated user only, must currently be role 'customer'
+ * Rate limit: strict (20/min) — sensitive one-time operation
+ */
+app.post(
+  '/upgrade-to-creator',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    input: { body: upgradeToCreatorSchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.identity.upgradeToCreator(
+        ctx.user.id,
+        ctx.input.body
+      );
+
+      // Invalidate session KV cache so next request picks up new role from DB.
+      // Must await (not waitUntil) — the redirect that follows needs the cache
+      // cleared before the browser's next request arrives.
+      // Delete both key formats: session-auth middleware uses "session:{token}",
+      // BetterAuth secondaryStorage uses the raw token.
+      const kv = ctx.env.AUTH_SESSION_KV;
+      if (kv && ctx.session?.token) {
+        await Promise.all([
+          kv.delete(`session:${ctx.session.token}`),
+          kv.delete(ctx.session.token),
+        ]).catch((err: unknown) => {
+          ctx.obs?.error('Failed to invalidate session KV after role upgrade', {
+            error: err instanceof Error ? err.message : String(err),
+            userId: ctx.user.id,
+          });
+        });
+      }
+
+      return result;
     },
   })
 );

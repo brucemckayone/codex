@@ -9,6 +9,7 @@
   import * as m from '$paraglide/messages';
   import { CreatorCard } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
+  import { UsersIcon } from '$lib/components/ui/Icon';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -72,12 +73,7 @@
   {:else}
     <!-- Empty State -->
     <div class="creators__empty">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="creators__empty-icon">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-        <circle cx="9" cy="7" r="4"></circle>
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-      </svg>
+      <UsersIcon size={48} class="creators__empty-icon" stroke-width="1.5" />
       <p class="creators__empty-text">{m.org_creators_empty()}</p>
     </div>
   {/if}

@@ -130,7 +130,7 @@
   }
 
   .tab-trigger:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
   }
@@ -141,8 +141,8 @@
   }
 
   .tab-trigger.active {
-    color: var(--color-primary-500);
-    border-bottom-color: var(--color-primary-500);
+    color: var(--color-interactive);
+    border-bottom-color: var(--color-interactive);
   }
 
   .settings-content {
@@ -165,7 +165,7 @@
     }
 
     .tab-trigger.active {
-      background-color: var(--color-primary-50);
+      background-color: var(--color-interactive-subtle);
       border-bottom-color: transparent;
     }
 
@@ -176,13 +176,13 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .tab-trigger.active {
-    color: var(--color-primary-400);
-    border-bottom-color: var(--color-primary-400);
+    color: var(--color-interactive);
+    border-bottom-color: var(--color-interactive);
   }
 
   @media (--below-sm) {
     :global([data-theme='dark']) .tab-trigger.active {
-      background-color: var(--color-primary-900);
+      background-color: var(--color-interactive-active);
       border-bottom-color: transparent;
     }
   }

@@ -9,6 +9,8 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { formatPrice } from '$lib/utils/format';
+  import { CheckCircleIcon, ClockIcon } from '$lib/components/ui/Icon';
   import type { PageData } from './$types';
 
   interface Props {
@@ -21,10 +23,6 @@
   const content = $derived(data.verification?.content);
   const purchase = $derived(data.verification?.purchase);
   const contentSlug = $derived(data.contentSlug);
-
-  function formatPrice(cents: number): string {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(cents / 100);
-  }
 </script>
 
 <svelte:head>
@@ -36,10 +34,7 @@
     {#if isComplete && content}
       <!-- Purchase confirmed -->
       <div class="checkout-success__icon checkout-success__icon--success">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-          <polyline points="22 4 12 14.01 9 11.01"></polyline>
-        </svg>
+        <CheckCircleIcon size={48} />
       </div>
 
       <h1 class="checkout-success__title">{m.checkout_success_title()}</h1>
@@ -74,10 +69,7 @@
     {:else if data.verification === null}
       <!-- Verification failed or pending -->
       <div class="checkout-success__icon checkout-success__icon--pending">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polyline points="12 6 12 12 16 14"></polyline>
-        </svg>
+        <ClockIcon size={48} />
       </div>
 
       <h1 class="checkout-success__title">{m.checkout_success_verifying()}</h1>
@@ -95,10 +87,7 @@
     {:else}
       <!-- Session open or expired -->
       <div class="checkout-success__icon checkout-success__icon--pending">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polyline points="12 6 12 12 16 14"></polyline>
-        </svg>
+        <ClockIcon size={48} />
       </div>
 
       <h1 class="checkout-success__title">{m.checkout_success_verifying()}</h1>
@@ -220,12 +209,12 @@
   }
 
   .checkout-success__btn--primary {
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     color: var(--color-text-inverse);
   }
 
   .checkout-success__btn--primary:hover {
-    background: var(--color-primary-600);
+    background: var(--color-interactive-hover);
   }
 
   .checkout-success__btn--secondary {

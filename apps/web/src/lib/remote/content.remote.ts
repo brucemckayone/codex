@@ -355,7 +355,7 @@ const optionalUuid = z
   .pipe(z.string().uuid().nullable());
 
 const createContentFormSchema = z.object({
-  organizationId: z.string().uuid(),
+  organizationId: optionalUuid,
   title: z.string().min(1, 'Title is required'),
   slug: z.string().min(1, 'Slug is required'),
   description: optionalString,
@@ -367,6 +367,20 @@ const createContentFormSchema = z.object({
     const parsed = parseFloat(v || '0');
     return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
   }),
+  category: optionalString,
+  tags: z
+    .string()
+    .optional()
+    .default('[]')
+    .transform((v) => {
+      try {
+        return JSON.parse(v) as string[];
+      } catch {
+        return [];
+      }
+    })
+    .pipe(z.array(z.string().trim().max(50)).max(20)),
+  thumbnailUrl: optionalString,
 });
 
 /**
@@ -387,6 +401,9 @@ export const createContentForm = form(
     contentBody,
     visibility,
     price,
+    category,
+    tags,
+    thumbnailUrl,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -402,6 +419,9 @@ export const createContentForm = form(
         visibility,
         organizationId,
         priceCents: price,
+        category,
+        tags,
+        thumbnailUrl,
       });
 
       return { success: true as const, contentId: result.id };
@@ -417,7 +437,7 @@ export const createContentForm = form(
 
 const updateContentFormSchema = z.object({
   contentId: z.string().uuid(),
-  organizationId: z.string().uuid(),
+  organizationId: optionalUuid,
   title: z.string().min(1, 'Title is required'),
   slug: z.string().min(1, 'Slug is required'),
   description: optionalString,
@@ -429,6 +449,20 @@ const updateContentFormSchema = z.object({
     const parsed = parseFloat(v || '0');
     return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
   }),
+  category: optionalString,
+  tags: z
+    .string()
+    .optional()
+    .default('[]')
+    .transform((v) => {
+      try {
+        return JSON.parse(v) as string[];
+      } catch {
+        return [];
+      }
+    })
+    .pipe(z.array(z.string().trim().max(50)).max(20)),
+  thumbnailUrl: optionalString,
 });
 
 /**
@@ -449,6 +483,9 @@ export const updateContentForm = form(
     contentBody,
     visibility,
     price,
+    category,
+    tags,
+    thumbnailUrl,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -464,6 +501,9 @@ export const updateContentForm = form(
         visibility,
         organizationId,
         priceCents: price,
+        category,
+        tags,
+        thumbnailUrl,
       });
 
       return { success: true as const, data: result };

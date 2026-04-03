@@ -22,6 +22,10 @@
     0 16px 30px -4px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
 
   --shadow-inner: inset 0 2px 4px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%));
+
+  /* Focus Ring — for input/select focus states */
+  --shadow-focus-ring: 0 0 0 2px var(--color-focus-ring);
+  --shadow-focus-ring-error: 0 0 0 2px var(--color-error-50);
 }
 
 [data-theme='dark'] {

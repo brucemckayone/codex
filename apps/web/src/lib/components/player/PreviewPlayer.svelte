@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { PlayIcon, PauseIcon, VolumeXIcon, Volume2Icon, MaximizeIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { createCheckout } from '$lib/remote/checkout.remote';
@@ -137,14 +138,9 @@
             aria-label={videoEl?.paused ? 'Play' : 'Pause'}
           >
             {#if videoEl?.paused}
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <polygon points="5,3 19,12 5,21" />
-              </svg>
+              <PlayIcon size={20} fill="currentColor" stroke="none" />
             {:else}
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <rect x="6" y="4" width="4" height="16" />
-                <rect x="14" y="4" width="4" height="16" />
-              </svg>
+              <PauseIcon size={20} fill="currentColor" stroke="none" />
             {/if}
           </button>
 
@@ -156,17 +152,9 @@
             aria-label={videoEl?.muted ? 'Unmute' : 'Mute'}
           >
             {#if videoEl?.muted}
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor" />
-                <line x1="23" y1="9" x2="17" y2="15" />
-                <line x1="17" y1="9" x2="23" y2="15" />
-              </svg>
+              <VolumeXIcon size={20} />
             {:else}
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-              </svg>
+              <Volume2Icon size={20} />
             {/if}
           </button>
 
@@ -182,12 +170,7 @@
             }}
             aria-label="Fullscreen"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <polyline points="15,3 21,3 21,9" />
-              <polyline points="9,21 3,21 3,15" />
-              <line x1="21" y1="3" x2="14" y2="10" />
-              <line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
+            <MaximizeIcon size={20} />
           </button>
         </div>
       {/if}
@@ -337,7 +320,7 @@
   }
 
   .preview-player__control-btn:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -413,7 +396,7 @@
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     color: white;
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md);
     cursor: pointer;
@@ -422,11 +405,11 @@
   }
 
   .preview-player__cta-button:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .preview-player__cta-button:focus-visible {
-    outline: 2px solid var(--color-primary-400);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 

@@ -10,8 +10,18 @@ export interface NavLink {
   label: string;
 }
 
+export type SidebarIcon =
+  | 'dashboard'
+  | 'content'
+  | 'media'
+  | 'analytics'
+  | 'team'
+  | 'customers'
+  | 'settings'
+  | 'billing';
+
 export interface SidebarLink extends NavLink {
-  icon: string;
+  icon: SidebarIcon;
 }
 
 /** Platform-level navigation (top header on codex.com) */
@@ -56,6 +66,11 @@ export const SIDEBAR_ADMIN_LINKS: SidebarLink[] = [
 /** Studio sidebar — owner-only links */
 export const SIDEBAR_OWNER_LINKS: SidebarLink[] = [
   { href: '/studio/billing', label: 'Billing', icon: 'billing' },
+];
+
+/** Studio sidebar — personal studio links (settings without admin gate) */
+export const SIDEBAR_PERSONAL_LINKS: SidebarLink[] = [
+  { href: '/studio/settings', label: 'Settings', icon: 'settings' },
 ];
 
 /** Studio settings sub-navigation (General, Branding) */

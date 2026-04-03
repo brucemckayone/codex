@@ -487,12 +487,11 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        expect(consoleSpy).toHaveBeenCalledWith(
-          'Session authenticated',
-          expect.objectContaining({
-            userId: 'user_1',
-          })
-        );
+        // The fallback ObservabilityClient formats logs as a single dev string
+        expect(consoleSpy).toHaveBeenCalledOnce();
+        const logOutput = consoleSpy.mock.calls[0]?.[0] as string;
+        expect(logOutput).toContain('Session authenticated');
+        expect(logOutput).toContain('user_1');
 
         consoleSpy.mockRestore();
       });

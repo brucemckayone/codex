@@ -22,7 +22,8 @@ export const load: PageServerLoad = async ({
 }) => {
   setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
 
-  const { username } = params;
+  // Strip leading @ from username (URL convention: /@alex-creator)
+  const username = params.username.replace(/^@/, '');
   const api = createServerApi(platform, cookies);
 
   // Attempt to fetch the creator's profile from identity API.
@@ -80,6 +81,12 @@ export const load: PageServerLoad = async ({
       id?: string;
       name?: string | null;
     } | null;
+    organization?: {
+      id?: string;
+      name?: string;
+      slug?: string;
+      logoUrl?: string | null;
+    } | null;
   }> = [];
 
   // If we have the creator's content via their profile, use that.
@@ -101,10 +108,29 @@ export const load: PageServerLoad = async ({
     }
   }
 
+  // Extract unique organizations from content items
+  const orgMap = new Map<
+    string,
+    { id: string; name: string; slug: string; logoUrl: string | null }
+  >();
+  for (const item of contentItems) {
+    const org = item.organization;
+    if (org?.id && org.slug && org.name) {
+      orgMap.set(org.id, {
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        logoUrl: org.logoUrl ?? null,
+      });
+    }
+  }
+  const organizations = [...orgMap.values()];
+
   return {
     username,
     user: locals.user,
     creatorProfile,
     contentItems,
+    organizations,
   };
 };

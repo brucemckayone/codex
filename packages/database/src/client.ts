@@ -1,3 +1,4 @@
+import { ObservabilityClient } from '@codex/observability';
 import { neon, neonConfig, Pool } from '@neondatabase/serverless';
 import { sql } from 'drizzle-orm';
 import { drizzle as drizzleHttp } from 'drizzle-orm/neon-http';
@@ -5,6 +6,8 @@ import { drizzle as drizzleWs } from 'drizzle-orm/neon-serverless';
 import ws from 'ws';
 import { DbEnvConfig, type DbEnvVars } from './config/env.config';
 import * as schema from './schema';
+
+const dbObs = new ObservabilityClient('database');
 
 /**
  * Environment Variable Loading Strategy:
@@ -161,7 +164,9 @@ function initializeDbWs(): ReturnType<typeof drizzleWs<typeof schema>> {
 
     if (!_pool) {
       _pool = new Pool({ connectionString: dbUrl });
-      _pool.on('error', (err) => console.error('Pool error:', err));
+      _pool.on('error', (err) =>
+        dbObs.error('Pool error', { error: err.message })
+      );
     }
 
     // Create Drizzle instance using Pool with WebSocket support
@@ -251,7 +256,9 @@ export function createPerRequestDbClient(env: DbEnvVars): {
 
   // Create a fresh Pool for this request
   const pool = new Pool({ connectionString: dbUrl });
-  pool.on('error', (err) => console.error('Per-request pool error:', err));
+  pool.on('error', (err) =>
+    dbObs.error('Per-request pool error', { error: err.message })
+  );
 
   // Create Drizzle instance with the pool
   const db = drizzleWs(pool, { schema });

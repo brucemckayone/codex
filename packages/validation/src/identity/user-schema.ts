@@ -81,5 +81,19 @@ export const updateProfileSchema = z.object({
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
+/**
+ * Upgrade to creator schema
+ *
+ * Used when a customer upgrades their account to become a creator.
+ * Username is required (not optional) because creators need a profile URL.
+ */
+export const upgradeToCreatorSchema = z.object({
+  username: usernameSchema,
+  bio: bioSchema,
+  socialLinks: socialLinksSchema,
+});
+
+export type UpgradeToCreatorInput = z.infer<typeof upgradeToCreatorSchema>;
+
 // Notification preferences schema is exported from './schemas/notifications.ts
 // to avoid duplicate exports

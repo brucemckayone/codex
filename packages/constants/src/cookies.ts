@@ -25,7 +25,7 @@ export interface CookieConfig {
  * @returns Secure cookie configuration
  *
  * Security:
- * - `secure: true` except for localhost/127.0.0.1 in dev mode
+ * - `secure: true` except for localhost/127.0.0.1/lvh.me/nip.io in dev mode
  * - Domain configurable via `COOKIE_DOMAIN` env var (defaults to .revelations.studio in prod)
  */
 export function getCookieConfig(
@@ -35,14 +35,15 @@ export function getCookieConfig(
 ): CookieConfig {
   const devMode = isDev(env);
 
-  // Only allow insecure cookies for localhost/lvh.me in dev mode
-  const isLocalhost =
+  // Only allow insecure cookies for local dev hosts in dev mode
+  const isLocalDev =
     host === 'localhost' ||
     host === '127.0.0.1' ||
     host?.startsWith('localhost:') ||
     host?.startsWith('127.0.0.1:') ||
-    host?.includes('lvh.me');
-  const secureCookie = devMode ? !isLocalhost : true;
+    host?.includes('lvh.me') ||
+    host?.includes('nip.io');
+  const secureCookie = devMode ? !isLocalDev : true;
 
   const config: CookieConfig = {
     path: '/',
@@ -61,6 +62,13 @@ export function getCookieConfig(
     // lvh.me resolves to 127.0.0.1 and supports cross-subdomain cookies
     // unlike localhost which browsers reject Domain=.localhost per RFC 6761
     config.domain = `.${DOMAINS.DEV}`;
+  } else if (devMode && host?.includes('nip.io') && !config.domain) {
+    // nip.io resolves to the embedded IP (e.g. 192.168.1.10.nip.io → 192.168.1.10)
+    // Extract the four-octet IP + nip.io portion for cross-subdomain cookie sharing
+    const nipMatch = host.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)/);
+    if (nipMatch) {
+      config.domain = `.${nipMatch[1]}`;
+    }
   }
 
   return config;

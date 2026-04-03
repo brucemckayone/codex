@@ -9,11 +9,22 @@
   @prop {string | null} [value] - Currently selected media item ID
   @prop {(mediaItemId: string | null) => void} [onchange] - Selection callback
   @prop {string} [name='mediaItemId'] - Hidden input name for form submission
-  @prop {string} [orgSlug] - Org slug for Media library link
+  @prop {boolean} [showLibraryLink] - Whether to show "Go to Media library" links
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import { formatDuration, formatFileSize } from '$lib/utils/format';
+  import {
+    CheckIcon,
+    ChevronDownIcon,
+    FilmIcon,
+    MinusCircleIcon,
+    MusicIcon,
+    PlayIcon,
+    SearchIcon,
+    UploadIcon,
+    XIcon,
+  } from '$lib/components/ui/Icon';
 
   interface MediaItemOption {
     id: string;
@@ -28,7 +39,7 @@
     value?: string | null;
     onchange?: (mediaItemId: string | null) => void;
     name?: string;
-    orgSlug?: string;
+    showLibraryLink?: boolean;
   }
 
   const {
@@ -36,14 +47,16 @@
     value = null,
     onchange,
     name = 'mediaItemId',
-    orgSlug,
+    showLibraryLink = false,
   }: Props = $props();
 
   // ── State ───────────────────────────────────────────────────────────
   let open = $state(false);
   let searchQuery = $state('');
+  let highlightedIndex = $state(-1);
   let searchInputEl: HTMLInputElement | undefined = $state();
   let containerEl: HTMLDivElement | undefined = $state();
+  let listboxEl: HTMLDivElement | undefined = $state();
 
   const selectedItem = $derived(mediaItems.find((item) => item.id === value) ?? null);
   const showSearch = $derived(mediaItems.length > 5);
@@ -53,11 +66,31 @@
     return mediaItems.filter((item) => item.title.toLowerCase().includes(query));
   });
 
+  // Flat list of selectable option IDs (null = "No media" option)
+  const selectableOptions = $derived.by(() => {
+    if (mediaItems.length === 0 || filteredItems.length === 0) return [];
+    return [null, ...filteredItems.map((item) => item.id)] as (string | null)[];
+  });
+
+  // ID of the currently keyboard-highlighted option (for aria-activedescendant)
+  const highlightedOptionId = $derived.by(() => {
+    if (highlightedIndex < 0 || highlightedIndex >= selectableOptions.length) return undefined;
+    const optionValue = selectableOptions[highlightedIndex];
+    return optionValue === null ? 'media-picker-option-none' : `media-picker-option-${optionValue}`;
+  });
+
+  // Reset highlight when search changes the filtered list
+  $effect(() => {
+    searchQuery;
+    highlightedIndex = -1;
+  });
+
   // ── Open / Close ────────────────────────────────────────────────────
   function toggle() {
     open = !open;
     if (open) {
       searchQuery = '';
+      highlightedIndex = -1;
       requestAnimationFrame(() => searchInputEl?.focus());
     }
   }
@@ -65,6 +98,7 @@
   function close() {
     open = false;
     searchQuery = '';
+    highlightedIndex = -1;
   }
 
   function selectItem(id: string | null) {
@@ -85,10 +119,75 @@
   }
 
   // ── Keyboard ────────────────────────────────────────────────────────
+  function scrollHighlightedIntoView() {
+    requestAnimationFrame(() => {
+      if (!highlightedOptionId || !listboxEl) return;
+      const el = listboxEl.querySelector(`#${highlightedOptionId}`);
+      el?.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && open) {
-      e.preventDefault();
-      close();
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        toggle();
+      }
+      return;
+    }
+
+    const count = selectableOptions.length;
+
+    switch (e.key) {
+      case 'Escape':
+        e.preventDefault();
+        close();
+        containerEl?.querySelector<HTMLElement>('[aria-haspopup]')?.focus();
+        break;
+
+      case 'ArrowDown':
+        e.preventDefault();
+        highlightedIndex = count === 0 ? -1 : (highlightedIndex + 1) % count;
+        scrollHighlightedIntoView();
+        break;
+
+      case 'ArrowUp':
+        e.preventDefault();
+        highlightedIndex = count === 0 ? -1 : (highlightedIndex - 1 + count) % count;
+        scrollHighlightedIntoView();
+        break;
+
+      case 'Home':
+        e.preventDefault();
+        highlightedIndex = count > 0 ? 0 : -1;
+        scrollHighlightedIntoView();
+        break;
+
+      case 'End':
+        e.preventDefault();
+        highlightedIndex = count > 0 ? count - 1 : -1;
+        scrollHighlightedIntoView();
+        break;
+
+      case 'Enter':
+        if (highlightedIndex >= 0 && highlightedIndex < count) {
+          e.preventDefault();
+          selectItem(selectableOptions[highlightedIndex]);
+        }
+        break;
+
+      case ' ':
+        // Don't intercept Space when typing in the search input
+        if (e.target instanceof HTMLInputElement) break;
+        if (highlightedIndex >= 0 && highlightedIndex < count) {
+          e.preventDefault();
+          selectItem(selectableOptions[highlightedIndex]);
+        }
+        break;
+
+      case 'Tab':
+        close();
+        break;
     }
   }
 
@@ -100,21 +199,22 @@
   });
 </script>
 
-<!-- Hidden input for native form submission -->
 <input type="hidden" {name} value={value ?? ''} />
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="media-picker" bind:this={containerEl} onkeydown={handleKeydown}>
-  <!-- Trigger -->
+<div
+  class="media-picker"
+  bind:this={containerEl}
+  role="group"
+  onkeydown={handleKeydown}
+>
   {#if selectedItem}
-    <!-- Selected state: preview card with clear button beside it -->
     <div class="picker-trigger has-value">
       <div class="trigger-preview" onclick={toggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }} tabindex="0" role="button" aria-haspopup="listbox" aria-expanded={open}>
         <span class="trigger-icon" aria-hidden="true">
           {#if selectedItem.mediaType === 'video'}
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <PlayIcon size={16} />
           {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+            <MusicIcon size={16} />
           {/if}
         </span>
         <span class="trigger-details">
@@ -140,24 +240,28 @@
         aria-label={m.media_picker_clear()}
         onclick={handleClear}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        <XIcon size={14} />
       </button>
     </div>
   {:else}
-    <!-- Empty state: placeholder trigger button -->
     <button type="button" class="picker-trigger" onclick={toggle} aria-haspopup="listbox" aria-expanded={open}>
       <span class="trigger-placeholder">{m.media_picker_placeholder()}</span>
-      <svg class="trigger-chevron" class:rotated={open} xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      <ChevronDownIcon size={16} class="trigger-chevron {open ? 'rotated' : ''}" />
     </button>
   {/if}
 
-  <!-- Dropdown -->
   {#if open}
-    <div class="picker-dropdown" role="listbox" aria-label={m.media_picker_placeholder()}>
-      <!-- Search -->
+    <div
+      class="picker-dropdown"
+      role="listbox"
+      id="media-picker-listbox"
+      aria-label={m.media_picker_placeholder()}
+      aria-activedescendant={highlightedOptionId}
+      bind:this={listboxEl}
+    >
       {#if showSearch}
         <div class="dropdown-search">
-          <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <SearchIcon size={14} class="search-icon" />
           <input
             bind:this={searchInputEl}
             type="text"
@@ -170,54 +274,56 @@
 
       <div class="dropdown-list">
         {#if mediaItems.length === 0}
-          <!-- Empty state: no media at all -->
           <div class="empty-state">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line><line x1="17" y1="17" x2="22" y2="17"></line></svg>
+            <FilmIcon size={32} stroke-width="1.5" />
             <span class="empty-title">{m.media_picker_empty_title()}</span>
             <span class="empty-desc">{m.media_picker_empty_desc()}</span>
-            {#if orgSlug}
+            {#if showLibraryLink}
               <a href="/studio/media" class="empty-link">{m.media_picker_go_to_library()}</a>
             {/if}
           </div>
         {:else if filteredItems.length === 0}
-          <!-- No search results -->
           <div class="empty-state">
             <span class="empty-desc">{m.media_picker_no_results()}</span>
           </div>
         {:else}
-          <!-- Clear selection option -->
           <button
             type="button"
             class="option option--clear"
             class:selected={!value}
+            class:highlighted={highlightedIndex === 0}
             role="option"
+            id="media-picker-option-none"
             aria-selected={!value}
             onclick={() => selectItem(null)}
+            onpointerenter={() => { highlightedIndex = 0; }}
           >
             <span class="option-icon option-icon--clear" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+              <MinusCircleIcon size={16} />
             </span>
             <span class="option-label">{m.media_picker_no_media()}</span>
             {#if !value}
-              <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <CheckIcon size={14} class="check-icon" stroke-width="2.5" />
             {/if}
           </button>
 
-          <!-- Media items -->
-          {#each filteredItems as item (item.id)}
+          {#each filteredItems as item, i (item.id)}
             <button
               type="button"
               class="option"
               class:selected={item.id === value}
+              class:highlighted={highlightedIndex === i + 1}
               role="option"
+              id="media-picker-option-{item.id}"
               aria-selected={item.id === value}
               onclick={() => selectItem(item.id)}
+              onpointerenter={() => { highlightedIndex = i + 1; }}
             >
               <span class="option-icon" data-type={item.mediaType} aria-hidden="true">
                 {#if item.mediaType === 'video'}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                  <PlayIcon size={16} />
                 {:else}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                  <MusicIcon size={16} />
                 {/if}
               </span>
               <span class="option-details">
@@ -237,18 +343,17 @@
                 </span>
               </span>
               {#if item.id === value}
-                <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <CheckIcon size={14} class="check-icon" stroke-width="2.5" />
               {/if}
             </button>
           {/each}
         {/if}
       </div>
 
-      <!-- Media library link (when items exist) -->
-      {#if mediaItems.length > 0 && orgSlug}
+      {#if mediaItems.length > 0 && showLibraryLink}
         <div class="dropdown-footer">
           <a href="/studio/media" class="library-link">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            <UploadIcon size={14} />
             {m.media_picker_go_to_library()}
           </a>
         </div>
@@ -287,9 +392,9 @@
   }
 
   .picker-trigger:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
-    border-color: var(--color-primary-500);
+    border-color: var(--color-border-focus);
   }
 
   /* ── Trigger: placeholder state ──────────────────────────────────── */
@@ -380,11 +485,11 @@
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     text-transform: capitalize;
-    color: var(--color-primary-700);
+    color: var(--color-interactive-active);
   }
 
   .type-badge[data-type='audio'] {
-    color: var(--color-info-700, var(--color-primary-700));
+    color: var(--color-info-700, var(--color-interactive-active));
   }
 
   .meta-sep {
@@ -459,12 +564,18 @@
     color: var(--color-text);
   }
 
-  .option:hover {
+  .option:hover,
+  .option.highlighted {
     background-color: var(--color-neutral-100);
   }
 
+  .option.highlighted {
+    outline: 2px solid var(--color-brand-primary-subtle);
+    outline-offset: -2px;
+  }
+
   .option.selected {
-    background-color: var(--color-primary-50);
+    background-color: var(--color-interactive-subtle);
   }
 
   .option-icon {
@@ -480,11 +591,11 @@
   }
 
   .option-icon[data-type='video'] {
-    color: var(--color-primary-600);
+    color: var(--color-interactive-hover);
   }
 
   .option-icon[data-type='audio'] {
-    color: var(--color-info-600, var(--color-primary-600));
+    color: var(--color-info-600, var(--color-interactive-hover));
   }
 
   .option-icon--clear {
@@ -520,7 +631,7 @@
   }
 
   .check-icon {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     flex-shrink: 0;
   }
 
@@ -550,13 +661,13 @@
   .empty-link {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     text-decoration: none;
     transition: var(--transition-colors);
   }
 
   .empty-link:hover {
-    color: var(--color-primary-600);
+    color: var(--color-interactive-hover);
     text-decoration: underline;
   }
 
@@ -578,7 +689,7 @@
   }
 
   .library-link:hover {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   /* ── Dark mode ───────────────────────────────────────────────────── */
@@ -627,12 +738,17 @@
     color: var(--color-text-dark);
   }
 
-  :global([data-theme='dark']) .option:hover {
+  :global([data-theme='dark']) .option:hover,
+  :global([data-theme='dark']) .option.highlighted {
     background-color: var(--color-surface-variant);
   }
 
+  :global([data-theme='dark']) .option.highlighted {
+    outline-color: var(--color-interactive-hover);
+  }
+
   :global([data-theme='dark']) .option.selected {
-    background-color: var(--color-primary-900);
+    background-color: var(--color-interactive-subtle);
   }
 
   :global([data-theme='dark']) .option-icon {
@@ -656,6 +772,6 @@
   }
 
   :global([data-theme='dark']) .type-badge {
-    color: var(--color-primary-300);
+    color: var(--color-brand-primary-subtle);
   }
 </style>

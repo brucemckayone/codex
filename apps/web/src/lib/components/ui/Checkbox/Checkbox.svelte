@@ -3,6 +3,7 @@
   import { untrack } from 'svelte';
   import type { HTMLInputAttributes } from 'svelte/elements';
   import { Label } from '../index';
+  import { CheckIcon } from '$lib/components/ui/Icon';
 
   interface Props extends Omit<HTMLInputAttributes, 'type' | 'checked'> {
     checked?: boolean | 'indeterminate';
@@ -50,9 +51,7 @@
   >
     <div class="checkbox-control">
       {#if checked === true}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="check-icon">
-          <polyline points="20 6 9 17 4 12"></polyline>
-        </svg>
+        <CheckIcon class="check-icon" stroke-width="3" />
       {:else if checked === 'indeterminate'}
         <div class="indeterminate-bar"></div>
       {/if}
@@ -87,12 +86,12 @@
   }
 
   .checkbox-root:global([data-state="checked"]) {
-    background-color: var(--color-primary-500);
-    border-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
+    border-color: var(--color-interactive);
   }
 
   .checkbox-root:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 

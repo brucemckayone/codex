@@ -49,6 +49,7 @@ import type {
   UpdateContactInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
+  UpgradeToCreatorInput,
 } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
@@ -305,6 +306,19 @@ export function createServerApi(
         }),
 
       /**
+       * Upgrade customer account to creator
+       */
+      upgradeToCreator: (data: UpgradeToCreatorInput) =>
+        request<UserData & { role: string }>(
+          'identity',
+          '/api/user/upgrade-to-creator',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
        * Get notification preferences
        */
       getNotificationPreferences: () =>
@@ -462,9 +476,13 @@ export function createServerApi(
        * Unpublish content (published -> draft)
        */
       unpublish: (id: string) =>
-        request<ContentWithRelations>('content', `/api/content/${id}/unpublish`, {
-          method: 'POST',
-        }),
+        request<ContentWithRelations>(
+          'content',
+          `/api/content/${id}/unpublish`,
+          {
+            method: 'POST',
+          }
+        ),
 
       /**
        * Delete content
@@ -498,6 +516,16 @@ export function createServerApi(
         request<PaginatedListResponse<ContentWithRelations>>(
           'content',
           `/api/content/public${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get published content platform-wide (discover page).
+       * No org scoping — returns content from all organizations.
+       */
+      getDiscoverContent: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<ContentWithRelations>>(
+          'content',
+          `/api/content/public/discover${params ? `?${params}` : ''}`
         ),
     },
 

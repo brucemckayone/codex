@@ -10,6 +10,7 @@
   import { page } from '$app/state';
   import ContentTable from '$lib/components/studio/ContentTable.svelte';
   import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
+  import { PlusIcon, FileIcon } from '$lib/components/ui/Icon';
 
   let { data }: { data: PageData } = $props();
 
@@ -32,10 +33,7 @@
       <h1>{m.studio_content_title()}</h1>
     </div>
     <a href="/studio/content/new" class="create-btn">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <line x1="12" y1="5" x2="12" y2="19"></line>
-        <line x1="5" y1="12" x2="19" y2="12"></line>
-      </svg>
+      <PlusIcon size={16} />
       {m.studio_content_create()}
     </a>
   </div>
@@ -54,10 +52,7 @@
     {/if}
   {:else}
     <div class="empty-state">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="empty-icon" aria-hidden="true">
-        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-      </svg>
+      <FileIcon size={48} class="empty-icon" stroke-width="1" />
       <h2 class="empty-title">{m.studio_content_empty()}</h2>
       <a href="/studio/content/new" class="empty-cta">
         {m.studio_content_create()}
@@ -103,7 +98,7 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: #ffffff;
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md);
     text-decoration: none;
@@ -112,11 +107,11 @@
   }
 
   .create-btn:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .create-btn:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -156,19 +151,19 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     text-decoration: none;
     border-radius: var(--radius-md);
     transition: var(--transition-colors);
   }
 
   .empty-cta:hover {
-    background-color: var(--color-primary-50);
-    color: var(--color-primary-600);
+    background-color: var(--color-interactive-subtle);
+    color: var(--color-interactive-hover);
   }
 
   .empty-cta:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -186,6 +181,6 @@
   }
 
   :global([data-theme='dark']) .empty-cta:hover {
-    background-color: var(--color-primary-900);
+    background-color: var(--color-interactive-active);
   }
 </style>

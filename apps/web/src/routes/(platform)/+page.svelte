@@ -3,6 +3,7 @@
    * Platform landing page - codex main domain
    */
   import * as m from '$paraglide/messages';
+  import { ClockIcon, CalendarIcon, UserIcon } from '$lib/components/ui/Icon';
 </script>
 
 <svelte:head>
@@ -31,32 +32,21 @@
     <div class="feature-grid">
       <div class="feature">
         <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 6v6l4 2" />
-          </svg>
+          <ClockIcon size={24} />
         </div>
         <h3>{m.landing_feature_curated_title()}</h3>
         <p>{m.landing_feature_curated_desc()}</p>
       </div>
       <div class="feature">
         <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-            <path d="M16 2v5" />
-            <path d="M8 2v5" />
-            <path d="M2 12h20" />
-          </svg>
+          <CalendarIcon size={24} />
         </div>
         <h3>{m.landing_feature_org_title()}</h3>
         <p>{m.landing_feature_org_desc()}</p>
       </div>
       <div class="feature">
         <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
+          <UserIcon size={24} />
         </div>
         <h3>{m.landing_feature_creators_title()}</h3>
         <p>{m.landing_feature_creators_desc()}</p>
@@ -112,22 +102,22 @@
   }
 
   .cta-primary {
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: white;
   }
 
   .cta-primary:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .cta-secondary {
     background-color: transparent;
-    color: var(--color-primary-500);
-    border: var(--border-width) var(--border-style) var(--color-primary-500);
+    color: var(--color-interactive);
+    border: var(--border-width) var(--border-style) var(--color-interactive);
   }
 
   .cta-secondary:hover {
-    background-color: var(--color-primary-50);
+    background-color: var(--color-interactive-subtle);
   }
 
   .features {
@@ -167,7 +157,7 @@
     width: 3rem;
     height: 3rem;
     margin: 0 auto var(--space-4);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   .feature-icon svg {

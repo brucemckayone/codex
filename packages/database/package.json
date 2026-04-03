@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@codex/constants": "workspace:*",
+    "@codex/observability": "workspace:*",
     "@neondatabase/serverless": "^0.10.4",
     "@types/pg": "^8.15.6",
     "dotenv": "^17.2.3",

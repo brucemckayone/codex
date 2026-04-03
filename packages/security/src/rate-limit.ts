@@ -1,6 +1,9 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { RATE_LIMIT_PRESETS as PRESETS } from '@codex/constants';
+import { ObservabilityClient } from '@codex/observability';
 import type { Context, Next } from 'hono';
+
+const fallbackObs = new ObservabilityClient('rate-limit');
 
 export interface RateLimitOptions {
   /**
@@ -188,7 +191,7 @@ export function rateLimit(options: RateLimitOptions = {}) {
   const store = kv ? new KVStore(kv, keyPrefix) : new InMemoryStore();
 
   if (!kv) {
-    console.warn(
+    fallbackObs.warn(
       '[RateLimit] Using in-memory store (not recommended for production). ' +
         'Bind a KV namespace for distributed rate limiting.'
     );

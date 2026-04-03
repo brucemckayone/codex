@@ -21,6 +21,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { createHlsPlayer } from './hls';
   import { createProgressTracker } from './progress.svelte.ts';
+  import { AlertCircleIcon } from '$lib/components/ui/Icon';
   import './styles.css';
 
   import type Hls from 'hls.js';
@@ -127,20 +128,7 @@
 
   {#if errorMessage}
     <div class="video-player-error" role="alert">
-      <svg
-        class="video-player-error-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="8" x2="12" y2="12" />
-        <line x1="12" y1="16" x2="12.01" y2="16" />
-      </svg>
+      <AlertCircleIcon class="video-player-error-icon" />
       <p class="video-player-error-message">{errorMessage}</p>
       <button class="video-player-error-retry" onclick={retry}>
         Try Again

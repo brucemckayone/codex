@@ -11,6 +11,7 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { ArrowLeftIcon, SearchIcon, FileIcon } from '$lib/components/ui/Icon';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -87,10 +88,7 @@
   <div class="catalog-header">
     <h1 class="catalog-title">{m.creator_content_title({ username: displayName })}</h1>
     <a href="/@{username}" class="back-link">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <line x1="19" y1="12" x2="5" y2="12"></line>
-        <polyline points="12 19 5 12 12 5"></polyline>
-      </svg>
+      <ArrowLeftIcon size={16} />
       @{username}
     </a>
   </div>
@@ -153,10 +151,7 @@
     {/if}
   {:else if data.search || (data.typeFilter && data.typeFilter !== 'all')}
     <div class="empty-state">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-state__icon" aria-hidden="true">
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-      </svg>
+      <SearchIcon size={48} class="empty-state__icon" stroke-width="1.5" />
       <p class="empty-state__text">{m.creator_content_no_results()}</p>
       <a href="/@{username}/content" class="empty-state__clear">
         {m.explore_clear_filters()}
@@ -164,10 +159,7 @@
     </div>
   {:else}
     <div class="empty-state">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-state__icon" aria-hidden="true">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-      </svg>
+      <FileIcon size={48} class="empty-state__icon" stroke-width="1.5" />
       <p class="empty-state__text">{m.creator_content_empty()}</p>
     </div>
   {/if}
@@ -218,7 +210,7 @@
   }
 
   .back-link:hover {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   /* ── Filters ── */
@@ -257,9 +249,9 @@
   }
 
   .search-input:focus {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
-    border-color: var(--color-primary-500);
+    border-color: var(--color-border-focus);
   }
 
   .type-filters {
@@ -287,9 +279,9 @@
   }
 
   .type-btn.active {
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     color: #ffffff;
-    border-color: var(--color-primary-500);
+    border-color: var(--color-interactive);
   }
 
   /* ── Content Grid ── */
@@ -343,13 +335,13 @@
 
   .empty-state__clear {
     font-size: var(--text-sm, 0.875rem);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     text-decoration: none;
     transition: var(--transition-colors);
   }
 
   .empty-state__clear:hover {
-    color: var(--color-primary-600);
+    color: var(--color-interactive-hover);
   }
 
   /* ── Responsive ── */
@@ -373,7 +365,7 @@
   }
 
   :global([data-theme='dark']) .back-link:hover {
-    color: var(--color-primary-400);
+    color: var(--color-interactive);
   }
 
   :global([data-theme='dark']) .search-input {

@@ -124,13 +124,13 @@
   }
 
   .search-input:focus {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
   }
 
   .search-btn {
     padding: var(--space-2) var(--space-4);
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: var(--color-text-inverse);
     border: none;
     border-radius: var(--radius-md);
@@ -141,7 +141,7 @@
   }
 
   .search-btn:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .content-grid {

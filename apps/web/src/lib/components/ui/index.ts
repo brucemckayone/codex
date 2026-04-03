@@ -15,6 +15,7 @@ export { default as ErrorBanner } from './Feedback/ErrorBanner.svelte';
 export { default as ErrorBoundary } from './Feedback/ErrorBoundary/ErrorBoundary.svelte';
 export { NavigationProgress } from './Feedback/NavigationProgress/index';
 export { Spinner } from './Feedback/Spinner/index';
+export * from './Icon/index';
 export { Input } from './Input/index';
 export { Label } from './Label/index';
 // Layout

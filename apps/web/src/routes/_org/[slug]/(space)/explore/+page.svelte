@@ -11,6 +11,7 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { SearchIcon, SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -112,10 +113,7 @@
   <div class="explore__controls">
     <!-- Search -->
     <form class="explore__search" onsubmit={handleSearchSubmit}>
-      <svg class="explore__search-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-      </svg>
+      <SearchIcon size={18} class="explore__search-icon" />
       <input
         type="search"
         class="explore__search-input"
@@ -159,9 +157,9 @@
         <ContentCard
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
+          thumbnail={item.mediaItem?.thumbnailKey ?? item.thumbnailUrl ?? null}
           description={item.description}
-          contentType={item.contentType === 'written' ? 'article' : item.contentType}
+          contentType={(item.contentType === 'written' ? 'article' : item.contentType) as 'video' | 'audio' | 'article'}
           duration={item.mediaItem?.durationSeconds ?? null}
           creator={item.creator ? {
             username: item.creator.name ?? undefined,
@@ -189,12 +187,7 @@
   {:else if hasActiveFilters}
     <!-- No search results -->
     <div class="explore__empty">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="explore__empty-icon">
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        <line x1="8" y1="8" x2="14" y2="14"></line>
-        <line x1="14" y1="8" x2="8" y2="14"></line>
-      </svg>
+      <SearchXIcon size={48} class="explore__empty-icon" stroke-width="1.5" />
       <p class="explore__empty-text">{m.explore_no_results()}</p>
       <button class="explore__clear-btn" onclick={clearFilters}>
         {m.explore_clear_filters()}
@@ -203,10 +196,7 @@
   {:else}
     <!-- No content at all -->
     <div class="explore__empty">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="explore__empty-icon">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-      </svg>
+      <FileIcon size={48} class="explore__empty-icon" stroke-width="1.5" />
       <p class="explore__empty-text">{m.explore_no_content()}</p>
     </div>
   {/if}
@@ -285,8 +275,8 @@
   }
 
   .explore__search-input:focus {
-    border-color: var(--color-primary-500);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    border-color: var(--color-border-focus);
+    box-shadow: var(--shadow-focus-ring);
   }
 
   .explore__search-input::placeholder {
@@ -319,12 +309,12 @@
   }
 
   .explore__filter-btn--active {
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     color: #ffffff;
   }
 
   .explore__filter-btn--active:hover {
-    background: var(--color-primary-600);
+    background: var(--color-interactive-hover);
   }
 
   /* Sort Select */
@@ -345,7 +335,7 @@
   }
 
   .explore__sort:focus {
-    border-color: var(--color-primary-500);
+    border-color: var(--color-border-focus);
   }
 
   /* ── Content Grid ── */
@@ -400,16 +390,16 @@
     padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
     font-size: var(--text-sm, 0.875rem);
     font-weight: var(--font-medium, 500);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     background: transparent;
-    border: var(--border-width, 1px) var(--border-style, solid) var(--color-primary-500);
+    border: var(--border-width, 1px) var(--border-style, solid) var(--color-interactive);
     border-radius: var(--radius-md, 0.375rem);
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease;
   }
 
   .explore__clear-btn:hover {
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     color: #ffffff;
   }
 
@@ -458,8 +448,8 @@
   }
 
   :global([data-theme='dark']) .explore__search-input:focus {
-    border-color: var(--color-primary-400);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    border-color: var(--color-interactive);
+    box-shadow: var(--shadow-focus-ring);
   }
 
   :global([data-theme='dark']) .explore__filter-group {
@@ -476,7 +466,7 @@
   }
 
   :global([data-theme='dark']) .explore__filter-btn--active {
-    background: var(--color-primary-500);
+    background: var(--color-interactive);
     color: #ffffff;
   }
 
@@ -495,12 +485,12 @@
   }
 
   :global([data-theme='dark']) .explore__clear-btn {
-    color: var(--color-primary-400);
-    border-color: var(--color-primary-400);
+    color: var(--color-interactive);
+    border-color: var(--color-interactive);
   }
 
   :global([data-theme='dark']) .explore__clear-btn:hover {
-    background: var(--color-primary-400);
+    background: var(--color-interactive);
     color: #000000;
   }
 </style>

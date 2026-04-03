@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import type { ContentWithRelations } from '$lib/types';
+  import { FileIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import { publishContent, unpublishContent } from '$lib/remote/content.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -78,10 +79,7 @@
 
 {#if isEmpty}
   <div class="empty-state">
-    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="empty-icon" aria-hidden="true">
-      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
-      <polyline points="14 2 14 8 20 8"></polyline>
-    </svg>
+    <FileIcon size={48} stroke-width="1" class="empty-icon" />
     <h3 class="empty-title">{m.studio_content_empty()}</h3>
   </div>
 {:else}
@@ -105,6 +103,7 @@
       </thead>
       <tbody>
         {#each items as item (item.id)}
+          {@const status = getItemStatus(item)}
           <tr class="row">
             <td class="cell-title">
               <a href="/studio/content/{item.id}/edit" class="title-link">
@@ -115,7 +114,6 @@
               <span class="type-badge">{getTypeText(item.contentType)}</span>
             </td>
             <td>
-              {@const status = getItemStatus(item)}
               <span class="status-dot" data-status={getStatusVariant(status)}></span>
               <span class="status-text" data-status={getStatusVariant(status)}>
                 {getStatusText(status)}
@@ -123,7 +121,6 @@
             </td>
             <td class="cell-date">{formatDate(item.createdAt)}</td>
             <td class="cell-actions">
-              {@const status = getItemStatus(item)}
               <button
                 type="button"
                 class="action-btn"
@@ -227,11 +224,11 @@
   }
 
   .title-link:hover {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   .title-link:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
   }
@@ -314,7 +311,7 @@
   }
 
   .action-btn:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
   }
@@ -322,7 +319,7 @@
   .action-edit {
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     text-decoration: none;
     padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-md);
@@ -331,12 +328,12 @@
   }
 
   .action-edit:hover {
-    background-color: var(--color-primary-50);
-    color: var(--color-primary-600);
+    background-color: var(--color-interactive-subtle);
+    color: var(--color-interactive-hover);
   }
 
   .action-edit:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
   }
@@ -409,7 +406,7 @@
   }
 
   :global([data-theme='dark']) .action-edit:hover {
-    background-color: var(--color-primary-900);
+    background-color: var(--color-interactive-subtle);
   }
 
   :global([data-theme='dark']) .empty-icon {

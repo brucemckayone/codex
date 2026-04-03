@@ -316,8 +316,8 @@
 	}
 
 	.filter-list a.active {
-		background-color: var(--color-primary-50);
-		color: var(--color-primary-700);
+		background-color: var(--color-interactive-subtle);
+		color: var(--color-interactive-active);
 	}
 
 	/* Table */
@@ -368,20 +368,20 @@
 		padding: var(--space-2) var(--space-4);
 		font-size: var(--text-sm);
 		font-weight: var(--font-medium);
-		color: var(--color-primary-500);
+		color: var(--color-interactive);
 		text-decoration: none;
 		border-radius: var(--radius-md);
 		transition: var(--transition-colors);
 	}
 
 	.discover-link:hover {
-		background-color: var(--color-primary-50);
-		color: var(--color-primary-600);
+		background-color: var(--color-interactive-subtle);
+		color: var(--color-interactive-hover);
 	}
 
 	.filter-list a:focus-visible,
 	.discover-link:focus-visible {
-		outline: 2px solid var(--color-primary-500);
+		outline: var(--border-width-thick) solid var(--color-focus);
 		outline-offset: 2px;
 	}
 
@@ -395,11 +395,11 @@
 
 	/* Dark mode */
 	:global([data-theme='dark']) .filter-list a.active {
-		background-color: var(--color-primary-900);
-		color: var(--color-primary-300);
+		background-color: var(--color-interactive-active);
+		color: var(--color-brand-primary-subtle);
 	}
 
 	:global([data-theme='dark']) .discover-link:hover {
-		background-color: var(--color-primary-900);
+		background-color: var(--color-interactive-active);
 	}
 </style>

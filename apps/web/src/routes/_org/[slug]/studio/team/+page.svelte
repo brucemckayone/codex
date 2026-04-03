@@ -13,6 +13,7 @@
   import * as m from '$paraglide/messages';
   import MemberTable from '$lib/components/studio/MemberTable.svelte';
   import InviteMemberDialog from '$lib/components/studio/InviteMemberDialog.svelte';
+  import { UserPlusIcon } from '$lib/components/ui/Icon';
   import {
     inviteMember,
     updateMemberRole,
@@ -63,23 +64,7 @@
       <h1 class="page-title">{m.team_title()}</h1>
     </div>
     <button class="btn btn-primary" onclick={() => (inviteDialogOpen = true)}>
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-        <circle cx="9" cy="7" r="4"></circle>
-        <line x1="19" y1="8" x2="19" y2="14"></line>
-        <line x1="22" y1="11" x2="16" y2="11"></line>
-      </svg>
+      <UserPlusIcon size={16} />
       {m.team_invite()}
     </button>
   </header>
@@ -160,16 +145,16 @@
   }
 
   .btn-primary {
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: white;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .btn-primary:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 

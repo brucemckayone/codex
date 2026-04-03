@@ -1,0 +1,140 @@
+/**
+ * Org Brand Token Derivation (CSS Relative Colors)
+ *
+ * Two activation layers:
+ *   [data-org-brand] — color, radius, density, fonts (always when org has branding)
+ *   [data-org-bg]    — surface, text, border (only when background color is explicitly set)
+ *
+ * Every var() has a fallback to the original :root default so nothing
+ * breaks when an input variable isn't set.
+ *
+ * Browser support: Chrome 119+, Firefox 128+, Safari 16.4+
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * COLOR + SHAPE + DENSITY (active when org has any branding)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-org-brand] {
+  /* ─── PRIMARY ───────────────────────────────────────────────────────── */
+  --color-brand-primary: var(--brand-color, var(--color-primary-500));
+  --color-brand-primary-hover: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
+  --color-brand-primary-active: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.15) c h);
+  --color-brand-primary-subtle: oklch(from var(--brand-color, var(--color-primary-500)) 0.96 calc(c * 0.2) h);
+
+  /* ─── INTERACTIVE ───────────────────────────────────────────────────── */
+  --color-interactive: var(--brand-color, var(--color-primary-500));
+  --color-interactive-hover: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
+  --color-interactive-active: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.15) c h);
+  --color-interactive-subtle: oklch(from var(--brand-color, var(--color-primary-500)) 0.97 calc(c * 0.15) h);
+
+  /* ─── FOCUS ─────────────────────────────────────────────────────────── */
+  --color-focus: var(--brand-color, var(--color-primary-500));
+  --color-focus-ring: oklch(from var(--brand-color, var(--color-primary-500)) calc(l + 0.15) calc(c * 0.5) h);
+  --color-border-focus: var(--brand-color, var(--color-primary-500));
+
+  /* ─── TEXT ON BRAND ─────────────────────────────────────────────────── */
+  --color-text-on-brand: oklch(from var(--brand-color, var(--color-primary-500)) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+
+  /* ─── LEGACY PRIMARY ────────────────────────────────────────────────── */
+  --color-primary-500: var(--brand-color, var(--color-primary-500));
+  --color-primary-600: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
+  --color-primary-100: oklch(from var(--brand-color, var(--color-primary-500)) 0.94 calc(c * 0.25) h);
+  --color-primary-50: oklch(from var(--brand-color, var(--color-primary-500)) 0.97 calc(c * 0.15) h);
+
+  /* ─── ACCENT ────────────────────────────────────────────────────────── */
+  --color-brand-accent: var(--brand-accent, var(--color-warning));
+  --color-brand-accent-hover: oklch(from var(--brand-accent, var(--color-warning)) calc(l - 0.08) c h);
+  --color-brand-accent-subtle: oklch(from var(--brand-accent, var(--color-warning)) 0.96 calc(c * 0.2) h);
+
+  /* ─── RADIUS (re-declare full scale at this DOM level) ──────────────── */
+  --brand-radius-base: var(--brand-radius, 0.5rem);
+  --radius-base: var(--brand-radius-base);
+  --radius-xs: calc(var(--radius-base) * 0.25);
+  --radius-sm: calc(var(--radius-base) * 0.5);
+  --radius-md: var(--radius-base);
+  --radius-lg: calc(var(--radius-base) * 1.5);
+  --radius-xl: calc(var(--radius-base) * 2);
+  --radius-button: var(--radius-md);
+  --radius-input: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-modal: var(--radius-xl);
+
+  /* ─── DENSITY (re-declare full scale at this DOM level) ─────────────── */
+  --brand-density-scale: var(--brand-density, 1);
+  --space-unit: calc(0.25rem * var(--brand-density-scale));
+  --space-0-5: calc(var(--space-unit) * 0.5);
+  --space-1: var(--space-unit);
+  --space-1-5: calc(var(--space-unit) * 1.5);
+  --space-2: calc(var(--space-unit) * 2);
+  --space-2-5: calc(var(--space-unit) * 2.5);
+  --space-3: calc(var(--space-unit) * 3);
+  --space-3-5: calc(var(--space-unit) * 3.5);
+  --space-4: calc(var(--space-unit) * 4);
+  --space-5: calc(var(--space-unit) * 5);
+  --space-5-5: calc(var(--space-unit) * 5.5);
+  --space-6: calc(var(--space-unit) * 6);
+  --space-7: calc(var(--space-unit) * 7);
+  --space-8: calc(var(--space-unit) * 8);
+  --space-9: calc(var(--space-unit) * 9);
+  --space-10: calc(var(--space-unit) * 10);
+  --space-11: calc(var(--space-unit) * 11);
+  --space-12: calc(var(--space-unit) * 12);
+  --space-14: calc(var(--space-unit) * 14);
+  --space-16: calc(var(--space-unit) * 16);
+  --space-20: calc(var(--space-unit) * 20);
+  --space-24: calc(var(--space-unit) * 24);
+
+  /* ─── TYPOGRAPHY ────────────────────────────────────────────────────── */
+  --font-body: var(--brand-font-body, var(--font-sans));
+  --font-heading: var(--brand-font-heading, var(--font-sans));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * SURFACE / TEXT / BORDER (only when background color is explicitly set)
+ * Guarded by a separate attribute so default theme is untouched.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-org-bg] {
+  --color-background: var(--brand-bg, white);
+  --color-surface: var(--brand-bg, white);
+  --color-surface-secondary: oklch(from var(--brand-bg, white) calc(l - 0.03) calc(c * 0.5) h);
+  --color-surface-tertiary: oklch(from var(--brand-bg, white) calc(l - 0.06) calc(c * 0.5) h);
+  --color-surface-elevated: oklch(from var(--brand-bg, white) calc(l + 0.02) calc(c * 0.3) h);
+
+  --color-text: oklch(from var(--brand-bg, white) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --color-text-primary: oklch(from var(--brand-bg, white) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --color-text-secondary: oklch(from var(--brand-bg, white) clamp(0.25, abs(0.55 - l) + 0.25, 0.65) 0 0);
+  --color-text-muted: oklch(from var(--brand-bg, white) clamp(0.3, abs(0.5 - l) + 0.3, 0.55) 0 0);
+
+  --color-border: oklch(from var(--brand-bg, white) calc(l - 0.12) calc(c * 0.3) h);
+  --color-border-strong: oklch(from var(--brand-bg, white) calc(l - 0.18) calc(c * 0.3) h);
+  --color-border-subtle: oklch(from var(--brand-bg, white) calc(l - 0.06) calc(c * 0.2) h);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * DARK MODE
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.dark [data-org-brand],
+[data-theme='dark'] [data-org-brand] {
+  --color-brand-primary-hover: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.08) c h);
+  --color-brand-primary-active: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.15) c h);
+  --color-brand-primary-subtle: oklch(from var(--brand-color, var(--color-primary-400)) 0.18 calc(c * 0.3) h);
+  --color-interactive-hover: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.08) c h);
+  --color-interactive-active: oklch(from var(--brand-color, var(--color-primary-400)) calc(l + 0.15) c h);
+  --color-interactive-subtle: oklch(from var(--brand-color, var(--color-primary-400)) 0.15 calc(c * 0.2) h);
+  --color-focus-ring: oklch(from var(--brand-color, var(--color-primary-400)) calc(l - 0.1) calc(c * 0.5) h);
+  --color-primary-100: oklch(from var(--brand-color, var(--color-primary-400)) 0.25 calc(c * 0.3) h);
+  --color-primary-50: oklch(from var(--brand-color, var(--color-primary-400)) 0.18 calc(c * 0.2) h);
+}
+
+.dark [data-org-bg],
+[data-theme='dark'] [data-org-bg] {
+  --color-surface-secondary: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.04) calc(c * 0.5) h);
+  --color-surface-tertiary: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.08) calc(c * 0.5) h);
+  --color-surface-elevated: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.06) calc(c * 0.3) h);
+  --color-border: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.12) calc(c * 0.3) h);
+  --color-border-strong: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.18) calc(c * 0.3) h);
+  --color-border-subtle: oklch(from var(--brand-bg, #1a1a2e) calc(l + 0.06) calc(c * 0.2) h);
+}

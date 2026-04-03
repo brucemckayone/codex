@@ -13,6 +13,7 @@
   import type { OrgMemberItem } from '$lib/server/api';
   import * as Table from '$lib/components/ui/Table';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
+  import { UsersIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -108,24 +109,7 @@
   </div>
 {:else if isEmpty}
   <div class="empty-state">
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="48"
-      height="48"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      class="empty-icon"
-      aria-hidden="true"
-    >
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-      <circle cx="9" cy="7" r="4"></circle>
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-    </svg>
+    <UsersIcon size={48} stroke-width="1" class="empty-icon" />
     <h3 class="empty-title">{m.team_empty()}</h3>
   </div>
 {:else}
@@ -225,8 +209,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: var(--color-primary-100);
-    color: var(--color-primary-700);
+    background-color: var(--color-brand-primary-subtle);
+    color: var(--color-interactive-active);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
   }
@@ -264,7 +248,7 @@
   }
 
   .role-select:focus {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
   }
 
@@ -355,8 +339,8 @@
   }
 
   :global([data-theme='dark']) .avatar {
-    background-color: var(--color-primary-900);
-    color: var(--color-primary-300);
+    background-color: var(--color-interactive-subtle);
+    color: var(--color-brand-primary-subtle);
   }
 
   :global([data-theme='dark']) .role-select {

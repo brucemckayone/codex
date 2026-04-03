@@ -37,7 +37,7 @@ describe('ObservabilityClient', () => {
 
   describe('log levels', () => {
     it('should log info messages', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.info('test info message', { key: 'value' });
 
       expect(consoleSpy.info).toHaveBeenCalledOnce();
@@ -50,7 +50,7 @@ describe('ObservabilityClient', () => {
     });
 
     it('should log warn messages', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.warn('test warning');
 
       expect(consoleSpy.warn).toHaveBeenCalledOnce();
@@ -61,7 +61,7 @@ describe('ObservabilityClient', () => {
     });
 
     it('should log error messages', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.error('test error');
 
       expect(consoleSpy.error).toHaveBeenCalledOnce();
@@ -84,7 +84,7 @@ describe('ObservabilityClient', () => {
 
   describe('trackRequest', () => {
     it('should track request metrics', () => {
-      const obs = new ObservabilityClient('api-service');
+      const obs = new ObservabilityClient('api-service', 'test');
       obs.trackRequest({
         url: '/api/test',
         method: 'GET',
@@ -105,7 +105,7 @@ describe('ObservabilityClient', () => {
 
   describe('trackError', () => {
     it('should track errors with context', () => {
-      const obs = new ObservabilityClient('error-service');
+      const obs = new ObservabilityClient('error-service', 'test');
       const error = new Error('Test error');
 
       obs.trackError(error, {
@@ -125,7 +125,7 @@ describe('ObservabilityClient', () => {
 
   describe('createRequestTimer', () => {
     it('should measure request duration', () => {
-      const obs = new ObservabilityClient('timer-service');
+      const obs = new ObservabilityClient('timer-service', 'test');
       const timer = createRequestTimer(obs, {
         url: '/api/timed',
         method: 'POST',
@@ -147,7 +147,7 @@ describe('ObservabilityClient', () => {
 
   describe('requestId correlation', () => {
     it('should include requestId in log output when set', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.setRequestId('req-abc-123');
       obs.info('correlated log');
 
@@ -158,7 +158,7 @@ describe('ObservabilityClient', () => {
     });
 
     it('should not include requestId when not set', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.info('uncorrelated log');
 
       const loggedData = JSON.parse(
@@ -168,7 +168,7 @@ describe('ObservabilityClient', () => {
     });
 
     it('should include requestId across all log levels', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.setRequestId('req-levels-456');
 
       obs.info('info msg');
@@ -187,7 +187,7 @@ describe('ObservabilityClient', () => {
     });
 
     it('should include requestId in trackError output', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.setRequestId('req-err-789');
       obs.trackError(new Error('fail'), { url: '/test' });
 
@@ -198,7 +198,7 @@ describe('ObservabilityClient', () => {
     });
 
     it('should include requestId in trackRequest output', () => {
-      const obs = new ObservabilityClient('test-service');
+      const obs = new ObservabilityClient('test-service', 'test');
       obs.setRequestId('req-track-000');
       obs.trackRequest({
         url: '/api/test',
@@ -233,13 +233,18 @@ describe('ObservabilityClient', () => {
 
   describe('environment-specific redaction modes', () => {
     it('should use mask mode in development', () => {
-      const devObs = new ObservabilityClient('test', 'development');
+      // Use 'test' environment for JSON-parseable output, but with dev-style redaction options
+      const devObs = new ObservabilityClient('test', 'test', {
+        mode: 'mask',
+        redactEmails: false,
+        keepChars: 4,
+      });
       devObs.info('test', { apiKey: 'sk_test_1234567890' });
 
       const loggedData = JSON.parse(
         consoleSpy.info.mock.calls[0]?.[0] as string
       );
-      // Development uses mask mode with keepChars, shows partial values
+      // Development-style mask mode with keepChars, shows partial values
       expect(loggedData.metadata.apiKey).toContain('...');
     });
 

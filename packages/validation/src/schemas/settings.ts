@@ -4,7 +4,14 @@ import type {
   FeatureSettingsResponse,
 } from '@codex/shared-types';
 import { z } from 'zod';
-import { hexColorSchema, timezoneSchema, urlSchema } from '../primitives';
+import {
+  densityValueSchema,
+  fontNameSchema,
+  hexColorSchema,
+  radiusValueSchema,
+  timezoneSchema,
+  urlSchema,
+} from '../primitives';
 
 /**
  * Platform Settings Validation Schemas
@@ -62,6 +69,13 @@ export const logoMimeTypeSchema = z.enum(ALLOWED_LOGO_MIME_TYPES);
  */
 export const updateBrandingSchema = z.object({
   primaryColorHex: hexColorSchema.optional(),
+  secondaryColorHex: hexColorSchema.nullable().optional(),
+  accentColorHex: hexColorSchema.nullable().optional(),
+  backgroundColorHex: hexColorSchema.nullable().optional(),
+  fontBody: fontNameSchema.nullable().optional(),
+  fontHeading: fontNameSchema.nullable().optional(),
+  radiusValue: radiusValueSchema.optional(),
+  densityValue: densityValueSchema.optional(),
 });
 
 export type UpdateBrandingInput = z.infer<typeof updateBrandingSchema>;
@@ -112,11 +126,25 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
   .object({
     logoUrl: z.string().url('Invalid URL format').nullable(),
     primaryColorHex: hexColorSchema,
+    secondaryColorHex: hexColorSchema.nullable(),
+    accentColorHex: hexColorSchema.nullable(),
+    backgroundColorHex: hexColorSchema.nullable(),
+    fontBody: z.string().nullable(),
+    fontHeading: z.string().nullable(),
+    radiusValue: z.number(),
+    densityValue: z.number(),
   })
   .pipe(
     z.object({
       logoUrl: z.string().url().nullable(),
       primaryColorHex: z.string(),
+      secondaryColorHex: z.string().nullable(),
+      accentColorHex: z.string().nullable(),
+      backgroundColorHex: z.string().nullable(),
+      fontBody: z.string().nullable(),
+      fontHeading: z.string().nullable(),
+      radiusValue: z.number(),
+      densityValue: z.number(),
     })
   );
 
@@ -163,7 +191,14 @@ export const allSettingsSchema = z.object({
 export const DEFAULT_BRANDING: BrandingSettingsResponse = {
   logoUrl: null,
   primaryColorHex: '#3B82F6',
-} as const;
+  secondaryColorHex: null,
+  accentColorHex: null,
+  backgroundColorHex: null,
+  fontBody: null,
+  fontHeading: null,
+  radiusValue: 0.5,
+  densityValue: 1,
+};
 
 /**
  * Default contact settings

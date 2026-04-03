@@ -170,6 +170,81 @@ export const updateNotificationsForm = form(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Become Creator Form
+// ─────────────────────────────────────────────────────────────────────────────
+
+const becomeCreatorFormSchema = z.object({
+  username: z
+    .string()
+    .min(2, 'Username must be at least 2 characters')
+    .max(50, 'Username must be at most 50 characters')
+    .regex(
+      /^[a-z0-9-]+$/,
+      'Username must be lowercase letters, numbers, and hyphens'
+    ),
+  bio: z.string().max(500).optional(),
+  website: z.string().url('Invalid website URL').or(z.literal('')).optional(),
+  twitter: z.string().url('Invalid Twitter URL').or(z.literal('')).optional(),
+  youtube: z.string().url('Invalid YouTube URL').or(z.literal('')).optional(),
+  instagram: z
+    .string()
+    .url('Invalid Instagram URL')
+    .or(z.literal(''))
+    .optional(),
+});
+
+/**
+ * Upgrade account from customer to creator
+ *
+ * On success, redirects to the creator studio.
+ * Username is required — it becomes the creator's profile URL.
+ */
+export const becomeCreatorForm = form(
+  becomeCreatorFormSchema,
+  async ({ username, bio, website, twitter, youtube, instagram }, issue) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const emptyToUndef = (v: string | undefined) => (v === '' ? undefined : v);
+
+    try {
+      await api.account.upgradeToCreator({
+        username,
+        bio: emptyToUndef(bio) ?? undefined,
+        socialLinks: {
+          website: emptyToUndef(website),
+          twitter: emptyToUndef(twitter),
+          youtube: emptyToUndef(youtube),
+          instagram: emptyToUndef(instagram),
+        },
+      });
+
+      redirect(303, '/studio');
+    } catch (error) {
+      if (isRedirect(error)) throw error;
+
+      if (error instanceof ApiError) {
+        if (error.status === 409) {
+          return invalid(issue.username('This username is already taken'));
+        }
+        if (error.status === 422) {
+          return {
+            success: false,
+            error: error.message,
+          };
+        }
+      }
+
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : 'Failed to upgrade account',
+      };
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Profile Query
 // ─────────────────────────────────────────────────────────────────────────────
 

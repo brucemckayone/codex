@@ -175,8 +175,11 @@ export type CreateMediaItemInput = z.infer<typeof createMediaItemSchema>;
 /**
  * Update Media Item Input
  * Used by transcoding service to update status, metadata, etc.
+ * Also supports user-editable fields (title, description) via the studio UI.
  */
 export const updateMediaItemSchema = z.object({
+  title: z.string().min(1).max(255).optional(),
+  description: z.string().max(2000).optional().nullable(),
   status: mediaStatusEnum.optional(),
   durationSeconds: z.number().int().min(0).max(86400).optional(), // Max 24 hours
   width: z.number().int().min(1).max(7680).optional(), // Max 8K width
@@ -254,8 +257,8 @@ const baseContentSchema = z.object({
   // Media reference (required for video/audio, optional for written)
   mediaItemId: uuidSchema.optional().nullable(),
 
-  // Written content body (Phase 2+)
-  contentBody: optionalTextSchema(100000, 'Content body'),
+  // Written content body (Phase 2+) — limit raised for Tiptap JSON overhead
+  contentBody: optionalTextSchema(500000, 'Content body'),
 
   // Organization (nullable = personal content)
   organizationId: uuidSchema.optional().nullable(),
@@ -421,10 +424,9 @@ export const mediaQuerySchema = paginationSchema.extend({
 export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
 /**
- * Public content query schema
- * Used for unauthenticated listing of published content.
- * Extends pagination with optional org scoping, type filter, search, and sort.
- * orgId is optional — omitting it returns platform-wide published content (discover page).
+ * Public content query schema (org-scoped)
+ * Used for unauthenticated listing of published content within an organization.
+ * Requires orgId or slug to prevent unscoped platform-wide enumeration.
  */
 export const publicContentQuerySchema = paginationSchema
   .extend({
@@ -434,12 +436,36 @@ export const publicContentQuerySchema = paginationSchema
     search: z.string().max(255).optional(),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
   })
+  .refine((data) => data.orgId || data.slug, {
+    message: 'Either orgId or slug must be provided',
+    path: ['orgId'],
+  })
   .transform((data) => ({
     ...data,
-    limit: Math.min(data.limit, 50), // Cap at 50 for public endpoint
+    limit: Math.min(data.limit, 50),
   }));
 
 export type PublicContentQueryInput = z.infer<typeof publicContentQuerySchema>;
+
+/**
+ * Discover content query schema (platform-wide)
+ * Used by the discover page to browse all published content across organizations.
+ * Intentionally omits orgId/slug — platform-wide access is the only valid use case.
+ */
+export const discoverContentQuerySchema = paginationSchema
+  .extend({
+    contentType: contentTypeEnum.optional(),
+    search: z.string().max(255).optional(),
+    sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
+  })
+  .transform((data) => ({
+    ...data,
+    limit: Math.min(data.limit, 50),
+  }));
+
+export type DiscoverContentQueryInput = z.infer<
+  typeof discoverContentQuerySchema
+>;
 
 /**
  * Organization query schema

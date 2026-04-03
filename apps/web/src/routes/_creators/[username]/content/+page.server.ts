@@ -21,7 +21,8 @@ export const load: PageServerLoad = async ({
 }) => {
   setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
 
-  const { username } = params;
+  // Strip leading @ from username (URL convention: /@alex-creator)
+  const username = params.username.replace(/^@/, '');
   const api = createServerApi(platform, cookies);
 
   // Parse URL search params for filtering and pagination

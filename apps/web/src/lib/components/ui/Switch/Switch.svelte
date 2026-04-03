@@ -75,12 +75,12 @@
   }
 
   .switch:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
   .switch[data-state="checked"] {
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
   }
 
   .switch:disabled {

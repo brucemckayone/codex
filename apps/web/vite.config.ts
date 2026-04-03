@@ -19,11 +19,12 @@ export default defineConfig({
     testTimeout: 15000,
   },
   server: {
-    // Bind to 0.0.0.0 so lvh.me (which resolves to 127.0.0.1 IPv4) can reach the server.
+    // Bind to 0.0.0.0 so lvh.me and nip.io (LAN wildcard DNS) can reach the server.
     host: true,
-    // Allow lvh.me and all subdomains (e.g. bruce-studio.lvh.me) for local dev.
-    // lvh.me is used instead of localhost to enable cross-subdomain cookie sharing.
-    allowedHosts: ['.lvh.me'],
+    // Allow lvh.me and nip.io plus all subdomains for local dev.
+    // lvh.me resolves to 127.0.0.1, nip.io resolves to the embedded LAN IP.
+    // Both support cross-subdomain cookie sharing (unlike localhost per RFC 6761).
+    allowedHosts: ['.lvh.me', '.nip.io'],
   },
   // Tell Vitest to use the `browser` entry points in `package.json` files,
   // even though it's running in Node. This is required for Svelte 5 runes

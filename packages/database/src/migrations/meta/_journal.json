@@ -246,6 +246,27 @@
       "when": 1774737633803,
       "tag": "0034_amazing_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1775077794650,
+      "tag": "0035_lying_sentinels",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1775081600183,
+      "tag": "0036_smiling_unus",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1775083089414,
+      "tag": "0037_huge_warhawk",
+      "breakpoints": true
     }
   ]
 }

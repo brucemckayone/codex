@@ -43,8 +43,8 @@
 	}
 
 	.tabs-trigger:global([data-state='active']) {
-		color: var(--color-primary-500);
-		border-bottom-color: var(--color-primary-500);
+		color: var(--color-interactive);
+		border-bottom-color: var(--color-interactive);
 	}
 
 	.tabs-trigger:global([data-disabled]) {

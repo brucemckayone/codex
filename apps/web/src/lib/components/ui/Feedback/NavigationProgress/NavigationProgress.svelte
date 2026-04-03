@@ -40,8 +40,8 @@
 
   .bar {
     height: 100%;
-    background: var(--color-primary-500);
-    box-shadow: 0 0 8px var(--color-primary-400);
+    background: var(--color-interactive);
+    box-shadow: 0 0 8px var(--color-focus);
     animation: trickle 4s ease-out forwards;
   }
 

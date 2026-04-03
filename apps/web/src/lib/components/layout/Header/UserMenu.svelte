@@ -3,6 +3,7 @@
   import { page } from '$app/state';
   import { submitFormPost } from '$lib/utils/navigation';
   import { buildCreatorsUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
@@ -39,7 +40,7 @@
         <AvatarFallback>{getInitials(user.name)}</AvatarFallback>
       </Avatar>
       <span class="user-name">{user.name}</span>
-      <svg class="chevron" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      <ChevronDownIcon size={16} class="chevron" />
     </DropdownMenuTrigger>
     <DropdownMenuContent>
       <div class="user-info">
@@ -149,13 +150,13 @@
 
   .auth-link--register {
     padding: var(--space-1) var(--space-3);
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: var(--color-text-inverse);
     border-radius: var(--radius-md);
   }
 
   .auth-link--register:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
     color: var(--color-text-inverse);
   }
 </style>

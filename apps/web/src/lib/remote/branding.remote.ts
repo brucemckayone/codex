@@ -50,12 +50,41 @@ export const getBrandingSettings = query(
 // Update Branding Form (Primary Color)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const hexColorOptional = z
+  .string()
+  .regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color')
+  .optional();
+
+const hexColorNullable = z
+  .string()
+  .regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color')
+  .or(z.literal(''))
+  .transform((v) => (v === '' ? null : v))
+  .nullable()
+  .optional();
+
 const updateBrandingFormSchema = z.object({
   orgId: z.string().uuid(),
-  primaryColorHex: z
+  primaryColorHex: hexColorOptional,
+  secondaryColorHex: hexColorNullable,
+  accentColorHex: hexColorNullable,
+  backgroundColorHex: hexColorNullable,
+  fontBody: z
     .string()
-    .regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color')
+    .max(50)
+    .or(z.literal(''))
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
     .optional(),
+  fontHeading: z
+    .string()
+    .max(50)
+    .or(z.literal(''))
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  radiusValue: z.coerce.number().min(0).max(2).optional(),
+  densityValue: z.coerce.number().min(0.75).max(1.25).optional(),
 });
 
 /**
@@ -75,12 +104,31 @@ const updateBrandingFormSchema = z.object({
  */
 export const updateBrandingForm = form(
   updateBrandingFormSchema,
-  async ({ orgId, primaryColorHex }) => {
+  async ({
+    orgId,
+    primaryColorHex,
+    secondaryColorHex,
+    accentColorHex,
+    backgroundColorHex,
+    fontBody,
+    fontHeading,
+    radiusValue,
+    densityValue,
+  }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
     try {
-      const result = await api.org.updateBranding(orgId, { primaryColorHex });
+      const result = await api.org.updateBranding(orgId, {
+        primaryColorHex,
+        secondaryColorHex,
+        accentColorHex,
+        backgroundColorHex,
+        fontBody,
+        fontHeading,
+        radiusValue,
+        densityValue,
+      });
 
       // Invalidate cache so layout picks up the new color
       await invalidateCache(platform, orgId);

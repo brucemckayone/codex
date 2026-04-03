@@ -10,6 +10,7 @@
   import { page } from '$app/state';
   import CustomerTable from '$lib/components/studio/CustomerTable.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
+  import { UsersIcon } from '$lib/components/ui/Icon';
 
   let { data }: { data: PageData } = $props();
 
@@ -53,12 +54,7 @@
     {/if}
   {:else}
     <div class="empty-state">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="empty-icon" aria-hidden="true">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-        <circle cx="9" cy="7" r="4"></circle>
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-      </svg>
+      <UsersIcon size={48} class="empty-icon" stroke-width="1" />
       <h2 class="empty-title">{m.studio_customers_empty()}</h2>
     </div>
   {/if}

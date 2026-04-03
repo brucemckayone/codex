@@ -14,7 +14,7 @@ const MANIFEST_KEY = 'codex-versions';
 
 /** All localStorage keys owned by Codex client state */
 const CODEX_STORAGE_KEYS = [
-  'codex-versions',
+  MANIFEST_KEY,
   'codex-library',
   'codex-playback-progress',
 ] as const;

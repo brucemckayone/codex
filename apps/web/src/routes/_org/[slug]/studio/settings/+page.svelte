@@ -327,9 +327,9 @@
   }
 
   .field-input:focus {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
-    border-color: var(--color-primary-500);
+    border-color: var(--color-border-focus);
   }
 
   .field-select {
@@ -385,16 +385,16 @@
   }
 
   .btn-primary {
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     color: white;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .btn-primary:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 

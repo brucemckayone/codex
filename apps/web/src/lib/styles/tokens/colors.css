@@ -54,19 +54,5 @@
   --color-info-700: #1d4ed8;
 }
 
-/* Organization Brand Override Pattern */
-[data-org-brand] {
-  /* Colors */
-  --color-primary-500: var(--org-brand-primary, #e85a3f);
-  --color-primary-600: var(--org-brand-primary-dark, #d54429);
-
-  /* Typography */
-  --brand-font-body: var(--org-brand-font-body, 'Inter');
-  --brand-font-heading: var(--org-brand-font-heading, 'Inter');
-
-  /* Shape */
-  --brand-radius-base: var(--org-brand-radius, 0.5rem);
-
-  /* Density (0.875 = compact, 1 = normal, 1.125 = spacious) */
-  --brand-density-scale: var(--org-brand-density, 1);
-}
+/* Organization brand overrides are handled by org-brand.css
+   using CSS relative colors (OKLCH) from --brand-* input variables. */

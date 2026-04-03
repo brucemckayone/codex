@@ -2735,7 +2735,7 @@ export const branding_logo_delete_confirm = () => `Are you sure you want to remo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_color_title = () => `Brand Color`
+export const branding_color_title = () => `Brand Colors`
 
 
 /**
@@ -2743,7 +2743,7 @@ export const branding_color_title = () => `Brand Color`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_color_description = () => `Choose a primary color for buttons, links, and accents across your platform.`
+export const branding_color_description = () => `Choose colors for buttons, links, and accents across your platform.`
 
 
 /**
@@ -2752,6 +2752,134 @@ export const branding_color_description = () => `Choose a primary color for butt
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const branding_color_primary = () => `Primary Color`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_color_secondary = () => `Secondary Color`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_color_accent = () => `Accent Color`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_color_clear = () => `Clear`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_typography_title = () => `Typography`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_typography_description = () => `Choose fonts for your platform. Leave as default to use the system font.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_typography_body = () => `Body Font`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_typography_heading = () => `Heading Font`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_typography_default = () => `Platform Default (Inter)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_title = () => `Shape & Spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_description = () => `Control the border radius and spacing density across your platform.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_radius = () => `Border Radius`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_radius_sharp = () => `Sharp`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_radius_rounded = () => `Round`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_density = () => `Spacing Density`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_density_compact = () => `Compact`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_shape_density_spacious = () => `Spacious`
 
 
 /**
@@ -3240,6 +3368,54 @@ export const media_picker_go_to_library = () => `Go to Media library`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const media_picker_no_results = () => `No media matches your search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_edit_title_label = () => `Title`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_edit_description_label = () => `Description`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_edit_description_placeholder = () => `Add a description...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_edit_save = () => `Save Changes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_filter_all_types = () => `All Types`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_filter_all_status = () => `All Status`
 
 
 /**

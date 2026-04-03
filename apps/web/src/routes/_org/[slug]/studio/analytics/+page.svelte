@@ -205,18 +205,18 @@
   }
 
   .preset-btn:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
   .preset-btn.active {
-    background-color: var(--color-primary-500);
-    border-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
+    border-color: var(--color-interactive);
     color: white;
   }
 
   .preset-btn.active:hover {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   /* Summary Cards */
@@ -297,8 +297,8 @@
   }
 
   :global([data-theme='dark']) .preset-btn.active {
-    background-color: var(--color-primary-500);
-    border-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
+    border-color: var(--color-interactive);
     color: white;
   }
 </style>

@@ -8,8 +8,11 @@
  *   app.use('*', createEnvValidationMiddleware(['DATABASE_URL', 'STRIPE_SECRET_KEY']));
  */
 
+import { ObservabilityClient } from '@codex/observability';
 import type { Bindings, HonoEnv } from '@codex/shared-types';
 import type { Context } from 'hono';
+
+const fallbackObs = new ObservabilityClient('env-validation');
 
 /**
  * Extended bindings type for local proxy support
@@ -78,12 +81,12 @@ function validateEnvironment(
   if (config.optional) {
     for (const key of config.optional) {
       if (!env[key]) {
-        console.warn(`⚠️  Optional env var missing: ${key}`);
+        fallbackObs.warn(`Optional env var missing: ${key}`);
       }
     }
   }
 
-  console.log('✅ Environment validation passed');
+  fallbackObs.info('Environment validation passed');
 }
 
 /**
@@ -171,7 +174,9 @@ export function createEnvValidationMiddleware(config: EnvValidationConfig) {
             error: error instanceof Error ? error.message : String(error),
           });
         } else {
-          console.error(error);
+          fallbackObs.error('Environment validation failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
         return c.json(
           {

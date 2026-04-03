@@ -11,6 +11,7 @@
   import type { ActivityItem, ActivityItemType } from '@codex/shared-types';
   import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/Card';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { ShoppingBagIcon, DownloadIcon, UserPlusIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -66,11 +67,11 @@
           <div class="activity-item">
             <span class="activity-icon {config.colorClass}" aria-hidden="true">
               {#if activity.type === 'purchase'}
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+                <ShoppingBagIcon size={16} />
               {:else if activity.type === 'content_published'}
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4"/></svg>
+                <DownloadIcon size={16} />
               {:else}
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>
+                <UserPlusIcon size={16} />
               {/if}
             </span>
             <div class="activity-text">
@@ -118,8 +119,8 @@
   }
 
   .activity-icon.event-publish {
-    background-color: var(--color-primary-50, hsl(210, 100%, 95%));
-    color: var(--color-primary-700, hsl(210, 80%, 40%));
+    background-color: var(--color-interactive-subtle, hsl(210, 100%, 95%));
+    color: var(--color-interactive-active, hsl(210, 80%, 40%));
   }
 
   .activity-icon.event-signup {
@@ -171,8 +172,8 @@
   }
 
   :global([data-theme='dark']) .activity-icon.event-publish {
-    background-color: color-mix(in srgb, var(--color-primary-700, hsl(210, 80%, 40%)) 20%, transparent);
-    color: var(--color-primary-400, hsl(210, 80%, 60%));
+    background-color: color-mix(in srgb, var(--color-interactive-active, hsl(210, 80%, 40%)) 20%, transparent);
+    color: var(--color-interactive, hsl(210, 80%, 60%));
   }
 
   :global([data-theme='dark']) .activity-icon.event-signup {

@@ -23,6 +23,7 @@
   import { untrack } from 'svelte';
   import { fly } from 'svelte/transition';
   import { Label } from '../index';
+  import { ChevronDownIcon, CheckIcon } from '$lib/components/ui/Icon';
 
   interface Option {
     value: string;
@@ -87,7 +88,7 @@
     <span class="select-value">
       {$selectedLabel || placeholder}
     </span>
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="select-icon"><path d="m6 9 6 6 6-6"/></svg>
+    <ChevronDownIcon size={16} class="select-icon" />
   </button>
 
   {#if $open}
@@ -96,7 +97,7 @@
         <div {...$option({ value: opt.value, label: opt.label })} use:option class="select-option">
           <span class="option-label">{opt.label}</span>
           {#if $isSelected(opt.value)}
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="check-icon"><polyline points="20 6 9 17 4 12"/></svg>
+            <CheckIcon size={16} class="check-icon" />
           {/if}
         </div>
       {/each}
@@ -130,7 +131,7 @@
   }
 
   .select-trigger:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -183,12 +184,12 @@
   }
 
   .select-option:global([aria-selected="true"]) {
-    background-color: var(--color-primary-50);
-    color: var(--color-primary-900);
+    background-color: var(--color-interactive-subtle);
+    color: var(--color-interactive-active);
   }
 
   .check-icon {
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
   }
 
   .sr-only {

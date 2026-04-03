@@ -66,14 +66,9 @@ function bumpOrgContentVersion(
     cache
       .invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId))
       .catch((err: unknown) => {
-        const msg = 'Cache invalidation failed';
-        if (obs) {
-          obs.warn(msg, {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        } else {
-          console.error(msg, err);
-        }
+        obs?.warn('Cache invalidation failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       })
   );
 }
@@ -264,7 +259,7 @@ app.delete(
           ctx.input.params.id,
           ctx.user.id
         );
-        organizationId = content?.organizationId;
+        organizationId = content?.organizationId ?? undefined;
       } catch {
         // Pre-fetch for cache invalidation is non-critical
       }

@@ -18,6 +18,7 @@
  */
 
 import { BRAND_COLORS } from '@codex/constants';
+import { createDbClient } from '@codex/database';
 import type {
   CreateOrganizationResponse,
   OrganizationBySlugResponse,
@@ -28,6 +29,7 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/organization';
+import { BrandingSettingsService } from '@codex/platform-settings';
 import { NotFoundError } from '@codex/service-errors';
 import type {
   CheckSlugResponse,
@@ -58,7 +60,7 @@ const app = new Hono<HonoEnv>();
 app.post(
   '/',
   procedure({
-    policy: { auth: 'required' },
+    policy: { auth: 'required', roles: ['creator', 'admin', 'platform_owner'] },
     input: { body: createOrganizationSchema },
     successStatus: 201,
     handler: async (ctx): Promise<CreateOrganizationResponse['data']> => {
@@ -203,18 +205,45 @@ app.get(
         });
       }
 
-      let branding: { logoUrl: string | null; primaryColorHex: string } = {
-        logoUrl: null,
+      // Create a branding service scoped to the found org's ID.
+      // Can't use ctx.services.settings — requires requireOrgMembership
+      // which isn't available on this public (no-auth) endpoint.
+      const brandingDb = createDbClient(ctx.env);
+      const brandingSvc = new BrandingSettingsService({
+        db: brandingDb,
+        environment: ctx.env.ENVIRONMENT ?? 'development',
+        organizationId: organization.id,
+      });
+
+      let branding = {
+        logoUrl: null as string | null,
         primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
+        secondaryColorHex: null as string | null,
+        accentColorHex: null as string | null,
+        backgroundColorHex: null as string | null,
+        fontBody: null as string | null,
+        fontHeading: null as string | null,
+        radiusValue: 0.5,
+        densityValue: 1,
       };
       try {
-        const b = await ctx.services.settings.getBranding();
+        const b = await brandingSvc.get();
         branding = {
           logoUrl: b.logoUrl ?? null,
           primaryColorHex: b.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
+          secondaryColorHex: b.secondaryColorHex ?? null,
+          accentColorHex: b.accentColorHex ?? null,
+          backgroundColorHex: b.backgroundColorHex ?? null,
+          fontBody: b.fontBody ?? null,
+          fontHeading: b.fontHeading ?? null,
+          radiusValue: b.radiusValue ?? 0.5,
+          densityValue: b.densityValue ?? 1,
         };
-      } catch {
-        // No branding settings yet — use defaults
+      } catch (err) {
+        console.error(
+          '[public-info] getBranding failed:',
+          err instanceof Error ? err.message : err
+        );
       }
 
       return {
@@ -223,7 +252,18 @@ app.get(
         name: organization.name,
         description: organization.description,
         logoUrl: branding.logoUrl,
-        brandColors: { primary: branding.primaryColorHex },
+        brandColors: {
+          primary: branding.primaryColorHex,
+          secondary: branding.secondaryColorHex,
+          accent: branding.accentColorHex,
+          background: branding.backgroundColorHex,
+        },
+        brandFonts: {
+          body: branding.fontBody,
+          heading: branding.fontHeading,
+        },
+        brandRadius: branding.radiusValue,
+        brandDensity: branding.densityValue,
       };
     },
   })

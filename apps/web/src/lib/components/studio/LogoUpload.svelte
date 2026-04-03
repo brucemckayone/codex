@@ -14,6 +14,7 @@
   @prop {object} deleteFormAttrs - Spread attrs from deleteLogoForm
 -->
 <script lang="ts">
+  import { UploadIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -158,23 +159,7 @@
         }
       }}
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="32"
-        height="32"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="upload-icon"
-        aria-hidden="true"
-      >
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="17 8 12 3 7 8"></polyline>
-        <line x1="12" y1="3" x2="12" y2="15"></line>
-      </svg>
+      <UploadIcon size={32} stroke-width="1.5" class="upload-icon" />
 
       <p class="drop-text">
         {m.branding_logo_upload()}
@@ -261,13 +246,13 @@
 
   .drop-zone:hover,
   .drop-zone:focus-visible {
-    border-color: var(--color-primary-400);
-    background-color: var(--color-primary-50, var(--color-surface-secondary));
+    border-color: var(--color-focus);
+    background-color: var(--color-interactive-subtle, var(--color-surface-secondary));
   }
 
   .drop-zone.dragging {
-    border-color: var(--color-primary-500);
-    background-color: var(--color-primary-50, var(--color-surface-secondary));
+    border-color: var(--color-interactive);
+    background-color: var(--color-interactive-subtle, var(--color-surface-secondary));
   }
 
   .drop-zone.disabled {
@@ -276,7 +261,7 @@
   }
 
   .drop-zone:focus-visible {
-    outline: 2px solid var(--color-primary-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -287,7 +272,7 @@
   .drop-text {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-primary-500);
+    color: var(--color-interactive);
     margin: 0;
     text-align: center;
   }
@@ -388,7 +373,7 @@
   :global([data-theme='dark']) .drop-zone:hover,
   :global([data-theme='dark']) .drop-zone:focus-visible,
   :global([data-theme='dark']) .drop-zone.dragging {
-    border-color: var(--color-primary-400);
+    border-color: var(--color-focus);
     background-color: var(--color-surface-variant);
   }
 

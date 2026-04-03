@@ -125,7 +125,7 @@
   }
 
   .bar {
-    background-color: var(--color-primary-500);
+    background-color: var(--color-interactive);
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     transition: background-color 0.15s ease;
     min-height: 2px;
@@ -136,7 +136,7 @@
   }
 
   .bar-wrapper:hover .bar {
-    background-color: var(--color-primary-600);
+    background-color: var(--color-interactive-hover);
   }
 
   .bar-wrapper:hover .bar.bar-zero {
