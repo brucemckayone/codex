@@ -5,7 +5,7 @@
 	import Badge from '$lib/components/ui/Badge/Badge.svelte';
 	import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
 	import Button from '$lib/components/ui/Button/Button.svelte';
-	import { Alert } from '$lib/components/ui';
+	import { Alert, EmptyState } from '$lib/components/ui';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
@@ -208,10 +208,11 @@
 				</div>
 			{/if}
 		{:else}
-			<div class="empty-state">
-				<p>{m.account_payments_none_history()}</p>
-				<a href="/discover" class="discover-link">{m.account_payments_discover_link()}</a>
-			</div>
+			<EmptyState title={m.account_payments_none_history()}>
+				{#snippet action()}
+					<a href="/discover" class="discover-link">{m.account_payments_discover_link()}</a>
+				{/snippet}
+			</EmptyState>
 		{/if}
 	</div>
 </div>
@@ -346,18 +347,7 @@
 		text-align: right;
 	}
 
-	/* Empty state */
-	.empty-state {
-		text-align: center;
-		padding: var(--space-12) var(--space-4);
-	}
-
-	.empty-state p {
-		font-size: var(--text-sm);
-		color: var(--color-text-secondary);
-		margin-bottom: var(--space-4);
-	}
-
+	/* Empty state action */
 	.discover-link {
 		display: inline-block;
 		padding: var(--space-2) var(--space-4);

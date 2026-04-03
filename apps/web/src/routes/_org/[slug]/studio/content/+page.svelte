@@ -12,6 +12,7 @@
   import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
   import { PageHeader } from '$lib/components/ui';
   import { PlusIcon, FileIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -51,13 +52,13 @@
       </div>
     {/if}
   {:else}
-    <div class="empty-state">
-      <FileIcon size={48} class="empty-icon" stroke-width="1" />
-      <h2 class="empty-title">{m.studio_content_empty()}</h2>
-      <a href="/studio/content/new" class="empty-cta">
-        {m.studio_content_create()}
-      </a>
-    </div>
+    <EmptyState title={m.studio_content_empty()} icon={FileIcon}>
+      {#snippet action()}
+        <a href="/studio/content/new" class="empty-cta">
+          {m.studio_content_create()}
+        </a>
+      {/snippet}
+    </EmptyState>
   {/if}
 </div>
 
@@ -67,8 +68,7 @@
     flex-direction: column;
     gap: var(--space-6);
   }
-
-.create-btn {
+  .create-btn {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
@@ -98,28 +98,6 @@
     justify-content: center;
     padding-top: var(--space-4);
     border-top: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-3);
-    padding: var(--space-16) var(--space-4);
-    text-align: center;
-  }
-
-  .empty-icon {
-    color: var(--color-text-muted);
-    margin-bottom: var(--space-2);
-  }
-
-  .empty-title {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0;
   }
 
   .empty-cta {

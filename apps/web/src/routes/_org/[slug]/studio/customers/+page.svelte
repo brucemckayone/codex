@@ -12,6 +12,7 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import { PageHeader } from '$lib/components/ui';
   import { UsersIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -51,10 +52,7 @@
       </div>
     {/if}
   {:else}
-    <div class="empty-state">
-      <UsersIcon size={48} class="empty-icon" stroke-width="1" />
-      <h2 class="empty-title">{m.studio_customers_empty()}</h2>
-    </div>
+    <EmptyState title={m.studio_customers_empty()} icon={UsersIcon} />
   {/if}
 </div>
 
@@ -64,8 +62,7 @@
     flex-direction: column;
     gap: var(--space-6);
   }
-
-.count-badge {
+  .count-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -86,27 +83,5 @@
     border-top: var(--border-width) var(--border-style) var(--color-border);
   }
 
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-3);
-    padding: var(--space-16) var(--space-4);
-    text-align: center;
-  }
 
-  .empty-icon {
-    color: var(--color-text-muted);
-    margin-bottom: var(--space-2);
-  }
-
-  .empty-title {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0;
-    max-width: 400px;
-    line-height: var(--leading-normal);
-  }
 </style>

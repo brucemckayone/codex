@@ -12,7 +12,7 @@
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
-  import { Alert } from '$lib/components/ui';
+  import { Alert, EmptyState } from '$lib/components/ui';
   import { portalSessionForm } from '$lib/remote/billing.remote';
 
   let { data }: { data: PageData } = $props();
@@ -115,9 +115,7 @@
         </Table.Root>
       </div>
     {:else}
-      <div class="empty-state">
-        <p>{m.billing_top_content_empty()}</p>
-      </div>
+      <EmptyState title={m.billing_top_content_empty()} />
     {/if}
   </div>
 </div>
@@ -203,15 +201,5 @@
     text-align: right;
   }
 
-  .empty-state {
-    text-align: center;
-    padding: var(--space-8) var(--space-4);
-  }
-
-  .empty-state p {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
-  }
 
 </style>

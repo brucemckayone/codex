@@ -12,6 +12,7 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { ArrowLeftIcon, SearchIcon, FileIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -150,18 +151,15 @@
       </div>
     {/if}
   {:else if data.search || (data.typeFilter && data.typeFilter !== 'all')}
-    <div class="empty-state">
-      <SearchIcon size={48} class="empty-state__icon" stroke-width="1.5" />
-      <p class="empty-state__text">{m.creator_content_no_results()}</p>
-      <a href="/@{username}/content" class="empty-state__clear">
-        {m.explore_clear_filters()}
-      </a>
-    </div>
+    <EmptyState title={m.creator_content_no_results()} icon={SearchIcon}>
+      {#snippet action()}
+        <a href="/@{username}/content" class="empty-state__clear">
+          {m.explore_clear_filters()}
+        </a>
+      {/snippet}
+    </EmptyState>
   {:else}
-    <div class="empty-state">
-      <FileIcon size={48} class="empty-state__icon" stroke-width="1.5" />
-      <p class="empty-state__text">{m.creator_content_empty()}</p>
-    </div>
+    <EmptyState title={m.creator_content_empty()} icon={FileIcon} />
   {/if}
 </div>
 
@@ -312,27 +310,6 @@
   }
 
   /* ── Empty State ── */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4, 1rem);
-    padding: var(--space-16, 4rem) var(--space-4, 1rem);
-    text-align: center;
-  }
-
-  .empty-state__icon {
-    color: var(--color-text-muted);
-    opacity: var(--opacity-60);
-  }
-
-  .empty-state__text {
-    margin: 0;
-    font-size: var(--text-lg, 1.125rem);
-    color: var(--color-text-muted);
-  }
-
   .empty-state__clear {
     font-size: var(--text-sm, 0.875rem);
     color: var(--color-interactive);

@@ -8,6 +8,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import LibraryFilters from '$lib/components/library/LibraryFilters.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { buildContentUrl, buildPlatformUrl } from '$lib/utils/subdomain';
@@ -141,14 +142,13 @@
           : 'Your library could not be loaded. Please try refreshing the page.'}
     />
   {:else if allItems.length === 0 && !hasActiveFilters}
-    <div class="empty-state">
-      <p class="empty-text">
-        You haven't purchased any content from {orgName} yet.
-      </p>
-      <a href="/explore" class="browse-btn">
-        Browse Content
-      </a>
-    </div>
+    <EmptyState title="You haven't purchased any content from {orgName} yet.">
+      {#snippet action()}
+        <a href="/explore" class="browse-btn">
+          Browse Content
+        </a>
+      {/snippet}
+    </EmptyState>
   {:else}
     <!-- Sort dropdown -->
     <div class="sort-bar">
@@ -392,16 +392,6 @@
 
   .progress-completed {
     color: var(--color-success);
-  }
-
-  .empty-state {
-    text-align: center;
-    padding: var(--space-16) 0;
-  }
-
-  .empty-text {
-    color: var(--color-text-secondary);
-    margin-bottom: var(--space-4);
   }
 
   .browse-btn {

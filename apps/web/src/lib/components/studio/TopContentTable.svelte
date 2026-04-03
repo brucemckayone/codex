@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import * as Table from '$lib/components/ui/Table';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
 
   interface TopContentItem {
@@ -48,9 +49,7 @@
     <div class="skeleton-row"></div>
   </div>
 {:else if isEmpty}
-  <div class="empty-state">
-    <p class="empty-text">{m.analytics_empty()}</p>
-  </div>
+  <EmptyState title={m.analytics_empty()} />
 {:else}
   <div class="table-wrapper">
     <Table.Root>
@@ -87,19 +86,6 @@
 <style>
   .table-wrapper {
     overflow-x: auto;
-  }
-
-  .empty-state {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-8) var(--space-4);
-  }
-
-  .empty-text {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
   }
 
   .loading-state {

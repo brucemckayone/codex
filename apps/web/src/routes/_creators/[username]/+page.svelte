@@ -11,6 +11,7 @@
   import { buildContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import { GlobeIcon, TwitterIcon, YoutubeIcon, InstagramIcon, FileIcon, UsersIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -167,10 +168,7 @@
         {/each}
       </div>
     {:else}
-      <div class="empty-state">
-        <FileIcon size={48} class="empty-state__icon" stroke-width="1.5" />
-        <p class="empty-state__text">{m.creator_profile_no_content()}</p>
-      </div>
+      <EmptyState title={m.creator_profile_no_content()} icon={FileIcon} />
     {/if}
   </section>
 </div>
@@ -367,28 +365,6 @@
     .content-grid {
       grid-template-columns: repeat(3, 1fr);
     }
-  }
-
-  /* ── Empty State ── */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4, 1rem);
-    padding: var(--space-16, 4rem) var(--space-4, 1rem);
-    text-align: center;
-  }
-
-  .empty-state__icon {
-    color: var(--color-text-muted);
-    opacity: var(--opacity-60);
-  }
-
-  .empty-state__text {
-    margin: 0;
-    font-size: var(--text-lg, 1.125rem);
-    color: var(--color-text-muted);
   }
 
   /* ── Responsive ── */

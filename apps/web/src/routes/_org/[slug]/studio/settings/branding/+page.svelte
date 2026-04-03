@@ -423,27 +423,7 @@
     display: contents;
   }
 
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .page-description {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
-  }
-
-  .settings-card {
+.settings-card {
     padding: var(--space-6);
     border-radius: var(--radius-lg);
     background-color: var(--color-surface);

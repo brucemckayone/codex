@@ -7,6 +7,7 @@
   import type { PageData } from './$types';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
 
   const { data }: { data: PageData } = $props();
@@ -78,9 +79,7 @@
         </a>
       {/each}
     {:else}
-      <div class="empty-state">
-        <p>{data.search ? m.discover_empty_search({ query: data.search }) : m.discover_empty()}</p>
-      </div>
+      <EmptyState title={data.search ? m.discover_empty_search({ query: data.search }) : m.discover_empty()} />
     {/if}
   </section>
 </div>
@@ -223,10 +222,5 @@
     color: var(--color-text-secondary);
   }
 
-  .empty-state {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: var(--space-16) 0;
-    color: var(--color-text-secondary);
-  }
+
 </style>

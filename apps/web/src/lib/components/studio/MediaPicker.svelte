@@ -25,6 +25,7 @@
     UploadIcon,
     XIcon,
   } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
 
   interface MediaItemOption {
     id: string;
@@ -274,18 +275,15 @@
 
       <div class="dropdown-list">
         {#if mediaItems.length === 0}
-          <div class="empty-state">
-            <FilmIcon size={32} stroke-width="1.5" />
-            <span class="empty-title">{m.media_picker_empty_title()}</span>
-            <span class="empty-desc">{m.media_picker_empty_desc()}</span>
-            {#if showLibraryLink}
-              <a href="/studio/media" class="empty-link">{m.media_picker_go_to_library()}</a>
-            {/if}
-          </div>
+          <EmptyState title={m.media_picker_empty_title()} description={m.media_picker_empty_desc()} icon={FilmIcon}>
+            {#snippet action()}
+              {#if showLibraryLink}
+                <a href="/studio/media" class="empty-link">{m.media_picker_go_to_library()}</a>
+              {/if}
+            {/snippet}
+          </EmptyState>
         {:else if filteredItems.length === 0}
-          <div class="empty-state">
-            <span class="empty-desc">{m.media_picker_no_results()}</span>
-          </div>
+          <EmptyState title={m.media_picker_no_results()} />
         {:else}
           <button
             type="button"
@@ -635,29 +633,7 @@
     flex-shrink: 0;
   }
 
-  /* ── Empty state ─────────────────────────────────────────────────── */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-6) var(--space-4);
-    text-align: center;
-    color: var(--color-text-muted);
-  }
-
-  .empty-title {
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--color-text-secondary);
-  }
-
-  .empty-desc {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    max-width: 240px;
-  }
-
+  /* ── Empty state link ────────────────────────────────────────────── */
   .empty-link {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);

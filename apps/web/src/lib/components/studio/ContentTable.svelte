@@ -9,6 +9,7 @@
 <script lang="ts">
   import type { ContentWithRelations } from '$lib/types';
   import { FileIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
   import { publishContent, unpublishContent } from '$lib/remote/content.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -78,10 +79,7 @@
 </script>
 
 {#if isEmpty}
-  <div class="empty-state">
-    <FileIcon size={48} stroke-width="1" class="empty-icon" />
-    <h3 class="empty-title">{m.studio_content_empty()}</h3>
-  </div>
+  <EmptyState title={m.studio_content_empty()} icon={FileIcon} />
 {:else}
   <div class="table-wrap">
     <table class="content-table">
@@ -338,27 +336,5 @@
     border-radius: var(--radius-sm);
   }
 
-  /* ── Empty state ───────────────────────────────── */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    padding: var(--space-12) var(--space-4);
-    text-align: center;
-  }
-
-  .empty-icon {
-    color: var(--color-text-muted);
-    margin-bottom: var(--space-2);
-  }
-
-  .empty-title {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0;
-  }
 
 </style>

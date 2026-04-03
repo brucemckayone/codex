@@ -11,6 +11,7 @@
   import type { CustomerListItem } from '@codex/shared-types';
   import * as Table from '$lib/components/ui/Table';
   import { UsersIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -45,10 +46,7 @@
 </script>
 
 {#if isEmpty}
-  <div class="empty-state">
-    <UsersIcon size={48} stroke-width="1" class="empty-icon" />
-    <h3 class="empty-title">{m.studio_customers_empty()}</h3>
-  </div>
+  <EmptyState title={m.studio_customers_empty()} icon={UsersIcon} />
 {:else}
   <div class="table-wrapper">
     <Table.Root>
@@ -89,30 +87,6 @@
 <style>
   .table-wrapper {
     overflow-x: auto;
-  }
-
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    padding: var(--space-12) var(--space-4);
-    text-align: center;
-  }
-
-  .empty-icon {
-    color: var(--color-text-muted);
-    margin-bottom: var(--space-2);
-  }
-
-  .empty-title {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0;
-    max-width: 400px;
-    line-height: var(--leading-normal);
   }
 
   /* Cell styles via :global since classes are passed as props to Table components */

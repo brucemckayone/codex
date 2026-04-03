@@ -12,6 +12,7 @@
   import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/Card';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { ShoppingBagIcon, DownloadIcon, UserPlusIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -60,7 +61,7 @@
           </div>
         {/each}
       {:else if activities.length === 0}
-        <p class="empty-state">{m.studio_activity_empty()}</p>
+        <EmptyState title={m.studio_activity_empty()} />
       {:else}
         {#each activities as activity (activity.id)}
           {@const config = typeConfig[activity.type]}
@@ -155,14 +156,6 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     line-height: var(--leading-normal);
-  }
-
-  .empty-state {
-    text-align: center;
-    color: var(--color-text-secondary);
-    font-size: var(--text-sm);
-    padding: var(--space-8) 0;
-    margin: 0;
   }
 
   /* Dark mode */

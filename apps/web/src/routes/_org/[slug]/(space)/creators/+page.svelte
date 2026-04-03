@@ -10,6 +10,7 @@
   import { CreatorCard } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { UsersIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -71,11 +72,7 @@
       </div>
     {/if}
   {:else}
-    <!-- Empty State -->
-    <div class="creators__empty">
-      <UsersIcon size={48} class="creators__empty-icon" stroke-width="1.5" />
-      <p class="creators__empty-text">{m.org_creators_empty()}</p>
-    </div>
+    <EmptyState title={m.org_creators_empty()} icon={UsersIcon} />
   {/if}
 </div>
 
@@ -137,28 +134,6 @@
     display: flex;
     justify-content: center;
     padding-top: var(--space-4, 1rem);
-  }
-
-  /* ── Empty State ── */
-  .creators__empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4, 1rem);
-    padding: var(--space-16, 4rem) var(--space-4, 1rem);
-    text-align: center;
-  }
-
-  .creators__empty-icon {
-    color: var(--color-text-muted);
-    opacity: var(--opacity-60);
-  }
-
-  .creators__empty-text {
-    margin: 0;
-    font-size: var(--text-lg, 1.125rem);
-    color: var(--color-text-muted);
   }
 
   /* ── Responsive ── */

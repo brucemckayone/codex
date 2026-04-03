@@ -92,8 +92,7 @@
     gap: var(--space-6);
     max-width: 1200px;
   }
-
-.members-section {
+  .members-section {
     background-color: var(--color-surface);
     border-radius: var(--radius-lg);
     border: var(--border-width) var(--border-style) var(--color-border);

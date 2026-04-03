@@ -12,6 +12,7 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { SearchIcon, SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -186,19 +187,16 @@
     {/if}
   {:else if hasActiveFilters}
     <!-- No search results -->
-    <div class="explore__empty">
-      <SearchXIcon size={48} class="explore__empty-icon" stroke-width="1.5" />
-      <p class="explore__empty-text">{m.explore_no_results()}</p>
-      <button class="explore__clear-btn" onclick={clearFilters}>
-        {m.explore_clear_filters()}
-      </button>
-    </div>
+    <EmptyState title={m.explore_no_results()} icon={SearchXIcon}>
+      {#snippet action()}
+        <button class="explore__clear-btn" onclick={clearFilters}>
+          {m.explore_clear_filters()}
+        </button>
+      {/snippet}
+    </EmptyState>
   {:else}
     <!-- No content at all -->
-    <div class="explore__empty">
-      <FileIcon size={48} class="explore__empty-icon" stroke-width="1.5" />
-      <p class="explore__empty-text">{m.explore_no_content()}</p>
-    </div>
+    <EmptyState title={m.explore_no_content()} icon={FileIcon} />
   {/if}
 </div>
 
@@ -365,27 +363,6 @@
   }
 
   /* ── Empty States ── */
-  .explore__empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4, 1rem);
-    padding: var(--space-16, 4rem) var(--space-4, 1rem);
-    text-align: center;
-  }
-
-  .explore__empty-icon {
-    color: var(--color-text-muted);
-    opacity: var(--opacity-60);
-  }
-
-  .explore__empty-text {
-    margin: 0;
-    font-size: var(--text-lg, 1.125rem);
-    color: var(--color-text-muted);
-  }
-
   .explore__clear-btn {
     padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
     font-size: var(--text-sm, 0.875rem);
