@@ -154,6 +154,79 @@ export const updateBrandingForm = form(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Update Branding Command (programmatic — for brand editor panel)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const updateBrandingCommandSchema = z.object({
+  orgId: z.string().uuid(),
+  primaryColorHex: hexColorOptional,
+  secondaryColorHex: hexColorNullable,
+  accentColorHex: hexColorNullable,
+  backgroundColorHex: hexColorNullable,
+  fontBody: z
+    .string()
+    .max(50)
+    .or(z.literal(''))
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  fontHeading: z
+    .string()
+    .max(50)
+    .or(z.literal(''))
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  radiusValue: z.number().min(0).max(2).optional(),
+  densityValue: z.number().min(0.75).max(1.25).optional(),
+});
+
+/**
+ * Update branding settings programmatically (for brand editor panel).
+ *
+ * Uses command() instead of form() since the panel submits via JS,
+ * not a native <form> submission.
+ */
+export const updateBrandingCommand = command(
+  updateBrandingCommandSchema,
+  async ({
+    orgId,
+    primaryColorHex,
+    secondaryColorHex,
+    accentColorHex,
+    backgroundColorHex,
+    fontBody,
+    fontHeading,
+    radiusValue,
+    densityValue,
+  }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const result = await api.org.updateBranding(orgId, {
+      primaryColorHex,
+      secondaryColorHex,
+      accentColorHex,
+      backgroundColorHex,
+      fontBody,
+      fontHeading,
+      radiusValue,
+      densityValue,
+    });
+
+    await invalidateCache(platform, orgId);
+
+    try {
+      await getBrandingSettings(orgId).refresh();
+    } catch {
+      /* non-critical */
+    }
+
+    return result;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Upload Logo Form
 // ─────────────────────────────────────────────────────────────────────────────
 

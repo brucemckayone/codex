@@ -29,6 +29,8 @@
   import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
+  import { updateBrandingCommand } from '$lib/remote/branding.remote';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection } from '$lib/collections';
   import * as m from '$paraglide/messages';
@@ -151,6 +153,35 @@
     }
   });
 
+  // Save handler
+  let saving = $state(false);
+
+  async function handleSave() {
+    const payload = brandEditor.getSavePayload();
+    if (!payload || !brandEditor.orgId) return;
+
+    saving = true;
+    try {
+      await updateBrandingCommand({
+        orgId: brandEditor.orgId,
+        primaryColorHex: payload.primaryColor,
+        secondaryColorHex: payload.secondaryColor,
+        accentColorHex: payload.accentColor,
+        backgroundColorHex: payload.backgroundColor,
+        fontBody: payload.fontBody,
+        fontHeading: payload.fontHeading,
+        radiusValue: payload.radius,
+        densityValue: payload.density,
+      });
+      brandEditor.markSaved();
+      toast.success('Brand settings saved');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save brand settings');
+    } finally {
+      saving = false;
+    }
+  }
+
   // SvelteKit navigation guard
   beforeNavigate(({ cancel }) => {
     if (brandEditor.isDirty && !brandEditor.isClosed) {
@@ -228,7 +259,7 @@
   {/if}
 
   {#snippet footer()}
-    <BrandEditorFooter />
+    <BrandEditorFooter onsave={handleSave} {saving} />
   {/snippet}
 </BrandEditorPanel>
 
