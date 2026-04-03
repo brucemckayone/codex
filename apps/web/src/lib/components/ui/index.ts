@@ -10,6 +10,7 @@ export * as Card from './Card/index';
 export { default as Checkbox } from './Checkbox/Checkbox.svelte';
 export * as Dialog from './Dialog/index';
 export * as DropdownMenu from './DropdownMenu/index';
+export { default as EmptyState } from './EmptyState/EmptyState.svelte';
 // Feedback
 export { default as ConfirmDialog } from './Feedback/ConfirmDialog.svelte';
 export { default as ErrorBanner } from './Feedback/ErrorBanner.svelte';
@@ -25,6 +26,7 @@ export { default as Footer } from './Layout/Footer.svelte';
 export { default as Header } from './Layout/Header.svelte';
 export { default as PageContainer } from './Layout/PageContainer.svelte';
 export { default as Stack } from './Layout/Stack.svelte';
+export { default as PageHeader } from './PageHeader/PageHeader.svelte';
 export * as Popover from './Popover/index';
 export { default as Select } from './Select/Select.svelte';
 export { Skeleton } from './Skeleton/index';

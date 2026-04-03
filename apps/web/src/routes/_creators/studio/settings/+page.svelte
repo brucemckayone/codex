@@ -15,7 +15,7 @@
   import Label from '$lib/components/ui/Label/Label.svelte';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
-  import { Alert } from '$lib/components/ui';
+  import { Alert, PageHeader } from '$lib/components/ui';
 
   import { onDestroy, tick } from 'svelte';
   import { invalidateAll } from '$app/navigation';
@@ -151,10 +151,7 @@
 </svelte:head>
 
 <div class="settings-page">
-  <header class="page-header">
-    <h1 class="page-title">Profile Settings</h1>
-    <p class="page-subtitle">Manage your creator profile and social links</p>
-  </header>
+  <PageHeader title="Profile Settings" description="Manage your creator profile and social links" />
 
   {#if showSuccess}
     <Alert variant="success">
@@ -345,29 +342,7 @@
     max-width: 720px;
   }
 
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
-  }
-
-  .page-subtitle {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
-    line-height: var(--leading-normal);
-  }
-
-  .field-error {
+.field-error {
     font-size: var(--text-xs);
     color: var(--color-error-600);
     margin-top: var(--space-1);

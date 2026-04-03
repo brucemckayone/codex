@@ -13,6 +13,7 @@
   import * as m from '$paraglide/messages';
   import MemberTable from '$lib/components/studio/MemberTable.svelte';
   import InviteMemberDialog from '$lib/components/studio/InviteMemberDialog.svelte';
+  import { PageHeader } from '$lib/components/ui';
   import { UserPlusIcon } from '$lib/components/ui/Icon';
   import {
     inviteMember,
@@ -59,15 +60,14 @@
 </svelte:head>
 
 <div class="team-page">
-  <header class="page-header">
-    <div class="header-content">
-      <h1 class="page-title">{m.team_title()}</h1>
-    </div>
-    <button class="btn btn-primary" onclick={() => (inviteDialogOpen = true)}>
-      <UserPlusIcon size={16} />
-      {m.team_invite()}
-    </button>
-  </header>
+  <PageHeader title={m.team_title()}>
+    {#snippet actions()}
+      <button class="btn btn-primary" onclick={() => (inviteDialogOpen = true)}>
+        <UserPlusIcon size={16} />
+        {m.team_invite()}
+      </button>
+    {/snippet}
+  </PageHeader>
 
   <section class="members-section">
     <MemberTable
@@ -93,30 +93,7 @@
     max-width: 1200px;
   }
 
-  .page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-  }
-
-  .header-content {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
-  }
-
-  .members-section {
+.members-section {
     background-color: var(--color-surface);
     border-radius: var(--radius-lg);
     border: var(--border-width) var(--border-style) var(--color-border);

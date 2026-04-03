@@ -13,7 +13,7 @@
   import { onDestroy } from 'svelte';
   import * as m from '$paraglide/messages';
   import { updateContactForm } from '$lib/remote/settings.remote';
-  import { Alert } from '$lib/components/ui';
+  import { Alert, PageHeader } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -89,9 +89,7 @@
 </svelte:head>
 
 <div class="general-page">
-  <div class="page-header">
-    <h2 class="page-title">{m.settings_general_title()}</h2>
-  </div>
+  <PageHeader title={m.settings_general_title()} />
 
   <!-- Success message -->
   {#if showSuccess}
@@ -263,21 +261,7 @@
     gap: var(--space-6);
   }
 
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .settings-form {
+.settings-form {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);

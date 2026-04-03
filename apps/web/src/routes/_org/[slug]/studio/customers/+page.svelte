@@ -10,6 +10,7 @@
   import { page } from '$app/state';
   import CustomerTable from '$lib/components/studio/CustomerTable.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
+  import { PageHeader } from '$lib/components/ui';
   import { UsersIcon } from '$lib/components/ui/Icon';
 
   let { data }: { data: PageData } = $props();
@@ -29,16 +30,13 @@
 </svelte:head>
 
 <div class="customers-page">
-  <div class="page-header">
-    <div class="header-text">
-      <h1>
-        {m.studio_customers_title()}
-        {#if hasCustomers && totalCustomers > 0}
-          <span class="count-badge">{totalCustomers}</span>
-        {/if}
-      </h1>
-    </div>
-  </div>
+  <PageHeader title={m.studio_customers_title()}>
+    {#snippet actions()}
+      {#if hasCustomers && totalCustomers > 0}
+        <span class="count-badge">{totalCustomers}</span>
+      {/if}
+    {/snippet}
+  </PageHeader>
 
   {#if hasCustomers}
     <CustomerTable customers={data.customers.items} />
@@ -67,32 +65,7 @@
     gap: var(--space-6);
   }
 
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  @media (--breakpoint-sm) {
-    .page-header {
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
-    }
-  }
-
-  .page-header h1 {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .count-badge {
+.count-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;

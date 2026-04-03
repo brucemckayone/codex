@@ -9,6 +9,7 @@
   import * as m from '$paraglide/messages';
   import ContentTable from '$lib/components/studio/ContentTable.svelte';
   import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
+  import { PageHeader } from '$lib/components/ui';
   import { PlusIcon, FileIcon } from '$lib/components/ui/Icon';
 
   let { data }: { data: PageData } = $props();
@@ -26,15 +27,14 @@
 </svelte:head>
 
 <div class="content-page">
-  <div class="page-header">
-    <div class="header-text">
-      <h1>{m.studio_content_title()}</h1>
-    </div>
-    <a href="/studio/content/new" class="create-btn">
-      <PlusIcon size={16} />
-      {m.studio_content_create()}
-    </a>
-  </div>
+  <PageHeader title={m.studio_content_title()}>
+    {#snippet actions()}
+      <a href="/studio/content/new" class="create-btn">
+        <PlusIcon size={16} />
+        {m.studio_content_create()}
+      </a>
+    {/snippet}
+  </PageHeader>
 
   {#if hasContent}
     <ContentTable items={data.content.items} />
@@ -66,29 +66,7 @@
     gap: var(--space-6);
   }
 
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  @media (--breakpoint-sm) {
-    .page-header {
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
-    }
-  }
-
-  .page-header h1 {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .create-btn {
+.create-btn {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);

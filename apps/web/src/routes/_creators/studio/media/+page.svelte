@@ -17,6 +17,7 @@
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
   import * as m from '$paraglide/messages';
+  import { PageHeader } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -121,10 +122,7 @@
 </svelte:head>
 
 <div class="media-page">
-  <header class="page-header">
-    <h1 class="page-title">{m.media_title()}</h1>
-    <p class="page-subtitle">{m.media_subtitle()}</p>
-  </header>
+  <PageHeader title={m.media_title()} description={m.media_subtitle()} />
 
   <section class="upload-section">
     <MediaUpload onUploadComplete={handleUploadComplete} />
@@ -218,29 +216,7 @@
     max-width: 1200px;
   }
 
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
-  }
-
-  .page-subtitle {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
-    line-height: var(--leading-normal);
-  }
-
-  .filters-section {
+.filters-section {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);

@@ -23,7 +23,7 @@
   import LogoUpload from '$lib/components/studio/LogoUpload.svelte';
   import ColorPicker from '$lib/components/studio/ColorPicker.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { Alert } from '$lib/components/ui';
+  import { Alert, PageHeader } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -212,10 +212,7 @@
 </svelte:head>
 
 <div class="branding-page">
-  <div class="page-header">
-    <h2 class="page-title">{m.branding_title()}</h2>
-    <p class="page-description">{m.branding_description()}</p>
-  </div>
+  <PageHeader title={m.branding_title()} description={m.branding_description()} />
 
   {#if showSuccess}
     <Alert variant="success">

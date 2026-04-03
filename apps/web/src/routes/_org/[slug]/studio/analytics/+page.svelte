@@ -10,6 +10,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
+  import { PageHeader } from '$lib/components/ui';
   import RevenueChart from '$lib/components/studio/RevenueChart.svelte';
   import TopContentTable from '$lib/components/studio/TopContentTable.svelte';
 
@@ -82,9 +83,7 @@
 </svelte:head>
 
 <div class="analytics-page">
-  <header class="page-header">
-    <h1 class="page-title">{m.analytics_title()}</h1>
-  </header>
+  <PageHeader title={m.analytics_title()} />
 
   <!-- Date Range Presets -->
   <div class="date-presets" role="group" aria-label="Date range">
@@ -163,21 +162,6 @@
     flex-direction: column;
     gap: var(--space-6);
     max-width: 1200px;
-  }
-
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
   }
 
   /* Date Range Presets */
