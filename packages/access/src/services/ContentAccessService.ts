@@ -1,6 +1,13 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import { CONTENT_STATUS, ENV_NAMES, MEDIA_STATUS, MEDIA_TYPES, PURCHASE_STATUS, VIDEO_PROGRESS } from '@codex/constants';
+import {
+  CONTENT_STATUS,
+  ENV_NAMES,
+  MEDIA_STATUS,
+  MEDIA_TYPES,
+  PURCHASE_STATUS,
+  VIDEO_PROGRESS,
+} from '@codex/constants';
 import type { DatabaseWs } from '@codex/database';
 import { createPerRequestDbClient } from '@codex/database';
 import {
@@ -42,7 +49,10 @@ interface R2Signer {
 class DevR2Signer implements R2Signer {
   constructor(private baseUrl: string) {}
 
-  async generateSignedUrl(r2Key: string, _expirySeconds: number): Promise<string> {
+  async generateSignedUrl(
+    r2Key: string,
+    _expirySeconds: number
+  ): Promise<string> {
     return `${this.baseUrl}/${r2Key}`;
   }
 }
@@ -489,13 +499,15 @@ export class ContentAccessService {
       sortBy: input.sortBy,
     });
 
-    // ── Step 1 & 2: Fetch purchases and memberships concurrently ─────────
+    // ── Step 1: Get purchased content IDs + count ──────────────────────
     const purchaseConditions = [
       eq(purchases.customerId, userId),
       eq(purchases.status, PURCHASE_STATUS.COMPLETED),
     ];
     if (input.organizationId) {
-      purchaseConditions.push(eq(purchases.organizationId, input.organizationId));
+      purchaseConditions.push(
+        eq(purchases.organizationId, input.organizationId)
+      );
     }
 
     const membershipConditions = [
@@ -508,7 +520,47 @@ export class ContentAccessService {
       );
     }
 
-    const [purchaseRecords, activeMemberships] = await Promise.all([
+    // ── Step 2: Count total items (DB-level) for accurate pagination ───
+    const [purchaseCountResult, activeMemberships] = await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(purchases)
+        .where(and(...purchaseConditions)),
+      db.query.organizationMemberships.findMany({
+        where: and(...membershipConditions),
+        columns: { organizationId: true },
+      }),
+    ]);
+
+    const purchaseCount = purchaseCountResult[0]?.count ?? 0;
+    const memberOrgIds = activeMemberships.map((m) => m.organizationId);
+
+    let membershipContentCount = 0;
+    if (memberOrgIds.length > 0) {
+      // Count membership content that isn't already purchased
+      const memberCountResult = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(content)
+        .where(
+          and(
+            inArray(content.organizationId, memberOrgIds),
+            eq(content.status, CONTENT_STATUS.PUBLISHED),
+            isNull(content.deletedAt),
+            sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`
+          )
+        );
+      membershipContentCount = memberCountResult[0]?.count ?? 0;
+    }
+
+    const totalUnfiltered = purchaseCount + membershipContentCount;
+
+    // ── Step 3: Fetch only the page of data needed ─────────────────────
+    // For simplicity with mixed sources, cap the fetch to a reasonable
+    // window rather than loading the entire dataset. For sorted/filtered
+    // queries we need all items from both sources, so use a bounded limit.
+    const fetchLimit = Math.min(totalUnfiltered, 500);
+
+    const [purchaseRecords, membershipContentRecords] = await Promise.all([
       db.query.purchases.findMany({
         where: and(...purchaseConditions),
         with: {
@@ -520,42 +572,24 @@ export class ContentAccessService {
           },
         },
         orderBy: [desc(purchases.createdAt)],
+        limit: fetchLimit,
       }),
-      db.query.organizationMemberships.findMany({
-        where: and(...membershipConditions),
-        columns: { organizationId: true },
-      }),
+      memberOrgIds.length > 0
+        ? db.query.content.findMany({
+            where: and(
+              inArray(content.organizationId, memberOrgIds),
+              eq(content.status, CONTENT_STATUS.PUBLISHED),
+              isNull(content.deletedAt)
+            ),
+            with: {
+              mediaItem: true,
+              organization: true,
+            },
+            orderBy: [desc(content.createdAt)],
+            limit: fetchLimit,
+          })
+        : Promise.resolve([]),
     ]);
-
-    const memberOrgIds = activeMemberships.map((m) => m.organizationId);
-
-    let membershipContentRecords: Array<{
-      id: string;
-      slug: string;
-      title: string;
-      description: string | null;
-      thumbnailUrl: string | null;
-      contentType: string;
-      organizationId: string | null;
-      createdAt: Date;
-      mediaItem: { mediaType: string; durationSeconds: number | null; thumbnailKey: string | null } | null;
-      organization: { slug: string } | null;
-    }> = [];
-
-    if (memberOrgIds.length > 0) {
-      membershipContentRecords = await db.query.content.findMany({
-        where: and(
-          inArray(content.organizationId, memberOrgIds),
-          eq(content.status, CONTENT_STATUS.PUBLISHED),
-          isNull(content.deletedAt)
-        ),
-        with: {
-          mediaItem: true,
-          organization: true,
-        },
-        orderBy: [desc(content.createdAt)],
-      });
-    }
 
     const purchasedContentIds = new Set(
       purchaseRecords.map((p) => p.contentId)
@@ -607,6 +641,7 @@ export class ContentAccessService {
       });
     }
 
+    // ── Step 4: Fetch progress only for the current page candidates ────
     const allContentIds = items.map((i) => i.content.id);
     if (allContentIds.length > 0) {
       const progressRecords = await db.query.videoPlayback.findMany({
@@ -636,6 +671,7 @@ export class ContentAccessService {
       }
     }
 
+    // ── Step 5: Filter and sort (still in-memory for filter/sort) ──────
     if (input.filter === 'in-progress') {
       items = items.filter((item) => item.progress && !item.progress.completed);
     } else if (input.filter === 'completed') {
@@ -650,6 +686,8 @@ export class ContentAccessService {
           (b.content.durationSeconds ?? 0) - (a.content.durationSeconds ?? 0)
       );
     }
+
+    // ── Step 6: Paginate ───────────────────────────────────────────────
     const total = items.length;
     const totalPages = Math.max(1, Math.ceil(total / input.limit));
     const offset = (input.page - 1) * input.limit;
