@@ -51,11 +51,7 @@
 
 <div class="org-landing">
   <!-- Hero Section -->
-  <section
-    class="hero"
-    style:--brand-primary={brandPrimary}
-    style:--brand-secondary={brandSecondary}
-  >
+  <section class="hero">
     <div class="hero__inner">
       {#if logoUrl}
         <img
@@ -128,7 +124,7 @@
   .hero {
     position: relative;
     padding: var(--space-16, 4rem) var(--space-6, 1.5rem);
-    background: linear-gradient(135deg, var(--brand-primary, #6366f1), var(--brand-secondary, #4f46e5));
+    background: linear-gradient(135deg, var(--color-brand-primary, #6366f1), var(--color-brand-secondary, #4f46e5));
     color: var(--color-text-on-brand);
     text-align: center;
     overflow: hidden;
@@ -183,18 +179,18 @@
     gap: var(--space-2, 0.5rem);
     margin-top: var(--space-4, 1rem);
     padding: var(--space-3, 0.75rem) var(--space-6, 1.5rem);
-    background: color-mix(in srgb, white 20%, transparent);
+    background: var(--color-brand-accent-subtle, color-mix(in srgb, white 20%, transparent));
     color: var(--color-text-on-brand);
     font-size: var(--text-base, 1rem);
     font-weight: var(--font-semibold, 600);
-    border: 2px solid color-mix(in srgb, white 40%, transparent);
-    border-radius: var(--radius-lg, 0.5rem);
+    border: var(--border-width-thick) solid color-mix(in srgb, white 40%, transparent);
+    border-radius: var(--radius-button, var(--radius-lg, 0.5rem));
     text-decoration: none;
     transition: background-color var(--duration-normal) var(--ease-default), border-color var(--duration-normal) var(--ease-default), transform var(--duration-fast) var(--ease-default);
   }
 
   .hero__cta:hover {
-    background: color-mix(in srgb, white 30%, transparent);
+    background: var(--color-brand-accent, color-mix(in srgb, white 30%, transparent));
     border-color: color-mix(in srgb, white 60%, transparent);
     transform: translateY(-1px);
   }
