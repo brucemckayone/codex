@@ -1,6 +1,7 @@
 // Primitives (Melt UI Stable v0.x Refactored)
 
 export * as Accordion from './Accordion/index';
+export { default as Alert } from './Alert/Alert.svelte';
 export * as Avatar from './Avatar/index';
 export { Badge } from './Badge/index';
 // Shared / Content Primitives

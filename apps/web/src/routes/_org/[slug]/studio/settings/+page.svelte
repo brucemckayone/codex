@@ -13,6 +13,7 @@
   import { onDestroy } from 'svelte';
   import * as m from '$paraglide/messages';
   import { updateContactForm } from '$lib/remote/settings.remote';
+  import { Alert } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -94,16 +95,16 @@
 
   <!-- Success message -->
   {#if showSuccess}
-    <div class="success-message" role="status" aria-live="polite">
+    <Alert variant="success">
       {m.settings_saved()}
-    </div>
+    </Alert>
   {/if}
 
   <!-- Form-level error -->
   {#if updateContactForm.result?.error}
-    <div class="error-message" role="alert">
+    <Alert variant="error">
       {updateContactForm.result.error}
-    </div>
+    </Alert>
   {/if}
 
   <form {...updateContactForm} class="settings-form" novalidate>
@@ -344,24 +345,6 @@
   .form-actions {
     display: flex;
     justify-content: flex-start;
-  }
-
-  .success-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-success-50);
-    border: var(--border-width) var(--border-style) var(--color-success-200);
-    color: var(--color-success-700);
-    font-size: var(--text-sm);
-  }
-
-  .error-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-error-50);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
-    color: var(--color-error-700);
-    font-size: var(--text-sm);
   }
 
   /* Buttons */

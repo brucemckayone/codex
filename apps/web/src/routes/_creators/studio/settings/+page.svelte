@@ -15,6 +15,7 @@
   import Label from '$lib/components/ui/Label/Label.svelte';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
+  import { Alert } from '$lib/components/ui';
 
   import { onDestroy, tick } from 'svelte';
   import { invalidateAll } from '$app/navigation';
@@ -156,13 +157,13 @@
   </header>
 
   {#if showSuccess}
-    <div class="success-message" role="status" aria-live="polite">
+    <Alert variant="success">
       {m.account_save_success()}
-    </div>
+    </Alert>
   {/if}
 
   {#if updateProfileForm.result?.error}
-    <div class="error-message" role="alert">{updateProfileForm.result.error}</div>
+    <Alert variant="error">{updateProfileForm.result.error}</Alert>
   {/if}
 
   <!-- Avatar Section -->
@@ -239,11 +240,11 @@
     <p class="avatar-help">{m.account_avatar_help()}</p>
 
     {#if avatarUploadForm.result?.error}
-      <div class="error-message" role="alert">{avatarUploadForm.result.error}</div>
+      <Alert variant="error">{avatarUploadForm.result.error}</Alert>
     {/if}
 
     {#if avatarDeleteForm.result?.error}
-      <div class="error-message" role="alert">{avatarDeleteForm.result.error}</div>
+      <Alert variant="error">{avatarDeleteForm.result.error}</Alert>
     {/if}
   </div>
 
@@ -364,24 +365,6 @@
     color: var(--color-text-secondary);
     margin: 0;
     line-height: var(--leading-normal);
-  }
-
-  .success-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-success-50);
-    border: var(--border-width) var(--border-style) var(--color-success-200);
-    color: var(--color-success-700);
-    font-size: var(--text-sm);
-  }
-
-  .error-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-error-50);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
-    color: var(--color-error-700);
-    font-size: var(--text-sm);
   }
 
   .field-error {

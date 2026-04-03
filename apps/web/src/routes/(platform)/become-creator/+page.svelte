@@ -4,6 +4,7 @@
 	import Input from '$lib/components/ui/Input/Input.svelte';
 	import Label from '$lib/components/ui/Label/Label.svelte';
 	import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
+	import { Alert } from '$lib/components/ui';
 
 	let { data } = $props();
 
@@ -26,7 +27,7 @@
 	</div>
 
 	{#if becomeCreatorForm.result && !becomeCreatorForm.result.success && becomeCreatorForm.result.error}
-		<div class="error-message" role="alert">{becomeCreatorForm.result.error}</div>
+		<Alert variant="error" style="margin-bottom: var(--space-4)">{becomeCreatorForm.result.error}</Alert>
 	{/if}
 
 	<form {...becomeCreatorForm} class="settings-card" novalidate>
@@ -126,16 +127,6 @@
 		font-size: var(--text-sm);
 		color: var(--color-text-secondary);
 		line-height: var(--leading-relaxed);
-	}
-
-	.error-message {
-		padding: var(--space-3);
-		margin-bottom: var(--space-4);
-		border-radius: var(--radius-md);
-		background-color: var(--color-error-50);
-		border: var(--border-width) var(--border-style) var(--color-error-200);
-		color: var(--color-error-700);
-		font-size: var(--text-sm);
 	}
 
 	.settings-card {

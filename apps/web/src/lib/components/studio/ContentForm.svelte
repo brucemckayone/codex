@@ -15,7 +15,7 @@
   import { ArrowLeftIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import { goto } from '$app/navigation';
-  import { ConfirmDialog } from '$lib/components/ui';
+  import { ConfirmDialog, Alert } from '$lib/components/ui';
   import {
     createContentForm,
     updateContentForm,
@@ -235,9 +235,9 @@
 
   <!-- Success message -->
   {#if showSuccess}
-    <div class="success-message" role="status" aria-live="polite">
+    <Alert variant="success">
       {m.studio_content_form_update_success()}
-    </div>
+    </Alert>
   {/if}
 
   <!-- Trigger redirects/toasts when form result changes (template-reactive) -->
@@ -250,9 +250,9 @@
 
   <!-- Error message -->
   {#if form.result?.error}
-    <div class="error-message" role="alert">
+    <Alert variant="error">
       {form.result.error}
-    </div>
+    </Alert>
   {/if}
 
   <form
@@ -378,25 +378,6 @@
     flex-direction: column;
     gap: var(--space-6);
     min-width: 0;
-  }
-
-  /* Success/error messages */
-  .success-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-success-50);
-    border: var(--border-width) var(--border-style) var(--color-success-200);
-    color: var(--color-success-700);
-    font-size: var(--text-sm);
-  }
-
-  .error-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-error-50);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
-    color: var(--color-error-700);
-    font-size: var(--text-sm);
   }
 
   /* Mobile sticky save bar */

@@ -5,6 +5,7 @@
 	import Badge from '$lib/components/ui/Badge/Badge.svelte';
 	import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
 	import Button from '$lib/components/ui/Button/Button.svelte';
+	import { Alert } from '$lib/components/ui';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
@@ -131,7 +132,7 @@
 		</form>
 
 		{#if portalSessionForm.result?.error}
-			<div class="error-message" role="alert">{portalSessionForm.result.error}</div>
+			<Alert variant="error" style="margin-top: var(--space-3)">{portalSessionForm.result.error}</Alert>
 		{/if}
 	</div>
 
@@ -248,12 +249,6 @@
 
 	.portal-form {
 		margin-top: var(--space-4);
-	}
-
-	.error-message {
-		margin-top: var(--space-3);
-		font-size: var(--text-sm);
-		color: var(--color-error);
 	}
 
 	.history-card {

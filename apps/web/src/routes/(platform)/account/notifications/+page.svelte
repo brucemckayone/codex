@@ -5,6 +5,7 @@
 	import Button from '$lib/components/ui/Button/Button.svelte';
 	import Label from '$lib/components/ui/Label/Label.svelte';
 	import Switch from '$lib/components/ui/Switch/Switch.svelte';
+	import { Alert } from '$lib/components/ui';
 
 	// Use server-loaded preferences (no client-side fetch needed)
 	let { data } = $props();
@@ -45,13 +46,13 @@
 	<p class="description">{m.account_notifications_description()}</p>
 
 	{#if showSuccess}
-		<div class="success-message" role="status" aria-live="polite">
+		<Alert variant="success" style="margin-bottom: var(--space-4)">
 			{m.account_notifications_save_success()}
-		</div>
+		</Alert>
 	{/if}
 
 	{#if updateNotificationsForm.result?.error}
-		<div class="error-message" role="alert">{updateNotificationsForm.result.error}</div>
+		<Alert variant="error" style="margin-bottom: var(--space-4)">{updateNotificationsForm.result.error}</Alert>
 	{/if}
 
 	<form {...updateNotificationsForm} class="settings-card">
@@ -121,26 +122,6 @@
 		font-size: var(--text-sm);
 		color: var(--color-text-secondary);
 		margin-bottom: var(--space-8);
-	}
-
-	.success-message {
-		padding: var(--space-3);
-		margin-bottom: var(--space-4);
-		border-radius: var(--radius-md);
-		background-color: var(--color-success-50);
-		border: var(--border-width) var(--border-style) var(--color-success-200);
-		color: var(--color-success-700);
-		font-size: var(--text-sm);
-	}
-
-	.error-message {
-		padding: var(--space-3);
-		margin-bottom: var(--space-4);
-		border-radius: var(--radius-md);
-		background-color: var(--color-error-50);
-		border: var(--border-width) var(--border-style) var(--color-error-200);
-		color: var(--color-error-700);
-		font-size: var(--text-sm);
 	}
 
 	.settings-card {

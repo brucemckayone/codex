@@ -10,6 +10,7 @@
 -->
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
+  import { Alert } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -73,7 +74,7 @@
 
     <form onsubmit={handleSubmit} class="invite-form">
       {#if error}
-        <div class="form-error" role="alert">{error}</div>
+        <Alert variant="error">{error}</Alert>
       {/if}
 
       <div class="form-field">
@@ -176,15 +177,6 @@
     background-position: right var(--space-3) center;
     padding-right: var(--space-8);
     cursor: pointer;
-  }
-
-  .form-error {
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-error-50);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
-    color: var(--color-error-700);
-    font-size: var(--text-sm);
   }
 
   .btn {

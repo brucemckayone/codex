@@ -12,6 +12,7 @@
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
+  import { Alert } from '$lib/components/ui';
   import { portalSessionForm } from '$lib/remote/billing.remote';
 
   let { data }: { data: PageData } = $props();
@@ -78,7 +79,7 @@
     </form>
 
     {#if portalSessionForm.result?.error}
-      <div class="error-message" role="alert">{portalSessionForm.result.error}</div>
+      <Alert variant="error" style="margin-top: var(--space-3)">{portalSessionForm.result.error}</Alert>
     {/if}
   </div>
 
@@ -179,12 +180,6 @@
 
   .portal-form {
     margin-top: var(--space-2);
-  }
-
-  .error-message {
-    margin-top: var(--space-3);
-    font-size: var(--text-sm);
-    color: var(--color-error);
   }
 
   .table-wrapper {

@@ -23,6 +23,7 @@
   import LogoUpload from '$lib/components/studio/LogoUpload.svelte';
   import ColorPicker from '$lib/components/studio/ColorPicker.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import { Alert } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -217,15 +218,15 @@
   </div>
 
   {#if showSuccess}
-    <div class="success-message" role="status" aria-live="polite">
+    <Alert variant="success">
       {m.branding_saved()}
-    </div>
+    </Alert>
   {/if}
 
   {#if updateBrandingForm.result?.error}
-    <div class="error-message" role="alert">
+    <Alert variant="error">
       {updateBrandingForm.result.error}
-    </div>
+    </Alert>
   {/if}
 
   <!-- Logo Section -->
@@ -677,26 +678,6 @@
   .form-actions {
     display: flex;
     justify-content: flex-start;
-  }
-
-  /* ── Messages ─────────────────────────────────────────── */
-
-  .success-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-success-50);
-    border: var(--border-width) var(--border-style) var(--color-success-200);
-    color: var(--color-success-700);
-    font-size: var(--text-sm);
-  }
-
-  .error-message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-error-50);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
-    color: var(--color-error-700);
-    font-size: var(--text-sm);
   }
 
   /* ── Buttons ──────────────────────────────────────────── */
