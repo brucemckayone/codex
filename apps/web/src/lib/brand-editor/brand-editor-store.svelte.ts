@@ -59,37 +59,49 @@ const currentLevel = $derived(LEVELS[state.level]);
 const breadcrumbs = $derived(getBreadcrumb(state.level));
 
 // ── Effects ───────────────────────────────────────────────────────────────
+// Wrapped in $effect.root() because module-level $effect needs an explicit
+// root — it runs at import time, outside any component lifecycle.
 
-// CSS injection — runs whenever pending values change
-$effect(() => {
-  if (!browser || !state.pending) return;
-  injectBrandVars(state.pending);
+let effectsInitialized = false;
 
-  // Load fonts if specified
-  if (state.pending.fontBody) loadGoogleFont(state.pending.fontBody);
-  if (state.pending.fontHeading) loadGoogleFont(state.pending.fontHeading);
-});
+function initEffects() {
+  if (effectsInitialized) return;
+  effectsInitialized = true;
 
-// sessionStorage persistence — crash recovery
-$effect(() => {
-  if (!browser || !state.orgId || !state.pending) return;
-  try {
-    sessionStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        orgId: state.orgId,
-        pending: state.pending,
-        level: state.level,
-      })
-    );
-  } catch {
-    // sessionStorage full or unavailable — silently ignore
-  }
-});
+  $effect.root(() => {
+    // CSS injection — runs whenever pending values change
+    $effect(() => {
+      if (!browser || !state.pending) return;
+      injectBrandVars(state.pending);
+
+      // Load fonts if specified
+      if (state.pending.fontBody) loadGoogleFont(state.pending.fontBody);
+      if (state.pending.fontHeading) loadGoogleFont(state.pending.fontHeading);
+    });
+
+    // sessionStorage persistence — crash recovery
+    $effect(() => {
+      if (!browser || !state.orgId || !state.pending) return;
+      try {
+        sessionStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            orgId: state.orgId,
+            pending: state.pending,
+            level: state.level,
+          })
+        );
+      } catch {
+        // sessionStorage full or unavailable — silently ignore
+      }
+    });
+  });
+}
 
 // ── Actions ───────────────────────────────────────────────────────────────
 
 function open(orgId: string, saved: BrandEditorState): void {
+  initEffects();
   state.orgId = orgId;
   state.saved = structuredClone(saved);
   state.level = 'home';
