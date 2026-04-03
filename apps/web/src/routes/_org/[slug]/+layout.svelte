@@ -14,10 +14,21 @@
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
-  import { invalidate } from '$app/navigation';
+  import { beforeNavigate, goto, invalidate } from '$app/navigation';
   import { page } from '$app/state';
   import type { LayoutData } from './$types';
   import OrgHeader from '$lib/components/layout/Header/OrgHeader.svelte';
+  import BrandEditorPanel from '$lib/components/brand-editor/BrandEditorPanel.svelte';
+  import BrandEditorHeader from '$lib/components/brand-editor/BrandEditorHeader.svelte';
+  import BrandEditorFooter from '$lib/components/brand-editor/BrandEditorFooter.svelte';
+  import BrandEditorHome from '$lib/components/brand-editor/levels/BrandEditorHome.svelte';
+  import BrandEditorColors from '$lib/components/brand-editor/levels/BrandEditorColors.svelte';
+  import BrandEditorTypography from '$lib/components/brand-editor/levels/BrandEditorTypography.svelte';
+  import BrandEditorShape from '$lib/components/brand-editor/levels/BrandEditorShape.svelte';
+  import BrandEditorShadows from '$lib/components/brand-editor/levels/BrandEditorShadows.svelte';
+  import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
+  import { brandEditor } from '$lib/brand-editor';
+  import type { BrandEditorState } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection } from '$lib/collections';
   import * as m from '$paraglide/messages';
@@ -90,6 +101,64 @@
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   });
+
+  // ── Brand Editor ────────────────────────────────────────────────────
+  const showBrandEditor = $derived(page.url.searchParams.has('brandEditor'));
+
+  // Open/close the editor based on URL param
+  $effect(() => {
+    if (!browser) return;
+    if (showBrandEditor && brandEditor.isClosed && data.org) {
+      const saved: BrandEditorState = {
+        primaryColor: brandPrimary ?? '#C24129',
+        secondaryColor: brandSecondary ?? null,
+        accentColor: brandAccent ?? null,
+        backgroundColor: brandBackground ?? null,
+        fontBody: data.org.brandFonts?.body ?? null,
+        fontHeading: data.org.brandFonts?.heading ?? null,
+        radius: Number(data.org.brandRadius) || 0.5,
+        density: Number(data.org.brandDensity) || 1,
+        logoUrl: data.org.logoUrl ?? null,
+        tokenOverrides: {},
+      };
+      brandEditor.open(data.org.id, saved);
+    }
+  });
+
+  // Strip URL param when editor closes
+  function handleEditorClose() {
+    if (brandEditor.isDirty) {
+      if (!confirm('You have unsaved brand changes. Discard?')) return;
+      brandEditor.discard();
+    }
+    brandEditor.close();
+    const url = new URL(page.url);
+    url.searchParams.delete('brandEditor');
+    goto(url.pathname + url.search, { replaceState: true });
+  }
+
+  // beforeunload when dirty
+  $effect(() => {
+    if (!browser) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (brandEditor.isDirty) {
+        e.preventDefault();
+      }
+    }
+    if (brandEditor.isDirty) {
+      window.addEventListener('beforeunload', onBeforeUnload);
+      return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    }
+  });
+
+  // SvelteKit navigation guard
+  beforeNavigate(({ cancel }) => {
+    if (brandEditor.isDirty && !brandEditor.isClosed) {
+      if (!confirm('You have unsaved brand changes. Discard?')) {
+        cancel();
+      }
+    }
+  });
 </script>
 
 <svelte:head>
@@ -137,6 +206,31 @@
     </footer>
   {/if}
 </div>
+
+<!-- Brand Editor Panel — rendered OUTSIDE .org-layout so it uses system tokens -->
+<BrandEditorPanel>
+  {#snippet header()}
+    <BrandEditorHeader onclose={handleEditorClose} />
+  {/snippet}
+
+  {#if brandEditor.level === 'home'}
+    <BrandEditorHome />
+  {:else if brandEditor.level === 'colors'}
+    <BrandEditorColors />
+  {:else if brandEditor.level === 'typography'}
+    <BrandEditorTypography />
+  {:else if brandEditor.level === 'shape'}
+    <BrandEditorShape />
+  {:else if brandEditor.level === 'shadows'}
+    <BrandEditorShadows />
+  {:else if brandEditor.level === 'logo'}
+    <BrandEditorLogo />
+  {/if}
+
+  {#snippet footer()}
+    <BrandEditorFooter />
+  {/snippet}
+</BrandEditorPanel>
 
 <style>
   .org-layout {
