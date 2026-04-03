@@ -228,7 +228,7 @@
     font-size: var(--text-3xl, 1.875rem);
     font-weight: var(--font-bold, 700);
     color: var(--color-text-primary);
-    line-height: 1.2;
+    line-height: var(--leading-tight);
   }
 
   .explore__count {
@@ -271,7 +271,7 @@
     border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
     border-radius: var(--radius-md, 0.375rem);
     outline: none;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color var(--duration-fast) var(--ease-default), box-shadow var(--duration-fast) var(--ease-default);
   }
 
   .explore__search-input:focus {
@@ -300,7 +300,7 @@
     background: var(--color-surface);
     border: none;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background-color var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default);
     white-space: nowrap;
   }
 
@@ -331,7 +331,7 @@
     background-repeat: no-repeat;
     background-position: right var(--space-2, 0.5rem) center;
     outline: none;
-    transition: border-color 0.15s ease;
+    transition: border-color var(--duration-fast) var(--ease-default);
   }
 
   .explore__sort:focus {
@@ -395,7 +395,7 @@
     border: var(--border-width, 1px) var(--border-style, solid) var(--color-interactive);
     border-radius: var(--radius-md, 0.375rem);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background-color var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default);
   }
 
   .explore__clear-btn:hover {

@@ -166,7 +166,7 @@
     cursor: pointer;
     border-radius: var(--radius-full, 9999px);
     font-size: var(--text-sm);
-    line-height: 1;
+    line-height: var(--leading-none);
     transition: var(--transition-colors);
   }
 

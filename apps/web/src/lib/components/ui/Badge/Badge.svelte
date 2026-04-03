@@ -24,7 +24,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    line-height: 1;
+    line-height: var(--leading-none);
     transition: var(--transition-colors);
     white-space: nowrap;
   }

@@ -486,7 +486,7 @@
     height: 100%;
     background-color: var(--color-interactive);
     border-radius: var(--radius-full);
-    transition: width 0.2s ease;
+    transition: width var(--duration-normal) var(--ease-default);
   }
 
   .queue-item-remove {

@@ -68,7 +68,7 @@
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
     margin: 0;
-    line-height: 1.5;
+    line-height: var(--leading-normal);
   }
 
   .error-detail {

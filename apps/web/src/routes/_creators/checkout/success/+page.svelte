@@ -201,7 +201,7 @@
     font-weight: var(--font-medium);
     border-radius: var(--radius-md);
     text-decoration: none;
-    transition: var(--transition-colors, background-color 0.15s);
+    transition: var(--transition-colors);
   }
 
   .checkout-success__btn--primary {

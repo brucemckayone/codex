@@ -326,7 +326,7 @@
     font-weight: var(--font-bold);
     color: var(--color-text);
     margin: 0;
-    line-height: 1.3;
+    line-height: var(--leading-snug);
   }
 
   .content-detail__meta {
@@ -423,7 +423,7 @@
     border-radius: var(--radius-md);
     border: none;
     cursor: pointer;
-    transition: var(--transition-colors, background-color 0.15s);
+    transition: var(--transition-colors);
     font-family: inherit;
     background: var(--color-interactive);
     color: var(--color-text-on-brand);
@@ -458,7 +458,7 @@
   .content-detail__description p {
     font-size: var(--text-base);
     color: var(--color-text-secondary);
-    line-height: 1.7;
+    line-height: var(--leading-relaxed);
     margin: 0;
     white-space: pre-line;
   }

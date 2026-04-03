@@ -404,7 +404,7 @@
 
   .trigger-chevron {
     color: var(--color-text-muted);
-    transition: transform 150ms ease;
+    transition: transform var(--duration-fast) var(--ease-default);
     flex-shrink: 0;
   }
 
@@ -557,7 +557,7 @@
     background: transparent;
     border-radius: var(--radius-sm, 4px);
     cursor: pointer;
-    transition: background-color 100ms ease;
+    transition: background-color var(--duration-fast) var(--ease-default);
     text-align: left;
     font-family: inherit;
     font-size: var(--text-sm);

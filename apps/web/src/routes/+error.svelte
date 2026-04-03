@@ -97,7 +97,7 @@
     font-weight: var(--font-bold, 700);
     color: var(--color-text, #171717);
     margin: 0;
-    line-height: 1;
+    line-height: var(--leading-none);
   }
 
   .error-title {
@@ -112,7 +112,7 @@
     color: var(--color-text-secondary, #737373);
     margin: 0;
     max-width: 360px;
-    line-height: 1.5;
+    line-height: var(--leading-normal);
   }
 
   .error-actions {
@@ -134,7 +134,7 @@
     text-decoration: none;
     border: none;
     cursor: pointer;
-    transition: var(--transition-colors, color 0.15s, background-color 0.15s);
+    transition: var(--transition-colors);
     font-family: inherit;
   }
 

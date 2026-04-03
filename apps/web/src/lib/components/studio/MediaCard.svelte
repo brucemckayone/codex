@@ -389,7 +389,7 @@
     height: 100%;
     background-color: var(--color-interactive);
     border-radius: var(--radius-full);
-    transition: width 0.5s ease;
+    transition: width var(--duration-slower) var(--ease-default);
   }
 
   .transcoding-step {

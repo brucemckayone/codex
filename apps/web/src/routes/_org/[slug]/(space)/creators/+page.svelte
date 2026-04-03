@@ -103,14 +103,14 @@
     font-size: var(--text-3xl, 1.875rem);
     font-weight: var(--font-bold, 700);
     color: var(--color-text-primary);
-    line-height: 1.2;
+    line-height: var(--leading-tight);
   }
 
   .creators__subtitle {
     margin: 0;
     font-size: var(--text-base, 1rem);
     color: var(--color-text-secondary);
-    line-height: 1.5;
+    line-height: var(--leading-normal);
   }
 
   /* ── Grid ── */

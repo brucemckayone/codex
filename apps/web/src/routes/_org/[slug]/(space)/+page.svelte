@@ -165,14 +165,14 @@
     margin: 0;
     font-size: var(--text-4xl, 2.25rem);
     font-weight: var(--font-bold, 700);
-    line-height: 1.2;
+    line-height: var(--leading-tight);
     letter-spacing: -0.02em;
   }
 
   .hero__description {
     margin: 0;
     font-size: var(--text-lg, 1.125rem);
-    line-height: 1.6;
+    line-height: var(--leading-normal);
     opacity: var(--opacity-90);
     max-width: 560px;
   }
@@ -190,7 +190,7 @@
     border: 2px solid color-mix(in srgb, white 40%, transparent);
     border-radius: var(--radius-lg, 0.5rem);
     text-decoration: none;
-    transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+    transition: background-color var(--duration-normal) var(--ease-default), border-color var(--duration-normal) var(--ease-default), transform var(--duration-fast) var(--ease-default);
   }
 
   .hero__cta:hover {
@@ -232,7 +232,7 @@
     color: var(--color-interactive);
     text-decoration: none;
     white-space: nowrap;
-    transition: color 0.15s ease;
+    transition: color var(--duration-fast) var(--ease-default);
   }
 
   .featured__view-all:hover {

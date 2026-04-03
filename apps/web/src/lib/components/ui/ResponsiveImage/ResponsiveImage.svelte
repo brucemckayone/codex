@@ -89,7 +89,7 @@
     width: 100%;
     height: auto;
     object-fit: cover;
-    transition: opacity 0.3s ease;
+    transition: var(--transition-opacity);
   }
 
   .responsive-image__img--hidden {

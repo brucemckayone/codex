@@ -103,7 +103,7 @@
     font-weight: var(--font-bold);
     color: var(--color-text);
     margin: 0;
-    line-height: 1;
+    line-height: var(--leading-none);
   }
 
   .error-title {
@@ -118,7 +118,7 @@
     color: var(--color-text-secondary);
     margin: 0;
     max-width: 360px;
-    line-height: 1.5;
+    line-height: var(--leading-normal);
   }
 
   .error-detail {

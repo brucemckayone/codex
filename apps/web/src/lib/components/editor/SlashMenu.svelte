@@ -155,7 +155,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-bold);
-    line-height: 1;
+    line-height: var(--leading-none);
   }
 
   .slash-menu__content {
@@ -169,13 +169,13 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text);
-    line-height: 1.3;
+    line-height: var(--leading-snug);
   }
 
   .slash-menu__description {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
-    line-height: 1.3;
+    line-height: var(--leading-snug);
   }
 
   /* Dark mode */

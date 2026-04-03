@@ -65,7 +65,7 @@
 
   .error-icon { color: var(--color-text-secondary); margin-bottom: var(--space-2); }
   .error-title { font-size: var(--text-xl); font-weight: var(--font-semibold); color: var(--color-text); margin: 0; }
-  .error-description { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 0; line-height: 1.5; }
+  .error-description { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 0; line-height: var(--leading-normal); }
   .error-detail { font-size: var(--text-xs); color: var(--color-text-muted); font-family: var(--font-mono); padding: var(--space-2); background-color: var(--color-surface-secondary); border-radius: var(--radius-md); }
   .error-actions { margin-top: var(--space-4); }
   .back-link { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: var(--text-sm); font-weight: var(--font-medium); color: var(--color-text); text-decoration: none; border: var(--border-width) var(--border-style) var(--color-border); border-radius: var(--radius-md); background-color: var(--color-surface); transition: var(--transition-colors); }

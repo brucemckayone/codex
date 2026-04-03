@@ -660,7 +660,7 @@
     height: 32px;
     border: var(--border-width) var(--border-style) var(--color-border-strong);
     background-color: var(--color-surface-secondary);
-    transition: border-radius 0.15s ease;
+    transition: border-radius var(--duration-fast) var(--ease-default);
   }
 
   .radius-preview-btn {
@@ -669,7 +669,7 @@
     color: var(--color-text-on-brand, white);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    transition: border-radius 0.15s ease;
+    transition: border-radius var(--duration-fast) var(--ease-default);
   }
 
   /* ── Form Actions ─────────────────────────────────────── */

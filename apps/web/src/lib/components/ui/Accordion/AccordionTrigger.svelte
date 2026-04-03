@@ -41,7 +41,7 @@
 		justify-content: space-between;
 		padding: var(--space-4) 0;
 		font-weight: var(--font-medium);
-		transition: all 0.2s;
+		transition: all var(--duration-normal) var(--ease-default);
 		background: transparent;
 		border: none;
 		cursor: pointer;
@@ -56,7 +56,7 @@
 	.accordion-chevron {
 		height: 1rem;
 		width: 1rem;
-		transition: transform 0.2s;
+		transition: transform var(--duration-normal) var(--ease-default);
 		opacity: var(--opacity-50);
 	}
 	.rotated {

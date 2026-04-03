@@ -112,7 +112,7 @@
     color: var(--color-text);
     margin: 0;
     max-width: 400px;
-    line-height: 1.5;
+    line-height: var(--leading-normal);
   }
 
   /* Cell styles via :global since classes are passed as props to Table components */

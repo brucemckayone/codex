@@ -207,7 +207,7 @@
     font-size: var(--text-3xl, 1.875rem);
     font-weight: var(--font-bold, 700);
     color: var(--color-text);
-    line-height: 1.2;
+    line-height: var(--leading-tight);
   }
 
   .profile-header__username {
@@ -220,7 +220,7 @@
     margin: 0;
     font-size: var(--text-base, 1rem);
     color: var(--color-text-secondary);
-    line-height: 1.6;
+    line-height: var(--leading-normal);
     max-width: 560px;
   }
 
@@ -263,7 +263,7 @@
     border-radius: var(--radius-md, 0.375rem);
     text-decoration: none;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background-color var(--duration-fast) var(--ease-default);
   }
 
   .follow-btn:hover {

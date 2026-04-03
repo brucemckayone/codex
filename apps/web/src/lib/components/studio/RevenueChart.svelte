@@ -127,7 +127,7 @@
   .bar {
     background-color: var(--color-interactive);
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--duration-fast) var(--ease-default);
     min-height: 2px;
   }
 

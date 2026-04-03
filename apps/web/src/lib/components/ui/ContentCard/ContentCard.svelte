@@ -340,7 +340,7 @@
   .content-card__progress-fill {
     height: 100%;
     background: var(--color-interactive);
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-default);
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
 
@@ -364,7 +364,7 @@
     margin: 0;
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
-    line-height: 1.4;
+    line-height: var(--leading-normal);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -386,7 +386,7 @@
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    line-height: 1.5;
+    line-height: var(--leading-normal);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;

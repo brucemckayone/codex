@@ -312,7 +312,7 @@
     color: var(--color-text-inverse);
     cursor: pointer;
     border-radius: var(--radius-sm);
-    transition: background-color 150ms ease;
+    transition: background-color var(--duration-fast) var(--ease-default);
   }
 
   .preview-player__control-btn:hover {
@@ -384,7 +384,7 @@
     font-size: var(--text-sm);
     color: color-mix(in srgb, white 80%, transparent);
     margin: 0;
-    line-height: 1.5;
+    line-height: var(--leading-normal);
   }
 
   .preview-player__cta-button {
@@ -401,7 +401,7 @@
     border-radius: var(--radius-md);
     cursor: pointer;
     text-decoration: none;
-    transition: background-color 150ms ease;
+    transition: background-color var(--duration-fast) var(--ease-default);
   }
 
   .preview-player__cta-button:hover {

@@ -118,7 +118,7 @@
     font-weight: var(--font-bold);
     color: var(--color-text);
     margin: 0;
-    line-height: 1;
+    line-height: var(--leading-none);
   }
 
   .error-title {

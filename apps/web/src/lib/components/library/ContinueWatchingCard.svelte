@@ -120,7 +120,7 @@
   .cw-card__progress-fill {
     height: 100%;
     background-color: var(--color-interactive);
-    transition: width 0.3s ease;
+    transition: width var(--duration-slow) var(--ease-default);
     border-radius: 0 2px 2px 0;
   }
 

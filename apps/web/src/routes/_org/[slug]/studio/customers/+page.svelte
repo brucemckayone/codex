@@ -134,7 +134,7 @@
     color: var(--color-text);
     margin: 0;
     max-width: 400px;
-    line-height: 1.5;
+    line-height: var(--leading-normal);
   }
 
   /* Dark mode */

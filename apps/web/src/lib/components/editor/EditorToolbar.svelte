@@ -348,7 +348,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-bold);
-    line-height: 1;
+    line-height: var(--leading-none);
   }
 
   .toolbar-separator {

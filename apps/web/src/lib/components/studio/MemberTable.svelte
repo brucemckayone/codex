@@ -222,7 +222,7 @@
   }
 
   .avatar-initials {
-    line-height: 1;
+    line-height: var(--leading-none);
   }
 
   .member-name {
