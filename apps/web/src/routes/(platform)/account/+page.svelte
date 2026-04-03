@@ -8,7 +8,7 @@
 	import Label from '$lib/components/ui/Label/Label.svelte';
 	import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
 	import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
-	import { Alert } from '$lib/components/ui';
+	import { Alert, Card } from '$lib/components/ui';
 
 	import { onDestroy, tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
@@ -182,8 +182,11 @@
 	{/if}
 
 	<!-- Avatar Section -->
-	<div class="settings-card">
-		<h2>{m.account_avatar_heading()}</h2>
+	<Card.Root>
+		<Card.Header>
+			<Card.Title level={2}>{m.account_avatar_heading()}</Card.Title>
+		</Card.Header>
+		<Card.Content>
 		<div class="avatar-container">
 			<Avatar src={avatarPreview ?? undefined}>
 				<AvatarImage src={avatarPreview ?? ''} alt="Avatar" />
@@ -261,7 +264,8 @@
 		{#if avatarDeleteForm.result?.error}
 			<Alert variant="error">{avatarDeleteForm.result.error}</Alert>
 		{/if}
-	</div>
+		</Card.Content>
+	</Card.Root>
 
 	<!--
 		Profile Form
@@ -270,8 +274,12 @@
 		This allows SvelteKit Remote Functions to handle validation entirely,
 		which is required for E2E tests to verify custom server-side error states.
 	-->
-	<form {...updateProfileForm} class="settings-card" novalidate>
-		<h2>{m.account_personal_information()}</h2>
+	<Card.Root>
+	<form {...updateProfileForm} novalidate>
+		<Card.Header>
+			<Card.Title level={2}>{m.account_personal_information()}</Card.Title>
+		</Card.Header>
+		<Card.Content>
 
 		<!-- Display Name -->
 		<div class="form-group">
@@ -371,12 +379,14 @@
 			{/each}
 		</div>
 
-		<div class="form-actions">
+		</Card.Content>
+		<Card.Footer>
 			<Button type="submit" variant="primary" loading={updateProfileForm.pending > 0}>
 				{updateProfileForm.pending > 0 ? m.account_saving() : m.account_save_button()}
 			</Button>
-		</div>
+		</Card.Footer>
 	</form>
+	</Card.Root>
 </div>
 
 <style>
@@ -423,31 +433,6 @@
 		font-size: var(--text-xs);
 		color: var(--color-error-600);
 		margin-top: var(--space-1);
-	}
-
-	.settings-card {
-		padding: var(--space-6);
-		border-radius: var(--radius-lg);
-		background-color: var(--color-surface);
-		border: var(--border-width) var(--border-style) var(--color-border);
-		margin-bottom: var(--space-6);
-	}
-
-	.settings-card h2 {
-		font-family: var(--font-heading);
-		font-size: var(--text-lg);
-		font-weight: var(--font-semibold);
-		color: var(--color-text);
-		margin-bottom: var(--space-6);
-	}
-
-	.settings-card h3 {
-		font-family: var(--font-heading);
-		font-size: var(--text-base);
-		font-weight: var(--font-semibold);
-		color: var(--color-text);
-		margin-top: var(--space-6);
-		margin-bottom: var(--space-4);
 	}
 
 	/* Avatar Section */
@@ -500,10 +485,5 @@
 		margin-top: var(--space-1);
 	}
 
-	.form-actions {
-		margin-top: var(--space-6);
-		padding-top: var(--space-6);
-		border-top: var(--border-width) var(--border-style) var(--color-border);
-	}
 
 </style>

@@ -10,7 +10,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import { PageHeader } from '$lib/components/ui';
+  import { Card, PageHeader } from '$lib/components/ui';
   import RevenueChart from '$lib/components/studio/RevenueChart.svelte';
   import TopContentTable from '$lib/components/studio/TopContentTable.svelte';
 
@@ -120,39 +120,53 @@
   <!-- Revenue Summary -->
   {#if data.revenue}
     <div class="summary-cards">
-      <div class="summary-card">
-        <span class="summary-label">{m.billing_total_revenue()}</span>
-        <span class="summary-value">
-          {formatRevenue(data.revenue.totalRevenueCents)}
-        </span>
-      </div>
-      <div class="summary-card">
-        <span class="summary-label">{m.billing_total_purchases()}</span>
-        <span class="summary-value">{data.revenue.totalPurchases}</span>
-      </div>
-      <div class="summary-card">
-        <span class="summary-label">{m.billing_avg_order()}</span>
-        <span class="summary-value">
-          {formatRevenue(data.revenue.averageOrderValueCents)}
-        </span>
-      </div>
+      <Card.Root class="summary-card">
+        <Card.Content>
+          <span class="summary-label">{m.billing_total_revenue()}</span>
+          <span class="summary-value">
+            {formatRevenue(data.revenue.totalRevenueCents)}
+          </span>
+        </Card.Content>
+      </Card.Root>
+      <Card.Root class="summary-card">
+        <Card.Content>
+          <span class="summary-label">{m.billing_total_purchases()}</span>
+          <span class="summary-value">{data.revenue.totalPurchases}</span>
+        </Card.Content>
+      </Card.Root>
+      <Card.Root class="summary-card">
+        <Card.Content>
+          <span class="summary-label">{m.billing_avg_order()}</span>
+          <span class="summary-value">
+            {formatRevenue(data.revenue.averageOrderValueCents)}
+          </span>
+        </Card.Content>
+      </Card.Root>
     </div>
   {/if}
 
   <!-- Revenue Chart -->
   <section class="chart-section">
-    <h2 class="section-title">{m.analytics_revenue_title()}</h2>
-    <div class="chart-card">
-      <RevenueChart data={chartData} loading={!data.revenue} />
-    </div>
+    <Card.Root>
+      <Card.Header>
+        <Card.Title level={2}>{m.analytics_revenue_title()}</Card.Title>
+      </Card.Header>
+      <Card.Content>
+        <RevenueChart data={chartData} loading={!data.revenue} />
+      </Card.Content>
+    </Card.Root>
   </section>
 
   <!-- Top Content -->
   <section class="table-section">
-    <h2 class="section-title">{m.analytics_top_content()}</h2>
-    <div class="table-card">
-      <TopContentTable items={topContentItems} loading={!data.topContent} />
-    </div>
+    <Card.Root>
+      <Card.Header>
+        <Card.Title level={2}>{m.analytics_top_content()}</Card.Title>
+      </Card.Header>
+      <Card.Content>
+        <TopContentTable items={topContentItems} loading={!data.topContent} />
+      </Card.Content>
+    </Card.Root>
   </section>
 </div>
 
@@ -210,11 +224,7 @@
     gap: var(--space-4);
   }
 
-  .summary-card {
-    padding: var(--space-4);
-    border-radius: var(--radius-lg);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
+  :global(.summary-card .card-content) {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -235,20 +245,4 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Sections */
-  .section-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .chart-card,
-  .table-card {
-    padding: var(--space-4);
-    border-radius: var(--radius-lg);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
 </style>

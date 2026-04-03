@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { AlertTriangleIcon, SearchMinusIcon, LockIcon } from '$lib/components/ui/Icon';
+  import { Button } from '$lib/components/ui';
 
   const statusConfig: Record<number, { title: () => string; description: () => string; icon: 'search' | 'lock' | 'warning' }> = {
     404: {
@@ -49,14 +50,14 @@
     <p class="error-description">{config.description()}</p>
 
     <div class="error-actions">
-      <a href="/" class="btn btn-primary">{m.errors_go_home()}</a>
+      <a href="/" class="btn-link btn-link--primary">{m.errors_go_home()}</a>
 
       {#if page.status === 404}
-        <button class="btn btn-secondary" onclick={() => history.back()}>{m.errors_go_back()}</button>
+        <Button variant="secondary" onclick={() => history.back()}>{m.errors_go_back()}</Button>
       {:else if page.status === 403}
-        <a href="/login" class="btn btn-secondary">{m.errors_sign_in()}</a>
+        <a href="/login" class="btn-link btn-link--secondary">{m.errors_sign_in()}</a>
       {:else if page.status === 500}
-        <button class="btn btn-secondary" onclick={() => location.reload()}>{m.errors_try_again()}</button>
+        <Button variant="secondary" onclick={() => location.reload()}>{m.errors_try_again()}</Button>
       {/if}
     </div>
   </div>
@@ -123,38 +124,38 @@
     justify-content: center;
   }
 
-  .btn {
+  .btn-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
-    font-size: var(--text-sm, 0.875rem);
-    font-weight: var(--font-medium, 500);
-    border-radius: var(--radius-md, 0.5rem);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    border-radius: var(--radius-md);
     text-decoration: none;
-    border: none;
+    border: var(--border-width) var(--border-style) transparent;
     cursor: pointer;
     transition: var(--transition-colors);
     font-family: inherit;
   }
 
-  .btn-primary {
+  .btn-link--primary {
     background: var(--color-interactive);
     color: var(--color-text-on-brand);
   }
 
-  .btn-primary:hover {
+  .btn-link--primary:hover {
     background: var(--color-interactive-hover);
   }
 
-  .btn-secondary {
+  .btn-link--secondary {
     background: transparent;
-    color: var(--color-text-secondary, #737373);
-    border: 1px solid var(--color-border, #e5e5e5);
+    color: var(--color-text-secondary);
+    border-color: var(--color-border);
   }
 
-  .btn-secondary:hover {
-    background: var(--color-neutral-50, #fafafa);
-    color: var(--color-text, #171717);
+  .btn-link--secondary:hover {
+    background: var(--color-surface-secondary);
+    color: var(--color-text);
   }
 </style>

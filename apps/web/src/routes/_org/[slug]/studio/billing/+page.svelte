@@ -12,7 +12,7 @@
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
-  import { Alert, EmptyState } from '$lib/components/ui';
+  import { Alert, Card, EmptyState } from '$lib/components/ui';
   import { portalSessionForm } from '$lib/remote/billing.remote';
 
   let { data }: { data: PageData } = $props();
@@ -68,25 +68,30 @@
   </section>
 
   <!-- Manage Billing Section -->
-  <div class="billing-card">
-    <h2>{m.billing_manage_stripe()}</h2>
-    <p class="description">{m.billing_manage_stripe_description()}</p>
+  <Card.Root>
+    <Card.Header>
+      <Card.Title level={2}>{m.billing_manage_stripe()}</Card.Title>
+      <Card.Description>{m.billing_manage_stripe_description()}</Card.Description>
+    </Card.Header>
+    <Card.Content>
+      <form {...portalSessionForm} class="portal-form">
+        <Button type="submit" variant="secondary" loading={portalSessionForm.pending > 0}>
+          {portalSessionForm.pending > 0 ? m.common_loading() : m.billing_manage_stripe()}
+        </Button>
+      </form>
 
-    <form {...portalSessionForm} class="portal-form">
-      <Button type="submit" variant="secondary" loading={portalSessionForm.pending > 0}>
-        {portalSessionForm.pending > 0 ? m.common_loading() : m.billing_manage_stripe()}
-      </Button>
-    </form>
-
-    {#if portalSessionForm.result?.error}
-      <Alert variant="error" style="margin-top: var(--space-3)">{portalSessionForm.result.error}</Alert>
-    {/if}
-  </div>
+      {#if portalSessionForm.result?.error}
+        <Alert variant="error" style="margin-top: var(--space-3)">{portalSessionForm.result.error}</Alert>
+      {/if}
+    </Card.Content>
+  </Card.Root>
 
   <!-- Top Content by Revenue -->
-  <div class="billing-card">
-    <h2>{m.billing_top_content()}</h2>
-
+  <Card.Root>
+    <Card.Header>
+      <Card.Title level={2}>{m.billing_top_content()}</Card.Title>
+    </Card.Header>
+    <Card.Content>
     {#if topContentItems.length > 0}
       <div class="table-wrapper">
         <Table.Root>
@@ -117,7 +122,8 @@
     {:else}
       <EmptyState title={m.billing_top_content_empty()} />
     {/if}
-  </div>
+    </Card.Content>
+  </Card.Root>
 </div>
 
 <style>
@@ -153,27 +159,6 @@
     .stats-grid {
       grid-template-columns: repeat(3, 1fr);
     }
-  }
-
-  .billing-card {
-    padding: var(--space-6);
-    border-radius: var(--radius-lg);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .billing-card h2 {
-    font-family: var(--font-heading);
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .description {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0 0 var(--space-4) 0;
   }
 
   .portal-form {

@@ -17,7 +17,7 @@
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
   import * as m from '$paraglide/messages';
-  import { PageHeader } from '$lib/components/ui';
+  import { Button, PageHeader } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -194,16 +194,16 @@
     </Dialog.Header>
     <p class="delete-description">{m.media_delete_confirm()}</p>
     <div class="dialog-actions">
-      <button
-        class="btn btn-secondary"
+      <Button
+        variant="secondary"
         onclick={() => handleDeleteDialogChange(false)}
         disabled={isDeleting}
       >
         {m.common_cancel()}
-      </button>
-      <button class="btn btn-danger" onclick={confirmDelete} disabled={isDeleting}>
+      </Button>
+      <Button variant="destructive" onclick={confirmDelete} disabled={isDeleting} loading={isDeleting}>
         {isDeleting ? m.common_loading() : m.media_delete_button()}
-      </button>
+      </Button>
     </div>
   </Dialog.Content>
 </Dialog.Root>
@@ -301,43 +301,4 @@
     gap: var(--space-2);
   }
 
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    border: none;
-    text-decoration: none;
-    padding: var(--space-2) var(--space-4);
-  }
-
-  .btn:disabled {
-    opacity: var(--opacity-60);
-    cursor: not-allowed;
-  }
-
-  .btn-secondary {
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background-color: var(--color-surface);
-  }
-
-  .btn-danger {
-    background-color: var(--color-error-600, #dc2626);
-    color: var(--color-text-inverse);
-    border-color: var(--color-error-600, #dc2626);
-  }
-
-  .btn-danger:hover:not(:disabled) {
-    background-color: var(--color-error-700, #b91c1c);
-    border-color: var(--color-error-700, #b91c1c);
-  }
 </style>

@@ -5,7 +5,7 @@
 	import Badge from '$lib/components/ui/Badge/Badge.svelte';
 	import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
 	import Button from '$lib/components/ui/Button/Button.svelte';
-	import { Alert, EmptyState } from '$lib/components/ui';
+	import { Alert, Card, EmptyState } from '$lib/components/ui';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
@@ -121,25 +121,28 @@
 	<p class="description">{m.account_payments_description()}</p>
 
 	<!-- Billing Information Section -->
-	<div class="settings-card">
-		<h2>{m.account_payments_billing()}</h2>
-		<p class="description">{m.account_payments_billing_description()}</p>
+	<Card.Root>
+		<Card.Header>
+			<Card.Title level={2}>{m.account_payments_billing()}</Card.Title>
+			<Card.Description>{m.account_payments_billing_description()}</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			<form {...portalSessionForm} class="portal-form">
+				<Button type="submit" variant="secondary" loading={portalSessionForm.pending > 0}>
+					{portalSessionForm.pending > 0 ? m.common_loading() : m.account_payments_manage_billing()}
+				</Button>
+			</form>
 
-		<form {...portalSessionForm} class="portal-form">
-			<Button type="submit" variant="secondary" loading={portalSessionForm.pending > 0}>
-				{portalSessionForm.pending > 0 ? m.common_loading() : m.account_payments_manage_billing()}
-			</Button>
-		</form>
-
-		{#if portalSessionForm.result?.error}
-			<Alert variant="error" style="margin-top: var(--space-3)">{portalSessionForm.result.error}</Alert>
-		{/if}
-	</div>
+			{#if portalSessionForm.result?.error}
+				<Alert variant="error" style="margin-top: var(--space-3)">{portalSessionForm.result.error}</Alert>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 
 	<!-- Purchase History Section -->
-	<div class="history-card">
-		<div class="history-header">
-			<h2>{m.account_payments_history()}</h2>
+	<Card.Root>
+		<Card.Header class="history-header">
+			<Card.Title level={2}>{m.account_payments_history()}</Card.Title>
 
 			{#if data.purchases.items && data.purchases.items.length > 0}
 				<nav class="filters" aria-label="Filter by status">
@@ -162,8 +165,9 @@
 					</ul>
 				</nav>
 			{/if}
-		</div>
+		</Card.Header>
 
+		<Card.Content>
 		{#if data.purchases.items && data.purchases.items.length > 0}
 			<div class="table-wrapper">
 				<Table.Root>
@@ -214,7 +218,8 @@
 				{/snippet}
 			</EmptyState>
 		{/if}
-	</div>
+		</Card.Content>
+	</Card.Root>
 </div>
 
 <style>
@@ -232,54 +237,14 @@
 		margin-bottom: var(--space-8);
 	}
 
-	.settings-card {
-		padding: var(--space-6);
-		border-radius: var(--radius-lg);
-		background-color: var(--color-surface);
-		border: var(--border-width) var(--border-style) var(--color-border);
-		margin-bottom: var(--space-6);
-	}
-
-	.settings-card h2 {
-		font-family: var(--font-heading);
-		font-size: var(--text-lg);
-		font-weight: var(--font-semibold);
-		color: var(--color-text);
-		margin-bottom: var(--space-4);
-	}
-
 	.portal-form {
 		margin-top: var(--space-4);
 	}
 
-	.history-card {
-		padding: var(--space-6);
-		border-radius: var(--radius-lg);
-		background-color: var(--color-surface);
-		border: var(--border-width) var(--border-style) var(--color-border);
-	}
-
-	.history-header {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-		margin-bottom: var(--space-6);
-	}
-
-	@media (--breakpoint-sm) {
-		.history-header {
-			flex-direction: row;
-			align-items: center;
-			justify-content: space-between;
-		}
-	}
-
-	.history-header h2 {
-		font-family: var(--font-heading);
-		font-size: var(--text-lg);
-		font-weight: var(--font-semibold);
-		color: var(--color-text);
-		margin: 0;
+	:global(.history-header) {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
 	}
 
 	/* Filters */

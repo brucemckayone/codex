@@ -318,48 +318,5 @@
     margin: 0;
   }
 
-  /* Buttons */
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    border: var(--border-width) var(--border-style) transparent;
-    text-decoration: none;
-  }
-
-  .btn:disabled {
-    opacity: var(--opacity-60);
-    cursor: not-allowed;
-  }
-
-  .btn-sm {
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-xs);
-  }
-
-  .btn-outline {
-    background-color: transparent;
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  .btn-outline:hover:not(:disabled) {
-    background-color: var(--color-surface-secondary);
-  }
-
-  .btn-danger {
-    background-color: transparent;
-    border-color: var(--color-error-300);
-    color: var(--color-error-700);
-  }
-
-  .btn-danger:hover:not(:disabled) {
-    background-color: var(--color-error-50);
-  }
 
 </style>

@@ -358,30 +358,6 @@
     margin-top: var(--space-1);
   }
 
-  .settings-card {
-    padding: var(--space-6);
-    border-radius: var(--radius-lg);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .settings-card h2 {
-    font-family: var(--font-heading);
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin-bottom: var(--space-6);
-  }
-
-  .settings-card h3 {
-    font-family: var(--font-heading);
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin-top: var(--space-6);
-    margin-bottom: var(--space-4);
-  }
-
   .avatar-container {
     display: flex;
     flex-direction: column;
@@ -430,9 +406,4 @@
     margin-top: var(--space-1);
   }
 
-  .form-actions {
-    margin-top: var(--space-6);
-    padding-top: var(--space-6);
-    border-top: var(--border-width) var(--border-style) var(--color-border);
-  }
 </style>
