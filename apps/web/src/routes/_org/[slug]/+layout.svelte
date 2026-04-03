@@ -27,6 +27,8 @@
   import BrandEditorShape from '$lib/components/brand-editor/levels/BrandEditorShape.svelte';
   import BrandEditorShadows from '$lib/components/brand-editor/levels/BrandEditorShadows.svelte';
   import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
+  import BrandEditorFineTuneColors from '$lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte';
+  import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
@@ -256,6 +258,10 @@
     <BrandEditorShadows />
   {:else if brandEditor.level === 'logo'}
     <BrandEditorLogo />
+  {:else if brandEditor.level === 'fine-tune-colors'}
+    <BrandEditorFineTuneColors />
+  {:else if brandEditor.level === 'fine-tune-typography'}
+    <BrandEditorFineTuneTypography />
   {/if}
 
   {#snippet footer()}
