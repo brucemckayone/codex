@@ -103,7 +103,7 @@
 
   .cta-primary {
     background-color: var(--color-interactive);
-    color: white;
+    color: var(--color-text-on-brand);
   }
 
   .cta-primary:hover {

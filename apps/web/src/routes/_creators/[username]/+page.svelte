@@ -257,7 +257,7 @@
     padding: var(--space-2, 0.5rem) var(--space-6, 1.5rem);
     font-size: var(--text-sm, 0.875rem);
     font-weight: var(--font-semibold, 600);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
     background: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md, 0.375rem);

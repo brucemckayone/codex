@@ -212,7 +212,7 @@
   .preset-btn.active {
     background-color: var(--color-interactive);
     border-color: var(--color-interactive);
-    color: white;
+    color: var(--color-text-on-brand);
   }
 
   .preset-btn.active:hover {
@@ -299,6 +299,6 @@
   :global([data-theme='dark']) .preset-btn.active {
     background-color: var(--color-interactive);
     border-color: var(--color-interactive);
-    color: white;
+    color: var(--color-text-on-brand);
   }
 </style>

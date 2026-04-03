@@ -280,7 +280,7 @@
 
   .type-btn.active {
     background: var(--color-interactive);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
     border-color: var(--color-interactive);
   }
 

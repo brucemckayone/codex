@@ -310,7 +310,7 @@
 
   .explore__filter-btn--active {
     background: var(--color-interactive);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
   }
 
   .explore__filter-btn--active:hover {
@@ -400,7 +400,7 @@
 
   .explore__clear-btn:hover {
     background: var(--color-interactive);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
   }
 
   /* ── Responsive Controls ── */
@@ -467,7 +467,7 @@
 
   :global([data-theme='dark']) .explore__filter-btn--active {
     background: var(--color-interactive);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
   }
 
   :global([data-theme='dark']) .explore__sort {

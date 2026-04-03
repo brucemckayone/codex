@@ -97,7 +97,7 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
     background-color: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md);

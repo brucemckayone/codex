@@ -129,7 +129,7 @@
     position: relative;
     padding: var(--space-16, 4rem) var(--space-6, 1.5rem);
     background: linear-gradient(135deg, var(--brand-primary, #6366f1), var(--brand-secondary, #4f46e5));
-    color: #ffffff;
+    color: var(--color-text-on-brand);
     text-align: center;
     overflow: hidden;
   }
@@ -184,7 +184,7 @@
     margin-top: var(--space-4, 1rem);
     padding: var(--space-3, 0.75rem) var(--space-6, 1.5rem);
     background: color-mix(in srgb, white 20%, transparent);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
     font-size: var(--text-base, 1rem);
     font-weight: var(--font-semibold, 600);
     border: 2px solid color-mix(in srgb, white 40%, transparent);

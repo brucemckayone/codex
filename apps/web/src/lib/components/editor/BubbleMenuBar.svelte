@@ -164,12 +164,12 @@
 
   .bubble-btn:hover {
     background-color: var(--color-neutral-800);
-    color: white;
+    color: var(--color-text-on-brand);
   }
 
   .bubble-btn[data-active] {
     background-color: var(--color-interactive-hover);
-    color: white;
+    color: var(--color-text-on-brand);
   }
 
   .bubble-separator {
@@ -187,7 +187,7 @@
     border: var(--border-width) var(--border-style) var(--color-neutral-600);
     border-radius: var(--radius-sm);
     background-color: var(--color-neutral-800);
-    color: white;
+    color: var(--color-text-on-brand);
     outline: none;
   }
 

@@ -386,7 +386,7 @@
 
   .btn-primary {
     background-color: var(--color-interactive);
-    color: white;
+    color: var(--color-text-on-brand);
   }
 
   .btn-primary:hover:not(:disabled) {

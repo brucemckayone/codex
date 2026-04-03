@@ -386,7 +386,7 @@
 
   .btn-danger {
     background-color: var(--color-error-600, #dc2626);
-    color: #ffffff;
+    color: var(--color-text-inverse);
     border-color: var(--color-error-600, #dc2626);
   }
 

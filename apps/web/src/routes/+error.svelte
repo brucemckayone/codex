@@ -140,7 +140,7 @@
 
   .btn-primary {
     background: var(--color-interactive);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
   }
 
   .btn-primary:hover {

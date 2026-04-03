@@ -99,7 +99,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
+    color: var(--color-text-on-brand);
     width: 100%;
     height: 100%;
   }
@@ -112,7 +112,7 @@
   .indeterminate-bar {
     width: 60%;
     height: 2px;
-    background-color: white;
+    background-color: var(--color-surface);
   }
 
   .checkbox-root:disabled {

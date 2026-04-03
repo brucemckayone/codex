@@ -282,7 +282,7 @@
     flex-direction: column;
     align-items: center;
     gap: var(--space-2);
-    color: #ffffff;
+    color: var(--color-text-inverse);
     text-align: center;
     padding: var(--space-6);
   }
@@ -431,7 +431,7 @@
     transition: var(--transition-colors, background-color 0.15s);
     font-family: inherit;
     background: var(--color-interactive);
-    color: #ffffff;
+    color: var(--color-text-on-brand);
     text-decoration: none;
     width: 100%;
   }

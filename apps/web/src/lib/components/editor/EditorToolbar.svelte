@@ -412,7 +412,7 @@
 
   .link-action-btn--apply {
     background-color: var(--color-interactive);
-    color: white;
+    color: var(--color-text-on-brand);
   }
 
   .link-action-btn--apply:hover {

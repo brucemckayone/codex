@@ -139,14 +139,14 @@
     font-weight: var(--font-medium);
     border: var(--border-width) var(--border-style) color-mix(in srgb, white 50%, transparent);
     background: color-mix(in srgb, black 40%, transparent);
-    color: white;
+    color: var(--color-text-inverse);
     cursor: pointer;
     transition: var(--transition-colors);
   }
 
   .overlay-btn:hover {
     background: color-mix(in srgb, black 60%, transparent);
-    border-color: white;
+    border-color: var(--color-text-inverse);
   }
 
   .overlay-btn-danger:hover {

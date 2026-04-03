@@ -309,7 +309,7 @@
     padding: 0;
     border: none;
     background: transparent;
-    color: white;
+    color: var(--color-text-inverse);
     cursor: pointer;
     border-radius: var(--radius-sm);
     transition: background-color 150ms ease;
@@ -334,7 +334,7 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: white;
+    color: var(--color-text-inverse);
     background: color-mix(in srgb, black 60%, transparent);
     border-radius: var(--radius-sm);
     z-index: 2;
@@ -376,7 +376,7 @@
   .preview-player__cta-title {
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
-    color: white;
+    color: var(--color-text-inverse);
     margin: 0;
   }
 
@@ -395,7 +395,7 @@
     padding-inline: var(--space-6);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: white;
+    color: var(--color-text-inverse);
     background-color: var(--color-interactive);
     border: none;
     border-radius: var(--radius-md);
