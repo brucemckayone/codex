@@ -16,7 +16,7 @@
   import type { HTMLButtonAttributes } from 'svelte/elements';
 
   interface Props extends HTMLButtonAttributes {
-    variant?: 'primary' | 'secondary' | 'ghost' | 'destructive';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'destructive' | 'accent';
     size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
     loading?: boolean;
     children: Snippet;
@@ -148,6 +148,17 @@
 
   .button[data-variant="destructive"]:hover:not(:disabled) {
     background-color: var(--color-error-600);
+  }
+
+  /* Variant: Accent */
+  .button[data-variant="accent"] {
+    background-color: var(--color-brand-accent);
+    color: var(--color-text-inverse);
+    border: none;
+  }
+
+  .button[data-variant="accent"]:hover:not(:disabled) {
+    background-color: var(--color-brand-accent-hover);
   }
 
   .button-content {

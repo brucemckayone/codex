@@ -4,7 +4,7 @@
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     children: Snippet;
-    variant?: 'neutral' | 'success' | 'warning' | 'error';
+    variant?: 'neutral' | 'success' | 'warning' | 'error' | 'info' | 'accent';
   }
 
   const { children, variant = 'neutral', class: className, ...restProps }: Props = $props();
@@ -55,5 +55,15 @@
     border: var(--border-width) var(--border-style) var(--color-error-200);
   }
 
-  /* Dark mode adjusments if needed, but semantic colors should handle it mostly. */
+  .badge[data-variant="info"] {
+    background-color: var(--color-info-50);
+    color: var(--color-info-700);
+    border: var(--border-width) var(--border-style) var(--color-info-200);
+  }
+
+  .badge[data-variant="accent"] {
+    background-color: var(--color-brand-accent-subtle);
+    color: var(--color-brand-accent);
+    border: var(--border-width) var(--border-style) var(--color-brand-accent);
+  }
 </style>
