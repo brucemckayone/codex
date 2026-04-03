@@ -53,13 +53,10 @@
             onclick={() => applyFullPalette(palette)}
             title={palette.name}
           >
-            <div class="home__palette-swatches">
-              <span class="home__palette-dot home__palette-dot--lg" style:background={palette.primary}></span>
-              <span class="home__palette-dot" style:background={palette.secondary}></span>
-              <span class="home__palette-dot" style:background={palette.accent}></span>
-              {#if palette.background}
-                <span class="home__palette-dot home__palette-dot--bg" style:background={palette.background}></span>
-              {/if}
+            <div class="home__palette-bars" style:background={palette.background ?? 'var(--color-surface)'}>
+              <span class="home__palette-bar" style:background={palette.primary}></span>
+              <span class="home__palette-bar" style:background={palette.secondary}></span>
+              <span class="home__palette-bar" style:background={palette.accent}></span>
             </div>
             <span class="home__palette-name">{palette.name}</span>
           </button>
@@ -257,28 +254,20 @@
     background: var(--color-surface-secondary);
   }
 
-  .home__palette-swatches {
+  .home__palette-bars {
     display: flex;
-    gap: var(--space-1);
+    height: 40px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
   }
 
-  .home__palette-dot {
-    width: var(--space-4);
-    height: var(--space-4);
-    border-radius: var(--radius-full);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    flex-shrink: 0;
+  .home__palette-bar {
+    flex: 1;
   }
 
-  .home__palette-dot--lg {
-    width: var(--space-5);
-    height: var(--space-5);
-  }
-
-  .home__palette-dot--bg {
-    width: var(--space-3);
-    height: var(--space-3);
-    align-self: center;
+  .home__palette-bar:first-child {
+    flex: 2;
   }
 
   .home__palette-name {
