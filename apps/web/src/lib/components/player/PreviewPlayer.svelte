@@ -241,8 +241,8 @@
   .preview-player__spinner {
     width: 2.5rem;
     height: 2.5rem;
-    border: 3px solid rgba(255, 255, 255, 0.2);
-    border-top-color: rgba(255, 255, 255, 0.8);
+    border: 3px solid color-mix(in srgb, white 20%, transparent);
+    border-top-color: color-mix(in srgb, white 80%, transparent);
     border-radius: 50%;
     animation: preview-spin 0.8s linear infinite;
   }
@@ -296,7 +296,7 @@
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, transparent 100%);
+    background: linear-gradient(to top, color-mix(in srgb, black 70%, transparent) 0%, transparent 100%);
     z-index: 2;
   }
 
@@ -316,7 +316,7 @@
   }
 
   .preview-player__control-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: color-mix(in srgb, white 15%, transparent);
   }
 
   .preview-player__control-btn:focus-visible {
@@ -335,7 +335,7 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: white;
-    background: rgba(0, 0, 0, 0.6);
+    background: color-mix(in srgb, black 60%, transparent);
     border-radius: var(--radius-sm);
     z-index: 2;
     pointer-events: none;
@@ -348,7 +348,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0);
+    background: transparent;
     z-index: 4;
     opacity: 0;
     transition:
@@ -359,7 +359,7 @@
 
   .preview-player__overlay--visible {
     opacity: 1;
-    background: rgba(0, 0, 0, 0.7);
+    background: color-mix(in srgb, black 70%, transparent);
     pointer-events: auto;
   }
 
@@ -382,7 +382,7 @@
 
   .preview-player__cta-description {
     font-size: var(--text-sm);
-    color: rgba(255, 255, 255, 0.8);
+    color: color-mix(in srgb, white 80%, transparent);
     margin: 0;
     line-height: 1.5;
   }
@@ -435,6 +435,6 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .preview-player__badge {
-    background: rgba(0, 0, 0, 0.7);
+    background: color-mix(in srgb, black 70%, transparent);
   }
 </style>

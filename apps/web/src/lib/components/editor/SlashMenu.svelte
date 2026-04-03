@@ -110,7 +110,7 @@
     background-color: var(--color-surface);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1));
+    box-shadow: var(--shadow-lg);
     min-width: 240px;
     max-height: 320px;
     overflow-y: auto;

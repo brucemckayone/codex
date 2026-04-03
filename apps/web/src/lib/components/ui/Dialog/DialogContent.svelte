@@ -34,7 +34,7 @@
     position: fixed;
     inset: 0;
     z-index: var(--z-modal-backdrop);
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--color-surface-overlay);
     backdrop-filter: blur(4px);
   }
 

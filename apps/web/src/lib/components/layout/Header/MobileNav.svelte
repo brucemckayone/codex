@@ -138,7 +138,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
+    background-color: var(--color-surface-overlay);
     z-index: var(--z-modal-backdrop);
   }
 

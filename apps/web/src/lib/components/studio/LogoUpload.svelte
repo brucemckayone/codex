@@ -356,7 +356,7 @@
   }
 
   .btn-danger:hover:not(:disabled) {
-    background-color: var(--color-error-50, rgba(239, 68, 68, 0.05));
+    background-color: var(--color-error-50);
   }
 
   /* Dark mode */

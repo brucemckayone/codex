@@ -123,7 +123,7 @@
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--color-surface-overlay);
     opacity: 0;
     transition: opacity var(--duration-normal) var(--ease-default);
   }
@@ -137,15 +137,15 @@
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    border: var(--border-width) var(--border-style) rgba(255, 255, 255, 0.5);
-    background: rgba(0, 0, 0, 0.4);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, white 50%, transparent);
+    background: color-mix(in srgb, black 40%, transparent);
     color: white;
     cursor: pointer;
     transition: var(--transition-colors);
   }
 
   .overlay-btn:hover {
-    background: rgba(0, 0, 0, 0.6);
+    background: color-mix(in srgb, black 60%, transparent);
     border-color: white;
   }
 

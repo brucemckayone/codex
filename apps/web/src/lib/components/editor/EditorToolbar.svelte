@@ -460,7 +460,7 @@
   }
 
   :global([data-theme='dark']) .link-action-btn--remove {
-    background-color: rgba(220, 38, 38, 0.15);
+    background-color: var(--color-error-50);
     color: #fca5a5;
   }
 </style>

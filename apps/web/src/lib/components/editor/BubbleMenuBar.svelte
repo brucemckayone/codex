@@ -144,7 +144,7 @@
     padding: var(--space-1) var(--space-2);
     background-color: var(--color-neutral-900);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.2));
+    box-shadow: var(--shadow-lg);
   }
 
   .bubble-btn {

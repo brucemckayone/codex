@@ -277,7 +277,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.6);
+    background: color-mix(in srgb, black 60%, transparent);
   }
 
   .content-detail__preview-cta {

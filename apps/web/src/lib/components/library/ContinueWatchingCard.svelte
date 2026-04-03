@@ -114,7 +114,7 @@
     left: 0;
     right: 0;
     height: 4px;
-    background: rgba(255, 255, 255, 0.3);
+    background: color-mix(in srgb, white 30%, transparent);
   }
 
   .cw-card__progress-fill {

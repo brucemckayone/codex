@@ -78,7 +78,7 @@
     background: var(--color-surface, #ffffff);
     border-radius: var(--radius-lg, 0.75rem);
     padding: var(--space-8, 2rem) var(--space-8, 2rem) var(--space-6, 1.5rem);
-    box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0,0,0,.1));
+    box-shadow: var(--shadow-lg);
     border: 1px solid var(--color-border, #e5e5e5);
     text-align: center;
     display: flex;
