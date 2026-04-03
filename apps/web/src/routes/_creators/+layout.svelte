@@ -170,28 +170,28 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .creators-header {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .logo {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .nav-link {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .nav-link:hover {
-    color: var(--color-text-dark);
+    color: var(--color-text);
     background-color: var(--color-surface-variant);
   }
 
   :global([data-theme='dark']) .creators-layout {
-    background-color: var(--color-background-dark);
+    background-color: var(--color-background);
   }
 
   :global([data-theme='dark']) .creators-footer {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 </style>

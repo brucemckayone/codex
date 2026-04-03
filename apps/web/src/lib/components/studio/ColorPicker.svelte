@@ -223,17 +223,17 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .color-input {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .hex-input {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .swatch {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .validation-hint {

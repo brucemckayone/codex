@@ -168,7 +168,7 @@
   }
 
   .tooltip-date {
-    opacity: 0.8;
+    opacity: var(--opacity-80);
   }
 
   .tooltip-value {
@@ -213,17 +213,17 @@
   @keyframes pulse {
     0%,
     100% {
-      opacity: 0.4;
+      opacity: var(--opacity-40);
     }
     50% {
-      opacity: 0.8;
+      opacity: var(--opacity-80);
     }
   }
 
   /* Dark mode */
   :global([data-theme='dark']) .bar-tooltip {
-    background-color: var(--color-surface-dark);
-    color: var(--color-text-dark);
-    border: var(--border-width) var(--border-style) var(--color-border-dark);
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    border: var(--border-width) var(--border-style) var(--color-border);
   }
 </style>

@@ -513,12 +513,12 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .upload-heading {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .drop-zone {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .drop-zone:hover,
@@ -529,20 +529,20 @@
   }
 
   :global([data-theme='dark']) .upload-icon {
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 
   :global([data-theme='dark']) .drop-text {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .queue-item {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .queue-item-name {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .progress-bar {

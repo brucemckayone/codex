@@ -60,7 +60,7 @@
 
   .error-description {
     font-size: var(--text-sm);
-    opacity: 0.9;
+    opacity: var(--opacity-90);
     margin: 0;
     max-width: none;
   }

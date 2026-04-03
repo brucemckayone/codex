@@ -256,7 +256,7 @@
   }
 
   .drop-zone.disabled {
-    opacity: 0.6;
+    opacity: var(--opacity-60);
     pointer-events: none;
   }
 
@@ -330,7 +330,7 @@
   }
 
   .btn:disabled {
-    opacity: 0.6;
+    opacity: var(--opacity-60);
     cursor: not-allowed;
   }
 
@@ -361,13 +361,13 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .logo-preview {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .drop-zone {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .drop-zone:hover,
@@ -378,12 +378,12 @@
   }
 
   :global([data-theme='dark']) .upload-icon {
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 
   :global([data-theme='dark']) .btn-outline {
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .btn-outline:hover:not(:disabled) {

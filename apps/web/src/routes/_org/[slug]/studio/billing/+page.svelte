@@ -221,11 +221,11 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .billing-card {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .billing-card h2 {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 </style>

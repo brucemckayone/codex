@@ -165,7 +165,7 @@
   }
 
   .field-input:disabled {
-    opacity: 0.6;
+    opacity: var(--opacity-60);
     cursor: not-allowed;
   }
 
@@ -202,7 +202,7 @@
   }
 
   .btn:disabled {
-    opacity: 0.6;
+    opacity: var(--opacity-60);
     cursor: not-allowed;
   }
 
@@ -232,13 +232,13 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .field-label {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .field-input {
-    background-color: var(--color-background-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-background);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .form-error {
@@ -248,8 +248,8 @@
   }
 
   :global([data-theme='dark']) .btn-secondary {
-    background-color: var(--color-surface-dark);
-    color: var(--color-text-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    border-color: var(--color-border);
   }
 </style>

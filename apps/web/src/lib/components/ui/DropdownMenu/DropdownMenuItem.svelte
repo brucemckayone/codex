@@ -47,7 +47,7 @@
 	}
 
 	.dropdown-item:global([data-disabled]) {
-		opacity: 0.5;
+		opacity: var(--opacity-50);
 		pointer-events: none;
 	}
 </style>

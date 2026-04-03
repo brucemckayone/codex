@@ -153,12 +153,12 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .cw-card {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .cw-card:hover {
-    border-color: var(--color-border-hover-dark);
+    border-color: var(--color-border-strong);
   }
 
   :global([data-theme='dark']) .cw-card__placeholder {
@@ -174,6 +174,6 @@
   }
 
   :global([data-theme='dark']) .cw-card__resume {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 </style>

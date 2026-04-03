@@ -119,7 +119,7 @@
   @keyframes pulse {
     0%,
     100% {
-      opacity: 0.5;
+      opacity: var(--opacity-50);
     }
     50% {
       opacity: 1;
@@ -161,10 +161,10 @@
 
   /* Dark mode */
   :global([data-theme='dark'] .title-cell) {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark'] .revenue-cell) {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 </style>

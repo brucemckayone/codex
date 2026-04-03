@@ -173,7 +173,7 @@
     margin: 0;
     font-size: var(--text-lg, 1.125rem);
     line-height: 1.6;
-    opacity: 0.9;
+    opacity: var(--opacity-90);
     max-width: 560px;
   }
 
@@ -270,7 +270,7 @@
 
   /* ── Dark Mode ── */
   :global([data-theme='dark']) .featured__title {
-    color: var(--color-text-primary-dark, #f1f5f9);
+    color: var(--color-text-primary, #f1f5f9);
   }
 
   :global([data-theme='dark']) .featured__view-all {
@@ -282,7 +282,7 @@
   }
 
   :global([data-theme='dark']) .featured__empty {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 
   /* ── Responsive Hero ── */

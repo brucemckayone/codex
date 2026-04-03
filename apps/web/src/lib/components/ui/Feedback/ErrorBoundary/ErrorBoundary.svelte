@@ -85,7 +85,7 @@
   .error-message {
     font-size: var(--text-sm);
     margin: 0;
-    opacity: 0.9;
+    opacity: var(--opacity-90);
   }
 
   .error-actions {

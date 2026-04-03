@@ -289,7 +289,7 @@
   }
 
   .action-btn:disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-50);
     cursor: not-allowed;
   }
 
@@ -363,19 +363,19 @@
 
   /* ── Dark mode ─────────────────────────────────── */
   :global([data-theme='dark']) .content-table {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .table-wrap {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) thead {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .row {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .row:hover {
@@ -383,13 +383,13 @@
   }
 
   :global([data-theme='dark']) .title-link {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .type-badge {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-secondary-dark, var(--color-text-muted));
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-text-secondary, var(--color-text-muted));
   }
 
   :global([data-theme='dark']) .action-btn[data-action='publish'] {
@@ -401,7 +401,7 @@
   }
 
   :global([data-theme='dark']) .action-btn[data-action='unpublish']:hover:not(:disabled) {
-    background-color: var(--color-surface-dark);
+    background-color: var(--color-surface);
     color: var(--color-warning-400);
   }
 
@@ -410,10 +410,10 @@
   }
 
   :global([data-theme='dark']) .empty-icon {
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 
   :global([data-theme='dark']) .empty-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 </style>

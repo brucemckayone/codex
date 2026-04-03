@@ -414,7 +414,7 @@
   }
 
   .preview-player__cta-button:disabled {
-    opacity: 0.6;
+    opacity: var(--opacity-60);
     cursor: not-allowed;
   }
 

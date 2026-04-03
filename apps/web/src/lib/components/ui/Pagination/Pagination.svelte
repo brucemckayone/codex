@@ -269,7 +269,7 @@
 
   .pagination__btn:disabled,
   .pagination__btn--disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-50);
     cursor: not-allowed;
     pointer-events: none;
   }
@@ -335,9 +335,9 @@
   /* Dark mode */
   :global([data-theme='dark']) .pagination__btn,
   :global([data-theme='dark']) .pagination__page {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .pagination__btn:hover:not(:disabled):not(.pagination__btn--disabled),
@@ -352,6 +352,6 @@
 
   :global([data-theme='dark']) .pagination__info,
   :global([data-theme='dark']) .pagination__ellipsis {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 </style>

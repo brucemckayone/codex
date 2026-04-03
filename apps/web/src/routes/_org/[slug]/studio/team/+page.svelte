@@ -140,7 +140,7 @@
   }
 
   .btn:disabled {
-    opacity: 0.6;
+    opacity: var(--opacity-60);
     cursor: not-allowed;
   }
 
@@ -160,11 +160,11 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .page-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .members-section {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 </style>

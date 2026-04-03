@@ -271,29 +271,29 @@
   /* Dark mode */
   :global([data-theme='dark']) .page-title,
   :global([data-theme='dark']) .section-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .summary-card,
   :global([data-theme='dark']) .chart-card,
   :global([data-theme='dark']) .table-card {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .summary-value {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .preset-btn {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
     color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .preset-btn:hover {
     background-color: var(--color-surface);
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .preset-btn.active {

@@ -180,8 +180,8 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .slash-menu {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .slash-menu__item[data-selected],
@@ -191,10 +191,10 @@
 
   :global([data-theme='dark']) .slash-menu__icon {
     background-color: var(--color-neutral-800);
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .slash-menu__title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 </style>

@@ -104,16 +104,16 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .error-icon {
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 
   :global([data-theme='dark']) .error-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .back-link {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 </style>

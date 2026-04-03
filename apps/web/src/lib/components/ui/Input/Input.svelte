@@ -114,7 +114,7 @@
   .input:disabled {
     cursor: not-allowed;
     background-color: var(--color-surface-secondary);
-    opacity: 0.7;
+    opacity: var(--opacity-70);
   }
 
   .password-toggle {

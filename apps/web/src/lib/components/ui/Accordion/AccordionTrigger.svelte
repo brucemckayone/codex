@@ -57,7 +57,7 @@
 		height: 1rem;
 		width: 1rem;
 		transition: transform 0.2s;
-		opacity: 0.5;
+		opacity: var(--opacity-50);
 	}
 	.rotated {
 		transform: rotate(180deg);

@@ -382,7 +382,7 @@
 
   .empty-state__icon {
     color: var(--color-text-muted);
-    opacity: 0.6;
+    opacity: var(--opacity-60);
   }
 
   .empty-state__text {
@@ -405,59 +405,59 @@
 
   /* ── Dark Mode ── */
   :global([data-theme='dark']) .orgs-section__title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .org-card {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .org-card:hover {
     border-color: var(--color-interactive-active);
-    background: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface-dark));
+    background: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface));
   }
 
   :global([data-theme='dark']) .org-card__initial {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .org-card__name {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .profile-header {
-    border-bottom-color: var(--color-border-dark);
+    border-bottom-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .profile-header__name,
   :global([data-theme='dark']) .content-section__title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .profile-header__username {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 
   :global([data-theme='dark']) .profile-header__bio {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .social-link {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
     background: var(--color-surface-variant);
   }
 
   :global([data-theme='dark']) .social-link:hover {
     background: var(--color-neutral-800);
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .empty-state__text {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 
   :global([data-theme='dark']) .empty-state__icon {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 </style>

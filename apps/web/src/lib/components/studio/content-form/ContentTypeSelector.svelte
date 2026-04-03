@@ -156,17 +156,17 @@
   }
 
   :global([data-theme='dark']) .type-card {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .type-card:hover {
     border-color: var(--color-focus);
-    background-color: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface-dark));
+    background-color: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface));
   }
 
   :global([data-theme='dark']) .type-card[data-selected] {
     border-color: var(--color-interactive);
-    background-color: color-mix(in srgb, var(--color-interactive) 15%, var(--color-surface-dark));
+    background-color: color-mix(in srgb, var(--color-interactive) 15%, var(--color-surface));
   }
 </style>

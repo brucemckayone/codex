@@ -318,12 +318,12 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .rich-text-editor__wrapper {
-    background-color: var(--color-background-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-background);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .rich-text-editor__wrapper :global(.rich-text-editor__content) {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .rich-text-editor__wrapper :global(a) {
@@ -331,14 +331,14 @@
   }
 
   :global([data-theme='dark']) .rich-text-editor__wrapper :global(blockquote) {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .rich-text-editor__wrapper :global(code) {
-    background-color: var(--color-surface-dark);
+    background-color: var(--color-surface);
   }
 
   :global([data-theme='dark']) .rich-text-editor__wrapper :global(pre) {
-    background-color: var(--color-surface-dark);
+    background-color: var(--color-surface);
   }
 </style>

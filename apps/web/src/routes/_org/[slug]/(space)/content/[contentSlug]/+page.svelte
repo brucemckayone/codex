@@ -291,7 +291,7 @@
   }
 
   .content-detail__lock-icon {
-    opacity: 0.9;
+    opacity: var(--opacity-90);
     margin-bottom: var(--space-1);
   }
 
@@ -303,7 +303,7 @@
 
   .content-detail__cta-subtext {
     font-size: var(--text-sm);
-    opacity: 0.8;
+    opacity: var(--opacity-80);
     margin: 0;
     max-width: 280px;
   }
@@ -436,7 +436,7 @@
   }
 
   .content-detail__purchase-btn:disabled {
-    opacity: 0.7;
+    opacity: var(--opacity-70);
     cursor: not-allowed;
   }
 
@@ -508,20 +508,20 @@
   }
 
   :global([data-theme='dark']) .content-detail__title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .content-detail__creator,
   :global([data-theme='dark']) .content-detail__duration {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .content-detail__description-heading {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .content-detail__description p {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .content-detail__completed-badge {

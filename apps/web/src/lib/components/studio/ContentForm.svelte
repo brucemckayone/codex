@@ -408,7 +408,7 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .page-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .success-message {

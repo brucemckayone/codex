@@ -152,7 +152,7 @@
 
   .creators__empty-icon {
     color: var(--color-text-muted);
-    opacity: 0.6;
+    opacity: var(--opacity-60);
   }
 
   .creators__empty-text {
@@ -175,18 +175,18 @@
 
   /* ── Dark Mode ── */
   :global([data-theme='dark']) .creators__title {
-    color: var(--color-text-primary-dark, #f1f5f9);
+    color: var(--color-text-primary, #f1f5f9);
   }
 
   :global([data-theme='dark']) .creators__subtitle {
-    color: var(--color-text-secondary-dark, #94a3b8);
+    color: var(--color-text-secondary, #94a3b8);
   }
 
   :global([data-theme='dark']) .creators__empty-text {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 
   :global([data-theme='dark']) .creators__empty-icon {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 </style>

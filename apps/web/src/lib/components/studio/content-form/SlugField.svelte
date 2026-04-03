@@ -120,13 +120,13 @@
   }
 
   :global([data-theme='dark']) .field-input {
-    background-color: var(--color-background-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-background);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .url-preview {
-    background-color: var(--color-surface-dark);
+    background-color: var(--color-surface);
   }
 
   :global([data-theme='dark']) .url-slug {

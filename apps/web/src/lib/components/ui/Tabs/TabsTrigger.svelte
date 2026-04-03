@@ -48,7 +48,7 @@
 	}
 
 	.tabs-trigger:global([data-disabled]) {
-		opacity: 0.5;
+		opacity: var(--opacity-50);
 		cursor: not-allowed;
 	}
 </style>

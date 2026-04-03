@@ -230,29 +230,29 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .checkout-success__card {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .checkout-success__title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .checkout-success__description {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .checkout-success__content-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .checkout-success__btn--secondary {
-    border-color: var(--color-border-dark, #404040);
-    color: var(--color-text-secondary-dark);
+    border-color: var(--color-border, #404040);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .checkout-success__btn--secondary:hover {
     background: var(--color-neutral-800, #262626);
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 </style>

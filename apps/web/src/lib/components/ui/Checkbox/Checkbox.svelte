@@ -117,6 +117,6 @@
 
   .checkbox-root:disabled {
     cursor: not-allowed;
-    opacity: 0.5;
+    opacity: var(--opacity-50);
   }
 </style>

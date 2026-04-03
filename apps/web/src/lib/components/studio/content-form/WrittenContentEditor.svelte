@@ -66,7 +66,7 @@
   }
 
   :global([data-theme='dark']) .form-card {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 </style>

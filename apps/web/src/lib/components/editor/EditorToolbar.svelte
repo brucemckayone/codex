@@ -340,7 +340,7 @@
   }
 
   .toolbar-btn:disabled {
-    opacity: 0.4;
+    opacity: var(--opacity-40);
     cursor: not-allowed;
   }
 
@@ -430,13 +430,13 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .editor-toolbar {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .toolbar-btn:hover:not(:disabled) {
     background-color: var(--color-neutral-800);
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .toolbar-btn[data-active] {
@@ -445,18 +445,18 @@
   }
 
   :global([data-theme='dark']) .toolbar-separator {
-    background-color: var(--color-border-dark);
+    background-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .link-popover {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .link-input {
-    background-color: var(--color-background-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-background);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .link-action-btn--remove {

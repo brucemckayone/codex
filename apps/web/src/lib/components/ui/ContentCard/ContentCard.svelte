@@ -432,12 +432,12 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .content-card {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .content-card:hover {
-    border-color: var(--color-border-hover-dark);
+    border-color: var(--color-border-strong);
   }
 
   :global([data-theme='dark']) .content-card__placeholder {
@@ -446,7 +446,7 @@
 
   :global([data-theme='dark']) .content-card__description,
   :global([data-theme='dark']) .content-card__creator-name {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .content-card__title a:hover {

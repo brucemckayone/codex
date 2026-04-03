@@ -341,8 +341,8 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .media-card {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .media-card:hover {
@@ -351,24 +351,24 @@
 
   :global([data-theme='dark']) .media-thumbnail {
     background-color: var(--color-surface-variant);
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 
   :global([data-theme='dark']) .media-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .media-meta {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .action-btn {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .action-btn:hover {
     background-color: var(--color-surface-variant);
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   .transcoding-progress {

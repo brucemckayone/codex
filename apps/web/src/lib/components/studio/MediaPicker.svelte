@@ -694,9 +694,9 @@
 
   /* ── Dark mode ───────────────────────────────────────────────────── */
   :global([data-theme='dark']) .picker-trigger {
-    background-color: var(--color-background-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-background);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .picker-trigger:hover {
@@ -705,15 +705,15 @@
 
   :global([data-theme='dark']) .trigger-icon {
     background-color: var(--color-surface-variant);
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 
   :global([data-theme='dark']) .trigger-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .trigger-meta {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .clear-btn:hover {
@@ -722,20 +722,20 @@
   }
 
   :global([data-theme='dark']) .picker-dropdown {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .dropdown-search {
-    border-bottom-color: var(--color-border-dark);
+    border-bottom-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .search-input {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .option {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .option:hover,
@@ -756,19 +756,19 @@
   }
 
   :global([data-theme='dark']) .option-meta {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .empty-title {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .dropdown-footer {
-    border-top-color: var(--color-border-dark);
+    border-top-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .library-link {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .type-badge {

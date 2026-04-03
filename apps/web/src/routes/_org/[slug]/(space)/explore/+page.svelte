@@ -377,7 +377,7 @@
 
   .explore__empty-icon {
     color: var(--color-text-muted);
-    opacity: 0.6;
+    opacity: var(--opacity-60);
   }
 
   .explore__empty-text {
@@ -434,17 +434,17 @@
 
   /* ── Dark Mode ── */
   :global([data-theme='dark']) .explore__title {
-    color: var(--color-text-primary-dark, #f1f5f9);
+    color: var(--color-text-primary, #f1f5f9);
   }
 
   :global([data-theme='dark']) .explore__count {
-    color: var(--color-text-secondary-dark, #94a3b8);
+    color: var(--color-text-secondary, #94a3b8);
   }
 
   :global([data-theme='dark']) .explore__search-input {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .explore__search-input:focus {
@@ -453,12 +453,12 @@
   }
 
   :global([data-theme='dark']) .explore__filter-group {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .explore__filter-btn {
-    background: var(--color-surface-dark);
-    color: var(--color-text-secondary-dark, #94a3b8);
+    background: var(--color-surface);
+    color: var(--color-text-secondary, #94a3b8);
   }
 
   :global([data-theme='dark']) .explore__filter-btn:hover {
@@ -471,17 +471,17 @@
   }
 
   :global([data-theme='dark']) .explore__sort {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .explore__empty-text {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 
   :global([data-theme='dark']) .explore__empty-icon {
-    color: var(--color-text-muted-dark, #94a3b8);
+    color: var(--color-text-muted, #94a3b8);
   }
 
   :global([data-theme='dark']) .explore__clear-btn {

@@ -141,19 +141,19 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .empty-icon {
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 
   :global([data-theme='dark']) .empty-title {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark'] .name-cell) {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark'] .email-cell),
   :global([data-theme='dark'] .date-cell) {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 </style>

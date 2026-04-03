@@ -290,18 +290,18 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .creator-card {
-    background: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .creator-card:hover {
-    border-color: var(--color-border-hover-dark);
+    border-color: var(--color-border-strong);
   }
 
   :global([data-theme='dark']) .creator-card__bio,
   :global([data-theme='dark']) .creator-card__count,
   :global([data-theme='dark']) .creator-card__social-link {
-    color: var(--color-text-secondary-dark);
+    color: var(--color-text-secondary);
   }
 
   :global([data-theme='dark']) .creator-card__name a:hover {

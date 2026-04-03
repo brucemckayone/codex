@@ -26,7 +26,7 @@
   }
 
   :global(.label:has(+ :disabled)) {
-    opacity: 0.5;
+    opacity: var(--opacity-50);
     cursor: not-allowed;
   }
 </style>

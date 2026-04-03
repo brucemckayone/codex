@@ -234,17 +234,17 @@
   }
 
   :global([data-theme='dark']) .form-card {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .thumbnail-placeholder {
-    border-color: var(--color-border-dark);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .field-input {
-    background-color: var(--color-background-dark);
-    border-color: var(--color-border-dark);
-    color: var(--color-text-dark);
+    background-color: var(--color-background);
+    border-color: var(--color-border);
+    color: var(--color-text);
   }
 </style>

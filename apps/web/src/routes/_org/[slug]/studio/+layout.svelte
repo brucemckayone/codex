@@ -292,18 +292,18 @@
 
   /* Dark mode overrides */
   :global([data-theme='dark']) .studio-layout {
-    background-color: var(--color-background-dark);
+    background-color: var(--color-background);
   }
 
   :global([data-theme='dark']) .studio-header.mobile,
   :global([data-theme='dark']) .studio-header.desktop {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .studio-sidebar {
-    background-color: var(--color-surface-dark);
-    border-color: var(--color-border-dark);
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
   :global([data-theme='dark']) .menu-toggle:hover,
@@ -313,14 +313,14 @@
 
   :global([data-theme='dark']) .menu-toggle,
   :global([data-theme='dark']) .sidebar-close {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .context-name {
-    color: var(--color-text-dark);
+    color: var(--color-text);
   }
 
   :global([data-theme='dark']) .sidebar-close {
-    color: var(--color-text-muted-dark);
+    color: var(--color-text-muted);
   }
 </style>
