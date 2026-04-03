@@ -119,17 +119,4 @@
     font-weight: var(--font-medium);
   }
 
-  :global([data-theme='dark']) .field-input {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .url-preview {
-    background-color: var(--color-surface);
-  }
-
-  :global([data-theme='dark']) .url-slug {
-    color: var(--color-interactive);
-  }
 </style>

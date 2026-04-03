@@ -486,40 +486,4 @@
     }
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .sidebar-section {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .field-input {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .price-prefix {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .status-badge[data-status='draft'] {
-    background-color: var(--color-warning-900, var(--color-warning-700));
-    color: var(--color-warning-100);
-  }
-
-  :global([data-theme='dark']) .status-badge[data-status='published'] {
-    background-color: var(--color-success-900, var(--color-success-700));
-    color: var(--color-success-100);
-  }
-
-  :global([data-theme='dark']) .btn-secondary {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .danger-zone {
-    border-color: var(--color-error-700);
-  }
 </style>

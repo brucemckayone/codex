@@ -359,43 +359,4 @@
     background-color: var(--color-error-50);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .logo-preview {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .drop-zone {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .drop-zone:hover,
-  :global([data-theme='dark']) .drop-zone:focus-visible,
-  :global([data-theme='dark']) .drop-zone.dragging {
-    border-color: var(--color-focus);
-    background-color: var(--color-surface-variant);
-  }
-
-  :global([data-theme='dark']) .upload-icon {
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .btn-outline {
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .btn-outline:hover:not(:disabled) {
-    background-color: var(--color-surface-variant);
-  }
-
-  :global([data-theme='dark']) .btn-danger {
-    border-color: var(--color-error-400);
-    color: var(--color-error-400);
-  }
-
-  :global([data-theme='dark']) .error-text {
-    color: var(--color-error-400);
-  }
 </style>

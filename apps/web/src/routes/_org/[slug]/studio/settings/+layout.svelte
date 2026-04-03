@@ -174,16 +174,4 @@
     }
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .tab-trigger.active {
-    color: var(--color-interactive);
-    border-bottom-color: var(--color-interactive);
-  }
-
-  @media (--below-sm) {
-    :global([data-theme='dark']) .tab-trigger.active {
-      background-color: var(--color-interactive-active);
-      border-bottom-color: transparent;
-    }
-  }
 </style>

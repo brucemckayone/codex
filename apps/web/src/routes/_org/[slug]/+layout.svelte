@@ -36,6 +36,7 @@
   // Raw inputs — the CSS file (org-brand.css) derives the full palette
   // from these via OKLCH relative color syntax.
   const brandPrimary = $derived(data.org?.brandColors?.primary ?? undefined);
+  const brandSecondary = $derived(data.org?.brandColors?.secondary ?? undefined);
   const brandAccent = $derived(data.org?.brandColors?.accent ?? undefined);
   const brandBackground = $derived(data.org?.brandColors?.background ?? undefined);
   const brandFontBody = $derived(data.org?.brandFonts?.body ?? undefined);
@@ -104,6 +105,7 @@
   data-org-brand={hasBranding ? '' : undefined}
   data-org-bg={brandBackground ? '' : undefined}
   style:--brand-color={brandPrimary}
+  style:--brand-secondary={brandSecondary}
   style:--brand-accent={brandAccent}
   style:--brand-bg={brandBackground}
   style:--brand-density={brandDensity}

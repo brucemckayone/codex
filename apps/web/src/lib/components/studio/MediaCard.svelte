@@ -339,38 +339,6 @@
     color: var(--color-error-700);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .media-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .media-card:hover {
-    border-color: var(--color-focus);
-  }
-
-  :global([data-theme='dark']) .media-thumbnail {
-    background-color: var(--color-surface-variant);
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .media-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .media-meta {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .action-btn {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .action-btn:hover {
-    background-color: var(--color-surface-variant);
-    color: var(--color-text);
-  }
-
   .transcoding-progress {
     display: flex;
     flex-direction: column;

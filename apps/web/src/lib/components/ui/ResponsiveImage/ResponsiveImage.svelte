@@ -112,8 +112,4 @@
     }
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .responsive-image__skeleton {
-    background: var(--color-neutral-800);
-  }
 </style>

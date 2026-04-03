@@ -125,14 +125,4 @@
     margin: 0;
   }
 
-  :global([data-theme='dark']) .form-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .field-input {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
 </style>

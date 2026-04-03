@@ -428,39 +428,4 @@
     background-color: var(--color-error-200);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .editor-toolbar {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .toolbar-btn:hover:not(:disabled) {
-    background-color: var(--color-neutral-800);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .toolbar-btn[data-active] {
-    background-color: var(--color-interactive-subtle);
-    color: var(--color-brand-primary-subtle);
-  }
-
-  :global([data-theme='dark']) .toolbar-separator {
-    background-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .link-popover {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .link-input {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .link-action-btn--remove {
-    background-color: var(--color-error-50);
-    color: #fca5a5;
-  }
 </style>

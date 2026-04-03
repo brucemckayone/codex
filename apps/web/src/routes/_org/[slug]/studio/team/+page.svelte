@@ -158,13 +158,4 @@
     outline-offset: 2px;
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .page-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .members-section {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
 </style>

@@ -196,11 +196,6 @@
     color: var(--color-text-muted);
   }
 
-  :global([data-theme='dark']) .tags-container {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-  }
-
   :global([data-theme='dark']) .tag-pill {
     background-color: color-mix(in srgb, var(--color-interactive) 20%, var(--color-surface));
     color: var(--color-brand-primary-subtle);
@@ -208,9 +203,5 @@
 
   :global([data-theme='dark']) .tag-remove:hover {
     background-color: color-mix(in srgb, var(--color-interactive) 30%, var(--color-surface));
-  }
-
-  :global([data-theme='dark']) .tag-input {
-    color: var(--color-text);
   }
 </style>

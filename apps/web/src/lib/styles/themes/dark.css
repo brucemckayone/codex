@@ -35,6 +35,9 @@
   --color-focus-ring: var(--color-primary-800);
 
   /* Brand defaults (overridden by [data-org-brand]) */
+  --color-brand-secondary: var(--color-neutral-400);
+  --color-brand-secondary-hover: var(--color-neutral-300);
+  --color-brand-secondary-subtle: var(--color-neutral-800);
   --color-brand-primary: var(--color-primary-400);
   --color-brand-primary-hover: var(--color-primary-300);
   --color-brand-primary-active: var(--color-primary-200);

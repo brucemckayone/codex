@@ -217,27 +217,4 @@
     box-shadow: 0 0 0 1px var(--color-interactive);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .filter-btn {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .filter-btn:hover {
-    border-color: var(--color-border-strong);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .filter-btn--active {
-    background-color: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-text-inverse);
-  }
-
-  :global([data-theme='dark']) .search-input {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
 </style>

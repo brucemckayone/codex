@@ -42,6 +42,11 @@
   --color-primary-100: oklch(from var(--brand-color, var(--color-primary-500)) 0.94 calc(c * 0.25) h);
   --color-primary-50: oklch(from var(--brand-color, var(--color-primary-500)) 0.97 calc(c * 0.15) h);
 
+  /* ─── SECONDARY ──────────────────────────────────────────────────────── */
+  --color-brand-secondary: var(--brand-secondary, var(--color-neutral-600));
+  --color-brand-secondary-hover: oklch(from var(--brand-secondary, var(--color-neutral-600)) calc(l - 0.08) c h);
+  --color-brand-secondary-subtle: oklch(from var(--brand-secondary, var(--color-neutral-600)) 0.96 calc(c * 0.2) h);
+
   /* ─── ACCENT ────────────────────────────────────────────────────────── */
   --color-brand-accent: var(--brand-accent, var(--color-warning));
   --color-brand-accent-hover: oklch(from var(--brand-accent, var(--color-warning)) calc(l - 0.08) c h);

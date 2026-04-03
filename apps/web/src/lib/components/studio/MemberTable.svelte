@@ -333,23 +333,4 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .member-name {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .avatar {
-    background-color: var(--color-interactive-subtle);
-    color: var(--color-brand-primary-subtle);
-  }
-
-  :global([data-theme='dark']) .role-select {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .empty-icon {
-    color: var(--color-text-muted);
-  }
 </style>

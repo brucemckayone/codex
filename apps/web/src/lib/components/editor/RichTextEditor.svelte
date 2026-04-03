@@ -316,29 +316,4 @@
     border: 0;
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .rich-text-editor__wrapper {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .rich-text-editor__wrapper :global(.rich-text-editor__content) {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .rich-text-editor__wrapper :global(a) {
-    color: var(--color-interactive);
-  }
-
-  :global([data-theme='dark']) .rich-text-editor__wrapper :global(blockquote) {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .rich-text-editor__wrapper :global(code) {
-    background-color: var(--color-surface);
-  }
-
-  :global([data-theme='dark']) .rich-text-editor__wrapper :global(pre) {
-    background-color: var(--color-surface);
-  }
 </style>

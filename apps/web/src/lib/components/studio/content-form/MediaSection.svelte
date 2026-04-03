@@ -193,16 +193,6 @@
     color: var(--color-text-muted);
   }
 
-  :global([data-theme='dark']) .form-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .media-preview {
-    background-color: var(--color-background);
-    border-color: var(--color-border);
-  }
-
   :global([data-theme='dark']) .media-preview-icon {
     background-color: color-mix(in srgb, var(--color-interactive) 15%, var(--color-surface));
     color: var(--color-interactive);

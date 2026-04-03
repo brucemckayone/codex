@@ -112,12 +112,12 @@
 
   .cta-secondary {
     background-color: transparent;
-    color: var(--color-interactive);
-    border: var(--border-width) var(--border-style) var(--color-interactive);
+    color: var(--color-brand-accent);
+    border: var(--border-width) var(--border-style) var(--color-brand-accent);
   }
 
   .cta-secondary:hover {
-    background-color: var(--color-interactive-subtle);
+    background-color: var(--color-brand-accent-subtle);
   }
 
   .features {

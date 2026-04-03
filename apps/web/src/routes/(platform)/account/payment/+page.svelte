@@ -393,13 +393,4 @@
 		border-top: var(--border-width) var(--border-style) var(--color-border);
 	}
 
-	/* Dark mode */
-	:global([data-theme='dark']) .filter-list a.active {
-		background-color: var(--color-interactive-active);
-		color: var(--color-brand-primary-subtle);
-	}
-
-	:global([data-theme='dark']) .discover-link:hover {
-		background-color: var(--color-interactive-active);
-	}
 </style>

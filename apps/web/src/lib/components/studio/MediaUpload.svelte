@@ -511,41 +511,4 @@
     color: var(--color-text);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .upload-heading {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .drop-zone {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .drop-zone:hover,
-  :global([data-theme='dark']) .drop-zone:focus-visible,
-  :global([data-theme='dark']) .drop-zone.dragging {
-    border-color: var(--color-focus);
-    background-color: var(--color-surface-variant);
-  }
-
-  :global([data-theme='dark']) .upload-icon {
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .drop-text {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .queue-item {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .queue-item-name {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .progress-bar {
-    background-color: var(--color-neutral-800);
-  }
 </style>

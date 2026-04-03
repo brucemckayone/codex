@@ -159,12 +159,4 @@
     color: var(--color-text-secondary);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark'] .title-cell) {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark'] .revenue-cell) {
-    color: var(--color-text);
-  }
 </style>

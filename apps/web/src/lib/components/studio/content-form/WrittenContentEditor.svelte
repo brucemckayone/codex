@@ -65,8 +65,4 @@
     margin: var(--space-1) 0 0 0;
   }
 
-  :global([data-theme='dark']) .form-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
 </style>

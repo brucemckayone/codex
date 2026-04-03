@@ -220,10 +220,4 @@
     }
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .bar-tooltip {
-    background-color: var(--color-surface);
-    color: var(--color-text);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
 </style>

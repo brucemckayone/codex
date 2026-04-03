@@ -76,16 +76,4 @@
     max-width: 320px;
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .empty-icon {
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .empty-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .empty-description {
-    color: var(--color-text-secondary);
-  }
 </style>

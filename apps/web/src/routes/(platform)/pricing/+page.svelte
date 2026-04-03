@@ -113,7 +113,7 @@
   }
 
   .plan-featured {
-    border-color: var(--color-interactive);
+    border-color: var(--color-brand-accent);
     box-shadow: var(--shadow-lg);
   }
 

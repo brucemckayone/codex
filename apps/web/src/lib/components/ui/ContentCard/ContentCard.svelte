@@ -430,30 +430,4 @@
     padding-top: 0;
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .content-card {
-    background: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .content-card:hover {
-    border-color: var(--color-border-strong);
-  }
-
-  :global([data-theme='dark']) .content-card__placeholder {
-    background: var(--color-neutral-800);
-  }
-
-  :global([data-theme='dark']) .content-card__description,
-  :global([data-theme='dark']) .content-card__creator-name {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .content-card__title a:hover {
-    color: var(--color-interactive);
-  }
-
-  :global([data-theme='dark']) .content-card__progress-text {
-    color: var(--color-interactive);
-  }
 </style>

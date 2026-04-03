@@ -155,11 +155,6 @@
     border: 0;
   }
 
-  :global([data-theme='dark']) .type-card {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
   :global([data-theme='dark']) .type-card:hover {
     border-color: var(--color-focus);
     background-color: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface));

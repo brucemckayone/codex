@@ -178,23 +178,4 @@
     line-height: var(--leading-snug);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .slash-menu {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .slash-menu__item[data-selected],
-  :global([data-theme='dark']) .slash-menu__item:hover {
-    background-color: var(--color-neutral-800);
-  }
-
-  :global([data-theme='dark']) .slash-menu__icon {
-    background-color: var(--color-neutral-800);
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .slash-menu__title {
-    color: var(--color-text);
-  }
 </style>

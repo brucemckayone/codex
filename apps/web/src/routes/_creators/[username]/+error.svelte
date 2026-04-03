@@ -173,36 +173,4 @@
     color: var(--color-text);
   }
 
-  /* Dark mode */
-  :global([data-theme='dark']) .error-page {
-    background: var(--color-background);
-  }
-
-  :global([data-theme='dark']) .error-card {
-    background: var(--color-surface);
-    border-color: var(--color-border);
-  }
-
-  :global([data-theme='dark']) .error-icon {
-    color: var(--color-text-muted);
-  }
-
-  :global([data-theme='dark']) .error-code,
-  :global([data-theme='dark']) .error-title {
-    color: var(--color-text);
-  }
-
-  :global([data-theme='dark']) .error-description {
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .btn-secondary {
-    border-color: var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  :global([data-theme='dark']) .btn-secondary:hover {
-    background: var(--color-surface-variant);
-    color: var(--color-text);
-  }
 </style>
