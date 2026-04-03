@@ -23,7 +23,7 @@
   import LogoUpload from '$lib/components/studio/LogoUpload.svelte';
   import ColorPicker from '$lib/components/studio/ColorPicker.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { Alert, PageHeader, Select } from '$lib/components/ui';
+  import { Alert, Card, PageHeader, Select } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -232,18 +232,21 @@
   {/if}
 
   <!-- Logo Section -->
-  <section class="settings-card">
-    <h3 class="card-title">{m.branding_logo_title()}</h3>
-    <p class="card-description">{m.branding_logo_description()}</p>
-
-    <LogoUpload
-      logoUrl={effectiveLogoUrl}
-      loading={logoLoading}
-      {orgId}
-      uploadFormAttrs={uploadLogoForm}
-      onDelete={handleLogoDelete}
-    />
-  </section>
+  <Card.Root>
+    <Card.Header>
+      <Card.Title>{m.branding_logo_title()}</Card.Title>
+      <Card.Description>{m.branding_logo_description()}</Card.Description>
+    </Card.Header>
+    <Card.Content>
+      <LogoUpload
+        logoUrl={effectiveLogoUrl}
+        loading={logoLoading}
+        {orgId}
+        uploadFormAttrs={uploadLogoForm}
+        onDelete={handleLogoDelete}
+      />
+    </Card.Content>
+  </Card.Root>
 
   <!-- All branding settings in one form -->
   <form {...updateBrandingForm} class="branding-form" novalidate>
@@ -258,10 +261,12 @@
     <input type="hidden" name="densityValue" value={densityValue} />
 
     <!-- Brand Colors Section -->
-    <section class="settings-card">
-      <h3 class="card-title">{m.branding_color_title()}</h3>
-      <p class="card-description">{m.branding_color_description()}</p>
-
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>{m.branding_color_title()}</Card.Title>
+        <Card.Description>{m.branding_color_description()}</Card.Description>
+      </Card.Header>
+      <Card.Content>
       <div class="color-fields">
         <div class="color-field">
           <label class="field-label">{m.branding_color_primary()}</label>
@@ -303,13 +308,16 @@
           {/if}
         </div>
       </div>
-    </section>
+      </Card.Content>
+    </Card.Root>
 
     <!-- Typography Section -->
-    <section class="settings-card">
-      <h3 class="card-title">{m.branding_typography_title()}</h3>
-      <p class="card-description">{m.branding_typography_description()}</p>
-
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>{m.branding_typography_title()}</Card.Title>
+        <Card.Description>{m.branding_typography_description()}</Card.Description>
+      </Card.Header>
+      <Card.Content>
       <div class="typography-fields">
         <div class="select-field">
           <Select
@@ -339,13 +347,16 @@
           {/if}
         </div>
       </div>
-    </section>
+      </Card.Content>
+    </Card.Root>
 
     <!-- Shape & Density Section -->
-    <section class="settings-card">
-      <h3 class="card-title">{m.branding_shape_title()}</h3>
-      <p class="card-description">{m.branding_shape_description()}</p>
-
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>{m.branding_shape_title()}</Card.Title>
+        <Card.Description>{m.branding_shape_description()}</Card.Description>
+      </Card.Header>
+      <Card.Content>
       <div class="slider-fields">
         <!-- Border Radius Slider -->
         <div class="slider-field">
@@ -396,7 +407,8 @@
           </div>
         </div>
       </div>
-    </section>
+      </Card.Content>
+    </Card.Root>
 
     <!-- Save Button -->
     <div class="form-actions">
@@ -424,30 +436,6 @@
 
   .branding-form {
     display: contents;
-  }
-
-.settings-card {
-    padding: var(--space-6);
-    border-radius: var(--radius-lg);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .card-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .card-description {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
   }
 
   .field-label {

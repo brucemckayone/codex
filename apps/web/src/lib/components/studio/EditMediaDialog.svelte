@@ -11,7 +11,7 @@
 -->
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/Dialog';
-  import { Alert } from '$lib/components/ui';
+  import { Alert, Button } from '$lib/components/ui';
   import type { MediaItemWithRelations } from '$lib/types';
   import * as m from '$paraglide/messages';
 
@@ -119,21 +119,21 @@
       </div>
 
       <Dialog.Footer>
-        <button
+        <Button
           type="button"
-          class="btn btn-secondary"
+          variant="secondary"
           onclick={() => handleOpenChange(false)}
           disabled={submitting}
         >
           {m.common_cancel()}
-        </button>
-        <button type="submit" class="btn btn-primary" disabled={submitting}>
+        </Button>
+        <Button type="submit" variant="primary" disabled={submitting} loading={submitting}>
           {#if submitting}
             {m.common_loading()}
           {:else}
             {m.media_edit_save()}
           {/if}
-        </button>
+        </Button>
       </Dialog.Footer>
     </form>
   </Dialog.Content>
@@ -186,47 +186,5 @@
     font-family: inherit;
   }
 
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    border: none;
-    text-decoration: none;
-    padding: var(--space-2) var(--space-4);
-  }
-
-  .btn:disabled {
-    opacity: var(--opacity-60);
-    cursor: not-allowed;
-  }
-
-  .btn-primary {
-    background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-interactive-hover);
-  }
-
-  .btn-primary:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
-  }
-
-  .btn-secondary {
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background-color: var(--color-surface);
-  }
 
 </style>

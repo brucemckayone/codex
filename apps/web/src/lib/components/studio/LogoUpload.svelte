@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import { UploadIcon } from '$lib/components/ui/Icon';
+  import { Button } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -122,22 +123,24 @@
     </div>
 
     <div class="logo-actions">
-      <button
+      <Button
         type="button"
-        class="btn btn-outline btn-sm"
+        variant="secondary"
+        size="sm"
         onclick={handleBrowseClick}
         disabled={loading}
       >
         {m.branding_logo_upload()}
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        class="btn btn-danger btn-sm"
+        variant="destructive"
+        size="sm"
         onclick={onDelete}
         disabled={loading}
       >
         {m.branding_logo_delete()}
-      </button>
+      </Button>
     </div>
   {:else}
     <!-- Upload Zone -->

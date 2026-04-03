@@ -15,7 +15,7 @@
 -->
 <script lang="ts">
   import { CheckIcon, CircleIcon } from '$lib/components/ui/Icon';
-  import { Badge, Select } from '$lib/components/ui';
+  import { Badge, Button, Select } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
   import TagsInput from './TagsInput.svelte';
   import type { ContentWithRelations } from '$lib/types';
@@ -125,10 +125,12 @@
       </div>
     {/if}
 
-    <button
+    <Button
       type="submit"
-      class="btn btn-primary btn-full"
+      variant="primary"
+      class="btn-full"
       disabled={formPending || deleting}
+      loading={formPending}
     >
       {#if formPending}
         {m.studio_content_form_submitting()}
@@ -137,35 +139,39 @@
       {:else}
         {m.studio_content_form_submit_create()}
       {/if}
-    </button>
+    </Button>
 
     {#if isEdit && currentStatus !== 'published'}
-      <button
+      <Button
         type="button"
-        class="btn btn-secondary btn-full"
+        variant="secondary"
+        class="btn-full"
         disabled={publishing || deleting || formPending || !isReadyToPublish}
         onclick={onPublishToggle}
         title={isReadyToPublish ? '' : 'Complete all readiness checks before publishing'}
+        loading={publishing}
       >
         {#if publishing}
           {m.studio_content_form_publishing()}
         {:else}
           {m.studio_content_form_publish()}
         {/if}
-      </button>
+      </Button>
     {:else if isEdit && currentStatus === 'published'}
-      <button
+      <Button
         type="button"
-        class="btn btn-secondary btn-full"
+        variant="secondary"
+        class="btn-full"
         disabled={publishing || deleting || formPending}
         onclick={onPublishToggle}
+        loading={publishing}
       >
         {#if publishing}
           {m.studio_content_form_unpublishing()}
         {:else}
           {m.studio_content_form_unpublish()}
         {/if}
-      </button>
+      </Button>
     {/if}
   </div>
 
@@ -251,14 +257,16 @@
         Danger Zone {showDangerZone ? '−' : '+'}
       </button>
       {#if showDangerZone}
-        <button
+        <Button
           type="button"
-          class="btn btn-destructive btn-full"
+          variant="destructive"
+          class="btn-full"
           disabled={deleting || formPending}
           onclick={onDelete}
+          loading={deleting}
         >
           {deleting ? 'Deleting...' : m.studio_content_form_delete()}
-        </button>
+        </Button>
       {/if}
     </div>
   {/if}
@@ -326,56 +334,9 @@
     color: var(--color-text-secondary);
   }
 
-  /* Buttons */
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    border: none;
-    padding: var(--space-2) var(--space-4);
-  }
-
-  .btn:disabled {
-    opacity: var(--opacity-60);
-    cursor: not-allowed;
-  }
-
-  .btn-full {
+  /* Button full-width override */
+  :global(.btn-full) {
     width: 100%;
-  }
-
-  .btn-primary {
-    background-color: var(--color-interactive);
-    color: var(--color-text-inverse);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-interactive-hover);
-  }
-
-  .btn-secondary {
-    background-color: var(--color-surface-raised, var(--color-surface));
-    color: var(--color-text);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background-color: var(--color-surface);
-    border-color: var(--color-text-secondary);
-  }
-
-  .btn-destructive {
-    background-color: var(--color-error-500);
-    color: var(--color-text-inverse);
-  }
-
-  .btn-destructive:hover:not(:disabled) {
-    background-color: var(--color-error-600);
   }
 
   /* Readiness checklist */

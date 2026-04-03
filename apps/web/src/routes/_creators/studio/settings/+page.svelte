@@ -15,7 +15,7 @@
   import Label from '$lib/components/ui/Label/Label.svelte';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
-  import { Alert, PageHeader } from '$lib/components/ui';
+  import { Alert, Card, PageHeader } from '$lib/components/ui';
 
   import { onDestroy, tick } from 'svelte';
   import { invalidateAll } from '$app/navigation';
@@ -164,8 +164,11 @@
   {/if}
 
   <!-- Avatar Section -->
-  <div class="settings-card">
-    <h2>Avatar</h2>
+  <Card.Root>
+    <Card.Header>
+      <Card.Title level={2}>Avatar</Card.Title>
+    </Card.Header>
+    <Card.Content>
     <div class="avatar-container">
       <Avatar src={avatarPreview ?? undefined}>
         <AvatarImage src={avatarPreview ?? ''} alt="Avatar" />
@@ -243,11 +246,16 @@
     {#if avatarDeleteForm.result?.error}
       <Alert variant="error">{avatarDeleteForm.result.error}</Alert>
     {/if}
-  </div>
+    </Card.Content>
+  </Card.Root>
 
   <!-- Profile Form -->
-  <form {...updateProfileForm} class="settings-card" novalidate>
-    <h2>{m.account_personal_information()}</h2>
+  <Card.Root>
+  <form {...updateProfileForm} novalidate>
+    <Card.Header>
+      <Card.Title level={2}>{m.account_personal_information()}</Card.Title>
+    </Card.Header>
+    <Card.Content>
 
     <div class="form-group">
       <Label for="displayName">{m.account_display_name()}</Label>
@@ -326,12 +334,14 @@
       {/each}
     </div>
 
-    <div class="form-actions">
+    </Card.Content>
+    <Card.Footer>
       <Button type="submit" variant="primary" loading={updateProfileForm.pending > 0}>
         {updateProfileForm.pending > 0 ? m.account_saving() : m.account_save_button()}
       </Button>
-    </div>
+    </Card.Footer>
   </form>
+  </Card.Root>
 </div>
 
 <style>

@@ -13,7 +13,7 @@
   import { onDestroy } from 'svelte';
   import * as m from '$paraglide/messages';
   import { updateContactForm } from '$lib/remote/settings.remote';
-  import { Alert, PageHeader, Select } from '$lib/components/ui';
+  import { Alert, Card, PageHeader, Select } from '$lib/components/ui';
 
   let { data } = $props();
 
@@ -116,9 +116,11 @@
     <input type="hidden" name="orgId" value={orgId} />
 
     <!-- General Section -->
-    <section class="settings-card">
-      <h3 class="card-title">{m.settings_general_title()}</h3>
-
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>{m.settings_general_title()}</Card.Title>
+      </Card.Header>
+      <Card.Content>
       <div class="form-fields">
         <div class="form-field">
           <label class="field-label" for="platformName">
@@ -171,12 +173,15 @@
           />
         </div>
       </div>
-    </section>
+      </Card.Content>
+    </Card.Root>
 
     <!-- Social Section -->
-    <section class="settings-card">
-      <h3 class="card-title">{m.settings_social_title()}</h3>
-
+    <Card.Root>
+      <Card.Header>
+        <Card.Title>{m.settings_social_title()}</Card.Title>
+      </Card.Header>
+      <Card.Content>
       <div class="form-fields">
         <div class="form-field">
           <label class="field-label" for="twitterUrl">
@@ -234,7 +239,8 @@
           />
         </div>
       </div>
-    </section>
+      </Card.Content>
+    </Card.Root>
 
     <!-- Save Button -->
     <div class="form-actions">
@@ -264,21 +270,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-  }
-
-  .settings-card {
-    padding: var(--space-6);
-    border-radius: var(--radius-lg);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .card-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0 0 var(--space-4) 0;
   }
 
   .form-fields {

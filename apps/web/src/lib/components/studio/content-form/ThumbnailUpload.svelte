@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { ImageIcon } from '$lib/components/ui/Icon';
+  import { Button } from '$lib/components/ui';
 
   interface Props {
     form: any;
@@ -54,13 +55,13 @@
         <span class="placeholder-text">No thumbnail set</span>
         <div class="placeholder-actions">
           {#if mediaThumbnailUrl}
-            <button type="button" class="btn btn-sm" onclick={useMediaThumbnail}>
+            <Button type="button" variant="primary" size="sm" onclick={useMediaThumbnail}>
               Use media thumbnail
-            </button>
+            </Button>
           {/if}
-          <button type="button" class="btn btn-sm btn-ghost" onclick={() => (showUrlInput = true)}>
+          <Button type="button" variant="ghost" size="sm" onclick={() => (showUrlInput = true)}>
             Enter URL
-          </button>
+          </Button>
         </div>
       </div>
     {/if}
@@ -74,9 +75,9 @@
         class="field-input"
         placeholder="https://example.com/thumbnail.jpg"
       />
-      <button type="button" class="btn btn-sm" onclick={() => (showUrlInput = false)}>
+      <Button type="button" variant="primary" size="sm" onclick={() => (showUrlInput = false)}>
         Done
-      </button>
+      </Button>
     </div>
   {/if}
 </section>
@@ -175,38 +176,6 @@
     display: flex;
     gap: var(--space-2);
     margin-top: var(--space-1);
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: var(--font-medium);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    border: none;
-  }
-
-  .btn-sm {
-    font-size: var(--text-xs);
-    padding: var(--space-1) var(--space-3);
-    background-color: var(--color-interactive);
-    color: var(--color-text-inverse);
-  }
-
-  .btn-sm:hover {
-    background-color: var(--color-interactive-hover);
-  }
-
-  .btn-ghost {
-    background: none;
-    color: var(--color-text-secondary);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .btn-ghost:hover {
-    background-color: var(--color-surface-secondary, var(--color-surface));
   }
 
   .url-input-row {
