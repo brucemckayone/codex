@@ -1,32 +1,35 @@
 <!--
   @component OrgLandingPage
 
-  Organization landing page with hero section, featured content grid, and org branding.
-  Displays the org's identity and up to 6 newest content items.
+  Organization landing page with branded hero, continue watching rail (auth only),
+  new releases grid, and creator preview section.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
+  import { Badge } from '$lib/components/ui/Badge';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { hydrateIfNeeded } from '$lib/collections';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
 
-  // Seed content collection with SSR data so subsequent navigations
-  // (e.g., content detail → back) find metadata already cached.
+  // Seed content collection with SSR data so subsequent navigations find metadata cached
   onMount(() => {
-    if (data.featuredContent?.length) {
-      hydrateIfNeeded('content', data.featuredContent);
+    if (data.newReleases?.length) {
+      hydrateIfNeeded('content', data.newReleases);
     }
   });
 
   const orgName = $derived(data.org?.name ?? 'Organization');
   const orgDescription = $derived(data.org?.description ?? '');
   const logoUrl = $derived(data.org?.logoUrl ?? '');
-  const featuredContent = $derived(data.featuredContent ?? []);
+  const newReleases = $derived(data.newReleases ?? []);
+  const creators = $derived(data.creators ?? { items: [], total: 0 });
+  const continueWatching = $derived(data.continueWatching);
 </script>
 
 <svelte:head>
@@ -48,7 +51,7 @@
 </svelte:head>
 
 <div class="org-landing">
-  <!-- Hero Section -->
+  <!-- 1. Hero Section -->
   <section class="hero">
     <div class="hero__inner">
       {#if logoUrl}
@@ -63,26 +66,64 @@
       {#if orgDescription}
         <p class="hero__description">{orgDescription}</p>
       {/if}
-      <a href="/explore" class="hero__cta">
-        {m.org_hero_explore()}
-      </a>
+      <div class="hero__actions">
+        <a href="/explore" class="hero__cta">
+          {m.org_hero_explore()}
+        </a>
+        {#if creators.items.length > 0}
+          <a href="/creators" class="hero__cta hero__cta--secondary">
+            {m.org_creators_preview_view_all()}
+          </a>
+        {/if}
+      </div>
     </div>
   </section>
 
-  <!-- Featured Content Section -->
-  <section class="featured">
-    <div class="featured__header">
-      <h2 class="featured__title">{m.org_featured_content()}</h2>
-      {#if featuredContent.length > 0}
-        <a href="/explore" class="featured__view-all">
+  <!-- 2. Continue Watching (auth + has items only) -->
+  {#if continueWatching && continueWatching.length > 0}
+    <section class="section continue-watching">
+      <div class="section__header">
+        <h2 class="section__title">{m.org_continue_watching_title()}</h2>
+        <a href="/library" class="section__view-all">
+          {m.org_continue_watching_view_library()} &rarr;
+        </a>
+      </div>
+      <div class="content-grid">
+        {#each continueWatching as item (item.content.id)}
+          <ContentCard
+            id={item.content.id}
+            title={item.content.title}
+            thumbnail={item.content.thumbnailUrl}
+            description={item.content.description}
+            contentType={item.content.contentType === 'written' ? 'article' : item.content.contentType}
+            duration={item.content.durationSeconds ?? null}
+            href={buildContentUrl(page.url, { slug: item.content.slug, id: item.content.id })}
+            progress={item.progress ? {
+              positionSeconds: item.progress.positionSeconds,
+              durationSeconds: item.progress.durationSeconds,
+              completed: item.progress.completed,
+              percentComplete: item.progress.percentComplete,
+            } : null}
+          />
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <!-- 3. New Releases -->
+  <section class="section new-releases">
+    <div class="section__header">
+      <h2 class="section__title">{m.org_new_releases_title()}</h2>
+      {#if newReleases.length > 0}
+        <a href="/explore" class="section__view-all">
           {m.org_view_all_content()} &rarr;
         </a>
       {/if}
     </div>
 
-    {#if featuredContent.length > 0}
-      <div class="featured__grid">
-        {#each featuredContent as item (item.id)}
+    {#if newReleases.length > 0}
+      <div class="content-grid">
+        {#each newReleases as item (item.id)}
           <ContentCard
             id={item.id}
             title={item.title}
@@ -103,11 +144,40 @@
         {/each}
       </div>
     {:else}
-      <div class="featured__empty">
+      <div class="empty-state">
         <p>{m.org_no_content_yet()}</p>
       </div>
     {/if}
   </section>
+
+  <!-- 4. Creator Preview -->
+  {#if creators.items.length > 0}
+    <section class="section creators-preview">
+      <div class="section__header">
+        <h2 class="section__title">{m.org_creators_preview_title()}</h2>
+        {#if creators.total > 3}
+          <a href="/creators" class="section__view-all">
+            {m.org_creators_preview_view_all()} &rarr;
+          </a>
+        {/if}
+      </div>
+      <div class="creators-preview__grid">
+        {#each creators.items as creator (creator.name)}
+          <div class="creator-preview-card">
+            <Avatar class="creator-preview-card__avatar">
+              <AvatarImage src={creator.avatarUrl} alt={creator.name} />
+              <AvatarFallback>{creator.name.charAt(0).toUpperCase()}</AvatarFallback>
+            </Avatar>
+            <span class="creator-preview-card__name">{creator.name}</span>
+            <Badge variant="neutral">{creator.role}</Badge>
+            <span class="creator-preview-card__count">
+              {m.org_creators_content_count({ count: String(creator.contentCount) })}
+            </span>
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
 </div>
 
 <style>
@@ -121,7 +191,7 @@
   /* ── Hero Section ── */
   .hero {
     position: relative;
-    padding: var(--space-16, 4rem) var(--space-6, 1.5rem);
+    padding: var(--space-20) var(--space-6);
     background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
     color: var(--color-text-on-brand);
     text-align: center;
@@ -143,13 +213,13 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-4, 1rem);
+    gap: var(--space-4);
   }
 
   .hero__logo {
-    width: var(--space-20);
-    height: var(--space-20);
-    border-radius: var(--radius-full, 9999px);
+    width: var(--space-28);
+    height: var(--space-28);
+    border-radius: var(--radius-full);
     object-fit: cover;
     border: 3px solid color-mix(in srgb, white 30%, transparent);
     box-shadow: var(--shadow-lg);
@@ -157,34 +227,42 @@
 
   .hero__title {
     margin: 0;
-    font-size: var(--text-4xl, 2.25rem);
-    font-weight: var(--font-bold, 700);
+    font-size: var(--text-4xl);
+    font-weight: var(--font-bold);
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-tight);
   }
 
   .hero__description {
     margin: 0;
-    font-size: var(--text-lg, 1.125rem);
+    font-size: var(--text-lg);
     line-height: var(--leading-normal);
     opacity: var(--opacity-90);
-    max-width: 560px;
+    max-width: 640px;
+  }
+
+  .hero__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
   }
 
   .hero__cta {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2, 0.5rem);
-    margin-top: var(--space-4, 1rem);
-    padding: var(--space-3, 0.75rem) var(--space-6, 1.5rem);
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-6);
     background: var(--color-brand-accent-subtle, color-mix(in srgb, white 20%, transparent));
     color: var(--color-text-on-brand);
-    font-size: var(--text-base, 1rem);
-    font-weight: var(--font-semibold, 600);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
     border: var(--border-width-thick) solid color-mix(in srgb, white 40%, transparent);
-    border-radius: var(--radius-button, var(--radius-lg, 0.5rem));
+    border-radius: var(--radius-button, var(--radius-lg));
     text-decoration: none;
-    transition: background-color var(--duration-normal) var(--ease-default), border-color var(--duration-normal) var(--ease-default), transform var(--duration-fast) var(--ease-default);
+    transition: background-color var(--duration-normal) var(--ease-default),
+      border-color var(--duration-normal) var(--ease-default),
+      transform var(--duration-fast) var(--ease-default);
   }
 
   .hero__cta:hover {
@@ -197,87 +275,154 @@
     transform: translateY(0);
   }
 
-  /* ── Featured Content Section ── */
-  .featured {
-    padding: var(--space-12, 3rem) var(--space-6, 1.5rem);
+  .hero__cta--secondary {
+    background: transparent;
+    border-color: color-mix(in srgb, white 25%, transparent);
+  }
+
+  .hero__cta--secondary:hover {
+    background: color-mix(in srgb, white 10%, transparent);
+    border-color: color-mix(in srgb, white 40%, transparent);
+  }
+
+  /* ── Shared Section Styles ── */
+  .section {
+    padding: var(--space-12) var(--space-6);
     max-width: 1200px;
     width: 100%;
     margin: 0 auto;
   }
 
-  .featured__header {
+  .section__header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: var(--space-4, 1rem);
-    margin-bottom: var(--space-8, 2rem);
+    gap: var(--space-4);
+    margin-bottom: var(--space-8);
   }
 
-  .featured__title {
+  .section__title {
     margin: 0;
-    font-size: var(--text-2xl, 1.5rem);
-    font-weight: var(--font-bold, 700);
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
     color: var(--color-text-primary);
   }
 
-  .featured__view-all {
-    font-size: var(--text-sm, 0.875rem);
-    font-weight: var(--font-medium, 500);
+  .section__view-all {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
     color: var(--color-interactive);
     text-decoration: none;
     white-space: nowrap;
     transition: color var(--duration-fast) var(--ease-default);
   }
 
-  .featured__view-all:hover {
+  .section__view-all:hover {
     color: var(--color-interactive-hover);
   }
 
-  .featured__grid {
+  /* ── Content Grid ── */
+  .content-grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: var(--space-6, 1.5rem);
+    gap: var(--space-6);
   }
 
   @media (--breakpoint-sm) {
-    .featured__grid {
+    .content-grid {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
   @media (--breakpoint-lg) {
-    .featured__grid {
+    .content-grid {
       grid-template-columns: repeat(3, 1fr);
     }
   }
 
-  .featured__empty {
+  /* ── Empty State ── */
+  .empty-state {
     text-align: center;
-    padding: var(--space-16, 4rem) var(--space-4, 1rem);
+    padding: var(--space-16) var(--space-4);
     color: var(--color-text-muted);
   }
 
-  .featured__empty p {
+  .empty-state p {
     margin: 0;
-    font-size: var(--text-lg, 1.125rem);
+    font-size: var(--text-lg);
   }
+
+  /* ── Creator Preview ── */
+  .creators-preview__grid {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-8);
+    flex-wrap: wrap;
+  }
+
+  .creator-preview-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-6);
+    background: var(--color-surface);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-lg);
+    min-width: 180px;
+    max-width: 240px;
+    text-align: center;
+    transition: var(--transition-shadow);
+  }
+
+  .creator-preview-card:hover {
+    box-shadow: var(--shadow-md);
+  }
+
+  :global(.creator-preview-card__avatar) {
+    width: var(--space-12);
+    height: var(--space-12);
+    font-size: var(--text-lg);
+  }
+
+  .creator-preview-card__name {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+  }
+
+  .creator-preview-card__count {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
   /* ── Responsive Hero ── */
   @media (--below-sm) {
     .hero {
-      padding: var(--space-10, 2.5rem) var(--space-4, 1rem);
+      padding: var(--space-10) var(--space-4);
     }
 
     .hero__title {
-      font-size: var(--text-2xl, 1.5rem);
+      font-size: var(--text-2xl);
     }
 
     .hero__description {
-      font-size: var(--text-base, 1rem);
+      font-size: var(--text-base);
     }
 
     .hero__logo {
-      width: var(--space-16);
-      height: var(--space-16);
+      width: var(--space-20);
+      height: var(--space-20);
+    }
+
+    .hero__actions {
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .hero__cta {
+      width: 100%;
+      justify-content: center;
     }
   }
 </style>
