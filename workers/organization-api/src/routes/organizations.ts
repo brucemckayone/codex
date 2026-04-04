@@ -232,6 +232,13 @@ app.get(
         fontHeading: string | null;
         radiusValue: number;
         densityValue: number;
+        tokenOverrides: string | null;
+        darkModeOverrides: string | null;
+        shadowScale: string | null;
+        shadowColor: string | null;
+        textScale: string | null;
+        headingWeight: string | null;
+        bodyWeight: string | null;
       } = {
         logoUrl: null,
         primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
@@ -242,6 +249,13 @@ app.get(
         fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
+        tokenOverrides: null,
+        darkModeOverrides: null,
+        shadowScale: null,
+        shadowColor: null,
+        textScale: null,
+        headingWeight: null,
+        bodyWeight: null,
       };
       try {
         const b = await brandingSvc.get();
@@ -255,6 +269,13 @@ app.get(
           fontHeading: b.fontHeading ?? null,
           radiusValue: b.radiusValue ?? 0.5,
           densityValue: b.densityValue ?? 1,
+          tokenOverrides: b.tokenOverrides ?? null,
+          darkModeOverrides: b.darkModeOverrides ?? null,
+          shadowScale: b.shadowScale ?? null,
+          shadowColor: b.shadowColor ?? null,
+          textScale: b.textScale ?? null,
+          headingWeight: b.headingWeight ?? null,
+          bodyWeight: b.bodyWeight ?? null,
         };
       } catch (err) {
         console.error(
@@ -281,6 +302,15 @@ app.get(
         },
         brandRadius: branding.radiusValue,
         brandDensity: branding.densityValue,
+        brandFineTune: {
+          tokenOverrides: branding.tokenOverrides,
+          darkModeOverrides: branding.darkModeOverrides,
+          shadowScale: branding.shadowScale,
+          shadowColor: branding.shadowColor,
+          textScale: branding.textScale,
+          headingWeight: branding.headingWeight,
+          bodyWeight: branding.bodyWeight,
+        },
       };
     },
   })

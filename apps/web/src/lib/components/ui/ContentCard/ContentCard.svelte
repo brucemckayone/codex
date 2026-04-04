@@ -304,13 +304,13 @@
     text-transform: uppercase;
   }
 
-  /* Price badge */
+  /* Price badge — uses accent to stand out from primary brand */
   .content-card__price-badge {
     position: absolute;
     top: var(--space-2);
     right: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: var(--color-interactive);
+    background: var(--color-brand-accent);
     color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
@@ -319,7 +319,7 @@
   }
 
   .content-card__price-badge--free {
-    background: var(--color-success-500);
+    background: var(--color-success);
   }
 
   /* Progress bar */

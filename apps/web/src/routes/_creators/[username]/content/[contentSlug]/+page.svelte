@@ -430,14 +430,14 @@
     cursor: pointer;
     transition: var(--transition-colors);
     font-family: inherit;
-    background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    background: var(--color-brand-accent);
+    color: var(--color-text-inverse);
     text-decoration: none;
     width: 100%;
   }
 
   .content-detail__purchase-btn:hover:not(:disabled) {
-    background: var(--color-interactive-hover);
+    background: var(--color-brand-accent-hover);
   }
 
   .content-detail__purchase-btn:disabled {

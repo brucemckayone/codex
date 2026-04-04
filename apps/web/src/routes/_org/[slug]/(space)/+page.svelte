@@ -23,8 +23,6 @@
     }
   });
 
-  const brandPrimary = $derived(data.org?.brandColors?.primary ?? '#6366f1');
-  const brandSecondary = $derived(data.org?.brandColors?.secondary ?? '#4f46e5');
   const orgName = $derived(data.org?.name ?? 'Organization');
   const orgDescription = $derived(data.org?.description ?? '');
   const logoUrl = $derived(data.org?.logoUrl ?? '');
@@ -124,7 +122,7 @@
   .hero {
     position: relative;
     padding: var(--space-16, 4rem) var(--space-6, 1.5rem);
-    background: linear-gradient(135deg, var(--color-brand-primary, #6366f1), var(--color-brand-secondary, #4f46e5));
+    background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
     color: var(--color-text-on-brand);
     text-align: center;
     overflow: hidden;

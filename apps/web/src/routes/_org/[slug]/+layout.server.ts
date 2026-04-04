@@ -54,6 +54,15 @@ export const load: LayoutServerLoad = async ({
         brandFonts?: { body?: string | null; heading?: string | null };
         brandRadius?: number;
         brandDensity?: number;
+        brandFineTune?: {
+          tokenOverrides?: string | null;
+          darkModeOverrides?: string | null;
+          shadowScale?: string | null;
+          shadowColor?: string | null;
+          textScale?: string | null;
+          headingWeight?: string | null;
+          bodyWeight?: string | null;
+        };
       };
 
       // Read version keys for staleness detection on the client
@@ -101,6 +110,8 @@ export const load: LayoutServerLoad = async ({
           brandFonts: org.brandFonts,
           brandRadius: org.brandRadius,
           brandDensity: org.brandDensity,
+          brandFineTune: (org as Record<string, unknown>)
+            .brandFineTune as (typeof typedOrg)['brandFineTune'],
         },
         user: locals.user,
         versions,

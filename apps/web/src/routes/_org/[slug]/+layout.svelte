@@ -67,6 +67,13 @@
   });
   const hasBranding = $derived(!!brandPrimary);
 
+  // Fine-tune branding fields — injected as CSS vars alongside core branding
+  const brandShadowScale = $derived(data.org?.brandFineTune?.shadowScale ?? undefined);
+  const brandShadowColor = $derived(data.org?.brandFineTune?.shadowColor ?? undefined);
+  const brandTextScale = $derived(data.org?.brandFineTune?.textScale ?? undefined);
+  const brandHeadingWeight = $derived(data.org?.brandFineTune?.headingWeight ?? undefined);
+  const brandBodyWeight = $derived(data.org?.brandFineTune?.bodyWeight ?? undefined);
+
   // Build Google Fonts URL from selected font families
   const googleFontsUrl = $derived.by(() => {
     const families = [...new Set([brandFontBody, brandFontHeading].filter(Boolean))] as string[];
@@ -114,6 +121,25 @@
   $effect(() => {
     if (!browser) return;
     if (showBrandEditor && brandEditor.isClosed && data.org) {
+      // Reconstruct saved tokenOverrides from fine-tune fields
+      const ft = data.org.brandFineTune;
+      const savedOverrides: Record<string, string> = {};
+      if (ft?.tokenOverrides) {
+        try { Object.assign(savedOverrides, JSON.parse(ft.tokenOverrides)); } catch { /* ignore parse errors */ }
+      }
+      // Also populate from individual fields (they may exist even without tokenOverrides JSON)
+      if (ft?.shadowScale) savedOverrides['shadow-scale'] = ft.shadowScale;
+      if (ft?.shadowColor) savedOverrides['shadow-color'] = ft.shadowColor;
+      if (ft?.textScale) savedOverrides['text-scale'] = ft.textScale;
+      if (ft?.headingWeight) savedOverrides['heading-weight'] = ft.headingWeight;
+      if (ft?.bodyWeight) savedOverrides['body-weight'] = ft.bodyWeight;
+
+      // Parse saved dark mode overrides
+      let savedDarkOverrides = null;
+      if (ft?.darkModeOverrides) {
+        try { savedDarkOverrides = JSON.parse(ft.darkModeOverrides); } catch { /* ignore */ }
+      }
+
       const saved: BrandEditorState = {
         primaryColor: brandPrimary ?? '#C24129',
         secondaryColor: brandSecondary ?? null,
@@ -124,8 +150,8 @@
         radius: Number(data.org.brandRadius) || 0.5,
         density: Number(data.org.brandDensity) || 1,
         logoUrl: data.org.logoUrl ?? null,
-        tokenOverrides: {},
-        darkOverrides: data.org.darkModeOverrides ?? null,
+        tokenOverrides: Object.keys(savedOverrides).length > 0 ? savedOverrides : {},
+        darkOverrides: savedDarkOverrides,
       };
       brandEditor.open(data.org.id, saved);
     }
@@ -227,6 +253,11 @@
   style:--brand-radius={brandRadius}
   style:--brand-font-body={brandFontBody ? `'${brandFontBody}', var(--font-sans)` : undefined}
   style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}', var(--font-sans)` : undefined}
+  style:--brand-shadow-scale={brandShadowScale}
+  style:--brand-shadow-color={brandShadowColor}
+  style:--brand-text-scale={brandTextScale}
+  style:--brand-heading-weight={brandHeadingWeight}
+  style:--brand-body-weight={brandBodyWeight}
 >
   {#if !isStudio}
     <OrgHeader user={data.user} org={data.org} />
