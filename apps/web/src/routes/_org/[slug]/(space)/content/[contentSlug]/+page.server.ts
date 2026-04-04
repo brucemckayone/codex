@@ -74,14 +74,23 @@ export const load: PageServerLoad = async ({
   // Render written content body to HTML (server-side)
   const contentBodyHtml = await renderContentBody(content);
 
+  // Fetch related content in parallel (non-blocking — failure is acceptable)
+  const relatedPromise = getPublicContent({
+    orgId: org.id,
+    sort: 'newest',
+    limit: 5,
+  }).catch(() => null);
+
   // For unauthenticated visitors, return immediately — no access checks needed
   if (!parentData.user) {
+    const relatedResult = await relatedPromise;
     return {
       content,
       contentBodyHtml,
       hasAccess: false,
       streamingUrl: null,
       progress: null,
+      relatedContent: relatedResult?.items ?? [],
     };
   }
 
@@ -105,7 +114,15 @@ export const load: PageServerLoad = async ({
       }
     : null;
 
-  return { content, contentBodyHtml, hasAccess, streamingUrl, progress };
+  const relatedResult = await relatedPromise;
+  return {
+    content,
+    contentBodyHtml,
+    hasAccess,
+    streamingUrl,
+    progress,
+    relatedContent: relatedResult?.items ?? [],
+  };
 };
 
 export const actions: Actions = {

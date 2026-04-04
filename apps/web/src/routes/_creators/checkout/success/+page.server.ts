@@ -15,8 +15,11 @@ export const load: PageServerLoad = async ({
   platform,
   cookies,
   setHeaders,
+  depends,
 }) => {
   setHeaders(CACHE_HEADERS.PRIVATE);
+  // Allow client-side retry polling via invalidate('checkout:verify')
+  depends('checkout:verify');
 
   const sessionId = url.searchParams.get('session_id');
   const contentSlug = url.searchParams.get('contentSlug');

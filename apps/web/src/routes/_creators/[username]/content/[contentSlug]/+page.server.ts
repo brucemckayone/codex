@@ -10,6 +10,7 @@
  *   a friendly error message instead of a generic 500.
  */
 import { error, fail } from '@sveltejs/kit';
+import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { ApiError } from '$lib/server/errors';
@@ -81,7 +82,7 @@ export const load: PageServerLoad = async ({
   contentParams.set('status', 'published');
   contentParams.set('limit', '1');
 
-  let content: any = null;
+  let content: Record<string, unknown> | null = null;
   try {
     const contentResult = await api.content.list(contentParams);
     content = contentResult?.items?.[0] ?? null;
@@ -101,8 +102,18 @@ export const load: PageServerLoad = async ({
   // Render written content body to HTML
   const contentBodyHtml = await renderContentBody(content);
 
+  // Fetch related content in parallel (non-blocking, guards against null org)
+  const relatedPromise = content.organization?.id
+    ? getPublicContent({
+        orgId: content.organization.id,
+        sort: 'newest',
+        limit: 5,
+      }).catch(() => null)
+    : Promise.resolve(null);
+
   // For unauthenticated visitors — no access checks
   if (!locals.user) {
+    const relatedResult = await relatedPromise;
     return {
       content,
       contentBodyHtml,
@@ -111,6 +122,7 @@ export const load: PageServerLoad = async ({
       progress: null,
       creatorProfile,
       username,
+      relatedContent: relatedResult?.items ?? [],
     };
   }
 
@@ -130,6 +142,7 @@ export const load: PageServerLoad = async ({
       }
     : null;
 
+  const relatedResult = await relatedPromise;
   return {
     content,
     contentBodyHtml,
@@ -138,6 +151,7 @@ export const load: PageServerLoad = async ({
     progress,
     creatorProfile,
     username,
+    relatedContent: relatedResult?.items ?? [],
   };
 };
 

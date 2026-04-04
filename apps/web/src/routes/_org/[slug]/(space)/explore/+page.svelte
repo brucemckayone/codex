@@ -1,10 +1,12 @@
 <!--
   @component OrgExplorePage
 
-  Organization explore page with search, type filtering, sorting, content grid, and pagination.
+  Organization explore page with search, type filtering, category pills, sorting,
+  filter chips, content grid, and pagination.
   All filter/search/page state lives in URL query params for SEO and bookmarkability.
 -->
 <script lang="ts">
+  import { fly } from 'svelte/transition';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -12,7 +14,7 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
   import { buildContentUrl } from '$lib/utils/subdomain';
-  import { SearchIcon, SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
+  import { SearchIcon, SearchXIcon, FileIcon, XIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
   import { BackToTop } from '$lib/components/ui/BackToTop';
@@ -22,25 +24,89 @@
   const { data }: { data: PageData } = $props();
 
   const orgName = $derived(data.org?.name ?? 'Organization');
-  const orgSlug = $derived(data.org?.slug ?? '');
   const items = $derived(data.content?.items ?? []);
   const total = $derived(data.content?.total ?? 0);
   const filters = $derived(data.filters);
   const limit = $derived(data.limit ?? 12);
   const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
-  const hasActiveFilters = $derived(!!filters.q || !!filters.type);
+  const isAuthenticated = $derived(!!data.user);
+
+  // Category extraction from loaded items (client-side only)
+  const categories = $derived(
+    [...new Set(items.map((item: { category?: string | null }) => item.category).filter(Boolean))]
+      .sort((a, b) => (a as string).localeCompare(b as string)) as string[]
+  );
+  const activeCategory = $derived(filters.category ?? '');
+
+  // Client-side category filtering
+  const displayItems = $derived(
+    activeCategory
+      ? items.filter((item: { category?: string | null }) => item.category === activeCategory)
+      : items
+  );
+
+  // Auth-aware sort options
+  const sortOptions = $derived([
+    { value: 'newest', label: m.explore_sort_newest() },
+    { value: 'oldest', label: m.explore_sort_oldest() },
+    { value: 'title', label: m.explore_sort_title() },
+    ...(isAuthenticated ? [
+      { value: 'popular', label: m.explore_sort_popular() },
+      { value: 'top-selling', label: m.explore_sort_top_selling() },
+    ] : []),
+  ]);
+
+  // Filter chips
+  const activeFilterChips = $derived.by(() => {
+    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+
+    if (filters.q) {
+      chips.push({
+        key: 'q',
+        label: `Search: "${filters.q}"`,
+        onRemove: () => { searchInput = ''; updateFilter('q', null); },
+      });
+    }
+
+    if (filters.type) {
+      const typeLabel = typeOptions.find((o) => o.value === filters.type)?.label ?? filters.type;
+      chips.push({
+        key: 'type',
+        label: `Type: ${typeLabel}`,
+        onRemove: () => updateFilter('type', null),
+      });
+    }
+
+    if (filters.category) {
+      chips.push({
+        key: 'category',
+        label: `Category: ${filters.category}`,
+        onRemove: () => updateFilter('category', null),
+      });
+    }
+
+    if (filters.sort && filters.sort !== 'newest') {
+      const sortLabel = sortOptions.find((o) => o.value === filters.sort)?.label ?? filters.sort;
+      chips.push({
+        key: 'sort',
+        label: `Sort: ${sortLabel}`,
+        onRemove: () => updateFilter('sort', null),
+      });
+    }
+
+    return chips;
+  });
+
+  const hasActiveFilters = $derived(
+    !!filters.q || !!filters.type || !!filters.category || (filters.sort !== 'newest')
+  );
 
   let searchInput = $state('');
 
-  // Sync search input with URL state when data changes (e.g. back/forward navigation)
   $effect(() => {
     searchInput = data.filters?.q ?? '';
   });
 
-  /**
-   * Update a URL search param and navigate with replaceState.
-   * Resets page to 1 on filter/search changes (unless key is 'page').
-   */
   function updateFilter(key: string, value: string | null) {
     const url = new URL(page.url);
     if (value) {
@@ -66,14 +132,11 @@
     url.searchParams.delete('q');
     url.searchParams.delete('type');
     url.searchParams.delete('sort');
+    url.searchParams.delete('category');
     url.searchParams.delete('page');
     goto(url.toString(), { replaceState: true });
   }
 
-  /**
-   * Build the baseUrl for Pagination links, preserving current filters
-   * but without the 'page' param (Pagination adds it).
-   */
   const paginationBaseUrl = $derived.by(() => {
     const url = new URL(page.url);
     url.searchParams.delete('page');
@@ -97,12 +160,6 @@
     viewMode = mode;
     if (browser) localStorage.setItem(STORAGE_KEY, mode);
   }
-
-  const sortOptions = $derived([
-    { value: 'newest', label: m.explore_sort_newest() },
-    { value: 'oldest', label: m.explore_sort_oldest() },
-    { value: 'title', label: m.explore_sort_title() },
-  ]);
 </script>
 
 <svelte:head>
@@ -121,13 +178,18 @@
   <header class="explore__header">
     <h1 class="explore__title">{m.explore_title()}</h1>
     {#if total > 0}
-      <p class="explore__count">{m.explore_results_count({ count: String(total) })}</p>
+      <p class="explore__count">
+        {#if activeCategory}
+          {m.explore_showing_filtered({ count: String(displayItems.length), total: String(total) })}
+        {:else}
+          {m.explore_results_count({ count: String(total) })}
+        {/if}
+      </p>
     {/if}
   </header>
 
-  <!-- Controls: Search, Type Filter, Sort -->
+  <!-- Controls: Search, Type Filter, Sort, View Toggle -->
   <div class="explore__controls">
-    <!-- Search -->
     <form class="explore__search" onsubmit={handleSearchSubmit}>
       <SearchIcon size={18} class="explore__search-icon" />
       <input
@@ -139,7 +201,6 @@
       />
     </form>
 
-    <!-- Type Filter -->
     <div class="explore__filter-group">
       {#each typeOptions as option (option.value)}
         <button
@@ -153,7 +214,6 @@
       {/each}
     </div>
 
-    <!-- Sort + View Toggle -->
     <div class="explore__sort-wrapper">
       <Select
         options={sortOptions}
@@ -165,10 +225,57 @@
     <ViewToggle value={viewMode} onchange={handleViewChange} />
   </div>
 
+  <!-- Category Strip -->
+  {#if categories.length >= 2}
+    <nav class="explore__categories" aria-label="Filter by category">
+      <button
+        class="explore__category-pill"
+        class:explore__category-pill--active={!activeCategory}
+        onclick={() => updateFilter('category', null)}
+        aria-pressed={!activeCategory}
+      >
+        {m.explore_filter_all()}
+      </button>
+      {#each categories as cat (cat)}
+        <button
+          class="explore__category-pill"
+          class:explore__category-pill--active={activeCategory === cat}
+          onclick={() => updateFilter('category', cat)}
+          aria-pressed={activeCategory === cat}
+        >
+          {cat}
+        </button>
+      {/each}
+    </nav>
+  {/if}
+
+  <!-- Active Filter Chips -->
+  {#if hasActiveFilters}
+    <div class="explore__chips" aria-label="Active filters">
+      {#each activeFilterChips as chip (chip.key)}
+        <span class="explore__chip" transition:fly={{ x: -8, duration: 150 }}>
+          {chip.label}
+          <button
+            class="explore__chip-remove"
+            onclick={chip.onRemove}
+            aria-label="Remove {chip.label} filter"
+          >
+            <XIcon size={12} />
+          </button>
+        </span>
+      {/each}
+      {#if activeFilterChips.length > 1}
+        <button class="explore__clear-all" onclick={clearFilters}>
+          {m.explore_clear_filters()}
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   <!-- Content Grid -->
-  {#if items.length > 0}
+  {#if displayItems.length > 0}
     <div class="explore__grid" data-view={viewMode}>
-      {#each items as item (item.id)}
+      {#each displayItems as item (item.id)}
         <ContentCard
           id={item.id}
           title={item.title}
@@ -189,7 +296,6 @@
       {/each}
     </div>
 
-    <!-- Pagination -->
     {#if totalPages > 1}
       <div class="explore__pagination">
         <Pagination
@@ -200,7 +306,6 @@
       </div>
     {/if}
   {:else if hasActiveFilters}
-    <!-- No search results -->
     <EmptyState title={m.explore_no_results()} icon={SearchXIcon}>
       {#snippet action()}
         <button class="explore__clear-btn" onclick={clearFilters}>
@@ -209,7 +314,6 @@
       {/snippet}
     </EmptyState>
   {:else}
-    <!-- No content at all -->
     <EmptyState title={m.explore_no_content()} description={m.explore_no_content_description()} icon={FileIcon} />
   {/if}
 </div>
@@ -222,10 +326,10 @@
     max-width: 1200px;
     width: 100%;
     margin: 0 auto;
-    padding: var(--space-8, 2rem) var(--space-6, 1.5rem);
+    padding: var(--space-8) var(--space-6);
     display: flex;
     flex-direction: column;
-    gap: var(--space-8, 2rem);
+    gap: var(--space-6);
   }
 
   /* ── Header ── */
@@ -233,21 +337,21 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: var(--space-4, 1rem);
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
   .explore__title {
     margin: 0;
-    font-size: var(--text-3xl, 1.875rem);
-    font-weight: var(--font-bold, 700);
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
     color: var(--color-text-primary);
     line-height: var(--leading-tight);
   }
 
   .explore__count {
     margin: 0;
-    font-size: var(--text-sm, 0.875rem);
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
   }
 
@@ -256,19 +360,18 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-4, 1rem);
+    gap: var(--space-4);
   }
 
-  /* Search */
   .explore__search {
     position: relative;
     flex: 1 1 280px;
     min-width: 0;
   }
 
-  .explore__search-icon {
+  :global(.explore__search-icon) {
     position: absolute;
-    left: var(--space-3, 0.75rem);
+    left: var(--space-3);
     top: 50%;
     transform: translateY(-50%);
     color: var(--color-text-muted);
@@ -277,15 +380,16 @@
 
   .explore__search-input {
     width: 100%;
-    padding: var(--space-2-5, 0.625rem) var(--space-3, 0.75rem);
-    padding-left: var(--space-10, 2.5rem);
-    font-size: var(--text-sm, 0.875rem);
+    padding: var(--space-2-5) var(--space-3);
+    padding-left: var(--space-10);
+    font-size: var(--text-sm);
     color: var(--color-text);
     background: var(--color-surface);
-    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
-    border-radius: var(--radius-md, 0.375rem);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
     outline: none;
-    transition: border-color var(--duration-fast) var(--ease-default), box-shadow var(--duration-fast) var(--ease-default);
+    transition: border-color var(--duration-fast) var(--ease-default),
+      box-shadow var(--duration-fast) var(--ease-default);
   }
 
   .explore__search-input:focus {
@@ -297,24 +401,24 @@
     color: var(--color-text-muted);
   }
 
-  /* Type Filter Buttons */
   .explore__filter-group {
     display: flex;
-    gap: var(--space-1, 0.25rem);
-    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
-    border-radius: var(--radius-md, 0.375rem);
+    gap: var(--space-1);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
     overflow: hidden;
   }
 
   .explore__filter-btn {
-    padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-    font-size: var(--text-sm, 0.875rem);
-    font-weight: var(--font-medium, 500);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
     color: var(--color-text-secondary);
     background: var(--color-surface);
     border: none;
     cursor: pointer;
-    transition: background-color var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default);
+    transition: background-color var(--duration-fast) var(--ease-default),
+      color var(--duration-fast) var(--ease-default);
     white-space: nowrap;
   }
 
@@ -331,16 +435,125 @@
     background: var(--color-interactive-hover);
   }
 
-  /* Sort Select Wrapper */
   .explore__sort-wrapper {
     min-width: 160px;
+  }
+
+  /* ── Category Strip ── */
+  .explore__categories {
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--space-1) 0;
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black var(--space-4),
+      black calc(100% - var(--space-4)),
+      transparent 100%
+    );
+  }
+
+  .explore__categories::-webkit-scrollbar {
+    display: none;
+  }
+
+  .explore__category-pill {
+    flex-shrink: 0;
+    padding: var(--space-1-5) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    background: var(--color-surface-secondary);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color var(--duration-fast) var(--ease-default),
+      color var(--duration-fast) var(--ease-default),
+      border-color var(--duration-fast) var(--ease-default);
+  }
+
+  .explore__category-pill:hover {
+    border-color: var(--color-border-hover);
+  }
+
+  .explore__category-pill--active {
+    background: var(--color-interactive);
+    color: var(--color-text-on-brand);
+    border-color: var(--color-interactive);
+  }
+
+  .explore__category-pill--active:hover {
+    background: var(--color-interactive-hover);
+    border-color: var(--color-interactive-hover);
+  }
+
+  /* ── Filter Chips ── */
+  .explore__chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .explore__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: var(--space-1-5) var(--space-3);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-interactive);
+    background: var(--color-surface-secondary);
+    border: var(--border-width) var(--border-style) var(--color-interactive);
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+  }
+
+  .explore__chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: var(--space-4);
+    height: var(--space-4);
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    border-radius: var(--radius-full);
+    transition: background-color var(--duration-fast) var(--ease-default);
+  }
+
+  .explore__chip-remove:hover {
+    background: var(--color-interactive);
+    color: var(--color-text-on-brand);
+  }
+
+  .explore__clear-all {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: var(--space-1) var(--space-2);
+    text-decoration: underline;
+    transition: color var(--duration-fast) var(--ease-default);
+  }
+
+  .explore__clear-all:hover {
+    color: var(--color-text);
   }
 
   /* ── Content Grid ── */
   .explore__grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: var(--space-6, 1.5rem);
+    gap: var(--space-6);
   }
 
   @media (--breakpoint-sm) {
@@ -392,20 +605,21 @@
   .explore__pagination {
     display: flex;
     justify-content: center;
-    padding-top: var(--space-4, 1rem);
+    padding-top: var(--space-4);
   }
 
   /* ── Empty States ── */
   .explore__clear-btn {
-    padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
-    font-size: var(--text-sm, 0.875rem);
-    font-weight: var(--font-medium, 500);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
     color: var(--color-interactive);
     background: transparent;
-    border: var(--border-width, 1px) var(--border-style, solid) var(--color-interactive);
-    border-radius: var(--radius-md, 0.375rem);
+    border: var(--border-width) var(--border-style) var(--color-interactive);
+    border-radius: var(--radius-md);
     cursor: pointer;
-    transition: background-color var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default);
+    transition: background-color var(--duration-fast) var(--ease-default),
+      color var(--duration-fast) var(--ease-default);
   }
 
   .explore__clear-btn:hover {
@@ -413,15 +627,14 @@
     color: var(--color-text-on-brand);
   }
 
-  /* ── Responsive Controls ── */
+  /* ── Responsive ── */
   @media (--below-sm) {
     .explore {
-      padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
-      gap: var(--space-6, 1.5rem);
+      padding: var(--space-6) var(--space-4);
     }
 
     .explore__title {
-      font-size: var(--text-2xl, 1.5rem);
+      font-size: var(--text-2xl);
     }
 
     .explore__controls {

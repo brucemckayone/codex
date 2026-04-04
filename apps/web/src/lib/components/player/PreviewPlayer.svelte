@@ -28,9 +28,11 @@
     contentId: string;
     contentTitle?: string;
     accessState: AccessState;
+    /** When true, attempts muted autoplay after HLS init. Default: false */
+    autoplay?: boolean;
   }
 
-  const { previewUrl, poster, contentId, contentTitle, accessState }: Props = $props();
+  const { previewUrl, poster, contentId, contentTitle, accessState, autoplay = false }: Props = $props();
 
   let videoEl: HTMLVideoElement | undefined = $state();
   let hlsInstance: Hls | null = null;
@@ -83,6 +85,13 @@
           loading = false;
         },
       });
+
+      // Attempt muted autoplay if requested — silently ignore browser blocks
+      if (autoplay && videoEl) {
+        videoEl.play().catch(() => {
+          // Browser blocked autoplay; user must click play manually
+        });
+      }
     } catch {
       errorMessage = 'Failed to initialize preview player.';
       loading = false;
@@ -119,6 +128,7 @@
         playsinline
         preload="metadata"
         poster={poster}
+        muted={autoplay}
         oncanplay={handleCanPlay}
         onerror={handleError}
         ontimeupdate={handleTimeUpdate}
