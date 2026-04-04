@@ -115,13 +115,27 @@ function open(orgId: string, saved: BrandEditorState): void {
       document.documentElement.getAttribute('data-theme') ?? 'light';
   }
 
-  // Try to restore pending state from sessionStorage
+  // Try to restore pending state from sessionStorage (crash recovery)
   if (browser) {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
         const restored = JSON.parse(raw);
         if (restored.orgId === orgId && restored.pending) {
+          // Merge server-saved tokenOverrides into restored state
+          // so fine-tune values persist even if sessionStorage is stale
+          if (
+            saved.tokenOverrides &&
+            Object.keys(saved.tokenOverrides).length > 0
+          ) {
+            restored.pending.tokenOverrides = {
+              ...saved.tokenOverrides,
+              ...(restored.pending.tokenOverrides ?? {}),
+            };
+          }
+          if (saved.darkOverrides && !restored.pending.darkOverrides) {
+            restored.pending.darkOverrides = saved.darkOverrides;
+          }
           state.pending = restored.pending;
           state.level = restored.level ?? 'home';
           state.panel = 'open';
