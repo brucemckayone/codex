@@ -94,7 +94,7 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 5px;
+    gap: var(--space-1);
     width: var(--space-10);
     height: var(--space-10);
     padding: var(--space-2);
@@ -115,9 +115,9 @@
   .hamburger-line {
     display: block;
     width: 100%;
-    height: 2px;
+    height: var(--border-width-thick);
     background-color: var(--color-text);
-    border-radius: 1px;
+    border-radius: var(--radius-xs);
     transition: transform var(--duration-normal) var(--ease-default),
                 opacity var(--duration-normal) var(--ease-default);
     transform-origin: center;

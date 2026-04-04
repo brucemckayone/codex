@@ -27,6 +27,6 @@
     border-radius: var(--radius-lg);
     padding: var(--space-8);
     box-shadow: var(--shadow-lg);
-    border: 1px solid var(--color-border);
+    border: var(--border-width) var(--border-style) var(--color-border);
   }
 </style>

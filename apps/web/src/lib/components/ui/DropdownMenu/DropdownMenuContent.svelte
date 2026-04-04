@@ -32,7 +32,7 @@
 <style>
 	.dropdown-content {
 		background: var(--color-surface);
-		border: 1px solid var(--color-border);
+		border: var(--border-width) var(--border-style) var(--color-border);
 		border-radius: var(--radius-md);
 		box-shadow: var(--shadow-lg);
 		padding: var(--space-1);

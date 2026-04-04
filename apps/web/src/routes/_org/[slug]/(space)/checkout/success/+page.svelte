@@ -224,7 +224,7 @@
   }
 
   .checkout-success__btn--secondary:hover {
-    background: var(--color-neutral-50);
+    background: var(--color-surface);
     color: var(--color-text);
   }
 </style>

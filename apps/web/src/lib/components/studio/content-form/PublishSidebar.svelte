@@ -330,7 +330,7 @@
   }
 
   .status-badge[data-status='archived'] {
-    background-color: var(--color-neutral-100, var(--color-surface));
+    background-color: var(--color-surface-secondary);
     color: var(--color-text-secondary);
   }
 

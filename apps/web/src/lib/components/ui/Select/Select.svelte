@@ -136,7 +136,7 @@
   }
 
   .select-trigger:hover {
-    border-color: var(--color-neutral-400);
+    border-color: var(--color-border-strong);
   }
 
   .select-icon {
@@ -180,7 +180,7 @@
   }
 
   .select-option:global([data-highlighted]) {
-    background-color: var(--color-neutral-100);
+    background-color: var(--color-surface-secondary);
   }
 
   .select-option:global([aria-selected="true"]) {

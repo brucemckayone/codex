@@ -31,9 +31,9 @@
 
   /* Variants */
   .badge[data-variant="neutral"] {
-    background-color: var(--color-neutral-100);
-    color: var(--color-neutral-900);
-    border-color: var(--color-neutral-200);
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text);
+    border-color: var(--color-border);
   }
 
   .badge[data-variant="success"] {

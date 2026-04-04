@@ -23,6 +23,9 @@
 /* Org Brand Overrides (CSS relative colors, activated by [data-org-brand]) */
 @import '../theme/tokens/org-brand.css';
 
+/* Base Element Styles (headings, forms, tables, code, lists, focus) */
+@import '../theme/base.css';
+
 /* Utilities */
 @import './utilities.css';
 

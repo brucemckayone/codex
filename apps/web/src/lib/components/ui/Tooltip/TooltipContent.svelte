@@ -33,7 +33,7 @@
 	.tooltip-content {
 		background: var(--color-surface-secondary);
 		color: var(--color-text);
-		border: 1px solid var(--color-border);
+		border: var(--border-width) var(--border-style) var(--color-border);
 		border-radius: var(--radius-sm);
 		box-shadow: var(--shadow-sm);
 		padding: var(--space-1) var(--space-2);

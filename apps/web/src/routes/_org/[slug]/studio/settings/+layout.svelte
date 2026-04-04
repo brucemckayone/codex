@@ -137,7 +137,7 @@
 
   .tab-trigger.loading {
     color: var(--color-text);
-    border-bottom-color: var(--color-neutral-300);
+    border-bottom-color: var(--color-border-strong);
   }
 
   .tab-trigger.active {

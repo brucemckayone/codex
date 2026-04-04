@@ -80,7 +80,7 @@
   .responsive-image__skeleton {
     position: absolute;
     inset: 0;
-    background: var(--color-neutral-100);
+    background: var(--color-surface-secondary);
     animation: shimmer 1.5s ease-in-out infinite;
   }
 

@@ -386,7 +386,7 @@
   }
 
   .picker-trigger:hover {
-    border-color: var(--color-neutral-400);
+    border-color: var(--color-border-strong);
   }
 
   .picker-trigger:focus-visible {
@@ -564,7 +564,7 @@
 
   .option:hover,
   .option.highlighted {
-    background-color: var(--color-neutral-100);
+    background-color: var(--color-surface-secondary);
   }
 
   .option.highlighted {

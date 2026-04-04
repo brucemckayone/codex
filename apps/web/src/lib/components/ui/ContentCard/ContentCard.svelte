@@ -251,12 +251,12 @@
   .content-card__thumbnail {
     position: relative;
     aspect-ratio: 16 / 9;
-    background: var(--color-neutral-100);
+    background: var(--color-surface-secondary);
     overflow: hidden;
   }
 
   .content-card__thumbnail--skeleton {
-    background: var(--color-neutral-50);
+    background: var(--color-surface);
   }
 
   .content-card__image {
@@ -276,7 +276,7 @@
     width: 100%;
     height: 100%;
     color: var(--color-text-muted);
-    background: var(--color-neutral-100);
+    background: var(--color-surface-secondary);
   }
 
   .content-card__duration {

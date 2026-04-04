@@ -171,7 +171,7 @@
     position: absolute;
     width: 1em;
     height: 1em;
-    border: 2px solid currentColor;
+    border: var(--border-width-thick) solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;
     animation: spin 0.6s linear infinite;

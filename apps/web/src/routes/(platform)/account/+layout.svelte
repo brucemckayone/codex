@@ -102,7 +102,7 @@
 
   .sidebar-link:hover {
     color: var(--color-text);
-    background-color: var(--color-neutral-100);
+    background-color: var(--color-surface-secondary);
   }
 
   .sidebar-link:focus-visible {
@@ -112,7 +112,7 @@
 
   .sidebar-link.loading {
     color: var(--color-text);
-    background-color: var(--color-neutral-100);
+    background-color: var(--color-surface-secondary);
   }
 
   .sidebar-link.active {

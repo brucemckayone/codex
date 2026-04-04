@@ -360,7 +360,7 @@
     justify-content: center;
     gap: var(--space-2);
     padding: var(--space-8) var(--space-4);
-    border: 2px dashed var(--color-border);
+    border: var(--border-width-thick) var(--border-style-dashed) var(--color-border);
     border-radius: var(--radius-lg);
     background-color: var(--color-surface);
     cursor: pointer;
@@ -476,8 +476,8 @@
 
   .progress-bar {
     width: 100%;
-    height: 4px;
-    background-color: var(--color-neutral-100);
+    height: var(--space-1);
+    background-color: var(--color-surface-secondary);
     border-radius: var(--radius-full);
     overflow: hidden;
   }
@@ -496,8 +496,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: var(--space-6);
+    height: var(--space-6);
     border: none;
     background: none;
     color: var(--color-text-muted);

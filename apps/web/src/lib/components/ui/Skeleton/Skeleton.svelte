@@ -33,7 +33,7 @@
     display: block;
     position: relative;
     overflow: hidden;
-    background: var(--color-neutral-200, hsl(210, 10%, 90%));
+    background: var(--color-surface-tertiary);
     border-radius: var(--radius-sm, 4px);
   }
 

@@ -251,9 +251,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 64px;
-    height: 64px;
-    min-width: 64px;
+    width: var(--space-16);
+    height: var(--space-16);
+    min-width: var(--space-16);
     background-color: var(--color-surface-secondary);
     border-radius: var(--radius-md);
     color: var(--color-text-secondary);
@@ -308,8 +308,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: var(--space-8);
+    height: var(--space-8);
     border: none;
     background: none;
     color: var(--color-text-secondary);
@@ -337,7 +337,7 @@
 
   .transcoding-progress-bar {
     height: var(--space-1);
-    background-color: var(--color-neutral-200);
+    background-color: var(--color-surface-tertiary);
     border-radius: var(--radius-full);
     overflow: hidden;
   }

@@ -14,24 +14,24 @@
   .spinner {
     display: inline-block;
     border-radius: 50%;
-    border: 2px solid var(--color-neutral-200, #e5e5e5);
+    border: var(--border-width-thick) solid var(--color-border);
     border-top-color: var(--color-interactive);
     animation: spin 0.6s linear infinite;
   }
 
   .spinner-sm {
-    width: 16px;
-    height: 16px;
+    width: var(--space-4);
+    height: var(--space-4);
   }
 
   .spinner-md {
-    width: 24px;
-    height: 24px;
+    width: var(--space-6);
+    height: var(--space-6);
   }
 
   .spinner-lg {
-    width: 40px;
-    height: 40px;
+    width: var(--space-10);
+    height: var(--space-10);
     border-width: 3px;
   }
 

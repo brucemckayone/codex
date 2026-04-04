@@ -42,7 +42,7 @@
 	}
 
 	.dropdown-item:global([data-highlighted]) {
-		background-color: var(--color-neutral-100);
+		background-color: var(--color-surface-secondary);
 		color: var(--color-text);
 	}
 

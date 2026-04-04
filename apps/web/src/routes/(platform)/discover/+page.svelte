@@ -178,7 +178,7 @@
 
   .card-thumb {
     aspect-ratio: 16 / 9;
-    background-color: var(--color-neutral-100);
+    background-color: var(--color-surface-secondary);
     overflow: hidden;
   }
 
@@ -191,7 +191,7 @@
   .thumb-placeholder {
     width: 100%;
     height: 100%;
-    background-color: var(--color-neutral-200);
+    background-color: var(--color-surface-tertiary);
   }
 
   .card-body {

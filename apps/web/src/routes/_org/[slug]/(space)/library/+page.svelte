@@ -311,7 +311,7 @@
 
   .card-thumb {
     aspect-ratio: 16 / 9;
-    background-color: var(--color-neutral-100);
+    background-color: var(--color-surface-secondary);
     overflow: hidden;
     position: relative;
   }
@@ -326,7 +326,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: var(--color-neutral-200);
+    background-color: var(--color-surface-tertiary);
   }
 
   .placeholder-text {
@@ -340,7 +340,7 @@
     left: 0;
     right: 0;
     height: var(--space-1);
-    background-color: var(--color-neutral-300);
+    background-color: var(--color-border);
   }
 
   .progress-fill {

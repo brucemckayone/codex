@@ -88,7 +88,7 @@
   .cw-card__thumb {
     position: relative;
     aspect-ratio: 16 / 9;
-    background-color: var(--color-neutral-100);
+    background-color: var(--color-surface-secondary);
     overflow: hidden;
   }
 
@@ -105,7 +105,7 @@
     width: 100%;
     height: 100%;
     color: var(--color-text-muted);
-    background-color: var(--color-neutral-200);
+    background-color: var(--color-surface-tertiary);
   }
 
   .cw-card__progress-track {
@@ -113,7 +113,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 4px;
+    height: var(--space-1);
     background: color-mix(in srgb, white 30%, transparent);
   }
 
@@ -121,7 +121,7 @@
     height: 100%;
     background-color: var(--color-interactive);
     transition: width var(--duration-slow) var(--ease-default);
-    border-radius: 0 2px 2px 0;
+    border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
   }
 
   .cw-card__body {

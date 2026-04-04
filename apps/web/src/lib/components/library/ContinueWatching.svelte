@@ -78,7 +78,7 @@
   }
 
   .continue-watching__row::-webkit-scrollbar-thumb {
-    background: var(--color-neutral-300);
+    background: var(--color-border);
     border-radius: var(--radius-full, 9999px);
   }
 

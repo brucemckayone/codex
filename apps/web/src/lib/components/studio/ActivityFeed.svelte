@@ -125,8 +125,8 @@
   }
 
   .activity-icon.event-signup {
-    background-color: var(--color-neutral-100);
-    color: var(--color-neutral-700);
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text);
   }
 
   .activity-text {

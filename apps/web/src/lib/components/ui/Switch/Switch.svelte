@@ -69,7 +69,7 @@
     align-items: center;
     border-radius: var(--radius-full);
     border: none;
-    background-color: var(--color-neutral-200);
+    background-color: var(--color-border);
     transition: var(--transition-colors);
     padding: 0;
   }

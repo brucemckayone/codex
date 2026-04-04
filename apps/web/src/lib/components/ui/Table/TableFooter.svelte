@@ -16,7 +16,7 @@
 <style>
   .table-footer {
     border-top: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-neutral-50);
+    background-color: var(--color-surface);
     font-weight: var(--font-medium);
   }
 

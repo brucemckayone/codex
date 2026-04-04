@@ -36,7 +36,7 @@
 <style>
   .progress-bar {
     width: 100%;
-    background-color: var(--color-neutral-200);
+    background-color: var(--color-surface-tertiary);
     border-radius: var(--radius-full);
     overflow: hidden;
   }

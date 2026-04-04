@@ -149,8 +149,8 @@
   }
 
   .hero__logo {
-    width: 80px;
-    height: 80px;
+    width: var(--space-20);
+    height: var(--space-20);
     border-radius: var(--radius-full, 9999px);
     object-fit: cover;
     border: 3px solid color-mix(in srgb, white 30%, transparent);
@@ -162,7 +162,7 @@
     font-size: var(--text-4xl, 2.25rem);
     font-weight: var(--font-bold, 700);
     line-height: var(--leading-tight);
-    letter-spacing: -0.02em;
+    letter-spacing: var(--tracking-tight);
   }
 
   .hero__description {
@@ -278,8 +278,8 @@
     }
 
     .hero__logo {
-      width: 64px;
-      height: 64px;
+      width: var(--space-16);
+      height: var(--space-16);
     }
   }
 </style>
