@@ -101,15 +101,28 @@
 
   // Sync org background to html element so scrollbar gutter area matches.
   // Without this, the scrollbar track shows the root light background on dark org brands.
+  // Tracks brandBackground (from server data) and brandEditor.pending?.backgroundColor
+  // (live editor changes) so it re-runs when either changes.
   $effect(() => {
     if (!browser) return;
+    // Track reactive deps: server brand bg + editor pending bg
+    const serverBg = brandBackground;
+    const editorBg = brandEditor.pending?.backgroundColor;
+    // Read the actual computed color after CSS derivation
     const layout = document.querySelector('.org-layout');
     if (!layout) return;
-    const bg = getComputedStyle(layout).backgroundColor;
-    if (bg && bg !== 'rgba(0, 0, 0, 0)') {
-      document.documentElement.style.backgroundColor = bg;
-    }
+    // Use requestAnimationFrame to ensure CSS has been applied
+    const raf = requestAnimationFrame(() => {
+      const bg = getComputedStyle(layout).backgroundColor;
+      if (bg && bg !== 'rgba(0, 0, 0, 0)') {
+        document.documentElement.style.backgroundColor = bg;
+      }
+    });
+    // Suppress unused var warnings — these are tracked for reactivity
+    void serverBg;
+    void editorBg;
     return () => {
+      cancelAnimationFrame(raf);
       document.documentElement.style.removeProperty('background-color');
     };
   });
