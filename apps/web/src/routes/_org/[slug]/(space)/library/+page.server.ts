@@ -50,6 +50,12 @@ export const load: PageServerLoad = async ({
   const sortParam = url.searchParams.get('sort') ?? 'recent';
   const sortBy = parseSortParam(sortParam);
 
+  // Parse filter params from URL
+  const contentType = url.searchParams.get('type') ?? 'all';
+  const accessType = url.searchParams.get('access') ?? 'all';
+  const progressStatus = url.searchParams.get('progress') ?? 'all';
+  const search = url.searchParams.get('q') ?? '';
+
   const api = createServerApi(platform, cookies);
 
   const params = new URLSearchParams();
@@ -57,6 +63,10 @@ export const load: PageServerLoad = async ({
   params.set('limit', String(LIBRARY_LIMIT));
   params.set('sortBy', sortBy);
   params.set('organizationId', org.id);
+  if (contentType !== 'all') params.set('contentType', contentType);
+  if (accessType !== 'all') params.set('accessType', accessType);
+  if (progressStatus !== 'all') params.set('filter', progressStatus);
+  if (search) params.set('search', search);
 
   try {
     const library = await api.access.getUserLibrary(params);
@@ -66,6 +76,10 @@ export const load: PageServerLoad = async ({
         pagination: { page: 1, limit: LIBRARY_LIMIT, total: 0, totalPages: 0 },
       },
       sort: sortParam,
+      contentType,
+      accessType,
+      progressStatus,
+      search,
       error: false,
       errorCode: null as string | null,
     };
@@ -80,6 +94,10 @@ export const load: PageServerLoad = async ({
         pagination: { page: 1, limit: LIBRARY_LIMIT, total: 0, totalPages: 0 },
       },
       sort: sortParam,
+      contentType,
+      accessType,
+      progressStatus,
+      search,
       error: true,
       errorCode: code,
     };

@@ -1,10 +1,14 @@
 <!--
   @component LibraryFilters
 
-  Provides content type, progress status, and search filtering for the library page.
-  All filtering is client-side over TanStack DB live query results.
+  Provides content type, progress status, access type, and search filtering
+  for the library page. Filters trigger server-side navigation via URL params.
 
-  @prop {(filters: { contentType: string; progressStatus: string; search: string }) => void} onFilterChange - Callback when filters change
+  @prop {(filters: FilterValues) => void} onFilterChange - Callback when filters change
+  @prop {string} initialContentType - Initial content type from URL state
+  @prop {string} initialProgressStatus - Initial progress status from URL state
+  @prop {string} initialAccessType - Initial access type from URL state
+  @prop {string} initialSearch - Initial search term from URL state
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -18,15 +22,25 @@
 
   interface Props {
     onFilterChange: (filters: FilterValues) => void;
+    initialContentType?: string;
+    initialProgressStatus?: string;
+    initialAccessType?: string;
+    initialSearch?: string;
   }
 
-  const { onFilterChange }: Props = $props();
+  const {
+    onFilterChange,
+    initialContentType = 'all',
+    initialProgressStatus = 'all',
+    initialAccessType = 'all',
+    initialSearch = '',
+  }: Props = $props();
 
-  let contentType = $state('all');
-  let progressStatus = $state('all');
-  let accessType = $state('all');
-  let searchInput = $state('');
-  let searchDebounced = $state('');
+  let contentType = $state(initialContentType);
+  let progressStatus = $state(initialProgressStatus);
+  let accessType = $state(initialAccessType);
+  let searchInput = $state(initialSearch);
+  let searchDebounced = $state(initialSearch);
 
   const contentTypeOptions = [
     { value: 'all', label: m.library_filter_all_types() },

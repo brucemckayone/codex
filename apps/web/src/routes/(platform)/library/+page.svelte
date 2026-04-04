@@ -40,16 +40,14 @@
     }
   });
 
-  // Live query over library collection
-  // - During SSR: Returns static server data (no reactivity)
-  // - After hydration: Uses cached data from onMount, stays reactive
+  // Live query over library collection — used for ContinueWatching section
   const libraryQuery = useLiveQuery(
     (q) =>
       q
         .from({ item: libraryCollection })
         .orderBy(({ item }) => item.progress?.updatedAt ?? '', 'desc'),
-    undefined, // deps (optional)
-    { ssrData: data.library?.items } // SSR fallback data
+    undefined,
+    { ssrData: data.library?.items }
   );
 
   // Sort options
@@ -72,35 +70,47 @@
     return Math.max(1, Math.ceil(total / limit));
   });
 
-  function handleSortChange(value: string | undefined) {
-    if (!value) return;
+  /** Build URLSearchParams preserving current filter state */
+  function buildFilterParams(overrides?: { sort?: string }) {
     const params = new URLSearchParams();
-    params.set('sort', value);
-    // Reset to page 1 when sort changes
-    void goto(`/library?${params.toString()}`);
+    const sort = overrides?.sort ?? currentSort;
+    if (sort !== 'recent') params.set('sort', sort);
+    if (filters.contentType !== 'all') params.set('type', filters.contentType);
+    if (filters.progressStatus !== 'all') params.set('progress', filters.progressStatus);
+    if (filters.search) params.set('q', filters.search);
+    return params;
   }
 
-  // Build base URL for pagination (preserves current sort)
+  function handleSortChange(value: string | undefined) {
+    if (!value) return;
+    const params = buildFilterParams({ sort: value });
+    const qs = params.toString();
+    void goto(`/library${qs ? `?${qs}` : ''}`);
+  }
+
   const paginationBaseUrl = $derived.by(() => {
-    const params = new URLSearchParams();
-    if (currentSort && currentSort !== 'recent') {
-      params.set('sort', currentSort);
-    }
+    const params = buildFilterParams();
     const qs = params.toString();
     return `/library${qs ? `?${qs}` : ''}`;
   });
 
-  // Filter state
-  let filters = $state({
-    contentType: 'all',
-    progressStatus: 'all',
-    search: '',
+  // Filter state — driven by URL params via server load
+  const filters = $derived({
+    contentType: data.contentType ?? 'all',
+    progressStatus: data.progressStatus ?? 'all',
+    search: data.search ?? '',
   });
 
   let filtersRef: LibraryFilters | undefined = $state();
 
   function handleFilterChange(newFilters: { contentType: string; progressStatus: string; search: string }) {
-    filters = newFilters;
+    const params = new URLSearchParams();
+    if (currentSort !== 'recent') params.set('sort', currentSort);
+    if (newFilters.contentType !== 'all') params.set('type', newFilters.contentType);
+    if (newFilters.progressStatus !== 'all') params.set('progress', newFilters.progressStatus);
+    if (newFilters.search) params.set('q', newFilters.search);
+    const qs = params.toString();
+    void goto(`/library${qs ? `?${qs}` : ''}`, { replaceState: true });
   }
 
   const hasActiveFilters = $derived(
@@ -109,45 +119,8 @@
     filters.search !== ''
   );
 
-  // Filtered items derived from live query data
-  const filteredItems = $derived.by(() => {
-    const items = libraryQuery.data ?? [];
-    if (!hasActiveFilters) return items;
-
-    return items.filter((item) => {
-      // Content type filter
-      if (filters.contentType !== 'all') {
-        const type = item.content.contentType?.toLowerCase() ?? '';
-        if (type !== filters.contentType) return false;
-      }
-
-      // Progress status filter
-      if (filters.progressStatus !== 'all') {
-        const progress = item.progress;
-        switch (filters.progressStatus) {
-          case 'not_started':
-            if (progress && (progress.positionSeconds > 0 || progress.completed)) return false;
-            break;
-          case 'in_progress':
-            if (!progress || progress.positionSeconds === 0 || progress.completed) return false;
-            break;
-          case 'completed':
-            if (!progress || !progress.completed) return false;
-            break;
-        }
-      }
-
-      // Search filter
-      if (filters.search) {
-        const search = filters.search.toLowerCase();
-        const title = item.content.title?.toLowerCase() ?? '';
-        const description = item.content.description?.toLowerCase() ?? '';
-        if (!title.includes(search) && !description.includes(search)) return false;
-      }
-
-      return true;
-    });
-  });
+  // Items from server data — already filtered by the API
+  const filteredItems = $derived(data.library?.items ?? []);
 </script>
 
 <svelte:head>
@@ -196,7 +169,13 @@
       />
     </div>
 
-    <LibraryFilters bind:this={filtersRef} onFilterChange={handleFilterChange} />
+    <LibraryFilters
+      bind:this={filtersRef}
+      onFilterChange={handleFilterChange}
+      initialContentType={filters.contentType}
+      initialProgressStatus={filters.progressStatus}
+      initialSearch={filters.search}
+    />
 
     <ContinueWatching items={libraryQuery.data ?? []} />
 
@@ -206,7 +185,7 @@
         <button
           type="button"
           class="clear-filters-btn"
-          onclick={() => filtersRef?.clearAll()}
+          onclick={() => { filtersRef?.clearAll(); void goto('/library'); }}
         >
           {m.library_clear_filters()}
         </button>

@@ -12,13 +12,14 @@ html {
   font-size: 16px;
   line-height: var(--leading-normal);
   color: var(--color-text-primary);
-  background-color: var(--color-surface);
+  background-color: var(--color-background);
 
   /* Smooth scrolling for anchor links */
   scroll-behavior: smooth;
 
-  /* Prevent content shift during scrollbar appearance */
-  scrollbar-gutter: stable;
+  /* NOTE: scrollbar-gutter: stable was removed — it creates a visible
+     gap with the root background color that can't inherit org branding
+     (org brand scopes to [data-org-brand], not :root). */
 }
 
 body {

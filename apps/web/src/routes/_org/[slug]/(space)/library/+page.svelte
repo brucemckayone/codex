@@ -40,34 +40,51 @@
     return Math.max(1, pagination.totalPages ?? Math.ceil(pagination.total / pagination.limit));
   });
 
+  /** Build URLSearchParams preserving current filter state */
+  function buildFilterParams(overrides?: { sort?: string }) {
+    const params = new URLSearchParams();
+    const sort = overrides?.sort ?? currentSort;
+    if (sort !== 'recent') params.set('sort', sort);
+    if (filters.contentType !== 'all') params.set('type', filters.contentType);
+    if (filters.accessType !== 'all') params.set('access', filters.accessType);
+    if (filters.progressStatus !== 'all') params.set('progress', filters.progressStatus);
+    if (filters.search) params.set('q', filters.search);
+    return params;
+  }
+
   function handleSortChange(value: string | undefined) {
     if (!value) return;
-    const params = new URLSearchParams();
-    params.set('sort', value);
-    void goto(`/library?${params.toString()}`);
+    const params = buildFilterParams({ sort: value });
+    const qs = params.toString();
+    void goto(`/library${qs ? `?${qs}` : ''}`);
   }
 
   const paginationBaseUrl = $derived.by(() => {
-    const params = new URLSearchParams();
-    if (currentSort && currentSort !== 'recent') {
-      params.set('sort', currentSort);
-    }
+    const params = buildFilterParams();
     const qs = params.toString();
     return `/library${qs ? `?${qs}` : ''}`;
   });
 
-  // Filter state
-  let filters = $state({
-    contentType: 'all',
-    progressStatus: 'all',
-    accessType: 'all',
-    search: '',
+  // Filter state — driven by URL params via server load
+  const filters = $derived({
+    contentType: data.contentType ?? 'all',
+    progressStatus: data.progressStatus ?? 'all',
+    accessType: data.accessType ?? 'all',
+    search: data.search ?? '',
   });
 
   let filtersRef: LibraryFilters | undefined = $state();
 
   function handleFilterChange(newFilters: { contentType: string; progressStatus: string; accessType: string; search: string }) {
-    filters = newFilters;
+    const params = new URLSearchParams();
+    if (currentSort !== 'recent') params.set('sort', currentSort);
+    if (newFilters.contentType !== 'all') params.set('type', newFilters.contentType);
+    if (newFilters.accessType !== 'all') params.set('access', newFilters.accessType);
+    if (newFilters.progressStatus !== 'all') params.set('progress', newFilters.progressStatus);
+    if (newFilters.search) params.set('q', newFilters.search);
+    // Reset to page 1 when filters change
+    const qs = params.toString();
+    void goto(`/library${qs ? `?${qs}` : ''}`, { replaceState: true });
   }
 
   const hasActiveFilters = $derived(
@@ -77,48 +94,8 @@
     filters.search !== ''
   );
 
-  // Items from server data (no live query needed — org library is server-driven)
-  const allItems = $derived(data.library?.items ?? []);
-
-  // Client-side filtering
-  const filteredItems = $derived.by(() => {
-    if (!hasActiveFilters) return allItems;
-
-    return allItems.filter((item: { content: { contentType?: string; title?: string; description?: string }; accessType?: string; progress?: { positionSeconds: number; completed: boolean } }) => {
-      if (filters.contentType !== 'all') {
-        const type = item.content.contentType?.toLowerCase() ?? '';
-        if (type !== filters.contentType) return false;
-      }
-
-      if (filters.accessType !== 'all') {
-        if ((item.accessType ?? 'purchased') !== filters.accessType) return false;
-      }
-
-      if (filters.progressStatus !== 'all') {
-        const progress = item.progress;
-        switch (filters.progressStatus) {
-          case 'not_started':
-            if (progress && (progress.positionSeconds > 0 || progress.completed)) return false;
-            break;
-          case 'in_progress':
-            if (!progress || progress.positionSeconds === 0 || progress.completed) return false;
-            break;
-          case 'completed':
-            if (!progress || !progress.completed) return false;
-            break;
-        }
-      }
-
-      if (filters.search) {
-        const search = filters.search.toLowerCase();
-        const title = item.content.title?.toLowerCase() ?? '';
-        const description = item.content.description?.toLowerCase() ?? '';
-        if (!title.includes(search) && !description.includes(search)) return false;
-      }
-
-      return true;
-    });
-  });
+  // Items from server data — already filtered by the API
+  const filteredItems = $derived(data.library?.items ?? []);
 </script>
 
 <svelte:head>
@@ -142,7 +119,7 @@
           ? 'The service is temporarily unavailable. Please try again shortly.'
           : 'Your library could not be loaded. Please try refreshing the page.'}
     />
-  {:else if allItems.length === 0 && !hasActiveFilters}
+  {:else if filteredItems.length === 0 && !hasActiveFilters}
     <EmptyState title="You haven't purchased any content from {orgName} yet.">
       {#snippet action()}
         <a href="/explore" class="browse-btn">
@@ -162,7 +139,14 @@
       />
     </div>
 
-    <LibraryFilters bind:this={filtersRef} onFilterChange={handleFilterChange} />
+    <LibraryFilters
+      bind:this={filtersRef}
+      onFilterChange={handleFilterChange}
+      initialContentType={filters.contentType}
+      initialProgressStatus={filters.progressStatus}
+      initialAccessType={filters.accessType}
+      initialSearch={filters.search}
+    />
 
     {#if filteredItems.length === 0 && hasActiveFilters}
       <div class="no-results">
@@ -170,7 +154,7 @@
         <button
           type="button"
           class="clear-filters-btn"
-          onclick={() => filtersRef?.clearAll()}
+          onclick={() => { filtersRef?.clearAll(); void goto('/library'); }}
         >
           {m.library_clear_filters()}
         </button>

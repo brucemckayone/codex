@@ -49,13 +49,21 @@ export const load: PageServerLoad = async ({
   const sortParam = url.searchParams.get('sort') ?? 'recent';
   const sortBy = parseSortParam(sortParam);
 
+  // Parse filter params from URL
+  const contentType = url.searchParams.get('type') ?? 'all';
+  const progressStatus = url.searchParams.get('progress') ?? 'all';
+  const search = url.searchParams.get('q') ?? '';
+
   const api = createServerApi(platform, cookies);
 
-  // Build query params (must match listUserLibrarySchema: page, limit, sortBy, filter)
+  // Build query params (must match listUserLibrarySchema)
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(LIBRARY_LIMIT));
   params.set('sortBy', sortBy);
+  if (contentType !== 'all') params.set('contentType', contentType);
+  if (progressStatus !== 'all') params.set('filter', progressStatus);
+  if (search) params.set('search', search);
 
   try {
     const library = await api.access.getUserLibrary(params);
@@ -67,6 +75,9 @@ export const load: PageServerLoad = async ({
         limit: LIBRARY_LIMIT,
       },
       sort: sortParam,
+      contentType,
+      progressStatus,
+      search,
       error: false,
       errorCode: null as string | null,
     };
@@ -78,6 +89,9 @@ export const load: PageServerLoad = async ({
     return {
       library: { items: [], total: 0, page: 1, limit: LIBRARY_LIMIT },
       sort: sortParam,
+      contentType,
+      progressStatus,
+      search,
       error: true,
       errorCode: code,
     };

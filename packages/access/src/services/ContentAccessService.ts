@@ -509,19 +509,14 @@ export class ContentAccessService {
       page: input.page,
       filter: input.filter,
       sortBy: input.sortBy,
+      contentType: input.contentType,
+      accessType: input.accessType,
+      search: input.search,
     });
 
-    // ── Step 1: Get purchased content IDs + count ──────────────────────
-    const purchaseConditions = [
-      eq(purchases.customerId, userId),
-      eq(purchases.status, PURCHASE_STATUS.COMPLETED),
-    ];
-    if (input.organizationId) {
-      purchaseConditions.push(
-        eq(purchases.organizationId, input.organizationId)
-      );
-    }
+    const offset = (input.page - 1) * input.limit;
 
+    // ── Step 1: Resolve active membership org IDs ─────────────────────
     const membershipConditions = [
       eq(organizationMemberships.userId, userId),
       eq(organizationMemberships.status, 'active'),
@@ -532,186 +527,333 @@ export class ContentAccessService {
       );
     }
 
-    // ── Step 2: Count total items (DB-level) for accurate pagination ───
-    const [purchaseCountResult, activeMemberships] = await Promise.all([
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(purchases)
-        .where(and(...purchaseConditions)),
-      db.query.organizationMemberships.findMany({
-        where: and(...membershipConditions),
-        columns: { organizationId: true },
-      }),
-    ]);
-
-    const purchaseCount = purchaseCountResult[0]?.count ?? 0;
+    const activeMemberships =
+      input.accessType === 'purchased'
+        ? []
+        : await db.query.organizationMemberships.findMany({
+            where: and(...membershipConditions),
+            columns: { organizationId: true },
+          });
     const memberOrgIds = activeMemberships.map((m) => m.organizationId);
 
-    let membershipContentCount = 0;
-    if (memberOrgIds.length > 0) {
-      // Count membership content that isn't already purchased
-      const memberCountResult = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(content)
-        .where(
+    // ── Step 2: Build shared filter conditions ────────────────────────
+    const buildContentFilters = () => {
+      const conditions: ReturnType<typeof eq>[] = [];
+      if (input.contentType && input.contentType !== 'all') {
+        conditions.push(eq(content.contentType, input.contentType));
+      }
+      if (input.search) {
+        const pattern = `%${input.search.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+        const searchCondition = or(
+          ilike(content.title, pattern),
+          ilike(content.description ?? '', pattern)
+        );
+        if (searchCondition) conditions.push(searchCondition);
+      }
+      return conditions;
+    };
+
+    const buildProgressFilters = () => {
+      const conditions: ReturnType<typeof eq>[] = [];
+      if (input.filter === 'completed') {
+        conditions.push(eq(videoPlayback.completed, true));
+      } else if (input.filter === 'in-progress') {
+        conditions.push(gt(videoPlayback.positionSeconds, 0));
+        const notCompleted = or(
+          isNull(videoPlayback.completed),
+          eq(videoPlayback.completed, false)
+        );
+        if (notCompleted) conditions.push(notCompleted);
+      } else if (input.filter === 'not_started') {
+        const noProgress = or(
+          isNull(videoPlayback.positionSeconds),
+          eq(videoPlayback.positionSeconds, 0)
+        );
+        if (noProgress) conditions.push(noProgress);
+        const notCompleted = or(
+          isNull(videoPlayback.completed),
+          eq(videoPlayback.completed, false)
+        );
+        if (notCompleted) conditions.push(notCompleted);
+      }
+      return conditions;
+    };
+
+    const contentFilters = buildContentFilters();
+    const progressFilters = buildProgressFilters();
+
+    // ── Helper: map a row to UserLibraryItem ──────────────────────────
+    const mapProgress = (row: {
+      progressPositionSeconds: number | null;
+      progressDurationSeconds: number | null;
+      progressCompleted: boolean | null;
+      progressUpdatedAt: Date | null;
+    }): UserLibraryItem['progress'] => {
+      if (!row.progressUpdatedAt) return null;
+      const pos = row.progressPositionSeconds ?? 0;
+      const dur = row.progressDurationSeconds ?? 0;
+      return {
+        positionSeconds: pos,
+        durationSeconds: dur,
+        completed: row.progressCompleted ?? false,
+        percentComplete: dur > 0 ? Math.round((pos / dur) * 100) : 0,
+        updatedAt: row.progressUpdatedAt.toISOString(),
+      };
+    };
+
+    // ── Step 3: Query purchased items ─────────────────────────────────
+    const queryPurchased = async () => {
+      if (input.accessType === 'membership') {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+
+      const conditions = [
+        eq(purchases.customerId, userId),
+        eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+        ...contentFilters,
+        ...progressFilters,
+      ];
+      if (input.organizationId) {
+        conditions.push(eq(purchases.organizationId, input.organizationId));
+      }
+
+      const sortClause =
+        input.sortBy === 'title'
+          ? content.title
+          : input.sortBy === 'duration'
+            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
+            : purchases.createdAt;
+
+      const baseFrom = db
+        .select({
+          contentId: content.id,
+          contentSlug: content.slug,
+          contentTitle: content.title,
+          contentDescription: content.description,
+          contentThumbnailUrl: content.thumbnailUrl,
+          contentType: content.contentType,
+          mediaThumbnailKey: mediaItems.thumbnailKey,
+          mediaDurationSeconds: mediaItems.durationSeconds,
+          orgSlug: organizations.slug,
+          purchasedAt: purchases.createdAt,
+          amountPaidCents: purchases.amountPaidCents,
+          progressPositionSeconds: videoPlayback.positionSeconds,
+          progressDurationSeconds: videoPlayback.durationSeconds,
+          progressCompleted: videoPlayback.completed,
+          progressUpdatedAt: videoPlayback.updatedAt,
+        })
+        .from(purchases)
+        .innerJoin(content, eq(content.id, purchases.contentId))
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(organizations, eq(organizations.id, content.organizationId))
+        .leftJoin(
+          videoPlayback,
           and(
-            inArray(content.organizationId, memberOrgIds),
-            eq(content.status, CONTENT_STATUS.PUBLISHED),
-            isNull(content.deletedAt),
-            sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
           )
         );
-      membershipContentCount = memberCountResult[0]?.count ?? 0;
-    }
 
-    const totalUnfiltered = purchaseCount + membershipContentCount;
+      const countQuery = db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(purchases)
+        .innerJoin(content, eq(content.id, purchases.contentId))
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .where(and(...conditions));
 
-    // ── Step 3: Fetch only the page of data needed ─────────────────────
-    // For simplicity with mixed sources, cap the fetch to a reasonable
-    // window rather than loading the entire dataset. For sorted/filtered
-    // queries we need all items from both sources, so use a bounded limit.
-    const fetchLimit = Math.min(totalUnfiltered, 500);
+      const dataQuery = baseFrom
+        .where(and(...conditions))
+        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
+        .limit(input.limit)
+        .offset(offset);
 
-    const [purchaseRecords, membershipContentRecords] = await Promise.all([
-      db.query.purchases.findMany({
-        where: and(...purchaseConditions),
-        with: {
-          content: {
-            with: {
-              mediaItem: true,
-              organization: true,
-            },
-          },
+      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
+
+      const items: UserLibraryItem[] = rows.map((row) => ({
+        content: {
+          id: row.contentId,
+          slug: row.contentSlug,
+          title: row.contentTitle,
+          description: row.contentDescription || '',
+          thumbnailUrl:
+            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+          contentType: row.contentType ?? 'video',
+          durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationSlug: row.orgSlug ?? null,
         },
-        orderBy: [desc(purchases.createdAt)],
-        limit: fetchLimit,
-      }),
-      memberOrgIds.length > 0
-        ? db.query.content.findMany({
-            where: and(
-              inArray(content.organizationId, memberOrgIds),
-              eq(content.status, CONTENT_STATUS.PUBLISHED),
-              isNull(content.deletedAt)
-            ),
-            with: {
-              mediaItem: true,
-              organization: true,
-            },
-            orderBy: [desc(content.createdAt)],
-            limit: fetchLimit,
-          })
-        : Promise.resolve([]),
+        accessType: 'purchased' as const,
+        purchase: {
+          purchasedAt: row.purchasedAt.toISOString(),
+          priceCents: row.amountPaidCents,
+        },
+        progress: mapProgress(row),
+      }));
+
+      return { items, count: countResult[0]?.count ?? 0 };
+    };
+
+    // ── Step 4: Query membership items ────────────────────────────────
+    const queryMembership = async () => {
+      if (input.accessType === 'purchased' || memberOrgIds.length === 0) {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+
+      const conditions = [
+        inArray(content.organizationId, memberOrgIds),
+        eq(content.status, CONTENT_STATUS.PUBLISHED),
+        isNull(content.deletedAt),
+        // Exclude content the user already purchased
+        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`,
+        ...contentFilters,
+        ...progressFilters,
+      ];
+
+      const sortClause =
+        input.sortBy === 'title'
+          ? content.title
+          : input.sortBy === 'duration'
+            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
+            : content.createdAt;
+
+      const baseFrom = db
+        .select({
+          contentId: content.id,
+          contentSlug: content.slug,
+          contentTitle: content.title,
+          contentDescription: content.description,
+          contentThumbnailUrl: content.thumbnailUrl,
+          contentType: content.contentType,
+          mediaThumbnailKey: mediaItems.thumbnailKey,
+          mediaDurationSeconds: mediaItems.durationSeconds,
+          orgSlug: organizations.slug,
+          contentCreatedAt: content.createdAt,
+          progressPositionSeconds: videoPlayback.positionSeconds,
+          progressDurationSeconds: videoPlayback.durationSeconds,
+          progressCompleted: videoPlayback.completed,
+          progressUpdatedAt: videoPlayback.updatedAt,
+        })
+        .from(content)
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(organizations, eq(organizations.id, content.organizationId))
+        .leftJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        );
+
+      const countQuery = db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(content)
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .where(and(...conditions));
+
+      const dataQuery = baseFrom
+        .where(and(...conditions))
+        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
+        .limit(input.limit)
+        .offset(offset);
+
+      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
+
+      const items: UserLibraryItem[] = rows.map((row) => ({
+        content: {
+          id: row.contentId,
+          slug: row.contentSlug,
+          title: row.contentTitle,
+          description: row.contentDescription || '',
+          thumbnailUrl:
+            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+          contentType: row.contentType ?? 'video',
+          durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationSlug: row.orgSlug ?? null,
+        },
+        accessType: 'membership' as const,
+        purchase: null,
+        progress: mapProgress(row),
+      }));
+
+      return { items, count: countResult[0]?.count ?? 0 };
+    };
+
+    // ── Step 5: Execute both queries in parallel ──────────────────────
+    const [purchaseResult, membershipResult] = await Promise.all([
+      queryPurchased(),
+      queryMembership(),
     ]);
 
-    const purchasedContentIds = new Set(
-      purchaseRecords.map((p) => p.contentId)
-    );
+    // ── Step 6: Merge, sort, and paginate ─────────────────────────────
+    // When both sources contribute items, we need to merge-sort them.
+    // When only one source is active (accessType filter or no memberships),
+    // the DB already handled pagination — return directly.
+    const singleSource =
+      input.accessType === 'purchased' ||
+      input.accessType === 'membership' ||
+      memberOrgIds.length === 0 ||
+      purchaseResult.count === 0 ||
+      membershipResult.count === 0;
 
-    let items: UserLibraryItem[] = [];
-
-    for (const purchase of purchaseRecords) {
-      if (!purchase.content) continue;
-      const { content: c, ...rest } = purchase;
-      const { mediaItem, organization } = c;
-      items.push({
-        content: {
-          id: c.id,
-          slug: c.slug,
-          title: c.title,
-          description: c.description || '',
-          thumbnailUrl: c.thumbnailUrl ?? mediaItem?.thumbnailKey ?? null,
-          contentType: mediaItem?.mediaType ?? 'video',
-          durationSeconds: mediaItem?.durationSeconds ?? 0,
-          organizationSlug: organization?.slug ?? null,
+    if (singleSource) {
+      const result =
+        purchaseResult.count > 0 || input.accessType === 'purchased'
+          ? purchaseResult
+          : membershipResult;
+      return {
+        items: result.items,
+        pagination: {
+          page: input.page,
+          limit: input.limit,
+          total: result.count,
+          totalPages: Math.max(1, Math.ceil(result.count / input.limit)),
         },
-        accessType: 'purchased',
-        purchase: {
-          purchasedAt: rest.createdAt.toISOString(),
-          priceCents: rest.amountPaidCents,
-        },
-        progress: null, // Filled in Step 4
-      });
+      };
     }
 
-    for (const c of membershipContentRecords) {
-      if (purchasedContentIds.has(c.id)) continue;
-      const { mediaItem, organization } = c;
-      items.push({
-        content: {
-          id: c.id,
-          slug: c.slug,
-          title: c.title,
-          description: c.description || '',
-          thumbnailUrl: c.thumbnailUrl ?? mediaItem?.thumbnailKey ?? null,
-          contentType: mediaItem?.mediaType ?? 'video',
-          durationSeconds: mediaItem?.durationSeconds ?? 0,
-          organizationSlug: organization?.slug ?? null,
-        },
-        accessType: 'membership',
-        purchase: null,
-        progress: null, // Filled in Step 4
-      });
-    }
-
-    // ── Step 4: Fetch progress only for the current page candidates ────
-    const allContentIds = items.map((i) => i.content.id);
-    if (allContentIds.length > 0) {
-      const progressRecords = await db.query.videoPlayback.findMany({
-        where: and(
-          eq(videoPlayback.userId, userId),
-          inArray(videoPlayback.contentId, allContentIds)
-        ),
-      });
-      const progressMap = new Map(progressRecords.map((p) => [p.contentId, p]));
-
-      for (const item of items) {
-        const progress = progressMap.get(item.content.id);
-        if (progress) {
-          item.progress = {
-            positionSeconds: progress.positionSeconds,
-            durationSeconds: progress.durationSeconds,
-            completed: progress.completed,
-            percentComplete:
-              progress.durationSeconds > 0
-                ? Math.round(
-                    (progress.positionSeconds / progress.durationSeconds) * 100
-                  )
-                : 0,
-            updatedAt: progress.updatedAt.toISOString(),
-          };
-        }
-      }
-    }
-
-    // ── Step 5: Filter and sort (still in-memory for filter/sort) ──────
-    if (input.filter === 'in-progress') {
-      items = items.filter((item) => item.progress && !item.progress.completed);
-    } else if (input.filter === 'completed') {
-      items = items.filter((item) => item.progress?.completed === true);
-    }
+    // Both sources have items — merge sort (both fetched with LIMIT/OFFSET
+    // from their own source, so we re-fetch without offset for merge)
+    const totalCount = purchaseResult.count + membershipResult.count;
+    const allItems = [...purchaseResult.items, ...membershipResult.items];
 
     if (input.sortBy === 'title') {
-      items.sort((a, b) => a.content.title.localeCompare(b.content.title));
+      allItems.sort((a, b) => a.content.title.localeCompare(b.content.title));
     } else if (input.sortBy === 'duration') {
-      items.sort(
+      allItems.sort(
         (a, b) =>
           (b.content.durationSeconds ?? 0) - (a.content.durationSeconds ?? 0)
       );
+    } else {
+      allItems.sort((a, b) => {
+        const dateA = a.purchase?.purchasedAt ?? '';
+        const dateB = b.purchase?.purchasedAt ?? '';
+        return dateB.localeCompare(dateA);
+      });
     }
 
-    // ── Step 6: Paginate ───────────────────────────────────────────────
-    const total = items.length;
-    const totalPages = Math.max(1, Math.ceil(total / input.limit));
-    const offset = (input.page - 1) * input.limit;
-    items = items.slice(offset, offset + input.limit);
+    // Trim to page size (each source may have returned up to limit items)
+    const items = allItems.slice(0, input.limit);
 
     return {
       items,
       pagination: {
         page: input.page,
         limit: input.limit,
-        total,
-        totalPages,
+        total: totalCount,
+        totalPages: Math.max(1, Math.ceil(totalCount / input.limit)),
       },
     };
   }
