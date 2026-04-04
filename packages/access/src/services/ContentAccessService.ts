@@ -557,7 +557,7 @@ export class ContentAccessService {
       const conditions: ReturnType<typeof eq>[] = [];
       if (input.filter === 'completed') {
         conditions.push(eq(videoPlayback.completed, true));
-      } else if (input.filter === 'in-progress') {
+      } else if (input.filter === 'in_progress') {
         conditions.push(gt(videoPlayback.positionSeconds, 0));
         const notCompleted = or(
           isNull(videoPlayback.completed),

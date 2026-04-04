@@ -99,6 +99,21 @@
     updateStoredVersions(data.versions ?? {});
   });
 
+  // Sync org background to html element so scrollbar gutter area matches.
+  // Without this, the scrollbar track shows the root light background on dark org brands.
+  $effect(() => {
+    if (!browser) return;
+    const layout = document.querySelector('.org-layout');
+    if (!layout) return;
+    const bg = getComputedStyle(layout).backgroundColor;
+    if (bg && bg !== 'rgba(0, 0, 0, 0)') {
+      document.documentElement.style.backgroundColor = bg;
+    }
+    return () => {
+      document.documentElement.style.removeProperty('background-color');
+    };
+  });
+
   onMount(() => {
     // Re-check KV versions on tab return — detects content published/unpublished
     // while this tab was hidden, or org settings changed on another device.
