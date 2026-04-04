@@ -27,8 +27,11 @@
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
   import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
+  import { extractPlainText } from '$lib/editor/render';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
+    /** Card display variant. @default 'explore' */
+    variant?: 'explore' | 'library' | 'featured' | 'compact';
     id: string;
     title: string;
     thumbnail?: string | null;
@@ -57,6 +60,7 @@
   }
 
   const {
+    variant = 'explore',
     id,
     title,
     thumbnail,
@@ -95,7 +99,7 @@
   const hasProgress = $derived(progress != null && (progress.completed || progressPercent > 0));
 </script>
 
-<article class="content-card {className ?? ''} {loading ? 'content-card--loading' : ''}" {...rest}>
+<article class="content-card {className ?? ''} {loading ? 'content-card--loading' : ''}" data-variant={variant} {...rest}>
   {#if loading}
     <div class="content-card__thumbnail content-card__thumbnail--skeleton">
       <Skeleton height="100%" />
@@ -180,7 +184,7 @@
       </h3>
 
       {#if description}
-        <p class="content-card__description">{description}</p>
+        <p class="content-card__description">{extractPlainText(description)}</p>
       {/if}
 
       {#if hasProgress}
@@ -422,6 +426,76 @@
   .content-card__actions {
     padding: var(--space-3);
     padding-top: 0;
+  }
+
+  /* ── Variant: Library ── */
+  .content-card[data-variant='library'] {
+    flex-direction: row;
+  }
+
+  .content-card[data-variant='library'] .content-card__thumbnail {
+    width: 180px;
+    min-width: 180px;
+    flex-shrink: 0;
+  }
+
+  .content-card[data-variant='library'] .content-card__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .content-card[data-variant='library'] .content-card__description {
+    display: none;
+  }
+
+  @media (--below-sm) {
+    .content-card[data-variant='library'] {
+      flex-direction: column;
+    }
+
+    .content-card[data-variant='library'] .content-card__thumbnail {
+      width: 100%;
+      min-width: 0;
+    }
+  }
+
+  /* ── Variant: Featured ── */
+  .content-card[data-variant='featured'] .content-card__thumbnail {
+    aspect-ratio: 4 / 3;
+  }
+
+  .content-card[data-variant='featured'] .content-card__title {
+    font-size: var(--text-lg);
+  }
+
+  /* ── Variant: Compact ── */
+  .content-card[data-variant='compact'] {
+    flex-direction: row;
+    border: none;
+    background: transparent;
+    gap: var(--space-3);
+  }
+
+  .content-card[data-variant='compact'] .content-card__thumbnail {
+    width: 120px;
+    min-width: 120px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md);
+  }
+
+  .content-card[data-variant='compact'] .content-card__body {
+    padding: 0;
+    gap: var(--space-1);
+  }
+
+  .content-card[data-variant='compact'] .content-card__title {
+    font-size: var(--text-sm);
+    -webkit-line-clamp: 1;
+  }
+
+  .content-card[data-variant='compact'] .content-card__description,
+  .content-card[data-variant='compact'] .content-card__creator {
+    display: none;
   }
 
 </style>
