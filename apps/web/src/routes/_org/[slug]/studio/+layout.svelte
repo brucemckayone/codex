@@ -15,12 +15,30 @@
   import StudioSwitcher from '$lib/components/layout/StudioSidebar/StudioSwitcher.svelte';
   import type { LayoutData } from './$types';
   import { MenuIcon, XIcon } from '$lib/components/ui/Icon';
+  import { browser } from '$app/environment';
   import * as m from '$paraglide/messages';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
   // Mobile menu state
   let mobileMenuOpen = $state(false);
+
+  // Collapsible sidebar state (desktop only, persisted in localStorage)
+  const SIDEBAR_KEY = 'codex-studio-sidebar-collapsed';
+  let sidebarCollapsed = $state(
+    browser ? localStorage.getItem(SIDEBAR_KEY) === 'true' : false
+  );
+
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    if (browser) {
+      if (sidebarCollapsed) {
+        localStorage.setItem(SIDEBAR_KEY, 'true');
+      } else {
+        localStorage.removeItem(SIDEBAR_KEY);
+      }
+    }
+  }
 
   // Close menu handler for reuse
   const closeMenu = () => (mobileMenuOpen = false);
@@ -48,7 +66,7 @@
 
 <!-- Child pages set their own titles -->
 
-<div class="studio-layout">
+<div class="studio-layout" style:--sidebar-width={sidebarCollapsed ? '56px' : '240px'}>
   <!-- Mobile Header -->
   <header class="studio-header mobile">
     <div class="header-content">
@@ -99,7 +117,14 @@
 
     <!-- Sidebar -->
     <aside class="studio-sidebar" class:open={mobileMenuOpen}>
-      <StudioSidebar role={data.userRole} context="org" />
+      <StudioSidebar
+        role={data.userRole}
+        context="org"
+        user={mobileMenuOpen ? data.studioUser : undefined}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
+        badgeCounts={data.badgeCounts}
+      />
 
       <!-- Mobile close button -->
       <button

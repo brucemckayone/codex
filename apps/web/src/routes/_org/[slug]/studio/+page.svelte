@@ -1,13 +1,32 @@
 <!--
   @component StudioDashboard
 
-  The main studio dashboard page showing key metrics and recent activity.
-  Revenue and customer stats are only visible to admins and owners.
-  Content count and views are visible to all studio roles.
+  The main studio dashboard page showing key metrics, revenue chart,
+  quick actions, and recent activity.
+
+  Revenue/customer stats and revenue chart are only visible to admins and owners.
+  Content count, views, quick actions (filtered), and activity feed are
+  visible to all studio roles.
 -->
 <script lang="ts">
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import ActivityFeed from '$lib/components/studio/ActivityFeed.svelte';
+  import RevenueChart from '$lib/components/studio/RevenueChart.svelte';
+  import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+  } from '$lib/components/ui/Card';
+  import {
+    PlusIcon,
+    UploadIcon,
+    TrendingUpIcon,
+    UsersIcon,
+    EditIcon,
+    GlobeIcon,
+  } from '$lib/components/ui/Icon';
+  import type { Component } from 'svelte';
   import * as m from '$paraglide/messages';
 
   let { data } = $props();
@@ -27,6 +46,37 @@
       maximumFractionDigits: 0,
     }).format(cents / 100);
   }
+
+  // ── Quick Actions ──────────────────────────────────────────────────────────
+
+  interface QuickAction {
+    label: string;
+    icon: Component<{ size?: number | string; class?: string }>;
+    href: string;
+    adminOnly: boolean;
+    external?: boolean;
+  }
+
+  const quickActions: QuickAction[] = [
+    { label: m.studio_action_create_content(), icon: PlusIcon, href: '/studio/content?action=create', adminOnly: false },
+    { label: m.studio_action_upload_media(), icon: UploadIcon, href: '/studio/media', adminOnly: false },
+    { label: m.studio_action_analytics(), icon: TrendingUpIcon, href: '/studio/analytics', adminOnly: false },
+    { label: m.studio_action_manage_team(), icon: UsersIcon, href: '/studio/team', adminOnly: true },
+    { label: m.studio_action_edit_branding(), icon: EditIcon, href: '/studio/settings/branding', adminOnly: true },
+    { label: m.studio_action_view_site(), icon: GlobeIcon, href: '/', adminOnly: false, external: true },
+  ];
+
+  const visibleActions = $derived(
+    quickActions.filter((a) => !a.adminOnly || isAdmin)
+  );
+
+  // ── Revenue Chart Data ─────────────────────────────────────────────────────
+
+  const chartData = $derived(
+    (data.stats?.revenue?.revenueByDay ?? [])
+      .slice(-14)
+      .map((d) => ({ date: d.date, revenue: d.revenueCents }))
+  );
 </script>
 
 <svelte:head>
@@ -66,6 +116,38 @@
       change={data.stats?.views.change}
       loading={!data.stats}
     />
+  </section>
+
+  {#if isAdmin}
+    <section class="revenue-section">
+      <Card>
+        <CardHeader>
+          <div class="revenue-header">
+            <CardTitle level={2}>{m.studio_revenue_chart_title()}</CardTitle>
+            <a href="/studio/analytics" class="revenue-link">
+              {m.studio_view_analytics()}
+            </a>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <RevenueChart data={chartData} loading={!data.stats} />
+        </CardContent>
+      </Card>
+    </section>
+  {/if}
+
+  <section class="quick-actions" aria-label={m.studio_quick_actions()}>
+    {#each visibleActions as action (action.href)}
+      <a
+        class="quick-action-link"
+        href={action.href}
+        target={action.external ? '_blank' : undefined}
+        rel={action.external ? 'noopener' : undefined}
+      >
+        <action.icon size={24} class="quick-action-icon" />
+        <span class="quick-action-label">{action.label}</span>
+      </a>
+    {/each}
   </section>
 
   <section class="activity-section">
@@ -112,18 +194,96 @@
     gap: var(--space-4);
   }
 
+  /* ── Revenue Chart ────────────────────────────────────────────────────── */
+
+  .revenue-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .revenue-link {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-interactive);
+    text-decoration: none;
+    transition: color var(--duration-fast) var(--ease-default);
+  }
+
+  .revenue-link:hover {
+    color: var(--color-interactive-hover);
+    text-decoration: underline;
+    text-underline-offset: var(--space-0-5, 2px);
+  }
+
+  /* ── Quick Actions Grid ───────────────────────────────────────────────── */
+
+  .quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-3);
+  }
+
+  .quick-action-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-3);
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    background: var(--color-surface);
+    transition: var(--transition-shadow), var(--transition-colors);
+    cursor: pointer;
+  }
+
+  .quick-action-link:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-interactive);
+  }
+
+  .quick-action-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  .quick-action-link :global(.quick-action-icon) {
+    color: var(--color-text-secondary);
+    transition: color var(--duration-fast) var(--ease-default);
+  }
+
+  .quick-action-link:hover :global(.quick-action-icon) {
+    color: var(--color-interactive);
+  }
+
+  .quick-action-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+    text-align: center;
+    line-height: var(--leading-normal);
+  }
+
   .activity-section {
     margin-top: var(--space-2);
   }
 
-  /* Tablet: 2 columns */
+  /* ── Responsive ───────────────────────────────────────────────────────── */
+
+  /* Tablet: 2 columns for stats, 3 columns for quick actions */
   @media (--breakpoint-sm) {
     .stats-grid {
       grid-template-columns: repeat(2, 1fr);
     }
+
+    .quick-actions {
+      grid-template-columns: repeat(3, 1fr);
+    }
   }
 
-  /* Desktop: 4 columns */
+  /* Desktop: 4 columns for stats */
   @media (--breakpoint-lg) {
     .stats-grid {
       grid-template-columns: repeat(4, 1fr);

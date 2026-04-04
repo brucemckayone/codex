@@ -2,7 +2,7 @@
   import type { LayoutOrganization } from '$lib/types';
   import { page } from '$app/state';
   import { buildOrgUrl } from '$lib/utils/subdomain';
-  import { UsersIcon, UserIcon, ChevronDownIcon, CheckIcon } from '$lib/components/ui/Icon';
+  import { UserIcon, ChevronDownIcon, CheckIcon, GlobeIcon } from '$lib/components/ui/Icon';
   import DropdownMenu from '$lib/components/ui/DropdownMenu/DropdownMenu.svelte';
   import DropdownMenuTrigger from '$lib/components/ui/DropdownMenu/DropdownMenuTrigger.svelte';
   import DropdownMenuContent from '$lib/components/ui/DropdownMenu/DropdownMenuContent.svelte';
@@ -10,24 +10,36 @@
   import DropdownMenuSeparator from '$lib/components/ui/DropdownMenu/DropdownMenuSeparator.svelte';
   import * as m from '$paraglide/messages';
 
+  interface OrgWithRole {
+    name: string;
+    slug: string;
+    logoUrl?: string;
+    role?: string;
+  }
+
   interface Props {
     currentContext: 'personal' | 'org';
     currentSlug?: string;
-    orgs: LayoutOrganization[];
+    orgs: OrgWithRole[];
   }
 
   const { currentContext, currentSlug, orgs }: Props = $props();
 
+  const currentOrg = $derived(orgs.find(o => o.slug === currentSlug));
   const label = $derived(
     currentContext === 'personal'
       ? m.studio_switcher_personal()
-      : orgs.find(o => o.slug === currentSlug)?.name ?? m.studio_switcher_organization()
+      : currentOrg?.name ?? m.studio_switcher_organization()
   );
 </script>
 
 <DropdownMenu>
   <DropdownMenuTrigger class="switcher-trigger">
-    <UsersIcon size={16} class="switcher-icon" />
+    {#if currentOrg?.logoUrl}
+      <img src={currentOrg.logoUrl} alt="" class="trigger-logo" />
+    {:else}
+      <span class="trigger-initial">{(currentOrg?.name ?? label)[0]}</span>
+    {/if}
     <span class="switcher-label">{label}</span>
     <ChevronDownIcon size={14} class="switcher-chevron" />
   </DropdownMenuTrigger>
@@ -55,7 +67,12 @@
               {:else}
                 <span class="org-icon-fallback">{orgItem.name[0]}</span>
               {/if}
-              {orgItem.name}
+              <span class="item-text">
+                <span class="item-name">{orgItem.name}</span>
+                {#if orgItem.role}
+                  <span class="item-role">{orgItem.role}</span>
+                {/if}
+              </span>
             </span>
             {#if currentSlug === orgItem.slug}
               <CheckIcon size={16} class="check" />
@@ -64,6 +81,16 @@
         </a>
       {/each}
     {/if}
+
+    <DropdownMenuSeparator />
+    <a href="/">
+      <DropdownMenuItem>
+        <span class="item-content">
+          <GlobeIcon size={16} />
+          {m.studio_view_public_site()}
+        </span>
+      </DropdownMenuItem>
+    </a>
   </DropdownMenuContent>
 </DropdownMenu>
 
@@ -85,8 +112,24 @@
     color: var(--color-text);
   }
 
-  .switcher-icon {
-    flex-shrink: 0;
+  .trigger-logo {
+    width: var(--space-5);
+    height: var(--space-5);
+    border-radius: var(--radius-sm);
+    object-fit: contain;
+  }
+
+  .trigger-initial {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-5);
+    height: var(--space-5);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
   }
 
   .switcher-label {
@@ -128,5 +171,21 @@
     color: var(--color-text-secondary);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
+  }
+
+  .item-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+  }
+
+  .item-name {
+    font-weight: var(--font-medium);
+  }
+
+  .item-role {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-transform: capitalize;
   }
 </style>

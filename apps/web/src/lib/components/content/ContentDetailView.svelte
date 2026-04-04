@@ -32,6 +32,7 @@
   import { formatPrice, formatDurationHuman } from '$lib/utils/format';
   import { LockIcon, CheckIcon } from '$lib/components/ui/Icon';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
+  import { extractPlainText } from '$lib/editor/render';
   import type { ContentWithRelations } from '$lib/types';
 
   /**
@@ -98,7 +99,7 @@
         : m.content_type_article()
   );
 
-  const description = $derived(content.description ?? '');
+  const description = $derived(extractPlainText(content.description));
   const thumbnailUrl = $derived(content.mediaItem?.thumbnailUrl ?? undefined);
   const duration = $derived(content.mediaItem?.durationSeconds ?? 0);
   const priceCents = $derived(content.priceCents ?? null);

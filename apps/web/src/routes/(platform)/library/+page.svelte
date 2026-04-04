@@ -29,6 +29,7 @@
   import { ShoppingBagIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import LibraryFilters from '$lib/components/library/LibraryFilters.svelte';
   import ContinueWatching from '$lib/components/library/ContinueWatching.svelte';
+  import LibraryCard from '$lib/components/library/LibraryCard.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
   import { browser } from '$app/environment';
@@ -170,6 +171,8 @@
       {/snippet}
     </EmptyState>
   {:else}
+    <ContinueWatching items={libraryQuery.data ?? []} variant="prominent" />
+
     <!-- Sort + View Toggle -->
     <div class="sort-bar">
       <Select
@@ -190,8 +193,6 @@
       initialSearch={filters.search}
     />
 
-    <ContinueWatching items={libraryQuery.data ?? []} />
-
     {#if filteredItems.length === 0 && hasActiveFilters}
       <EmptyState title={m.library_no_results()} icon={SearchXIcon}>
         {#snippet action()}
@@ -207,52 +208,7 @@
     {:else}
       <div class="content-grid" data-view={viewMode}>
         {#each filteredItems as item (item.content.id)}
-          <a href={buildContentUrl(page.url, item.content)} class="content-card">
-            {#if item.content.thumbnailUrl}
-              <div class="card-thumb">
-                <img
-                  src={item.content.thumbnailUrl}
-                  alt={item.content.title}
-                  class="thumb-img"
-                  onerror={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
-                {#if item.progress}
-                  <div class="progress-track">
-                    <div
-                      class="progress-fill"
-                      style="width: {item.progress.percentComplete}%"
-                    ></div>
-                  </div>
-                {/if}
-              </div>
-            {:else}
-              <div class="card-thumb thumb-placeholder">
-                <span class="placeholder-text">{m.library_no_thumbnail()}</span>
-              </div>
-            {/if}
-
-            <div class="card-body">
-              <h2 class="card-title">
-                {item.content.title}
-              </h2>
-
-              {#if item.content.description}
-                <p class="card-desc">
-                  {item.content.description}
-                </p>
-              {/if}
-
-              {#if item.progress}
-                <div class="card-progress">
-                  {#if item.progress.completed}
-                    <span class="progress-completed">{m.content_progress_completed()}</span>
-                  {:else}
-                    {m.content_progress_percent({ percent: item.progress.percentComplete })}
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </a>
+          <LibraryCard {item} href={buildContentUrl(page.url, item.content)} />
         {/each}
       </div>
 
@@ -302,101 +258,6 @@
     }
   }
 
-  .content-card {
-    display: block;
-    background-color: var(--color-surface);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    text-decoration: none;
-    border: var(--border-width) var(--border-style) var(--color-border);
-    transition: var(--transition-transform);
-  }
-
-  .content-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-  }
-
-  .card-thumb {
-    aspect-ratio: 16 / 9;
-    background-color: var(--color-surface-secondary);
-    overflow: hidden;
-    position: relative;
-  }
-
-  .thumb-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .thumb-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--color-surface-tertiary);
-  }
-
-  .placeholder-text {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-
-  .progress-track {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: var(--space-1);
-    background-color: var(--color-border);
-  }
-
-  .progress-fill {
-    height: 100%;
-    background-color: var(--color-interactive);
-  }
-
-  .card-body {
-    padding: var(--space-4);
-  }
-
-  .card-title {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    line-height: var(--leading-tight);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .content-card:hover .card-title {
-    color: var(--color-interactive);
-    transition: var(--transition-colors);
-  }
-
-  .card-desc {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: var(--leading-normal);
-    margin-top: var(--space-1);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .card-progress {
-    margin-top: var(--space-2);
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-  }
-
-  .progress-completed {
-    color: var(--color-success);
-  }
-
   .browse-btn {
     display: inline-flex;
     align-items: center;
@@ -436,7 +297,6 @@
     outline-offset: 2px;
   }
 
-  .content-card:focus-visible,
   .browse-btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
@@ -455,34 +315,6 @@
   .content-grid[data-view='list'] {
     grid-template-columns: 1fr;
     gap: var(--space-3);
-  }
-
-  .content-grid[data-view='list'] .content-card {
-    display: flex;
-    flex-direction: row;
-  }
-
-  .content-grid[data-view='list'] .card-thumb {
-    aspect-ratio: 16 / 9;
-    width: 200px;
-    min-width: 200px;
-    flex-shrink: 0;
-  }
-
-  .content-grid[data-view='list'] .card-body {
-    flex: 1;
-    min-width: 0;
-  }
-
-  @media (--below-sm) {
-    .content-grid[data-view='list'] .content-card {
-      flex-direction: column;
-    }
-
-    .content-grid[data-view='list'] .card-thumb {
-      width: 100%;
-      min-width: 0;
-    }
   }
 
   /* Pagination */

@@ -6,6 +6,7 @@
   Shows up to 4 items. Does not render if no in-progress items exist.
 
   @prop {import('$lib/collections').LibraryItem[]} items - All library items
+  @prop {'default' | 'prominent'} variant - Layout variant. 'prominent' uses larger heading, CSS grid, and bottom border.
 -->
 <script lang="ts">
   import type { LibraryItem } from '$lib/collections';
@@ -14,9 +15,10 @@
 
   interface Props {
     items: LibraryItem[];
+    variant?: 'default' | 'prominent';
   }
 
-  const { items }: Props = $props();
+  const { items, variant = 'default' }: Props = $props();
 
   const continueWatchingItems = $derived.by(() => {
     return items
@@ -33,14 +35,16 @@
       })
       .slice(0, 4);
   });
+
+  const cardSize = $derived(variant === 'prominent' ? 'large' : 'default');
 </script>
 
 {#if continueWatchingItems.length > 0}
-  <section class="continue-watching">
+  <section class="continue-watching" class:continue-watching--prominent={variant === 'prominent'}>
     <h2 class="continue-watching__title">{m.library_continue_watching()}</h2>
     <div class="continue-watching__row">
       {#each continueWatchingItems as item (item.content.id)}
-        <ContinueWatchingCard {item} />
+        <ContinueWatchingCard {item} size={cardSize} />
       {/each}
     </div>
   </section>
@@ -86,6 +90,37 @@
     .continue-watching__row {
       overflow-x: visible;
       scroll-snap-type: none;
+    }
+  }
+
+  /* Prominent variant */
+  .continue-watching--prominent {
+    padding-bottom: var(--space-6);
+    margin-bottom: var(--space-6);
+    border-bottom: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .continue-watching--prominent .continue-watching__title {
+    font-size: var(--text-2xl);
+  }
+
+  .continue-watching--prominent .continue-watching__row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+    overflow-x: visible;
+    scroll-snap-type: none;
+  }
+
+  @media (--breakpoint-sm) {
+    .continue-watching--prominent .continue-watching__row {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (--breakpoint-lg) {
+    .continue-watching--prominent .continue-watching__row {
+      grid-template-columns: repeat(4, 1fr);
     }
   }
 </style>

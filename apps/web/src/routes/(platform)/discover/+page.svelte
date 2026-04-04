@@ -6,6 +6,7 @@
   import { page } from '$app/state';
   import type { PageData } from './$types';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { extractPlainText } from '$lib/editor/render';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
@@ -70,7 +71,7 @@
           <div class="card-body">
             <h3 class="card-title">{item.title}</h3>
             {#if item.description}
-              <p class="card-desc">{item.description}</p>
+              <p class="card-desc">{extractPlainText(item.description)}</p>
             {/if}
             {#if item.creator?.name}
               <span class="card-creator">{item.creator.name}</span>

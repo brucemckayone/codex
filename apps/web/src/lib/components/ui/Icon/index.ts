@@ -11,6 +11,8 @@ export { default as CheckIcon } from './CheckIcon.svelte';
 export { default as ChevronDownIcon } from './ChevronDownIcon.svelte';
 export { default as ChevronLeftIcon } from './ChevronLeftIcon.svelte';
 export { default as ChevronRightIcon } from './ChevronRightIcon.svelte';
+export { default as ChevronsLeftIcon } from './ChevronsLeftIcon.svelte';
+export { default as ChevronsRightIcon } from './ChevronsRightIcon.svelte';
 export { default as ChevronUpIcon } from './ChevronUpIcon.svelte';
 // Shapes
 export { default as CircleIcon } from './CircleIcon.svelte';

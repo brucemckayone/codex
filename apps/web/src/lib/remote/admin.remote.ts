@@ -38,73 +38,58 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 
-  // Build URLSearchParams for each endpoint
-  const searchParamsRev = new URLSearchParams();
-  searchParamsRev.set('organizationId', orgId);
+  const searchParams = new URLSearchParams();
+  searchParams.set('organizationId', orgId);
 
-  const searchParamsCust = new URLSearchParams();
-  searchParamsCust.set('organizationId', orgId);
-  searchParamsCust.set('limit', '1');
+  try {
+    const stats = await api.analytics.getDashboardStats(searchParams);
 
-  const searchParamsContent = new URLSearchParams();
-  searchParamsContent.set('organizationId', orgId);
-  searchParamsContent.set('limit', '100');
+    // Derive week-over-week revenue change (same logic as before)
+    const revenueByDay = stats.revenue.revenueByDay ?? [];
+    const recentRevenue = revenueByDay
+      .slice(0, 7)
+      .reduce((sum, day) => sum + day.revenueCents, 0);
+    const previousRevenue = revenueByDay
+      .slice(7, 14)
+      .reduce((sum, day) => sum + day.revenueCents, 0);
+    const revenueChange =
+      previousRevenue > 0
+        ? Math.round(
+            ((recentRevenue - previousRevenue) / previousRevenue) * 100
+          )
+        : 0;
 
-  // Fetch all stats in parallel with graceful degradation
-  // Using allSettled ensures partial failures don't break the entire dashboard
-  const results = await Promise.allSettled([
-    api.analytics.getRevenue(searchParamsRev),
-    api.admin.getCustomers(searchParamsCust),
-    api.analytics.getTopContent(searchParamsContent),
-  ]);
+    return {
+      revenue: {
+        value: stats.revenue.totalRevenueCents,
+        change: revenueChange,
+        revenueByDay: stats.revenue.revenueByDay,
+      },
+      customers: {
+        value: stats.customers.totalCustomers,
+        change: 0, // Change % not provided by backend
+      },
+      contentCount: {
+        value: stats.topContent?.pagination?.total ?? 0,
+        change: 0,
+      },
+      views: {
+        value: 0, // Views not tracked by current backend
+        change: 0,
+      },
+    };
+  } catch (error) {
+    logger.error('[Dashboard] Failed to fetch dashboard stats', {
+      reason: String(error),
+    });
 
-  // Extract results with fallbacks, log errors for monitoring
-  const revenue = results[0].status === 'fulfilled' ? results[0].value : null;
-  const customers = results[1].status === 'fulfilled' ? results[1].value : null;
-  const topContent =
-    results[2].status === 'fulfilled' ? results[2].value : null;
-
-  // Log any failures for monitoring/alerting
-  results.forEach((result, i) => {
-    if (result.status === 'rejected') {
-      const endpointNames = ['revenue', 'customers', 'topContent'] as const;
-      logger.error(`[Dashboard] Failed to fetch ${endpointNames[i]}`, {
-        reason: String(result.reason),
-      });
-    }
-  });
-
-  // Calculate change percentages from revenueByDay data
-  const revenueByDay = revenue?.revenueByDay ?? [];
-  const recentRevenue = revenueByDay
-    .slice(0, 7)
-    .reduce((sum, day) => sum + day.revenueCents, 0);
-  const previousRevenue = revenueByDay
-    .slice(7, 14)
-    .reduce((sum, day) => sum + day.revenueCents, 0);
-  const revenueChange =
-    previousRevenue > 0
-      ? Math.round(((recentRevenue - previousRevenue) / previousRevenue) * 100)
-      : 0;
-
-  return {
-    revenue: {
-      value: revenue?.totalRevenueCents ?? 0,
-      change: revenueChange,
-    },
-    customers: {
-      value: customers?.pagination?.total ?? 0,
-      change: 0, // Change not provided by API
-    },
-    contentCount: {
-      value: topContent?.pagination?.total ?? 0,
-      change: 0, // Content count change not provided by API
-    },
-    views: {
-      value: 0, // Views not tracked by current API
-      change: 0,
-    },
-  };
+    return {
+      revenue: { value: 0, change: 0, revenueByDay: [] },
+      customers: { value: 0, change: 0 },
+      contentCount: { value: 0, change: 0 },
+      views: { value: 0, change: 0 },
+    };
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

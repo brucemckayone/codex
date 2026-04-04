@@ -8,36 +8,12 @@
  * - purchase: Creates a Stripe checkout session and returns the redirect URL
  */
 import { error, fail } from '@sveltejs/kit';
+import { renderContentBody } from '$lib/editor/render';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { ApiError } from '$lib/server/errors';
 import type { Actions, PageServerLoad } from './$types';
-
-/**
- * Render content body to HTML for written content.
- * Uses Tiptap generateHTML for JSON content, falls back to marked for legacy markdown.
- */
-async function renderContentBody(content: {
-  contentType: string;
-  contentBodyJson?: Record<string, unknown> | null;
-  contentBody?: string | null;
-}): Promise<string | null> {
-  if (content.contentType !== 'written') return null;
-
-  if (content.contentBodyJson) {
-    const { generateHTML } = await import('@tiptap/html');
-    const { getRenderExtensions } = await import('$lib/editor/extensions');
-    return generateHTML(content.contentBodyJson, getRenderExtensions('full'));
-  }
-
-  if (content.contentBody) {
-    const { marked } = await import('marked');
-    return marked.parse(content.contentBody, { async: false }) as string;
-  }
-
-  return null;
-}
 
 export const load: PageServerLoad = async ({
   params,

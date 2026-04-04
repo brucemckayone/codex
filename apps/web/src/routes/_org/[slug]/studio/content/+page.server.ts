@@ -27,6 +27,9 @@ export const load: PageServerLoad = async ({
     Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10) || 20)
   );
 
+  // Parse search query
+  const search = url.searchParams.get('search')?.trim() || undefined;
+
   // Build query parameters
   const params = new URLSearchParams();
   params.set('organizationId', org.id);
@@ -34,6 +37,7 @@ export const load: PageServerLoad = async ({
   params.set('limit', String(limit));
   params.set('sortBy', 'createdAt');
   params.set('sortOrder', 'desc');
+  if (search) params.set('search', search);
 
   const fallbackPagination = { page: 1, limit: 20, total: 0, totalPages: 0 };
 

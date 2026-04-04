@@ -9,9 +9,16 @@
 import { redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { getMyMembership, getMyOrganizations } from '$lib/remote/org.remote';
+import { createServerApi } from '$lib/server/api';
 import type { LayoutServerLoad } from './$types';
 
-export const load: LayoutServerLoad = async ({ locals, parent, depends }) => {
+export const load: LayoutServerLoad = async ({
+  locals,
+  parent,
+  depends,
+  platform,
+  cookies,
+}) => {
   // Auth gate: must be logged in
   if (!locals.user) {
     redirect(302, '/login?redirect=/studio');
@@ -30,7 +37,7 @@ export const load: LayoutServerLoad = async ({ locals, parent, depends }) => {
     redirect(302, '/404');
   }
 
-  // Load user's membership and all orgs in parallel
+  // Load user's membership and orgs in parallel
   const membershipTimer = logger.startTimer('studio-layout:membership+orgs', {
     threshold: 2000,
   });
@@ -47,10 +54,26 @@ export const load: LayoutServerLoad = async ({ locals, parent, depends }) => {
     redirect(302, '/?error=access_denied');
   }
 
+  // Draft count: lightweight call after auth check — limit=1 just to get pagination.total
+  let draftCount = 0;
+  try {
+    const api = createServerApi(platform, cookies);
+    const draftParams = new URLSearchParams();
+    draftParams.set('organizationId', org.id);
+    draftParams.set('status', 'draft');
+    draftParams.set('limit', '1');
+    draftParams.set('page', '1');
+    const draftResult = await api.content.list(draftParams);
+    draftCount = draftResult?.pagination?.total ?? 0;
+  } catch {
+    // Non-critical — badge just won't show
+  }
+
   const orgs = (orgsResult ?? []).map((o) => ({
     name: o.name,
     slug: o.slug,
     logoUrl: o.logoUrl ?? undefined,
+    role: o.role,
   }));
 
   layoutTimer.end({ slug: org.slug, role });
@@ -66,5 +89,12 @@ export const load: LayoutServerLoad = async ({ locals, parent, depends }) => {
     userRole: role,
     userJoinedAt: joinedAt,
     orgs,
+    studioUser: {
+      name: locals.user.name ?? '',
+      email: locals.user.email ?? '',
+    },
+    badgeCounts: {
+      draftContent: draftCount,
+    },
   };
 };
