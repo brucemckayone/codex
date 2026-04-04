@@ -34,9 +34,7 @@
   );
 
   function handleEditLive() {
-    const slug = data.org?.slug;
-    if (!slug) return;
-    goto(`/${slug}?brandEditor=true`);
+    goto('/?brandEditor=true');
   }
 
   async function handleDeleteLogo() {

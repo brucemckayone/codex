@@ -12,7 +12,9 @@ import type { DatabaseWs } from '@codex/database';
 import { createPerRequestDbClient } from '@codex/database';
 import {
   content,
+  mediaItems,
   organizationMemberships,
+  organizations,
   purchases,
   videoPlayback,
 } from '@codex/database/schema';
@@ -25,7 +27,17 @@ import type {
   ListUserLibraryInput,
   SavePlaybackProgressInput,
 } from '@codex/validation';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  ilike,
+  inArray,
+  isNull,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY, SERVICE_NAME } from '../constants';
 import {
   AccessDeniedError,

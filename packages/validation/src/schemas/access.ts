@@ -41,8 +41,20 @@ export const getPlaybackProgressSchema = z.object({
 
 export const listUserLibrarySchema = paginationSchema.extend({
   organizationId: uuidSchema.optional(),
-  filter: z.enum(['all', 'in-progress', 'completed']).optional().default('all'),
+  filter: z
+    .enum(['all', 'in-progress', 'completed', 'not_started'])
+    .optional()
+    .default('all'),
   sortBy: z.enum(['recent', 'title', 'duration']).optional().default('recent'),
+  contentType: z
+    .enum(['all', 'video', 'audio', 'article'])
+    .optional()
+    .default('all'),
+  accessType: z
+    .enum(['all', 'purchased', 'membership'])
+    .optional()
+    .default('all'),
+  search: z.string().max(200).optional().default(''),
 });
 
 // Type exports
