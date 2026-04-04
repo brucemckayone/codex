@@ -25,13 +25,29 @@
   import { buildContentUrl } from '$lib/utils/subdomain';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { SkeletonContentCard } from '$lib/components/ui/ContentCard';
+  import { ShoppingBagIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import LibraryFilters from '$lib/components/library/LibraryFilters.svelte';
   import ContinueWatching from '$lib/components/library/ContinueWatching.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
+  import { browser } from '$app/environment';
+  import { ViewToggle } from '$lib/components/ui/ViewToggle';
+  import { BackToTop } from '$lib/components/ui/BackToTop';
   import * as m from '$paraglide/messages';
 
   let { data } = $props();
+
+  const STORAGE_KEY = 'codex-view-mode';
+
+  let viewMode = $state<'grid' | 'list'>(
+    browser ? (localStorage.getItem(STORAGE_KEY) as 'grid' | 'list') ?? 'grid' : 'grid'
+  );
+
+  function handleViewChange(mode: 'grid' | 'list') {
+    viewMode = mode;
+    if (browser) localStorage.setItem(STORAGE_KEY, mode);
+  }
 
   // Hydrate collection with server data on mount
   onMount(() => {
@@ -142,15 +158,11 @@
   {:else if libraryQuery.isLoading && !data.library?.items?.length}
     <div class="content-grid">
       {#each Array(6) as _}
-        <div class="skeleton-card">
-          <div class="skeleton-thumb"></div>
-          <div class="skeleton-line skeleton-line-title"></div>
-          <div class="skeleton-line skeleton-line-subtitle"></div>
-        </div>
+        <SkeletonContentCard />
       {/each}
     </div>
   {:else if libraryQuery.data?.length === 0}
-    <EmptyState title={m.library_empty()}>
+    <EmptyState title={m.library_empty()} description={m.library_empty_description()} icon={ShoppingBagIcon}>
       {#snippet action()}
         <a href="/discover" class="browse-btn">
           {m.library_browse()}
@@ -158,7 +170,7 @@
       {/snippet}
     </EmptyState>
   {:else}
-    <!-- Sort dropdown -->
+    <!-- Sort + View Toggle -->
     <div class="sort-bar">
       <Select
         options={sortOptions}
@@ -167,6 +179,7 @@
         label={m.library_sort_label()}
         placeholder={m.library_sort_label()}
       />
+      <ViewToggle value={viewMode} onchange={handleViewChange} />
     </div>
 
     <LibraryFilters
@@ -180,18 +193,19 @@
     <ContinueWatching items={libraryQuery.data ?? []} />
 
     {#if filteredItems.length === 0 && hasActiveFilters}
-      <div class="no-results">
-        <p class="no-results-text">{m.library_no_results()}</p>
-        <button
-          type="button"
-          class="clear-filters-btn"
-          onclick={() => { filtersRef?.clearAll(); void goto('/library'); }}
-        >
-          {m.library_clear_filters()}
-        </button>
-      </div>
+      <EmptyState title={m.library_no_results()} icon={SearchXIcon}>
+        {#snippet action()}
+          <button
+            type="button"
+            class="clear-filters-btn"
+            onclick={() => { filtersRef?.clearAll(); void goto('/library'); }}
+          >
+            {m.library_clear_filters()}
+          </button>
+        {/snippet}
+      </EmptyState>
     {:else}
-      <div class="content-grid">
+      <div class="content-grid" data-view={viewMode}>
         {#each filteredItems as item (item.content.id)}
           <a href={buildContentUrl(page.url, item.content)} class="content-card">
             {#if item.content.thumbnailUrl}
@@ -254,6 +268,8 @@
     {/if}
   {/if}
 </div>
+
+<BackToTop />
 
 <style>
   .library {
@@ -381,42 +397,6 @@
     color: var(--color-success);
   }
 
-  .skeleton-card {
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  .skeleton-thumb {
-    aspect-ratio: 16 / 9;
-    background-color: var(--color-surface-tertiary);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--space-2);
-  }
-
-  .skeleton-line {
-    background-color: var(--color-surface-tertiary);
-    border-radius: var(--radius-sm);
-    margin-bottom: var(--space-2);
-  }
-
-  .skeleton-line-title {
-    height: var(--text-sm);
-    width: 75%;
-  }
-
-  .skeleton-line-subtitle {
-    height: var(--text-xs);
-    width: 50%;
-  }
-
-  @keyframes pulse {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: var(--opacity-50);
-    }
-  }
-
   .browse-btn {
     display: inline-flex;
     align-items: center;
@@ -431,16 +411,6 @@
 
   .browse-btn:hover {
     background-color: var(--color-interactive-hover);
-  }
-
-  .no-results {
-    text-align: center;
-    padding: var(--space-12) 0;
-  }
-
-  .no-results-text {
-    color: var(--color-text-secondary);
-    margin-bottom: var(--space-4);
   }
 
   .clear-filters-btn {
@@ -474,8 +444,45 @@
 
   /* Sort bar */
   .sort-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
     margin-bottom: var(--space-4);
-    max-width: 280px;
+    max-width: 480px;
+  }
+
+  /* List view */
+  .content-grid[data-view='list'] {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  .content-grid[data-view='list'] .content-card {
+    display: flex;
+    flex-direction: row;
+  }
+
+  .content-grid[data-view='list'] .card-thumb {
+    aspect-ratio: 16 / 9;
+    width: 200px;
+    min-width: 200px;
+    flex-shrink: 0;
+  }
+
+  .content-grid[data-view='list'] .card-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  @media (--below-sm) {
+    .content-grid[data-view='list'] .content-card {
+      flex-direction: column;
+    }
+
+    .content-grid[data-view='list'] .card-thumb {
+      width: 100%;
+      min-width: 0;
+    }
   }
 
   /* Pagination */

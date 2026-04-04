@@ -4736,3 +4736,11 @@ export const about_learners_body = () => `Discover content from creators you tru
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const about_cta = () => `Get Started`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_purchased = () => `Purchased`

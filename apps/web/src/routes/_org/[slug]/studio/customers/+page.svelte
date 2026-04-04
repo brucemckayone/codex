@@ -52,7 +52,7 @@
       </div>
     {/if}
   {:else}
-    <EmptyState title={m.studio_customers_empty()} icon={UsersIcon} />
+    <EmptyState title={m.studio_customers_empty()} description={m.studio_customers_empty_description()} icon={UsersIcon} />
   {/if}
 </div>
 

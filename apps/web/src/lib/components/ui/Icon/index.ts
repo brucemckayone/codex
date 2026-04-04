@@ -11,6 +11,7 @@ export { default as CheckIcon } from './CheckIcon.svelte';
 export { default as ChevronDownIcon } from './ChevronDownIcon.svelte';
 export { default as ChevronLeftIcon } from './ChevronLeftIcon.svelte';
 export { default as ChevronRightIcon } from './ChevronRightIcon.svelte';
+export { default as ChevronUpIcon } from './ChevronUpIcon.svelte';
 // Shapes
 export { default as CircleIcon } from './CircleIcon.svelte';
 export { default as ClockIcon } from './ClockIcon.svelte';
@@ -31,6 +32,8 @@ export { default as ImageIcon } from './ImageIcon.svelte';
 // Social
 export { default as InstagramIcon } from './InstagramIcon.svelte';
 export { default as LayoutDashboardIcon } from './LayoutDashboardIcon.svelte';
+export { default as LayoutGridIcon } from './LayoutGridIcon.svelte';
+export { default as LayoutListIcon } from './LayoutListIcon.svelte';
 export { default as LockIcon } from './LockIcon.svelte';
 export { default as MaximizeIcon } from './MaximizeIcon.svelte';
 export { default as MenuIcon } from './MenuIcon.svelte';

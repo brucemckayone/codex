@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { LayoutUser, LayoutOrganization } from '$lib/types';
+  import { page } from '$app/state';
   import { getOrgNav } from '$lib/config/navigation';
   import { PageContainer } from '$lib/components/ui';
   import UserMenu from './UserMenu.svelte';
@@ -13,6 +14,12 @@
   const { user, org }: Props = $props();
 
   const navLinks = $derived(getOrgNav(org.slug));
+
+  function isActive(href: string): boolean {
+    const pathname = page.url.pathname;
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
+  }
 </script>
 
 <header class="header">
@@ -26,7 +33,14 @@
 
     <nav class="desktop-nav" aria-label="Organization">
       {#each navLinks as link}
-        <a href={link.href} class="nav-link">{link.label}</a>
+        <a
+          href={link.href}
+          class="nav-link"
+          class:nav-link--active={isActive(link.href)}
+          aria-current={isActive(link.href) ? 'page' : undefined}
+        >
+          {link.label}
+        </a>
       {/each}
     </nav>
 
@@ -100,6 +114,22 @@
 
   .nav-link:hover {
     color: var(--color-text);
+  }
+
+  .nav-link--active {
+    color: var(--color-text);
+    position: relative;
+  }
+
+  .nav-link--active::after {
+    content: '';
+    position: absolute;
+    bottom: calc(-1 * var(--space-4));
+    left: 0;
+    right: 0;
+    height: var(--border-width-thick);
+    background-color: var(--color-interactive);
+    border-radius: var(--radius-xs);
   }
 
   .header-actions {

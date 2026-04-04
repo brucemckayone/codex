@@ -52,7 +52,7 @@
       </div>
     {/if}
   {:else}
-    <EmptyState title={m.studio_content_empty()} icon={FileIcon}>
+    <EmptyState title={m.studio_content_empty()} description={m.studio_content_empty_description()} icon={FileIcon}>
       {#snippet action()}
         <a href="/studio/content/new" class="empty-cta">
           {m.studio_content_create()}

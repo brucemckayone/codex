@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import type { LayoutUser } from '$lib/types';
   import type { NavLink } from '$lib/config/navigation';
+  import { page } from '$app/state';
   import { submitFormPost } from '$lib/utils/navigation';
   import { XIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
@@ -28,6 +29,12 @@
     if (event.key === 'Escape') {
       close();
     }
+  }
+
+  function isActive(href: string): boolean {
+    const pathname = page.url.pathname;
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
   }
 </script>
 
@@ -59,7 +66,15 @@
     <ul class="nav-list" role="list">
       {#each links as link}
         <li>
-          <a href={link.href} class="nav-item" onclick={close}>{link.label}</a>
+          <a
+            href={link.href}
+            class="nav-item"
+            class:nav-item--active={isActive(link.href)}
+            aria-current={isActive(link.href) ? 'page' : undefined}
+            onclick={close}
+          >
+            {link.label}
+          </a>
         </li>
       {/each}
     </ul>
@@ -208,6 +223,11 @@
 
   .nav-item:hover {
     background-color: var(--color-surface-secondary);
+  }
+
+  .nav-item--active {
+    background-color: var(--color-interactive-subtle);
+    color: var(--color-interactive);
   }
 
   .drawer-actions {

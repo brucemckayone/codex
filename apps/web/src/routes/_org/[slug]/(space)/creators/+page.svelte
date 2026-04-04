@@ -72,7 +72,7 @@
       </div>
     {/if}
   {:else}
-    <EmptyState title={m.org_creators_empty()} icon={UsersIcon} />
+    <EmptyState title={m.org_creators_empty()} description={m.org_creators_empty_description()} icon={UsersIcon} />
   {/if}
 </div>
 

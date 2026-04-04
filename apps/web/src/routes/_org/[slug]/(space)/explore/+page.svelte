@@ -14,6 +14,9 @@
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { SearchIcon, SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { ViewToggle } from '$lib/components/ui/ViewToggle';
+  import { BackToTop } from '$lib/components/ui/BackToTop';
+  import { browser } from '$app/environment';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -84,6 +87,17 @@
     { value: 'written', label: m.explore_filter_article() },
   ] as const;
 
+  const STORAGE_KEY = 'codex-view-mode';
+
+  let viewMode = $state<'grid' | 'list'>(
+    browser ? (localStorage.getItem(STORAGE_KEY) as 'grid' | 'list') ?? 'grid' : 'grid'
+  );
+
+  function handleViewChange(mode: 'grid' | 'list') {
+    viewMode = mode;
+    if (browser) localStorage.setItem(STORAGE_KEY, mode);
+  }
+
   const sortOptions = $derived([
     { value: 'newest', label: m.explore_sort_newest() },
     { value: 'oldest', label: m.explore_sort_oldest() },
@@ -139,7 +153,7 @@
       {/each}
     </div>
 
-    <!-- Sort -->
+    <!-- Sort + View Toggle -->
     <div class="explore__sort-wrapper">
       <Select
         options={sortOptions}
@@ -148,11 +162,12 @@
         placeholder="Sort content"
       />
     </div>
+    <ViewToggle value={viewMode} onchange={handleViewChange} />
   </div>
 
   <!-- Content Grid -->
   {#if items.length > 0}
-    <div class="explore__grid">
+    <div class="explore__grid" data-view={viewMode}>
       {#each items as item (item.id)}
         <ContentCard
           id={item.id}
@@ -195,9 +210,11 @@
     </EmptyState>
   {:else}
     <!-- No content at all -->
-    <EmptyState title={m.explore_no_content()} icon={FileIcon} />
+    <EmptyState title={m.explore_no_content()} description={m.explore_no_content_description()} icon={FileIcon} />
   {/if}
 </div>
+
+<BackToTop />
 
 <style>
   /* ── Layout ── */
@@ -335,6 +352,39 @@
   @media (--breakpoint-lg) {
     .explore__grid {
       grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  /* ── List View ── */
+  .explore__grid[data-view='list'] {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  .explore__grid[data-view='list'] :global(.content-card) {
+    flex-direction: row;
+  }
+
+  .explore__grid[data-view='list'] :global(.content-card__thumbnail) {
+    aspect-ratio: 16 / 9;
+    width: 200px;
+    min-width: 200px;
+    flex-shrink: 0;
+  }
+
+  .explore__grid[data-view='list'] :global(.content-card__body) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  @media (--below-sm) {
+    .explore__grid[data-view='list'] :global(.content-card) {
+      flex-direction: column;
+    }
+
+    .explore__grid[data-view='list'] :global(.content-card__thumbnail) {
+      width: 100%;
+      min-width: 0;
     }
   }
 

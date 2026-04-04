@@ -168,7 +168,7 @@
         {/each}
       </div>
     {:else}
-      <EmptyState title={m.creator_profile_no_content()} icon={FileIcon} />
+      <EmptyState title={m.creator_profile_no_content()} description={m.creator_profile_no_content_description()} icon={FileIcon} />
     {/if}
   </section>
 </div>

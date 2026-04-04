@@ -25,6 +25,7 @@
   import { formatDurationHuman } from '$lib/utils/format';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
+  import { PriceBadge } from '../PriceBadge';
   import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -52,6 +53,7 @@
       amount: number;
       currency: string;
     } | null;
+    purchased?: boolean;
   }
 
   const {
@@ -67,18 +69,10 @@
     loading = false,
     progress = null,
     price = null,
+    purchased = false,
     class: className,
     ...rest
   }: Props = $props();
-
-  function formatPrice(amount: number, currency: string): string {
-    if (amount === 0) return m.content_price_free();
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-    }).format(amount / 100);
-  }
 
   const contentTypeLabels = {
     video: m.content_type_video(),
@@ -154,12 +148,23 @@
         </span>
       {/if}
 
-      <span class="content-card__type">{contentTypeLabels[contentType]}</span>
+      <span class="content-card__type-icon" aria-label={contentTypeLabels[contentType]}>
+        {#if contentType === 'video'}
+          <PlayIcon size={16} />
+        {:else if contentType === 'audio'}
+          <MusicIcon size={16} />
+        {:else}
+          <FileTextIcon size={16} />
+        {/if}
+      </span>
 
-      {#if price != null}
-        <span class="content-card__price-badge" class:content-card__price-badge--free={price.amount === 0}>
-          {formatPrice(price.amount, price.currency)}
-        </span>
+      {#if price != null || purchased}
+        <PriceBadge
+          amount={price?.amount ?? null}
+          currency={price?.currency ?? 'GBP'}
+          {purchased}
+          class="content-card__price-badge"
+        />
       {/if}
 
       {#if hasProgress}
@@ -218,12 +223,15 @@
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    transition: var(--transition-colors), var(--transition-shadow);
+    transition: var(--transition-colors), var(--transition-shadow), var(--transition-transform);
   }
 
-  .content-card:hover {
+  .content-card:hover,
+  .content-card:focus-within {
     border-color: var(--color-border-hover);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-lg);
+    transform: scale(1.02);
+    z-index: 1;
   }
 
   .content-card--loading {
@@ -291,35 +299,26 @@
     border-radius: var(--radius-sm);
   }
 
-  .content-card__type {
+  .content-card__type-icon {
     position: absolute;
-    top: var(--space-2);
+    bottom: var(--space-2);
     left: var(--space-2);
-    padding: var(--space-1) var(--space-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-1);
     background: var(--color-overlay);
     color: var(--color-text-inverse);
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
-    text-transform: uppercase;
+    line-height: 0;
   }
 
-  /* Price badge — uses accent to stand out from primary brand */
-  .content-card__price-badge {
+  /* Position PriceBadge within thumbnail */
+  :global(.content-card__price-badge) {
     position: absolute;
     top: var(--space-2);
     right: var(--space-2);
-    padding: var(--space-1) var(--space-2);
-    background: var(--color-brand-accent);
-    color: var(--color-text-inverse);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    border-radius: var(--radius-sm);
     z-index: 1;
-  }
-
-  .content-card__price-badge--free {
-    background: var(--color-success);
   }
 
   /* Progress bar */

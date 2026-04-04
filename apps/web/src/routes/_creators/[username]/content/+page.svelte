@@ -159,7 +159,7 @@
       {/snippet}
     </EmptyState>
   {:else}
-    <EmptyState title={m.creator_content_empty()} icon={FileIcon} />
+    <EmptyState title={m.creator_content_empty()} description={m.creator_content_empty_description()} icon={FileIcon} />
   {/if}
 </div>
 

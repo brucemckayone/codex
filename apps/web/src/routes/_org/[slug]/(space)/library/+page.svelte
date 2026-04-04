@@ -13,9 +13,24 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
   import { buildContentUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import { browser } from '$app/environment';
+  import { ViewToggle } from '$lib/components/ui/ViewToggle';
+  import { BackToTop } from '$lib/components/ui/BackToTop';
+  import { ShoppingBagIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   let { data } = $props();
+
+  const STORAGE_KEY = 'codex-view-mode';
+
+  let viewMode = $state<'grid' | 'list'>(
+    browser ? (localStorage.getItem(STORAGE_KEY) as 'grid' | 'list') ?? 'grid' : 'grid'
+  );
+
+  function handleViewChange(mode: 'grid' | 'list') {
+    viewMode = mode;
+    if (browser) localStorage.setItem(STORAGE_KEY, mode);
+  }
 
   const orgName = $derived(data.org?.name ?? 'Organization');
 
@@ -120,15 +135,15 @@
           : 'Your library could not be loaded. Please try refreshing the page.'}
     />
   {:else if filteredItems.length === 0 && !hasActiveFilters}
-    <EmptyState title="You haven't purchased any content from {orgName} yet.">
+    <EmptyState title={m.org_library_empty()} description={m.org_library_empty_description({ orgName })} icon={ShoppingBagIcon}>
       {#snippet action()}
         <a href="/explore" class="browse-btn">
-          Browse Content
+          {m.org_library_browse()}
         </a>
       {/snippet}
     </EmptyState>
   {:else}
-    <!-- Sort dropdown -->
+    <!-- Sort + View Toggle -->
     <div class="sort-bar">
       <Select
         options={sortOptions}
@@ -137,6 +152,7 @@
         label={m.library_sort_label()}
         placeholder={m.library_sort_label()}
       />
+      <ViewToggle value={viewMode} onchange={handleViewChange} />
     </div>
 
     <LibraryFilters
@@ -160,7 +176,7 @@
         </button>
       </div>
     {:else}
-      <div class="content-grid">
+      <div class="content-grid" data-view={viewMode}>
         {#each filteredItems as item (item.content.id)}
           <a href={buildContentUrl(page.url, item.content)} class="content-card">
             {#if item.content.thumbnailUrl}
@@ -223,6 +239,8 @@
     {/if}
   {/if}
 </div>
+
+<BackToTop />
 
 <style>
   .library {
@@ -426,8 +444,45 @@
 
   /* Sort bar */
   .sort-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
     margin-bottom: var(--space-4);
-    max-width: 280px;
+    max-width: 480px;
+  }
+
+  /* List view */
+  .content-grid[data-view='list'] {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  .content-grid[data-view='list'] .content-card {
+    display: flex;
+    flex-direction: row;
+  }
+
+  .content-grid[data-view='list'] .card-thumb {
+    aspect-ratio: 16 / 9;
+    width: 200px;
+    min-width: 200px;
+    flex-shrink: 0;
+  }
+
+  .content-grid[data-view='list'] .card-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  @media (--below-sm) {
+    .content-grid[data-view='list'] .content-card {
+      flex-direction: column;
+    }
+
+    .content-grid[data-view='list'] .card-thumb {
+      width: 100%;
+      min-width: 0;
+    }
   }
 
   /* Pagination */
