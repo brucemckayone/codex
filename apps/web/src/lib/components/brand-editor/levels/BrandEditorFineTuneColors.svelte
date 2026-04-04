@@ -6,7 +6,7 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
   import { srgbToHex } from '$lib/brand-editor/oklch-math';
-  import ColorInput from '../color-picker/ColorInput.svelte';
+  import OklchColorPicker from '../color-picker/OklchColorPicker.svelte';
 
   // Token override entries — each can be null (auto) or a hex string
   const TOKEN_GROUPS = [
@@ -50,21 +50,38 @@
     brandEditor.updateField('tokenOverrides', current);
   }
 
-  /** Read the resolved color for a CSS custom property from the org layout element. */
+  /** Read the resolved color for a CSS custom property from the org layout element.
+   *  Uses a canvas to convert any CSS color format (rgb, oklch, etc.) to hex. */
   function readComputedColor(key: string): string | null {
     const orgLayout = document.querySelector('.org-layout');
     if (!orgLayout) return null;
 
-    // Probe element — set its color to the CSS var, read the resolved rgb()
+    // Probe element — set its color to the CSS var, read the resolved value
     const probe = document.createElement('div');
     probe.style.color = `var(--color-${key})`;
     orgLayout.appendChild(probe);
     const computed = getComputedStyle(probe).color;
     probe.remove();
 
-    const match = computed.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-    if (!match) return null;
-    return srgbToHex(+match[1], +match[2], +match[3]);
+    if (!computed || computed === 'none') return null;
+
+    // Try rgb() match first (fastest path)
+    const rgbMatch = computed.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (rgbMatch) return srgbToHex(+rgbMatch[1], +rgbMatch[2], +rgbMatch[3]);
+
+    // Fallback: use canvas to convert any CSS color (oklch, lab, etc.) to RGB
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.fillStyle = computed;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+      return srgbToHex(r, g, b);
+    } catch {
+      return null;
+    }
   }
 
   /** Switch a token from auto to custom: read current computed color as starting value. */
@@ -96,7 +113,7 @@
           </div>
 
           {#if override}
-            <ColorInput value={override} onchange={(hex) => setOverride(token.key, hex)} />
+            <OklchColorPicker value={override} onchange={(hex) => setOverride(token.key, hex)} />
           {:else}
             <p class="fine-tune__auto-hint">{token.auto}</p>
           {/if}
