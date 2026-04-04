@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import { getRequestEvent, query } from '$app/server';
+import { command, getRequestEvent, query } from '$app/server';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 
@@ -267,5 +267,62 @@ export const getActivityFeed = query(
     return api.admin.getActivity(
       searchParams.toString() ? searchParams : undefined
     );
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer Detail
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get customer details with purchase history
+ *
+ * Returns customer profile, aggregated stats (total spent, purchase count),
+ * and full purchase history for the organization.
+ *
+ * Usage:
+ * ```svelte
+ * <script>
+ *   const detail = await getCustomerDetail(customerId);
+ * </script>
+ *
+ * <p>{detail.name} — {detail.email}</p>
+ * ```
+ */
+export const getCustomerDetail = query(
+  z.string().uuid(),
+  async (customerId) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.admin.getCustomerDetail(customerId);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grant Content Access
+// ─────────────────────────────────────────────────────────────────────────────
+
+const grantAccessSchema = z.object({
+  customerId: z.string().uuid(),
+  contentId: z.string().uuid(),
+});
+
+/**
+ * Grant complimentary content access to a customer
+ *
+ * Creates a contentAccess record (not a purchase) so revenue analytics
+ * remain accurate. Idempotent — returns success if access already exists.
+ *
+ * Usage:
+ * ```typescript
+ * await grantContentAccess({ customerId, contentId });
+ * ```
+ */
+export const grantContentAccess = command(
+  grantAccessSchema,
+  async ({ customerId, contentId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.admin.grantContentAccess(customerId, contentId);
   }
 );

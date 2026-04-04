@@ -16,7 +16,9 @@ import type {
 } from '@codex/access';
 import type {
   ActivityFeedResponse,
+  CustomerDetails,
   CustomerListItem,
+  DashboardStats,
   RevenueAnalyticsResponse,
   TopContentAnalyticsResponse,
 } from '@codex/admin';
@@ -910,6 +912,30 @@ export function createServerApi(
           'admin',
           `/api/admin/analytics/top-content${params ? `?${params}` : ''}`
         ),
+
+      /**
+       * Get combined dashboard statistics (revenue, customers, top content)
+       *
+       * Single endpoint replacing 3 parallel calls. Returns:
+       * - revenue: RevenueStats (includes revenueByDay[])
+       * - customers: CustomerStats (totalCustomers, newCustomersLast30Days)
+       * - topContent: PaginatedListResponse<TopContentItem>
+       *
+       * Query parameters (from adminDashboardStatsQuerySchema):
+       * - organizationId: UUID (required)
+       *
+       * @example
+       * ```typescript
+       * const params = new URLSearchParams();
+       * params.set('organizationId', orgId);
+       * const stats = await api.analytics.getDashboardStats(params);
+       * ```
+       */
+      getDashboardStats: (params?: URLSearchParams) =>
+        request<DashboardStats>(
+          'admin',
+          `/api/admin/analytics/dashboard-stats${params ? `?${params}` : ''}`
+        ),
     },
 
     /**
@@ -1069,6 +1095,32 @@ export function createServerApi(
         request<ActivityFeedResponse>(
           'admin',
           `/api/admin/activity${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get customer details with purchase history
+       *
+       * @param customerId - Customer's user UUID
+       * @returns Customer profile with aggregated stats and purchase history
+       */
+      getCustomerDetail: (customerId: string) =>
+        request<CustomerDetails>('admin', `/api/admin/customers/${customerId}`),
+
+      /**
+       * Grant complimentary content access to a customer
+       *
+       * Used for refunds, promotions, and support.
+       * Creates a contentAccess record (not a purchase), so revenue analytics stay accurate.
+       *
+       * @param customerId - Customer's user UUID
+       * @param contentId - Content UUID to grant access to
+       * @returns Success indicator
+       */
+      grantContentAccess: (customerId: string, contentId: string) =>
+        request<{ success: boolean }>(
+          'admin',
+          `/api/admin/customers/${customerId}/grant-access/${contentId}`,
+          { method: 'POST' }
         ),
     },
   };

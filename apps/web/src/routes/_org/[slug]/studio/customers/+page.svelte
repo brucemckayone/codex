@@ -3,12 +3,14 @@
 
   Lists all organization customers in a table with name, email,
   purchases, total spent, and joined date. Supports URL-based pagination.
+  Clicking a row opens a customer detail drawer with profile, stats, and purchase history.
 -->
 <script lang="ts">
   import type { PageData } from './$types';
   import * as m from '$paraglide/messages';
   import { page } from '$app/state';
   import CustomerTable from '$lib/components/studio/CustomerTable.svelte';
+  import CustomerDetailDrawer from '$lib/components/studio/CustomerDetailDrawer.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { PageHeader } from '$lib/components/ui';
   import { UsersIcon } from '$lib/components/ui/Icon';
@@ -23,6 +25,14 @@
   );
   const totalCustomers = $derived(data.customers.pagination.total);
   const hasCustomers = $derived(data.customers.items.length > 0 || currentPage > 1);
+
+  let drawerOpen = $state(false);
+  let selectedCustomerId = $state<string | null>(null);
+
+  function handleCustomerClick(customerId: string) {
+    selectedCustomerId = customerId;
+    drawerOpen = true;
+  }
 </script>
 
 <svelte:head>
@@ -40,7 +50,10 @@
   </PageHeader>
 
   {#if hasCustomers}
-    <CustomerTable customers={data.customers.items} />
+    <CustomerTable
+      customers={data.customers.items}
+      onCustomerClick={handleCustomerClick}
+    />
 
     {#if totalPages > 1}
       <div class="pagination-wrapper">
@@ -55,6 +68,12 @@
     <EmptyState title={m.studio_customers_empty()} description={m.studio_customers_empty_description()} icon={UsersIcon} />
   {/if}
 </div>
+
+<CustomerDetailDrawer
+  bind:open={drawerOpen}
+  customerId={selectedCustomerId}
+  orgId={data.org.id}
+/>
 
 <style>
   .customers-page {

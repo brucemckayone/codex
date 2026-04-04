@@ -5,7 +5,11 @@
   Shows name, email, purchase count, total spent (formatted GBP), and joined date.
   Uses the Table sub-component suite.
 
+  Rows are interactive: clicking or pressing Enter/Space on a focused row
+  fires the `onCustomerClick` callback with the customer's userId.
+
   @prop {CustomerListItem[]} customers - Array of customer items to display
+  @prop {(customerId: string) => void} [onCustomerClick] - Callback when a customer row is clicked
 -->
 <script lang="ts">
   import type { CustomerListItem } from '@codex/shared-types';
@@ -17,11 +21,19 @@
 
   interface Props {
     customers: CustomerListItem[];
+    onCustomerClick?: (customerId: string) => void;
   }
 
-  const { customers }: Props = $props();
+  const { customers, onCustomerClick }: Props = $props();
 
   const isEmpty = $derived(customers.length === 0);
+
+  function handleRowKeydown(event: KeyboardEvent, customerId: string) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onCustomerClick?.(customerId);
+    }
+  }
 </script>
 
 {#if isEmpty}
@@ -40,7 +52,13 @@
       </Table.Header>
       <Table.Body>
         {#each customers as customer (customer.userId)}
-          <Table.Row>
+          <Table.Row
+            class="customer-row"
+            tabindex={onCustomerClick ? 0 : undefined}
+            role={onCustomerClick ? 'button' : undefined}
+            onclick={() => onCustomerClick?.(customer.userId)}
+            onkeydown={(e: KeyboardEvent) => handleRowKeydown(e, customer.userId)}
+          >
             <Table.Cell class="name-cell">
               {customer.name ?? '--'}
             </Table.Cell>
@@ -66,6 +84,15 @@
 <style>
   .table-wrapper {
     overflow-x: auto;
+  }
+
+  :global(.customer-row) {
+    cursor: pointer;
+  }
+
+  :global(.customer-row:focus-visible) {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: -2px;
   }
 
   /* Cell styles via :global since classes are passed as props to Table components */
