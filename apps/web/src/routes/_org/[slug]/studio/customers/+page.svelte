@@ -15,16 +15,11 @@
   import { PageHeader } from '$lib/components/ui';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { getCustomers } from '$lib/remote/admin.remote';
 
   let { data }: { data: PageData } = $props();
 
-  const orgSlug = $derived(page.params.slug);
-  const currentPage = $derived(data.customers.pagination.page);
-  const totalPages = $derived(
-    Math.max(1, data.customers.pagination.totalPages)
-  );
-  const totalCustomers = $derived(data.customers.pagination.total);
-  const hasCustomers = $derived(data.customers.items.length > 0 || currentPage > 1);
+  const CUSTOMERS_LIMIT = 20;
 
   let drawerOpen = $state(false);
   let selectedCustomerId = $state<string | null>(null);
@@ -33,6 +28,15 @@
     selectedCustomerId = customerId;
     drawerOpen = true;
   }
+
+  // $derived query reacts to URL page param — fixes pagination bug
+  const currentUrlPage = $derived(parseInt(page.url.searchParams.get('page') || '1', 10) || 1);
+
+  const customersQuery = $derived(
+    data.org?.id
+      ? getCustomers({ organizationId: data.org.id, page: currentUrlPage, limit: CUSTOMERS_LIMIT })
+      : null
+  );
 </script>
 
 <svelte:head>
@@ -41,38 +45,59 @@
 </svelte:head>
 
 <div class="customers-page">
-  <PageHeader title={m.studio_customers_title()}>
-    {#snippet actions()}
-      {#if hasCustomers && totalCustomers > 0}
-        <span class="count-badge">{totalCustomers}</span>
-      {/if}
-    {/snippet}
-  </PageHeader>
-
-  {#if hasCustomers}
-    <CustomerTable
-      customers={data.customers.items}
-      onCustomerClick={handleCustomerClick}
-    />
-
-    {#if totalPages > 1}
-      <div class="pagination-wrapper">
-        <Pagination
-          {currentPage}
-          {totalPages}
-          baseUrl="/studio/customers"
-        />
-      </div>
-    {/if}
+  {#if customersQuery?.loading}
+    <PageHeader title={m.studio_customers_title()} />
+    <div class="table-skeleton">
+      <div class="skeleton table-skeleton-header" style="width: 100%; height: var(--space-10);"></div>
+      {#each Array(5) as _}
+        <div class="table-skeleton-row">
+          <div class="skeleton" style="width: 40%; height: var(--space-5);"></div>
+          <div class="skeleton" style="width: 25%; height: var(--space-5);"></div>
+          <div class="skeleton" style="width: 15%; height: var(--space-5);"></div>
+          <div class="skeleton" style="width: 15%; height: var(--space-5);"></div>
+        </div>
+      {/each}
+    </div>
   {:else}
-    <EmptyState title={m.studio_customers_empty()} description={m.studio_customers_empty_description()} icon={UsersIcon} />
+    {@const customers = customersQuery?.current ?? { items: [], pagination: { page: 1, limit: CUSTOMERS_LIMIT, total: 0, totalPages: 0 } }}
+    {@const currentPage = customers.pagination?.page ?? 1}
+    {@const totalPages = Math.max(1, customers.pagination?.totalPages ?? 0)}
+    {@const totalCustomers = customers.pagination?.total ?? 0}
+    {@const hasCustomers = (customers.items?.length ?? 0) > 0 || currentPage > 1}
+
+    <PageHeader title={m.studio_customers_title()}>
+      {#snippet actions()}
+        {#if hasCustomers && totalCustomers > 0}
+          <span class="count-badge">{totalCustomers}</span>
+        {/if}
+      {/snippet}
+    </PageHeader>
+
+    {#if hasCustomers}
+      <CustomerTable
+        customers={customers.items ?? []}
+        onCustomerClick={handleCustomerClick}
+      />
+
+      {#if totalPages > 1}
+        <div class="pagination-wrapper">
+          <Pagination
+            {currentPage}
+            {totalPages}
+            baseUrl="/studio/customers"
+          />
+        </div>
+      {/if}
+    {:else}
+      <EmptyState title={m.studio_customers_empty()} description={m.studio_customers_empty_description()} icon={UsersIcon} />
+    {/if}
   {/if}
 </div>
 
 <CustomerDetailDrawer
   bind:open={drawerOpen}
   customerId={selectedCustomerId}
-  orgId={data.org.id}
+  orgId={data.org?.id}
 />
 
 <style>
@@ -102,5 +127,42 @@
     border-top: var(--border-width) var(--border-style) var(--color-border);
   }
 
+  /* ── Skeleton Loading States ─────────────────────────────────────────── */
 
+  .table-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .table-skeleton-header {
+    border-radius: 0;
+  }
+
+  .table-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 </style>

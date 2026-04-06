@@ -19,10 +19,12 @@
   @prop {{ amount: number; currency: string } | null} price - Price info (null = hidden, amount 0 = Free)
 -->
 <script lang="ts">
-  import type { Snippet, HTMLAttributes } from 'svelte/elements';
+  import type { Snippet } from 'svelte';
+  import type { HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
   import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import { formatDurationHuman } from '$lib/utils/format';
+  import { calculateProgressPercent } from '$lib/utils/progress';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
@@ -86,15 +88,7 @@
 
   const profileHref = $derived(creator?.username ? `/@${creator.username}` : '#');
 
-  const progressPercent = $derived.by(() => {
-    if (!progress) return 0;
-    if (progress.completed) return 100;
-    if (progress.percentComplete != null) return Math.round(progress.percentComplete);
-    if (progress.positionSeconds != null && progress.durationSeconds && progress.durationSeconds > 0) {
-      return Math.round((progress.positionSeconds / progress.durationSeconds) * 100);
-    }
-    return 0;
-  });
+  const progressPercent = $derived(calculateProgressPercent(progress));
 
   const hasProgress = $derived(progress != null && (progress.completed || progressPercent > 0));
 </script>

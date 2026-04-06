@@ -18,24 +18,15 @@
     { value: 'Raleway', label: 'Raleway' },
   ];
 
-  let bodyFont = $state(brandEditor.pending?.fontBody ?? '');
-  let headingFont = $state(brandEditor.pending?.fontHeading ?? '');
-
-  $effect(() => {
-    bodyFont = brandEditor.pending?.fontBody ?? '';
-    headingFont = brandEditor.pending?.fontHeading ?? '';
-  });
+  const bodyFont = $derived(brandEditor.pending?.fontBody ?? '');
+  const headingFont = $derived(brandEditor.pending?.fontHeading ?? '');
 
   function updateBody(val: string | undefined) {
-    const v = val || null;
-    bodyFont = v ?? '';
-    brandEditor.updateField('fontBody', v);
+    brandEditor.updateField('fontBody', val || null);
   }
 
   function updateHeading(val: string | undefined) {
-    const v = val || null;
-    headingFont = v ?? '';
-    brandEditor.updateField('fontHeading', v);
+    brandEditor.updateField('fontHeading', val || null);
   }
 </script>
 

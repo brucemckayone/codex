@@ -6,19 +6,35 @@
   and social media URLs (Twitter, YouTube, Instagram, TikTok).
 
   Uses form() progressive enhancement -- works without JS, enhances with JS.
+  Fetches contact settings client-side to avoid __data.json round-trips.
 
-  @prop {PageData} data - Server-loaded contact settings + orgId from parent
+  @prop data - orgId from settings layout + org/userRole from studio layout
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
-  import { updateContactForm } from '$lib/remote/settings.remote';
+  import { getContactSettings, updateContactForm } from '$lib/remote/settings.remote';
   import { Alert, Card, PageHeader, Select } from '$lib/components/ui';
 
   let { data } = $props();
 
-  const orgId = $derived(data.orgId);
-  const contact = $derived(data.contact ?? {
+  const orgId = $derived(data.org.id);
+
+  // Role guard: admin/owner only
+  $effect(() => {
+    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+      goto('/studio');
+    }
+  });
+
+  const isAuthorized = $derived(data.userRole === 'admin' || data.userRole === 'owner');
+
+  const contactQuery = $derived(
+    isAuthorized ? getContactSettings(orgId) : null
+  );
+
+  const contact = $derived(contactQuery?.current ?? {
     platformName: '',
     supportEmail: '',
     contactUrl: '',
@@ -95,6 +111,34 @@
   <title>{m.settings_general()} | {m.settings_title()}</title>
 </svelte:head>
 
+{#if !isAuthorized}
+  <!-- Redirecting... -->
+{:else if contactQuery?.loading}
+<div class="general-page">
+  <PageHeader title={m.settings_general_title()} />
+  <div class="settings-skeleton">
+    <div class="settings-skeleton-card">
+      <div class="skeleton" style="width: 120px; height: var(--text-lg); margin-bottom: var(--space-4);"></div>
+      {#each Array(4) as _}
+        <div class="settings-skeleton-field">
+          <div class="skeleton" style="width: 100px; height: var(--text-sm);"></div>
+          <div class="skeleton" style="width: 100%; height: var(--space-10);"></div>
+        </div>
+      {/each}
+    </div>
+    <div class="settings-skeleton-card">
+      <div class="skeleton" style="width: 100px; height: var(--text-lg); margin-bottom: var(--space-4);"></div>
+      {#each Array(4) as _}
+        <div class="settings-skeleton-field">
+          <div class="skeleton" style="width: 80px; height: var(--text-sm);"></div>
+          <div class="skeleton" style="width: 100%; height: var(--space-10);"></div>
+        </div>
+      {/each}
+    </div>
+    <div class="skeleton" style="width: 80px; height: var(--space-10);"></div>
+  </div>
+</div>
+{:else}
 <div class="general-page">
   <PageHeader title={m.settings_general_title()} />
 
@@ -258,12 +302,54 @@
     </div>
   </form>
 </div>
+{/if}
 
 <style>
   .general-page {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
+  }
+
+  .settings-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .settings-skeleton-card {
+    padding: var(--space-6);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+
+  .settings-skeleton-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4);
+  }
+
+  .settings-skeleton-field:last-child {
+    margin-bottom: 0;
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
 .settings-form {

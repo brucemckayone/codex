@@ -7,6 +7,7 @@
   import { brandEditor } from '$lib/brand-editor';
   import { srgbToHex } from '$lib/brand-editor/oklch-math';
   import OklchColorPicker from '../color-picker/OklchColorPicker.svelte';
+  import * as m from '$paraglide/messages';
 
   // Token override entries — each can be null (auto) or a hex string
   const TOKEN_GROUPS = [
@@ -103,11 +104,11 @@
             <span class="fine-tune__token-name">{token.name}</span>
             {#if override}
               <button class="fine-tune__auto-btn" onclick={() => clearOverride(token.key)}>
-                Auto
+                {m.brand_editor_auto()}
               </button>
             {:else}
               <button class="fine-tune__customize-btn" onclick={() => enableCustomize(token.key)}>
-                Customize
+                {m.brand_editor_customize()}
               </button>
             {/if}
           </div>

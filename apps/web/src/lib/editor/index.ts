@@ -4,6 +4,7 @@ export {
   getMinimalExtensions,
   getRenderExtensions,
 } from './extensions.js';
+export { extractPlainText, renderContentBody } from './render.js';
 export type { SlashCommandItem, SlashCommandRender } from './slash-commands.js';
 export {
   createSlashCommandsExtension,

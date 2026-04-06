@@ -14,9 +14,10 @@
   import * as Table from '$lib/components/ui/Table';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
   import Select from '$lib/components/ui/Select/Select.svelte';
+  import { ConfirmDialog } from '$lib/components/ui';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
-  import { formatDate } from '$lib/utils/format';
+  import { formatDate, getInitials } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -29,6 +30,10 @@
   const { members, onChangeRole, onRemove, loading = false }: Props = $props();
 
   const isEmpty = $derived(members.length === 0);
+
+  // Confirm dialog state for member removal
+  let showRemoveConfirm = $state(false);
+  let pendingRemoveUserId = $state<string | null>(null);
 
   /**
    * Map role to Badge variant
@@ -66,19 +71,6 @@
     }
   }
 
-  /**
-   * Get initials from name for avatar fallback
-   */
-  function getInitials(name: string | null): string {
-    if (!name) return '?';
-    return name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase();
-  }
-
   const roleOptions = $derived([
     { value: 'admin', label: getRoleText('admin') },
     { value: 'creator', label: getRoleText('creator') },
@@ -90,9 +82,19 @@
   }
 
   function handleRemove(userId: string) {
-    if (confirm(m.team_remove_confirm())) {
-      onRemove?.(userId);
+    pendingRemoveUserId = userId;
+    showRemoveConfirm = true;
+  }
+
+  function confirmRemove() {
+    if (pendingRemoveUserId) {
+      onRemove?.(pendingRemoveUserId);
     }
+    pendingRemoveUserId = null;
+  }
+
+  function cancelRemove() {
+    pendingRemoveUserId = null;
   }
 </script>
 
@@ -174,6 +176,16 @@
     </Table.Root>
   </div>
 {/if}
+
+<ConfirmDialog
+  bind:open={showRemoveConfirm}
+  title={m.team_remove()}
+  description={m.team_remove_confirm()}
+  confirmText={m.team_remove()}
+  variant="destructive"
+  onConfirm={confirmRemove}
+  onCancel={cancelRemove}
+/>
 
 <style>
   .table-wrapper {
@@ -258,16 +270,6 @@
     border-radius: var(--radius-md);
     background-color: var(--color-surface-secondary);
     animation: pulse 1.5s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: var(--opacity-50);
-    }
-    50% {
-      opacity: 1;
-    }
   }
 
   /* Global cell styles */

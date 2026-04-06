@@ -21,6 +21,7 @@
     SettingsIcon,
     PlusIcon,
   } from '$lib/components/ui/Icon';
+  import * as m from '$paraglide/messages';
 
   interface CommandItem {
     id: string;
@@ -41,24 +42,24 @@
   let activeIndex = $state(0);
   let inputEl: HTMLInputElement | undefined = $state();
 
-  // Static page items
-  const pageItems: CommandItem[] = [
-    { id: 'dashboard', label: 'Dashboard', href: '/studio', group: 'Pages' },
-    { id: 'content', label: 'Content', href: '/studio/content', group: 'Pages' },
-    { id: 'media', label: 'Media', href: '/studio/media', group: 'Pages' },
-    { id: 'analytics', label: 'Analytics', href: '/studio/analytics', group: 'Pages' },
-    { id: 'team', label: 'Team', href: '/studio/team', group: 'Pages' },
-    { id: 'customers', label: 'Customers', href: '/studio/customers', group: 'Pages' },
-    { id: 'settings', label: 'Settings', href: '/studio/settings', group: 'Pages' },
-    { id: 'billing', label: 'Billing', href: '/studio/billing', group: 'Pages' },
-  ];
+  // Static page items — use $derived so paraglide messages resolve at render time
+  const pageItems: CommandItem[] = $derived([
+    { id: 'dashboard', label: m.command_palette_page_dashboard(), href: '/studio', group: m.command_palette_group_pages() },
+    { id: 'content', label: m.command_palette_page_content(), href: '/studio/content', group: m.command_palette_group_pages() },
+    { id: 'media', label: m.command_palette_page_media(), href: '/studio/media', group: m.command_palette_group_pages() },
+    { id: 'analytics', label: m.command_palette_page_analytics(), href: '/studio/analytics', group: m.command_palette_group_pages() },
+    { id: 'team', label: m.command_palette_page_team(), href: '/studio/team', group: m.command_palette_group_pages() },
+    { id: 'customers', label: m.command_palette_page_customers(), href: '/studio/customers', group: m.command_palette_group_pages() },
+    { id: 'settings', label: m.command_palette_page_settings(), href: '/studio/settings', group: m.command_palette_group_pages() },
+    { id: 'billing', label: m.command_palette_page_billing(), href: '/studio/billing', group: m.command_palette_group_pages() },
+  ]);
 
-  const actionItems: CommandItem[] = [
-    { id: 'new-content', label: 'Create new content', href: '/studio/content/new', group: 'Actions' },
-    { id: 'view-site', label: 'View public site', href: '/', group: 'Actions' },
-  ];
+  const actionItems: CommandItem[] = $derived([
+    { id: 'new-content', label: m.command_palette_action_create_content(), href: '/studio/content/new', group: m.command_palette_group_actions() },
+    { id: 'view-site', label: m.command_palette_action_view_site(), href: '/', group: m.command_palette_group_actions() },
+  ]);
 
-  const allStaticItems = [...pageItems, ...actionItems];
+  const allStaticItems = $derived([...pageItems, ...actionItems]);
 
   const filteredItems = $derived.by(() => {
     if (!query.trim()) return allStaticItems;
@@ -124,9 +125,22 @@
         e.preventDefault();
         close();
         break;
-      case 'Tab':
-        e.preventDefault(); // Trap focus in palette
+      case 'Tab': {
+        e.preventDefault();
+        // Get all focusable elements within the palette
+        const palette = e.currentTarget.closest('.palette') as HTMLElement;
+        if (!palette) break;
+        const focusable = palette.querySelectorAll<HTMLElement>(
+          'input, [role="option"], button:not([disabled])'
+        );
+        if (focusable.length === 0) break;
+        const currentIndex = Array.from(focusable).indexOf(document.activeElement as HTMLElement);
+        const nextIndex = e.shiftKey
+          ? (currentIndex - 1 + focusable.length) % focusable.length
+          : (currentIndex + 1) % focusable.length;
+        focusable[nextIndex]?.focus();
         break;
+      }
     }
   }
 
@@ -162,7 +176,7 @@
   <div
     class="palette"
     role="dialog"
-    aria-label="Command palette"
+    aria-label={m.command_palette_label()}
     onkeydown={handleKeydown}
   >
     <div class="palette__input-wrapper">
@@ -171,19 +185,20 @@
         bind:this={inputEl}
         type="text"
         class="palette__input"
-        placeholder="Search pages, content, actions..."
+        placeholder={m.command_palette_search_placeholder()}
         bind:value={query}
-        aria-label="Command palette search"
+        aria-label={m.command_palette_search_label()}
         role="combobox"
+        aria-controls="palette-results"
         aria-expanded={flatItems.length > 0}
         aria-activedescendant={flatItems[activeIndex] ? `cmd-${flatItems[activeIndex].id}` : undefined}
         autocomplete="off"
       />
     </div>
 
-    <div class="palette__results" role="listbox">
+    <div class="palette__results" id="palette-results" role="listbox">
       {#if flatItems.length === 0}
-        <div class="palette__empty">No results found</div>
+        <div class="palette__empty">{m.command_palette_no_results()}</div>
       {:else}
         {#each [...groupedItems] as [group, items] (group)}
           <div class="palette__group">
@@ -200,8 +215,8 @@
                 onmouseenter={() => (activeIndex = globalIndex)}
               >
                 <span class="palette__item-label">{item.label}</span>
-                {#if item.group === 'Actions'}
-                  <span class="palette__item-badge">Action</span>
+                {#if item.group === m.command_palette_group_actions()}
+                  <span class="palette__item-badge">{m.command_palette_action_badge()}</span>
                 {/if}
               </button>
             {/each}
@@ -211,9 +226,9 @@
     </div>
 
     <div class="palette__footer">
-      <span class="palette__hint"><kbd>&uarr;&darr;</kbd> Navigate</span>
-      <span class="palette__hint"><kbd>Enter</kbd> Select</span>
-      <span class="palette__hint"><kbd>Esc</kbd> Close</span>
+      <span class="palette__hint"><kbd>&uarr;&darr;</kbd> {m.command_palette_hint_navigate()}</span>
+      <span class="palette__hint"><kbd>Enter</kbd> {m.command_palette_hint_select()}</span>
+      <span class="palette__hint"><kbd>Esc</kbd> {m.command_palette_hint_close()}</span>
     </div>
   </div>
 {/if}

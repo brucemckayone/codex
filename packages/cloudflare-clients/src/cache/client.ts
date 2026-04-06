@@ -20,7 +20,7 @@ export class CachePurgeClient {
   private readonly zoneId: string;
   private readonly apiToken: string;
   private readonly enabled: boolean;
-  private readonly logger?: Logger;
+  private readonly logger: Logger;
 
   constructor(config?: CachePurgeConfig, logger?: Logger) {
     if (config?.zoneId && config?.apiToken) {
@@ -66,7 +66,7 @@ export class CachePurgeClient {
     );
     for (const result of results) {
       if (result.status === 'rejected') {
-        this.logger!.warn('Cache purge failed', {
+        this.logger.warn('Cache purge failed', {
           reason: String(result.reason),
         });
       }
@@ -83,7 +83,7 @@ export class CachePurgeClient {
     try {
       await this.purgeRequest({ purge_everything: true });
     } catch (error) {
-      this.logger!.warn('Cache purge (everything) failed', {
+      this.logger.warn('Cache purge (everything) failed', {
         error: error instanceof Error ? error.message : String(error),
       });
     }

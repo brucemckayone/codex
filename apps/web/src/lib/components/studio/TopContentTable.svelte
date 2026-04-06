@@ -4,18 +4,25 @@
   Displays a ranked table of top-performing content by revenue.
   Columns: Rank, Title, Revenue (formatted GBP), Purchases.
 
+  Migrated to DataTable to validate the shared component pattern.
+  DataTable provides consistent table chrome (border, hover, header styles)
+  while renderCell handles domain-specific formatting.
+
   @prop {{ contentTitle: string; revenueCents: number; purchaseCount: number }[]} items - Content items
   @prop {boolean} loading - Whether the data is loading
 -->
 <script lang="ts">
-  import * as Table from '$lib/components/ui/Table';
+  import type { Snippet } from 'svelte';
+  import DataTable from '$lib/components/ui/DataTable/DataTable.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { formatPrice } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
 
   interface TopContentItem {
     contentTitle: string;
     revenueCents: number;
     purchaseCount: number;
+    [key: string]: unknown;
   }
 
   interface Props {
@@ -27,18 +34,25 @@
 
   const isEmpty = $derived(items.length === 0);
 
-  /**
-   * Format cents to currency string (GBP)
-   */
-  function formatRevenue(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(cents / 100);
-  }
+  const columns = $derived([
+    { key: 'rank', label: m.analytics_col_rank(), width: '48px' },
+    { key: 'contentTitle', label: m.analytics_col_title() },
+    { key: 'revenueCents', label: m.analytics_col_revenue(), align: 'right' as const },
+    { key: 'purchaseCount', label: m.analytics_col_purchases(), align: 'right' as const },
+  ]);
 </script>
+
+{#snippet renderCell(row: TopContentItem, col: { key: string })}
+  {#if col.key === 'rank'}
+    <span class="rank-cell">{items.indexOf(row) + 1}</span>
+  {:else if col.key === 'contentTitle'}
+    <span class="title-cell">{row.contentTitle}</span>
+  {:else if col.key === 'revenueCents'}
+    <span class="revenue-cell">{formatPrice(row.revenueCents)}</span>
+  {:else if col.key === 'purchaseCount'}
+    <span class="purchases-cell">{row.purchaseCount}</span>
+  {/if}
+{/snippet}
 
 {#if loading}
   <div class="loading-state">
@@ -51,43 +65,16 @@
 {:else if isEmpty}
   <EmptyState title={m.analytics_empty()} />
 {:else}
-  <div class="table-wrapper">
-    <Table.Root>
-      <Table.Header>
-        <Table.Row>
-          <Table.Head class="rank-col">{m.analytics_col_rank()}</Table.Head>
-          <Table.Head>{m.analytics_col_title()}</Table.Head>
-          <Table.Head class="number-col">{m.analytics_col_revenue()}</Table.Head>
-          <Table.Head class="number-col">{m.analytics_col_purchases()}</Table.Head>
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        {#each items as item, index (index)}
-          <Table.Row>
-            <Table.Cell class="rank-cell">
-              {index + 1}
-            </Table.Cell>
-            <Table.Cell class="title-cell">
-              {item.contentTitle}
-            </Table.Cell>
-            <Table.Cell class="revenue-cell">
-              {formatRevenue(item.revenueCents)}
-            </Table.Cell>
-            <Table.Cell class="purchases-cell">
-              {item.purchaseCount}
-            </Table.Cell>
-          </Table.Row>
-        {/each}
-      </Table.Body>
-    </Table.Root>
-  </div>
+  <DataTable
+    {columns}
+    data={items}
+    getRowId={(row) => row.contentTitle}
+    {renderCell}
+    class="top-content-table"
+  />
 {/if}
 
 <style>
-  .table-wrapper {
-    overflow-x: auto;
-  }
-
   .loading-state {
     display: flex;
     flex-direction: column;
@@ -102,47 +89,25 @@
     animation: pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: var(--opacity-50);
-    }
-    50% {
-      opacity: 1;
-    }
-  }
-
-  /* Global cell styles */
-  :global(.rank-col) {
-    width: 48px;
-  }
-
-  :global(.number-col) {
-    text-align: right;
-  }
-
-  :global(.rank-cell) {
+  .rank-cell {
     color: var(--color-text-secondary);
     font-weight: var(--font-semibold);
     font-variant-numeric: tabular-nums;
   }
 
-  :global(.title-cell) {
+  .title-cell {
     font-weight: var(--font-medium);
     color: var(--color-text);
   }
 
-  :global(.revenue-cell) {
-    text-align: right;
+  .revenue-cell {
     font-variant-numeric: tabular-nums;
     font-weight: var(--font-medium);
     color: var(--color-text);
   }
 
-  :global(.purchases-cell) {
-    text-align: right;
+  .purchases-cell {
     font-variant-numeric: tabular-nums;
     color: var(--color-text-secondary);
   }
-
 </style>

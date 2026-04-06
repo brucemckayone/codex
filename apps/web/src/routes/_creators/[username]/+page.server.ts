@@ -6,7 +6,6 @@
  * username from the URL and fetches public content scoped by search query.
  * Sets DYNAMIC_PUBLIC cache headers for edge caching.
  */
-import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';

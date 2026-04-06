@@ -28,7 +28,6 @@ export type DatabaseTransaction = Parameters<
   Parameters<typeof dbHttp.transaction>[0]
 >[0];
 
-import type { ServiceConfig } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
   PaginationParams,
@@ -119,7 +118,8 @@ export type ContentListResponse = PaginatedListResponse<ContentWithRelations>;
  * The API boundary resolves raw R2 keys (hlsPreviewKey) into
  * full CDN URLs (hlsPreviewUrl) so clients never see raw keys.
  */
-export interface PublicContentItem extends Omit<ContentWithRelations, 'mediaItem'> {
+export interface PublicContentItem
+  extends Omit<ContentWithRelations, 'mediaItem'> {
   mediaItem:
     | (MediaItem & {
         /** Resolved CDN URL for the 30-second HLS preview clip */

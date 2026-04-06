@@ -45,12 +45,18 @@ import type {
   UserData,
 } from '@codex/shared-types';
 import type {
+  CancelSubscriptionInput,
+  ChangeTierInput,
+  ConnectOnboardInput,
   CreateCheckoutInput,
   CreatePortalSessionInput,
+  CreateSubscriptionCheckoutInput,
+  CreateTierInput,
   UpdateBrandingInput,
   UpdateContactInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
+  UpdateTierInput,
   UpgradeToCreatorInput,
 } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
@@ -59,9 +65,18 @@ import { logger } from '$lib/observability';
 // Import local types that extend DB types with relations
 import type {
   CheckoutResponse,
+  ConnectAccountStatusResponse,
+  ConnectDashboardResponse,
+  ConnectOnboardResponse,
   ContentWithRelations,
+  CurrentSubscription,
   MediaItemWithRelations,
   OrganizationData,
+  SubscriberItem,
+  SubscriptionCheckoutResponse,
+  SubscriptionStats,
+  SubscriptionTier,
+  UserOrgSubscription,
 } from '../types';
 import { ApiError } from './errors';
 
@@ -1122,6 +1137,160 @@ export function createServerApi(
           `/api/admin/customers/${customerId}/grant-access/${contentId}`,
           { method: 'POST' }
         ),
+    },
+
+    /**
+     * Subscription tier endpoints (organization-api worker)
+     */
+    tiers: {
+      /**
+       * List active tiers for an org (public, no auth required)
+       */
+      list: (orgId: string) =>
+        request<SubscriptionTier[]>('org', `/api/organizations/${orgId}/tiers`),
+
+      /**
+       * Create a subscription tier
+       */
+      create: (orgId: string, data: CreateTierInput) =>
+        request<SubscriptionTier>('org', `/api/organizations/${orgId}/tiers`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Update a subscription tier
+       */
+      update: (orgId: string, tierId: string, data: UpdateTierInput) =>
+        request<SubscriptionTier>(
+          'org',
+          `/api/organizations/${orgId}/tiers/${tierId}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * Delete a subscription tier (soft delete)
+       */
+      delete: (orgId: string, tierId: string) =>
+        request<void>('org', `/api/organizations/${orgId}/tiers/${tierId}`, {
+          method: 'DELETE',
+        }),
+
+      /**
+       * Reorder tiers
+       */
+      reorder: (orgId: string, tierIds: string[]) =>
+        request<void>('org', `/api/organizations/${orgId}/tiers/reorder`, {
+          method: 'POST',
+          body: JSON.stringify({ tierIds }),
+        }),
+    },
+
+    /**
+     * Subscription endpoints (ecom-api worker)
+     */
+    subscription: {
+      /**
+       * Create a subscription checkout session
+       */
+      checkout: (data: CreateSubscriptionCheckoutInput) =>
+        request<SubscriptionCheckoutResponse>(
+          'ecom',
+          '/subscriptions/checkout',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * Get user's current subscription for an org
+       */
+      getCurrent: (organizationId: string) =>
+        request<CurrentSubscription | null>(
+          'ecom',
+          `/subscriptions/current?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * Get all user's active subscriptions
+       */
+      getMine: () =>
+        request<UserOrgSubscription[]>('ecom', '/subscriptions/mine'),
+
+      /**
+       * Change subscription tier (upgrade/downgrade)
+       */
+      changeTier: (data: ChangeTierInput) =>
+        request<CurrentSubscription>('ecom', '/subscriptions/change-tier', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Cancel subscription at period end
+       */
+      cancel: (data: CancelSubscriptionInput) =>
+        request<CurrentSubscription>('ecom', '/subscriptions/cancel', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Get subscription stats for an org (admin)
+       */
+      getStats: (organizationId: string) =>
+        request<SubscriptionStats>(
+          'ecom',
+          `/subscriptions/stats?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * List subscribers for an org (admin, paginated)
+       */
+      getSubscribers: (organizationId: string, params?: URLSearchParams) => {
+        const query = new URLSearchParams(params);
+        query.set('organizationId', organizationId);
+        return request<PaginatedListResponse<SubscriberItem>>(
+          'ecom',
+          `/subscriptions/subscribers?${query}`
+        );
+      },
+    },
+
+    /**
+     * Stripe Connect endpoints (ecom-api worker)
+     */
+    connect: {
+      /**
+       * Start Connect onboarding — creates Express account + returns onboarding URL
+       */
+      onboard: (data: ConnectOnboardInput) =>
+        request<ConnectOnboardResponse>('ecom', '/connect/onboard', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Get Connect account status for an org
+       */
+      getStatus: (organizationId: string) =>
+        request<ConnectAccountStatusResponse>(
+          'ecom',
+          `/connect/status?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * Get Stripe Express dashboard link
+       */
+      getDashboardLink: (organizationId: string) =>
+        request<ConnectDashboardResponse>('ecom', '/connect/dashboard', {
+          method: 'POST',
+          body: JSON.stringify({ organizationId }),
+        }),
     },
   };
 }

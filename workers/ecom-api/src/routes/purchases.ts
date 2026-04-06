@@ -16,8 +16,8 @@
  * - PurchaseService - Queries purchases from database
  */
 
-import type { Purchase, PurchaseListItem } from '@codex/purchase';
-import type { HonoEnv, PaginatedListResponse } from '@codex/shared-types';
+import type { Purchase } from '@codex/purchase';
+import type { HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema, purchaseQuerySchema } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';

@@ -29,6 +29,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Source Sans 3',
       radius: 0.375,
       density: 0.95,
+      darkOverrides: null,
     },
   },
   {
@@ -45,6 +46,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'DM Sans',
       radius: 0.25,
       density: 0.9,
+      darkOverrides: null,
     },
   },
   {
@@ -61,6 +63,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Inter',
       radius: 0.5,
       density: 1,
+      darkOverrides: null,
     },
   },
 
@@ -79,6 +82,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Poppins',
       radius: 0.75,
       density: 1,
+      darkOverrides: null,
     },
   },
   {
@@ -95,6 +99,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Nunito',
       radius: 1,
       density: 1.05,
+      darkOverrides: null,
     },
   },
   {
@@ -111,6 +116,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Outfit',
       radius: 0.75,
       density: 1,
+      darkOverrides: null,
     },
   },
 
@@ -129,6 +135,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'DM Sans',
       radius: 0.5,
       density: 1,
+      darkOverrides: null,
     },
   },
   {
@@ -145,6 +152,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Space Grotesk',
       radius: 0.25,
       density: 0.95,
+      darkOverrides: null,
     },
   },
   {
@@ -161,6 +169,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Rubik',
       radius: 0.375,
       density: 1,
+      darkOverrides: null,
     },
   },
 
@@ -179,6 +188,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: null,
       radius: 0,
       density: 1,
+      darkOverrides: null,
     },
   },
   {
@@ -195,6 +205,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: 'Lora',
       radius: 0.5,
       density: 1.1,
+      darkOverrides: null,
     },
   },
   {
@@ -211,6 +222,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       fontHeading: null,
       radius: 0,
       density: 0.95,
+      darkOverrides: null,
     },
   },
 ] as const;

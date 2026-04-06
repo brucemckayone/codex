@@ -10,6 +10,7 @@
   import { createMedia, completeUpload, uploadMedia } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
   import { UploadIcon, XIcon } from '$lib/components/ui/Icon';
+  import { useDropZone } from '$lib/utils/use-drop-zone.svelte';
   import * as m from '$paraglide/messages';
 
   interface UploadItem {
@@ -27,8 +28,11 @@
   const { onUploadComplete }: Props = $props();
 
   let queue: UploadItem[] = $state([]);
-  let isDragging = $state(false);
   let fileInput: HTMLInputElement | undefined = $state();
+
+  const dropZone = useDropZone({
+    onDrop: (files) => addFiles(files),
+  });
 
   const hasItems = $derived(queue.length > 0);
   const activeUploads = $derived(
@@ -166,56 +170,65 @@
   }
 
   /**
-   * PUT file directly to R2 via presigned URL with XHR progress tracking
+   * Generic XHR upload with progress tracking.
+   * Both presigned-URL and worker-fallback paths use this.
    */
-  function uploadToR2(item: UploadItem, presignedUrl: string): Promise<void> {
+  function xhrUpload(opts: {
+    url: string;
+    method: 'PUT' | 'POST';
+    file: File;
+    onProgress: (percent: number) => void;
+    withCredentials?: boolean;
+    errorPrefix?: string;
+  }): Promise<void> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
-          item.progress = Math.round((e.loaded / e.total) * 100);
+          opts.onProgress(Math.round((e.loaded / e.total) * 100));
         }
       };
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(new Error(`Upload failed with status ${xhr.status}`));
+          reject(new Error(`${opts.errorPrefix ?? 'Upload'} failed with status ${xhr.status}`));
         }
       };
-      xhr.onerror = () => reject(new Error('Network error during upload'));
-      xhr.open('PUT', presignedUrl);
-      xhr.setRequestHeader('Content-Type', item.file.type);
-      xhr.send(item.file);
+      xhr.onerror = () => reject(new Error(`Network error during ${opts.errorPrefix?.toLowerCase() ?? 'upload'}`));
+      xhr.open(opts.method, opts.url);
+      xhr.setRequestHeader('Content-Type', opts.file.type);
+      if (opts.withCredentials) xhr.withCredentials = true;
+      xhr.send(opts.file);
     });
   }
 
   /**
-   * Fallback: upload file directly to content-api → R2 binding via XHR.
+   * PUT file directly to R2 via presigned URL with XHR progress tracking
+   */
+  function uploadToR2(item: UploadItem, presignedUrl: string): Promise<void> {
+    return xhrUpload({
+      url: presignedUrl,
+      method: 'PUT',
+      file: item.file,
+      onProgress: (percent) => { item.progress = percent; },
+      errorPrefix: 'Upload',
+    });
+  }
+
+  /**
+   * Fallback: upload file directly to content-api -> R2 binding via XHR.
    * Used when presigned URLs are unavailable or fail (CORS in local dev).
    * Cannot use command() because File objects aren't serializable.
    */
-  async function uploadViaWorker(item: UploadItem, mediaId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          item.progress = Math.round((e.loaded / e.total) * 100);
-        }
-      };
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
-        } else {
-          reject(new Error(`Worker upload failed with status ${xhr.status}`));
-        }
-      };
-      xhr.onerror = () => reject(new Error('Network error during worker upload'));
-      // POST binary body to content-api binaryUploadProcedure endpoint
-      xhr.open('POST', `/api/media/${mediaId}/upload`);
-      xhr.setRequestHeader('Content-Type', item.file.type);
-      xhr.withCredentials = true;
-      xhr.send(item.file);
+  function uploadViaWorker(item: UploadItem, mediaId: string): Promise<void> {
+    return xhrUpload({
+      url: `/api/media/${mediaId}/upload`,
+      method: 'POST',
+      file: item.file,
+      onProgress: (percent) => { item.progress = percent; },
+      withCredentials: true,
+      errorPrefix: 'Worker upload',
     });
   }
 
@@ -227,24 +240,6 @@
   }
 
   // ─── Event Handlers ──────────────────────────────────────────────────────
-
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    isDragging = true;
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    e.preventDefault();
-    isDragging = false;
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    isDragging = false;
-    if (e.dataTransfer?.files) {
-      addFiles(e.dataTransfer.files);
-    }
-  }
 
   function handleFileSelect(e: Event) {
     const target = e.target as HTMLInputElement;
@@ -265,13 +260,13 @@
   <!-- Drop Zone -->
   <div
     class="drop-zone"
-    class:dragging={isDragging}
+    class:dragging={dropZone.isDragging}
     role="button"
     tabindex="0"
     aria-label={m.media_upload_title()}
-    ondragover={handleDragOver}
-    ondragleave={handleDragLeave}
-    ondrop={handleDrop}
+    ondragover={dropZone.handlers.dragover}
+    ondragleave={dropZone.handlers.dragleave}
+    ondrop={dropZone.handlers.drop}
     onclick={handleBrowseClick}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleBrowseClick(); }}}
   >

@@ -5,13 +5,14 @@
  * Extracts session_id from URL, calls the ecom-api verify endpoint,
  * and returns the purchase status + content details for display.
  */
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
   url,
+  locals,
   parent,
   platform,
   cookies,
@@ -22,6 +23,10 @@ export const load: PageServerLoad = async ({
   setHeaders(CACHE_HEADERS.PRIVATE);
   // Allow client-side retry polling via invalidate('checkout:verify')
   depends('checkout:verify');
+
+  if (!locals.user) {
+    redirect(302, '/login');
+  }
 
   const sessionId = url.searchParams.get('session_id');
   const contentSlug = url.searchParams.get('contentSlug');

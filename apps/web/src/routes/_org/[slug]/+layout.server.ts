@@ -110,8 +110,7 @@ export const load: LayoutServerLoad = async ({
           brandFonts: org.brandFonts,
           brandRadius: org.brandRadius,
           brandDensity: org.brandDensity,
-          brandFineTune: (org as Record<string, unknown>)
-            .brandFineTune as (typeof typedOrg)['brandFineTune'],
+          brandFineTune: org.brandFineTune,
         },
         user: locals.user,
         versions,
@@ -147,7 +146,7 @@ async function readOrgVersions(
     const cache = new VersionedCache({
       kv: platform.env.CACHE_KV as KVNamespace,
     });
-    const orgConfigKey = CacheType.ORG_CONFIG + ':' + orgId;
+    const orgConfigKey = `${CacheType.ORG_CONFIG}:${orgId}`;
     const orgContentKey = CacheType.COLLECTION_ORG_CONTENT(orgId);
     const libraryKey = userId
       ? CacheType.COLLECTION_USER_LIBRARY(userId)

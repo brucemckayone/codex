@@ -97,8 +97,16 @@ export async function updateBrandCache(
         backgroundColorHex: settings.branding?.backgroundColorHex ?? null,
         fontBody: settings.branding?.fontBody ?? null,
         fontHeading: settings.branding?.fontHeading ?? null,
-        radiusValue: settings.branding?.radiusValue ?? 0.5,
-        densityValue: settings.branding?.densityValue ?? 1,
+        radiusValue: Number(settings.branding?.radiusValue ?? 0.5),
+        densityValue: Number(settings.branding?.densityValue ?? 1),
+        tokenOverrides: settings.branding?.tokenOverrides ?? null,
+        darkModeOverrides: settings.branding?.darkModeOverrides ?? null,
+        textColorHex: settings.branding?.textColorHex ?? null,
+        shadowScale: settings.branding?.shadowScale ?? null,
+        shadowColor: settings.branding?.shadowColor ?? null,
+        textScale: settings.branding?.textScale ?? null,
+        headingWeight: settings.branding?.headingWeight ?? null,
+        bodyWeight: settings.branding?.bodyWeight ?? null,
       };
     } else {
       // Fallback: Settings not created yet, fetch org directly
@@ -128,6 +136,14 @@ export async function updateBrandCache(
         fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
+        tokenOverrides: null,
+        darkModeOverrides: null,
+        textColorHex: null,
+        shadowScale: null,
+        shadowColor: null,
+        textScale: null,
+        headingWeight: null,
+        bodyWeight: null,
       };
     }
 
@@ -149,6 +165,7 @@ export async function updateBrandCache(
 
 /**
  * Invalidate brand cache and bump org version for client staleness detection.
+ * Also invalidates the slug-keyed VersionedCache for the public org info endpoint.
  * Extracts duplicated cache invalidation logic used by branding mutation handlers.
  */
 function invalidateBrandAndCache(
@@ -162,7 +179,26 @@ function invalidateBrandAndCache(
   const tasks: Promise<unknown>[] = [updateBrandCache(ctx.env, orgId, obs)];
   if (ctx.env.CACHE_KV) {
     const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+    // Invalidate org version (for client staleness detection)
     tasks.push(cache.invalidate(orgId));
+    // Invalidate the slug-keyed public info cache.
+    // Resolve the slug from DB — fire-and-forget, non-critical.
+    tasks.push(
+      (async () => {
+        try {
+          const db = createDbClient(ctx.env);
+          const org = await db.query.organizations.findFirst({
+            where: eq(schema.organizations.id, orgId),
+            columns: { slug: true },
+          });
+          if (org?.slug) {
+            await cache.invalidate(org.slug);
+          }
+        } catch {
+          // Non-critical — slug cache expires via TTL
+        }
+      })()
+    );
   }
   ctx.executionCtx.waitUntil(Promise.all(tasks));
 }

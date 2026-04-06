@@ -5,24 +5,40 @@
   type indicators, and edit actions. Supports URL-based pagination.
 -->
 <script lang="ts">
-  import type { PageData } from './$types';
   import * as m from '$paraglide/messages';
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
+  import { listContent } from '$lib/remote/content.remote';
   import ContentTable from '$lib/components/studio/ContentTable.svelte';
   import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
-  import { goto } from '$app/navigation';
   import { PageHeader } from '$lib/components/ui';
   import { PlusIcon, FileIcon, SearchIcon, XIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
 
-  let { data }: { data: PageData } = $props();
+  let { data } = $props();
 
-  const orgSlug = $derived(page.params.slug);
-  const currentPage = $derived(data.content.pagination.page);
-  const totalPages = $derived(
-    Math.max(1, data.content.pagination.totalPages)
-  );
-  const hasContent = $derived(data.content.items.length > 0 || currentPage > 1);
+  const fallbackPagination = { page: 1, limit: 20, total: 0, totalPages: 0 };
+
+  // Reactive URL params
+  const urlPage = $derived(Math.max(1, parseInt(page.url.searchParams.get('page') || '1', 10) || 1));
+  const urlLimit = $derived(Math.min(100, Math.max(1, parseInt(page.url.searchParams.get('limit') || '20', 10) || 20)));
+  const urlSearch = $derived(page.url.searchParams.get('search')?.trim() || undefined);
+
+  // $derived query re-runs when URL params change
+  const contentQuery = $derived(listContent({
+    organizationId: data.org.id,
+    page: urlPage,
+    limit: urlLimit,
+    sortBy: 'createdAt',
+    sortOrder: 'desc',
+    ...(urlSearch && { search: urlSearch }),
+  }));
+
+  const contentItems = $derived(contentQuery.current?.items ?? []);
+  const pagination = $derived(contentQuery.current?.pagination ?? fallbackPagination);
+  const currentPage = $derived(pagination.page);
+  const totalPages = $derived(Math.max(1, pagination.totalPages));
+  const hasContent = $derived(contentItems.length > 0 || currentPage > 1);
 
   // Search state
   let searchQuery = $state(page.url.searchParams.get('search') ?? '');
@@ -95,8 +111,21 @@
     </div>
   </div>
 
-  {#if hasContent}
-    <ContentTable items={data.content.items} />
+  {#if contentQuery.loading}
+    <div class="table-skeleton">
+      <div class="skeleton table-skeleton-header" style="width: 100%; height: var(--space-10);"></div>
+      {#each Array(5) as _, i}
+        <div class="table-skeleton-row">
+          <div class="skeleton" style="width: {35 + (i % 3) * 10}%; height: var(--space-5);"></div>
+          <div class="skeleton" style="width: 12%; height: var(--space-5);"></div>
+          <div class="skeleton" style="width: 15%; height: var(--space-5);"></div>
+          <div class="skeleton" style="width: 18%; height: var(--space-5);"></div>
+          <div class="skeleton" style="width: 10%; height: var(--space-5);"></div>
+        </div>
+      {/each}
+    </div>
+  {:else if hasContent}
+    <ContentTable items={contentItems} />
 
     {#if totalPages > 1}
       <div class="pagination-wrapper">
@@ -250,5 +279,42 @@
   .empty-cta:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
+  }
+
+  .table-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .table-skeleton-header {
+    border-radius: 0;
+  }
+
+  .table-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 </style>

@@ -677,5 +677,62 @@
   "about_creators_body": "Upload, organize, and monetize your content. Set up your organization, invite team members, and build your audience with powerful tools and analytics.",
   "about_learners_title": "For Learners",
   "about_learners_body": "Discover content from creators you trust. Track your progress, build your library, and learn at your own pace with adaptive streaming.",
-  "about_cta": "Get Started"
+  "about_cta": "Get Started",
+
+  "command_palette_label": "Command palette",
+  "command_palette_search_placeholder": "Search pages, content, actions...",
+  "command_palette_search_label": "Command palette search",
+  "command_palette_no_results": "No results found",
+  "command_palette_hint_navigate": "Navigate",
+  "command_palette_hint_select": "Select",
+  "command_palette_hint_close": "Close",
+  "command_palette_group_pages": "Pages",
+  "command_palette_group_actions": "Actions",
+  "command_palette_page_dashboard": "Dashboard",
+  "command_palette_page_content": "Content",
+  "command_palette_page_media": "Media",
+  "command_palette_page_analytics": "Analytics",
+  "command_palette_page_team": "Team",
+  "command_palette_page_customers": "Customers",
+  "command_palette_page_settings": "Settings",
+  "command_palette_page_billing": "Billing",
+  "command_palette_action_create_content": "Create new content",
+  "command_palette_action_view_site": "View public site",
+  "command_palette_action_badge": "Action",
+
+  "carousel_view_all": "View all",
+  "carousel_default_label": "Content carousel",
+  "carousel_scroll_left": "Scroll left",
+  "carousel_scroll_right": "Scroll right",
+
+  "table_selected_count": "{selected} of {total} selected",
+  "table_select_all": "Select all rows",
+  "table_select_row": "Select row",
+
+  "view_toggle_label": "View mode",
+  "view_toggle_grid": "Grid view",
+  "view_toggle_list": "List view",
+
+  "back_to_top": "Back to top",
+
+  "preview_player_load_error": "Failed to load preview.",
+  "preview_player_init_error": "Failed to initialize preview player.",
+  "player_play": "Play",
+  "player_pause": "Pause",
+  "player_unmute": "Unmute",
+  "player_mute": "Mute",
+  "player_fullscreen": "Fullscreen",
+
+  "nav_badge_items": "{count} items",
+
+  "studio_sidebar_admin": "Admin",
+  "studio_sidebar_owner": "Owner",
+
+  "search_placeholder": "Search...",
+  "search_clear": "Clear search",
+  "search_recent": "Recent",
+  "search_clear_button": "Clear",
+
+  "brand_editor_auto": "Auto",
+  "brand_editor_customize": "Customize"
 }

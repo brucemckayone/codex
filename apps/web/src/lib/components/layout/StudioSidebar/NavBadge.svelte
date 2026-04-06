@@ -1,4 +1,6 @@
 <script lang="ts">
+  import * as m from '$paraglide/messages';
+
   interface Props {
     count: number;
   }
@@ -7,7 +9,7 @@
 </script>
 
 {#if count > 0}
-  <span class="nav-badge" aria-label="{count} items">
+  <span class="nav-badge" aria-label={m.nav_badge_items({ count: String(count) })}>
     {count > 99 ? '99+' : count}
   </span>
 {/if}

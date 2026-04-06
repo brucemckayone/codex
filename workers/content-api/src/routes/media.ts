@@ -21,7 +21,6 @@ import {
 import type {
   CreateMediaResponse,
   DeleteMediaResponse,
-  MediaListResponse,
   MediaResponse,
   UpdateMediaResponse,
 } from '@codex/content';

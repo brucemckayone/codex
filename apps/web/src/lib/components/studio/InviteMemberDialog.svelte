@@ -2,15 +2,15 @@
   @component InviteMemberDialog
 
   Dialog for inviting a new member to the organization.
-  Contains email and role select fields with validation.
+  Uses DialogForm for the shared dialog + form boilerplate.
 
   @prop {boolean} open - Whether the dialog is open
   @prop {(open: boolean) => void} onOpenChange - Callback for open state change
   @prop {(email: string, role: string) => Promise<void>} onInvite - Callback when invite is submitted
 -->
 <script lang="ts">
-  import * as Dialog from '$lib/components/ui/Dialog';
-  import { Alert, Button, Select } from '$lib/components/ui';
+  import { DialogForm } from '$lib/components/ui/DialogForm';
+  import { Select } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -61,113 +61,54 @@
   }
 
   function handleOpenChange(isOpen: boolean) {
-    open = isOpen;
-    onOpenChange?.(isOpen);
     if (!isOpen) {
       // Reset form state on close
       email = '';
       role = 'creator';
       error = null;
     }
+    onOpenChange?.(isOpen);
   }
 </script>
 
-<Dialog.Root bind:open onOpenChange={handleOpenChange}>
-  <Dialog.Content>
-    <Dialog.Header>
-      <Dialog.Title>{m.team_invite()}</Dialog.Title>
-    </Dialog.Header>
+<DialogForm
+  title={m.team_invite()}
+  bind:open
+  {submitting}
+  {error}
+  onsubmit={handleSubmit}
+  onOpenChange={handleOpenChange}
+  submitLabel={m.team_invite_send()}
+>
+  <div class="form-field">
+    <label class="field-label" for="invite-email">
+      {m.team_invite_email()}
+    </label>
+    <input
+      type="email"
+      id="invite-email"
+      class="field-input"
+      bind:value={email}
+      placeholder="name@example.com"
+      required
+      disabled={submitting}
+    />
+  </div>
 
-    <form onsubmit={handleSubmit} class="invite-form">
-      {#if error}
-        <Alert variant="error">{error}</Alert>
-      {/if}
-
-      <div class="form-field">
-        <label class="field-label" for="invite-email">
-          {m.team_invite_email()}
-        </label>
-        <input
-          type="email"
-          id="invite-email"
-          class="field-input"
-          bind:value={email}
-          placeholder="name@example.com"
-          required
-          disabled={submitting}
-        />
-      </div>
-
-      <div class="form-field">
-        <Select
-          options={roleOptions}
-          bind:value={role}
-          label={m.team_invite_role()}
-          placeholder={m.team_invite_role()}
-        />
-      </div>
-
-      <Dialog.Footer>
-        <Button
-          type="button"
-          variant="secondary"
-          onclick={() => handleOpenChange(false)}
-          disabled={submitting}
-        >
-          {m.common_cancel()}
-        </Button>
-        <Button type="submit" variant="primary" disabled={submitting} loading={submitting}>
-          {#if submitting}
-            {m.common_loading()}
-          {:else}
-            {m.team_invite_send()}
-          {/if}
-        </Button>
-      </Dialog.Footer>
-    </form>
-  </Dialog.Content>
-</Dialog.Root>
+  <div class="form-field">
+    <Select
+      options={roleOptions}
+      bind:value={role}
+      label={m.team_invite_role()}
+      placeholder={m.team_invite_role()}
+    />
+  </div>
+</DialogForm>
 
 <style>
-  .invite-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
   .form-field {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
   }
-
-  .field-label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text);
-  }
-
-  .field-input {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    border-radius: var(--radius-md);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-background);
-    color: var(--color-text);
-    transition: var(--transition-colors);
-    width: 100%;
-  }
-
-  .field-input:focus {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
-    border-color: var(--color-border-focus);
-  }
-
-  .field-input:disabled {
-    opacity: var(--opacity-60);
-    cursor: not-allowed;
-  }
-
-
 </style>

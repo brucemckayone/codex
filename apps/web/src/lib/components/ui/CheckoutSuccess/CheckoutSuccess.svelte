@@ -45,7 +45,6 @@
   const MAX_RETRIES = 5;
   const RETRY_INTERVAL_MS = 3000;
   const shouldRetry = $derived(!isComplete && retryCount < MAX_RETRIES);
-  const retriesExhausted = $derived(!isComplete && retryCount >= MAX_RETRIES);
 
   $effect(() => {
     if (!shouldRetry) return;
@@ -162,26 +161,8 @@
       <h1 class="checkout-success__title">{m.checkout_success_confirming()}</h1>
       <p class="checkout-success__description">{m.checkout_success_confirming_description()}</p>
 
-    {:else if retriesExhausted}
-      <!-- Fallback: Retries exhausted -->
-      <div class="checkout-success__icon checkout-success__icon--pending">
-        <ClockIcon size={48} />
-      </div>
-
-      <h1 class="checkout-success__title">{m.checkout_success_almost_there()}</h1>
-      <p class="checkout-success__description">{m.checkout_success_almost_there_description()}</p>
-
-      <div class="checkout-success__actions">
-        <a href={libraryUrl} class="checkout-success__btn checkout-success__btn--primary">
-          {m.checkout_success_go_to_library()}
-        </a>
-        <a href={browseUrl} class="checkout-success__btn checkout-success__btn--secondary">
-          {m.checkout_success_browse()}
-        </a>
-      </div>
-
     {:else}
-      <!-- Session open/expired (no retries left, direct arrival) -->
+      <!-- Fallback: Retries exhausted or session open/expired -->
       <div class="checkout-success__icon checkout-success__icon--pending">
         <ClockIcon size={48} />
       </div>
@@ -274,16 +255,12 @@
 
   /* --- Spinner --- */
   .checkout-success__spinner {
-    width: 48px;
-    height: 48px;
+    width: var(--space-12);
+    height: var(--space-12);
     border-radius: 50%;
     border: var(--border-width-thick) solid var(--color-border);
     border-top-color: var(--color-interactive);
     animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
   }
 
   /* --- Typography --- */

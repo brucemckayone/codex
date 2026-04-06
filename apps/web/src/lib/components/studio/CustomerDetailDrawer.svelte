@@ -20,7 +20,7 @@
   import * as Dialog from '$lib/components/ui/Dialog';
   import { Button, Skeleton } from '$lib/components/ui';
   import * as Table from '$lib/components/ui/Table';
-  import { formatDate, formatPrice } from '$lib/utils/format';
+  import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
   import { getCustomerDetail } from '$lib/remote/admin.remote';
   import GrantAccessDialog from './GrantAccessDialog.svelte';
@@ -83,16 +83,7 @@
   }
 
   const displayName = $derived(customer?.name ?? '--');
-  const initials = $derived(
-    customer?.name
-      ? customer.name
-          .split(' ')
-          .map((n) => n[0])
-          .join('')
-          .toUpperCase()
-          .slice(0, 2)
-      : '?'
-  );
+  const initials = $derived(getInitials(customer?.name));
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
@@ -206,33 +197,37 @@
 </Dialog.Root>
 
 <style>
-  /* Override Dialog positioning for right-anchored drawer */
-  :global(.drawer-content) {
-    position: fixed !important;
-    top: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    left: auto !important;
-    max-width: 32rem !important;
-    width: 100% !important;
-    max-height: 100vh !important;
-    height: 100% !important;
-    border-radius: 0 !important;
-    border-right: none !important;
-    border-top: none !important;
-    border-bottom: none !important;
-    border-left: var(--border-width) var(--border-style) var(--color-border) !important;
-    overflow-y: auto !important;
-    display: flex !important;
-    flex-direction: column !important;
-    gap: var(--space-5) !important;
-    padding: var(--space-6) !important;
+  /*
+   * Override Dialog positioning for right-anchored drawer.
+   * Uses .dialog-content.drawer-content to beat the base .dialog-content
+   * specificity without !important.
+   */
+  :global(.dialog-content.drawer-content) {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    max-width: 32rem;
+    width: 100%;
+    max-height: 100vh;
+    height: 100%;
+    border-radius: 0;
+    border-right: none;
+    border-top: none;
+    border-bottom: none;
+    border-left: var(--border-width) var(--border-style) var(--color-border);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    padding: var(--space-6);
   }
 
   /* Full-width on mobile */
   @media (max-width: 40rem) {
-    :global(.drawer-content) {
-      max-width: 100% !important;
+    :global(.dialog-content.drawer-content) {
+      max-width: 100%;
     }
   }
 

@@ -735,6 +735,14 @@ export const account_payments_none_history = () => `No purchases yet. Browse the
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const account_payments_empty_description = () => `Your purchase history will appear here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const account_payments_discover_link = () => `Browse Discover`
 
 
@@ -943,6 +951,70 @@ export const studio_close_menu = () => `Close menu`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_view_public_site = () => `View Public Site`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_sidebar_collapse = () => `Collapse`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_sidebar_expand = () => `Expand sidebar`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_search_placeholder = () => `Search content...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_search_clear = () => `Clear search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_search_empty = () => `No matching content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_search_empty_description = () => `Try a different search term or clear the filter.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_search_clear_filter = () => `Clear search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_error_title = () => `Studio Error`
 
 
@@ -1104,6 +1176,46 @@ export const org_no_content_yet = () => `No content available yet`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const org_view_all_content = () => `View all content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_continue_watching_title = () => `Continue Watching`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_continue_watching_view_library = () => `View Library`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_new_releases_title = () => `New Releases`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_creators_preview_title = () => `Our Creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_creators_preview_view_all = () => `Meet All Creators`
 
 
 /**
@@ -1279,7 +1391,39 @@ export const explore_sort_title = () => `A-Z`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const explore_sort_popular = () => `Most Popular`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_sort_top_selling = () => `Top Selling`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_showing_filtered = (params) => `Showing ${params.count} of ${params.total} results`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const explore_no_content = () => `No content available yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_no_content_description = () => `This organization hasn't published any content yet. Check back soon.`
 
 
 /**
@@ -1328,6 +1472,38 @@ export const org_creators_subtitle = () => `Meet the talented creators in our co
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const org_creators_empty = () => `No creators found`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_creators_empty_description = () => `No creators have joined this organization yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_library_empty = () => `No purchases yet`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_library_empty_description = (params) => `Content you purchase from ${params.orgName} will appear here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_library_browse = () => `Browse Content`
 
 
 /**
@@ -1663,6 +1839,14 @@ export const content_price_free = () => `Free`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const content_price_purchased = () => `Purchased`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const content_detail_purchase_cta = () => `Purchase to watch`
 
 
@@ -1688,6 +1872,70 @@ export const content_detail_by_creator = (params) => `By ${params.creator}`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const content_detail_about = () => `About this content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_benefits_heading = () => `What you'll get`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_benefit_hd_video = () => `HD video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_benefit_hq_audio = () => `High-quality audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_benefit_full_article = () => `Full article`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_benefit_lifetime_access = () => `Lifetime access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_benefit_progress_tracking = () => `Progress tracking`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_benefit_any_device = () => `Watch on any device`
+
+
+/**
+ * @param {{ creator: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_more_from_creator = (params) => `More from ${params.creator}`
 
 
 /**
@@ -1776,6 +2024,78 @@ export const studio_activity_publish = (params) => `${params.title} was publishe
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_activity_signup = () => `New member joined`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_quick_actions = () => `Quick Actions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_action_create_content = () => `Create Content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_action_upload_media = () => `Upload Media`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_action_analytics = () => `View Analytics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_action_manage_team = () => `Manage Team`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_action_edit_branding = () => `Edit Branding`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_action_view_site = () => `View Public Site`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_revenue_chart_title = () => `Revenue (Last 14 Days)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_view_analytics = () => `View all analytics`
 
 
 /**
@@ -1944,6 +2264,14 @@ export const billing_top_content = () => `Top Content by Revenue`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const billing_top_content_empty = () => `No revenue data available yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const billing_top_content_empty_description = () => `Revenue data will appear here once you make your first sale.`
 
 
 /**
@@ -2120,6 +2448,22 @@ export const library_continue_watching = () => `Continue Watching`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const library_resume_from = (params) => `Resume from ${params.time}`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_time_remaining = (params) => `${params.time} left`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_resume = () => `Resume`
 
 
 /**
@@ -2431,6 +2775,14 @@ export const studio_content_empty = () => `No content yet. Create your first pie
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_empty_description = () => `Create your first piece of content to get started.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_col_title = () => `Title`
 
 
@@ -2623,7 +2975,55 @@ export const creator_profile_no_content = () => `No content published yet`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const creator_profile_no_content_description = () => `This creator hasn't published any content yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const creator_profile_follow = () => `Follow`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_profile_stat_content = (params) => `${params.count} Content Items`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_profile_stat_orgs = (params) => `${params.count} Organizations`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_profile_role_creator = () => `Creator`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_profile_org_content_count = (params) => `${params.count} content items`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_profile_view_on_org = (params) => `View on ${params.name}`
 
 
 /**
@@ -3559,6 +3959,14 @@ export const creator_content_empty = () => `No content available`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const creator_content_empty_description = () => `This creator hasn't published any content yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const creator_content_no_results = () => `No content matches your search`
 
 
@@ -3639,6 +4047,14 @@ export const studio_customers_empty = () => `No customers yet. Customers will ap
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_empty_description = () => `Customers will appear here once they make a purchase.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_customers_col_name = () => `Name`
 
 
@@ -3696,6 +4112,182 @@ export const studio_customers_error_description = () => `Something went wrong lo
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_customers_error_back_to_studio = () => `Back to Studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_title = () => `Customer Details`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_profile = () => `Profile`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_email = () => `Email`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_joined = () => `Joined`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_stats = () => `Statistics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_total_spent = () => `Total Spent`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_purchases = () => `Purchases`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_purchase_history = () => `Purchase History`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_col_date = () => `Date`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_col_content = () => `Content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_col_amount = () => `Amount`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_no_purchases = () => `No purchase history available.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_grant_access = () => `Grant Access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_loading = () => `Loading customer details...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_drawer_error = () => `Failed to load customer details.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_grant_title = () => `Grant Content Access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_grant_description = () => `Grant complimentary access to content for this customer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_grant_select_content = () => `Select Content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_grant_select_placeholder = () => `Choose content to grant access...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_grant_confirm = () => `Grant Access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_grant_success = () => `Access granted successfully.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_grant_error = () => `Failed to grant access.`
 
 
 /**
@@ -4191,6 +4783,86 @@ export const checkout_success_go_to_library = () => `Go to Library`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_listen_now = () => `Start Listening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_read_now = () => `Start Reading`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_confirming = () => `Confirming your purchase...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_confirming_description = () => `This usually takes just a few seconds. Please stay on this page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_almost_there = () => `Almost there...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_almost_there_description = () => `Your purchase is being processed. It should appear in your library within a few minutes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_whats_next = () => `What's Next`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_tip_progress = () => `Pick up where you left off — your progress is saved automatically.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_tip_library = () => `Find all your purchases in your Library, any time.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_tip_devices = () => `Watch on any device — your progress syncs everywhere.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const checkout_cancel_back = () => `Back to Content`
 
 
@@ -4311,6 +4983,14 @@ export const library_empty = () => `Your library is empty.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const library_empty_description = () => `Content you purchase will appear here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const library_browse = () => `Browse Content`
 
 
@@ -4368,6 +5048,30 @@ export const discover_error_description = () => `Some content could not be loade
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const discover_empty = () => `No content found. Check back soon.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_empty_description = () => `Try a different search or browse all content.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_empty_search_description = () => `No content matched your search. Try different keywords.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_clear_search = () => `Clear search`
 
 
 /**
@@ -4743,4 +5447,372 @@ export const about_cta = () => `Get Started`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const content_price_purchased = () => `Purchased`
+export const command_palette_label = () => `Command palette`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_search_placeholder = () => `Search pages, content, actions...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_search_label = () => `Command palette search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_no_results = () => `No results found`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_hint_navigate = () => `Navigate`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_hint_select = () => `Select`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_hint_close = () => `Close`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_group_pages = () => `Pages`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_group_actions = () => `Actions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_dashboard = () => `Dashboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_content = () => `Content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_media = () => `Media`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_analytics = () => `Analytics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_team = () => `Team`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_customers = () => `Customers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_settings = () => `Settings`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_page_billing = () => `Billing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_action_create_content = () => `Create new content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_action_view_site = () => `View public site`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_action_badge = () => `Action`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const carousel_view_all = () => `View all`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const carousel_default_label = () => `Content carousel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const carousel_scroll_left = () => `Scroll left`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const carousel_scroll_right = () => `Scroll right`
+
+
+/**
+ * @param {{ selected: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const table_selected_count = (params) => `${params.selected} of ${params.total} selected`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const table_select_all = () => `Select all rows`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const table_select_row = () => `Select row`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const view_toggle_label = () => `View mode`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const view_toggle_grid = () => `Grid view`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const view_toggle_list = () => `List view`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const back_to_top = () => `Back to top`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const preview_player_load_error = () => `Failed to load preview.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const preview_player_init_error = () => `Failed to initialize preview player.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_play = () => `Play`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_pause = () => `Pause`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_unmute = () => `Unmute`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_mute = () => `Mute`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const player_fullscreen = () => `Fullscreen`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_badge_items = (params) => `${params.count} items`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_sidebar_admin = () => `Admin`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_sidebar_owner = () => `Owner`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const search_placeholder = () => `Search...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const search_clear = () => `Clear search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const search_recent = () => `Recent`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const search_clear_button = () => `Clear`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_editor_auto = () => `Auto`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const brand_editor_customize = () => `Customize`

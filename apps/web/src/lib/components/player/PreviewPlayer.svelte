@@ -53,7 +53,7 @@
 
   function handleError() {
     if (!errorMessage) {
-      errorMessage = 'Failed to load preview.';
+      errorMessage = m.preview_player_load_error();
     }
     loading = false;
   }
@@ -93,7 +93,7 @@
         });
       }
     } catch {
-      errorMessage = 'Failed to initialize preview player.';
+      errorMessage = m.preview_player_init_error();
       loading = false;
     }
   }
@@ -145,7 +145,7 @@
               if (videoEl.paused) videoEl.play();
               else videoEl.pause();
             }}
-            aria-label={videoEl?.paused ? 'Play' : 'Pause'}
+            aria-label={videoEl?.paused ? m.player_play() : m.player_pause()}
           >
             {#if videoEl?.paused}
               <PlayIcon size={20} fill="currentColor" stroke="none" />
@@ -159,7 +159,7 @@
             onclick={() => {
               if (videoEl) videoEl.muted = !videoEl.muted;
             }}
-            aria-label={videoEl?.muted ? 'Unmute' : 'Mute'}
+            aria-label={videoEl?.muted ? m.player_unmute() : m.player_mute()}
           >
             {#if videoEl?.muted}
               <VolumeXIcon size={20} />
@@ -178,7 +178,7 @@
                 container?.requestFullscreen();
               }
             }}
-            aria-label="Fullscreen"
+            aria-label={m.player_fullscreen()}
           >
             <MaximizeIcon size={20} />
           </button>
@@ -232,7 +232,7 @@
     position: relative;
     width: 100%;
     aspect-ratio: 16 / 9;
-    background-color: var(--color-neutral-900);
+    background-color: var(--color-surface-tertiary);
     border-radius: var(--radius-md);
     overflow: hidden;
   }
@@ -244,14 +244,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: var(--color-neutral-900);
+    background-color: var(--color-surface-tertiary);
     z-index: 3;
   }
 
   .preview-player__spinner {
-    width: 2.5rem;
-    height: 2.5rem;
-    border: 3px solid color-mix(in srgb, white 20%, transparent);
+    width: var(--space-10);
+    height: var(--space-10);
+    border: var(--border-width-thick) solid color-mix(in srgb, white 20%, transparent);
     border-top-color: color-mix(in srgb, white 80%, transparent);
     border-radius: 50%;
     animation: preview-spin 0.8s linear infinite;
@@ -270,8 +270,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: var(--color-neutral-900);
-    color: var(--color-neutral-300);
+    background-color: var(--color-surface-tertiary);
+    color: var(--color-text-muted);
     z-index: 2;
     padding: var(--space-6);
     text-align: center;
@@ -314,8 +314,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
+    width: var(--space-8);
+    height: var(--space-8);
     padding: 0;
     border: none;
     background: transparent;
@@ -343,7 +343,7 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: var(--tracking-wider);
     color: var(--color-text-inverse);
     background: color-mix(in srgb, black 60%, transparent);
     border-radius: var(--radius-sm);
@@ -362,8 +362,8 @@
     z-index: 4;
     opacity: 0;
     transition:
-      opacity 300ms ease,
-      background 300ms ease;
+      opacity var(--duration-slow) var(--ease-default),
+      background var(--duration-slow) var(--ease-default);
     pointer-events: none;
   }
 
@@ -401,7 +401,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 2.5rem;
+    height: var(--space-10);
     padding-inline: var(--space-6);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);

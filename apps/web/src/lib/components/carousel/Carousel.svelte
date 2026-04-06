@@ -20,6 +20,7 @@
   import type { HTMLAttributes } from 'svelte/elements';
   import { onMount } from 'svelte';
   import { ChevronLeftIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
+  import * as m from '$paraglide/messages';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     items: T[];
@@ -39,7 +40,7 @@
     renderItem,
     title,
     viewAllHref,
-    viewAllLabel = 'View all',
+    viewAllLabel = m.carousel_view_all(),
     itemMinWidth = '280px',
     gap = 'var(--space-4)',
     showArrows = true,
@@ -92,7 +93,7 @@
     class="carousel {className ?? ''}"
     role="region"
     aria-roledescription="carousel"
-    aria-label={ariaLabel ?? title ?? 'Content carousel'}
+    aria-label={ariaLabel ?? title ?? m.carousel_default_label()}
     {...restProps}
   >
     {#if title}
@@ -127,7 +128,7 @@
           class="carousel__arrow carousel__arrow--left"
           hidden={!canScrollLeft}
           onclick={() => scrollByDirection('left')}
-          aria-label="Scroll left"
+          aria-label={m.carousel_scroll_left()}
         >
           <ChevronLeftIcon size={20} />
         </button>
@@ -135,7 +136,7 @@
           class="carousel__arrow carousel__arrow--right"
           hidden={!canScrollRight}
           onclick={() => scrollByDirection('right')}
-          aria-label="Scroll right"
+          aria-label={m.carousel_scroll_right()}
         >
           <ChevronRightIcon size={20} />
         </button>
@@ -198,7 +199,7 @@
   }
 
   .carousel__track::-webkit-scrollbar {
-    height: 4px;
+    height: var(--space-1);
   }
 
   .carousel__track::-webkit-scrollbar-track {

@@ -2,6 +2,7 @@
   import type { LayoutUser } from '$lib/types';
   import { PLATFORM_NAV } from '$lib/config/navigation';
   import { PageContainer } from '$lib/components/ui';
+  import SearchBar from '$lib/components/search/SearchBar.svelte';
   import UserMenu from './UserMenu.svelte';
   import MobileNav from './MobileNav.svelte';
 
@@ -23,6 +24,10 @@
         <a href={link.href} class="nav-link">{link.label}</a>
       {/each}
     </nav>
+
+    <div class="header-search">
+      <SearchBar scope="platform" />
+    </div>
 
     <div class="header-actions">
       <div class="desktop-only">
@@ -82,6 +87,17 @@
 
   .nav-link:hover {
     color: var(--color-text);
+  }
+
+  .header-search {
+    display: none;
+  }
+
+  @media (--breakpoint-md) {
+    .header-search {
+      display: flex;
+      flex: 0 1 auto;
+    }
   }
 
   .header-actions {

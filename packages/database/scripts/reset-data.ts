@@ -91,7 +91,7 @@ async function resetData() {
   await seedTemplates();
 
   // Summary
-  console.log('\n' + '─'.repeat(40));
+  console.log(`\n${'─'.repeat(40)}`);
   console.log('  Reset complete!');
   console.log('  - All application data cleared');
   console.log('  - 4 global email templates re-seeded');

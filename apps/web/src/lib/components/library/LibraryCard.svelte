@@ -12,6 +12,7 @@
   import type { LibraryItem } from '$lib/collections';
   import { PlayIcon, MusicIcon, FileTextIcon, CheckIcon } from '$lib/components/ui/Icon';
   import { formatDurationHuman } from '$lib/utils/format';
+  import { calculateProgressPercent } from '$lib/utils/progress';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -21,15 +22,7 @@
 
   const { item, href }: Props = $props();
 
-  const progressPercent = $derived.by(() => {
-    if (!item.progress) return 0;
-    if (item.progress.completed) return 100;
-    if (item.progress.percentComplete != null) return item.progress.percentComplete;
-    if (item.progress.durationSeconds > 0) {
-      return Math.round((item.progress.positionSeconds / item.progress.durationSeconds) * 100);
-    }
-    return 0;
-  });
+  const progressPercent = $derived(calculateProgressPercent(item.progress));
 
   const timeRemaining = $derived.by(() => {
     if (!item.progress || item.progress.completed) return null;

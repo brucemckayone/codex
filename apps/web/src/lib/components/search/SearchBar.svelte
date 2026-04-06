@@ -41,7 +41,7 @@
   );
 
   const defaultPlaceholder = $derived(
-    placeholder ?? m.search_placeholder?.() ?? 'Search...'
+    placeholder ?? m.search_placeholder()
   );
 
   const searchUrl = $derived.by(() => {
@@ -93,9 +93,12 @@
     }
   }
 
-  // Cmd/Ctrl+K global shortcut
+  // "/" global shortcut (standard search convention)
   function handleGlobalKeydown(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // Don't capture "/" when typing in an input, textarea, or contentEditable
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
       e.preventDefault();
       inputEl?.focus();
       isOpen = true;
@@ -118,6 +121,7 @@
       onkeydown={handleKeydown}
       aria-label={defaultPlaceholder}
       role="combobox"
+      aria-controls="search-results"
       aria-expanded={isOpen && recentSearches.length > 0}
       aria-autocomplete="list"
       autocomplete="off"
@@ -127,22 +131,22 @@
         type="button"
         class="search-bar__clear"
         onclick={() => { query = ''; inputEl?.focus(); }}
-        aria-label="Clear search"
+        aria-label={m.search_clear()}
       >
         <XIcon size={14} />
       </button>
     {:else}
       <kbd class="search-bar__shortcut">
-        <span>&#8984;K</span>
+        <span>/</span>
       </kbd>
     {/if}
   </form>
 
   {#if isOpen && recentSearches.length > 0 && !query}
-    <div class="search-bar__dropdown" role="listbox">
+    <div class="search-bar__dropdown" id="search-results" role="listbox">
       <div class="search-bar__dropdown-header">
-        <span class="search-bar__dropdown-title">Recent</span>
-        <button class="search-bar__dropdown-clear" onclick={clearRecent}>Clear</button>
+        <span class="search-bar__dropdown-title">{m.search_recent()}</span>
+        <button class="search-bar__dropdown-clear" onclick={clearRecent}>{m.search_clear_button()}</button>
       </div>
       {#each recentSearches as term (term)}
         <button

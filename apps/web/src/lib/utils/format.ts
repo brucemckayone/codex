@@ -52,3 +52,21 @@ export function formatPrice(cents: number | null): string {
   if (cents == null) return '';
   return gbpFormatter.format(cents / 100);
 }
+
+/**
+ * Extract initials from a display name.
+ * Returns up to 2 uppercase characters (first letter of each word).
+ * Falls back to `fallback` (default `'?'`) when name is null / empty.
+ */
+export function getInitials(
+  name: string | null | undefined,
+  fallback = '?'
+): string {
+  if (!name) return fallback;
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+}

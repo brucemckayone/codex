@@ -14,7 +14,6 @@ import type { NewOrganization, Organization } from '@codex/database/schema';
  */
 export type Database = typeof dbHttp | typeof dbWs;
 
-import type { ServiceConfig } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
   PaginationParams,

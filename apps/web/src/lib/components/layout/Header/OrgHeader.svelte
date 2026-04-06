@@ -3,6 +3,7 @@
   import { page } from '$app/state';
   import { getOrgNav } from '$lib/config/navigation';
   import { PageContainer } from '$lib/components/ui';
+  import SearchBar from '$lib/components/search/SearchBar.svelte';
   import UserMenu from './UserMenu.svelte';
   import MobileNav from './MobileNav.svelte';
 
@@ -43,6 +44,10 @@
         </a>
       {/each}
     </nav>
+
+    <div class="header-search">
+      <SearchBar scope="org" orgSlug={org.slug} />
+    </div>
 
     <div class="header-actions">
       <div class="desktop-only">
@@ -130,6 +135,17 @@
     height: var(--border-width-thick);
     background-color: var(--color-interactive);
     border-radius: var(--radius-xs);
+  }
+
+  .header-search {
+    display: none;
+  }
+
+  @media (--breakpoint-md) {
+    .header-search {
+      display: flex;
+      flex: 0 1 auto;
+    }
   }
 
   .header-actions {

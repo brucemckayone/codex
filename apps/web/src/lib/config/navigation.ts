@@ -18,7 +18,8 @@ export type SidebarIcon =
   | 'team'
   | 'customers'
   | 'settings'
-  | 'billing';
+  | 'billing'
+  | 'monetisation';
 
 export interface SidebarLink extends NavLink {
   icon: SidebarIcon;
@@ -37,6 +38,7 @@ export function getOrgNav(_slug: string): NavLink[] {
   return [
     { href: '/explore', label: 'Explore' },
     { href: '/creators', label: 'Creators' },
+    { href: '/pricing', label: 'Pricing' },
     { href: '/library', label: 'Library' },
   ];
 }
@@ -65,6 +67,7 @@ export const SIDEBAR_ADMIN_LINKS: SidebarLink[] = [
 
 /** Studio sidebar — owner-only links */
 export const SIDEBAR_OWNER_LINKS: SidebarLink[] = [
+  { href: '/studio/monetisation', label: 'Monetisation', icon: 'monetisation' },
   { href: '/studio/billing', label: 'Billing', icon: 'billing' },
 ];
 
@@ -82,6 +85,7 @@ export const SETTINGS_NAV: NavLink[] = [
 /** Account settings sub-navigation */
 export const ACCOUNT_NAV: NavLink[] = [
   { href: '/account', label: 'Profile' },
+  { href: '/account/subscriptions', label: 'Subscriptions' },
   { href: '/account/payment', label: 'Payments' },
   { href: '/account/notifications', label: 'Notifications' },
 ];

@@ -2,8 +2,7 @@
   @component GrantAccessDialog
 
   Modal dialog for granting complimentary content access to a customer.
-  Shows a content picker (Select dropdown) populated from the org's published content,
-  and a confirm button that calls the grantContentAccess API.
+  Uses DialogForm for the shared dialog + form boilerplate.
 
   @prop {boolean} open - Whether the dialog is open (bindable)
   @prop {string} customerId - Customer to grant access to
@@ -11,8 +10,8 @@
   @prop {() => void} [onSuccess] - Callback after successful grant
 -->
 <script lang="ts">
-  import * as Dialog from '$lib/components/ui/Dialog';
-  import { Alert, Button, Select } from '$lib/components/ui';
+  import { DialogForm } from '$lib/components/ui/DialogForm';
+  import { Select } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
   import { grantContentAccess } from '$lib/remote/admin.remote';
   import { listContent } from '$lib/remote/content.remote';
@@ -89,7 +88,6 @@
   }
 
   function handleOpenChange(isOpen: boolean) {
-    open = isOpen;
     if (!isOpen) {
       selectedContentId = undefined;
       error = null;
@@ -97,60 +95,28 @@
   }
 </script>
 
-<Dialog.Root bind:open onOpenChange={handleOpenChange}>
-  <Dialog.Content>
-    <Dialog.Header>
-      <Dialog.Title>{m.studio_customers_grant_title()}</Dialog.Title>
-      <Dialog.Description>{m.studio_customers_grant_description()}</Dialog.Description>
-    </Dialog.Header>
-
-    <form onsubmit={handleSubmit} class="grant-form">
-      {#if error}
-        <Alert variant="error">{error}</Alert>
-      {/if}
-
-      <div class="form-field">
-        <Select
-          options={contentOptions}
-          bind:value={selectedContentId}
-          label={m.studio_customers_grant_select_content()}
-          placeholder={loadingContent ? m.common_loading() : m.studio_customers_grant_select_placeholder()}
-        />
-      </div>
-
-      <Dialog.Footer>
-        <Button
-          type="button"
-          variant="secondary"
-          onclick={() => handleOpenChange(false)}
-          disabled={submitting}
-        >
-          {m.common_cancel()}
-        </Button>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={submitting || !selectedContentId}
-          loading={submitting}
-        >
-          {#if submitting}
-            {m.common_loading()}
-          {:else}
-            {m.studio_customers_grant_confirm()}
-          {/if}
-        </Button>
-      </Dialog.Footer>
-    </form>
-  </Dialog.Content>
-</Dialog.Root>
+<DialogForm
+  title={m.studio_customers_grant_title()}
+  description={m.studio_customers_grant_description()}
+  bind:open
+  {submitting}
+  {error}
+  onsubmit={handleSubmit}
+  onOpenChange={handleOpenChange}
+  submitLabel={m.studio_customers_grant_confirm()}
+  submitDisabled={!selectedContentId}
+>
+  <div class="form-field">
+    <Select
+      options={contentOptions}
+      bind:value={selectedContentId}
+      label={m.studio_customers_grant_select_content()}
+      placeholder={loadingContent ? m.common_loading() : m.studio_customers_grant_select_placeholder()}
+    />
+  </div>
+</DialogForm>
 
 <style>
-  .grant-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
   .form-field {
     display: flex;
     flex-direction: column;

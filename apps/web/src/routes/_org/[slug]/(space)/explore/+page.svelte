@@ -3,9 +3,13 @@
 
   Organization explore page with search, type filtering, category pills, sorting,
   filter chips, content grid, and pagination.
-  All filter/search/page state lives in URL query params for SEO and bookmarkability.
+
+  Type and category filters are client-side (instant, no network request) via
+  useLiveQuery + contentCollection. Search and sort remain server-side via URL params.
+  Pagination is server-driven.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { fly } from 'svelte/transition';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -13,37 +17,77 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
+  import { contentCollection, hydrateCollection, hydrateIfNeeded, useLiveQuery } from '$lib/collections';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { SearchIcon, SearchXIcon, FileIcon, XIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
   import { BackToTop } from '$lib/components/ui/BackToTop';
-  import { browser } from '$app/environment';
+  import { useViewMode } from '$lib/utils/view-mode.svelte';
   import type { PageData } from './$types';
+
 
   const { data }: { data: PageData } = $props();
 
+  // Client-side filter state for instant type/category filtering
+  let localType = $state(data.filters.type || '');
+  let localCategory = $state(data.filters.category || '');
+
+  // Hydrate collection on mount; re-hydrate when server data changes (search/sort navigation)
+  onMount(() => {
+    if (data.content?.items?.length) {
+      hydrateIfNeeded('content', data.content.items);
+    }
+  });
+
+  // When server data changes (search/sort/page navigation), re-hydrate the collection
+  // and reset client-side filters since the server result set has changed
+  let prevServerItems = data.content?.items;
+  $effect(() => {
+    const currentItems = data.content?.items;
+    if (currentItems && currentItems !== prevServerItems) {
+      hydrateCollection('content', currentItems);
+      prevServerItems = currentItems;
+      // Reset client-side filters when server data changes (new search/sort context)
+      localType = data.filters.type || '';
+      localCategory = data.filters.category || '';
+    }
+  });
+
+  // Reactive query over the content collection for client-side filtering
+  const contentQuery = useLiveQuery(
+    (q) => q.from({ item: contentCollection }),
+    undefined,
+    { ssrData: data.content?.items ?? [] }
+  );
+
   const orgName = $derived(data.org?.name ?? 'Organization');
-  const items = $derived(data.content?.items ?? []);
+  // Use live query data when available, fall back to server data
+  const items = $derived(contentQuery.data ?? data.content?.items ?? []);
   const total = $derived(data.content?.total ?? 0);
   const filters = $derived(data.filters);
   const limit = $derived(data.limit ?? 12);
-  const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
   const isAuthenticated = $derived(!!data.user);
 
-  // Category extraction from loaded items (client-side only)
+  // Category extraction from loaded items (before type filtering, so all categories show)
   const categories = $derived(
     [...new Set(items.map((item: { category?: string | null }) => item.category).filter(Boolean))]
       .sort((a, b) => (a as string).localeCompare(b as string)) as string[]
   );
-  const activeCategory = $derived(filters.category ?? '');
 
-  // Client-side category filtering
-  const displayItems = $derived(
-    activeCategory
-      ? items.filter((item: { category?: string | null }) => item.category === activeCategory)
-      : items
-  );
+  // Client-side filtered items — instant type + category filtering
+  const displayItems = $derived.by(() => {
+    let filtered = items;
+    if (localType) {
+      filtered = filtered.filter((item: { contentType?: string }) => item.contentType === localType);
+    }
+    if (localCategory) {
+      filtered = filtered.filter((item: { category?: string | null }) => item.category === localCategory);
+    }
+    return filtered;
+  });
+
+  const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
 
   // Auth-aware sort options
   const sortOptions = $derived([
@@ -56,7 +100,7 @@
     ] : []),
   ]);
 
-  // Filter chips
+  // Filter chips — type/category use local state; search/sort use URL params
   const activeFilterChips = $derived.by(() => {
     const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
 
@@ -68,20 +112,20 @@
       });
     }
 
-    if (filters.type) {
-      const typeLabel = typeOptions.find((o) => o.value === filters.type)?.label ?? filters.type;
+    if (localType) {
+      const typeLabel = typeOptions.find((o) => o.value === localType)?.label ?? localType;
       chips.push({
         key: 'type',
         label: `Type: ${typeLabel}`,
-        onRemove: () => updateFilter('type', null),
+        onRemove: () => { localType = ''; },
       });
     }
 
-    if (filters.category) {
+    if (localCategory) {
       chips.push({
         key: 'category',
-        label: `Category: ${filters.category}`,
-        onRemove: () => updateFilter('category', null),
+        label: `Category: ${localCategory}`,
+        onRemove: () => { localCategory = ''; },
       });
     }
 
@@ -98,7 +142,7 @@
   });
 
   const hasActiveFilters = $derived(
-    !!filters.q || !!filters.type || !!filters.category || (filters.sort !== 'newest')
+    !!filters.q || !!localType || !!localCategory || (filters.sort !== 'newest')
   );
 
   let searchInput = $state('');
@@ -128,6 +172,8 @@
 
   function clearFilters() {
     searchInput = '';
+    localType = '';
+    localCategory = '';
     const url = new URL(page.url);
     url.searchParams.delete('q');
     url.searchParams.delete('type');
@@ -150,16 +196,7 @@
     { value: 'written', label: m.explore_filter_article() },
   ] as const;
 
-  const STORAGE_KEY = 'codex-view-mode';
-
-  let viewMode = $state<'grid' | 'list'>(
-    browser ? (localStorage.getItem(STORAGE_KEY) as 'grid' | 'list') ?? 'grid' : 'grid'
-  );
-
-  function handleViewChange(mode: 'grid' | 'list') {
-    viewMode = mode;
-    if (browser) localStorage.setItem(STORAGE_KEY, mode);
-  }
+  const { viewMode, handleViewChange } = useViewMode();
 </script>
 
 <svelte:head>
@@ -179,7 +216,7 @@
     <h1 class="explore__title">{m.explore_title()}</h1>
     {#if total > 0}
       <p class="explore__count">
-        {#if activeCategory}
+        {#if localType || localCategory}
           {m.explore_showing_filtered({ count: String(displayItems.length), total: String(total) })}
         {:else}
           {m.explore_results_count({ count: String(total) })}
@@ -205,9 +242,9 @@
       {#each typeOptions as option (option.value)}
         <button
           class="explore__filter-btn"
-          class:explore__filter-btn--active={filters.type === option.value}
-          onclick={() => updateFilter('type', option.value || null)}
-          aria-pressed={filters.type === option.value}
+          class:explore__filter-btn--active={localType === option.value}
+          onclick={() => { localType = option.value; }}
+          aria-pressed={localType === option.value}
         >
           {option.label}
         </button>
@@ -230,18 +267,18 @@
     <nav class="explore__categories" aria-label="Filter by category">
       <button
         class="explore__category-pill"
-        class:explore__category-pill--active={!activeCategory}
-        onclick={() => updateFilter('category', null)}
-        aria-pressed={!activeCategory}
+        class:explore__category-pill--active={!localCategory}
+        onclick={() => { localCategory = ''; }}
+        aria-pressed={!localCategory}
       >
         {m.explore_filter_all()}
       </button>
       {#each categories as cat (cat)}
         <button
           class="explore__category-pill"
-          class:explore__category-pill--active={activeCategory === cat}
-          onclick={() => updateFilter('category', cat)}
-          aria-pressed={activeCategory === cat}
+          class:explore__category-pill--active={localCategory === cat}
+          onclick={() => { localCategory = cat; }}
+          aria-pressed={localCategory === cat}
         >
           {cat}
         </button>
@@ -274,7 +311,7 @@
 
   <!-- Content Grid -->
   {#if displayItems.length > 0}
-    <div class="explore__grid" data-view={viewMode}>
+    <div class="content-grid explore__grid" data-view={viewMode}>
       {#each displayItems as item (item.id)}
         <ContentCard
           id={item.id}
@@ -549,30 +586,7 @@
     color: var(--color-text);
   }
 
-  /* ── Content Grid ── */
-  .explore__grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-6);
-  }
-
-  @media (--breakpoint-sm) {
-    .explore__grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  @media (--breakpoint-lg) {
-    .explore__grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
   /* ── List View ── */
-  .explore__grid[data-view='list'] {
-    grid-template-columns: 1fr;
-    gap: var(--space-3);
-  }
 
   .explore__grid[data-view='list'] :global(.content-card) {
     flex-direction: row;

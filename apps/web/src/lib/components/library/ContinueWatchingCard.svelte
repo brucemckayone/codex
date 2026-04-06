@@ -14,6 +14,7 @@
   import * as m from '$paraglide/messages';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { formatDuration } from '$lib/utils/format';
+  import { calculateProgressPercent } from '$lib/utils/progress';
 
   interface Props {
     item: LibraryItem;
@@ -22,14 +23,7 @@
 
   const { item, size = 'default' }: Props = $props();
 
-  const progressPercent = $derived.by(() => {
-    if (!item.progress) return 0;
-    if (item.progress.percentComplete != null) return item.progress.percentComplete;
-    if (item.progress.durationSeconds && item.progress.durationSeconds > 0) {
-      return Math.round((item.progress.positionSeconds / item.progress.durationSeconds) * 100);
-    }
-    return 0;
-  });
+  const progressPercent = $derived(calculateProgressPercent(item.progress));
 
   const resumeTime = $derived(formatDuration(item.progress?.positionSeconds ?? 0));
 

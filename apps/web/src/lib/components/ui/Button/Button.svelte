@@ -77,31 +77,31 @@
 
   /* Size variants */
   .button[data-size="xs"] {
-    height: 1.75rem;
+    height: var(--space-7);
     padding-inline: var(--space-2);
     font-size: var(--text-xs);
   }
 
   .button[data-size="sm"] {
-    height: 2rem;
+    height: var(--space-8);
     padding-inline: var(--space-3);
     font-size: var(--text-sm);
   }
 
   .button[data-size="md"] {
-    height: 2.5rem;
+    height: var(--space-10);
     padding-inline: var(--space-4);
     font-size: var(--text-base);
   }
 
   .button[data-size="lg"] {
-    height: 2.75rem;
+    height: var(--space-11);
     padding-inline: var(--space-5);
     font-size: var(--text-lg);
   }
 
   .button[data-size="xl"] {
-    height: 3rem;
+    height: var(--space-12);
     padding-inline: var(--space-6);
     font-size: var(--text-lg);
   }
@@ -179,9 +179,5 @@
 
   .invisible {
     visibility: hidden;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
   }
 </style>

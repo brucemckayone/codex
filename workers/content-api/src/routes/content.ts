@@ -18,7 +18,6 @@
 import { CacheType, VersionedCache } from '@codex/cache';
 import { AUTH_ROLES } from '@codex/constants';
 import type {
-  ContentListResponse,
   ContentResponse,
   CreateContentResponse,
   DeleteContentResponse,

@@ -169,17 +169,17 @@
     max-width: 1200px;
     width: 100%;
     margin: 0 auto;
-    padding: var(--space-8, 2rem) var(--space-6, 1.5rem);
+    padding: var(--space-8) var(--space-6);
     display: flex;
     flex-direction: column;
-    gap: var(--space-6, 1.5rem);
+    gap: var(--space-6);
   }
 
   /* ── Header ── */
   .catalog-header {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2, 0.5rem);
+    gap: var(--space-2);
   }
 
   @media (--breakpoint-sm) {
@@ -192,16 +192,16 @@
 
   .catalog-title {
     margin: 0;
-    font-size: var(--text-2xl, 1.5rem);
-    font-weight: var(--font-bold, 700);
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
     color: var(--color-text);
   }
 
   .back-link {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-1, 0.25rem);
-    font-size: var(--text-sm, 0.875rem);
+    gap: var(--space-1);
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
     text-decoration: none;
     transition: var(--transition-colors);
@@ -215,14 +215,14 @@
   .catalog-filters {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3, 0.75rem);
+    gap: var(--space-3);
   }
 
   @media (--breakpoint-sm) {
     .catalog-filters {
       flex-direction: row;
       align-items: center;
-      gap: var(--space-4, 1rem);
+      gap: var(--space-4);
     }
   }
 
@@ -233,12 +233,12 @@
 
   .search-input {
     width: 100%;
-    padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-    font-size: var(--text-sm, 0.875rem);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
     color: var(--color-text);
     background: var(--color-surface);
-    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
-    border-radius: var(--radius-md, 0.375rem);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
     transition: var(--transition-colors);
   }
 
@@ -254,18 +254,18 @@
 
   .type-filters {
     display: flex;
-    gap: var(--space-1, 0.25rem);
+    gap: var(--space-1);
     flex-shrink: 0;
   }
 
   .type-btn {
-    padding: var(--space-1-5, 0.375rem) var(--space-3, 0.75rem);
-    font-size: var(--text-sm, 0.875rem);
-    font-weight: var(--font-medium, 500);
+    padding: var(--space-1-5) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
     color: var(--color-text-secondary);
     background: transparent;
-    border: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
-    border-radius: var(--radius-md, 0.375rem);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
     cursor: pointer;
     transition: var(--transition-colors);
     white-space: nowrap;
@@ -282,36 +282,17 @@
     border-color: var(--color-interactive);
   }
 
-  /* ── Content Grid ── */
-  .content-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-6, 1.5rem);
-  }
-
-  @media (--breakpoint-sm) {
-    .content-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  @media (--breakpoint-lg) {
-    .content-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
   /* ── Pagination ── */
   .pagination-wrapper {
     display: flex;
     justify-content: center;
-    padding-top: var(--space-4, 1rem);
-    border-top: var(--border-width, 1px) var(--border-style, solid) var(--color-border);
+    padding-top: var(--space-4);
+    border-top: var(--border-width) var(--border-style) var(--color-border);
   }
 
   /* ── Empty State ── */
   .empty-state__clear {
-    font-size: var(--text-sm, 0.875rem);
+    font-size: var(--text-sm);
     color: var(--color-interactive);
     text-decoration: none;
     transition: var(--transition-colors);
@@ -324,11 +305,11 @@
   /* ── Responsive ── */
   @media (--below-sm) {
     .catalog {
-      padding: var(--space-6, 1.5rem) var(--space-4, 1rem);
+      padding: var(--space-6) var(--space-4);
     }
 
     .catalog-title {
-      font-size: var(--text-xl, 1.25rem);
+      font-size: var(--text-xl);
     }
   }
 </style>

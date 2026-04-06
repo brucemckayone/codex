@@ -3,19 +3,39 @@
 
   Billing page for organization owners.
   Displays revenue summary cards, Stripe portal access, and top content by revenue.
+  Fetches data client-side to avoid __data.json round-trips.
 
-  @prop {PageData} data - Server-loaded billing data (revenue, topContent, org)
+  @prop data - Org info and userRole from parent studio layout
 -->
 <script lang="ts">
-  import type { PageData } from './$types';
+  import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
   import { Alert, Card, EmptyState } from '$lib/components/ui';
-  import { portalSessionForm } from '$lib/remote/billing.remote';
+  import { portalSessionForm, getOrgRevenue, getTopContent } from '$lib/remote/billing.remote';
 
-  let { data }: { data: PageData } = $props();
+  let { data } = $props();
+
+  // Role guard: owner only
+  $effect(() => {
+    if (data.userRole !== 'owner') {
+      goto('/studio');
+    }
+  });
+
+  const isOwner = $derived(data.userRole === 'owner');
+
+  const revenueQuery = $derived(
+    isOwner ? getOrgRevenue({ organizationId: data.org.id }) : null
+  );
+
+  const topContentQuery = $derived(
+    isOwner ? getTopContent({ organizationId: data.org.id, limit: 5 }) : null
+  );
+
+  const loading = $derived((revenueQuery?.loading ?? true) || (topContentQuery?.loading ?? true));
 
   /**
    * Format cents to currency string (GBP)
@@ -30,12 +50,12 @@
   }
 
   // Derived stats from revenue data
-  const totalRevenue = $derived(data.revenue?.totalRevenueCents ?? 0);
-  const totalPurchases = $derived(data.revenue?.totalPurchases ?? 0);
-  const avgOrder = $derived(data.revenue?.averageOrderValueCents ?? 0);
+  const totalRevenue = $derived(revenueQuery?.current?.totalRevenueCents ?? 0);
+  const totalPurchases = $derived(revenueQuery?.current?.totalPurchases ?? 0);
+  const avgOrder = $derived(revenueQuery?.current?.averageOrderValueCents ?? 0);
 
   // Top content items
-  const topContentItems = $derived(data.topContent?.items ?? []);
+  const topContentItems = $derived(topContentQuery?.current?.items ?? []);
 </script>
 
 <svelte:head>
@@ -43,6 +63,9 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
+{#if !isOwner}
+  <!-- Redirecting... -->
+{:else}
 <div class="billing">
   <header class="billing-header">
     <h1 class="billing-title">{m.billing_title()}</h1>
@@ -53,17 +76,17 @@
     <StatCard
       label={m.billing_total_revenue()}
       value={formatCurrency(totalRevenue)}
-      loading={!data.revenue}
+      loading={loading}
     />
     <StatCard
       label={m.billing_total_purchases()}
       value={totalPurchases}
-      loading={!data.revenue}
+      loading={loading}
     />
     <StatCard
       label={m.billing_avg_order()}
       value={formatCurrency(avgOrder)}
-      loading={!data.revenue}
+      loading={loading}
     />
   </section>
 
@@ -92,7 +115,18 @@
       <Card.Title level={2}>{m.billing_top_content()}</Card.Title>
     </Card.Header>
     <Card.Content>
-    {#if topContentItems.length > 0}
+    {#if loading}
+      <div class="table-skeleton">
+        <div class="skeleton table-skeleton-header" style="width: 100%; height: var(--space-10);"></div>
+        {#each Array(5) as _, i}
+          <div class="table-skeleton-row">
+            <div class="skeleton" style="width: {40 + (i % 3) * 8}%; height: var(--space-5);"></div>
+            <div class="skeleton" style="width: 20%; height: var(--space-5);"></div>
+            <div class="skeleton" style="width: 15%; height: var(--space-5);"></div>
+          </div>
+        {/each}
+      </div>
+    {:else if topContentItems.length > 0}
       <div class="table-wrapper">
         <Table.Root>
           <Table.Header>
@@ -125,6 +159,7 @@
     </Card.Content>
   </Card.Root>
 </div>
+{/if}
 
 <style>
   .billing {
@@ -168,6 +203,40 @@
   .table-wrapper {
     overflow-x: auto;
     margin-top: var(--space-4);
+  }
+
+  .table-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .table-skeleton-header {
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+
+  .table-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   :global(.content-title-cell) {

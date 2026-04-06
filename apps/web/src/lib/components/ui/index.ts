@@ -9,8 +9,10 @@ export { Button } from './Button/index';
 export * as Card from './Card/index';
 export { default as Checkbox } from './Checkbox/Checkbox.svelte';
 export * as Dialog from './Dialog/index';
+export { DialogForm } from './DialogForm/index';
 export * as DropdownMenu from './DropdownMenu/index';
 export { default as EmptyState } from './EmptyState/EmptyState.svelte';
+export { ErrorCard } from './ErrorCard/index';
 // Feedback
 export { default as ConfirmDialog } from './Feedback/ConfirmDialog.svelte';
 export { default as ErrorBanner } from './Feedback/ErrorBanner.svelte';

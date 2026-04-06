@@ -47,12 +47,6 @@
     border-width: 0;
   }
 
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .spinner {
       animation: pulse 1.5s ease-in-out infinite;

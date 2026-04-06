@@ -4,7 +4,7 @@
   Publishing controls sidebar: status, readiness checklist,
   visibility, pricing, category, tags, and danger zone.
 
-  @prop {any} form - The active form instance
+  @prop {ContentForm} form - The active form instance
   @prop {boolean} isEdit - Whether in edit mode
   @prop {ContentWithRelations} [content] - Existing content (edit mode)
   @prop {boolean} formPending - Whether the form is submitting
@@ -19,9 +19,12 @@
   import * as m from '$paraglide/messages';
   import TagsInput from './TagsInput.svelte';
   import type { ContentWithRelations } from '$lib/types';
+  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+
+  type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: any;
+    form: ContentForm;
     isEdit: boolean;
     content?: ContentWithRelations;
     formPending: boolean;
@@ -69,7 +72,7 @@
   ]);
 
   function handleVisibilityChange(val: string | undefined) {
-    if (val) form.fields.visibility.set(val);
+    if (val) form.fields.visibility.set(val as 'public' | 'private' | 'members_only' | 'purchased_only');
   }
 
   // Visibility descriptions
@@ -359,25 +362,6 @@
 
   .readiness-item[data-met] {
     color: var(--color-success-600);
-  }
-
-  /* Form inputs */
-  .field-input {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    border-radius: var(--radius-md);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-background);
-    color: var(--color-text);
-    transition: var(--transition-colors);
-    width: 100%;
-    font-family: inherit;
-  }
-
-  .field-input:focus {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
-    border-color: var(--color-border-focus);
   }
 
   .field-hint {

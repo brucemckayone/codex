@@ -9,12 +9,16 @@
  *   Phase 1: Personal content purchase is blocked by the backend — returns
  *   a friendly error message instead of a generic 500.
  */
-import { error, fail } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
-import { ApiError } from '$lib/server/errors';
+import {
+  handlePurchaseAction,
+  loadAccessAndProgress,
+} from '$lib/server/content-detail';
+import type { ContentWithRelations } from '$lib/types';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -58,10 +62,10 @@ export const load: PageServerLoad = async ({
   contentParams.set('status', 'published');
   contentParams.set('limit', '1');
 
-  let content: Record<string, unknown> | null = null;
+  let content: ContentWithRelations | null = null;
   try {
     const contentResult = await api.content.list(contentParams);
-    content = contentResult?.items?.[0] ?? null;
+    content = (contentResult?.items?.[0] as ContentWithRelations) ?? null;
   } catch {
     content = null;
   }
@@ -78,56 +82,55 @@ export const load: PageServerLoad = async ({
   // Render written content body to HTML
   const contentBodyHtml = await renderContentBody(content);
 
-  // Fetch related content in parallel (non-blocking, guards against null org)
+  // Fetch related content — returned as a bare promise (streamed, below fold)
   const relatedPromise = content.organization?.id
     ? getPublicContent({
         orgId: content.organization.id,
         sort: 'newest',
         limit: 5,
-      }).catch(() => null)
-    : Promise.resolve(null);
+      })
+        .then((r) => r?.items ?? [])
+        .catch(
+          () => [] as Awaited<ReturnType<typeof getPublicContent>>['items']
+        )
+    : Promise.resolve(
+        [] as Awaited<ReturnType<typeof getPublicContent>>['items']
+      );
 
-  // For unauthenticated visitors — no access checks
+  // For unauthenticated visitors — no access checks, no streaming
   if (!locals.user) {
-    const relatedResult = await relatedPromise;
     return {
       content,
       contentBodyHtml,
-      hasAccess: false,
+      hasAccess: false as const,
       streamingUrl: null,
       progress: null,
+      accessAndProgress: null,
       creatorProfile,
       username,
-      relatedContent: relatedResult?.items ?? [],
+      relatedContent: relatedPromise,
     };
   }
 
-  // For authenticated users — check access + progress in parallel
-  const [streamResult, progressResult] = await Promise.all([
-    api.access.getStreamingUrl(content.id).catch(() => null),
-    api.access.getProgress(content.id).catch(() => null),
-  ]);
-
-  const hasAccess = !!streamResult?.streamingUrl;
-  const streamingUrl = streamResult?.streamingUrl ?? null;
-  const progress = progressResult
-    ? {
-        positionSeconds: progressResult.positionSeconds,
-        durationSeconds: progressResult.durationSeconds,
-        completed: progressResult.completed,
-      }
-    : null;
-
-  const relatedResult = await relatedPromise;
+  // For authenticated users — stream access+progress (secondary, not needed for first paint)
   return {
     content,
     contentBodyHtml,
-    hasAccess,
-    streamingUrl,
-    progress,
+    hasAccess: null,
+    streamingUrl: null,
+    progress: null,
+    accessAndProgress: loadAccessAndProgress(
+      content.id,
+      platform,
+      cookies
+    ).catch(() => ({
+      hasAccess: false as const,
+      streamingUrl: null,
+      progress: null,
+    })),
     creatorProfile,
     username,
-    relatedContent: relatedResult?.items ?? [],
+    relatedContent: relatedPromise,
   };
 };
 
@@ -136,47 +139,16 @@ export const actions: Actions = {
    * Create a Stripe checkout session for content purchase.
    *
    * Phase 1: Personal content (no organizationId) will be rejected by the
-   * backend purchase service. We catch this and return a user-friendly message.
+   * backend purchase service. The shared handler catches this and returns a
+   * user-friendly message.
    */
-  purchase: async ({ request, url, params, platform, cookies }) => {
-    const api = createServerApi(platform, cookies);
-    const formData = await request.formData();
-    const contentId = formData.get('contentId');
-
-    if (!contentId || typeof contentId !== 'string') {
-      return fail(400, { checkoutError: 'Missing content ID' });
-    }
-
-    const origin = url.origin;
-    const successUrl = `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&contentSlug=${encodeURIComponent(params.contentSlug)}&username=${encodeURIComponent(params.username)}`;
-    const cancelUrl = url.href;
-
-    try {
-      const result = await api.checkout.create({
-        contentId,
-        successUrl,
-        cancelUrl,
-      });
-
-      return { sessionUrl: result.sessionUrl };
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        return fail(409, {
-          checkoutError: 'You already have access to this content.',
-        });
-      }
-
-      // Phase 1: Personal content purchase blocked by backend
-      if (err instanceof ApiError && err.message?.includes('organization')) {
-        return fail(422, {
-          checkoutError:
-            'Purchases for personal creator content are coming soon. Stay tuned!',
-        });
-      }
-
-      return fail(500, {
-        checkoutError: 'Failed to create checkout session. Please try again.',
-      });
-    }
-  },
+  purchase: async ({ request, url, params, platform, cookies }) =>
+    handlePurchaseAction({
+      request,
+      url,
+      platform,
+      cookies,
+      buildSuccessUrl: (origin) =>
+        `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&contentSlug=${encodeURIComponent(params.contentSlug)}&username=${encodeURIComponent(params.username)}`,
+    }),
 };

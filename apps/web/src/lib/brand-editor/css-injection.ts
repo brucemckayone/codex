@@ -82,6 +82,27 @@ function getOrgLayoutElement(): HTMLElement | null {
 }
 
 /**
+ * Remove inline --color-* and --brand-* override CSS properties from an element.
+ * Optionally excludes properties in the provided set (e.g. base brand vars that
+ * should be kept by injectBrandVars but removed by clearBrandVars).
+ */
+function removeOverrideVars(el: HTMLElement, excludeProps?: Set<string>): void {
+  const toRemove: string[] = [];
+  for (let i = 0; i < el.style.length; i++) {
+    const prop = el.style[i];
+    if (
+      (prop.startsWith('--color-') || prop.startsWith('--brand-')) &&
+      (!excludeProps || !excludeProps.has(prop))
+    ) {
+      toRemove.push(prop);
+    }
+  }
+  for (const prop of toRemove) {
+    el.style.removeProperty(prop);
+  }
+}
+
+/**
  * Inject brand editor state as CSS custom properties on the org layout element.
  * The CSS engine (org-brand.css) derives the full palette automatically.
  */
@@ -114,20 +135,9 @@ export function injectBrandVars(state: BrandEditorState): void {
 
   // Clear any stale token override CSS properties from previous injection passes.
   // This ensures removed overrides don't linger on the inline style.
-  const toRemove: string[] = [];
-  for (let i = 0; i < el.style.length; i++) {
-    const prop = el.style[i];
-    if (
-      (prop.startsWith('--color-') || prop.startsWith('--brand-')) &&
-      !BASE_VAR_PROPS.has(prop) &&
-      !DARK_VAR_PROPS.has(prop)
-    ) {
-      toRemove.push(prop);
-    }
-  }
-  for (const prop of toRemove) {
-    el.style.removeProperty(prop);
-  }
+  // Exclude base brand vars and dark mode vars — they were just set above.
+  const preservedProps = new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS]);
+  removeOverrideVars(el, preservedProps);
 
   // Inject token overrides from fine-tune panels
   const overrides = state.tokenOverrides ?? {};
@@ -169,18 +179,8 @@ export function clearBrandVars(): void {
     el.style.removeProperty(mapping.property);
   }
 
-  // Remove any token override CSS vars previously set
-  // Iterate all inline styles and remove --color-* and --brand-* overrides
-  const toRemove: string[] = [];
-  for (let i = 0; i < el.style.length; i++) {
-    const prop = el.style[i];
-    if (prop.startsWith('--color-') || prop.startsWith('--brand-')) {
-      toRemove.push(prop);
-    }
-  }
-  for (const prop of toRemove) {
-    el.style.removeProperty(prop);
-  }
+  // Remove all token override CSS vars previously set (no exclusions — clear everything)
+  removeOverrideVars(el);
 }
 
 /**

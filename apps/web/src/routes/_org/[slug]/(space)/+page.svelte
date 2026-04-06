@@ -28,8 +28,6 @@
   const orgDescription = $derived(data.org?.description ?? '');
   const logoUrl = $derived(data.org?.logoUrl ?? '');
   const newReleases = $derived(data.newReleases ?? []);
-  const creators = $derived(data.creators ?? { items: [], total: 0 });
-  const continueWatching = $derived(data.continueWatching);
 </script>
 
 <svelte:head>
@@ -70,45 +68,60 @@
         <a href="/explore" class="hero__cta">
           {m.org_hero_explore()}
         </a>
-        {#if creators.items.length > 0}
-          <a href="/creators" class="hero__cta hero__cta--secondary">
-            {m.org_creators_preview_view_all()}
-          </a>
-        {/if}
+        <a href="/creators" class="hero__cta hero__cta--secondary">
+          {m.org_creators_preview_view_all()}
+        </a>
       </div>
     </div>
   </section>
 
-  <!-- 2. Continue Watching (auth + has items only) -->
-  {#if continueWatching && continueWatching.length > 0}
+  <!-- 2. Continue Watching (streamed, auth + has items only) -->
+  {#await data.continueWatching}
     <section class="section continue-watching">
       <div class="section__header">
-        <h2 class="section__title">{m.org_continue_watching_title()}</h2>
-        <a href="/library" class="section__view-all">
-          {m.org_continue_watching_view_library()} &rarr;
-        </a>
+        <div class="skeleton" style="width: 220px; height: var(--text-2xl);"></div>
       </div>
       <div class="content-grid">
-        {#each continueWatching as item (item.content.id)}
-          <ContentCard
-            id={item.content.id}
-            title={item.content.title}
-            thumbnail={item.content.thumbnailUrl}
-            description={item.content.description}
-            contentType={item.content.contentType === 'written' ? 'article' : item.content.contentType}
-            duration={item.content.durationSeconds ?? null}
-            href={buildContentUrl(page.url, { slug: item.content.slug, id: item.content.id })}
-            progress={item.progress ? {
-              positionSeconds: item.progress.positionSeconds,
-              durationSeconds: item.progress.durationSeconds,
-              completed: item.progress.completed,
-              percentComplete: item.progress.percentComplete,
-            } : null}
-          />
+        {#each Array(3) as _}
+          <div class="skeleton-content-card">
+            <div class="skeleton skeleton-thumbnail"></div>
+            <div class="skeleton" style="width: 80%; height: var(--text-base);"></div>
+            <div class="skeleton" style="width: 50%; height: var(--text-sm);"></div>
+          </div>
         {/each}
       </div>
     </section>
-  {/if}
+  {:then continueWatching}
+    {#if continueWatching && continueWatching.length > 0}
+      <section class="section continue-watching">
+        <div class="section__header">
+          <h2 class="section__title">{m.org_continue_watching_title()}</h2>
+          <a href="/library" class="section__view-all">
+            {m.org_continue_watching_view_library()} &rarr;
+          </a>
+        </div>
+        <div class="content-grid">
+          {#each continueWatching as item (item.content.id)}
+            <ContentCard
+              id={item.content.id}
+              title={item.content.title}
+              thumbnail={item.content.thumbnailUrl}
+              description={item.content.description}
+              contentType={item.content.contentType === 'written' ? 'article' : item.content.contentType}
+              duration={item.content.durationSeconds ?? null}
+              href={buildContentUrl(page.url, { slug: item.content.slug, id: item.content.id })}
+              progress={item.progress ? {
+                positionSeconds: item.progress.positionSeconds,
+                durationSeconds: item.progress.durationSeconds,
+                completed: item.progress.completed,
+                percentComplete: item.progress.percentComplete,
+              } : null}
+            />
+          {/each}
+        </div>
+      </section>
+    {/if}
+  {/await}
 
   <!-- 3. New Releases -->
   <section class="section new-releases">
@@ -150,34 +163,51 @@
     {/if}
   </section>
 
-  <!-- 4. Creator Preview -->
-  {#if creators.items.length > 0}
+  <!-- 4. Creator Preview (streamed) -->
+  {#await data.creators}
     <section class="section creators-preview">
       <div class="section__header">
-        <h2 class="section__title">{m.org_creators_preview_title()}</h2>
-        {#if creators.total > 3}
-          <a href="/creators" class="section__view-all">
-            {m.org_creators_preview_view_all()} &rarr;
-          </a>
-        {/if}
+        <div class="skeleton" style="width: 200px; height: var(--text-2xl);"></div>
       </div>
       <div class="creators-preview__grid">
-        {#each creators.items as creator (creator.name)}
-          <div class="creator-preview-card">
-            <Avatar class="creator-preview-card__avatar">
-              <AvatarImage src={creator.avatarUrl} alt={creator.name} />
-              <AvatarFallback>{creator.name.charAt(0).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <span class="creator-preview-card__name">{creator.name}</span>
-            <Badge variant="neutral">{creator.role}</Badge>
-            <span class="creator-preview-card__count">
-              {m.org_creators_content_count({ count: String(creator.contentCount) })}
-            </span>
+        {#each Array(3) as _}
+          <div class="creator-preview-card skeleton-card">
+            <div class="skeleton skeleton-circle"></div>
+            <div class="skeleton" style="width: 120px; height: var(--text-base);"></div>
+            <div class="skeleton" style="width: 80px; height: var(--text-sm);"></div>
           </div>
         {/each}
       </div>
     </section>
-  {/if}
+  {:then creators}
+    {#if creators.items.length > 0}
+      <section class="section creators-preview">
+        <div class="section__header">
+          <h2 class="section__title">{m.org_creators_preview_title()}</h2>
+          {#if creators.total > 3}
+            <a href="/creators" class="section__view-all">
+              {m.org_creators_preview_view_all()} &rarr;
+            </a>
+          {/if}
+        </div>
+        <div class="creators-preview__grid">
+          {#each creators.items as creator (creator.name)}
+            <div class="creator-preview-card">
+              <Avatar class="creator-preview-card__avatar">
+                <AvatarImage src={creator.avatarUrl} alt={creator.name} />
+                <AvatarFallback>{creator.name.charAt(0).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <span class="creator-preview-card__name">{creator.name}</span>
+              <Badge variant="neutral">{creator.role}</Badge>
+              <span class="creator-preview-card__count">
+                {m.org_creators_content_count({ count: String(creator.contentCount) })}
+              </span>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
+  {/await}
 </div>
 
 <style>
@@ -321,25 +351,6 @@
     color: var(--color-interactive-hover);
   }
 
-  /* ── Content Grid ── */
-  .content-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-6);
-  }
-
-  @media (--breakpoint-sm) {
-    .content-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  @media (--breakpoint-lg) {
-    .content-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
   /* ── Empty State ── */
   .empty-state {
     text-align: center;
@@ -424,5 +435,49 @@
       width: 100%;
       justify-content: center;
     }
+  }
+
+  /* ── Skeleton Loading States ── */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+  }
+
+  .skeleton-circle {
+    width: var(--space-12);
+    height: var(--space-12);
+    border-radius: var(--radius-full);
+  }
+
+  .skeleton-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-6);
+  }
+
+  .skeleton-content-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .skeleton-thumbnail {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius-lg);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 </style>

@@ -5,6 +5,9 @@
   Shows media items with type icons, title, duration, and file size.
   Includes search/filter, clear selection, and empty state with upload CTA.
 
+  Built on Melt UI's createCombobox for keyboard navigation, ARIA, and
+  open/close management — eliminates manual handlers.
+
   @prop {MediaItemOption[]} mediaItems - Available media items (status = 'ready')
   @prop {string | null} [value] - Currently selected media item ID
   @prop {(mediaItemId: string | null) => void} [onchange] - Selection callback
@@ -12,6 +15,9 @@
   @prop {boolean} [showLibraryLink] - Whether to show "Go to Media library" links
 -->
 <script lang="ts">
+  import { createCombobox } from '@melt-ui/svelte';
+  import { fly } from 'svelte/transition';
+  import { untrack } from 'svelte';
   import * as m from '$paraglide/messages';
   import { formatDuration, formatFileSize } from '$lib/utils/format';
   import {
@@ -35,6 +41,9 @@
     fileSizeBytes?: number | null;
   }
 
+  /** Combobox option value — null represents the "No media" sentinel. */
+  type PickerValue = string | null;
+
   interface Props {
     mediaItems: MediaItemOption[];
     value?: string | null;
@@ -51,166 +60,72 @@
     showLibraryLink = false,
   }: Props = $props();
 
-  // ── State ───────────────────────────────────────────────────────────
-  let open = $state(false);
-  let searchQuery = $state('');
-  let highlightedIndex = $state(-1);
-  let searchInputEl: HTMLInputElement | undefined = $state();
-  let containerEl: HTMLDivElement | undefined = $state();
-  let listboxEl: HTMLDivElement | undefined = $state();
+  // ── Melt UI Combobox ────────────────────────────────────────────────
+  const {
+    elements: { input, menu, option, label },
+    states: { open, inputValue, selected, touchedInput },
+    helpers: { isSelected, isHighlighted },
+  } = createCombobox<PickerValue>({
+    forceVisible: true,
+    portal: null,
+    defaultSelected: untrack(() =>
+      value != null
+        ? { value, label: mediaItems.find((item) => item.id === value)?.title ?? '' }
+        : undefined
+    ),
+    onSelectedChange: ({ next }) => {
+      const newValue = next?.value ?? null;
+      onchange?.(newValue);
+      // Reset filter text after selection
+      inputValue.set(next?.label ?? '');
+      return next;
+    },
+  });
 
   const selectedItem = $derived(mediaItems.find((item) => item.id === value) ?? null);
-  const showSearch = $derived(mediaItems.length > 5);
+
+  // Filter items based on combobox input
   const filteredItems = $derived.by(() => {
-    if (!searchQuery) return mediaItems;
-    const query = searchQuery.toLowerCase();
+    if (!$touchedInput || !$inputValue) return mediaItems;
+    const query = $inputValue.toLowerCase();
     return mediaItems.filter((item) => item.title.toLowerCase().includes(query));
   });
 
-  // Flat list of selectable option IDs (null = "No media" option)
-  const selectableOptions = $derived.by(() => {
-    if (mediaItems.length === 0 || filteredItems.length === 0) return [];
-    return [null, ...filteredItems.map((item) => item.id)] as (string | null)[];
-  });
-
-  // ID of the currently keyboard-highlighted option (for aria-activedescendant)
-  const highlightedOptionId = $derived.by(() => {
-    if (highlightedIndex < 0 || highlightedIndex >= selectableOptions.length) return undefined;
-    const optionValue = selectableOptions[highlightedIndex];
-    return optionValue === null ? 'media-picker-option-none' : `media-picker-option-${optionValue}`;
-  });
-
-  // Reset highlight when search changes the filtered list
+  // Sync external value changes into combobox state
   $effect(() => {
-    searchQuery;
-    highlightedIndex = -1;
-  });
-
-  // ── Open / Close ────────────────────────────────────────────────────
-  function toggle() {
-    open = !open;
-    if (open) {
-      searchQuery = '';
-      highlightedIndex = -1;
-      requestAnimationFrame(() => searchInputEl?.focus());
+    const currentSelected = $selected;
+    if (value !== (currentSelected?.value ?? null)) {
+      const found = mediaItems.find((item) => item.id === value);
+      selected.set(found ? { value: found.id, label: found.title } : undefined);
+      inputValue.set(found?.title ?? '');
     }
-  }
-
-  function close() {
-    open = false;
-    searchQuery = '';
-    highlightedIndex = -1;
-  }
-
-  function selectItem(id: string | null) {
-    onchange?.(id);
-    close();
-  }
+  });
 
   function handleClear(e: MouseEvent) {
     e.stopPropagation();
     onchange?.(null);
+    selected.set(undefined);
+    inputValue.set('');
   }
 
-  // ── Click outside ───────────────────────────────────────────────────
-  function handleClickOutside(e: MouseEvent) {
-    if (open && containerEl && !containerEl.contains(e.target as Node)) {
-      close();
-    }
+  function selectNone() {
+    onchange?.(null);
+    selected.set(undefined);
+    inputValue.set('');
   }
-
-  // ── Keyboard ────────────────────────────────────────────────────────
-  function scrollHighlightedIntoView() {
-    requestAnimationFrame(() => {
-      if (!highlightedOptionId || !listboxEl) return;
-      const el = listboxEl.querySelector(`#${highlightedOptionId}`);
-      el?.scrollIntoView({ block: 'nearest' });
-    });
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (!open) {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        toggle();
-      }
-      return;
-    }
-
-    const count = selectableOptions.length;
-
-    switch (e.key) {
-      case 'Escape':
-        e.preventDefault();
-        close();
-        containerEl?.querySelector<HTMLElement>('[aria-haspopup]')?.focus();
-        break;
-
-      case 'ArrowDown':
-        e.preventDefault();
-        highlightedIndex = count === 0 ? -1 : (highlightedIndex + 1) % count;
-        scrollHighlightedIntoView();
-        break;
-
-      case 'ArrowUp':
-        e.preventDefault();
-        highlightedIndex = count === 0 ? -1 : (highlightedIndex - 1 + count) % count;
-        scrollHighlightedIntoView();
-        break;
-
-      case 'Home':
-        e.preventDefault();
-        highlightedIndex = count > 0 ? 0 : -1;
-        scrollHighlightedIntoView();
-        break;
-
-      case 'End':
-        e.preventDefault();
-        highlightedIndex = count > 0 ? count - 1 : -1;
-        scrollHighlightedIntoView();
-        break;
-
-      case 'Enter':
-        if (highlightedIndex >= 0 && highlightedIndex < count) {
-          e.preventDefault();
-          selectItem(selectableOptions[highlightedIndex]);
-        }
-        break;
-
-      case ' ':
-        // Don't intercept Space when typing in the search input
-        if (e.target instanceof HTMLInputElement) break;
-        if (highlightedIndex >= 0 && highlightedIndex < count) {
-          e.preventDefault();
-          selectItem(selectableOptions[highlightedIndex]);
-        }
-        break;
-
-      case 'Tab':
-        close();
-        break;
-    }
-  }
-
-  $effect(() => {
-    if (open) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  });
 </script>
 
 <input type="hidden" {name} value={value ?? ''} />
 
-<div
-  class="media-picker"
-  bind:this={containerEl}
-  role="group"
-  onkeydown={handleKeydown}
->
+<div class="media-picker">
   {#if selectedItem}
     <div class="picker-trigger has-value">
-      <div class="trigger-preview" onclick={toggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }} tabindex="0" role="button" aria-haspopup="listbox" aria-expanded={open}>
+      <button
+        {...$input}
+        use:input
+        type="button"
+        class="trigger-preview"
+      >
         <span class="trigger-icon" aria-hidden="true">
           {#if selectedItem.mediaType === 'video'}
             <PlayIcon size={16} />
@@ -234,7 +149,8 @@
             {/if}
           </span>
         </span>
-      </div>
+        <ChevronDownIcon size={16} class="trigger-chevron {$open ? 'rotated' : ''}" />
+      </button>
       <button
         type="button"
         class="clear-btn"
@@ -245,31 +161,25 @@
       </button>
     </div>
   {:else}
-    <button type="button" class="picker-trigger" onclick={toggle} aria-haspopup="listbox" aria-expanded={open}>
-      <span class="trigger-placeholder">{m.media_picker_placeholder()}</span>
-      <ChevronDownIcon size={16} class="trigger-chevron {open ? 'rotated' : ''}" />
-    </button>
+    <input
+      {...$input}
+      use:input
+      class="picker-trigger picker-input"
+      placeholder={m.media_picker_placeholder()}
+    />
   {/if}
 
-  {#if open}
+  {#if $open}
     <div
+      {...$menu}
+      use:menu
       class="picker-dropdown"
-      role="listbox"
-      id="media-picker-listbox"
-      aria-label={m.media_picker_placeholder()}
-      aria-activedescendant={highlightedOptionId}
-      bind:this={listboxEl}
+      transition:fly={{ y: -5, duration: 150 }}
     >
-      {#if showSearch}
+      {#if selectedItem}
         <div class="dropdown-search">
           <SearchIcon size={14} class="search-icon" />
-          <input
-            bind:this={searchInputEl}
-            type="text"
-            class="search-input"
-            placeholder={m.media_picker_search()}
-            bind:value={searchQuery}
-          />
+          <span class="search-hint">{m.media_picker_search()}</span>
         </div>
       {/if}
 
@@ -286,15 +196,11 @@
           <EmptyState title={m.media_picker_no_results()} />
         {:else}
           <button
+            {...$option({ value: null, label: m.media_picker_no_media() })}
+            use:option
             type="button"
             class="option option--clear"
             class:selected={!value}
-            class:highlighted={highlightedIndex === 0}
-            role="option"
-            id="media-picker-option-none"
-            aria-selected={!value}
-            onclick={() => selectItem(null)}
-            onpointerenter={() => { highlightedIndex = 0; }}
           >
             <span class="option-icon option-icon--clear" aria-hidden="true">
               <MinusCircleIcon size={16} />
@@ -305,17 +211,12 @@
             {/if}
           </button>
 
-          {#each filteredItems as item, i (item.id)}
-            <button
-              type="button"
+          {#each filteredItems as item (item.id)}
+            <div
+              {...$option({ value: item.id, label: item.title })}
+              use:option
               class="option"
               class:selected={item.id === value}
-              class:highlighted={highlightedIndex === i + 1}
-              role="option"
-              id="media-picker-option-{item.id}"
-              aria-selected={item.id === value}
-              onclick={() => selectItem(item.id)}
-              onpointerenter={() => { highlightedIndex = i + 1; }}
             >
               <span class="option-icon" data-type={item.mediaType} aria-hidden="true">
                 {#if item.mediaType === 'video'}
@@ -343,7 +244,7 @@
               {#if item.id === value}
                 <CheckIcon size={14} class="check-icon" stroke-width="2.5" />
               {/if}
-            </button>
+            </div>
           {/each}
         {/if}
       </div>
@@ -393,6 +294,14 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
     border-color: var(--color-border-focus);
+  }
+
+  .picker-input {
+    font-family: inherit;
+  }
+
+  .picker-input::placeholder {
+    color: var(--color-text-muted);
   }
 
   /* ── Trigger: placeholder state ──────────────────────────────────── */

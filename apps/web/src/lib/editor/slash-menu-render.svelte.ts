@@ -29,8 +29,11 @@ export function createSlashMenuRender(): NonNullable<
     if (!container || !clientRect) return;
     const rect = clientRect();
     if (!rect) return;
-    container.style.left = `${rect.left}px`;
-    container.style.top = `${rect.bottom + 8}px`;
+    // clientRect() returns viewport-relative coordinates, but the container
+    // is absolutely positioned relative to the document body — add scroll
+    // offset to convert viewport → document coordinates.
+    container.style.left = `${rect.left + window.scrollX}px`;
+    container.style.top = `${rect.bottom + 8 + window.scrollY}px`;
   }
 
   function cleanup() {

@@ -201,8 +201,9 @@ CacheType.COLLECTION_USER_LIBRARY(userId)          // 'user:{userId}:library'
 | Account layout SSR version passthrough | ✅ Done |
 | Account layout mount-time staleness check | ✅ Done |
 | `libraryCollection` → localStorage | ✅ Done |
-| `CACHE_KV` in content-api / admin-api | ❌ Pending |
-| Content invalidation on publish/update | ❌ Pending |
+| `CACHE_KV` in content-api (version bumping) | ✅ Done |
+| Content invalidation on publish/update | ✅ Done (via `bumpOrgContentVersion` in content-api routes) |
+| `CACHE_KV` in admin-api | ❌ Pending |
 | `CACHE_KV` in ecom-api (purchase → library version) | ✅ Done |
 | Platform/org layout version passthrough | ✅ Done |
 | Versions endpoint — superseded by depends/invalidate pattern | ✅ Done (design complete, no separate endpoint needed) |

@@ -8,10 +8,7 @@
  * - GET /api/content/public/discover - Browse all published content platform-wide (discover page)
  */
 
-import type {
-  ContentWithRelations,
-  PublicContentListResponse,
-} from '@codex/content';
+import type { ContentWithRelations } from '@codex/content';
 import {
   discoverContentQuerySchema,
   publicContentQuerySchema,

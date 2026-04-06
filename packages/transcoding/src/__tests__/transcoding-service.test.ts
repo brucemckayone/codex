@@ -11,12 +11,7 @@ import {
   TranscodingService,
   type TranscodingServiceFullConfig,
 } from '../services/transcoding-service';
-import type {
-  MediaStatus,
-  MediaType,
-  RunPodWebhookOutput,
-  RunPodWebhookPayload,
-} from '../types';
+import type { MediaStatus, MediaType, RunPodWebhookPayload } from '../types';
 
 // Mock Dependencies
 const mockDb = {

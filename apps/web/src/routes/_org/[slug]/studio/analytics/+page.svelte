@@ -3,8 +3,9 @@
 
   Analytics page showing revenue chart and top content table.
   Supports date range preset buttons (7d, 30d, 90d, year) that update the URL.
+  Fetches data client-side to avoid __data.json round-trips.
 
-  @prop {PageData} data - Server-loaded analytics data + org info from parent
+  @prop data - Org info and userRole from parent studio layout
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
@@ -13,28 +14,73 @@
   import { Card, PageHeader } from '$lib/components/ui';
   import RevenueChart from '$lib/components/studio/RevenueChart.svelte';
   import TopContentTable from '$lib/components/studio/TopContentTable.svelte';
+  import {
+    getAnalyticsRevenue,
+    getAnalyticsTopContent,
+  } from '$lib/remote/admin.remote';
 
   let { data } = $props();
 
-  const slug = $derived(page.params.slug);
+  // Role guard: admin/owner only
+  $effect(() => {
+    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+      goto('/studio');
+    }
+  });
+
+  const isAuthorized = $derived(data.userRole === 'admin' || data.userRole === 'owner');
+
+  // Parse date range from URL, default to last 30 days
+  const dateFrom = $derived.by(() => {
+    const now = new Date();
+    const defaultFrom = new Date(now);
+    defaultFrom.setDate(defaultFrom.getDate() - 30);
+    return page.url.searchParams.get('dateFrom') ?? defaultFrom.toISOString().split('T')[0];
+  });
+
+  const dateTo = $derived(
+    page.url.searchParams.get('dateTo') ?? new Date().toISOString().split('T')[0]
+  );
+
+  // $derived queries react to URL param changes
+  const revenueQuery = $derived(
+    isAuthorized
+      ? getAnalyticsRevenue({
+          organizationId: data.org.id,
+          dateFrom,
+          dateTo,
+        })
+      : null
+  );
+
+  const topContentQuery = $derived(
+    isAuthorized
+      ? getAnalyticsTopContent({
+          organizationId: data.org.id,
+          limit: 10,
+        })
+      : null
+  );
 
   // Derive chart data from revenue response
   const chartData = $derived(
-    (data.revenue?.revenueByDay ?? []).map((d) => ({
+    (revenueQuery?.current?.revenueByDay ?? []).map((d: any) => ({
       date: d.date,
       revenue: d.revenueCents,
     }))
   );
 
   // Derive top content items
-  const topContentItems = $derived(data.topContent?.items ?? []);
+  const topContentItems = $derived(topContentQuery?.current?.items ?? []);
+
+  const loading = $derived((revenueQuery?.loading ?? true) || (topContentQuery?.loading ?? true));
 
   /**
    * Calculate how many days back a date range covers from today
    */
   function getActivePreset(): string {
     const now = new Date();
-    const from = new Date(data.dateFrom);
+    const from = new Date(dateFrom);
     const diffDays = Math.round(
       (now.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)
     );
@@ -82,6 +128,9 @@
   <title>{m.analytics_title()} | {data.org.name}</title>
 </svelte:head>
 
+{#if !isAuthorized}
+  <!-- Redirecting... -->
+{:else}
 <div class="analytics-page">
   <PageHeader title={m.analytics_title()} />
 
@@ -118,27 +167,28 @@
   </div>
 
   <!-- Revenue Summary -->
-  {#if data.revenue}
+  {#if revenueQuery?.current}
+    {@const revenue = revenueQuery.current}
     <div class="summary-cards">
       <Card.Root class="summary-card">
         <Card.Content>
           <span class="summary-label">{m.billing_total_revenue()}</span>
           <span class="summary-value">
-            {formatRevenue(data.revenue.totalRevenueCents)}
+            {formatRevenue(revenue.totalRevenueCents)}
           </span>
         </Card.Content>
       </Card.Root>
       <Card.Root class="summary-card">
         <Card.Content>
           <span class="summary-label">{m.billing_total_purchases()}</span>
-          <span class="summary-value">{data.revenue.totalPurchases}</span>
+          <span class="summary-value">{revenue.totalPurchases}</span>
         </Card.Content>
       </Card.Root>
       <Card.Root class="summary-card">
         <Card.Content>
           <span class="summary-label">{m.billing_avg_order()}</span>
           <span class="summary-value">
-            {formatRevenue(data.revenue.averageOrderValueCents)}
+            {formatRevenue(revenue.averageOrderValueCents)}
           </span>
         </Card.Content>
       </Card.Root>
@@ -152,7 +202,7 @@
         <Card.Title level={2}>{m.analytics_revenue_title()}</Card.Title>
       </Card.Header>
       <Card.Content>
-        <RevenueChart data={chartData} loading={!data.revenue} />
+        <RevenueChart data={chartData} loading={loading || !revenueQuery?.current} />
       </Card.Content>
     </Card.Root>
   </section>
@@ -164,11 +214,12 @@
         <Card.Title level={2}>{m.analytics_top_content()}</Card.Title>
       </Card.Header>
       <Card.Content>
-        <TopContentTable items={topContentItems} loading={!data.topContent} />
+        <TopContentTable items={topContentItems} loading={loading || !topContentQuery?.current} />
       </Card.Content>
     </Card.Root>
   </section>
 </div>
+{/if}
 
 <style>
   .analytics-page {

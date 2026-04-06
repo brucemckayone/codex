@@ -20,9 +20,13 @@
     header?: Snippet;
     /** Footer snippet (dirty indicator + save/reset). */
     footer?: Snippet;
+    /** Save handler, wired to the minimized bar's Save button. */
+    onsave?: () => void;
+    /** Whether a save is in progress (disables minimized Save). */
+    saving?: boolean;
   }
 
-  const { children, header, footer }: Props = $props();
+  const { children, header, footer, onsave, saving = false }: Props = $props();
 </script>
 
 {#if brandEditor.isOpen}
@@ -66,7 +70,7 @@
     {/if}
 
     {#if brandEditor.isDirty}
-      <Button variant="primary" size="xs" onclick={() => {}}>
+      <Button variant="primary" size="xs" loading={saving} onclick={() => onsave?.()}>
         Save
       </Button>
     {/if}

@@ -30,16 +30,6 @@ const RESET = '\x1b[0m';
  * Format a log entry as a colorized, human-readable string for the dev console.
  * Only used when environment === 'development'.
  */
-// Fields promoted to the main log line for quick scanning
-const INLINE_KEYS = new Set([
-  'method',
-  'url',
-  'status',
-  'duration',
-  'durationMs',
-  'error',
-]);
-
 function formatDevLog(
   level: LogEvent['level'],
   message: string,

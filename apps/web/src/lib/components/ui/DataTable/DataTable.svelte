@@ -15,6 +15,7 @@
 <script lang="ts" generics="T extends Record<string, unknown>">
   import type { Snippet } from 'svelte';
   import { ChevronDownIcon, ChevronUpIcon } from '$lib/components/ui/Icon';
+  import * as m from '$paraglide/messages';
 
   interface ColumnDef {
     key: string;
@@ -89,7 +90,7 @@
   {#if selectable && selectedIds.size > 0 && bulkActions}
     <div class="data-table__bulk-bar">
       <span class="data-table__bulk-count">
-        {selectedIds.size} of {data.length} selected
+        {m.table_selected_count({ selected: String(selectedIds.size), total: String(data.length) })}
       </span>
       {@render bulkActions(selectedIds)}
     </div>
@@ -106,7 +107,7 @@
                 checked={allSelected}
                 indeterminate={someSelected}
                 onchange={toggleAll}
-                aria-label="Select all rows"
+                aria-label={m.table_select_all()}
               />
             </th>
           {/if}
@@ -152,7 +153,7 @@
                   type="checkbox"
                   checked={selectedIds.has(rowId)}
                   onchange={() => toggleRow(rowId)}
-                  aria-label="Select row"
+                  aria-label={m.table_select_row()}
                 />
               </td>
             {/if}

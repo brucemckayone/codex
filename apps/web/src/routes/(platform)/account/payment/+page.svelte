@@ -9,6 +9,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
+	import { formatPrice, formatDate } from '$lib/utils/format';
 
 	/**
 	 * Payment page component.
@@ -93,22 +94,7 @@
 		{ key: 'refunded', label: m.account_payments_filter_refunded() },
 	];
 
-	// Format currency (UK pricing default)
-	function formatAmount(cents: number): string {
-		return new Intl.NumberFormat('en-US', {
-			style: 'currency',
-			currency: 'USD',
-		}).format(cents / 100);
-	}
-
-	// Format date (UK format)
-	function formatDate(dateStr: string): string {
-		return new Date(dateStr).toLocaleDateString('en-US', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-		});
-	}
+	// formatPrice (GBP) and formatDate (en-GB) imported from $lib/utils/format
 </script>
 
 <svelte:head>
@@ -189,7 +175,7 @@
 									<span class="content-title">{purchase.contentTitle}</span>
 								</Table.Cell>
 								<Table.Cell class="amount-cell">
-									{formatAmount(purchase.amountCents)}
+									{formatPrice(purchase.amountCents)}
 								</Table.Cell>
 								<Table.Cell class="status-cell">
 									<Badge variant={getStatusVariant(purchase.status)}>

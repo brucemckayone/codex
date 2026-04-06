@@ -313,7 +313,7 @@
 </div>
 
 <!-- Brand Editor Panel — rendered OUTSIDE .org-layout so it uses system tokens -->
-<BrandEditorPanel>
+<BrandEditorPanel onsave={handleSave} {saving}>
   {#snippet header()}
     <BrandEditorHeader onclose={handleEditorClose} />
   {/snippet}

@@ -3,19 +3,34 @@
 
   Logo upload + "Edit Brand Live" CTA that opens the floating brand editor.
   Read-only brand summary showing current color swatches, fonts, and shape.
+  Fetches branding settings client-side to avoid __data.json round-trips.
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
-  import { uploadLogoForm, deleteLogo } from '$lib/remote/branding.remote';
+  import { getBrandingSettings, uploadLogoForm, deleteLogo } from '$lib/remote/branding.remote';
   import LogoUpload from '$lib/components/studio/LogoUpload.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { Button, Card, PageHeader } from '$lib/components/ui';
 
   let { data } = $props();
 
-  const orgId = $derived(data.orgId);
-  const branding = $derived(data.branding ?? {
+  const orgId = $derived(data.org.id);
+
+  // Role guard: admin/owner only
+  $effect(() => {
+    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+      goto('/studio');
+    }
+  });
+
+  const isAuthorized = $derived(data.userRole === 'admin' || data.userRole === 'owner');
+
+  const brandingQuery = $derived(
+    isAuthorized ? getBrandingSettings(orgId) : null
+  );
+
+  const branding = $derived(brandingQuery?.current ?? {
     logoUrl: null,
     primaryColorHex: '#C24129',
     secondaryColorHex: null,
@@ -52,6 +67,16 @@
   <title>{m.branding_title()} | {data.org?.name ?? 'Studio'}</title>
 </svelte:head>
 
+{#if !isAuthorized}
+  <!-- Redirecting... -->
+{:else if brandingQuery?.loading}
+<div class="branding-page">
+  <PageHeader title={m.branding_title()} description={m.branding_description()} />
+  <div class="loading-state">
+    <p>Loading branding settings...</p>
+  </div>
+</div>
+{:else}
 <div class="branding-page">
   <PageHeader title={m.branding_title()} description={m.branding_description()}>
     {#snippet actions()}
@@ -119,6 +144,7 @@
     </Card.Content>
   </Card.Root>
 </div>
+{/if}
 
 <style>
   .branding-page {
@@ -126,6 +152,14 @@
     flex-direction: column;
     gap: var(--space-6);
     max-width: 800px;
+  }
+
+  .loading-state {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-8);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
   }
 
   .brand-summary {

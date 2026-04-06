@@ -1,332 +1,130 @@
-<!--
-  @component StudioMediaPage
-
-  Media management page in Studio. Displays an upload zone and a grid of
-  existing media items with pagination. Supports edit metadata and delete actions.
-  Includes server-side filtering by media type and status.
--->
 <script lang="ts">
-  import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
-  import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
-  import MediaGrid from '$lib/components/studio/MediaGrid.svelte';
-  import EditMediaDialog from '$lib/components/studio/EditMediaDialog.svelte';
-  import { Pagination } from '$lib/components/ui/Pagination';
-  import * as Dialog from '$lib/components/ui/Dialog';
-  import { deleteMedia, updateMedia } from '$lib/remote/media.remote';
-  import { logger } from '$lib/observability';
-  import type { MediaItemWithRelations } from '$lib/types';
-  import * as m from '$paraglide/messages';
-  import { Button, PageHeader } from '$lib/components/ui';
+  import { listMedia } from '$lib/remote/media.remote';
+  import StudioMediaPage from '$lib/components/studio/StudioMediaPage.svelte';
 
   let { data } = $props();
 
-  // Delete state
-  let showDeleteConfirm = $state(false);
-  let deleteTargetId: string | null = $state(null);
-  let isDeleting = $state(false);
+  // Reactive URL params
+  const urlPage = $derived(Number(page.url.searchParams.get('page') ?? '1'));
+  const urlStatus = $derived(page.url.searchParams.get('status') as
+    | 'uploading' | 'uploaded' | 'transcoding' | 'ready' | 'failed'
+    | null);
+  const urlMediaType = $derived(page.url.searchParams.get('mediaType') as
+    | 'video' | 'audio'
+    | null);
 
-  // Edit state
-  let showEditDialog = $state(false);
-  let editTarget = $state<MediaItemWithRelations | null>(null);
+  // $derived query re-runs when URL params change
+  const mediaQuery = $derived(listMedia({
+    organizationId: data.org.id,
+    page: urlPage,
+    limit: 12,
+    ...(urlStatus && { status: urlStatus }),
+    ...(urlMediaType && { mediaType: urlMediaType }),
+  }));
 
-  const currentPage = $derived(data.pagination.page);
-  const totalPages = $derived(data.pagination.totalPages);
-
-  // Build pagination baseUrl that preserves current filter params
-  const paginationBaseUrl = $derived.by(() => {
-    const params = new URLSearchParams();
-    if (data.filters.status !== 'all') params.set('status', data.filters.status);
-    if (data.filters.mediaType !== 'all') params.set('mediaType', data.filters.mediaType);
-    const qs = params.toString();
-    return `/studio/media${qs ? `?${qs}` : ''}`;
+  const mediaData = $derived({
+    mediaItems: mediaQuery.current?.items ?? [],
+    pagination: {
+      page: mediaQuery.current?.pagination?.page ?? urlPage,
+      totalPages: mediaQuery.current?.pagination?.totalPages ?? 0,
+    },
+    filters: {
+      status: urlStatus ?? 'all',
+      mediaType: urlMediaType ?? 'all',
+    },
+    org: data.org,
   });
-
-  // Filter state (derived from URL)
-  const activeMediaType = $derived(data.filters.mediaType);
-  const activeStatus = $derived(data.filters.status);
-
-  const mediaTypeOptions = [
-    { value: 'all', label: m.media_filter_all_types() },
-    { value: 'video', label: m.media_type_video() },
-    { value: 'audio', label: m.media_type_audio() },
-  ];
-
-  const statusOptions = [
-    { value: 'all', label: m.media_filter_all_status() },
-    { value: 'ready', label: m.media_status_ready() },
-    { value: 'transcoding', label: m.media_status_processing() },
-    { value: 'failed', label: m.media_status_failed() },
-  ];
-
-  /**
-   * Navigate with updated filter params, resetting page to 1
-   */
-  function setFilter(key: string, value: string) {
-    const params = new URLSearchParams(page.url.searchParams);
-    if (value === 'all') {
-      params.delete(key);
-    } else {
-      params.set(key, value);
-    }
-    params.delete('page'); // Reset to page 1 on filter change
-    const qs = params.toString();
-    void goto(`/studio/media${qs ? `?${qs}` : ''}`, { invalidateAll: true });
-  }
-
-  /**
-   * Handle successful upload: refresh the media list
-   */
-  function handleUploadComplete() {
-    void invalidateAll();
-  }
-
-  /**
-   * Handle edit media: open edit dialog
-   */
-  function handleEdit(id: string) {
-    const media = data.mediaItems.find((item) => item.id === id);
-    if (!media) return;
-    editTarget = media;
-    showEditDialog = true;
-  }
-
-  /**
-   * Save edited media metadata
-   */
-  async function handleSave(id: string, updateData: { title?: string; description?: string | null }) {
-    await updateMedia({ id, data: updateData });
-    void invalidateAll();
-  }
-
-  /**
-   * Confirm delete media
-   */
-  function handleDelete(id: string) {
-    deleteTargetId = id;
-    showDeleteConfirm = true;
-  }
-
-  /**
-   * Execute the delete operation
-   */
-  async function confirmDelete() {
-    if (!deleteTargetId) return;
-    isDeleting = true;
-    try {
-      await deleteMedia(deleteTargetId);
-      showDeleteConfirm = false;
-      deleteTargetId = null;
-      void invalidateAll();
-    } catch (error) {
-      logger.error('Failed to delete media', { error: error instanceof Error ? error.message : String(error) });
-    } finally {
-      isDeleting = false;
-    }
-  }
-
-  /**
-   * Handle delete dialog close
-   */
-  function handleDeleteDialogChange(isOpen: boolean) {
-    showDeleteConfirm = isOpen;
-    if (!isOpen) {
-      deleteTargetId = null;
-    }
-  }
-
-  /**
-   * Handle page change via URL navigation
-   */
-  function handlePageChange(newPage: number) {
-    void newPage;
-  }
 </script>
 
-<svelte:head>
-  <title>{m.media_title()} | {data.org.name}</title>
-</svelte:head>
-
-<div class="media-page">
-  <PageHeader title={m.media_title()} description={m.media_subtitle()} />
-
-  <section class="upload-section">
-    <MediaUpload onUploadComplete={handleUploadComplete} />
-  </section>
-
-  <section class="filters-section">
-    <div class="filters-row">
-      <div class="filter-group">
-        {#each mediaTypeOptions as option (option.value)}
-          <button
-            class="filter-btn"
-            class:filter-btn--active={activeMediaType === option.value}
-            onclick={() => setFilter('mediaType', option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
-
-      <div class="filter-group">
-        {#each statusOptions as option (option.value)}
-          <button
-            class="filter-btn"
-            class:filter-btn--active={activeStatus === option.value}
-            onclick={() => setFilter('status', option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
+{#if mediaQuery.loading && (mediaQuery.current?.items ?? []).length === 0}
+  <div class="media-skeleton">
+    <div class="media-skeleton-header">
+      <div class="skeleton" style="width: 140px; height: var(--text-2xl);"></div>
+      <div class="skeleton" style="width: 120px; height: var(--space-8);"></div>
     </div>
-  </section>
-
-  <section class="media-section">
-    <MediaGrid
-      items={data.mediaItems}
-      onEdit={handleEdit}
-      onDelete={handleDelete}
-    />
-
-    {#if totalPages > 1}
-      <div class="pagination-container">
-        <Pagination
-          currentPage={currentPage}
-          {totalPages}
-          onPageChange={handlePageChange}
-          baseUrl={paginationBaseUrl}
-          paramName="page"
-        />
-      </div>
-    {/if}
-  </section>
-</div>
-
-<!-- Edit Media Dialog -->
-<EditMediaDialog
-  bind:open={showEditDialog}
-  media={editTarget}
-  onSave={handleSave}
-/>
-
-<!-- Delete Confirmation Dialog -->
-<Dialog.Root bind:open={showDeleteConfirm} onOpenChange={handleDeleteDialogChange}>
-  <Dialog.Content>
-    <Dialog.Header>
-      <Dialog.Title>{m.media_delete_title()}</Dialog.Title>
-    </Dialog.Header>
-    <p class="delete-description">{m.media_delete_confirm()}</p>
-    <div class="dialog-actions">
-      <Button
-        variant="secondary"
-        onclick={() => handleDeleteDialogChange(false)}
-        disabled={isDeleting}
-      >
-        {m.common_cancel()}
-      </Button>
-      <Button variant="destructive" onclick={confirmDelete} disabled={isDeleting} loading={isDeleting}>
-        {isDeleting ? m.common_loading() : m.media_delete_button()}
-      </Button>
+    <div class="media-skeleton-grid">
+      {#each Array(6) as _}
+        <div class="media-skeleton-card">
+          <div class="skeleton media-skeleton-thumb"></div>
+          <div class="media-skeleton-meta">
+            <div class="skeleton" style="width: 75%; height: var(--text-sm);"></div>
+            <div class="skeleton" style="width: 50%; height: var(--text-xs);"></div>
+          </div>
+        </div>
+      {/each}
     </div>
-  </Dialog.Content>
-</Dialog.Root>
+  </div>
+{:else}
+  <StudioMediaPage data={mediaData} studioName={data.org.name} />
+{/if}
 
 <style>
-  .media-page {
+  .media-skeleton {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
+    padding: var(--space-1);
   }
 
-/* Filters */
-  .filters-section {
+  .media-skeleton-header {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
+    align-items: center;
+    justify-content: space-between;
   }
 
-  .filters-row {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  @media (min-width: 640px) {
-    .filters-row {
-      flex-direction: row;
-      gap: var(--space-4);
-    }
-  }
-
-  .filter-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .filter-btn {
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-full, 9999px);
-    background-color: var(--color-surface);
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    white-space: nowrap;
-  }
-
-  .filter-btn:hover {
-    border-color: var(--color-border-hover);
-    color: var(--color-text);
-  }
-
-  .filter-btn--active {
-    background-color: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-text-inverse);
-  }
-
-  .filter-btn--active:hover {
-    background-color: var(--color-interactive-hover);
-    border-color: var(--color-interactive-hover);
-    color: var(--color-text-inverse);
-  }
-
-  .filter-btn:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--border-width-thick);
-  }
-
-  .media-section {
-    display: flex;
-    flex-direction: column;
+  .media-skeleton-grid {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
     gap: var(--space-4);
   }
 
-  .pagination-container {
-    display: flex;
-    justify-content: center;
-    margin-top: var(--space-2);
+  @media (--breakpoint-sm) {
+    .media-skeleton-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
-  /* Delete dialog content */
-  .delete-description {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
-    line-height: var(--leading-relaxed);
+  @media (--breakpoint-lg) {
+    .media-skeleton-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
   }
 
-  .dialog-actions {
+  .media-skeleton-card {
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--color-surface);
+  }
+
+  .media-skeleton-thumb {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 0;
+  }
+
+  .media-skeleton-meta {
     display: flex;
-    justify-content: flex-end;
+    flex-direction: column;
     gap: var(--space-2);
+    padding: var(--space-3);
   }
 
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 </style>

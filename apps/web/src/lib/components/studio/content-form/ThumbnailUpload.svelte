@@ -3,15 +3,18 @@
 
   Thumbnail preview zone with auto-extract from media or URL input fallback.
 
-  @prop {any} form - The active form instance
+  @prop {ContentForm} form - The active form instance
   @prop {string | null} [mediaThumbnailUrl] - Auto-extracted thumbnail URL from media
 -->
 <script lang="ts">
   import { ImageIcon } from '$lib/components/ui/Icon';
   import { Button } from '$lib/components/ui';
+  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+
+  type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: any;
+    form: ContentForm;
     mediaThumbnailUrl?: string | null;
   }
 
@@ -184,22 +187,8 @@
     margin-top: var(--space-3);
   }
 
-  .field-input {
+  .url-input-row :global(.field-input) {
     flex: 1;
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    border-radius: var(--radius-md);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-background);
-    color: var(--color-text);
-    transition: var(--transition-colors);
-    font-family: inherit;
-  }
-
-  .field-input:focus {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
-    border-color: var(--color-border-focus);
   }
 
 </style>

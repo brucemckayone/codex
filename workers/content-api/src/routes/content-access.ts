@@ -2,7 +2,6 @@ import type {
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
-  UserLibraryResponse,
 } from '@codex/access';
 import {
   createIdParamsSchema,

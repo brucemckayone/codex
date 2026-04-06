@@ -16,6 +16,7 @@
 <script lang="ts">
   import { UploadIcon } from '$lib/components/ui/Icon';
   import { Button } from '$lib/components/ui';
+  import { useDropZone } from '$lib/utils/use-drop-zone.svelte';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -34,10 +35,16 @@
     onDelete,
   }: Props = $props();
 
-  let isDragging = $state(false);
   let validationError = $state<string | null>(null);
   let fileInput: HTMLInputElement | undefined = $state();
   let uploadFormEl: HTMLFormElement | undefined = $state();
+
+  const dropZone = useDropZone({
+    onDrop: (files) => {
+      const file = files[0];
+      if (file) handleFile(file);
+    },
+  });
 
   const ALLOWED_TYPES = [
     'image/png',
@@ -78,25 +85,6 @@
   }
 
   // ─── Event Handlers ──────────────────────────────────────────────────────
-
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    isDragging = true;
-  }
-
-  function handleDragLeave(e: DragEvent) {
-    e.preventDefault();
-    isDragging = false;
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    isDragging = false;
-    const file = e.dataTransfer?.files?.[0];
-    if (file) {
-      handleFile(file);
-    }
-  }
 
   function handleFileSelect(e: Event) {
     const target = e.target as HTMLInputElement;
@@ -146,14 +134,14 @@
     <!-- Upload Zone -->
     <div
       class="drop-zone"
-      class:dragging={isDragging}
+      class:dragging={dropZone.isDragging}
       class:disabled={loading}
       role="button"
       tabindex="0"
       aria-label={m.branding_logo_upload()}
-      ondragover={handleDragOver}
-      ondragleave={handleDragLeave}
-      ondrop={handleDrop}
+      ondragover={dropZone.handlers.dragover}
+      ondragleave={dropZone.handlers.dragleave}
+      ondrop={dropZone.handlers.drop}
       onclick={handleBrowseClick}
       onkeydown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

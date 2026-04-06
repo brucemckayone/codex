@@ -2,7 +2,7 @@ import { getMediaThumbnailKey } from '../../../transcoding/src/paths';
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
 import { CONTENT } from './constants';
-import { ARTICLE_BODY, generateThumbnailSvg } from './placeholders';
+import { ARTICLE_BODY_JSON } from './placeholders';
 
 const now = new Date();
 const publishedAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
@@ -53,7 +53,8 @@ export async function seedContent(db: typeof DbClient) {
         DESCRIPTIONS[c.slug] ??
         `${c.title} — seed content for local development.`,
       contentType: c.contentType,
-      contentBody: c.contentType === 'written' ? ARTICLE_BODY : null,
+      contentBody: null,
+      contentBodyJson: c.contentType === 'written' ? ARTICLE_BODY_JSON : null,
       thumbnailUrl: thumbnailUrl(c.creatorId, c.mediaId),
       category: c.contentType === 'audio' ? 'podcasts' : 'tutorials',
       tags: ['seed-data', c.contentType],

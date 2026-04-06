@@ -1,19 +1,14 @@
 /**
  * Settings layout - server load
  *
- * Role guard: only admin or owner can access settings.
- * Redirects to studio root if insufficient permissions.
+ * Passes orgId from parent studio layout for settings pages.
+ * Role guard (admin/owner) is handled client-side in the settings pages
+ * since the studio uses ssr = false.
  */
-import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 
-export const load: LayoutServerLoad = async ({ parent, params }) => {
-  const { org, userRole } = await parent();
-
-  // Settings are restricted to admin and owner roles
-  if (userRole !== 'admin' && userRole !== 'owner') {
-    redirect(302, '/studio');
-  }
+export const load: LayoutServerLoad = async ({ parent }) => {
+  const { org } = await parent();
 
   return {
     orgId: org.id,

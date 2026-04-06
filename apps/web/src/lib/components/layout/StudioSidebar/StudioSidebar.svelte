@@ -26,7 +26,7 @@
   import type { Component } from 'svelte';
   import * as m from '$paraglide/messages';
 
-  const ICON_MAP: Record<SidebarIcon, Component<any>> = {
+  const ICON_MAP: Record<SidebarIcon, Component<Record<string, unknown>>> = {
     dashboard: LayoutDashboardIcon,
     content: FileIcon,
     media: VideoIcon,
@@ -97,7 +97,7 @@
 
     {#if isAdmin && context === 'org'}
       <div class="section-divider"></div>
-      <span class="section-label">Admin</span>
+      <span class="section-label">{m.studio_sidebar_admin()}</span>
       <ul class="nav-section" role="list">
         {#each adminLinks as link}
           {@const Icon = ICON_MAP[link.icon]}
@@ -119,7 +119,7 @@
 
     {#if isOwner && context === 'org'}
       <div class="section-divider"></div>
-      <span class="section-label">Owner</span>
+      <span class="section-label">{m.studio_sidebar_owner()}</span>
       <ul class="nav-section" role="list">
         {#each ownerLinks as link}
           {@const Icon = ICON_MAP[link.icon]}
@@ -268,7 +268,7 @@
   }
 
   .section-divider {
-    height: 1px;
+    height: var(--border-width);
     background-color: var(--color-border);
     margin: var(--space-3) var(--space-3);
   }

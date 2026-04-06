@@ -8,7 +8,7 @@
 import type { OrganizationWithRole } from '@codex/shared-types';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
-import { createServerApi, serverApiUrl } from '$lib/server/api';
+import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Organization by Slug (Authenticated)

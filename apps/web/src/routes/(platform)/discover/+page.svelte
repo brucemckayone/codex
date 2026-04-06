@@ -2,9 +2,11 @@
   /**
    * Discover page - filterable content grid with search
    */
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import type { PageData } from './$types';
+  import { hydrateIfNeeded } from '$lib/collections';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { extractPlainText } from '$lib/editor/render';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
@@ -12,6 +14,12 @@
   import * as m from '$paraglide/messages';
 
   const { data }: { data: PageData } = $props();
+
+  onMount(() => {
+    if (data.content?.items?.length) {
+      hydrateIfNeeded('content', data.content.items);
+    }
+  });
 
   let searchValue = $state(data.search);
 
@@ -142,24 +150,6 @@
 
   .search-btn:hover {
     background-color: var(--color-interactive-hover);
-  }
-
-  .content-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-6);
-  }
-
-  @media (--breakpoint-sm) {
-    .content-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  @media (--breakpoint-lg) {
-    .content-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
   }
 
   .content-card {

@@ -12,7 +12,7 @@ config({ path: path.resolve(__dirname, '../../../.env.dev') });
 
 import { dbWs } from '../src';
 import { seedCommerce } from './seed/commerce';
-import { SEED_PASSWORD, USERS } from './seed/constants';
+import { SEED_PASSWORD } from './seed/constants';
 import { seedContent } from './seed/content';
 import { seedMedia } from './seed/media';
 import { seedOrganizations } from './seed/organizations';
@@ -109,7 +109,7 @@ async function seedData() {
   await seedR2Files();
 
   // Summary
-  console.log('\n' + '─'.repeat(50));
+  console.log(`\n${'─'.repeat(50)}`);
   console.log('  Seed complete!');
   console.log('─'.repeat(50));
   console.log('\n  Login credentials (all accounts):');

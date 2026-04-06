@@ -14,9 +14,8 @@
 import type { BrandingSettingsResponse } from '@codex/shared-types';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
-import { createServerApi, serverApiUrl } from '$lib/server/api';
+import { createServerApi } from '$lib/server/api';
 import { invalidateCache } from '$lib/server/cache';
-import { ApiError } from '$lib/server/errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Branding Settings Query
@@ -50,18 +49,29 @@ export const getBrandingSettings = query(
 // Update Branding Form (Primary Color)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const hexColorOptional = z
-  .string()
-  .regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color')
-  .optional();
+// Form-data helpers: input stays as string (compatible with RemoteFormInput)
+// while output can be the validated/transformed value.
+const hexColorOptional = z.string().pipe(
+  z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color')
+    .optional()
+);
 
 const hexColorNullable = z
   .string()
-  .regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color')
-  .or(z.literal(''))
   .transform((v) => (v === '' ? null : v))
-  .nullable()
-  .optional();
+  .pipe(
+    z
+      .string()
+      .regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color')
+      .nullable()
+      .optional()
+  );
+
+const nullableString = z.string().transform((v) => (v === '' ? null : v));
+
+const formNumber = z.string().transform((v) => Number(v));
 
 const updateBrandingFormSchema = z.object({
   orgId: z.string().uuid(),
@@ -69,22 +79,10 @@ const updateBrandingFormSchema = z.object({
   secondaryColorHex: hexColorNullable,
   accentColorHex: hexColorNullable,
   backgroundColorHex: hexColorNullable,
-  fontBody: z
-    .string()
-    .max(50)
-    .or(z.literal(''))
-    .transform((v) => (v === '' ? null : v))
-    .nullable()
-    .optional(),
-  fontHeading: z
-    .string()
-    .max(50)
-    .or(z.literal(''))
-    .transform((v) => (v === '' ? null : v))
-    .nullable()
-    .optional(),
-  radiusValue: z.coerce.number().min(0).max(2).optional(),
-  densityValue: z.coerce.number().min(0.75).max(1.25).optional(),
+  fontBody: nullableString.pipe(z.string().max(50).nullable().optional()),
+  fontHeading: nullableString.pipe(z.string().max(50).nullable().optional()),
+  radiusValue: formNumber.pipe(z.number().min(0).max(2)).optional(),
+  densityValue: formNumber.pipe(z.number().min(0.75).max(1.25)).optional(),
 });
 
 /**
@@ -156,8 +154,6 @@ export const updateBrandingForm = form(
 // ─────────────────────────────────────────────────────────────────────────────
 // Update Branding Command (programmatic — for brand editor panel)
 // ─────────────────────────────────────────────────────────────────────────────
-
-const nullableString = z.string().nullable().optional();
 
 const updateBrandingCommandSchema = z.object({
   orgId: z.string().uuid(),

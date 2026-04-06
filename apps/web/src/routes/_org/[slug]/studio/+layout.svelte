@@ -13,6 +13,7 @@
   import { page } from '$app/state';
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import StudioSwitcher from '$lib/components/layout/StudioSidebar/StudioSwitcher.svelte';
+  import CommandPalette from '$lib/components/command-palette/CommandPalette.svelte';
   import type { LayoutData } from './$types';
   import { MenuIcon, XIcon } from '$lib/components/ui/Icon';
   import { browser } from '$app/environment';
@@ -141,6 +142,8 @@
       {@render children()}
     </main>
   </div>
+
+  <CommandPalette orgSlug={data.org.slug} />
 </div>
 
 <style>

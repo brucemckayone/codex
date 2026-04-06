@@ -33,7 +33,6 @@
     content={contentValue}
     preset="full"
     placeholder={m.studio_content_form_body_placeholder()}
-    maxLength={100000}
     formFieldAttrs={form.fields.contentBody.as('text')}
     oninput={handleInput}
   />

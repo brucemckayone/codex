@@ -11,6 +11,96 @@
 
 .grid { display: grid; }
 
+/* ── Content Grid ──
+   Responsive 1→2→3 column grid used across content listings.
+   Default gap is --space-6; use .content-grid--compact for --space-4. */
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+}
+
+.content-grid--compact {
+  gap: var(--space-4);
+}
+
+@media (--breakpoint-sm) {
+  .content-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (--breakpoint-lg) {
+  .content-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* List view variant (used with data-view="list" attribute) */
+.content-grid[data-view='list'] {
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+/* ── Form Field Inputs ──
+   Shared styling for text inputs, textareas, and labels used across forms. */
+.field-input {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-md);
+  border: var(--border-width) var(--border-style) var(--color-border);
+  background-color: var(--color-background);
+  color: var(--color-text);
+  transition: var(--transition-colors);
+  width: 100%;
+  font-family: inherit;
+}
+
+.field-input:focus {
+  outline: var(--border-width-thick) solid var(--color-focus);
+  outline-offset: -1px;
+  border-color: var(--color-border-focus);
+}
+
+.field-input:disabled {
+  opacity: var(--opacity-60);
+  cursor: not-allowed;
+}
+
+.field-label {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--color-text);
+}
+
+.field-textarea {
+  resize: vertical;
+  min-height: calc(var(--space-6) * 3);
+  font-family: inherit;
+}
+
+/* ── Animations ──
+   Global keyframes shared across components.
+   Svelte scopes @keyframes defined in <style> blocks,
+   so global definitions live here. */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: var(--opacity-50); }
+  50% { opacity: 1; }
+}
+
+.animate-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

@@ -8,7 +8,7 @@ import {
 } from '../../../transcoding/src/paths';
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
-import { MEDIA, USERS } from './constants';
+import { MEDIA } from './constants';
 
 const now = new Date();
 

@@ -51,20 +51,22 @@ export const load: PageServerLoad = async ({
     continueWatchingPromise = api.access.getUserLibrary(params);
   }
 
-  // Await all in parallel — each independently error-handled
-  const [contentResult, creatorsResult, continueWatchingResult] =
-    await Promise.all([
-      contentPromise.catch(() => null),
-      creatorsPromise.catch(() => null),
-      continueWatchingPromise?.catch(() => null) ?? Promise.resolve(null),
-    ]);
+  // Await only what's critical for first paint (hero + new releases)
+  const contentResult = await contentPromise.catch(() => null);
 
   return {
     newReleases: contentResult?.items ?? [],
-    creators: {
-      items: creatorsResult?.items ?? [],
-      total: creatorsResult?.pagination?.total ?? 0,
-    },
-    continueWatching: continueWatchingResult?.items ?? undefined,
+    // Stream non-critical data — bare promises resolve client-side.
+    // .catch() on each prevents "unhandled promise rejection" server crashes.
+    creators: creatorsPromise
+      .then((r) => ({
+        items: r?.items ?? [],
+        total: r?.pagination?.total ?? 0,
+      }))
+      .catch(() => ({ items: [], total: 0 })),
+    continueWatching:
+      continueWatchingPromise
+        ?.then((r) => r?.items ?? undefined)
+        ?.catch(() => undefined) ?? Promise.resolve(undefined),
   };
 };

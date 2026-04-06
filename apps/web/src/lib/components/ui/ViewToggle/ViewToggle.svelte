@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import { LayoutGridIcon, LayoutListIcon } from '$lib/components/ui/Icon';
+  import * as m from '$paraglide/messages';
 
   interface Props {
     value?: 'grid' | 'list';
@@ -19,14 +20,14 @@
   const { value = 'grid', onchange, class: className }: Props = $props();
 </script>
 
-<div class="view-toggle {className ?? ''}" role="radiogroup" aria-label="View mode">
+<div class="view-toggle {className ?? ''}" role="radiogroup" aria-label={m.view_toggle_label()}>
   <button
     class="view-toggle__btn"
     class:active={value === 'grid'}
     onclick={() => onchange?.('grid')}
     aria-checked={value === 'grid'}
     role="radio"
-    aria-label="Grid view"
+    aria-label={m.view_toggle_grid()}
   >
     <LayoutGridIcon size={18} />
   </button>
@@ -36,7 +37,7 @@
     onclick={() => onchange?.('list')}
     aria-checked={value === 'list'}
     role="radio"
-    aria-label="List view"
+    aria-label={m.view_toggle_list()}
   >
     <LayoutListIcon size={18} />
   </button>

@@ -19,7 +19,7 @@ export function generateThumbnailSvg(
   height = 450
 ): Buffer {
   // Truncate long titles
-  const label = title.length > 30 ? title.slice(0, 27) + '...' : title;
+  const label = title.length > 30 ? `${title.slice(0, 27)}...` : title;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <rect width="${width}" height="${height}" fill="${bgColor}"/>
   <rect x="0" y="${height - 4}" width="${width}" height="4" fill="${accentColor}"/>
@@ -147,6 +147,7 @@ export const VIDEO_VARIANTS = [
 
 // ── Article Body ─────────────────────────────────────────────────────────
 
+/** Legacy markdown body — kept for backwards compatibility with old content */
 export const ARTICLE_BODY = `# Getting Started with Modern Web Development
 
 The web development landscape has evolved dramatically. This guide covers the essential tools and patterns you need to build production-grade applications in 2026.
@@ -181,3 +182,231 @@ Each layer builds on the previous one. Don't try to implement everything at once
 ## What's Next
 
 In upcoming tutorials, we'll dive deep into each of these topics with hands-on projects. Subscribe to stay updated.`;
+
+/**
+ * TipTap JSON document for the article body.
+ * This is the canonical format used by the editor and server-side renderer.
+ * Must have `type: 'doc'` at root for parseContentBody() to route to contentBodyJson.
+ */
+export const ARTICLE_BODY_JSON: Record<string, unknown> = {
+  type: 'doc',
+  content: [
+    {
+      type: 'heading',
+      attrs: { level: 1 },
+      content: [
+        {
+          type: 'text',
+          text: 'Getting Started with Modern Web Development',
+        },
+      ],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'The web development landscape has evolved dramatically. This guide covers the essential tools and patterns you need to build production-grade applications in 2026.',
+        },
+      ],
+    },
+    {
+      type: 'heading',
+      attrs: { level: 2 },
+      content: [{ type: 'text', text: 'The Modern Stack' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'Today\u2019s web applications are built on a foundation of ',
+        },
+        {
+          type: 'text',
+          marks: [{ type: 'bold' }],
+          text: 'TypeScript',
+        },
+        { type: 'text', text: ', ' },
+        {
+          type: 'text',
+          marks: [{ type: 'bold' }],
+          text: 'component frameworks',
+        },
+        { type: 'text', text: ', and ' },
+        {
+          type: 'text',
+          marks: [{ type: 'bold' }],
+          text: 'edge computing',
+        },
+        { type: 'text', text: '. Here\u2019s what you need to know:' },
+      ],
+    },
+    {
+      type: 'heading',
+      attrs: { level: 3 },
+      content: [{ type: 'text', text: 'TypeScript First' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'TypeScript has become the default for serious web development. The type safety catches entire categories of bugs at compile time, and the DX improvements (autocomplete, refactoring, documentation) make it worth the setup cost for any project beyond a prototype.',
+        },
+      ],
+    },
+    {
+      type: 'heading',
+      attrs: { level: 3 },
+      content: [{ type: 'text', text: 'Component Frameworks' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'Svelte 5 introduced runes \u2014 a reactivity system that\u2019s both simpler and more powerful than previous approaches. Combined with SvelteKit\u2019s file-based routing and server-side rendering, you get a framework that handles the full spectrum from static sites to complex applications.',
+        },
+      ],
+    },
+    {
+      type: 'heading',
+      attrs: { level: 3 },
+      content: [{ type: 'text', text: 'Edge Computing' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'Cloudflare Workers run your code at the edge \u2014 physically closer to your users than any traditional server setup. Combined with R2 for storage and KV for caching, you can build globally distributed applications without managing infrastructure.',
+        },
+      ],
+    },
+    { type: 'horizontalRule' },
+    {
+      type: 'heading',
+      attrs: { level: 2 },
+      content: [{ type: 'text', text: 'Building Your First Project' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'Start with the basics: create a SvelteKit project, add TypeScript, and deploy to Cloudflare Pages. From there, add features incrementally:',
+        },
+      ],
+    },
+    {
+      type: 'orderedList',
+      content: [
+        {
+          type: 'listItem',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  marks: [{ type: 'bold' }],
+                  text: 'Authentication',
+                },
+                {
+                  type: 'text',
+                  text: ' \u2014 session-based auth with HttpOnly cookies',
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  marks: [{ type: 'bold' }],
+                  text: 'Database',
+                },
+                {
+                  type: 'text',
+                  text: ' \u2014 PostgreSQL via Neon\u2019s serverless driver',
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  marks: [{ type: 'bold' }],
+                  text: 'Storage',
+                },
+                {
+                  type: 'text',
+                  text: ' \u2014 R2 for media files, KV for session cache',
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  marks: [{ type: 'bold' }],
+                  text: 'Payments',
+                },
+                {
+                  type: 'text',
+                  text: ' \u2014 Stripe Checkout for purchases',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'blockquote',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'Each layer builds on the previous one. Don\u2019t try to implement everything at once.',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'heading',
+      attrs: { level: 2 },
+      content: [{ type: 'text', text: 'What\u2019s Next' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'In upcoming tutorials, we\u2019ll dive deep into each of these topics with hands-on projects. Subscribe to stay updated.',
+        },
+      ],
+    },
+  ],
+};

@@ -26,6 +26,8 @@
     EditIcon,
     GlobeIcon,
   } from '$lib/components/ui/Icon';
+  import { formatPrice } from '$lib/utils/format';
+  import { getDashboardStats, getActivityFeed } from '$lib/remote/admin.remote';
   import type { Component } from 'svelte';
   import * as m from '$paraglide/messages';
 
@@ -35,17 +37,10 @@
     data.userRole === 'admin' || data.userRole === 'owner'
   );
 
-  /**
-   * Format cents to currency string (GBP)
-   */
-  function formatRevenue(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(cents / 100);
-  }
+  // Query-based data fetching — page shell renders immediately,
+  // data loads in background with skeleton states
+  const statsQuery = $derived(data.org?.id ? getDashboardStats(data.org.id) : null);
+  const activitiesQuery = $derived(data.org?.id ? getActivityFeed({ organizationId: data.org.id, limit: 10 }) : null);
 
   // ── Quick Actions ──────────────────────────────────────────────────────────
 
@@ -72,11 +67,7 @@
 
   // ── Revenue Chart Data ─────────────────────────────────────────────────────
 
-  const chartData = $derived(
-    (data.stats?.revenue?.revenueByDay ?? [])
-      .slice(-14)
-      .map((d) => ({ date: d.date, revenue: d.revenueCents }))
-  );
+  // chartData is derived inside the {#await} block's {:then} branch
 </script>
 
 <svelte:head>
@@ -89,51 +80,81 @@
     <p class="dashboard-subtitle">{m.studio_dashboard_subtitle()}</p>
   </header>
 
-  <section class="stats-grid" aria-label="Dashboard statistics">
-    {#if isAdmin}
-      <StatCard
-        label={m.studio_stat_revenue()}
-        value={data.stats ? formatRevenue(data.stats.revenue.value) : '--'}
-        change={data.stats?.revenue.change}
-        loading={!data.stats}
-      />
-      <StatCard
-        label={m.studio_stat_customers()}
-        value={data.stats?.customers.value ?? '--'}
-        change={data.stats?.customers.change}
-        loading={!data.stats}
-      />
-    {/if}
-    <StatCard
-      label={m.studio_stat_content()}
-      value={data.stats?.contentCount.value ?? '--'}
-      change={data.stats?.contentCount.change}
-      loading={!data.stats}
-    />
-    <StatCard
-      label={m.studio_stat_views()}
-      value={data.stats?.views.value ?? '--'}
-      change={data.stats?.views.change}
-      loading={!data.stats}
-    />
-  </section>
-
-  {#if isAdmin}
-    <section class="revenue-section">
-      <Card>
-        <CardHeader>
-          <div class="revenue-header">
-            <CardTitle level={2}>{m.studio_revenue_chart_title()}</CardTitle>
-            <a href="/studio/analytics" class="revenue-link">
-              {m.studio_view_analytics()}
-            </a>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <RevenueChart data={chartData} loading={!data.stats} />
-        </CardContent>
-      </Card>
+  {#if statsQuery?.loading}
+    <section class="stats-grid" aria-label="Dashboard statistics">
+      {#each Array(isAdmin ? 4 : 2) as _}
+        <div class="stat-card-skeleton">
+          <div class="skeleton" style="width: 80px; height: var(--text-sm); margin-bottom: var(--space-2);"></div>
+          <div class="skeleton" style="width: 120px; height: var(--text-3xl);"></div>
+        </div>
+      {/each}
     </section>
+    {#if isAdmin}
+      <section class="revenue-section">
+        <Card>
+          <CardHeader>
+            <div class="revenue-header">
+              <div class="skeleton" style="width: 180px; height: var(--text-lg);"></div>
+              <div class="skeleton" style="width: 100px; height: var(--text-sm);"></div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div class="skeleton" style="width: 100%; height: 200px;"></div>
+          </CardContent>
+        </Card>
+      </section>
+    {/if}
+  {:else}
+    {@const stats = statsQuery?.current ?? null}
+    <section class="stats-grid" aria-label="Dashboard statistics">
+      {#if isAdmin}
+        <StatCard
+          label={m.studio_stat_revenue()}
+          value={stats ? formatPrice(stats.revenue.value) : '--'}
+          change={stats?.revenue.change}
+          loading={!stats}
+        />
+        <StatCard
+          label={m.studio_stat_customers()}
+          value={stats?.customers.value ?? '--'}
+          change={stats?.customers.change}
+          loading={!stats}
+        />
+      {/if}
+      <StatCard
+        label={m.studio_stat_content()}
+        value={stats?.contentCount.value ?? '--'}
+        change={stats?.contentCount.change}
+        loading={!stats}
+      />
+      <StatCard
+        label={m.studio_stat_views()}
+        value={stats?.views.value ?? '--'}
+        change={stats?.views.change}
+        loading={!stats}
+      />
+    </section>
+
+    {#if isAdmin && stats}
+      {@const chartData = (stats.revenue?.revenueByDay ?? [])
+        .slice(-14)
+        .map((d) => ({ date: d.date, revenue: d.revenueCents }))}
+      <section class="revenue-section">
+        <Card>
+          <CardHeader>
+            <div class="revenue-header">
+              <CardTitle level={2}>{m.studio_revenue_chart_title()}</CardTitle>
+              <a href="/studio/analytics" class="revenue-link">
+                {m.studio_view_analytics()}
+              </a>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <RevenueChart data={chartData} loading={!stats} />
+          </CardContent>
+        </Card>
+      </section>
+    {/if}
   {/if}
 
   <section class="quick-actions" aria-label={m.studio_quick_actions()}>
@@ -151,10 +172,18 @@
   </section>
 
   <section class="activity-section">
-    <ActivityFeed
-      activities={data.activities ?? []}
-      loading={!data.activities}
-    />
+    {#if activitiesQuery?.loading}
+      <div class="activity-skeleton">
+        {#each Array(5) as _}
+          <div class="skeleton" style="width: 100%; height: var(--space-10); margin-bottom: var(--space-2);"></div>
+        {/each}
+      </div>
+    {:else}
+      <ActivityFeed
+        activities={activitiesQuery?.current?.items ?? []}
+        loading={false}
+      />
+    {/if}
   </section>
 </div>
 
@@ -268,6 +297,40 @@
 
   .activity-section {
     margin-top: var(--space-2);
+  }
+
+  /* ── Skeleton Loading States ─────────────────────────────────────────── */
+
+  .stat-card-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-4);
+    background: var(--color-surface);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .activity-skeleton {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-md);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   /* ── Responsive ───────────────────────────────────────────────────────── */

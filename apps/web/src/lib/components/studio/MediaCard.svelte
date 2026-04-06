@@ -16,7 +16,7 @@
   import type { MediaItemWithRelations } from '$lib/types';
   import { Badge } from '$lib/components/ui/Badge';
   import { PlayIcon, MusicIcon, EditIcon, TrashIcon } from '$lib/components/ui/Icon';
-  import { formatDate } from '$lib/utils/format';
+  import { formatDate, formatFileSize } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -127,18 +127,6 @@
         return media.status;
     }
   });
-
-  /**
-   * Format file size to human-readable string
-   */
-  function formatFileSize(bytes: number | null): string {
-    if (!bytes) return '--';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024)
-      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  }
 
   const isVideo = $derived(media.mediaType === 'video');
 

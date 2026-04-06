@@ -7,12 +7,14 @@
  * Form actions:
  * - purchase: Creates a Stripe checkout session and returns the redirect URL
  */
-import { error, fail } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { getPublicContent } from '$lib/remote/content.remote';
-import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
-import { ApiError } from '$lib/server/errors';
+import {
+  handlePurchaseAction,
+  loadAccessAndProgress,
+} from '$lib/server/content-detail';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -50,54 +52,46 @@ export const load: PageServerLoad = async ({
   // Render written content body to HTML (server-side)
   const contentBodyHtml = await renderContentBody(content);
 
-  // Fetch related content in parallel (non-blocking — failure is acceptable)
+  // Fetch related content — returned as a bare promise (streamed, below fold)
   const relatedPromise = getPublicContent({
     orgId: org.id,
     sort: 'newest',
     limit: 5,
-  }).catch(() => null);
+  })
+    .then((r) => r?.items ?? [])
+    .catch(() => [] as Awaited<ReturnType<typeof getPublicContent>>['items']);
 
-  // For unauthenticated visitors, return immediately — no access checks needed
+  // For unauthenticated visitors — no access checks needed, no streaming
   if (!parentData.user) {
-    const relatedResult = await relatedPromise;
     return {
       content,
       contentBodyHtml,
-      hasAccess: false,
+      hasAccess: false as const,
       streamingUrl: null,
       progress: null,
-      relatedContent: relatedResult?.items ?? [],
+      accessAndProgress: null,
+      relatedContent: relatedPromise,
     };
   }
 
-  // For authenticated users, fetch streaming URL + progress in parallel.
+  // For authenticated users — stream access+progress (secondary, not needed for first paint).
   // getStreamingUrl doubles as access check — 403 means no access (expected for non-owners).
-  // Use direct API calls instead of query() remote functions to ensure 403s are properly caught.
-  const api = createServerApi(platform, cookies);
-
-  const [streamResult, progressResult] = await Promise.all([
-    api.access.getStreamingUrl(content.id).catch(() => null),
-    api.access.getProgress(content.id).catch(() => null),
-  ]);
-
-  const hasAccess = !!streamResult?.streamingUrl;
-  const streamingUrl = streamResult?.streamingUrl ?? null;
-  const progress = progressResult
-    ? {
-        positionSeconds: progressResult.positionSeconds,
-        durationSeconds: progressResult.durationSeconds,
-        completed: progressResult.completed,
-      }
-    : null;
-
-  const relatedResult = await relatedPromise;
   return {
     content,
     contentBodyHtml,
-    hasAccess,
-    streamingUrl,
-    progress,
-    relatedContent: relatedResult?.items ?? [],
+    hasAccess: null,
+    streamingUrl: null,
+    progress: null,
+    accessAndProgress: loadAccessAndProgress(
+      content.id,
+      platform,
+      cookies
+    ).catch(() => ({
+      hasAccess: false as const,
+      streamingUrl: null,
+      progress: null,
+    })),
+    relatedContent: relatedPromise,
   };
 };
 
@@ -109,39 +103,13 @@ export const actions: Actions = {
    * The successUrl points to /checkout/success on the same org subdomain.
    * The cancelUrl returns the user to this content detail page.
    */
-  purchase: async ({ request, url, params, platform, cookies }) => {
-    const api = createServerApi(platform, cookies);
-    const formData = await request.formData();
-    const contentId = formData.get('contentId');
-
-    if (!contentId || typeof contentId !== 'string') {
-      return fail(400, { checkoutError: 'Missing content ID' });
-    }
-
-    const origin = url.origin;
-    // Stripe replaces {CHECKOUT_SESSION_ID} with the real session ID at redirect time.
-    // contentSlug lets the success page link back to the content detail.
-    const successUrl = `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&contentSlug=${encodeURIComponent(params.contentSlug)}`;
-    const cancelUrl = url.href;
-
-    try {
-      const result = await api.checkout.create({
-        contentId,
-        successUrl,
-        cancelUrl,
-      });
-
-      return { sessionUrl: result.sessionUrl };
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        return fail(409, {
-          checkoutError: 'You already have access to this content.',
-        });
-      }
-
-      return fail(500, {
-        checkoutError: 'Failed to create checkout session. Please try again.',
-      });
-    }
-  },
+  purchase: async ({ request, url, params, platform, cookies }) =>
+    handlePurchaseAction({
+      request,
+      url,
+      platform,
+      cookies,
+      buildSuccessUrl: (origin) =>
+        `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&contentSlug=${encodeURIComponent(params.contentSlug)}`,
+    }),
 };

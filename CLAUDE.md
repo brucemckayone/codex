@@ -184,6 +184,91 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 - R2 uploads → `@codex/cloudflare-clients` `R2Service`
 - Local dev images → Use dev-cdn (port 4100) + Miniflare R2, NEVER external placeholder services
 
+### Server Load Streaming (Shell + Stream Pattern)
+
+SvelteKit server loads can return unresolved promises. The page renders immediately with awaited data; streamed data fills in via `{#await}` blocks with skeleton loading states.
+
+**Rule: Await critical data, stream secondary data.**
+
+```typescript
+// +page.server.ts — Shell + Stream
+export const load: PageServerLoad = async ({ parent }) => {
+  const { org } = await parent();
+
+  // AWAIT: Critical for first paint (hero, SEO, page structure)
+  const content = await getPublicContent({ orgId: org.id, limit: 6 });
+
+  return {
+    newReleases: content?.items ?? [],                        // Awaited — renders immediately
+    creators: getCreators({ slug: org.slug })                 // Streamed — skeleton → data
+      .then(r => ({ items: r?.items ?? [], total: r?.pagination?.total ?? 0 }))
+      .catch(() => ({ items: [], total: 0 })),
+    continueWatching: getContinueWatching()                   // Streamed — skeleton → data
+      .catch(() => undefined),
+  };
+};
+```
+
+```svelte
+<!-- +page.svelte — Skeleton → Content -->
+<HeroSection items={data.newReleases} />
+
+{#await data.creators}
+  <CreatorsSkeleton />
+{:then creators}
+  {#if creators.items.length > 0}
+    <CreatorsSection items={creators.items} />
+  {/if}
+{/await}
+```
+
+**Streaming rules:**
+- **MUST** `.catch()` on every returned promise — unhandled rejections crash the server
+- **MUST** await data needed for SEO (`<svelte:head>`) and page structure
+- **MUST** use `{#await}` blocks with skeleton loading states for streamed data
+- **MUST** use design tokens in skeleton CSS (shimmer animation, `--color-surface-secondary`)
+- With JS disabled, SvelteKit waits for all promises before sending HTML (graceful degradation)
+- Streaming only works in `+page.server.ts`, NOT `+page.ts` (universal loads)
+
+**Pages using streaming:** Org landing, content detail (org + creator), studio dashboard, studio customers.
+
+### Studio SPA Mode
+
+The studio uses `export const ssr = false` (`_org/[slug]/studio/+layout.ts`) — the entire studio sub-tree is client-rendered. This gives instant navigation between studio pages since there's no server HTML generation.
+
+**What still works:**
+- Parent org layout SSR's normally (auth, branding, org resolution)
+- `+page.server.ts` files still execute (SvelteKit calls them via fetch)
+- Auth guard in `+layout.server.ts` still redirects unauthenticated users
+- Role guard still checks membership
+
+**What changes:**
+- Initial studio page load shows empty shell → client renders content
+- Navigation between studio pages is instant (no loading bar)
+- View Source shows no studio content (client-only)
+
+**When to use `ssr = false`:** Only for route subtrees that are behind auth, not SEO-significant, and where instant navigation matters (admin panels, dashboards, settings).
+
+### Server-Side KV Caching (VersionedCache)
+
+Workers use `@codex/cache` `VersionedCache` for KV-backed cache-aside. Pattern:
+
+```typescript
+const cache = new VersionedCache({ kv: env.CACHE_KV });
+
+// Cache-aside: try cache, fall back to DB, write-through
+const data = await cache.get(CacheType.ORG_CONFIG, orgSlug, async () => {
+  return await service.getPublicInfo(slug); // fetcher on miss
+}, { ttl: 30 * 60 }); // 30 min TTL
+
+// Invalidate on mutation (fire-and-forget via waitUntil)
+executionCtx.waitUntil(
+  cache.invalidate(CacheType.ORG_CONFIG, orgSlug).catch(() => {})
+);
+```
+
+**Currently cached:** User profile (10min), user preferences (10min), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
+
 ---
 
 ## Development
@@ -204,3 +289,6 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 | **Errors** | Throw typed `ServiceError` subclass → procedure maps to HTTP |
 | **Env** | Shared bindings defined in `@codex/shared-types` `HonoEnv` |
 | **Logging** | Use `ObservabilityClient` with PII redaction — NEVER `console.log` |
+| **Streaming** | Await critical data, stream secondary via bare promises + `{#await}` skeletons |
+| **Studio** | `ssr = false` — client-rendered SPA for instant navigation |
+| **KV Cache** | `VersionedCache` cache-aside with TTL + fire-and-forget invalidation |

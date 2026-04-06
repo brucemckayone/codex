@@ -95,4 +95,5 @@ export const ANALYTICS = {
 export const CACHE_TTL = {
   BRAND_CACHE_SECONDS: 604800, // 7 days
   BRAND_CACHE_REFRESH_MS: 24 * 60 * 60 * 1000, // 24 hours
+  ORG_PUBLIC_INFO_SECONDS: 30 * 60, // 30 minutes
 } as const;

@@ -13,6 +13,7 @@
   import MediaPicker from '../MediaPicker.svelte';
   import { Badge } from '$lib/components/ui';
   import { VideoIcon, MusicIcon } from '$lib/components/ui/Icon';
+  import { formatDuration, formatFileSize } from '$lib/utils/format';
 
   interface MediaItemOption {
     id: string;
@@ -43,17 +44,6 @@
     form.fields.mediaItemId.set(id ?? '');
   }
 
-  function formatDuration(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  }
-
-  function formatFileSize(bytes: number): string {
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  }
 </script>
 
 <section class="form-card">

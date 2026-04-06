@@ -5,6 +5,9 @@
  * plus additional types specific to the transcoding service.
  */
 
+// Import TranscodingStep locally so it can be used in interfaces below
+import type { TranscodingStep } from '@codex/validation';
+
 // Re-export all transcoding schemas and types from validation package
 export {
   type GetTranscodingStatusInput,

@@ -123,7 +123,6 @@
               class="filter-bar__pill"
               class:filter-bar__pill--active={values[filter.key] === option.value || (!values[filter.key] && !option.value)}
               onclick={() => onFilterChange(filter.key, option.value || null)}
-              aria-pressed={values[filter.key] === option.value || (!values[filter.key] && !option.value)}
               role="radio"
               aria-checked={values[filter.key] === option.value || (!values[filter.key] && !option.value)}
             >

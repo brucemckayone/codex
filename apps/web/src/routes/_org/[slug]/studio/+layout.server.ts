@@ -10,6 +10,7 @@ import { redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { getMyMembership, getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
+import { CACHE_HEADERS } from '$lib/server/cache';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({
@@ -18,11 +19,15 @@ export const load: LayoutServerLoad = async ({
   depends,
   platform,
   cookies,
+  setHeaders,
 }) => {
   // Auth gate: must be logged in
   if (!locals.user) {
     redirect(302, '/login?redirect=/studio');
   }
+
+  // Studio is always user-specific — prevent public caching
+  setHeaders(CACHE_HEADERS.PRIVATE);
 
   // Prevents re-running this load on every studio sub-page navigation.
   // Hard refresh still re-fetches (correct behavior).
@@ -31,7 +36,11 @@ export const load: LayoutServerLoad = async ({
   const layoutTimer = logger.startTimer('studio-layout', { threshold: 3000 });
 
   // Reuse org data from parent layout — saves one API round-trip
-  const { org } = await parent();
+  const parentData = await parent().catch((err: unknown) => {
+    logger.error('studio-layout:parent failed', { error: String(err) });
+    throw err;
+  });
+  const { org } = parentData;
 
   if (!org) {
     redirect(302, '/404');
@@ -41,13 +50,26 @@ export const load: LayoutServerLoad = async ({
   const membershipTimer = logger.startTimer('studio-layout:membership+orgs', {
     threshold: 2000,
   });
-  const [membership, orgsResult] = await Promise.all([
-    getMyMembership(org.id),
-    getMyOrganizations(),
+
+  const [membershipResult, orgsResult] = await Promise.all([
+    getMyMembership(org.id).catch((err: unknown) => {
+      logger.error('studio-layout:getMyMembership failed', {
+        orgId: org.id,
+        error: String(err),
+      });
+      return { role: null, joinedAt: null };
+    }),
+    getMyOrganizations().catch((err: unknown) => {
+      logger.error('studio-layout:getMyOrganizations failed', {
+        orgId: org.id,
+        error: String(err),
+      });
+      return null;
+    }),
   ]);
   membershipTimer.end({ orgId: org.id });
 
-  const { role, joinedAt } = membership;
+  const { role, joinedAt } = membershipResult;
 
   // Membership gate: must be creator, admin, or owner (members cannot access studio)
   if (!role || role === 'member') {

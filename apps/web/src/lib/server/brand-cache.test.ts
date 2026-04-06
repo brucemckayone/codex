@@ -38,6 +38,21 @@ describe('Brand Cache', () => {
   const mockBranding: BrandingSettingsResponse = {
     logoUrl: 'https://example.com/logo.png',
     primaryColorHex: '#ff0000',
+    secondaryColorHex: null,
+    accentColorHex: null,
+    backgroundColorHex: null,
+    fontBody: null,
+    fontHeading: null,
+    radiusValue: 0.5,
+    densityValue: 1,
+    tokenOverrides: null,
+    darkModeOverrides: null,
+    textColorHex: null,
+    shadowScale: null,
+    shadowColor: null,
+    textScale: null,
+    headingWeight: null,
+    bodyWeight: null,
   };
   const mockCachedData: CachedBrandConfig = {
     updatedAt: new Date().toISOString(),

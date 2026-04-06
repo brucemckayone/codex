@@ -17,7 +17,8 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { BRAND_COLORS } from '@codex/constants';
+import { CacheType, VersionedCache } from '@codex/cache';
+import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient } from '@codex/database';
 import type {
   CreateOrganizationResponse,
@@ -32,6 +33,7 @@ import {
 import { BrandingSettingsService } from '@codex/platform-settings';
 import { NotFoundError } from '@codex/service-errors';
 import type {
+  Bindings,
   CheckSlugResponse,
   HonoEnv,
   PublicBrandingResponse,
@@ -191,10 +193,139 @@ app.get(
 );
 
 /**
+ * Fetch public org identity + branding from DB.
+ * Extracted so VersionedCache can use it as a fetcher on cache miss,
+ * and it can be called directly when CACHE_KV is unavailable.
+ */
+async function fetchPublicOrgInfo(
+  ctx: {
+    services: {
+      organization: {
+        getBySlug(
+          slug: string
+        ): Promise<{
+          id: string;
+          slug: string;
+          name: string;
+          description: string | null;
+        } | null>;
+      };
+    };
+    env: Bindings;
+  },
+  slug: string
+) {
+  const organization = await ctx.services.organization.getBySlug(slug);
+
+  if (!organization) {
+    throw new NotFoundError('Organization not found', { slug });
+  }
+
+  // Create a branding service scoped to the found org's ID.
+  // Can't use ctx.services.settings — requires requireOrgMembership
+  // which isn't available on this public (no-auth) endpoint.
+  const brandingDb = createDbClient(ctx.env);
+  const brandingSvc = new BrandingSettingsService({
+    db: brandingDb,
+    environment: ctx.env.ENVIRONMENT ?? 'development',
+    organizationId: organization.id,
+  });
+
+  let branding: {
+    logoUrl: string | null;
+    primaryColorHex: string;
+    secondaryColorHex: string | null;
+    accentColorHex: string | null;
+    backgroundColorHex: string | null;
+    fontBody: string | null;
+    fontHeading: string | null;
+    radiusValue: number;
+    densityValue: number;
+    tokenOverrides: string | null;
+    darkModeOverrides: string | null;
+    shadowScale: string | null;
+    shadowColor: string | null;
+    textScale: string | null;
+    headingWeight: string | null;
+    bodyWeight: string | null;
+  } = {
+    logoUrl: null,
+    primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
+    secondaryColorHex: null,
+    accentColorHex: null,
+    backgroundColorHex: null,
+    fontBody: null,
+    fontHeading: null,
+    radiusValue: 0.5,
+    densityValue: 1,
+    tokenOverrides: null,
+    darkModeOverrides: null,
+    shadowScale: null,
+    shadowColor: null,
+    textScale: null,
+    headingWeight: null,
+    bodyWeight: null,
+  };
+  try {
+    const b = await brandingSvc.get();
+    branding = {
+      logoUrl: b.logoUrl ?? null,
+      primaryColorHex: b.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
+      secondaryColorHex: b.secondaryColorHex ?? null,
+      accentColorHex: b.accentColorHex ?? null,
+      backgroundColorHex: b.backgroundColorHex ?? null,
+      fontBody: b.fontBody ?? null,
+      fontHeading: b.fontHeading ?? null,
+      radiusValue: b.radiusValue ?? 0.5,
+      densityValue: b.densityValue ?? 1,
+      tokenOverrides: b.tokenOverrides ?? null,
+      darkModeOverrides: b.darkModeOverrides ?? null,
+      shadowScale: b.shadowScale ?? null,
+      shadowColor: b.shadowColor ?? null,
+      textScale: b.textScale ?? null,
+      headingWeight: b.headingWeight ?? null,
+      bodyWeight: b.bodyWeight ?? null,
+    };
+  } catch {
+    // Branding fetch failed — use defaults (non-critical)
+  }
+
+  return {
+    id: organization.id,
+    slug: organization.slug,
+    name: organization.name,
+    description: organization.description,
+    logoUrl: branding.logoUrl,
+    brandColors: {
+      primary: branding.primaryColorHex,
+      secondary: branding.secondaryColorHex,
+      accent: branding.accentColorHex,
+      background: branding.backgroundColorHex,
+    },
+    brandFonts: {
+      body: branding.fontBody,
+      heading: branding.fontHeading,
+    },
+    brandRadius: branding.radiusValue,
+    brandDensity: branding.densityValue,
+    brandFineTune: {
+      tokenOverrides: branding.tokenOverrides,
+      darkModeOverrides: branding.darkModeOverrides,
+      shadowScale: branding.shadowScale,
+      shadowColor: branding.shadowColor,
+      textScale: branding.textScale,
+      headingWeight: branding.headingWeight,
+      bodyWeight: branding.bodyWeight,
+    },
+  };
+}
+
+/**
  * GET /api/organizations/public/:slug/info
  * Public org info endpoint - no auth required
  *
  * Returns org identity + branding for the org layout (works without cookies).
+ * Cached in KV for 30 minutes; invalidated on branding/settings updates.
  */
 app.get(
   '/public/:slug/info',
@@ -202,116 +333,23 @@ app.get(
     policy: { auth: 'none' },
     input: { params: z.object({ slug: createSlugSchema(255) }) },
     handler: async (ctx) => {
-      const organization = await ctx.services.organization.getBySlug(
-        ctx.input.params.slug
-      );
+      const slug = ctx.input.params.slug;
 
-      if (!organization) {
-        throw new NotFoundError('Organization not found', {
-          slug: ctx.input.params.slug,
-        });
-      }
-
-      // Create a branding service scoped to the found org's ID.
-      // Can't use ctx.services.settings — requires requireOrgMembership
-      // which isn't available on this public (no-auth) endpoint.
-      const brandingDb = createDbClient(ctx.env);
-      const brandingSvc = new BrandingSettingsService({
-        db: brandingDb,
-        environment: ctx.env.ENVIRONMENT ?? 'development',
-        organizationId: organization.id,
-      });
-
-      let branding: {
-        logoUrl: string | null;
-        primaryColorHex: string;
-        secondaryColorHex: string | null;
-        accentColorHex: string | null;
-        backgroundColorHex: string | null;
-        fontBody: string | null;
-        fontHeading: string | null;
-        radiusValue: number;
-        densityValue: number;
-        tokenOverrides: string | null;
-        darkModeOverrides: string | null;
-        shadowScale: string | null;
-        shadowColor: string | null;
-        textScale: string | null;
-        headingWeight: string | null;
-        bodyWeight: string | null;
-      } = {
-        logoUrl: null,
-        primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
-        secondaryColorHex: null,
-        accentColorHex: null,
-        backgroundColorHex: null,
-        fontBody: null,
-        fontHeading: null,
-        radiusValue: 0.5,
-        densityValue: 1,
-        tokenOverrides: null,
-        darkModeOverrides: null,
-        shadowScale: null,
-        shadowColor: null,
-        textScale: null,
-        headingWeight: null,
-        bodyWeight: null,
-      };
-      try {
-        const b = await brandingSvc.get();
-        branding = {
-          logoUrl: b.logoUrl ?? null,
-          primaryColorHex: b.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
-          secondaryColorHex: b.secondaryColorHex ?? null,
-          accentColorHex: b.accentColorHex ?? null,
-          backgroundColorHex: b.backgroundColorHex ?? null,
-          fontBody: b.fontBody ?? null,
-          fontHeading: b.fontHeading ?? null,
-          radiusValue: b.radiusValue ?? 0.5,
-          densityValue: b.densityValue ?? 1,
-          tokenOverrides: b.tokenOverrides ?? null,
-          darkModeOverrides: b.darkModeOverrides ?? null,
-          shadowScale: b.shadowScale ?? null,
-          shadowColor: b.shadowColor ?? null,
-          textScale: b.textScale ?? null,
-          headingWeight: b.headingWeight ?? null,
-          bodyWeight: b.bodyWeight ?? null,
-        };
-      } catch (err) {
-        console.error(
-          '[public-info] getBranding failed:',
-          err instanceof Error ? err.message : err
+      // Use VersionedCache for KV caching (30 min TTL).
+      // The cache key is the org slug — we don't know the orgId yet.
+      // The fetcher resolves slug → org + branding from DB on cache miss.
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        return cache.get(
+          slug,
+          CacheType.ORG_CONFIG,
+          () => fetchPublicOrgInfo(ctx, slug),
+          { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
         );
       }
 
-      return {
-        id: organization.id,
-        slug: organization.slug,
-        name: organization.name,
-        description: organization.description,
-        logoUrl: branding.logoUrl,
-        brandColors: {
-          primary: branding.primaryColorHex,
-          secondary: branding.secondaryColorHex,
-          accent: branding.accentColorHex,
-          background: branding.backgroundColorHex,
-        },
-        brandFonts: {
-          body: branding.fontBody,
-          heading: branding.fontHeading,
-        },
-        brandRadius: branding.radiusValue,
-        brandDensity: branding.densityValue,
-        brandFineTune: {
-          tokenOverrides: branding.tokenOverrides,
-          darkModeOverrides: branding.darkModeOverrides,
-          shadowScale: branding.shadowScale,
-          shadowColor: branding.shadowColor,
-          textScale: branding.textScale,
-          headingWeight: branding.headingWeight,
-          bodyWeight: branding.bodyWeight,
-        },
-      };
+      // Fallback when CACHE_KV is not bound (shouldn't happen in production)
+      return fetchPublicOrgInfo(ctx, slug);
     },
   })
 );
@@ -470,6 +508,17 @@ app.patch(
         );
       }
 
+      // Invalidate VersionedCache for public org info (keyed by slug)
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const invalidations: Promise<void>[] = [cache.invalidate(updated.slug)];
+        // If slug changed, also invalidate the old slug's cache
+        if (oldSlug && updated.slug !== oldSlug) {
+          invalidations.push(cache.invalidate(oldSlug));
+        }
+        ctx.executionCtx.waitUntil(Promise.all(invalidations).catch(() => {}));
+      }
+
       return updated;
     },
   })
@@ -524,11 +573,21 @@ app.delete(
 
       await ctx.services.organization.delete(ctx.input.params.id);
 
-      // Invalidate brand cache if exists
-      if (org && ctx.env.BRAND_KV) {
-        ctx.executionCtx.waitUntil(
-          ctx.env.BRAND_KV.delete(`brand:${org.slug}`)
-        );
+      // Invalidate brand cache and slug-keyed VersionedCache
+      if (org) {
+        const invalidations: Promise<unknown>[] = [];
+        if (ctx.env.BRAND_KV) {
+          invalidations.push(ctx.env.BRAND_KV.delete(`brand:${org.slug}`));
+        }
+        if (ctx.env.CACHE_KV) {
+          const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+          invalidations.push(cache.invalidate(org.slug));
+        }
+        if (invalidations.length > 0) {
+          ctx.executionCtx.waitUntil(
+            Promise.all(invalidations).catch(() => {})
+          );
+        }
       }
 
       return null;

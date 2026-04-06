@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { ChevronUpIcon } from '$lib/components/ui/Icon';
+  import * as m from '$paraglide/messages';
 
   interface Props {
     threshold?: number;
@@ -33,8 +34,8 @@
   <button
     class="back-to-top"
     onclick={scrollToTop}
-    aria-label="Back to top"
-    title="Back to top"
+    aria-label={m.back_to_top()}
+    title={m.back_to_top()}
   >
     <ChevronUpIcon size={20} />
   </button>
