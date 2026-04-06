@@ -17,6 +17,7 @@ export { default as ChevronUpIcon } from './ChevronUpIcon.svelte';
 // Shapes
 export { default as CircleIcon } from './CircleIcon.svelte';
 export { default as ClockIcon } from './ClockIcon.svelte';
+export { default as CoinsIcon } from './CoinsIcon.svelte';
 // Layout / sidebar
 export { default as CreditCardIcon } from './CreditCardIcon.svelte';
 export { default as DownloadIcon } from './DownloadIcon.svelte';

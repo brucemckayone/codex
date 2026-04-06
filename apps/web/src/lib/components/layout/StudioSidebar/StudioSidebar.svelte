@@ -15,6 +15,7 @@
     UsersIcon,
     UserPlusIcon,
     SettingsIcon,
+    CoinsIcon,
     CreditCardIcon,
     GlobeIcon,
     UserIcon,
@@ -34,6 +35,7 @@
     team: UsersIcon,
     customers: UserPlusIcon,
     settings: SettingsIcon,
+    monetisation: CoinsIcon,
     billing: CreditCardIcon,
   };
 
