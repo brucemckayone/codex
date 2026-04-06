@@ -229,6 +229,8 @@ export function createTestMediaItem(
     loudnessIntegrated: null, // Transcoding Phase 1 field
     loudnessPeak: null, // Transcoding Phase 1 field
     loudnessRange: null, // Transcoding Phase 1 field
+    transcodingProgress: null,
+    transcodingStep: null,
     uploadedAt: now,
     createdAt: now,
     updatedAt: now,
@@ -297,10 +299,12 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     thumbnailUrl: null,
     contentBody:
       contentType === CONTENT_TYPES.WRITTEN ? 'Test content body' : null,
+    contentBodyJson: null,
     category: 'test-category',
     tags: ['test', 'automation'],
     visibility: VISIBILITY.PUBLIC,
     priceCents: 0,
+    minimumTierId: null,
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
     viewCount: 0,

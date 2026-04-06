@@ -281,6 +281,13 @@
       "when": 1775227790929,
       "tag": "0039_new_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1775415249504,
+      "tag": "0040_lean_veda",
+      "breakpoints": true
     }
   ]
 }

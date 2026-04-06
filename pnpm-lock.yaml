@@ -168,6 +168,9 @@ importers:
       hls.js:
         specifier: ^1.6.15
         version: 1.6.15
+      isomorphic-dompurify:
+        specifier: ^2.35.0
+        version: 2.35.0
       media-chrome:
         specifier: ^4.17.2
         version: 4.17.2(react@19.2.3)

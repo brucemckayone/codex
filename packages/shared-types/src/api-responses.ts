@@ -16,8 +16,6 @@
  * to avoid circular dependencies.
  */
 
-import type { ProgressData } from './worker-types';
-
 /**
  * Standard pagination metadata for all paginated responses
  * @example
@@ -238,6 +236,7 @@ export interface ContactSettingsResponse {
 export interface FeatureSettingsResponse {
   enableSignups: boolean;
   enablePurchases: boolean;
+  enableSubscriptions: boolean;
 }
 
 /**

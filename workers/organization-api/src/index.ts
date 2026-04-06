@@ -34,6 +34,7 @@ import {
 import memberRoutes from './routes/members';
 import organizationRoutes from './routes/organizations';
 import settingsRoutes from './routes/settings';
+import tierRoutes from './routes/tiers';
 
 // ============================================================================
 // Application Setup
@@ -88,6 +89,10 @@ app.route('/api/organizations/:id/members', memberRoutes);
 // Mount settings routes under /api/organizations/:id/settings
 // Settings are nested under organization to scope them properly
 app.route('/api/organizations/:id/settings', settingsRoutes);
+
+// Mount tier routes under /api/organizations/:id/tiers
+// Subscription tier management for org owners
+app.route('/api/organizations/:id/tiers', tierRoutes);
 
 // ============================================================================
 // Export

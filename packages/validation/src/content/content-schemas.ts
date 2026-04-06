@@ -281,6 +281,9 @@ const baseContentSchema = z.object({
   // Access control
   visibility: visibilityEnum.default(VISIBILITY.PURCHASED_ONLY),
   priceCents: priceCentsSchema.optional(),
+
+  // Subscription tier gating (null = not included in any subscription)
+  minimumTierId: uuidSchema.optional().nullable(),
 });
 
 /**

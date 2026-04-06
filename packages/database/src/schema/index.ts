@@ -11,5 +11,6 @@ export * from './notifications';
 export * from './playback';
 export * from './settings';
 export * from './storage';
+export * from './subscriptions';
 export * from './test';
 export * from './users';

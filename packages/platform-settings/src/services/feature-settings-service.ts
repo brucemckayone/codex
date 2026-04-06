@@ -47,6 +47,7 @@ export class FeatureSettingsService extends BaseService {
       .select({
         enableSignups: schema.featureSettings.enableSignups,
         enablePurchases: schema.featureSettings.enablePurchases,
+        enableSubscriptions: schema.featureSettings.enableSubscriptions,
       })
       .from(schema.featureSettings)
       .where(eq(schema.featureSettings.organizationId, this.organizationId))
@@ -63,6 +64,7 @@ export class FeatureSettingsService extends BaseService {
     return {
       enableSignups: row.enableSignups,
       enablePurchases: row.enablePurchases,
+      enableSubscriptions: row.enableSubscriptions,
     };
   }
 
@@ -82,6 +84,9 @@ export class FeatureSettingsService extends BaseService {
     if (input.enablePurchases !== undefined) {
       updateValues.enablePurchases = input.enablePurchases;
     }
+    if (input.enableSubscriptions !== undefined) {
+      updateValues.enableSubscriptions = input.enableSubscriptions;
+    }
 
     // If no updates, just return current state
     if (Object.keys(updateValues).length === 0) {
@@ -96,6 +101,8 @@ export class FeatureSettingsService extends BaseService {
         enableSignups: input.enableSignups ?? DEFAULT_FEATURES.enableSignups,
         enablePurchases:
           input.enablePurchases ?? DEFAULT_FEATURES.enablePurchases,
+        enableSubscriptions:
+          input.enableSubscriptions ?? DEFAULT_FEATURES.enableSubscriptions,
       })
       .onConflictDoUpdate({
         target: schema.featureSettings.organizationId,
@@ -118,6 +125,7 @@ export class FeatureSettingsService extends BaseService {
     return {
       enableSignups: row.enableSignups,
       enablePurchases: row.enablePurchases,
+      enableSubscriptions: row.enableSubscriptions,
     };
   }
 

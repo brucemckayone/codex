@@ -1,5 +1,15 @@
 export const STRIPE_EVENTS = {
+  // Purchase (Phase 1)
   CHECKOUT_COMPLETED: 'checkout.session.completed',
+  // Subscription lifecycle
+  SUBSCRIPTION_CREATED: 'customer.subscription.created',
+  SUBSCRIPTION_UPDATED: 'customer.subscription.updated',
+  SUBSCRIPTION_DELETED: 'customer.subscription.deleted',
+  // Invoices (subscription renewals)
+  INVOICE_PAYMENT_SUCCEEDED: 'invoice.payment_succeeded',
+  INVOICE_PAYMENT_FAILED: 'invoice.payment_failed',
+  // Connect
+  ACCOUNT_UPDATED: 'account.updated',
 } as const;
 
 export const PURCHASE_STATUS = {
@@ -9,9 +19,30 @@ export const PURCHASE_STATUS = {
   REFUNDED: 'refunded',
 } as const;
 
+export const SUBSCRIPTION_STATUS = {
+  ACTIVE: 'active',
+  PAST_DUE: 'past_due',
+  CANCELLING: 'cancelling',
+  CANCELLED: 'cancelled',
+  INCOMPLETE: 'incomplete',
+} as const;
+
+export const BILLING_INTERVAL = {
+  MONTH: 'month',
+  YEAR: 'year',
+} as const;
+
+export const CONNECT_ACCOUNT_STATUS = {
+  ONBOARDING: 'onboarding',
+  ACTIVE: 'active',
+  RESTRICTED: 'restricted',
+  DISABLED: 'disabled',
+} as const;
+
 export const FEES = {
-  PLATFORM_PERCENT: 1000, // 10.00%
-  ORG_PERCENT: 0, // 0%
+  PLATFORM_PERCENT: 1000, // 10.00% of gross
+  ORG_PERCENT: 0, // 0% for one-time purchases
+  SUBSCRIPTION_ORG_PERCENT: 1500, // 15.00% of post-platform-fee for subscriptions
 } as const;
 
 export const CURRENCY = {

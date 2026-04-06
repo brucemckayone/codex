@@ -12,6 +12,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
+import { subscriptionTiers } from './subscriptions';
 import { users } from './users';
 
 /**
@@ -285,6 +286,13 @@ export const content = pgTable(
     // 'public' | 'private' | 'members_only' | 'purchased_only' (Phase 1: public, purchased_only)
     priceCents: integer('price_cents'), // NULL = free, INTEGER = price in cents (ACID-compliant)
 
+    // Subscription tier gating — minimum tier required for subscription access.
+    // NULL = not included in any subscription (purchase-only or free).
+    minimumTierId: uuid('minimum_tier_id').references(
+      () => subscriptionTiers.id,
+      { onDelete: 'set null' }
+    ),
+
     // Status
     status: varchar('status', { length: 50 }).default('draft').notNull(),
     // 'draft' | 'published' | 'archived'
@@ -313,6 +321,7 @@ export const content = pgTable(
     index('idx_content_status').on(table.status),
     index('idx_content_published_at').on(table.publishedAt),
     index('idx_content_category').on(table.category),
+    index('idx_content_minimum_tier').on(table.minimumTierId),
 
     // Partial unique indexes for slug uniqueness
     // Unique slug per organization (for organization content)

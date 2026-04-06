@@ -146,6 +146,9 @@ export const featureSettings = pgTable(
 
     enableSignups: boolean('enable_signups').notNull().default(true),
     enablePurchases: boolean('enable_purchases').notNull().default(true),
+    enableSubscriptions: boolean('enable_subscriptions')
+      .notNull()
+      .default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

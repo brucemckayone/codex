@@ -37,6 +37,7 @@ export const VISIBILITY = {
 export const ACCESS_TYPES = {
   FREE: 'free',
   PURCHASED: 'purchased',
+  SUBSCRIPTION: 'subscription',
   COMPLIMENTARY: 'complimentary',
   MEMBERS_ONLY: 'members_only',
 } as const;

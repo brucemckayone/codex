@@ -23,9 +23,13 @@ import {
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 import { handleCheckoutCompleted } from './handlers/checkout';
+import { handleConnectWebhook } from './handlers/connect-webhook';
+import { handleSubscriptionWebhook } from './handlers/subscription-webhook';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import checkout from './routes/checkout';
+import connect from './routes/connect';
 import purchases from './routes/purchases';
+import subscriptions from './routes/subscriptions';
 import { createWebhookHandler } from './utils/webhook-handler';
 
 // ============================================================================
@@ -108,6 +112,18 @@ app.route('/checkout', checkout);
  */
 app.route('/purchases', purchases);
 
+/**
+ * Subscription routes
+ * Handles subscription checkout, management, and queries
+ */
+app.route('/subscriptions', subscriptions);
+
+/**
+ * Connect routes
+ * Handles Stripe Connect onboarding and account management
+ */
+app.route('/connect', connect);
+
 // ============================================================================
 // Webhook Endpoints
 // ============================================================================
@@ -129,7 +145,7 @@ app.post(
 app.post(
   '/webhooks/stripe/subscription',
   verifyStripeSignature(),
-  createWebhookHandler('Subscription')
+  createWebhookHandler('Subscription', handleSubscriptionWebhook)
 );
 
 /**
@@ -139,7 +155,7 @@ app.post(
 app.post(
   '/webhooks/stripe/connect',
   verifyStripeSignature(),
-  createWebhookHandler('Connect')
+  createWebhookHandler('Connect', handleConnectWebhook)
 );
 
 /**

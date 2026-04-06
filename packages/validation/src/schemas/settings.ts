@@ -119,6 +119,7 @@ export type UpdateContactInput = z.infer<typeof updateContactSchema>;
 export const updateFeaturesSchema = z.object({
   enableSignups: z.boolean().optional(),
   enablePurchases: z.boolean().optional(),
+  enableSubscriptions: z.boolean().optional(),
 });
 
 export type UpdateFeaturesInput = z.infer<typeof updateFeaturesSchema>;
@@ -163,6 +164,7 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
       radiusValue: z.number(),
       densityValue: z.number(),
       tokenOverrides: z.string().nullable(),
+      darkModeOverrides: z.string().nullable(),
       textColorHex: z.string().nullable(),
       shadowScale: z.string().nullable(),
       shadowColor: z.string().nullable(),
@@ -193,6 +195,7 @@ export const contactSettingsSchema = z.object({
 export const featureSettingsSchema = z.object({
   enableSignups: z.boolean(),
   enablePurchases: z.boolean(),
+  enableSubscriptions: z.boolean(),
 });
 
 /**
@@ -255,4 +258,5 @@ export const DEFAULT_CONTACT: ContactSettingsResponse = {
 export const DEFAULT_FEATURES: FeatureSettingsResponse = {
   enableSignups: true,
   enablePurchases: true,
+  enableSubscriptions: false,
 } as const;

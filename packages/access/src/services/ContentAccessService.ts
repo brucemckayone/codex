@@ -16,6 +16,8 @@ import {
   organizationMemberships,
   organizations,
   purchases,
+  subscriptions,
+  subscriptionTiers,
   videoPlayback,
 } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
@@ -42,6 +44,7 @@ import { LOG_EVENTS, LOG_SEVERITY, SERVICE_NAME } from '../constants';
 import {
   AccessDeniedError,
   ContentNotFoundError,
+  InvalidContentTypeError,
   MediaNotReadyForStreamingError,
   R2SigningError,
 } from '../errors';
@@ -230,59 +233,103 @@ export class ContentAccessService {
                 contentId: input.contentId,
               });
             } else {
-              // No purchase - check organization membership
-              const contentOrgId = contentRecord.organizationId;
+              // No purchase — check subscription tier access
+              let hasSubscriptionAccess = false;
 
-              if (!contentOrgId) {
-                // Personal content with no org - requires purchase
-                obs.warn(
-                  'Access denied - paid personal content requires purchase',
-                  {
+              if (contentRecord.minimumTierId && contentRecord.organizationId) {
+                const userSub = await tx.query.subscriptions.findFirst({
+                  where: and(
+                    eq(subscriptions.userId, userId),
+                    eq(
+                      subscriptions.organizationId,
+                      contentRecord.organizationId
+                    ),
+                    inArray(subscriptions.status, ['active', 'cancelling']),
+                    gt(subscriptions.currentPeriodEnd, new Date())
+                  ),
+                  with: { tier: true },
+                });
+
+                if (userSub) {
+                  // Get the content's minimum tier for sort order comparison
+                  const contentTier =
+                    await tx.query.subscriptionTiers.findFirst({
+                      where: eq(
+                        subscriptionTiers.id,
+                        contentRecord.minimumTierId
+                      ),
+                    });
+
+                  if (
+                    contentTier &&
+                    userSub.tier.sortOrder >= contentTier.sortOrder
+                  ) {
+                    hasSubscriptionAccess = true;
+                    obs.info('Access granted via subscription', {
+                      userId,
+                      contentId: input.contentId,
+                      subscriptionTier: userSub.tier.name,
+                      contentMinTier: contentTier.name,
+                    });
+                  }
+                }
+              }
+
+              if (!hasSubscriptionAccess) {
+                // No subscription access — fall back to org membership check
+                const contentOrgId = contentRecord.organizationId;
+
+                if (!contentOrgId) {
+                  // Personal content with no org - requires purchase
+                  obs.warn(
+                    'Access denied - paid personal content requires purchase',
+                    {
+                      userId,
+                      contentId: input.contentId,
+                      priceCents: contentRecord.priceCents,
+                      securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                      severity: LOG_SEVERITY.MEDIUM,
+                      eventType: LOG_EVENTS.ACCESS_CONTROL,
+                    }
+                  );
+                  throw new AccessDeniedError(userId, input.contentId, {
+                    priceCents: contentRecord.priceCents,
+                  });
+                }
+
+                // Check if user is active member of content's organization
+                const membership =
+                  await tx.query.organizationMemberships.findFirst({
+                    where: and(
+                      eq(organizationMemberships.organizationId, contentOrgId),
+                      eq(organizationMemberships.userId, userId),
+                      eq(organizationMemberships.status, 'active')
+                    ),
+                  });
+
+                if (!membership) {
+                  obs.warn('Access denied - no purchase and not org member', {
                     userId,
                     contentId: input.contentId,
+                    organizationId: contentOrgId,
                     priceCents: contentRecord.priceCents,
                     securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
                     severity: LOG_SEVERITY.MEDIUM,
                     eventType: LOG_EVENTS.ACCESS_CONTROL,
-                  }
-                );
-                throw new AccessDeniedError(userId, input.contentId, {
-                  priceCents: contentRecord.priceCents,
-                });
-              }
+                  });
+                  throw new AccessDeniedError(userId, input.contentId, {
+                    priceCents: contentRecord.priceCents,
+                    organizationId: contentOrgId,
+                  });
+                }
 
-              // Check if user is active member of content's organization
-              const membership =
-                await tx.query.organizationMemberships.findFirst({
-                  where: and(
-                    eq(organizationMemberships.organizationId, contentOrgId),
-                    eq(organizationMemberships.userId, userId),
-                    eq(organizationMemberships.status, 'active')
-                  ),
-                });
-
-              if (!membership) {
-                obs.warn('Access denied - no purchase and not org member', {
+                obs.info('Access granted via organization membership', {
                   userId,
                   contentId: input.contentId,
                   organizationId: contentOrgId,
-                  priceCents: contentRecord.priceCents,
-                  securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                  severity: LOG_SEVERITY.MEDIUM,
-                  eventType: LOG_EVENTS.ACCESS_CONTROL,
+                  membershipRole: membership.role,
                 });
-                throw new AccessDeniedError(userId, input.contentId, {
-                  priceCents: contentRecord.priceCents,
-                  organizationId: contentOrgId,
-                });
-              }
-
-              obs.info('Access granted via organization membership', {
-                userId,
-                contentId: input.contentId,
-                organizationId: contentOrgId,
-                membershipRole: membership.role,
-              });
+              } // end if (!hasSubscriptionAccess)
             }
           } else {
             obs.info('Free content - access granted', {
@@ -335,7 +382,7 @@ export class ContentAccessService {
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
             });
-            throw new Error('INVALID_MEDIA_TYPE');
+            throw new InvalidContentTypeError(input.contentId, mediaType);
           }
 
           // Return data for R2 signing (outside transaction)
@@ -386,6 +433,8 @@ export class ContentAccessService {
       if (
         error instanceof ContentNotFoundError ||
         error instanceof AccessDeniedError ||
+        error instanceof InvalidContentTypeError ||
+        error instanceof MediaNotReadyForStreamingError ||
         error instanceof R2SigningError
       ) {
         throw error;

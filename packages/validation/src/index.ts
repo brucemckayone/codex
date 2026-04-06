@@ -29,6 +29,8 @@ export * from './schemas/organization';
 export * from './schemas/purchase';
 // Settings schemas
 export * from './schemas/settings';
+// Subscription schemas
+export * from './schemas/subscription';
 // Transcoding schemas (RunPod webhooks, transcoding API)
 export * from './schemas/transcoding';
 // Shared schemas (pagination, etc)
