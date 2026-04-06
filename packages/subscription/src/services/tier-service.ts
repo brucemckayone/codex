@@ -352,18 +352,20 @@ export class TierService extends BaseService {
         }
       }
 
-      // Update sort orders in a single transaction
+      // Update sort orders in a single transaction.
+      // Uses high-offset temp values (10000+) to avoid both the UNIQUE constraint
+      // on (organizationId, sortOrder) and the CHECK constraint (sort_order > 0).
       await (this.db as typeof import('@codex/database').dbWs).transaction(
         async (tx) => {
-          // Temporarily set all to negative to avoid unique constraint violations
+          // Phase 1: Move all to high temp values to clear the target range
           for (const [i, tierId] of tierIds.entries()) {
             await tx
               .update(subscriptionTiers)
-              .set({ sortOrder: -(i + 1) })
+              .set({ sortOrder: 10000 + i + 1 })
               .where(eq(subscriptionTiers.id, tierId));
           }
 
-          // Set to final positive values
+          // Phase 2: Set to final values (1-based)
           for (const [i, tierId] of tierIds.entries()) {
             await tx
               .update(subscriptionTiers)

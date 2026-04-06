@@ -18,7 +18,7 @@
   import { Badge, Button, Select } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
   import TagsInput from './TagsInput.svelte';
-  import type { ContentWithRelations } from '$lib/types';
+  import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
   import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
@@ -32,6 +32,7 @@
     onDelete: () => void;
     publishing: boolean;
     deleting: boolean;
+    tiers?: SubscriptionTier[];
   }
 
   const {
@@ -43,6 +44,7 @@
     onDelete,
     publishing,
     deleting,
+    tiers = [],
   }: Props = $props();
 
   const currentStatus = $derived(content?.status ?? 'draft');
@@ -107,6 +109,18 @@
   const isReadyToPublish = $derived(readinessChecks.every((c) => c.met));
   const showPriceField = $derived(visibilityVal === 'purchased_only');
   let showDangerZone = $state(false);
+
+  // Minimum tier selector
+  let selectedMinimumTierId = $state<string>(content?.minimumTierId ?? '');
+  const hasTiers = $derived(tiers.length > 0);
+  const tierSelectOptions = $derived([
+    { value: '', label: 'No tier required (free/purchased)' },
+    ...tiers.map((t) => ({ value: t.id, label: `${t.name}` })),
+  ]);
+
+  function handleTierChange(val: string | undefined) {
+    selectedMinimumTierId = val ?? '';
+  }
 </script>
 
 <aside class="publish-sidebar">
@@ -228,6 +242,23 @@
       {#if parseFloat(priceVal || '0') <= 0}
         <span class="field-warning">Paid content requires a price greater than &pound;0</span>
       {/if}
+    </div>
+  {/if}
+
+  <!-- Minimum Subscription Tier -->
+  {#if hasTiers}
+    <div class="sidebar-section">
+      <h4 class="sidebar-heading">Minimum Tier</h4>
+      <input type="hidden" name="minimumTierId" value={selectedMinimumTierId || ''} />
+      <Select
+        options={tierSelectOptions}
+        value={selectedMinimumTierId}
+        onValueChange={handleTierChange}
+        placeholder="Select a minimum tier"
+      />
+      <span class="field-hint">
+        Subscribers at or above this tier can access this content.
+      </span>
     </div>
   {/if}
 

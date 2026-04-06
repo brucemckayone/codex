@@ -26,3 +26,7 @@ export * from './helpers';
 export * from './mocks';
 // Test Setup Helpers
 export * from './setup';
+// Stripe Mock (for subscription/purchase service testing)
+export * from './stripe-mock';
+// Subscription-specific factories (tiers, subscriptions, connect accounts, Stripe event payloads)
+export * from './subscription-factories';
