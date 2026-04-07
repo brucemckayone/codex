@@ -23,7 +23,7 @@
   } from '$lib/remote/content.remote';
   import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import type { ContentWithRelations } from '$lib/types';
+  import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
 
   // Sub-components
   import ContentTypeSelector from './content-form/ContentTypeSelector.svelte';
@@ -48,10 +48,11 @@
     organizationId: string | null;
     orgSlug: string | null;
     mediaItems?: MediaItemOption[];
+    tiers?: SubscriptionTier[];
     onSuccess?: () => void;
   }
 
-  const { content, organizationId, orgSlug, mediaItems = [], onSuccess }: Props = $props();
+  const { content, organizationId, orgSlug, mediaItems = [], tiers = [], onSuccess }: Props = $props();
 
   const isEdit = $derived(!!content);
   const form = $derived(isEdit ? updateContentForm : createContentForm);
@@ -282,6 +283,7 @@
       {formPending}
       {publishing}
       {deleting}
+      {tiers}
       onPublishToggle={handlePublishToggle}
       onDelete={() => (showDeleteConfirm = true)}
     />

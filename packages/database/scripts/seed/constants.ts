@@ -311,6 +311,16 @@ export const CONTENT = {
   },
 } as const;
 
+// ── Thumbnail Image Seeds (picsum.photos) ───────────────────
+// Each media item maps to a deterministic picsum seed string.
+// Same seed → same image on every run.
+export const THUMBNAIL_SEEDS: Record<string, string> = {
+  [MEDIA.introTs.id]: 'typescript-intro',
+  [MEDIA.advancedSvelte.id]: 'svelte-advanced',
+  [MEDIA.honoApis.id]: 'api-building',
+  [MEDIA.podcast.id]: 'podcast-tech',
+};
+
 // ── Purchases ────────────────────────────────────────────────
 export const PURCHASES = {
   viewerSvelte: { id: seedUuid('seed-purchase-viewer-svelte') },
@@ -333,6 +343,14 @@ export const PLAYBACK = {
   viewerPodcast: { id: seedUuid('seed-playback-viewer-podcast') },
   adminHono: { id: seedUuid('seed-playback-admin-hono') },
   adminSvelte: { id: seedUuid('seed-playback-admin-svelte') },
+} as const;
+
+// ── Stripe Connect Accounts ─────────────────────────────────
+export const CONNECT_ACCOUNTS = {
+  alphaCreator: {
+    id: seedUuid('seed-connect-alpha-creator'),
+    stripeAccountId: 'acct_seed_alpha_creator',
+  },
 } as const;
 
 // ── Platform Fee Config ──────────────────────────────────────

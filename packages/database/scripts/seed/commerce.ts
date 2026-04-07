@@ -1,6 +1,7 @@
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
 import {
+  CONNECT_ACCOUNTS,
   CONTENT,
   CONTENT_ACCESS,
   ORGS,
@@ -127,7 +128,25 @@ export async function seedCommerce(db: typeof DbClient) {
     },
   ]);
 
+  // Stripe Connect account for Studio Alpha (creator is org owner)
+  // This enables subscription tier creation and Stripe payouts
+  await db
+    .insert(schema.stripeConnectAccounts)
+    .values({
+      id: CONNECT_ACCOUNTS.alphaCreator.id,
+      organizationId: ORGS.alpha.id,
+      userId: USERS.creator.id,
+      stripeAccountId: CONNECT_ACCOUNTS.alphaCreator.stripeAccountId,
+      status: 'active',
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      onboardingCompletedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing();
+
   console.log(
-    '  Seeded platform fee, 3 purchases, and 4 content access records'
+    '  Seeded platform fee, 3 purchases, 4 content access records, and 1 Connect account'
   );
 }

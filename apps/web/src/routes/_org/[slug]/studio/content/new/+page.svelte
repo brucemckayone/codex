@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import { listMedia } from '$lib/remote/media.remote';
+  import { listTiers } from '$lib/remote/subscription.remote';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
 
@@ -27,6 +28,8 @@
     sortBy: 'createdAt',
     sortOrder: 'desc',
   }));
+
+  const tiersQuery = $derived(listTiers(data.org.id));
 </script>
 
 <svelte:head>
@@ -53,7 +56,7 @@
       </div>
     </div>
   {:else}
-    <ContentForm {organizationId} {orgSlug} mediaItems={mediaQuery.current?.items ?? []} />
+    <ContentForm {organizationId} {orgSlug} mediaItems={mediaQuery.current?.items ?? []} tiers={tiersQuery.current ?? []} />
   {/if}
 </div>
 
