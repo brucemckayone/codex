@@ -4,7 +4,7 @@
   Slug input with prominent URL preview bar and real-time availability check.
   Auto-generates from title value unless manually edited.
 
-  @prop {any} form - The active form instance
+  @prop {ContentForm} form - The active form instance
   @prop {string | null} orgSlug - Organization slug for URL preview (null for personal content)
   @prop {string | null} [creatorUsername] - Creator username for personal content URL preview
   @prop {string | null} [organizationId] - Organization ID for slug scope
@@ -13,9 +13,12 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import { checkContentSlug } from '$lib/remote/content.remote';
+  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+
+  type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: any;
+    form: ContentForm;
     orgSlug: string | null;
     creatorUsername?: string | null;
     organizationId?: string | null;

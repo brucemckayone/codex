@@ -3,16 +3,19 @@
 
   Groups title, slug, and description fields with inline validation.
 
-  @prop {any} form - The active form instance
+  @prop {ContentForm} form - The active form instance
   @prop {string | null} orgSlug - Organization slug for slug URL preview (null for personal content)
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import SlugField from './SlugField.svelte';
   import RichTextEditor from '$lib/components/editor/RichTextEditor.svelte';
+  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+
+  type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: any;
+    form: ContentForm;
     orgSlug: string | null;
     creatorUsername?: string | null;
     organizationId?: string | null;

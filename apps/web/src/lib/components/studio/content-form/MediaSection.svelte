@@ -4,7 +4,7 @@
   Media picker with selected media preview card.
   Only shown for video/audio content types.
 
-  @prop {any} form - The active form instance
+  @prop {ContentForm} form - The active form instance
   @prop {MediaItemOption[]} mediaItems - Available media items
   @prop {string | null} orgSlug - Org slug for media library link (null for personal content)
 -->
@@ -14,6 +14,9 @@
   import { Badge } from '$lib/components/ui';
   import { VideoIcon, MusicIcon } from '$lib/components/ui/Icon';
   import { formatDuration, formatFileSize } from '$lib/utils/format';
+  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+
+  type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface MediaItemOption {
     id: string;
@@ -26,7 +29,7 @@
   }
 
   interface Props {
-    form: any;
+    form: ContentForm;
     mediaItems: MediaItemOption[];
     orgSlug: string | null;
   }

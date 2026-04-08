@@ -4,14 +4,17 @@
   Rich text editor for content body (all content types).
   Uses Tiptap with the full preset (headings, code blocks, lists, etc).
 
-  @prop {any} form - The active form instance
+  @prop {ContentForm} form - The active form instance
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import RichTextEditor from '$lib/components/editor/RichTextEditor.svelte';
+  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+
+  type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: any;
+    form: ContentForm;
     optional?: boolean;
   }
 

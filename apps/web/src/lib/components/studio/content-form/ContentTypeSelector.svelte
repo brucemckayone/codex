@@ -12,9 +12,12 @@
   import { VideoIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
   import { Badge } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
+  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+
+  type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
-    form: any;
+    form: ContentForm;
     isEdit: boolean;
     currentType?: string;
   }
