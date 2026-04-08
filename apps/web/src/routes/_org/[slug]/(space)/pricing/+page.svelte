@@ -13,6 +13,7 @@
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { createSubscriptionCheckoutSession } from '$lib/remote/subscription.remote';
   import type { SubscriptionTier } from '$lib/types';
+  import { formatPrice } from '$lib/utils/format';
 
   let { data } = $props();
 
@@ -21,13 +22,6 @@
 
   const tiers: SubscriptionTier[] = $derived(data.tiers ?? []);
   const currentTierId = $derived(data.currentSubscription?.tierId ?? null);
-
-  function formatPrice(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-    }).format(cents / 100);
-  }
 
   function savingsPercent(tier: SubscriptionTier): number {
     const monthlyTotal = tier.priceMonthly * 12;

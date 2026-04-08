@@ -15,6 +15,7 @@
   import * as Table from '$lib/components/ui/Table';
   import { Alert, Card, EmptyState } from '$lib/components/ui';
   import { portalSessionForm, getOrgRevenue, getTopContent } from '$lib/remote/billing.remote';
+  import { formatPriceCompact } from '$lib/utils/format';
 
   let { data } = $props();
 
@@ -36,18 +37,6 @@
   );
 
   const loading = $derived((revenueQuery?.loading ?? true) || (topContentQuery?.loading ?? true));
-
-  /**
-   * Format cents to currency string (GBP)
-   */
-  function formatCurrency(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(cents / 100);
-  }
 
   // Derived stats from revenue data
   const totalRevenue = $derived(revenueQuery?.current?.totalRevenueCents ?? 0);
@@ -75,7 +64,7 @@
   <section class="stats-grid" aria-label={m.billing_title()}>
     <StatCard
       label={m.billing_total_revenue()}
-      value={formatCurrency(totalRevenue)}
+      value={formatPriceCompact(totalRevenue)}
       loading={loading}
     />
     <StatCard
@@ -85,7 +74,7 @@
     />
     <StatCard
       label={m.billing_avg_order()}
-      value={formatCurrency(avgOrder)}
+      value={formatPriceCompact(avgOrder)}
       loading={loading}
     />
   </section>
@@ -143,7 +132,7 @@
                   {item.contentTitle}
                 </Table.Cell>
                 <Table.Cell class="revenue-cell">
-                  {formatCurrency(item.revenueCents)}
+                  {formatPriceCompact(item.revenueCents)}
                 </Table.Cell>
                 <Table.Cell class="purchases-cell">
                   {item.purchaseCount}

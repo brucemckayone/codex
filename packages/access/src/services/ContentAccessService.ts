@@ -8,7 +8,6 @@ import {
   PURCHASE_STATUS,
   VIDEO_PROGRESS,
 } from '@codex/constants';
-import type { DatabaseWs } from '@codex/database';
 import { createPerRequestDbClient } from '@codex/database';
 import {
   content,
@@ -20,11 +19,10 @@ import {
   subscriptionTiers,
   videoPlayback,
 } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
 import {
-  InternalServiceError,
-  isServiceError,
+  BaseService,
+  type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
 import type {
@@ -44,7 +42,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
-import { LOG_EVENTS, LOG_SEVERITY, SERVICE_NAME } from '../constants';
+import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
 import {
   AccessDeniedError,
   ContentNotFoundError,
@@ -118,10 +116,8 @@ interface UserLibraryResponse {
   };
 }
 
-export interface ContentAccessServiceConfig {
-  db: DatabaseWs; // WebSocket client for transaction support
+export interface ContentAccessServiceConfig extends ServiceConfig {
   r2: R2Signer;
-  obs: ObservabilityClient;
   purchaseService: PurchaseService;
 }
 
@@ -145,8 +141,15 @@ export interface ContentAccessServiceConfig {
  * - P1-ECOM-001: Verifies purchases table for access
  * - R2 Service: Generates presigned URLs via AWS SDK
  */
-export class ContentAccessService {
-  constructor(private config: ContentAccessServiceConfig) {}
+export class ContentAccessService extends BaseService {
+  private readonly r2: R2Signer;
+  private readonly purchaseService: PurchaseService;
+
+  constructor(config: ContentAccessServiceConfig) {
+    super(config);
+    this.r2 = config.r2;
+    this.purchaseService = config.purchaseService;
+  }
 
   /**
    * Generate signed streaming URL for content
@@ -178,9 +181,7 @@ export class ContentAccessService {
     expiresAt: Date;
     contentType: 'video' | 'audio';
   }> {
-    const { db, r2, obs } = this.config;
-
-    obs.info('Getting streaming URL', {
+    this.obs.info('Getting streaming URL', {
       userId,
       contentId: input.contentId,
       expirySeconds: input.expirySeconds,
@@ -189,7 +190,7 @@ export class ContentAccessService {
     try {
       // Step 1 & 2: Verify access and fetch content/media data within transaction
       // Transaction ensures consistent snapshot for access verification
-      const { r2Key, mediaType } = await db.transaction(
+      const { r2Key, mediaType } = await this.db.transaction(
         async (tx) => {
           // Get content with media details (any organization)
           const contentRecord = await tx.query.content.findFirst({
@@ -204,7 +205,7 @@ export class ContentAccessService {
           });
 
           if (!contentRecord) {
-            obs.warn('Content not found or not accessible', {
+            this.obs.warn('Content not found or not accessible', {
               contentId: input.contentId,
               userId,
             });
@@ -213,7 +214,7 @@ export class ContentAccessService {
           }
 
           if (!contentRecord.mediaItem) {
-            obs.warn('Content has no associated media item', {
+            this.obs.warn('Content has no associated media item', {
               contentId: input.contentId,
               userId,
             });
@@ -244,7 +245,7 @@ export class ContentAccessService {
             );
 
             if (!membership) {
-              obs.warn('Access denied - members-only content', {
+              this.obs.warn('Access denied - members-only content', {
                 userId,
                 contentId: input.contentId,
                 organizationId: contentRecord.organizationId,
@@ -258,23 +259,25 @@ export class ContentAccessService {
               });
             }
 
-            obs.info('Access granted via membership (members-only content)', {
-              userId,
-              contentId: input.contentId,
-              organizationId: contentRecord.organizationId,
-              membershipRole: membership.role,
-            });
+            this.obs.info(
+              'Access granted via membership (members-only content)',
+              {
+                userId,
+                contentId: input.contentId,
+                organizationId: contentRecord.organizationId,
+                membershipRole: membership.role,
+              }
+            );
           } // Check access - free content, purchase, or org membership
           else if (contentRecord.priceCents && contentRecord.priceCents > 0) {
             // Paid content - check purchase via PurchaseService
-            const hasPurchased =
-              await this.config.purchaseService.verifyPurchase(
-                input.contentId,
-                userId
-              );
+            const hasPurchased = await this.purchaseService.verifyPurchase(
+              input.contentId,
+              userId
+            );
 
             if (hasPurchased) {
-              obs.info('Access granted via purchase', {
+              this.obs.info('Access granted via purchase', {
                 userId,
                 contentId: input.contentId,
               });
@@ -311,7 +314,7 @@ export class ContentAccessService {
                     userSub.tier.sortOrder >= contentTier.sortOrder
                   ) {
                     hasSubscriptionAccess = true;
-                    obs.info('Access granted via subscription', {
+                    this.obs.info('Access granted via subscription', {
                       userId,
                       contentId: input.contentId,
                       subscriptionTier: userSub.tier.name,
@@ -327,7 +330,7 @@ export class ContentAccessService {
 
                 if (!contentOrgId) {
                   // Personal content with no org - requires purchase
-                  obs.warn(
+                  this.obs.warn(
                     'Access denied - paid personal content requires purchase',
                     {
                       userId,
@@ -354,22 +357,25 @@ export class ContentAccessService {
                   });
 
                 if (!membership) {
-                  obs.warn('Access denied - no purchase and not org member', {
-                    userId,
-                    contentId: input.contentId,
-                    organizationId: contentOrgId,
-                    priceCents: contentRecord.priceCents,
-                    securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                    severity: LOG_SEVERITY.MEDIUM,
-                    eventType: LOG_EVENTS.ACCESS_CONTROL,
-                  });
+                  this.obs.warn(
+                    'Access denied - no purchase and not org member',
+                    {
+                      userId,
+                      contentId: input.contentId,
+                      organizationId: contentOrgId,
+                      priceCents: contentRecord.priceCents,
+                      securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                      severity: LOG_SEVERITY.MEDIUM,
+                      eventType: LOG_EVENTS.ACCESS_CONTROL,
+                    }
+                  );
                   throw new AccessDeniedError(userId, input.contentId, {
                     priceCents: contentRecord.priceCents,
                     organizationId: contentOrgId,
                   });
                 }
 
-                obs.info('Access granted via organization membership', {
+                this.obs.info('Access granted via organization membership', {
                   userId,
                   contentId: input.contentId,
                   organizationId: contentOrgId,
@@ -378,7 +384,7 @@ export class ContentAccessService {
               } // end if (!hasSubscriptionAccess)
             }
           } else {
-            obs.info('Free content - access granted', {
+            this.obs.info('Free content - access granted', {
               contentId: input.contentId,
             });
           }
@@ -386,7 +392,7 @@ export class ContentAccessService {
           // Verify media is ready for streaming (status='ready' with transcoding outputs)
           const mediaStatus = contentRecord.mediaItem.status;
           if (mediaStatus !== MEDIA_STATUS.READY) {
-            obs.warn('Media not ready for streaming', {
+            this.obs.warn('Media not ready for streaming', {
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
               status: mediaStatus,
@@ -403,7 +409,7 @@ export class ContentAccessService {
 
           if (!r2Key) {
             // This should never happen due to database constraint, but defensive check
-            obs.error('Media marked ready but missing HLS key', {
+            this.obs.error('Media marked ready but missing HLS key', {
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
             });
@@ -423,7 +429,7 @@ export class ContentAccessService {
               mediaType
             )
           ) {
-            obs.error('Invalid media type', {
+            this.obs.error('Invalid media type', {
               mediaType,
               contentId: input.contentId,
               mediaItemId: contentRecord.mediaItem.id,
@@ -445,13 +451,13 @@ export class ContentAccessService {
 
       // Step 3: Generate signed R2 URL (OUTSIDE transaction - external API call)
       try {
-        const streamingUrl = await r2.generateSignedUrl(
+        const streamingUrl = await this.r2.generateSignedUrl(
           r2Key,
           input.expirySeconds
         );
         const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
 
-        obs.info('Streaming URL generated successfully', {
+        this.obs.info('Streaming URL generated successfully', {
           userId,
           contentId: input.contentId,
           contentType: mediaType,
@@ -464,7 +470,7 @@ export class ContentAccessService {
           contentType: mediaType,
         };
       } catch (err) {
-        obs.error('Failed to generate signed R2 URL', {
+        this.obs.error('Failed to generate signed R2 URL', {
           errorMessage: err instanceof Error ? err.message : String(err),
           errorStack: err instanceof Error ? err.stack : undefined,
           errorName: err instanceof Error ? err.name : undefined,
@@ -475,21 +481,7 @@ export class ContentAccessService {
         throw new R2SigningError(r2Key, err);
       }
     } catch (error) {
-      // Re-throw known service errors as-is, wrap unexpected errors
-      if (isServiceError(error)) {
-        throw error;
-      }
-      obs.error('Unexpected error in getStreamingUrl', {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        errorName: error instanceof Error ? error.name : undefined,
-        userId,
-        contentId: input.contentId,
-      });
-      throw new InternalServiceError('Unexpected error in getStreamingUrl', {
-        userId,
-        contentId: input.contentId,
-      });
+      this.handleError(error, 'getStreamingUrl');
     }
   }
 
@@ -503,14 +495,12 @@ export class ContentAccessService {
     userId: string,
     input: SavePlaybackProgressInput
   ): Promise<void> {
-    const { db, obs } = this.config;
-
     // Auto-complete if watched >= completion threshold
     const completionThreshold =
       input.durationSeconds * VIDEO_PROGRESS.COMPLETION_THRESHOLD;
     const isCompleted = input.positionSeconds >= completionThreshold;
 
-    obs.info('Saving playback progress', {
+    this.obs.info('Saving playback progress', {
       userId,
       contentId: input.contentId,
       positionSeconds: input.positionSeconds,
@@ -520,7 +510,7 @@ export class ContentAccessService {
 
     // Upsert using unique constraint with optimistic concurrency control
     // Only update if new position is greater (prevents backwards seeking overwrites)
-    await db
+    await this.db
       .insert(videoPlayback)
       .values({
         userId,
@@ -539,7 +529,7 @@ export class ContentAccessService {
         },
       });
 
-    obs.info('Playback progress saved', {
+    this.obs.info('Playback progress saved', {
       userId,
       contentId: input.contentId,
       completed: isCompleted,
@@ -562,9 +552,7 @@ export class ContentAccessService {
     completed: boolean;
     updatedAt: Date;
   } | null> {
-    const { db } = this.config;
-
-    const progress = await db.query.videoPlayback.findFirst({
+    const progress = await this.db.query.videoPlayback.findFirst({
       where: and(
         eq(videoPlayback.userId, userId),
         eq(videoPlayback.contentId, input.contentId)
@@ -594,9 +582,7 @@ export class ContentAccessService {
     userId: string,
     input: ListUserLibraryInput
   ): Promise<UserLibraryResponse> {
-    const { db, obs } = this.config;
-
-    obs.info('Listing user library', {
+    this.obs.info('Listing user library', {
       userId,
       page: input.page,
       filter: input.filter,
@@ -622,7 +608,7 @@ export class ContentAccessService {
     const activeMemberships =
       input.accessType === 'purchased'
         ? []
-        : await db.query.organizationMemberships.findMany({
+        : await this.db.query.organizationMemberships.findMany({
             where: and(...membershipConditions),
             columns: { organizationId: true },
           });
@@ -716,7 +702,7 @@ export class ContentAccessService {
             ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
             : purchases.createdAt;
 
-      const baseFrom = db
+      const baseFrom = this.db
         .select({
           contentId: content.id,
           contentSlug: content.slug,
@@ -746,7 +732,7 @@ export class ContentAccessService {
           )
         );
 
-      const countQuery = db
+      const countQuery = this.db
         .select({ count: sql<number>`count(*)::int` })
         .from(purchases)
         .innerJoin(content, eq(content.id, purchases.contentId))
@@ -814,7 +800,7 @@ export class ContentAccessService {
             ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
             : content.createdAt;
 
-      const baseFrom = db
+      const baseFrom = this.db
         .select({
           contentId: content.id,
           contentSlug: content.slug,
@@ -842,7 +828,7 @@ export class ContentAccessService {
           )
         );
 
-      const countQuery = db
+      const countQuery = this.db
         .select({ count: sql<number>`count(*)::int` })
         .from(content)
         .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
@@ -994,11 +980,6 @@ export function createContentAccessService(env: ContentAccessEnv): {
   service: ContentAccessService;
   cleanup: () => Promise<void>;
 } {
-  const obs = new ObservabilityClient(
-    SERVICE_NAME,
-    env.ENVIRONMENT ?? 'development'
-  );
-
   let r2: R2Signer;
   if (env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT && env.R2_PUBLIC_URL_BASE) {
     r2 = new DevR2Signer(env.R2_PUBLIC_URL_BASE);
@@ -1055,13 +1036,15 @@ export function createContentAccessService(env: ContentAccessEnv): {
   const { db, cleanup } = createPerRequestDbClient(env);
 
   // Create Stripe client and PurchaseService
+  const environment = env.ENVIRONMENT ?? 'development';
   const stripe = createStripeClient(env.STRIPE_SECRET_KEY || '');
-  const purchaseService = new PurchaseService(
-    { db, environment: env.ENVIRONMENT ?? 'development' },
-    stripe
-  );
-
-  const service = new ContentAccessService({ db, r2, obs, purchaseService });
+  const purchaseService = new PurchaseService({ db, environment }, stripe);
+  const service = new ContentAccessService({
+    db,
+    environment,
+    r2,
+    purchaseService,
+  });
 
   // Return service with cleanup function
   return { service, cleanup };

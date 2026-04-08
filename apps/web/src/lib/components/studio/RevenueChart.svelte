@@ -10,6 +10,7 @@
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
+  import { formatPriceCompact, formatDate } from '$lib/utils/format';
 
   interface Props {
     data: { date: string; revenue: number }[];
@@ -25,35 +26,12 @@
   const isEmpty = $derived(data.length === 0 || data.every((d) => d.revenue === 0));
 
   /**
-   * Format cents to currency string (GBP)
-   */
-  function formatRevenue(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(cents / 100);
-  }
-
-  /**
-   * Format date for tooltip display
-   */
-  function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString('en-GB', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-    });
-  }
-
-  /**
    * Build aria-label summarizing the chart
    */
   const chartLabel = $derived(() => {
     if (isEmpty) return m.analytics_empty();
     const total = data.reduce((sum, d) => sum + d.revenue, 0);
-    return `Revenue chart: ${formatRevenue(total)} total over ${data.length} days`;
+    return `Revenue chart: ${formatPriceCompact(total)} total over ${data.length} days`;
   });
 </script>
 
@@ -81,10 +59,10 @@
     <div class="chart-bars">
       {#each data as point, index (point.date)}
         {@const heightPercent = (point.revenue / maxRevenue) * 100}
-        <div class="bar-wrapper" title="{formatDate(point.date)}: {formatRevenue(point.revenue)}">
+        <div class="bar-wrapper" title="{formatDate(point.date)}: {formatPriceCompact(point.revenue)}">
           <div class="bar-tooltip">
             <span class="tooltip-date">{formatDate(point.date)}</span>
-            <span class="tooltip-value">{formatRevenue(point.revenue)}</span>
+            <span class="tooltip-value">{formatPriceCompact(point.revenue)}</span>
           </div>
           <div
             class="bar"

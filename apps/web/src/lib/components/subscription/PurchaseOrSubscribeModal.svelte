@@ -13,6 +13,7 @@
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { createSubscriptionCheckoutSession } from '$lib/remote/subscription.remote';
   import type { SubscriptionTier, CurrentSubscription } from '$lib/types';
+  import { formatPrice } from '$lib/utils/format';
 
   interface Props {
     open: boolean;
@@ -38,13 +39,6 @@
   let checkoutLoading = $state<string | null>(null);
 
   const currentTierSortOrder = $derived(userSubscription?.tier?.sortOrder ?? 0);
-
-  function formatPrice(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-    }).format(cents / 100);
-  }
 
   function tierPrice(tier: SubscriptionTier): number {
     return billingInterval === 'month' ? tier.priceMonthly : tier.priceAnnual;

@@ -64,9 +64,22 @@ export function formatRelativeTime(dateStr: string | Date): string {
 }
 
 /** Format pence/cents as `£12.34`. Accepts integer minor units. */
-export function formatPrice(cents: number | null): string {
+export function formatPrice(cents: number | null | undefined): string {
   if (cents == null) return '';
   return gbpFormatter.format(cents / 100);
+}
+
+const gbpCompactFormatter = new Intl.NumberFormat(LOCALE, {
+  style: 'currency',
+  currency: 'GBP',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+/** Format pence/cents as `£1,234` (no decimals). For dashboard stats and revenue summaries. */
+export function formatPriceCompact(cents: number | null | undefined): string {
+  if (cents == null) return '£0';
+  return gbpCompactFormatter.format(cents / 100);
 }
 
 /**

@@ -40,7 +40,14 @@
     syncConnectStatus,
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
+  import { formatPrice } from '$lib/utils/format';
   import type { SubscriptionTier } from '$lib/types';
+
+  /** Shape returned by SvelteKit's query() when called client-side */
+  interface QueryResult<T> {
+    current: T | undefined;
+    loading?: boolean;
+  }
 
   let { data } = $props();
 
@@ -63,19 +70,34 @@
   const statsQuery = $derived(orgId ? getSubscriptionStats(orgId) : null);
 
   // Derived data from queries (with safe defaults)
-  const tiers = $derived((tiersQuery as any)?.current ?? []) as SubscriptionTier[];
-  const connectStatus = $derived((connectQuery as any)?.current ?? {
-    isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null,
-  });
-  const enableSubscriptionsFromServer = $derived(
-    (settingsQuery as any)?.current?.features?.enableSubscriptions ?? false
+  const tiers = $derived(
+    ((tiersQuery as QueryResult<SubscriptionTier[]> | null)?.current ?? [])
   );
-  const stats = $derived((statsQuery as any)?.current ?? {
-    totalSubscribers: 0, activeSubscribers: 0, mrrCents: 0, tierBreakdown: [],
-  });
+  const connectStatus = $derived(
+    (connectQuery as QueryResult<{
+      isConnected: boolean; accountId: string | null;
+      chargesEnabled: boolean; payoutsEnabled: boolean; status: string | null;
+    }> | null)?.current ?? {
+      isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null,
+    }
+  );
+  const enableSubscriptionsFromServer = $derived(
+    (settingsQuery as QueryResult<{ features?: { enableSubscriptions?: boolean } }> | null)
+      ?.current?.features?.enableSubscriptions ?? false
+  );
+  const stats = $derived(
+    (statsQuery as QueryResult<{
+      totalSubscribers: number; activeSubscribers: number;
+      mrrCents: number; tierBreakdown: unknown[];
+    }> | null)?.current ?? {
+      totalSubscribers: 0, activeSubscribers: 0, mrrCents: 0, tierBreakdown: [],
+    }
+  );
 
   const dataLoading = $derived(
-    (tiersQuery as any)?.loading || (connectQuery as any)?.loading || (settingsQuery as any)?.loading
+    (tiersQuery as QueryResult<unknown> | null)?.loading
+    || (connectQuery as QueryResult<unknown> | null)?.loading
+    || (settingsQuery as QueryResult<unknown> | null)?.loading
   );
 
   // ─── State ──────────────────────────────────────────────────────────────
@@ -112,13 +134,6 @@
   });
 
   // ─── Helpers ────────────────────────────────────────────────────────────
-
-  function formatCurrency(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-    }).format(cents / 100);
-  }
 
   function connectStatusLabel(status: string | null): string {
     switch (status) {
@@ -371,7 +386,7 @@
       />
       <StatCard
         label={m.monetisation_stats_mrr()}
-        value={formatCurrency(stats.mrrCents)}
+        value={formatPrice(stats.mrrCents)}
       />
     </section>
   {/if}
@@ -424,10 +439,10 @@
               </div>
               <div class="tier-prices">
                 <span class="tier-price">
-                  {formatCurrency(tier.priceMonthly)}<span class="tier-interval">/{m.monetisation_tier_monthly()}</span>
+                  {formatPrice(tier.priceMonthly)}<span class="tier-interval">/{m.monetisation_tier_monthly()}</span>
                 </span>
                 <span class="tier-price tier-price-secondary">
-                  {formatCurrency(tier.priceAnnual)}<span class="tier-interval">/{m.monetisation_tier_annual()}</span>
+                  {formatPrice(tier.priceAnnual)}<span class="tier-interval">/{m.monetisation_tier_annual()}</span>
                 </span>
               </div>
               <div class="tier-actions">
@@ -457,7 +472,7 @@
             <div class="breakdown-item">
               <span class="breakdown-name">{tb.tierName}</span>
               <span class="breakdown-count">{tb.subscriberCount} subscribers</span>
-              <span class="breakdown-mrr">{formatCurrency(tb.mrrCents)}/mo</span>
+              <span class="breakdown-mrr">{formatPrice(tb.mrrCents)}/mo</span>
             </div>
           {/each}
         </div>
@@ -509,7 +524,7 @@
             step={1}
             required
           />
-          <span class="form-hint">{formatCurrency(tierPriceMonthly)}</span>
+          <span class="form-hint">{formatPrice(tierPriceMonthly)}</span>
         </div>
         <div class="form-field">
           <Label for="tier-price-annual">{m.monetisation_tier_price_annual()}</Label>
@@ -521,7 +536,7 @@
             step={1}
             required
           />
-          <span class="form-hint">{formatCurrency(tierPriceAnnual)}</span>
+          <span class="form-hint">{formatPrice(tierPriceAnnual)}</span>
         </div>
       </div>
 

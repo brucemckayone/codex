@@ -6,10 +6,7 @@
  * creation of unused services and enabling proper cleanup.
  */
 
-import {
-  type ContentAccessService,
-  createContentAccessService,
-} from '@codex/access';
+import { ContentAccessService } from '@codex/access';
 import {
   AdminAnalyticsService,
   AdminContentManagementService,
@@ -227,10 +224,61 @@ export function createServiceRegistry(
 
     get access() {
       if (!_access) {
-        // createContentAccessService creates its own per-request DB client
-        const result = createContentAccessService(env);
-        _access = result.service;
-        cleanupFns.push(result.cleanup);
+        // Build R2Signer: dev uses unsigned CDN URLs, prod uses R2 presigned URLs
+        let r2Signer: {
+          generateSignedUrl(
+            r2Key: string,
+            expirySeconds: number
+          ): Promise<string>;
+        };
+        const isDev = getEnvironment() === 'development';
+
+        if (isDev && env.R2_PUBLIC_URL_BASE) {
+          // Development: unsigned dev-cdn URLs (Miniflare R2 serves without signatures)
+          const baseUrl = env.R2_PUBLIC_URL_BASE;
+          r2Signer = {
+            async generateSignedUrl(r2Key: string, _expirySeconds: number) {
+              return `${baseUrl}/${r2Key}`;
+            },
+          };
+        } else if (env.MEDIA_BUCKET) {
+          // Production: presigned R2 URLs via R2Service
+          const accountId =
+            typeof env.R2_ACCOUNT_ID === 'string'
+              ? env.R2_ACCOUNT_ID
+              : undefined;
+          const accessKeyId =
+            typeof env.R2_ACCESS_KEY_ID === 'string'
+              ? env.R2_ACCESS_KEY_ID
+              : undefined;
+          const secretAccessKey =
+            typeof env.R2_SECRET_ACCESS_KEY === 'string'
+              ? env.R2_SECRET_ACCESS_KEY
+              : undefined;
+          const bucketName =
+            typeof env.R2_BUCKET_MEDIA === 'string'
+              ? env.R2_BUCKET_MEDIA
+              : undefined;
+
+          const signingConfig =
+            accountId && accessKeyId && secretAccessKey && bucketName
+              ? { accountId, accessKeyId, secretAccessKey, bucketName }
+              : undefined;
+
+          r2Signer = new R2Service(env.MEDIA_BUCKET, {}, signingConfig);
+        } else {
+          throw new Error(
+            'R2 signing configuration unavailable. ' +
+              'Ensure MEDIA_BUCKET binding is set, or R2_PUBLIC_URL_BASE for development.'
+          );
+        }
+
+        _access = new ContentAccessService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          r2: r2Signer,
+          purchaseService: registry.purchase,
+        });
       }
       return _access;
     },

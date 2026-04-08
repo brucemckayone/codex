@@ -21,6 +21,7 @@
   import type { UserOrgSubscription } from '$lib/types';
   import { page } from '$app/state';
   import { buildOrgUrl } from '$lib/utils/subdomain';
+  import { formatPrice, formatDate } from '$lib/utils/format';
 
   let { data } = $props();
 
@@ -30,21 +31,6 @@
   let cancelLoading = $state(false);
   let cancelError = $state('');
   let reactivateLoading = $state<string | null>(null);
-
-  function formatCurrency(cents: number): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-    }).format(cents / 100);
-  }
-
-  function formatDate(dateStr: string): string {
-    return new Intl.DateTimeFormat('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }).format(new Date(dateStr));
-  }
 
   function statusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
     switch (status) {
@@ -176,7 +162,7 @@
 
               <div class="subscription-meta">
                 <span class="subscription-price">
-                  {formatCurrency(sub.amountCents)}
+                  {formatPrice(sub.amountCents)}
                   <span class="billing-interval">/{sub.billingInterval === 'month' ? 'mo' : 'yr'}</span>
                 </span>
                 <span class="subscription-period">

@@ -18,6 +18,7 @@
     getAnalyticsRevenue,
     getAnalyticsTopContent,
   } from '$lib/remote/admin.remote';
+  import { formatPriceCompact } from '$lib/utils/format';
 
   let { data } = $props();
 
@@ -111,17 +112,6 @@
     });
   }
 
-  /**
-   * Format cents to currency string (GBP)
-   */
-  function formatRevenue(cents: number | undefined | null): string {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: 'GBP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format((cents ?? 0) / 100);
-  }
 </script>
 
 <svelte:head>
@@ -174,7 +164,7 @@
         <Card.Content>
           <span class="summary-label">{m.billing_total_revenue()}</span>
           <span class="summary-value">
-            {formatRevenue(revenue.totalRevenueCents)}
+            {formatPriceCompact(revenue.totalRevenueCents)}
           </span>
         </Card.Content>
       </Card.Root>
@@ -188,7 +178,7 @@
         <Card.Content>
           <span class="summary-label">{m.billing_avg_order()}</span>
           <span class="summary-value">
-            {formatRevenue(revenue.averageOrderValueCents)}
+            {formatPriceCompact(revenue.averageOrderValueCents)}
           </span>
         </Card.Content>
       </Card.Root>
