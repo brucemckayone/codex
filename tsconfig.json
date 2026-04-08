@@ -23,7 +23,14 @@
     { "path": "./workers/ecom-api" },
     { "path": "./workers/admin-api" },
     { "path": "./packages/identity" },
-    { "path": "./packages/image-processing" }
+    { "path": "./packages/image-processing" },
+    { "path": "./packages/subscription" },
+    { "path": "./packages/cache" },
+    { "path": "./packages/notifications" },
+    { "path": "./packages/transcoding" },
+    { "path": "./packages/platform-settings" },
+    { "path": "./packages/constants" },
+    { "path": "./workers/media-api" }
   ],
   "compilerOptions": {
     "target": "ES2022",
@@ -70,7 +77,21 @@
       "@codex/identity": ["packages/identity/src/index.ts"],
       "@codex/identity/*": ["packages/identity/src/*"],
       "@codex/image-processing": ["packages/image-processing/src/index.ts"],
-      "@codex/image-processing/*": ["packages/image-processing/src/*"]
+      "@codex/image-processing/*": ["packages/image-processing/src/*"],
+      "@codex/subscription": ["packages/subscription/src/index.ts"],
+      "@codex/subscription/*": ["packages/subscription/src/*"],
+      "@codex/cache": ["packages/cache/src/index.ts"],
+      "@codex/cache/*": ["packages/cache/src/*"],
+      "@codex/notifications": ["packages/notifications/src/index.ts"],
+      "@codex/notifications/*": ["packages/notifications/src/*"],
+      "@codex/transcoding": ["packages/transcoding/src/index.ts"],
+      "@codex/transcoding/*": ["packages/transcoding/src/*"],
+      "@codex/platform-settings": ["packages/platform-settings/src/index.ts"],
+      "@codex/platform-settings/*": ["packages/platform-settings/src/*"],
+      "@codex/constants": ["packages/constants/src/index.ts"],
+      "@codex/constants/*": ["packages/constants/src/*"],
+      "@codex/purchase": ["packages/purchase/src/index.ts"],
+      "@codex/purchase/*": ["packages/purchase/src/*"]
     }
   }
 }

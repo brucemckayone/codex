@@ -164,29 +164,20 @@ app.get(
     policy: { auth: 'none' },
     input: { params: z.object({ slug: createSlugSchema(255) }) },
     handler: async (ctx): Promise<PublicBrandingResponse> => {
-      const organization = await ctx.services.organization.getBySlug(
-        ctx.input.params.slug
-      );
-
-      if (!organization) {
-        throw new NotFoundError('Organization not found', {
-          slug: ctx.input.params.slug,
-        });
-      }
-
-      // Get branding from platform settings service
-      const branding = await ctx.services.settings.getBranding();
+      // Use fetchPublicOrgInfo — ctx.services.settings requires org context
+      // which is unavailable on public (no-auth) endpoints
+      const info = await fetchPublicOrgInfo(ctx, ctx.input.params.slug);
 
       return {
-        logoUrl: branding.logoUrl ?? null,
-        primaryColorHex: branding.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
-        secondaryColorHex: branding.secondaryColorHex ?? null,
-        accentColorHex: branding.accentColorHex ?? null,
-        backgroundColorHex: branding.backgroundColorHex ?? null,
-        fontBody: branding.fontBody ?? null,
-        fontHeading: branding.fontHeading ?? null,
-        radiusValue: branding.radiusValue ?? 0.5,
-        densityValue: branding.densityValue ?? 1,
+        logoUrl: info.logoUrl ?? null,
+        primaryColorHex: info.brandColors.primary ?? BRAND_COLORS.DEFAULT_BLUE,
+        secondaryColorHex: info.brandColors.secondary ?? null,
+        accentColorHex: info.brandColors.accent ?? null,
+        backgroundColorHex: info.brandColors.background ?? null,
+        fontBody: info.brandFonts.body ?? null,
+        fontHeading: info.brandFonts.heading ?? null,
+        radiusValue: info.brandRadius ?? 0.5,
+        densityValue: info.brandDensity ?? 1,
       };
     },
   })
@@ -201,9 +192,7 @@ async function fetchPublicOrgInfo(
   ctx: {
     services: {
       organization: {
-        getBySlug(
-          slug: string
-        ): Promise<{
+        getBySlug(slug: string): Promise<{
           id: string;
           slug: string;
           name: string;
@@ -563,7 +552,7 @@ app.delete(
     policy: {
       auth: 'required',
       requireOrgManagement: true,
-      rateLimit: 'auth', // Stricter rate limit for deletion
+      rateLimit: 'strict', // 20/min for destructive operations
     },
     input: { params: z.object({ id: uuidSchema }) },
     successStatus: 204,

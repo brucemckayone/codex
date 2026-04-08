@@ -30,6 +30,7 @@ import checkout from './routes/checkout';
 import connect from './routes/connect';
 import purchases from './routes/purchases';
 import subscriptions from './routes/subscriptions';
+import { routeDevWebhook } from './utils/dev-webhook-router';
 import { createWebhookHandler } from './utils/webhook-handler';
 
 // ============================================================================
@@ -69,16 +70,17 @@ app.use(
       'DATABASE_URL',
       'STRIPE_SECRET_KEY',
       'STRIPE_WEBHOOK_SECRET_BOOKING',
+      'STRIPE_WEBHOOK_SECRET_PAYMENT',
+      'STRIPE_WEBHOOK_SECRET_SUBSCRIPTION',
+      'STRIPE_WEBHOOK_SECRET_CONNECT',
       'RATE_LIMIT_KV',
     ],
     optional: [
       'ENVIRONMENT',
       'WEB_APP_URL',
       'API_URL',
-      'STRIPE_WEBHOOK_SECRET_PAYMENT',
-      'STRIPE_WEBHOOK_SECRET_SUBSCRIPTION',
+      // Customer and dispute webhooks are logging stubs only
       'STRIPE_WEBHOOK_SECRET_CUSTOMER',
-      'STRIPE_WEBHOOK_SECRET_CONNECT',
       'STRIPE_WEBHOOK_SECRET_DISPUTE',
     ],
   })
@@ -186,6 +188,28 @@ app.post(
   '/webhooks/stripe/dispute',
   verifyStripeSignature(),
   createWebhookHandler('Dispute')
+);
+
+// ============================================================================
+// Development Webhook Router
+// ============================================================================
+
+/**
+ * Dev-only catch-all webhook endpoint
+ *
+ * The Stripe CLI generates ONE signing secret and forwards ALL events to ONE URL.
+ * In production, each endpoint has its own secret configured in the Stripe Dashboard.
+ * This endpoint routes events to the correct handler by type.
+ *
+ * Uses STRIPE_WEBHOOK_SECRET_BOOKING as the signing secret (set all secrets
+ * to the same CLI-generated value in .dev.vars for this to work).
+ *
+ * Usage: stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev
+ */
+app.post(
+  '/webhooks/stripe/dev',
+  verifyStripeSignature(),
+  createWebhookHandler('Dev', routeDevWebhook)
 );
 
 export default app;

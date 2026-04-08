@@ -50,7 +50,6 @@ import {
   MemberNotFoundError,
   NotFoundError,
   OrganizationNotFoundError,
-  wrapError,
 } from '../errors';
 import type {
   Organization,
@@ -100,7 +99,7 @@ export class OrganizationService extends BaseService {
           .returning();
 
         if (!newOrganization) {
-          throw new Error('Failed to create organization');
+          throw new InternalServiceError('Failed to create organization');
         }
 
         // Auto-create owner membership for the creating user
@@ -129,7 +128,7 @@ export class OrganizationService extends BaseService {
           slug: validated.slug,
         });
       }
-      throw wrapError(error, { input: validated });
+      this.handleError(error, 'create');
     }
   }
 
@@ -147,7 +146,7 @@ export class OrganizationService extends BaseService {
 
       return result || null;
     } catch (error) {
-      throw wrapError(error, { organizationId: id });
+      this.handleError(error, 'get');
     }
   }
 
@@ -168,7 +167,7 @@ export class OrganizationService extends BaseService {
 
       return result || null;
     } catch (error) {
-      throw wrapError(error, { slug });
+      this.handleError(error, 'getBySlug');
     }
   }
 
@@ -225,7 +224,7 @@ export class OrganizationService extends BaseService {
           slug: validated.slug,
         });
       }
-      throw wrapError(error, { organizationId: id, input: validated });
+      this.handleError(error, 'update');
     }
   }
 
@@ -260,7 +259,7 @@ export class OrganizationService extends BaseService {
       if (error instanceof OrganizationNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId: id });
+      this.handleError(error, 'delete');
     }
   }
 
@@ -288,9 +287,12 @@ export class OrganizationService extends BaseService {
 
       // Add search filter
       if (filters.search) {
+        const escaped = filters.search
+          .replace(/%/g, '\\%')
+          .replace(/_/g, '\\_');
         const searchCondition = or(
-          ilike(organizations.name, `%${filters.search}%`),
-          ilike(organizations.description ?? '', `%${filters.search}%`)
+          ilike(organizations.name, `%${escaped}%`),
+          ilike(organizations.description ?? '', `%${escaped}%`)
         );
         if (searchCondition) {
           whereConditions.push(searchCondition);
@@ -332,7 +334,7 @@ export class OrganizationService extends BaseService {
         },
       };
     } catch (error) {
-      throw wrapError(error, { filters, pagination });
+      this.handleError(error, 'list');
     }
   }
 
@@ -364,7 +366,7 @@ export class OrganizationService extends BaseService {
 
       return !existing;
     } catch (error) {
-      throw wrapError(error, { slug });
+      this.handleError(error, 'isSlugAvailable');
     }
   }
 
@@ -490,7 +492,7 @@ export class OrganizationService extends BaseService {
       if (error instanceof OrganizationNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { slug });
+      this.handleError(error, 'getPublicCreators');
     }
   }
 
@@ -564,7 +566,9 @@ export class OrganizationService extends BaseService {
 
       const totalRecord = countResult[0];
       if (!totalRecord) {
-        throw new Error('Failed to get member count');
+        throw new InternalServiceError('Failed to get member count', {
+          organizationId,
+        });
       }
 
       const totalCount = Number(totalRecord.total);
@@ -589,7 +593,7 @@ export class OrganizationService extends BaseService {
         },
       };
     } catch (error) {
-      throw wrapError(error, { organizationId });
+      this.handleError(error, 'listMembers');
     }
   }
 
@@ -629,7 +633,7 @@ export class OrganizationService extends BaseService {
         joinedAt: membership?.createdAt.toISOString() ?? null,
       };
     } catch (error) {
-      throw wrapError(error, { organizationId, userId });
+      this.handleError(error, 'getMyMembership');
     }
   }
 
@@ -691,7 +695,7 @@ export class OrganizationService extends BaseService {
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
     } catch (error) {
-      throw wrapError(error, { userId });
+      this.handleError(error, 'getUserOrganizations');
     }
   }
 
@@ -775,7 +779,7 @@ export class OrganizationService extends BaseService {
         error instanceof InternalServiceError
       )
         throw error;
-      throw wrapError(error, { organizationId });
+      this.handleError(error, 'inviteMember');
     }
   }
 
@@ -861,7 +865,7 @@ export class OrganizationService extends BaseService {
         error instanceof LastOwnerError
       )
         throw error;
-      throw wrapError(error, { organizationId, userId });
+      this.handleError(error, 'updateMemberRole');
     }
   }
 
@@ -874,47 +878,51 @@ export class OrganizationService extends BaseService {
    * @param userId - User ID to remove
    */
   async removeMember(organizationId: string, userId: string): Promise<void> {
-    return await this.db.transaction(async (tx) => {
-      const membership = await tx.query.organizationMemberships.findFirst({
-        where: and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, userId)
-        ),
-      });
+    try {
+      return await this.db.transaction(async (tx) => {
+        const membership = await tx.query.organizationMemberships.findFirst({
+          where: and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.userId, userId)
+          ),
+        });
 
-      if (!membership) {
-        throw new MemberNotFoundError(userId);
-      }
+        if (!membership) {
+          throw new MemberNotFoundError(userId);
+        }
 
-      // Safety: Cannot remove the last owner
-      if (membership.role === 'owner') {
-        const ownerCount = await tx
-          .select({ total: count() })
-          .from(organizationMemberships)
+        // Safety: Cannot remove the last owner
+        if (membership.role === 'owner') {
+          const ownerCount = await tx
+            .select({ total: count() })
+            .from(organizationMemberships)
+            .where(
+              and(
+                eq(organizationMemberships.organizationId, organizationId),
+                eq(organizationMemberships.role, 'owner'),
+                eq(organizationMemberships.status, 'active')
+              )
+            );
+
+          const totalOwners = Number(ownerCount[0]?.total ?? 0);
+          if (totalOwners <= 1) {
+            throw new LastOwnerError();
+          }
+        }
+
+        await tx
+          .update(organizationMemberships)
+          .set({ status: 'inactive', updatedAt: new Date() })
           .where(
             and(
               eq(organizationMemberships.organizationId, organizationId),
-              eq(organizationMemberships.role, 'owner'),
-              eq(organizationMemberships.status, 'active')
+              eq(organizationMemberships.userId, userId)
             )
           );
-
-        const totalOwners = Number(ownerCount[0]?.total ?? 0);
-        if (totalOwners <= 1) {
-          throw new LastOwnerError();
-        }
-      }
-
-      await tx
-        .update(organizationMemberships)
-        .set({ status: 'inactive', updatedAt: new Date() })
-        .where(
-          and(
-            eq(organizationMemberships.organizationId, organizationId),
-            eq(organizationMemberships.userId, userId)
-          )
-        );
-    });
+      });
+    } catch (error) {
+      this.handleError(error, 'removeMember');
+    }
   }
 
   /**
@@ -1008,7 +1016,7 @@ export class OrganizationService extends BaseService {
       if (error instanceof OrganizationNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { slug });
+      this.handleError(error, 'getPublicMembers');
     }
   }
 }

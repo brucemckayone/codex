@@ -33,6 +33,11 @@ import { OrganizationService } from '@codex/organization';
 import { PlatformSettingsFacade } from '@codex/platform-settings';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
+import {
+  ConnectAccountService,
+  SubscriptionService,
+  TierService,
+} from '@codex/subscription';
 import { TranscodingService } from '@codex/transcoding';
 import type { ServiceRegistry } from './types';
 
@@ -92,6 +97,9 @@ export function createServiceRegistry(
   let _preferences: NotificationPreferencesService | undefined;
   let _images: ImageProcessingService | undefined;
   let _identity: IdentityService | undefined;
+  let _subscription: SubscriptionService | undefined;
+  let _tier: TierService | undefined;
+  let _connectAccount: ConnectAccountService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -113,6 +121,23 @@ export function createServiceRegistry(
    */
   function getEnvironment() {
     return env.ENVIRONMENT || 'development';
+  }
+
+  // Shared Stripe client (created once, reused by purchase/subscription/tier/connect)
+  let _stripeClient: ReturnType<typeof createStripeClient> | undefined;
+
+  function getStripeClient() {
+    if (!_stripeClient) {
+      const stripeKey = env.STRIPE_SECRET_KEY;
+      if (!stripeKey) {
+        throw new Error(
+          'STRIPE_SECRET_KEY not configured. ' +
+            'Add secret to worker environment for Stripe operations.'
+        );
+      }
+      _stripeClient = createStripeClient(stripeKey);
+    }
+    return _stripeClient;
   }
 
   const registry: ServiceRegistry = {
@@ -282,23 +307,58 @@ export function createServiceRegistry(
 
     get purchase() {
       if (!_purchase) {
-        const stripeKey = env.STRIPE_SECRET_KEY;
-        if (!stripeKey) {
-          throw new Error(
-            'STRIPE_SECRET_KEY not configured. ' +
-              'Add secret to worker environment for purchase operations.'
-          );
-        }
-        const stripe = createStripeClient(stripeKey);
         _purchase = new PurchaseService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
           },
-          stripe
+          getStripeClient()
         );
       }
       return _purchase;
+    },
+
+    // ========================================================================
+    // Subscription Domain
+    // ========================================================================
+
+    get subscription() {
+      if (!_subscription) {
+        _subscription = new SubscriptionService(
+          {
+            db: getSharedDb(),
+            environment: getEnvironment(),
+          },
+          getStripeClient()
+        );
+      }
+      return _subscription;
+    },
+
+    get tier() {
+      if (!_tier) {
+        _tier = new TierService(
+          {
+            db: getSharedDb(),
+            environment: getEnvironment(),
+          },
+          getStripeClient()
+        );
+      }
+      return _tier;
+    },
+
+    get connect() {
+      if (!_connectAccount) {
+        _connectAccount = new ConnectAccountService(
+          {
+            db: getSharedDb(),
+            environment: getEnvironment(),
+          },
+          getStripeClient()
+        );
+      }
+      return _connectAccount;
     },
 
     // ========================================================================

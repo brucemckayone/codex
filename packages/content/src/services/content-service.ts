@@ -48,7 +48,6 @@ import {
   MediaNotReadyError,
   SlugConflictError,
   ValidationError,
-  wrapError,
 } from '../errors';
 import type {
   Content,
@@ -215,7 +214,7 @@ export class ContentService extends BaseService {
       if (isUniqueViolation(error)) {
         throw new SlugConflictError(validated.slug);
       }
-      throw wrapError(error, { creatorId, input: validated });
+      this.handleError(error, 'create');
     }
   }
 
@@ -253,7 +252,7 @@ export class ContentService extends BaseService {
 
       return result || null;
     } catch (error) {
-      throw wrapError(error, { contentId: id, creatorId });
+      this.handleError(error, 'get');
     }
   }
 
@@ -331,7 +330,7 @@ export class ContentService extends BaseService {
       if (error instanceof ContentNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { contentId: id, creatorId, input: validated });
+      this.handleError(error, 'update');
     }
   }
 
@@ -423,7 +422,7 @@ export class ContentService extends BaseService {
 
       return !existing;
     } catch (error) {
-      throw wrapError(error, { slug, creatorId, organizationId });
+      this.handleError(error, 'isSlugAvailable');
     }
   }
 
@@ -525,7 +524,7 @@ export class ContentService extends BaseService {
       ) {
         throw error;
       }
-      throw wrapError(error, { contentId: id, creatorId });
+      this.handleError(error, 'publish');
     }
   }
 
@@ -584,7 +583,7 @@ export class ContentService extends BaseService {
       if (error instanceof ContentNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { contentId: id, creatorId });
+      this.handleError(error, 'unpublish');
     }
   }
 
@@ -623,7 +622,7 @@ export class ContentService extends BaseService {
       if (error instanceof ContentNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { contentId: id, creatorId });
+      this.handleError(error, 'delete');
     }
   }
 
@@ -686,9 +685,12 @@ export class ContentService extends BaseService {
         whereConditions.push(eq(content.creatorId, filters.creatorId));
       }
       if (filters.search) {
+        const escaped = filters.search
+          .replace(/%/g, '\\%')
+          .replace(/_/g, '\\_');
         const searchCondition = or(
-          ilike(content.title, `%${filters.search}%`),
-          ilike(content.description ?? '', `%${filters.search}%`)
+          ilike(content.title, `%${escaped}%`),
+          ilike(content.description ?? '', `%${escaped}%`)
         );
         if (searchCondition) {
           whereConditions.push(searchCondition);
@@ -741,7 +743,7 @@ export class ContentService extends BaseService {
         },
       };
     } catch (error) {
-      throw wrapError(error, { creatorId, filters, pagination });
+      this.handleError(error, 'list');
     }
   }
 
@@ -800,9 +802,10 @@ export class ContentService extends BaseService {
 
       // Optional search on title/description
       if (params.search) {
+        const escaped = params.search.replace(/%/g, '\\%').replace(/_/g, '\\_');
         const searchCondition = or(
-          ilike(content.title, `%${params.search}%`),
-          ilike(content.description ?? '', `%${params.search}%`)
+          ilike(content.title, `%${escaped}%`),
+          ilike(content.description ?? '', `%${escaped}%`)
         );
         if (searchCondition) {
           whereConditions.push(searchCondition);
@@ -855,7 +858,7 @@ export class ContentService extends BaseService {
         },
       };
     } catch (error) {
-      throw wrapError(error, { params });
+      this.handleError(error, 'listPublic');
     }
   }
 

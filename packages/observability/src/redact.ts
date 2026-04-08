@@ -78,6 +78,19 @@ async function hashValue(value: string): Promise<string> {
 }
 
 /**
+ * Simple synchronous hash for log correlation (not cryptographic).
+ * Uses FNV-1a 32-bit for speed — sufficient for correlating redacted values in logs.
+ */
+function syncHash(value: string): string {
+  let hash = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0; // FNV prime, unsigned 32-bit
+  }
+  return `hash:${hash.toString(16).padStart(8, '0')}`;
+}
+
+/**
  * Redact a single value based on mode
  */
 function redactValue(
@@ -94,8 +107,8 @@ function redactValue(
     return '[REDACTED]';
   }
 
-  // Hash mode handled asynchronously
-  return '[REDACTED]';
+  // Hash mode: deterministic sync hash for log correlation
+  return syncHash(value);
 }
 
 /**

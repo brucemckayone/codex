@@ -71,8 +71,10 @@ export async function sendVerificationEmail(
   );
 
   if (!result.success) {
-    const msg = `Failed to send verification email for user ${user.email}: ${result.error}`;
-    obs?.error(msg);
+    obs?.error('Failed to send verification email', {
+      userId: user.id,
+      error: result.error,
+    });
   }
 }
 

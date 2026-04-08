@@ -34,6 +34,7 @@ import {
   FEES,
   SUBSCRIPTION_STATUS,
 } from '@codex/constants';
+import { isUniqueViolation } from '@codex/database';
 import {
   creatorOrganizationAgreements,
   pendingPayouts,
@@ -43,7 +44,7 @@ import {
 } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -106,7 +107,6 @@ export class SubscriptionService extends BaseService {
     cancelUrl: string
   ): Promise<{ sessionUrl: string; sessionId: string }> {
     try {
-      // Validate tier
       const [tier] = await this.db
         .select()
         .from(subscriptionTiers)
@@ -115,7 +115,7 @@ export class SubscriptionService extends BaseService {
             eq(subscriptionTiers.id, tierId),
             eq(subscriptionTiers.organizationId, orgId),
             eq(subscriptionTiers.isActive, true),
-            sql`${subscriptionTiers.deletedAt} IS NULL`
+            isNull(subscriptionTiers.deletedAt)
           )
         )
         .limit(1);
@@ -234,20 +234,6 @@ export class SubscriptionService extends BaseService {
       return;
     }
 
-    // Idempotency: check if already recorded
-    const [existing] = await this.db
-      .select({ id: subscriptions.id })
-      .from(subscriptions)
-      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
-      .limit(1);
-
-    if (existing) {
-      this.obs.info('Subscription already recorded (idempotent)', {
-        stripeSubscriptionId: stripeSubId,
-      });
-      return;
-    }
-
     // Get amount from the subscription's latest invoice
     const amountCents =
       stripeSubscription.items.data[0]?.price?.unit_amount ?? 0;
@@ -268,32 +254,43 @@ export class SubscriptionService extends BaseService {
     const periodStart = firstItem?.current_period_start ?? 0;
     const periodEnd = firstItem?.current_period_end ?? 0;
 
-    // Insert subscription record
-    await this.db.insert(subscriptions).values({
-      userId,
-      organizationId: orgId,
-      tierId,
-      stripeSubscriptionId: stripeSubId,
-      stripeCustomerId:
-        typeof stripeSubscription.customer === 'string'
-          ? stripeSubscription.customer
-          : stripeSubscription.customer.id,
-      status: SUBSCRIPTION_STATUS.ACTIVE,
-      billingInterval,
-      currentPeriodStart: new Date(periodStart * 1000),
-      currentPeriodEnd: new Date(periodEnd * 1000),
-      amountCents,
-      platformFeeCents: split.platformFeeCents,
-      organizationFeeCents: split.organizationFeeCents,
-      creatorPayoutCents: split.creatorPayoutCents,
-    });
+    // Insert subscription record — rely on unique constraint for idempotency
+    // (eliminates TOCTOU race between SELECT check and INSERT)
+    try {
+      await this.db.insert(subscriptions).values({
+        userId,
+        organizationId: orgId,
+        tierId,
+        stripeSubscriptionId: stripeSubId,
+        stripeCustomerId:
+          typeof stripeSubscription.customer === 'string'
+            ? stripeSubscription.customer
+            : stripeSubscription.customer.id,
+        status: SUBSCRIPTION_STATUS.ACTIVE,
+        billingInterval,
+        currentPeriodStart: new Date(periodStart * 1000),
+        currentPeriodEnd: new Date(periodEnd * 1000),
+        amountCents,
+        platformFeeCents: split.platformFeeCents,
+        organizationFeeCents: split.organizationFeeCents,
+        creatorPayoutCents: split.creatorPayoutCents,
+      });
 
-    this.obs.info('Subscription created from webhook', {
-      stripeSubscriptionId: stripeSubId,
-      organizationId: orgId,
-      tierId,
-      amountCents,
-    });
+      this.obs.info('Subscription created from webhook', {
+        stripeSubscriptionId: stripeSubId,
+        organizationId: orgId,
+        tierId,
+        amountCents,
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        this.obs.info('Subscription already recorded (idempotent)', {
+          stripeSubscriptionId: stripeSubId,
+        });
+        return;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -508,7 +505,7 @@ export class SubscriptionService extends BaseService {
             eq(subscriptionTiers.id, newTierId),
             eq(subscriptionTiers.organizationId, orgId),
             eq(subscriptionTiers.isActive, true),
-            sql`${subscriptionTiers.deletedAt} IS NULL`
+            isNull(subscriptionTiers.deletedAt)
           )
         )
         .limit(1);
@@ -842,26 +839,63 @@ export class SubscriptionService extends BaseService {
 
     // Transfer org fee
     if (orgConnect?.chargesEnabled && orgFeeCents > 0) {
-      await this.stripe.transfers.create({
-        amount: orgFeeCents,
-        currency: CURRENCY.GBP,
-        destination: orgConnect.stripeAccountId,
-        source_transaction: chargeId,
-        transfer_group: transferGroup,
-        metadata: {
-          subscription_id: subscriptionId,
-          type: 'organization_fee',
-        },
-      });
+      try {
+        await this.stripe.transfers.create(
+          {
+            amount: orgFeeCents,
+            currency: CURRENCY.GBP,
+            destination: orgConnect.stripeAccountId,
+            source_transaction: chargeId,
+            transfer_group: transferGroup,
+            metadata: {
+              subscription_id: subscriptionId,
+              type: 'organization_fee',
+            },
+          },
+          { idempotencyKey: `${chargeId}_org_fee` }
+        );
+      } catch (transferError) {
+        this.obs.error('Org transfer failed, accumulating as pending payout', {
+          subscriptionId,
+          organizationId: orgId,
+          amountCents: orgFeeCents,
+          error: (transferError as Error).message,
+        });
+        try {
+          await this.db.insert(pendingPayouts).values({
+            userId: orgConnect.userId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: orgFeeCents,
+            reason: 'transfer_failed',
+          });
+        } catch (insertError) {
+          this.obs.error('Failed to record pending payout for org transfer', {
+            subscriptionId,
+            organizationId: orgId,
+            amountCents: orgFeeCents,
+            error: (insertError as Error).message,
+          });
+        }
+      }
     } else if (orgFeeCents > 0) {
       // Accumulate if Connect not ready
-      await this.db.insert(pendingPayouts).values({
-        userId: orgConnect?.userId ?? '',
-        organizationId: orgId,
-        subscriptionId,
-        amountCents: orgFeeCents,
-        reason: 'connect_not_ready',
-      });
+      try {
+        await this.db.insert(pendingPayouts).values({
+          userId: orgConnect?.userId ?? '',
+          organizationId: orgId,
+          subscriptionId,
+          amountCents: orgFeeCents,
+          reason: 'connect_not_ready',
+        });
+      } catch (insertError) {
+        this.obs.error('Failed to record pending payout (Connect not ready)', {
+          subscriptionId,
+          organizationId: orgId,
+          amountCents: orgFeeCents,
+          error: (insertError as Error).message,
+        });
+      }
     }
 
     // Get all creators in the org with their revenue share agreements
@@ -883,17 +917,39 @@ export class SubscriptionService extends BaseService {
       // (Already handled by org transfer above or accumulated)
       // Transfer remaining to the org Connect account as creator payout
       if (orgConnect?.chargesEnabled && creatorPayoutCents > 0) {
-        await this.stripe.transfers.create({
-          amount: creatorPayoutCents,
-          currency: CURRENCY.GBP,
-          destination: orgConnect.stripeAccountId,
-          source_transaction: chargeId,
-          transfer_group: transferGroup,
-          metadata: {
-            subscription_id: subscriptionId,
-            type: 'creator_payout_to_owner',
-          },
-        });
+        try {
+          await this.stripe.transfers.create(
+            {
+              amount: creatorPayoutCents,
+              currency: CURRENCY.GBP,
+              destination: orgConnect.stripeAccountId,
+              source_transaction: chargeId,
+              transfer_group: transferGroup,
+              metadata: {
+                subscription_id: subscriptionId,
+                type: 'creator_payout_to_owner',
+              },
+            },
+            { idempotencyKey: `${chargeId}_creator_pool_owner` }
+          );
+        } catch (transferError) {
+          this.obs.error(
+            'Creator pool transfer to owner failed, accumulating',
+            {
+              subscriptionId,
+              organizationId: orgId,
+              amountCents: creatorPayoutCents,
+              error: (transferError as Error).message,
+            }
+          );
+          await this.db.insert(pendingPayouts).values({
+            userId: orgConnect.userId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: creatorPayoutCents,
+            reason: 'transfer_failed',
+          });
+        }
       }
       return;
     }
@@ -906,6 +962,19 @@ export class SubscriptionService extends BaseService {
       0
     );
 
+    // Batch-fetch all creator Connect accounts to avoid N+1 queries
+    const creatorIds = creatorAgreements.map((a) => a.creatorId);
+    const creatorConnects = await this.db
+      .select()
+      .from(stripeConnectAccounts)
+      .where(
+        and(
+          inArray(stripeConnectAccounts.userId, creatorIds),
+          eq(stripeConnectAccounts.organizationId, orgId)
+        )
+      );
+    const connectByCreator = new Map(creatorConnects.map((c) => [c.userId, c]));
+
     for (const agreement of creatorAgreements) {
       const creatorAmount = Math.floor(
         (creatorPayoutCents * agreement.sharePercent) / totalShareBps
@@ -913,31 +982,40 @@ export class SubscriptionService extends BaseService {
 
       if (creatorAmount <= 0) continue;
 
-      // Check creator's Connect account
-      const [creatorConnect] = await this.db
-        .select()
-        .from(stripeConnectAccounts)
-        .where(
-          and(
-            eq(stripeConnectAccounts.userId, agreement.creatorId),
-            eq(stripeConnectAccounts.organizationId, orgId)
-          )
-        )
-        .limit(1);
+      const creatorConnect = connectByCreator.get(agreement.creatorId);
 
       if (creatorConnect?.chargesEnabled) {
-        await this.stripe.transfers.create({
-          amount: creatorAmount,
-          currency: CURRENCY.GBP,
-          destination: creatorConnect.stripeAccountId,
-          source_transaction: chargeId,
-          transfer_group: transferGroup,
-          metadata: {
-            subscription_id: subscriptionId,
-            creator_id: agreement.creatorId,
-            type: 'creator_payout',
-          },
-        });
+        try {
+          await this.stripe.transfers.create(
+            {
+              amount: creatorAmount,
+              currency: CURRENCY.GBP,
+              destination: creatorConnect.stripeAccountId,
+              source_transaction: chargeId,
+              transfer_group: transferGroup,
+              metadata: {
+                subscription_id: subscriptionId,
+                creator_id: agreement.creatorId,
+                type: 'creator_payout',
+              },
+            },
+            { idempotencyKey: `${chargeId}_creator_${agreement.creatorId}` }
+          );
+        } catch (transferError) {
+          this.obs.error('Creator transfer failed, accumulating as pending', {
+            subscriptionId,
+            creatorId: agreement.creatorId,
+            amountCents: creatorAmount,
+            error: (transferError as Error).message,
+          });
+          await this.db.insert(pendingPayouts).values({
+            userId: agreement.creatorId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: creatorAmount,
+            reason: 'transfer_failed',
+          });
+        }
       } else {
         // Accumulate pending payout
         await this.db.insert(pendingPayouts).values({

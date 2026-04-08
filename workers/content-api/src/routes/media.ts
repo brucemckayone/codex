@@ -142,7 +142,15 @@ app.get(
         ctx.user.id,
         ctx.input.query
       );
-      return new PaginatedResult(result.items, result.pagination);
+      const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
+      const items = result.items.map((item) => ({
+        ...item,
+        thumbnailUrl:
+          item.thumbnailKey && cdnBase
+            ? `${cdnBase}/${item.thumbnailKey}`
+            : null,
+      }));
+      return new PaginatedResult(items, result.pagination);
     },
   })
 );
@@ -310,7 +318,7 @@ app.delete(
     policy: {
       auth: 'required',
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
-      rateLimit: 'auth', // Stricter rate limit for deletion
+      rateLimit: 'strict', // 20/min for destructive operations
     },
     input: { params: createIdParamsSchema() },
     successStatus: 204,

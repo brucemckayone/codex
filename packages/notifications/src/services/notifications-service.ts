@@ -203,61 +203,59 @@ export class NotificationsService extends BaseService {
       escapeValues: false,
     });
 
-    // 5. Send Email with retry logic wrapped in transaction and audit logging
-    return this.db.transaction(async (tx) => {
-      // Create audit log entry
-      const [auditLog] = await tx
-        .insert(schema.emailAuditLogs)
-        .values({
-          templateName: template.name,
-          recipientEmail: to,
-          organizationId: organizationId || null,
-          creatorId: creatorId || null,
-          status: EMAIL_SEND_STATUS.PENDING,
-          metadata: JSON.stringify(data), // basic metadata storage
+    // 5. Send Email with audit logging
+    // Audit log is created OUTSIDE the transaction so it persists even if sending fails
+    const [auditLog] = await this.db
+      .insert(schema.emailAuditLogs)
+      .values({
+        templateName: template.name,
+        recipientEmail: to,
+        organizationId: organizationId || null,
+        creatorId: creatorId || null,
+        status: EMAIL_SEND_STATUS.PENDING,
+        metadata: JSON.stringify(data),
+      })
+      .returning();
+
+    if (!auditLog) {
+      throw new Error('Failed to create audit log');
+    }
+
+    try {
+      const result = await this.sendWithRetry(
+        {
+          to,
+          toName,
+          subject: subjectResult.content,
+          html: htmlResult.content,
+          text: textResult.content,
+        },
+        { templateName, organizationId: organizationId || 'none' }
+      );
+
+      // Update audit log on success
+      await this.db
+        .update(schema.emailAuditLogs)
+        .set({
+          status: EMAIL_SEND_STATUS.SUCCESS,
+          updatedAt: new Date(),
         })
-        .returning();
+        .where(eq(schema.emailAuditLogs.id, auditLog.id));
 
-      if (!auditLog) {
-        throw new Error('Failed to create audit log');
-      }
+      return result;
+    } catch (error) {
+      // Update audit log on failure — this persists since it's outside a transaction
+      await this.db
+        .update(schema.emailAuditLogs)
+        .set({
+          status: EMAIL_SEND_STATUS.FAILED,
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.emailAuditLogs.id, auditLog.id));
 
-      try {
-        const result = await this.sendWithRetry(
-          {
-            to,
-            toName,
-            subject: subjectResult.content,
-            html: htmlResult.content,
-            text: textResult.content,
-          },
-          { templateName, organizationId: organizationId || 'none' }
-        );
-
-        // Update audit log on success
-        await tx
-          .update(schema.emailAuditLogs)
-          .set({
-            status: EMAIL_SEND_STATUS.SUCCESS,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.emailAuditLogs.id, auditLog.id));
-
-        return result;
-      } catch (error) {
-        // Update audit log on failure
-        await tx
-          .update(schema.emailAuditLogs)
-          .set({
-            status: EMAIL_SEND_STATUS.FAILED,
-            error: error instanceof Error ? error.message : String(error),
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.emailAuditLogs.id, auditLog.id));
-
-        throw error;
-      }
-    });
+      throw error;
+    }
   }
 
   /**

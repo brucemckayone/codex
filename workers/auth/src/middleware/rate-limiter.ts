@@ -19,9 +19,16 @@ import type { AuthEnv } from '../types';
  * @returns Hono middleware handler
  */
 export function createAuthRateLimiter() {
+  const RATE_LIMITED_PATHS = new Set([
+    '/api/auth/email/login',
+    '/api/auth/email/register',
+    '/api/auth/email/send-reset-password-email',
+    '/api/auth/email/reset-password',
+  ]);
+
   return async (c: Context<AuthEnv>, next: Next) => {
-    // Only apply rate limiting to login endpoint
-    if (c.req.path === '/api/auth/email/login' && c.req.method === 'POST') {
+    // Apply rate limiting to all auth mutation endpoints
+    if (RATE_LIMITED_PATHS.has(c.req.path) && c.req.method === 'POST') {
       const kv = c.env.RATE_LIMIT_KV;
 
       if (kv) {

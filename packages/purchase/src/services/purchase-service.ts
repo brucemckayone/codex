@@ -53,7 +53,6 @@ import {
   ForbiddenError,
   PaymentProcessingError,
   PurchaseNotFoundError,
-  wrapError,
 } from '../errors';
 
 /**
@@ -304,7 +303,7 @@ export class PurchaseService extends BaseService {
         });
       }
 
-      throw wrapError(error, { customerId, contentId: validated.contentId });
+      this.handleError(error, 'createCheckoutSession');
     }
   }
 
@@ -449,10 +448,7 @@ export class PurchaseService extends BaseService {
         contentId: metadata.contentId,
         amountPaidCents: metadata.amountPaidCents,
       });
-      throw wrapError(error, {
-        stripePaymentIntentId,
-        metadata,
-      });
+      this.handleError(error, 'completePurchase');
     }
   }
 
@@ -486,7 +482,7 @@ export class PurchaseService extends BaseService {
 
       return !!purchase;
     } catch (error) {
-      throw wrapError(error, { contentId, customerId });
+      this.handleError(error, 'verifyPurchase');
     }
   }
 
@@ -514,17 +510,12 @@ export class PurchaseService extends BaseService {
    *   limit: 20,
    *   status: 'completed',
    * });
-   * // Returns: { items: [...], total: 42, page: 1, limit: 20 }
+   * // Returns: { items: [...], pagination: { total: 42, page: 1, limit: 20, totalPages: 3 } }
    */
   async getPurchaseHistory(
     customerId: string,
     filters: PurchaseQueryInput
-  ): Promise<{
-    items: PurchaseWithContent[];
-    total: number;
-    page: number;
-    limit: number;
-  }> {
+  ): Promise<PaginatedListResponse<PurchaseWithContent>> {
     const validated = purchaseQuerySchema.parse(filters);
 
     try {
@@ -570,12 +561,15 @@ export class PurchaseService extends BaseService {
 
       return {
         items: items as PurchaseWithContent[],
-        total,
-        page: validated.page,
-        limit: validated.limit,
+        pagination: {
+          page: validated.page,
+          limit: validated.limit,
+          total,
+          totalPages: Math.ceil(total / validated.limit),
+        },
       };
     } catch (error) {
-      throw wrapError(error, { customerId, filters: validated });
+      this.handleError(error, 'getPurchaseHistory');
     }
   }
 
@@ -588,12 +582,9 @@ export class PurchaseService extends BaseService {
    * @param result - Raw purchase history from getPurchaseHistory()
    * @returns Paginated response with formatted PurchaseListItem items
    */
-  formatPurchasesForClient(result: {
-    items: PurchaseWithContent[];
-    total: number;
-    page: number;
-    limit: number;
-  }): PaginatedListResponse<PurchaseListItem> {
+  formatPurchasesForClient(
+    result: PaginatedListResponse<PurchaseWithContent>
+  ): PaginatedListResponse<PurchaseListItem> {
     const validStatuses = new Set<PurchaseListItem['status']>([
       PURCHASE_STATUS.COMPLETED,
       PURCHASE_STATUS.PENDING,
@@ -618,12 +609,7 @@ export class PurchaseService extends BaseService {
             : PURCHASE_STATUS.PENDING,
         })
       ),
-      pagination: {
-        page: result.page,
-        limit: result.limit,
-        total: result.total,
-        totalPages: Math.ceil(result.total / result.limit),
-      },
+      pagination: result.pagination,
     };
   }
 
@@ -666,7 +652,7 @@ export class PurchaseService extends BaseService {
       if (error instanceof PurchaseNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { purchaseId, customerId });
+      this.handleError(error, 'getPurchase');
     }
   }
 
@@ -799,7 +785,7 @@ export class PurchaseService extends BaseService {
         });
       }
 
-      throw wrapError(error, { sessionId, customerId });
+      this.handleError(error, 'verifyCheckoutSession');
     }
   }
 
@@ -857,7 +843,7 @@ export class PurchaseService extends BaseService {
         );
       }
 
-      throw wrapError(error, { userId });
+      this.handleError(error, 'createPortalSession');
     }
   }
 }

@@ -34,7 +34,7 @@ const subscriptions = new Hono<HonoEnv>();
 subscriptions.post(
   '/checkout',
   procedure({
-    policy: { auth: 'required', rateLimit: 'auth' },
+    policy: { auth: 'required', rateLimit: 'strict' },
     input: { body: createSubscriptionCheckoutSchema },
     successStatus: 201,
     handler: async (ctx) => {
@@ -89,7 +89,7 @@ subscriptions.get(
 subscriptions.post(
   '/change-tier',
   procedure({
-    policy: { auth: 'required', rateLimit: 'auth' },
+    policy: { auth: 'required', rateLimit: 'strict' },
     input: { body: changeTierSchema },
     handler: async (ctx) => {
       await ctx.services.subscription.changeTier(

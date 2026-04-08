@@ -76,7 +76,7 @@ app.post(
 app.post(
   '/api/transcoding/retry/:id',
   procedure({
-    policy: { auth: 'required', rateLimit: 'auth' },
+    policy: { auth: 'required', rateLimit: 'strict' },
     input: {
       params: idParamSchema,
     },

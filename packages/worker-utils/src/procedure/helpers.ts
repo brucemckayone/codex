@@ -344,10 +344,7 @@ export async function enforcePolicyInline(
   // ========================================================================
   if (mergedPolicy.auth === AUTH_ROLES.PLATFORM_OWNER) {
     if (user.role !== AUTH_ROLES.PLATFORM_OWNER) {
-      throw new ForbiddenError('Platform owner access required', {
-        userRole: user.role,
-        required: AUTH_ROLES.PLATFORM_OWNER,
-      });
+      throw new ForbiddenError('Platform owner access required');
     }
 
     // For platform owners, automatically look up their organization
@@ -383,10 +380,7 @@ export async function enforcePolicyInline(
     );
 
     if (!hasRequiredRole) {
-      throw new ForbiddenError('Insufficient permissions', {
-        userRoles,
-        required: mergedPolicy.roles,
-      });
+      throw new ForbiddenError('Insufficient permissions');
     }
   }
 

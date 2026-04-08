@@ -6,6 +6,7 @@
  *
  * Endpoints:
  * - POST   /api/content            - Create content
+ * - GET    /api/content/check-slug/:slug - Check slug availability
  * - GET    /api/content/:id        - Get by ID
  * - PATCH  /api/content/:id        - Update content
  * - GET    /api/content            - List with filters
@@ -27,6 +28,7 @@ import type {
 } from '@codex/content';
 import {
   ContentNotFoundError,
+  checkContentSlugSchema,
   contentQuerySchema,
   createContentSchema,
   updateContentSchema,
@@ -35,7 +37,7 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
-import type { HonoEnv } from '@codex/shared-types';
+import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
   multipartProcedure,
@@ -92,6 +94,40 @@ app.post(
     successStatus: 201,
     handler: async (ctx): Promise<CreateContentResponse['data']> => {
       return await ctx.services.content.create(ctx.input.body, ctx.user.id);
+    },
+  })
+);
+
+/**
+ * GET /api/content/check-slug/:slug
+ * Check if a content slug is available
+ *
+ * Query params:
+ * - organizationId (optional): scope check to org content
+ * - excludeContentId (optional): exclude a content item (for edit mode)
+ *
+ * Returns: { available: boolean } (200)
+ * Security: Authenticated users, API rate limit (100 req/min)
+ * @returns {CheckSlugResponse}
+ */
+app.get(
+  '/check-slug/:slug',
+  procedure({
+    policy: { auth: 'required' },
+    input: {
+      params: checkContentSlugSchema.pick({ slug: true }),
+      query: checkContentSlugSchema
+        .pick({ organizationId: true, excludeContentId: true })
+        .optional(),
+    },
+    handler: async (ctx): Promise<CheckSlugResponse> => {
+      const available = await ctx.services.content.isSlugAvailable(
+        ctx.input.params.slug,
+        ctx.user.id,
+        ctx.input.query?.organizationId ?? null,
+        ctx.input.query?.excludeContentId ?? null
+      );
+      return { available };
     },
   })
 );
@@ -246,7 +282,7 @@ app.delete(
     policy: {
       auth: 'required',
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
-      rateLimit: 'auth', // Stricter rate limit for deletion
+      rateLimit: 'strict', // 20/min for destructive operations
     },
     input: { params: createIdParamsSchema() },
     successStatus: 204,

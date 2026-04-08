@@ -89,7 +89,7 @@ checkout.post(
   procedure({
     policy: {
       auth: 'required',
-      rateLimit: 'auth', // 10 req/min - stricter than default api (100 req/min)
+      rateLimit: 'strict', // 20/min for checkout operations
     },
     input: { body: createCheckoutSchema },
     handler: async (ctx): Promise<CheckoutSessionResponse> => {
@@ -135,7 +135,7 @@ checkout.post(
   procedure({
     policy: {
       auth: 'required',
-      rateLimit: 'auth',
+      rateLimit: 'strict',
     },
     input: { body: createPortalSessionSchema },
     handler: async (ctx) => {

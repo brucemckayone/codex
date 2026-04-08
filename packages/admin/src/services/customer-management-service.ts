@@ -19,9 +19,8 @@ import {
   BaseService,
   ConflictError,
   NotFoundError,
-  wrapError,
 } from '@codex/service-errors';
-import { and, countDistinct, desc, eq, sql } from 'drizzle-orm';
+import { and, countDistinct, desc, eq, gte, ilike, or, sql } from 'drizzle-orm';
 import type {
   CustomerDetails,
   CustomerWithStats,
@@ -42,53 +41,128 @@ export class AdminCustomerManagementService extends BaseService {
    */
   async listCustomers(
     organizationId: string,
-    options: Partial<PaginationParams> = {}
+    options: Partial<PaginationParams> & {
+      search?: string;
+      contentId?: string;
+      joinedWithin?: number;
+      minSpendCents?: number;
+      maxSpendCents?: number;
+    } = {}
   ): Promise<PaginatedListResponse<CustomerWithStats>> {
-    const { page = 1, limit = PAGINATION.DEFAULT } = options;
+    const {
+      page = 1,
+      limit = PAGINATION.DEFAULT,
+      search,
+      contentId,
+      joinedWithin,
+      minSpendCents,
+      maxSpendCents,
+    } = options;
 
     try {
       // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
       const { limit: safeLimit, offset } = withPagination({ page, limit });
 
-      // Get customers with aggregated stats
-      // Customer = user with completed purchases from this org
-      // Run items + count queries concurrently (independent queries)
-      const whereCondition = and(
+      // Purchase-scoped conditions
+      const purchaseConditions = and(
         eq(schema.purchases.organizationId, organizationId),
-        eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
+        eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
+        ...(contentId ? [eq(schema.purchases.contentId, contentId)] : [])
       );
 
+      // User search condition (name or email, case-insensitive)
+      const escaped = search?.replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const searchCondition = escaped
+        ? or(
+            ilike(schema.users.name, `%${escaped}%`),
+            ilike(schema.users.email, `%${escaped}%`)
+          )
+        : undefined;
+
+      // Joined date filter (user createdAt within N days)
+      const joinedCondition = joinedWithin
+        ? gte(
+            schema.users.createdAt,
+            new Date(Date.now() - joinedWithin * 86_400_000)
+          )
+        : undefined;
+
+      const whereCondition = and(
+        purchaseConditions,
+        ...(searchCondition ? [searchCondition] : []),
+        ...(joinedCondition ? [joinedCondition] : [])
+      );
+
+      // HAVING conditions for aggregate filters (spend range)
+      const spendSum = sql`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)`;
+      const havingConditions = and(
+        ...(minSpendCents != null
+          ? [gte(spendSum, sql`${minSpendCents}`)]
+          : []),
+        ...(maxSpendCents != null ? [sql`${spendSum} < ${maxSpendCents}`] : [])
+      );
+
+      // Build base items query
+      let itemsQuery = this.db
+        .select({
+          userId: schema.purchases.customerId,
+          email: schema.users.email,
+          name: schema.users.name,
+          createdAt: schema.users.createdAt,
+          totalPurchases: sql<number>`COUNT(*)::int`,
+          totalSpentCents: sql<number>`${spendSum}::int`,
+        })
+        .from(schema.purchases)
+        .innerJoin(
+          schema.users,
+          eq(schema.purchases.customerId, schema.users.id)
+        )
+        .where(whereCondition)
+        .groupBy(
+          schema.purchases.customerId,
+          schema.users.email,
+          schema.users.name,
+          schema.users.createdAt
+        )
+        .orderBy(desc(spendSum))
+        .limit(safeLimit)
+        .offset(offset)
+        .$dynamic();
+
+      if (havingConditions) {
+        itemsQuery = itemsQuery.having(havingConditions);
+      }
+
+      // Count query needs the same filters including HAVING
+      // Use a subquery to count distinct customers after aggregate filtering
+      const countQuery = havingConditions
+        ? this.db
+            .select({ total: sql<number>`COUNT(*)::int` })
+            .from(
+              this.db
+                .select({ userId: schema.purchases.customerId })
+                .from(schema.purchases)
+                .innerJoin(
+                  schema.users,
+                  eq(schema.purchases.customerId, schema.users.id)
+                )
+                .where(whereCondition)
+                .groupBy(schema.purchases.customerId, schema.users.createdAt)
+                .having(havingConditions)
+                .as('filtered_customers')
+            )
+        : this.db
+            .select({ total: countDistinct(schema.purchases.customerId) })
+            .from(schema.purchases)
+            .innerJoin(
+              schema.users,
+              eq(schema.purchases.customerId, schema.users.id)
+            )
+            .where(whereCondition);
+
       const [customersQuery, countResult] = await Promise.all([
-        this.db
-          .select({
-            userId: schema.purchases.customerId,
-            email: schema.users.email,
-            name: schema.users.name,
-            createdAt: schema.users.createdAt,
-            totalPurchases: sql<number>`COUNT(*)::int`,
-            totalSpentCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-          })
-          .from(schema.purchases)
-          .innerJoin(
-            schema.users,
-            eq(schema.purchases.customerId, schema.users.id)
-          )
-          .where(whereCondition)
-          .groupBy(
-            schema.purchases.customerId,
-            schema.users.email,
-            schema.users.name,
-            schema.users.createdAt
-          )
-          .orderBy(desc(sql`SUM(${schema.purchases.amountPaidCents})`))
-          .limit(safeLimit)
-          .offset(offset),
-        this.db
-          .select({
-            total: countDistinct(schema.purchases.customerId),
-          })
-          .from(schema.purchases)
-          .where(whereCondition),
+        itemsQuery,
+        countQuery,
       ]);
 
       const total = Number(countResult[0]?.total ?? 0);
@@ -116,7 +190,7 @@ export class AdminCustomerManagementService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, options });
+      this.handleError(error, 'listCustomers');
     }
   }
 
@@ -220,7 +294,7 @@ export class AdminCustomerManagementService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, customerId });
+      this.handleError(error, 'getCustomerDetails');
     }
   }
 
@@ -317,7 +391,7 @@ export class AdminCustomerManagementService extends BaseService {
       if (error instanceof NotFoundError || error instanceof ConflictError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, customerId, contentId });
+      this.handleError(error, 'grantContentAccess');
     }
   }
 }
