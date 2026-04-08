@@ -8,6 +8,8 @@
   @prop {(tags: string[]) => void} onchange - Callback when tags change
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
+
   interface Props {
     tags: string[];
     onchange: (tags: string[]) => void;
@@ -17,6 +19,7 @@
 
   let inputValue = $state('');
   let inputRef = $state<HTMLInputElement | null>(null);
+  let announcement = $state('');
 
   const MAX_TAGS = 20;
   const MAX_TAG_LENGTH = 50;
@@ -30,11 +33,14 @@
 
     onchange([...tags, trimmed]);
     inputValue = '';
+    announcement = `${trimmed} added`;
   }
 
   function removeTag(index: number) {
+    const removed = tags[index];
     onchange(tags.filter((_, i) => i !== index));
     inputRef?.focus();
+    announcement = `${removed} removed`;
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -49,7 +55,7 @@
 
 <div class="tags-input-wrapper">
   <div class="label-row">
-    <span class="field-label">Tags <span class="optional-hint">Optional</span></span>
+    <label for="tags-input" class="field-label">{m.content_form_tags()} <span class="optional-hint">{m.content_form_optional()}</span></label>
     <span
       class="tag-count"
       data-warning={tags.length >= 18 || undefined}
@@ -59,15 +65,16 @@
     </span>
   </div>
 
-  <div class="tags-container" onclick={() => inputRef?.focus()}>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="tags-container" role="list" aria-label={m.content_form_tags()} onclick={() => inputRef?.focus()}>
     {#each tags as tag, i}
-      <span class="tag-pill">
+      <span class="tag-pill" role="listitem">
         {tag}
         <button
           type="button"
           class="tag-remove"
           onclick={() => removeTag(i)}
-          aria-label="Remove tag {tag}"
+          aria-label={m.content_form_tags_remove({ tag })}
         >
           &times;
         </button>
@@ -75,18 +82,20 @@
     {/each}
     {#if tags.length < MAX_TAGS}
       <input
+        id="tags-input"
         bind:this={inputRef}
         bind:value={inputValue}
         type="text"
         class="tag-input"
-        placeholder={tags.length === 0 ? 'Add tags...' : ''}
+        placeholder={tags.length === 0 ? m.content_form_tags_placeholder() : ''}
         maxlength={MAX_TAG_LENGTH}
         onkeydown={handleKeydown}
         onblur={() => { if (inputValue.trim()) addTag(inputValue); }}
       />
     {/if}
   </div>
-  <span class="field-hint">Press Enter or comma to add. Max {MAX_TAG_LENGTH} chars each.</span>
+  <span class="field-hint">{m.content_form_tags_hint({ max: MAX_TAG_LENGTH })}</span>
+  <span class="sr-only" aria-live="polite">{announcement}</span>
 </div>
 
 <style>

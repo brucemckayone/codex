@@ -2,7 +2,7 @@
   @component SearchBar
 
   Global search bar with debounced input, recent searches in localStorage,
-  Cmd/Ctrl+K shortcut, and scope-aware navigation.
+  "/" shortcut, and scope-aware navigation.
 
   @prop {'org' | 'platform' | 'studio'} scope - Search context
   @prop {string} orgSlug - Current org slug (required for org/studio scope)
@@ -34,6 +34,7 @@
   let query = $state('');
   let isOpen = $state(false);
   let inputEl: HTMLInputElement | undefined = $state();
+  let activeIndex = $state(-1);
 
   // Recent searches from localStorage
   let recentSearches = $state<string[]>(
@@ -87,9 +88,30 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      isOpen = false;
-      inputEl?.blur();
+    const items = isOpen && !query ? recentSearches : [];
+    const len = items.length;
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        if (!isOpen && len > 0) { isOpen = true; }
+        activeIndex = len > 0 ? (activeIndex + 1) % len : -1;
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        activeIndex = len > 0 ? (activeIndex - 1 + len) % len : -1;
+        break;
+      case 'Enter':
+        if (activeIndex >= 0 && activeIndex < len) {
+          e.preventDefault();
+          selectRecent(items[activeIndex]);
+        }
+        break;
+      case 'Escape':
+        isOpen = false;
+        activeIndex = -1;
+        inputEl?.blur();
+        break;
     }
   }
 
@@ -117,13 +139,14 @@
       class="search-bar__input"
       placeholder={defaultPlaceholder}
       bind:value={query}
-      onfocus={() => (isOpen = true)}
+      onfocus={() => { isOpen = true; activeIndex = -1; }}
       onkeydown={handleKeydown}
       aria-label={defaultPlaceholder}
       role="combobox"
       aria-controls="search-results"
       aria-expanded={isOpen && recentSearches.length > 0}
       aria-autocomplete="list"
+      aria-activedescendant={activeIndex >= 0 ? `search-option-${activeIndex}` : undefined}
       autocomplete="off"
     />
     {#if query}
@@ -148,10 +171,13 @@
         <span class="search-bar__dropdown-title">{m.search_recent()}</span>
         <button class="search-bar__dropdown-clear" onclick={clearRecent}>{m.search_clear_button()}</button>
       </div>
-      {#each recentSearches as term (term)}
+      {#each recentSearches as term, i (term)}
         <button
           class="search-bar__suggestion"
+          class:active={i === activeIndex}
           role="option"
+          id="search-option-{i}"
+          aria-selected={i === activeIndex}
           onclick={() => selectRecent(term)}
         >
           <SearchIcon size={14} />
@@ -303,7 +329,8 @@
     transition: var(--transition-colors);
   }
 
-  .search-bar__suggestion:hover {
+  .search-bar__suggestion:hover,
+  .search-bar__suggestion.active {
     background: var(--color-surface-secondary);
     color: var(--color-text);
   }

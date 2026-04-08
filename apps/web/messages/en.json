@@ -875,5 +875,11 @@
   "search_clear_button": "Clear",
 
   "brand_editor_auto": "Auto",
-  "brand_editor_customize": "Customize"
+  "brand_editor_customize": "Customize",
+
+  "content_form_tags": "Tags",
+  "content_form_optional": "Optional",
+  "content_form_tags_placeholder": "Add tags...",
+  "content_form_tags_hint": "Press Enter or comma to add. Max {max} chars each.",
+  "content_form_tags_remove": "Remove tag {tag}"
 }
