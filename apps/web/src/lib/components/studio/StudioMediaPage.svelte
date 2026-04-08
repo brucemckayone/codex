@@ -240,7 +240,7 @@
     gap: var(--space-3);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .filters-row {
       flex-direction: row;
       gap: var(--space-4);

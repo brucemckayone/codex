@@ -105,7 +105,7 @@
     gap: var(--space-3);
   }
 
-  @media (max-width: 480px) {
+  @media (--below-xs) {
     .type-cards {
       grid-template-columns: 1fr;
     }

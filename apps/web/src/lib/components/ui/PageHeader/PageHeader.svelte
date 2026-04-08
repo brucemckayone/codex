@@ -31,7 +31,7 @@
     gap: var(--space-4);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .page-header {
       flex-direction: row;
       align-items: center;

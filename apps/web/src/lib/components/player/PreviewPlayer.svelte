@@ -441,7 +441,7 @@
   }
 
   /* Responsive */
-  @media (max-width: 640px) {
+  @media (--below-sm) {
     .preview-player__controls {
       padding: var(--space-1) var(--space-2);
     }

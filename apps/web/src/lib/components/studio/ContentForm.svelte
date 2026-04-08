@@ -360,7 +360,7 @@
     gap: var(--space-6);
   }
 
-  @media (min-width: 768px) {
+  @media (--breakpoint-md) {
     .content-form-layout {
       grid-template-columns: 1fr 280px;
     }
@@ -374,7 +374,7 @@
   }
 
   /* Mobile sticky save bar */
-  @media (max-width: 767px) {
+  @media (--below-md) {
     .content-form-layout :global(.publish-sidebar) {
       position: static;
     }

@@ -187,7 +187,7 @@
 
   /* ── Mobile ──────────────────────────────────────────────────── */
 
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .brand-panel {
       left: var(--space-2);
       right: var(--space-2);

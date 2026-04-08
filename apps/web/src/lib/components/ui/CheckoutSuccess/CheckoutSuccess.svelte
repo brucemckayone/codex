@@ -366,7 +366,7 @@
     color: var(--color-text);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .checkout-success__btn--primary {
       width: auto;
     }

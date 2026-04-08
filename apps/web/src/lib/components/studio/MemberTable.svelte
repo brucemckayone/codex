@@ -199,8 +199,8 @@
   }
 
   .avatar {
-    width: 32px;
-    height: 32px;
+    width: var(--space-8);
+    height: var(--space-8);
     border-radius: var(--radius-full);
     overflow: hidden;
     flex-shrink: 0;
@@ -266,7 +266,7 @@
   }
 
   .skeleton-row {
-    height: 48px;
+    height: var(--space-12);
     border-radius: var(--radius-md);
     background-color: var(--color-surface-secondary);
     animation: pulse 1.5s ease-in-out infinite;

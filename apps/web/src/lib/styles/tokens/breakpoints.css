@@ -15,6 +15,7 @@
 @custom-media --breakpoint-2xl (min-width: 96rem);  /* 1536px */
 
 /* Max-width (for mobile-only styles) */
+@custom-media --below-xs (max-width: 29.9375rem);   /* 479px */
 @custom-media --below-sm (max-width: 39.9375rem);   /* 639px */
 @custom-media --below-md (max-width: 47.9375rem);   /* 767px */
 @custom-media --below-lg (max-width: 63.9375rem);   /* 1023px */
