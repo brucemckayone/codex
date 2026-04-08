@@ -32,7 +32,8 @@ function escapeHtml(str: string): string {
  * Cached per-isolate, keyed on config to invalidate if env changes between requests.
  */
 export function getEmailProvider(env: AuthBindings): EmailProvider {
-  const key = `${env.USE_MOCK_EMAIL}:${env.RESEND_API_KEY}`;
+  // Use key length as fingerprint — avoids storing raw API key in memory
+  const key = `${env.USE_MOCK_EMAIL}:${env.RESEND_API_KEY?.length ?? 0}`;
   if (!cachedProvider || cachedProviderKey !== key) {
     cachedProvider = createEmailProvider({
       useMock: env.USE_MOCK_EMAIL === 'true',
@@ -72,7 +73,7 @@ export async function sendVerificationEmail(
 
   if (!result.success) {
     obs?.error('Failed to send verification email', {
-      userId: user.id,
+      email: user.email,
       error: result.error,
     });
   }
