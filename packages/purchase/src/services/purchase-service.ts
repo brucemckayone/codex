@@ -657,6 +657,65 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * Process a refund from a charge.refunded webhook event.
+   *
+   * Flow:
+   * 1. Look up purchase by stripePaymentIntentId
+   * 2. Update purchase status to 'refunded'
+   * 3. Revoke content access (soft delete)
+   *
+   * Idempotent: If purchase is already refunded, this is a no-op.
+   */
+  async processRefund(paymentIntentId: string): Promise<void> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+
+      if (!purchase) {
+        this.obs.warn('Refund for unknown purchase', { paymentIntentId });
+        return;
+      }
+
+      // Idempotent: already refunded
+      if (purchase.status === PURCHASE_STATUS.REFUNDED) {
+        this.obs.info('Refund already processed', {
+          purchaseId: purchase.id,
+          paymentIntentId,
+        });
+        return;
+      }
+
+      // Update purchase status
+      await this.db
+        .update(purchases)
+        .set({ status: PURCHASE_STATUS.REFUNDED, updatedAt: new Date() })
+        .where(eq(purchases.id, purchase.id));
+
+      // Revoke content access (soft delete)
+      await this.db
+        .update(contentAccess)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(contentAccess.userId, purchase.customerId),
+            eq(contentAccess.contentId, purchase.contentId),
+            isNull(contentAccess.deletedAt)
+          )
+        );
+
+      this.obs.info('Refund processed', {
+        purchaseId: purchase.id,
+        contentId: purchase.contentId,
+        customerId: purchase.customerId,
+        paymentIntentId,
+      });
+    } catch (error) {
+      this.handleError(error, 'processRefund');
+    }
+  }
+
+  /**
    * Verify Stripe checkout session status
    *
    * Queries Stripe API for session details and checks for completed purchase.

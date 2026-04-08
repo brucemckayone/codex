@@ -10,6 +10,9 @@ export const STRIPE_EVENTS = {
   INVOICE_PAYMENT_FAILED: 'invoice.payment_failed',
   // Connect
   ACCOUNT_UPDATED: 'account.updated',
+  ACCOUNT_DEAUTHORIZED: 'account.application.deauthorized',
+  // Refunds
+  CHARGE_REFUNDED: 'charge.refunded',
 } as const;
 
 export const PURCHASE_STATUS = {

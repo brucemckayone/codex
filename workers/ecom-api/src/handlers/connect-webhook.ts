@@ -47,6 +47,18 @@ export async function handleConnectWebhook(
         break;
       }
 
+      case STRIPE_EVENTS.ACCOUNT_DEAUTHORIZED: {
+        // account.application.deauthorized — the connected account
+        // has disconnected from our platform. Disable locally to
+        // stop future transfer attempts.
+        const account = event.data.object as Stripe.Account;
+        await service.handleAccountDeauthorized(account.id);
+        obs?.info('Connect account deauthorized', {
+          accountId: account.id,
+        });
+        break;
+      }
+
       default:
         obs?.info('Unhandled connect webhook event', {
           type: event.type,

@@ -13,7 +13,7 @@
  */
 
 import { createDbClient } from '@codex/database';
-import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
+import { isServiceError, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   runpodWebhookUnionSchema,
@@ -104,11 +104,24 @@ app.post(
       // Return success - RunPod expects 200 OK to acknowledge receipt
       return c.json({ received: true }, 200);
     } catch (error) {
-      // Map service errors to HTTP responses using standard error handler
-      const { statusCode, response } = mapErrorToResponse(error);
+      // Transient/permanent classification (same pattern as Stripe webhooks):
+      // - Permanent (bad payload, business logic) → 200 to stop retries
+      // - Transient (DB/network failure) → 500 to trigger RunPod retry
+      const isPermanent =
+        error instanceof ValidationError || isServiceError(error);
+
+      const message =
+        error instanceof Error ? error.message : 'Unknown webhook error';
+
+      if (isPermanent) {
+        // Acknowledge receipt so RunPod doesn't retry a non-fixable error
+        return c.json({ received: true, error: message }, 200);
+      }
+
+      // Transient error — let RunPod retry
       return c.json(
-        response,
-        statusCode as 400 | 401 | 403 | 404 | 409 | 422 | 500
+        { error: { code: 'INTERNAL_ERROR', message: 'Transient failure' } },
+        500
       );
     }
   }

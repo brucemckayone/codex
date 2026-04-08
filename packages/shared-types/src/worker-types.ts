@@ -12,15 +12,28 @@ import type { ObservabilityClient } from '@codex/observability';
  * Environment variables and resources available to all workers
  */
 export type Bindings = {
+  // ==========================================================================
+  // Required Bindings (every worker needs these)
+  // ==========================================================================
+
   /**
    * Environment name (development, staging, production)
    */
-  ENVIRONMENT?: string;
+  ENVIRONMENT: string;
 
   /**
    * Database connection URL (Neon PostgreSQL)
    */
-  DATABASE_URL?: string;
+  DATABASE_URL: string;
+
+  /**
+   * Shared secret for worker-to-worker HMAC authentication
+   */
+  WORKER_SHARED_SECRET: string;
+
+  // ==========================================================================
+  // Optional Bindings (worker-specific)
+  // ==========================================================================
 
   /**
    * Database method (PRODUCTION for connection pooling, LOCAL for direct)
@@ -240,11 +253,6 @@ export type Bindings = {
    * e.g. http://host.docker.internal:4002 for Docker → host networking.
    */
   TRANSCODING_WEBHOOK_URL?: string;
-
-  /**
-   * Shared secret for worker-to-worker HMAC authentication
-   */
-  WORKER_SHARED_SECRET?: string;
 
   // ==========================================================================
   // Worker-to-Worker Communication

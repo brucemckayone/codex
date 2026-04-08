@@ -24,6 +24,7 @@ import {
 } from '@codex/worker-utils';
 import { handleCheckoutCompleted } from './handlers/checkout';
 import { handleConnectWebhook } from './handlers/connect-webhook';
+import { handlePaymentWebhook } from './handlers/payment-webhook';
 import { handleSubscriptionWebhook } from './handlers/subscription-webhook';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import checkout from './routes/checkout';
@@ -137,7 +138,7 @@ app.route('/connect', connect);
 app.post(
   '/webhooks/stripe/payment',
   verifyStripeSignature(),
-  createWebhookHandler('Payment')
+  createWebhookHandler('Payment', handlePaymentWebhook)
 );
 
 /**

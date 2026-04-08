@@ -216,6 +216,36 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
+   * Handle account.application.deauthorized webhook.
+   * Marks the local Connect account as disabled so the platform
+   * stops attempting transfers to a disconnected account.
+   */
+  async handleAccountDeauthorized(stripeAccountId: string): Promise<void> {
+    const [updated] = await this.db
+      .update(stripeConnectAccounts)
+      .set({
+        status: 'disabled',
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        updatedAt: new Date(),
+      })
+      .where(eq(stripeConnectAccounts.stripeAccountId, stripeAccountId))
+      .returning();
+
+    if (!updated) {
+      this.obs.warn('Deauthorized event for unknown Connect account', {
+        stripeAccountId,
+      });
+      return;
+    }
+
+    this.obs.info('Connect account deauthorized', {
+      stripeAccountId,
+      organizationId: updated.organizationId,
+    });
+  }
+
+  /**
    * Generate an Express Dashboard login link for the org owner.
    */
   async createDashboardLink(orgId: string): Promise<{ url: string }> {
