@@ -54,4 +54,4 @@ Content requested
 
 ## Reference Files
 
-- `packages/access/src/services/content-access-service.ts` — ContentAccessService
+- `packages/access/src/services/ContentAccessService.ts` — ContentAccessService

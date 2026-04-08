@@ -819,21 +819,7 @@ export class OrganizationService extends BaseService {
 
         // Safety: If demoting from owner, check there's at least one other active owner
         if (membership.role === 'owner' && role !== 'owner') {
-          const ownerCount = await tx
-            .select({ total: count() })
-            .from(organizationMemberships)
-            .where(
-              and(
-                eq(organizationMemberships.organizationId, organizationId),
-                eq(organizationMemberships.role, 'owner'),
-                eq(organizationMemberships.status, 'active')
-              )
-            );
-
-          const totalOwners = Number(ownerCount[0]?.total ?? 0);
-          if (totalOwners <= 1) {
-            throw new LastOwnerError();
-          }
+          await this.ensureNotLastOwner(tx, organizationId);
         }
 
         const [updated] = await tx
@@ -893,21 +879,7 @@ export class OrganizationService extends BaseService {
 
         // Safety: Cannot remove the last owner
         if (membership.role === 'owner') {
-          const ownerCount = await tx
-            .select({ total: count() })
-            .from(organizationMemberships)
-            .where(
-              and(
-                eq(organizationMemberships.organizationId, organizationId),
-                eq(organizationMemberships.role, 'owner'),
-                eq(organizationMemberships.status, 'active')
-              )
-            );
-
-          const totalOwners = Number(ownerCount[0]?.total ?? 0);
-          if (totalOwners <= 1) {
-            throw new LastOwnerError();
-          }
+          await this.ensureNotLastOwner(tx, organizationId);
         }
 
         await tx
@@ -1017,6 +989,31 @@ export class OrganizationService extends BaseService {
         throw error;
       }
       this.handleError(error, 'getPublicMembers');
+    }
+  }
+
+  /**
+   * Ensure the org has more than one active owner.
+   * Used before demoting/removing an owner to prevent orphaned orgs.
+   */
+  private async ensureNotLastOwner(
+    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+    organizationId: string
+  ): Promise<void> {
+    const ownerCount = await tx
+      .select({ total: count() })
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.role, 'owner'),
+          eq(organizationMemberships.status, 'active')
+        )
+      );
+
+    const totalOwners = Number(ownerCount[0]?.total ?? 0);
+    if (totalOwners <= 1) {
+      throw new LastOwnerError();
     }
   }
 }

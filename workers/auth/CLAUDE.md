@@ -46,7 +46,7 @@ This worker does NOT use `procedure()` for auth endpoints — BetterAuth provide
 
 ## Strict Rules
 
-- **MUST** use rate limiting (`auth` preset) on login/register — prevents brute force
+- **MUST** use rate limiting (`auth` preset) on login, register, and password reset — prevents brute force
 - **MUST** use HttpOnly, Secure cookies — NEVER expose session tokens to JavaScript
 - **MUST** hash passwords with bcrypt before storage — BetterAuth handles this
 - **NEVER** log passwords, session tokens, or reset tokens

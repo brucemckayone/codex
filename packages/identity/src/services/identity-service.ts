@@ -256,19 +256,7 @@ export class IdentityService extends BaseService {
         input.username !== existing.username
       ) {
         if (input.username !== null) {
-          // Check if username is already taken by another ACTIVE user
-          // We need: username = input.username AND id != userId AND deletedAt IS NULL
-          const otherUserWithUsername = await this.db.query.users.findFirst({
-            where: and(
-              eq(users.username, input.username),
-              ne(users.id, userId),
-              whereNotDeleted(users) // Exclude soft-deleted users
-            ),
-          });
-
-          if (otherUserWithUsername) {
-            throw new UsernameTakenError(input.username);
-          }
+          await this.validateUsernameAvailability(input.username, userId);
 
           this.obs.info('Username update', {
             userId,
@@ -359,18 +347,7 @@ export class IdentityService extends BaseService {
         });
       }
 
-      // Username uniqueness check (same pattern as updateProfile)
-      const otherUser = await this.db.query.users.findFirst({
-        where: and(
-          eq(users.username, input.username),
-          ne(users.id, userId),
-          whereNotDeleted(users)
-        ),
-      });
-
-      if (otherUser) {
-        throw new UsernameTakenError(input.username);
-      }
+      await this.validateUsernameAvailability(input.username, userId);
 
       // Atomic update: role + profile fields
       const [updated] = await this.db
@@ -566,6 +543,27 @@ export class IdentityService extends BaseService {
         error,
         'IdentityService.updateNotificationPreferences'
       );
+    }
+  }
+
+  /**
+   * Validate that a username is available (not taken by another active user).
+   * Shared by updateProfile() and upgradeToCreator().
+   */
+  private async validateUsernameAvailability(
+    username: string,
+    excludeUserId: string
+  ): Promise<void> {
+    const existing = await this.db.query.users.findFirst({
+      where: and(
+        eq(users.username, username),
+        ne(users.id, excludeUserId),
+        whereNotDeleted(users)
+      ),
+    });
+
+    if (existing) {
+      throw new UsernameTakenError(username);
     }
   }
 }
