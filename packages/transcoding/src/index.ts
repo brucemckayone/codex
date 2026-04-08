@@ -53,7 +53,6 @@ export {
   TranscodingMediaNotFoundError,
   TranscodingServiceError,
   ValidationError,
-  wrapError,
 } from './errors';
 // Path utilities (SINGLE SOURCE OF TRUTH for R2/B2 keys)
 export {

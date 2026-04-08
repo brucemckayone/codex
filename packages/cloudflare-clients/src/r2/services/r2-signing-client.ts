@@ -18,6 +18,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { AWS_ERRORS, INFRA_KEYS } from '@codex/constants';
+import { ValidationError } from '@codex/service-errors';
 import { R2_REGIONS } from '../constants';
 
 // Import from r2-service (exported via index.ts)
@@ -123,8 +124,17 @@ export function createR2SigningClientFromEnv(): R2SigningClient {
   const bucketName = process.env[INFRA_KEYS.R2.BUCKET_MEDIA];
 
   if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
-    throw new Error(
-      `Missing R2 environment variables. Required: ${INFRA_KEYS.R2.ACCOUNT_ID}, ${INFRA_KEYS.R2.ACCESS_KEY_ID}, ${INFRA_KEYS.R2.SECRET_ACCESS_KEY}, ${INFRA_KEYS.R2.BUCKET_MEDIA}`
+    throw new ValidationError(
+      `Missing R2 environment variables. Required: ${INFRA_KEYS.R2.ACCOUNT_ID}, ${INFRA_KEYS.R2.ACCESS_KEY_ID}, ${INFRA_KEYS.R2.SECRET_ACCESS_KEY}, ${INFRA_KEYS.R2.BUCKET_MEDIA}`,
+      {
+        field: 'environment',
+        required: [
+          INFRA_KEYS.R2.ACCOUNT_ID,
+          INFRA_KEYS.R2.ACCESS_KEY_ID,
+          INFRA_KEYS.R2.SECRET_ACCESS_KEY,
+          INFRA_KEYS.R2.BUCKET_MEDIA,
+        ],
+      }
     );
   }
 

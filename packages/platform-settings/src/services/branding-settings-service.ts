@@ -8,7 +8,7 @@
 import type { R2Service } from '@codex/cloudflare-clients';
 import { MIME_TYPES } from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
-import { BaseService } from '@codex/service-errors';
+import { BaseService, InternalServiceError } from '@codex/service-errors';
 import type { BrandingSettingsResponse } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
@@ -215,7 +215,9 @@ export class BrandingSettingsService extends BaseService {
     validatedFile: import('@codex/validation').ValidatedLogoFile
   ): Promise<BrandingSettingsResponse> {
     if (!this.r2) {
-      throw new Error('R2 service not configured for logo uploads');
+      throw new InternalServiceError(
+        'R2 service not configured for logo uploads'
+      );
     }
 
     const { buffer, mimeType } = validatedFile;
@@ -327,7 +329,9 @@ export class BrandingSettingsService extends BaseService {
    */
   async deleteLogo(): Promise<BrandingSettingsResponse> {
     if (!this.r2) {
-      throw new Error('R2 service not configured for logo operations');
+      throw new InternalServiceError(
+        'R2 service not configured for logo operations'
+      );
     }
 
     // Get current logo path

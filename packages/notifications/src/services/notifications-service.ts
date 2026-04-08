@@ -7,7 +7,11 @@ import {
 import { BaseService } from '@codex/service-errors';
 import { z } from '@codex/validation';
 import { eq } from 'drizzle-orm';
-import { TemplateNotFoundError, ValidationError } from '../errors';
+import {
+  InternalServiceError,
+  TemplateNotFoundError,
+  ValidationError,
+} from '../errors';
 import type {
   EmailMessage,
   EmailProvider,
@@ -48,11 +52,13 @@ export class NotificationsService extends BaseService {
     NonNullable<NotificationsServiceConfig['defaults']>
   >;
   private readonly brandingCache: BrandingCache;
+  private readonly brandTokenResolver?: NotificationsServiceConfig['brandTokenResolver'];
 
   constructor(config: NotificationsServiceConfig) {
     super(config);
     this.templateRepository = new TemplateRepository(this.db);
     this.brandingCache = new BrandingCache(); // 5 minute TTL by default
+    this.brandTokenResolver = config.brandTokenResolver;
     this.brandDefaults = {
       platformName: config.defaults?.platformName || 'Codex',
       primaryColor: config.defaults?.primaryColor || '#000000',
@@ -62,7 +68,9 @@ export class NotificationsService extends BaseService {
     };
 
     if (!config.emailProvider) {
-      throw new Error('EmailProvider is required');
+      throw new ValidationError('EmailProvider is required', {
+        field: 'emailProvider',
+      });
     }
     this.emailProvider = config.emailProvider;
 
@@ -86,28 +94,41 @@ export class NotificationsService extends BaseService {
     }
 
     try {
-      // Services require organizationId in constructor (org-scoped design)
-      const brandingService = new BrandingSettingsService({
-        db: this.db,
-        environment: this.environment,
-        organizationId,
-      });
-      const contactService = new ContactSettingsService({
-        db: this.db,
-        environment: this.environment,
-        organizationId,
-      });
+      let primaryColor: string;
+      let logoUrl: string;
+      let supportEmail: string;
 
-      const [branding, contact] = await Promise.all([
-        brandingService.get(),
-        contactService.get(),
-      ]);
+      if (this.brandTokenResolver) {
+        // Use injected resolver (preferred — controlled by service registry)
+        const resolved = await this.brandTokenResolver(organizationId);
+        primaryColor =
+          resolved?.primaryColor ?? this.brandDefaults.primaryColor;
+        logoUrl = resolved?.logoUrl ?? this.brandDefaults.logoUrl;
+        supportEmail =
+          resolved?.supportEmail ?? this.brandDefaults.supportEmail;
+      } else {
+        // Fallback: create org-scoped settings services ad-hoc
+        const brandingService = new BrandingSettingsService({
+          db: this.db,
+          environment: this.environment,
+          organizationId,
+        });
+        const contactService = new ContactSettingsService({
+          db: this.db,
+          environment: this.environment,
+          organizationId,
+        });
 
-      const primaryColor: string =
-        branding.primaryColorHex ?? this.brandDefaults.primaryColor;
-      const logoUrl: string = branding.logoUrl ?? this.brandDefaults.logoUrl;
-      const supportEmail: string =
-        contact.supportEmail ?? this.brandDefaults.supportEmail;
+        const [branding, contact] = await Promise.all([
+          brandingService.get(),
+          contactService.get(),
+        ]);
+
+        primaryColor =
+          branding.primaryColorHex ?? this.brandDefaults.primaryColor;
+        logoUrl = branding.logoUrl ?? this.brandDefaults.logoUrl;
+        supportEmail = contact.supportEmail ?? this.brandDefaults.supportEmail;
+      }
 
       const tokens = {
         platformName: this.brandDefaults.platformName,
@@ -218,7 +239,7 @@ export class NotificationsService extends BaseService {
       .returning();
 
     if (!auditLog) {
-      throw new Error('Failed to create audit log');
+      throw new InternalServiceError('Failed to create audit log');
     }
 
     try {
@@ -299,7 +320,10 @@ export class NotificationsService extends BaseService {
 
         return result;
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
+        lastError =
+          error instanceof Error
+            ? error
+            : new InternalServiceError(String(error));
 
         // Skip retry for known non-transient errors
         if (
@@ -326,7 +350,10 @@ export class NotificationsService extends BaseService {
     });
 
     // Throw for consistent error handling (callers can catch if needed)
-    throw lastError || new Error('Failed to send email after retries');
+    throw (
+      lastError ||
+      new InternalServiceError('Failed to send email after retries')
+    );
   }
 
   /**

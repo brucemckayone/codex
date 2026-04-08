@@ -9,11 +9,7 @@
  * they have access to based on scope and ownership.
  */
 
-import { createDbClient, schema } from '@codex/database';
-import {
-  TemplateAccessDeniedError,
-  TemplateNotFoundError,
-} from '@codex/notifications';
+import { TemplateAccessDeniedError } from '@codex/notifications';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createIdParamsSchema,
@@ -21,7 +17,6 @@ import {
   testSendTemplateSchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
-import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
@@ -72,16 +67,10 @@ app.post(
       body: testSendTemplateSchema,
     },
     handler: async (ctx) => {
-      const db = createDbClient(ctx.env);
-
-      // Get template (we need the name for sending)
-      const template = await db.query.emailTemplates.findFirst({
-        where: eq(schema.emailTemplates.id, ctx.input.params.id),
-      });
-
-      if (!template) {
-        throw new TemplateNotFoundError(ctx.input.params.id);
-      }
+      // Get template via service (replaces ad-hoc createDbClient)
+      const template = await ctx.services.templates.getTemplateById(
+        ctx.input.params.id
+      );
 
       // Check access using template service
       const hasAccess = await ctx.services.templates.checkTemplateAccess(

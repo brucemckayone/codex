@@ -13,6 +13,7 @@ import type {
   R2MultipartOptions,
 } from '@cloudflare/workers-types';
 import { MIME_TYPES, R2_DEFAULTS } from '@codex/constants';
+import { ValidationError } from '@codex/service-errors';
 import { R2_REGIONS, RETRYABLE_STATUS_CODES } from '../constants';
 
 export type R2Opts = {
@@ -154,9 +155,10 @@ export class R2Service {
     expirySeconds: number
   ): Promise<string> {
     if (!this.s3Client || !this.bucketName) {
-      throw new Error(
+      throw new ValidationError(
         'R2 signing config required for presigned URLs. ' +
-          'Provide R2SigningConfig (accountId, accessKeyId, secretAccessKey, bucketName) in constructor.'
+          'Provide R2SigningConfig (accountId, accessKeyId, secretAccessKey, bucketName) in constructor.',
+        { field: 'signingConfig' }
       );
     }
 
@@ -183,9 +185,10 @@ export class R2Service {
     expirySeconds = 3600
   ): Promise<string> {
     if (!this.s3Client || !this.bucketName) {
-      throw new Error(
+      throw new ValidationError(
         'R2 signing config required for presigned URLs. ' +
-          'Provide R2SigningConfig (accountId, accessKeyId, secretAccessKey, bucketName) in constructor.'
+          'Provide R2SigningConfig (accountId, accessKeyId, secretAccessKey, bucketName) in constructor.',
+        { field: 'signingConfig' }
       );
     }
 

@@ -12,6 +12,8 @@
  * Rounding: ceil for platform and org, remainder goes to creators.
  */
 
+import { InternalServiceError } from '@codex/service-errors';
+
 export interface RevenueSplit {
   platformFeeCents: number;
   organizationFeeCents: number;
@@ -58,7 +60,7 @@ export function calculateRevenueSplit(
   // Sanity check
   const total = platformFeeCents + organizationFeeCents + creatorPayoutCents;
   if (total !== amountCents) {
-    throw new Error(
+    throw new InternalServiceError(
       `Revenue split mismatch: ${total} !== ${amountCents} ` +
         `(platform=${platformFeeCents}, org=${organizationFeeCents}, creator=${creatorPayoutCents})`
     );

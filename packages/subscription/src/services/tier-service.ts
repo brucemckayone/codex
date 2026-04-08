@@ -23,7 +23,11 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  InternalServiceError,
+  type ServiceConfig,
+} from '@codex/service-errors';
 import type { CreateTierInput, UpdateTierInput } from '@codex/validation';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -113,7 +117,7 @@ export class TierService extends BaseService {
         .returning();
 
       if (!tier) {
-        throw new Error('Failed to insert tier record');
+        throw new InternalServiceError('Failed to insert tier record');
       }
 
       this.obs.info('Subscription tier created', {

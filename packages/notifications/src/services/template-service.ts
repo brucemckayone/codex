@@ -46,6 +46,30 @@ type EmailTemplate = typeof schema.emailTemplates.$inferSelect;
  */
 export class TemplateService extends BaseService {
   // ===========================================================================
+  // Generic Template Lookup (any scope)
+  // ===========================================================================
+
+  /**
+   * Get any template by ID regardless of scope.
+   * Useful for operations like test-send where the caller already
+   * handles access control via checkTemplateAccess().
+   */
+  async getTemplateById(id: string): Promise<EmailTemplate> {
+    const template = await this.db.query.emailTemplates.findFirst({
+      where: and(
+        eq(schema.emailTemplates.id, id),
+        isNull(schema.emailTemplates.deletedAt)
+      ),
+    });
+
+    if (!template) {
+      throw new TemplateNotFoundError(id);
+    }
+
+    return template;
+  }
+
+  // ===========================================================================
   // Global Template Operations (Platform Owner Only)
   // ===========================================================================
 
@@ -113,7 +137,7 @@ export class TemplateService extends BaseService {
         .returning();
 
       if (!template) {
-        throw new Error('Failed to create global template');
+        throw new InternalServiceError('Failed to create global template');
       }
 
       // Log after successful DB operation
@@ -286,7 +310,9 @@ export class TemplateService extends BaseService {
         .returning();
 
       if (!template) {
-        throw new Error('Failed to create organization template');
+        throw new InternalServiceError(
+          'Failed to create organization template'
+        );
       }
 
       // Log after successful DB operation
@@ -444,7 +470,7 @@ export class TemplateService extends BaseService {
         .returning();
 
       if (!template) {
-        throw new Error('Failed to create creator template');
+        throw new InternalServiceError('Failed to create creator template');
       }
 
       // Log after successful DB operation

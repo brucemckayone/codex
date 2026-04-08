@@ -41,11 +41,34 @@ export type { ServiceConfig };
 /**
  * Configuration for NotificationsService initialization
  */
+/**
+ * Brand tokens resolved for an organization (used in email template rendering)
+ */
+export interface OrgBrandTokens {
+  primaryColor: string;
+  logoUrl: string;
+  supportEmail: string;
+}
+
+/**
+ * Factory that resolves brand tokens for a given organization.
+ * Injected at construction so the service registry controls creation.
+ */
+export type BrandTokenResolver = (
+  orgId: string
+) => Promise<OrgBrandTokens | null>;
+
 export interface NotificationsServiceConfig extends ServiceConfig {
   emailProvider: EmailProvider;
   fromEmail?: string;
   fromName?: string;
   replyToEmail?: string;
+  /**
+   * Optional factory to resolve org-scoped brand tokens.
+   * When provided, replaces the ad-hoc BrandingSettingsService/ContactSettingsService
+   * instantiation, letting the service registry control settings access.
+   */
+  brandTokenResolver?: BrandTokenResolver;
   /**
    * Default branding and support configuration
    */

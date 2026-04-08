@@ -23,7 +23,7 @@ import { mediaItems } from '@codex/database/schema';
 import {
   BaseService,
   type ServiceConfig,
-  wrapError,
+  ValidationError,
 } from '@codex/service-errors';
 import type {
   RunPodProgressWebhookPayload,
@@ -103,13 +103,17 @@ export class TranscodingService extends BaseService {
 
     // Validate required config
     if (!config.runpodApiKey) {
-      throw new Error('TranscodingService: runpodApiKey is required');
+      throw new ValidationError('TranscodingService: runpodApiKey is required');
     }
     if (!config.runpodEndpointId) {
-      throw new Error('TranscodingService: runpodEndpointId is required');
+      throw new ValidationError(
+        'TranscodingService: runpodEndpointId is required'
+      );
     }
     if (!config.webhookBaseUrl) {
-      throw new Error('TranscodingService: webhookBaseUrl is required');
+      throw new ValidationError(
+        'TranscodingService: webhookBaseUrl is required'
+      );
     }
 
     this.runpodApiKey = config.runpodApiKey;
@@ -168,7 +172,9 @@ export class TranscodingService extends BaseService {
 
     // Verify input file exists
     if (!media.r2Key) {
-      throw new Error('Input file not uploaded (r2Key missing)');
+      throw new ValidationError('Input file not uploaded (r2Key missing)', {
+        mediaId,
+      });
     }
 
     // Step 2: Construct job request
@@ -683,7 +689,7 @@ export class TranscodingService extends BaseService {
       ) {
         throw error;
       }
-      throw wrapError(error, { mediaId, creatorId });
+      this.handleError(error, 'getMedia');
     }
   }
 

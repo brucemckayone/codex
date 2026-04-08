@@ -22,7 +22,6 @@ export {
   NotFoundError,
   ServiceError as TranscodingServiceError,
   ValidationError,
-  wrapError,
 } from '@codex/service-errors';
 
 /**

@@ -22,7 +22,11 @@ import {
 } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
-import { wrapError } from '@codex/service-errors';
+import {
+  InternalServiceError,
+  isServiceError,
+  ValidationError,
+} from '@codex/service-errors';
 import type {
   GetPlaybackProgressInput,
   GetStreamingUrlInput,
@@ -471,14 +475,8 @@ export class ContentAccessService {
         throw new R2SigningError(r2Key, err);
       }
     } catch (error) {
-      // Re-throw domain errors as-is, wrap unexpected errors
-      if (
-        error instanceof ContentNotFoundError ||
-        error instanceof AccessDeniedError ||
-        error instanceof InvalidContentTypeError ||
-        error instanceof MediaNotReadyForStreamingError ||
-        error instanceof R2SigningError
-      ) {
+      // Re-throw known service errors as-is, wrap unexpected errors
+      if (isServiceError(error)) {
         throw error;
       }
       obs.error('Unexpected error in getStreamingUrl', {
@@ -488,7 +486,10 @@ export class ContentAccessService {
         userId,
         contentId: input.contentId,
       });
-      throw wrapError(error, { userId, contentId: input.contentId });
+      throw new InternalServiceError('Unexpected error in getStreamingUrl', {
+        userId,
+        contentId: input.contentId,
+      });
     }
   }
 
@@ -1003,19 +1004,41 @@ export function createContentAccessService(env: ContentAccessEnv): {
     r2 = new DevR2Signer(env.R2_PUBLIC_URL_BASE);
   } else {
     if (!env.MEDIA_BUCKET) {
-      throw new Error('MEDIA_BUCKET binding is required');
+      throw new ValidationError('MEDIA_BUCKET binding is required', {
+        field: 'MEDIA_BUCKET',
+      });
     }
     if (!env.R2_ACCOUNT_ID) {
-      throw new Error('R2_ACCOUNT_ID environment variable is required');
+      throw new ValidationError(
+        'R2_ACCOUNT_ID environment variable is required',
+        {
+          field: 'R2_ACCOUNT_ID',
+        }
+      );
     }
     if (!env.R2_ACCESS_KEY_ID) {
-      throw new Error('R2_ACCESS_KEY_ID environment variable is required');
+      throw new ValidationError(
+        'R2_ACCESS_KEY_ID environment variable is required',
+        {
+          field: 'R2_ACCESS_KEY_ID',
+        }
+      );
     }
     if (!env.R2_SECRET_ACCESS_KEY) {
-      throw new Error('R2_SECRET_ACCESS_KEY environment variable is required');
+      throw new ValidationError(
+        'R2_SECRET_ACCESS_KEY environment variable is required',
+        {
+          field: 'R2_SECRET_ACCESS_KEY',
+        }
+      );
     }
     if (!env.R2_BUCKET_MEDIA) {
-      throw new Error('R2_BUCKET_MEDIA environment variable is required');
+      throw new ValidationError(
+        'R2_BUCKET_MEDIA environment variable is required',
+        {
+          field: 'R2_BUCKET_MEDIA',
+        }
+      );
     }
 
     const signingConfig: R2SigningConfig = {

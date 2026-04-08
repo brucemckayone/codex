@@ -30,7 +30,11 @@ import {
 } from '@codex/notifications';
 import type { ObservabilityClient } from '@codex/observability';
 import { OrganizationService } from '@codex/organization';
-import { PlatformSettingsFacade } from '@codex/platform-settings';
+import {
+  BrandingSettingsService,
+  ContactSettingsService,
+  PlatformSettingsFacade,
+} from '@codex/platform-settings';
 import { createStripeClient, PurchaseService } from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
 import {
@@ -493,6 +497,29 @@ export function createServiceRegistry(
           fromEmail: env.FROM_EMAIL || 'noreply@example.com',
           fromName: env.FROM_NAME || 'Codex',
           environment: getEnvironment(),
+          // Inject brand token resolver so NotificationsService doesn't
+          // create ad-hoc BrandingSettingsService/ContactSettingsService
+          brandTokenResolver: async (orgId) => {
+            const brandingSvc = new BrandingSettingsService({
+              db: getSharedDb(),
+              environment: getEnvironment(),
+              organizationId: orgId,
+            });
+            const contactSvc = new ContactSettingsService({
+              db: getSharedDb(),
+              environment: getEnvironment(),
+              organizationId: orgId,
+            });
+            const [branding, contact] = await Promise.all([
+              brandingSvc.get(),
+              contactSvc.get(),
+            ]);
+            return {
+              primaryColor: branding.primaryColorHex ?? '#000000',
+              logoUrl: branding.logoUrl ?? '',
+              supportEmail: contact.supportEmail ?? '',
+            };
+          },
         });
       }
       return _notifications;
