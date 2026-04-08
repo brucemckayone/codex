@@ -3,6 +3,7 @@ import type {
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
 } from '@codex/access';
+import type { HonoEnv } from '@codex/shared-types';
 import {
   createIdParamsSchema,
   getStreamingUrlSchema,
@@ -12,7 +13,7 @@ import {
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
-const app = new Hono();
+const app = new Hono<HonoEnv>();
 
 /**
  * GET /api/access/content/:id/stream
