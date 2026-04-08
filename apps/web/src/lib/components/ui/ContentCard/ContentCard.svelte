@@ -29,7 +29,7 @@
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
   import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
-  import { extractPlainText } from '$lib/editor/render';
+  import { extractPlainText } from '@codex/validation';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     /** Card display variant. @default 'explore' */
@@ -242,17 +242,6 @@
     z-index: 1;
   }
 
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border-width: 0;
-  }
 
   .content-card__thumbnail {
     position: relative;

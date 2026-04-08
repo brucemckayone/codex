@@ -62,7 +62,7 @@
       : 0
   );
 
-  function parseContent(raw: string): Record<string, unknown> | undefined {
+  function parseContent(raw: string): Record<string, unknown> | string | undefined {
     if (!raw) return undefined;
     try {
       const parsed = JSON.parse(raw);
@@ -70,9 +70,10 @@
         return parsed;
       }
     } catch {
-      // Not JSON — likely legacy markdown, return undefined to start empty
+      // Not Tiptap JSON — treat as plain text so existing descriptions are preserved
     }
-    return undefined;
+    // Return plain text as-is — Tiptap will convert it to a document
+    return raw;
   }
 
   onMount(() => {
@@ -127,6 +128,23 @@
       ed.destroy();
       editorInstance = null;
     };
+  });
+
+  // Handle late-arriving content (e.g., form fields set after mount via $effect).
+  // Only fires once: when the editor exists but is empty, and the content prop
+  // arrives with a value. Prevents infinite loops by checking editor emptiness.
+  let didSetDeferredContent = false;
+  $effect(() => {
+    if (editorInstance && content && !didSetDeferredContent) {
+      const isEmpty = editorInstance.isEmpty;
+      if (isEmpty) {
+        const parsed = parseContent(content);
+        if (parsed) {
+          editorInstance.commands.setContent(parsed);
+          didSetDeferredContent = true;
+        }
+      }
+    }
   });
 </script>
 
@@ -303,17 +321,5 @@
     color: var(--color-error-600);
   }
 
-  /* SR-only for hidden textarea */
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
 
 </style>

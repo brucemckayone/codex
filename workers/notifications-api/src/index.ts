@@ -25,7 +25,6 @@ import {
   createWorker,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
-import preferencesRoutes from './routes/preferences';
 // Import route modules
 import previewRoutes from './routes/preview';
 import templateRoutes from './routes/templates';
@@ -81,8 +80,6 @@ app.use(
  */
 app.route('/api/templates', templateRoutes);
 app.route('/api/templates', previewRoutes);
-app.route('/api/notifications', preferencesRoutes);
-
 // ============================================================================
 // Export
 // ============================================================================

@@ -621,7 +621,7 @@ export function createMockStripeCheckoutEvent(
     paymentIntentId = `pi_test_${randomUUID().slice(0, 8)}`,
     paymentStatus = 'paid',
     amountTotal = 2999,
-    currency = 'usd',
+    currency = 'gbp',
     metadata = {
       customerId: randomUUID(),
       contentId: randomUUID(),
@@ -706,7 +706,7 @@ export function createMockStripePaymentIntentEvent(
     paymentIntentId = `pi_test_${randomUUID().slice(0, 8)}`,
     status = 'succeeded',
     amount = 2999,
-    currency = 'usd',
+    currency = 'gbp',
     metadata = {},
   } = overrides;
 
