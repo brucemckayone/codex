@@ -2,6 +2,9 @@
   @component StudioMonetisation
 
   Studio monetisation dashboard for org owners.
+  Uses client-side queries (SPA pattern) — page renders instantly with
+  skeletons, data streams in from remote functions.
+
   Sections:
   - Stripe Connect status + onboarding
   - Enable/disable subscriptions toggle
@@ -9,7 +12,7 @@
   - Subscriber stats
 -->
 <script lang="ts">
-  import { goto, invalidate } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import StatCard from '$lib/components/studio/StatCard.svelte';
@@ -22,14 +25,21 @@
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
   import { TrashIcon, EditIcon, PlusIcon, CheckCircleIcon } from '$lib/components/ui/Icon';
+  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { onMount } from 'svelte';
   import {
+    listTiers,
+    getConnectStatus,
+    getSubscriptionStats,
     createTier,
     updateTier,
     deleteTier,
-    reorderTiers,
     connectOnboard,
     getConnectDashboardLink,
+    updateSubscriptionFeature,
+    syncConnectStatus,
   } from '$lib/remote/subscription.remote';
+  import { getOrgSettings } from '$lib/remote/org.remote';
   import type { SubscriptionTier } from '$lib/types';
 
   let { data } = $props();
@@ -44,9 +54,32 @@
   const isOwner = $derived(data.userRole === 'owner');
   const orgId = $derived(data.org.id);
 
+  // ─── Client-side queries (SPA pattern) ─────────────────────────────────
+  // Page renders instantly with skeletons, data streams in.
+
+  const tiersQuery = $derived(orgId ? listTiers(orgId) : null);
+  const connectQuery = $derived(orgId ? getConnectStatus(orgId) : null);
+  const settingsQuery = $derived(orgId ? getOrgSettings(orgId) : null);
+  const statsQuery = $derived(orgId ? getSubscriptionStats(orgId) : null);
+
+  // Derived data from queries (with safe defaults)
+  const tiers = $derived((tiersQuery as any)?.current ?? []) as SubscriptionTier[];
+  const connectStatus = $derived((connectQuery as any)?.current ?? {
+    isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null,
+  });
+  const enableSubscriptionsFromServer = $derived(
+    (settingsQuery as any)?.current?.features?.enableSubscriptions ?? false
+  );
+  const stats = $derived((statsQuery as any)?.current ?? {
+    totalSubscribers: 0, activeSubscribers: 0, mrrCents: 0, tierBreakdown: [],
+  });
+
+  const dataLoading = $derived(
+    (tiersQuery as any)?.loading || (connectQuery as any)?.loading || (settingsQuery as any)?.loading
+  );
+
   // ─── State ──────────────────────────────────────────────────────────────
 
-  let enableSubscriptions = $state(data.enableSubscriptions);
   let tierDialogOpen = $state(false);
   let deleteDialogOpen = $state(false);
   let editingTier = $state<SubscriptionTier | null>(null);
@@ -63,6 +96,20 @@
   // Connect state
   let connectLoading = $state(false);
   let connectError = $state('');
+  let connectSyncing = $state(false);
+
+  // Auto-sync Connect status when returning from Stripe onboarding.
+  // Without a webhook tunnel, the account.updated event never arrives in local dev.
+  onMount(() => {
+    const connectParam = page.url.searchParams.get('connect');
+    if (connectParam === 'success' && orgId) {
+      connectSyncing = true;
+      syncConnectStatus({ organizationId: orgId })
+        .then(() => invalidateAll())
+        .catch(() => {})
+        .finally(() => { connectSyncing = false; });
+    }
+  });
 
   // ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -141,7 +188,7 @@
         });
       }
       tierDialogOpen = false;
-      await invalidate('cache:studio');
+      await invalidateAll();
     } catch (error) {
       tierFormError = error instanceof Error ? error.message : 'Failed to save tier';
     } finally {
@@ -155,9 +202,8 @@
       await deleteTier({ orgId, tierId: deletingTier.id });
       deleteDialogOpen = false;
       deletingTier = null;
-      await invalidate('cache:studio');
+      await invalidateAll();
     } catch (error) {
-      // Show error inline
       tierFormError = error instanceof Error ? error.message : 'Failed to delete tier';
     }
   }
@@ -165,15 +211,16 @@
   // ─── Feature Toggle ─────────────────────────────────────────────────────
 
   let featureToggleLoading = $state(false);
+  let featureToggleError = $state('');
 
-  async function handleFeatureToggle(checked: boolean) {
+  async function handleFeatureToggle(newValue: boolean) {
     featureToggleLoading = true;
+    featureToggleError = '';
     try {
-      const api = await import('$lib/server/api');
-      // Use the settings remote function instead
-      enableSubscriptions = checked;
-      // This will need a remote function for settings update — for now just toggle locally
-      // The actual settings update is already wired through the settings page
+      await updateSubscriptionFeature({ orgId, enabled: newValue });
+      await invalidateAll();
+    } catch (error) {
+      featureToggleError = error instanceof Error ? error.message : 'Failed to update setting';
     } finally {
       featureToggleLoading = false;
     }
@@ -206,7 +253,10 @@
       const result = await getConnectDashboardLink({ organizationId: orgId });
       window.location.href = result.url;
     } catch (error) {
-      connectError = error instanceof Error ? error.message : 'Failed to open dashboard';
+      const msg = error instanceof Error ? error.message : 'Failed to open dashboard';
+      connectError = msg.includes('test') || msg.includes('seed') || msg === 'API Error'
+        ? 'Stripe dashboard is unavailable for seed/test accounts. Connect a real Stripe account to access the dashboard.'
+        : msg;
       connectLoading = false;
     }
   }
@@ -231,49 +281,57 @@
     <Card.Header>
       <div class="card-header-row">
         <Card.Title level={2}>{m.monetisation_connect_title()}</Card.Title>
-        <Badge variant={connectStatusVariant(data.connectStatus.status)}>
-          {connectStatusLabel(data.connectStatus.status)}
-        </Badge>
+        {#if dataLoading}
+          <Skeleton width="80px" height="var(--space-6)" class="skeleton-circle" />
+        {:else}
+          <Badge variant={connectStatusVariant(connectStatus.status)}>
+            {connectStatusLabel(connectStatus.status)}
+          </Badge>
+        {/if}
       </div>
       <Card.Description>{m.monetisation_connect_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
-      {#if data.connectStatus.isConnected}
-        <div class="connect-status-row">
-          {#if data.connectStatus.chargesEnabled}
-            <span class="status-item status-enabled">
-              <CheckCircleIcon size={14} />
-              {m.monetisation_connect_charges_enabled()}
-            </span>
-          {/if}
-          {#if data.connectStatus.payoutsEnabled}
-            <span class="status-item status-enabled">
-              <CheckCircleIcon size={14} />
-              {m.monetisation_connect_payouts_enabled()}
-            </span>
+      {#if dataLoading}
+        <Skeleton width="200px" height="var(--space-5)" />
+      {:else}
+        {#if connectStatus.isConnected}
+          <div class="connect-status-row">
+            {#if connectStatus.chargesEnabled}
+              <span class="status-item status-enabled">
+                <CheckCircleIcon size={14} />
+                {m.monetisation_connect_charges_enabled()}
+              </span>
+            {/if}
+            {#if connectStatus.payoutsEnabled}
+              <span class="status-item status-enabled">
+                <CheckCircleIcon size={14} />
+                {m.monetisation_connect_payouts_enabled()}
+              </span>
+            {/if}
+          </div>
+        {/if}
+
+        {#if connectError}
+          <Alert variant="error" style="margin-top: var(--space-3)">{connectError}</Alert>
+        {/if}
+
+        <div class="connect-actions">
+          {#if !connectStatus.isConnected}
+            <Button onclick={handleConnectOnboard} loading={connectLoading}>
+              {m.monetisation_connect_start()}
+            </Button>
+          {:else if connectStatus.status === 'onboarding'}
+            <Button onclick={handleConnectOnboard} loading={connectLoading} variant="secondary">
+              {m.monetisation_connect_continue()}
+            </Button>
+          {:else}
+            <Button onclick={handleConnectDashboard} loading={connectLoading} variant="secondary">
+              {m.monetisation_connect_dashboard()}
+            </Button>
           {/if}
         </div>
       {/if}
-
-      {#if connectError}
-        <Alert variant="error" style="margin-top: var(--space-3)">{connectError}</Alert>
-      {/if}
-
-      <div class="connect-actions">
-        {#if !data.connectStatus.isConnected}
-          <Button onclick={handleConnectOnboard} loading={connectLoading}>
-            {m.monetisation_connect_start()}
-          </Button>
-        {:else if data.connectStatus.status === 'onboarding'}
-          <Button onclick={handleConnectOnboard} loading={connectLoading} variant="secondary">
-            {m.monetisation_connect_continue()}
-          </Button>
-        {:else}
-          <Button onclick={handleConnectDashboard} loading={connectLoading} variant="secondary">
-            {m.monetisation_connect_dashboard()}
-          </Button>
-        {/if}
-      </div>
     </Card.Content>
   </Card.Root>
 
@@ -286,28 +344,34 @@
           <span class="feature-toggle-description">{m.monetisation_feature_toggle_description()}</span>
         </div>
         <Switch
-          checked={enableSubscriptions}
-          disabled={featureToggleLoading || !data.connectStatus.isConnected || data.connectStatus.status !== 'active'}
-          onCheckedChange={handleFeatureToggle}
+          checked={dataLoading ? false : enableSubscriptionsFromServer}
+          disabled={dataLoading || featureToggleLoading || !connectStatus.isConnected || connectStatus.status !== 'active'}
+          onclick={() => handleFeatureToggle(!enableSubscriptionsFromServer)}
         />
       </div>
+      {#if featureToggleError}
+        <Alert variant="error" style="margin-top: var(--space-3)">{featureToggleError}</Alert>
+      {/if}
+      {#if !dataLoading && (!connectStatus.isConnected || connectStatus.status !== 'active')}
+        <p class="feature-toggle-disabled-hint">{m.monetisation_feature_requires_connect()}</p>
+      {/if}
     </Card.Content>
   </Card.Root>
 
   <!-- Subscriber Stats -->
-  {#if data.stats.totalSubscribers > 0}
+  {#if stats.totalSubscribers > 0}
     <section class="stats-grid" aria-label={m.monetisation_stats_title()}>
       <StatCard
         label={m.monetisation_stats_total()}
-        value={data.stats.totalSubscribers}
+        value={stats.totalSubscribers}
       />
       <StatCard
         label={m.monetisation_stats_active()}
-        value={data.stats.activeSubscribers}
+        value={stats.activeSubscribers}
       />
       <StatCard
         label={m.monetisation_stats_mrr()}
-        value={formatCurrency(data.stats.mrrCents)}
+        value={formatCurrency(stats.mrrCents)}
       />
     </section>
   {/if}
@@ -327,14 +391,27 @@
       </div>
     </Card.Header>
     <Card.Content>
-      {#if data.tiers.length === 0}
+      {#if dataLoading}
+        <div class="tier-list">
+          {#each Array(2) as _}
+            <div class="tier-item-skeleton">
+              <Skeleton width="var(--space-8)" height="var(--space-8)" class="skeleton-circle" />
+              <div style="flex: 1; display: flex; flex-direction: column; gap: var(--space-1);">
+                <Skeleton width="120px" height="var(--text-sm)" />
+                <Skeleton width="200px" height="var(--text-xs)" />
+              </div>
+              <Skeleton width="80px" height="var(--text-sm)" />
+            </div>
+          {/each}
+        </div>
+      {:else if tiers.length === 0}
         <EmptyState
           title={m.monetisation_tiers_empty()}
           description={m.monetisation_tiers_empty_description()}
         />
       {:else}
         <div class="tier-list">
-          {#each data.tiers as tier, i (tier.id)}
+          {#each tiers as tier, i (tier.id)}
             <div class="tier-item">
               <div class="tier-info">
                 <div class="tier-rank">{i + 1}</div>
@@ -364,20 +441,19 @@
             </div>
           {/each}
         </div>
-        <p class="tier-reorder-hint">{m.monetisation_tiers_reorder()}</p>
       {/if}
     </Card.Content>
   </Card.Root>
 
   <!-- Tier Breakdown Table -->
-  {#if data.stats.tierBreakdown.length > 0}
+  {#if stats.tierBreakdown.length > 0}
     <Card.Root>
       <Card.Header>
         <Card.Title level={2}>{m.monetisation_stats_title()}</Card.Title>
       </Card.Header>
       <Card.Content>
         <div class="breakdown-grid">
-          {#each data.stats.tierBreakdown as tb (tb.tierId)}
+          {#each stats.tierBreakdown as tb (tb.tierId)}
             <div class="breakdown-item">
               <span class="breakdown-name">{tb.tierName}</span>
               <span class="breakdown-count">{tb.subscriberCount} subscribers</span>
@@ -584,6 +660,12 @@
     color: var(--color-text-secondary);
   }
 
+  .feature-toggle-disabled-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-top: var(--space-2);
+  }
+
   /* Tier list */
   .tier-list {
     display: flex;
@@ -591,7 +673,8 @@
     gap: var(--space-2);
   }
 
-  .tier-item {
+  .tier-item,
+  .tier-item-skeleton {
     display: flex;
     align-items: center;
     gap: var(--space-4);
@@ -677,12 +760,6 @@
     flex-shrink: 0;
   }
 
-  .tier-reorder-hint {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    margin-top: var(--space-2);
-  }
-
   /* Breakdown */
   .breakdown-grid {
     display: flex;
@@ -753,4 +830,5 @@
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
   }
+
 </style>

@@ -14,6 +14,7 @@ import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   handlePurchaseAction,
   loadAccessAndProgress,
+  loadSubscriptionContext,
 } from '$lib/server/content-detail';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -63,6 +64,20 @@ export const load: PageServerLoad = async ({
 
   // For unauthenticated visitors — no access checks needed, no streaming
   if (!parentData.user) {
+    // Still load tiers for the subscribe modal (public endpoint, no auth needed)
+    const subscriptionContext = loadSubscriptionContext(
+      org.id,
+      content.minimumTierId ?? null,
+      platform,
+      cookies
+    ).catch(() => ({
+      requiresSubscription: !!content.minimumTierId,
+      hasSubscription: false,
+      subscriptionCoversContent: false,
+      currentSubscription: null,
+      tiers: [],
+    }));
+
     return {
       content,
       contentBodyHtml,
@@ -70,11 +85,12 @@ export const load: PageServerLoad = async ({
       streamingUrl: null,
       progress: null,
       accessAndProgress: null,
+      subscriptionContext,
       relatedContent: relatedPromise,
     };
   }
 
-  // For authenticated users — stream access+progress (secondary, not needed for first paint).
+  // For authenticated users — stream access+progress and subscription context in parallel.
   // getStreamingUrl doubles as access check — 403 means no access (expected for non-owners).
   return {
     content,
@@ -90,6 +106,18 @@ export const load: PageServerLoad = async ({
       hasAccess: false as const,
       streamingUrl: null,
       progress: null,
+    })),
+    subscriptionContext: loadSubscriptionContext(
+      org.id,
+      content.minimumTierId ?? null,
+      platform,
+      cookies
+    ).catch(() => ({
+      requiresSubscription: !!content.minimumTierId,
+      hasSubscription: false,
+      subscriptionCoversContent: false,
+      currentSubscription: null,
+      tiers: [],
     })),
     relatedContent: relatedPromise,
   };

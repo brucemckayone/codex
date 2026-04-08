@@ -229,6 +229,44 @@ export const removeMember = command(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Create Organization
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a new organization
+ *
+ * Creates the org and auto-assigns the current user as owner.
+ * On success, redirect to the new org's studio via cross-subdomain navigation.
+ */
+export const createOrganization = command(
+  z.object({
+    name: z.string().min(1).max(255),
+    slug: z.string().min(1).max(255),
+    description: z.string().max(5000).optional(),
+  }),
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.create(input);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check Organization Slug Availability
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Check if an organization slug is available
+ *
+ * Used for real-time availability feedback in the create org dialog.
+ */
+export const checkOrgSlug = query(z.string().min(2), async (slug) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.org.checkSlug(slug);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // My Organizations
 // ─────────────────────────────────────────────────────────────────────────────
 

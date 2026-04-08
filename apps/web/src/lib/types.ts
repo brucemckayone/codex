@@ -176,6 +176,22 @@ export interface SubscriberItem {
 // Re-export for convenience
 export type { Subscription, SubscriptionTier } from '@codex/database/schema';
 
+// ─── Organization Member Types ────────────────────────────────────────────
+
+/**
+ * Organization member item shape returned by the members API.
+ * Defined here (not in $lib/server/api) because components import it directly.
+ */
+export interface OrgMemberItem {
+  userId: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  role: string;
+  status: string;
+  joinedAt: string;
+}
+
 // ─── Organization Types ────────────────────────────────────────────────────
 
 export interface OrganizationData {

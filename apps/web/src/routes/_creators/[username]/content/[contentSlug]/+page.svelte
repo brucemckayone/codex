@@ -39,6 +39,23 @@
 
   let purchasing = $state(false);
 
+  // Subscription context — resolves asynchronously without blocking render
+  let subCtx = $state({
+    requiresSubscription: !!data.content.minimumTierId,
+    hasSubscription: false,
+    subscriptionCoversContent: false,
+  });
+
+  $effect(() => {
+    data.subscriptionContext?.then((ctx) => {
+      subCtx = {
+        requiresSubscription: ctx.requiresSubscription,
+        hasSubscription: ctx.hasSubscription,
+        subscriptionCoversContent: ctx.subscriptionCoversContent,
+      };
+    });
+  });
+
   const creatorName = $derived(data.creatorProfile?.name ?? data.username);
   const priceCents = $derived(content.priceCents ?? null);
 
@@ -78,6 +95,9 @@
       {purchasing}
       {creatorName}
       titleSuffix={creatorName}
+      requiresSubscription={subCtx.requiresSubscription}
+      hasSubscription={subCtx.hasSubscription}
+      subscriptionCoversContent={subCtx.subscriptionCoversContent}
     >
       {#snippet creatorAttribution()}
         <p class="content-detail__creator">
@@ -106,6 +126,9 @@
       {purchasing}
       {creatorName}
       titleSuffix={creatorName}
+      requiresSubscription={subCtx.requiresSubscription}
+      hasSubscription={subCtx.hasSubscription}
+      subscriptionCoversContent={subCtx.subscriptionCoversContent}
     >
       {#snippet creatorAttribution()}
         <p class="content-detail__creator">
@@ -146,6 +169,9 @@
     {purchasing}
     {creatorName}
     titleSuffix={creatorName}
+    requiresSubscription={subCtx.requiresSubscription}
+    hasSubscription={subCtx.hasSubscription}
+    subscriptionCoversContent={subCtx.subscriptionCoversContent}
   >
     {#snippet creatorAttribution()}
       <p class="content-detail__creator">

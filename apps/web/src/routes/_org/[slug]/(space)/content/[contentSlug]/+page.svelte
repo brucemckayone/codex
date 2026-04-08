@@ -41,6 +41,23 @@
 
   let purchasing = $state(false);
 
+  // Subscription context — resolves asynchronously without blocking render
+  let subCtx = $state({
+    requiresSubscription: !!data.content.minimumTierId,
+    hasSubscription: false,
+    subscriptionCoversContent: false,
+  });
+
+  $effect(() => {
+    data.subscriptionContext?.then((ctx) => {
+      subCtx = {
+        requiresSubscription: ctx.requiresSubscription,
+        hasSubscription: ctx.hasSubscription,
+        subscriptionCoversContent: ctx.subscriptionCoversContent,
+      };
+    });
+  });
+
   const creatorName = $derived(content.creator?.name ?? content.creator?.email ?? '');
   const titleSuffix = $derived(data.org?.name ?? 'Codex');
   const priceCents = $derived(content.priceCents ?? null);
@@ -81,6 +98,9 @@
       {purchasing}
       {creatorName}
       {titleSuffix}
+      requiresSubscription={subCtx.requiresSubscription}
+      hasSubscription={subCtx.hasSubscription}
+      subscriptionCoversContent={subCtx.subscriptionCoversContent}
     >
       {#snippet purchaseForm()}
         <div class="access-skeleton">
@@ -101,6 +121,9 @@
       {purchasing}
       {creatorName}
       {titleSuffix}
+      requiresSubscription={subCtx.requiresSubscription}
+      hasSubscription={subCtx.hasSubscription}
+      subscriptionCoversContent={subCtx.subscriptionCoversContent}
     >
       {#snippet purchaseForm()}
         <form method="POST" action="?/purchase" use:enhance={handlePurchase}>
@@ -133,6 +156,9 @@
     {purchasing}
     {creatorName}
     {titleSuffix}
+    requiresSubscription={subCtx.requiresSubscription}
+    hasSubscription={subCtx.hasSubscription}
+    subscriptionCoversContent={subCtx.subscriptionCoversContent}
   >
     {#snippet purchaseForm()}
       <form method="POST" action="?/purchase" use:enhance={handlePurchase}>

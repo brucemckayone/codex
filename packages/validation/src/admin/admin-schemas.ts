@@ -174,9 +174,15 @@ export type AdminContentIdParams = z.infer<typeof adminContentIdParamsSchema>;
 
 /**
  * Customer list query parameters
- * Uses standard pagination
+ * Extends standard pagination with search and content filter
  */
-export const adminCustomerListQuerySchema = paginationSchema;
+export const adminCustomerListQuerySchema = paginationSchema.extend({
+  search: z.string().trim().max(200).optional(),
+  contentId: uuidSchema.optional(),
+  joinedWithin: z.coerce.number().int().positive().optional(),
+  minSpendCents: z.coerce.number().int().nonnegative().optional(),
+  maxSpendCents: z.coerce.number().int().positive().optional(),
+});
 
 export type AdminCustomerListQueryInput = z.infer<
   typeof adminCustomerListQuerySchema

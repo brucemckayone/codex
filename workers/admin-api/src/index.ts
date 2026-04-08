@@ -1,3 +1,5 @@
+/* eslint-disable -- force wrangler reload */
+/* eslint-enable */
 /**
  * Admin API Worker
  *

@@ -17,7 +17,6 @@ import {
   BaseService,
   BusinessLogicError,
   NotFoundError,
-  wrapError,
 } from '@codex/service-errors';
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import type {
@@ -99,7 +98,7 @@ export class AdminContentManagementService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, options });
+      this.handleError(error, 'listAllContent');
     }
   }
 
@@ -211,7 +210,7 @@ export class AdminContentManagementService extends BaseService {
       ) {
         throw error;
       }
-      throw wrapError(error, { organizationId, contentId });
+      this.handleError(error, 'publishContent');
     }
   }
 
@@ -297,7 +296,7 @@ export class AdminContentManagementService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, contentId });
+      this.handleError(error, 'unpublishContent');
     }
   }
 
@@ -344,7 +343,7 @@ export class AdminContentManagementService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, contentId });
+      this.handleError(error, 'deleteContent');
     }
   }
 }

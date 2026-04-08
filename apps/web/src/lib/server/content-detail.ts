@@ -11,6 +11,7 @@
  */
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
+import type { CurrentSubscription, SubscriptionTier } from '$lib/types';
 import { createServerApi } from './api';
 import { ApiError } from './errors';
 
@@ -22,6 +23,19 @@ interface AccessAndProgress {
     durationSeconds: number;
     completed: boolean;
   } | null;
+}
+
+export interface SubscriptionContext {
+  /** Whether the content requires a subscription tier */
+  requiresSubscription: boolean;
+  /** Whether the user has an active subscription to this org */
+  hasSubscription: boolean;
+  /** Whether the user's tier is high enough for this content */
+  subscriptionCoversContent: boolean;
+  /** The user's current subscription (null if none) */
+  currentSubscription: CurrentSubscription | null;
+  /** All active tiers for this org (for the subscribe modal) */
+  tiers: SubscriptionTier[];
 }
 
 /**
@@ -53,6 +67,56 @@ export async function loadAccessAndProgress(
     : null;
 
   return { hasAccess, streamingUrl, progress };
+}
+
+/**
+ * Load subscription context for content that may require a tier.
+ *
+ * Fetches the user's current subscription + org tiers in parallel.
+ * Compares tier sortOrder to determine if subscription covers the content.
+ */
+export async function loadSubscriptionContext(
+  orgId: string,
+  contentMinimumTierId: string | null,
+  platform: App.Platform | undefined,
+  cookies: Cookies
+): Promise<SubscriptionContext> {
+  if (!contentMinimumTierId) {
+    return {
+      requiresSubscription: false,
+      hasSubscription: false,
+      subscriptionCoversContent: false,
+      currentSubscription: null,
+      tiers: [],
+    };
+  }
+
+  const api = createServerApi(platform, cookies);
+
+  const [currentSubscription, tiers] = await Promise.all([
+    api.subscription.getCurrent(orgId).catch(() => null),
+    api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]),
+  ]);
+
+  const hasSubscription = !!currentSubscription;
+  let subscriptionCoversContent = false;
+
+  if (currentSubscription) {
+    // Find the content's minimum tier to compare sortOrder
+    const contentTier = tiers.find((t) => t.id === contentMinimumTierId);
+    if (contentTier) {
+      subscriptionCoversContent =
+        currentSubscription.tier.sortOrder >= contentTier.sortOrder;
+    }
+  }
+
+  return {
+    requiresSubscription: true,
+    hasSubscription,
+    subscriptionCoversContent,
+    currentSubscription,
+    tiers,
+  };
 }
 
 interface PurchaseActionArgs {

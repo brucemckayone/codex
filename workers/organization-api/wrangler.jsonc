@@ -156,6 +156,24 @@
         "API_URL": "https://api-staging.revelations.studio",
         "R2_PUBLIC_URL_BASE": "https://cdn-staging.revelations.studio"
       },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "BRAND_KV",
+          "id": "e86ed818ff4f4a54bfb801bb46c10788"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
+        }
+      ],
       "r2_buckets": [
         {
           "binding": "MEDIA_BUCKET",

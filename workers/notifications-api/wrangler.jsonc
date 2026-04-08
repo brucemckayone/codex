@@ -93,6 +93,16 @@
         "WEB_APP_URL": "https://codex-staging.revelations.studio",
         "API_URL": "https://api-staging.revelations.studio"
       },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
       "routes": [
         {
           "pattern": "notifications-api-staging.revelations.studio/*",

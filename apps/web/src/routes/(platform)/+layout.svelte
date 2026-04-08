@@ -5,14 +5,14 @@
    */
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
-  import { invalidate } from '$app/navigation';
+  import { beforeNavigate, invalidate } from '$app/navigation';
   import { PlatformHeader } from '$lib/components/layout';
   import { Footer, PageContainer } from '$lib/components/ui';
   import type { LayoutUser } from '$lib/types';
   import type { LayoutData } from './$types';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection } from '$lib/collections';
-  import { initProgressSync, cleanupProgressSync } from '$lib/collections/progress-sync';
+  import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
@@ -31,6 +31,11 @@
       void invalidateCollection('library');
     }
     updateStoredVersions(data.versions ?? {});
+  });
+
+  // Flush unsynced playback progress before navigation so server loads see it
+  beforeNavigate(() => {
+    void forceSync();
   });
 
   onMount(() => {

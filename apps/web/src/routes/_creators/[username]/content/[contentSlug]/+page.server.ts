@@ -17,6 +17,7 @@ import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   handlePurchaseAction,
   loadAccessAndProgress,
+  loadSubscriptionContext,
 } from '$lib/server/content-detail';
 import type { ContentWithRelations } from '$lib/types';
 import type { Actions, PageServerLoad } from './$types';
@@ -97,6 +98,28 @@ export const load: PageServerLoad = async ({
         [] as Awaited<ReturnType<typeof getPublicContent>>['items']
       );
 
+  // Subscription context (org-scoped content may have tier gating)
+  const subContextPromise = content.organization?.id
+    ? loadSubscriptionContext(
+        content.organization.id,
+        content.minimumTierId ?? null,
+        platform,
+        cookies
+      ).catch(() => ({
+        requiresSubscription: !!content.minimumTierId,
+        hasSubscription: false,
+        subscriptionCoversContent: false,
+        currentSubscription: null,
+        tiers: [],
+      }))
+    : Promise.resolve({
+        requiresSubscription: false,
+        hasSubscription: false,
+        subscriptionCoversContent: false,
+        currentSubscription: null,
+        tiers: [],
+      });
+
   // For unauthenticated visitors — no access checks, no streaming
   if (!locals.user) {
     return {
@@ -106,6 +129,7 @@ export const load: PageServerLoad = async ({
       streamingUrl: null,
       progress: null,
       accessAndProgress: null,
+      subscriptionContext: subContextPromise,
       creatorProfile,
       username,
       relatedContent: relatedPromise,
@@ -128,6 +152,7 @@ export const load: PageServerLoad = async ({
       streamingUrl: null,
       progress: null,
     })),
+    subscriptionContext: subContextPromise,
     creatorProfile,
     username,
     relatedContent: relatedPromise,

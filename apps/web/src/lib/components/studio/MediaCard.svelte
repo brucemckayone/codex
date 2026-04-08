@@ -27,9 +27,11 @@
 
   const { media, onEdit, onDelete }: Props = $props();
 
-  const isTranscoding = $derived(media.status === 'transcoding');
-
   let progress = $state<{ progress: number | null; step: string | null; status: string } | null>(null);
+
+  // Use polled status when available — the media prop is stale after transcoding completes
+  const effectiveStatus = $derived(progress?.status ?? media.status);
+  const isTranscoding = $derived(effectiveStatus === 'transcoding');
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let pollErrors = 0;
   let pollErrorMessage = $state<string | null>(null);
@@ -93,7 +95,7 @@
    * Map media status to badge variant
    */
   const statusVariant = $derived.by(() => {
-    switch (media.status) {
+    switch (effectiveStatus) {
       case 'uploading':
       case 'uploaded':
         return 'warning' as const;
@@ -112,7 +114,7 @@
    * Get the i18n label for a media status
    */
   const statusLabel = $derived.by(() => {
-    switch (media.status) {
+    switch (effectiveStatus) {
       case 'uploading':
         return m.media_status_uploading();
       case 'uploaded':
@@ -124,7 +126,7 @@
       case 'failed':
         return m.media_status_failed();
       default:
-        return media.status;
+        return effectiveStatus;
     }
   });
 

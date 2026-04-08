@@ -36,6 +36,7 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection } from '$lib/collections';
+  import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -137,8 +138,15 @@
     }
     document.addEventListener('visibilitychange', handleVisibility);
 
+    // Activate progress sync on org subdomain — content is watched here,
+    // so the 30s flush, visibility handler, and beforeunload beacon are needed.
+    if (data.user?.id) {
+      initProgressSync(data.user.id);
+    }
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
+      cleanupProgressSync();
     };
   });
 
@@ -251,8 +259,11 @@
     }
   }
 
-  // SvelteKit navigation guard
+  // SvelteKit navigation guard — flush progress + brand editor dirty check
   beforeNavigate(({ cancel }) => {
+    // Flush unsynced playback progress so server loads see it immediately
+    void forceSync();
+
     if (brandEditor.isDirty && !brandEditor.isClosed) {
       if (!confirm('You have unsaved brand changes. Discard?')) {
         cancel();

@@ -1,14 +1,17 @@
 <!--
   @component PriceBadge
 
-  Displays a price badge with three visual variants:
+  Displays a price/access badge with visual variants:
   - "Free" (success) when amount is 0
   - Formatted price (neutral) when amount > 0
   - "Purchased" (info + check icon) when purchased is true
+  - "Subscription" (purple) for subscriber-gated content
+  - "Members" (secondary) for members-only content
 
   @prop {number | null} amount - Price in minor units (pence). 0 = free, null = hidden.
   @prop {string} currency - ISO 4217 currency code. Defaults to 'GBP'.
   @prop {boolean} purchased - Whether the user has purchased this content.
+  @prop {'free' | 'paid' | 'subscribers' | 'members'} [accessType] - Content access type override.
 -->
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
@@ -20,31 +23,43 @@
     amount: number | null;
     currency?: string;
     purchased?: boolean;
+    accessType?: 'free' | 'paid' | 'subscribers' | 'members' | null;
   }
 
   const {
     amount,
     currency = 'GBP',
     purchased = false,
+    accessType = null,
     class: className,
     ...restProps
   }: Props = $props();
 
   const variant = $derived.by(() => {
     if (purchased) return 'purchased';
-    if (amount === 0) return 'free';
+    if (accessType === 'subscribers') return 'subscribers';
+    if (accessType === 'members') return 'members';
+    if (amount === 0 || accessType === 'free') return 'free';
     return 'paid';
   });
 
   const label = $derived.by(() => {
     if (purchased) return m.content_price_purchased();
-    if (amount === 0) return m.content_price_free();
+    if (accessType === 'subscribers') {
+      // Show price if also purchasable, otherwise show "Subscription"
+      if (amount && amount > 0) return formatPrice(amount);
+      return m.content_price_subscribers();
+    }
+    if (accessType === 'members') return m.content_price_members();
+    if (amount === 0 || accessType === 'free') return m.content_price_free();
     if (amount != null) return formatPrice(amount);
     return '';
   });
+
+  const show = $derived(amount != null || purchased || accessType != null);
 </script>
 
-{#if amount != null || purchased}
+{#if show}
   <span class="price-badge {className ?? ''}" data-variant={variant} {...restProps}>
     {#if purchased}
       <CheckIcon size={12} />
@@ -81,6 +96,18 @@
   .price-badge[data-variant='paid'] {
     background: var(--color-surface-secondary);
     color: var(--color-text);
+    border: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .price-badge[data-variant='subscribers'] {
+    background: var(--color-primary-50);
+    color: var(--color-primary-700);
+    border: var(--border-width) var(--border-style) var(--color-primary-200);
+  }
+
+  .price-badge[data-variant='members'] {
+    background: var(--color-surface-secondary);
+    color: var(--color-text-secondary);
     border: var(--border-width) var(--border-style) var(--color-border);
   }
 </style>

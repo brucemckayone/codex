@@ -13,7 +13,11 @@
   import { Badge, EmptyState, Alert } from '$lib/components/ui';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
-  import { cancelSubscription } from '$lib/remote/subscription.remote';
+  import {
+    cancelSubscription,
+    reactivateSubscription,
+  } from '$lib/remote/subscription.remote';
+  import { openBillingPortal } from '$lib/remote/account.remote';
   import type { UserOrgSubscription } from '$lib/types';
   import { page } from '$app/state';
   import { buildOrgUrl } from '$lib/utils/subdomain';
@@ -25,6 +29,7 @@
   let cancelReason = $state('');
   let cancelLoading = $state(false);
   let cancelError = $state('');
+  let reactivateLoading = $state<string | null>(null);
 
   function formatCurrency(cents: number): string {
     return new Intl.NumberFormat('en-GB', {
@@ -85,6 +90,31 @@
       cancelLoading = false;
     }
   }
+
+  async function handleReactivate(sub: UserOrgSubscription) {
+    reactivateLoading = sub.id;
+    try {
+      await reactivateSubscription({ organizationId: sub.organizationId });
+      await invalidate('cache:versions');
+    } catch (error) {
+      cancelError = error instanceof Error ? error.message : 'Failed to reactivate subscription';
+    } finally {
+      reactivateLoading = null;
+    }
+  }
+
+  async function handleUpdatePayment() {
+    try {
+      const result = await openBillingPortal({
+        returnUrl: page.url.href,
+      });
+      if (result?.url) {
+        window.location.href = result.url;
+      }
+    } catch {
+      // Portal session creation failed — silent (Stripe will show its own error)
+    }
+  }
 </script>
 
 <svelte:head>
@@ -127,6 +157,23 @@
                 </Badge>
               </div>
 
+              {#if sub.status === 'past_due'}
+                <Alert variant="error">
+                  {m.subscription_past_due_message()}
+                  <Button variant="ghost" size="sm" onclick={handleUpdatePayment}>
+                    {m.subscription_update_payment()}
+                  </Button>
+                </Alert>
+              {/if}
+
+              {#if sub.status === 'cancelling'}
+                <p class="cancelling-message">
+                  {m.subscription_cancelling_message({
+                    date: formatDate(sub.currentPeriodEnd as unknown as string),
+                  })}
+                </p>
+              {/if}
+
               <div class="subscription-meta">
                 <span class="subscription-price">
                   {formatCurrency(sub.amountCents)}
@@ -157,6 +204,16 @@
                     onclick={() => openCancelDialog(sub)}
                   >
                     {m.subscription_cancel()}
+                  </Button>
+                {/if}
+                {#if sub.status === 'cancelling'}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={reactivateLoading === sub.id}
+                    onclick={() => handleReactivate(sub)}
+                  >
+                    {m.subscription_reactivate()}
                   </Button>
                 {/if}
               </div>
@@ -300,6 +357,12 @@
     display: flex;
     gap: var(--space-2);
     justify-content: flex-end;
+  }
+
+  .cancelling-message {
+    font-size: var(--text-xs);
+    color: var(--color-warning-700);
+    margin: 0;
   }
 
   .cancel-form {

@@ -9,10 +9,7 @@
  * - POST /connect/dashboard - Get Stripe Express dashboard link
  */
 
-import { createDbClient } from '@codex/database';
-import { createStripeClient } from '@codex/purchase';
 import type { HonoEnv } from '@codex/shared-types';
-import { ConnectAccountService } from '@codex/subscription';
 import {
   connectDashboardSchema,
   connectOnboardSchema,
@@ -22,15 +19,6 @@ import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
-
-function getConnectService(env: HonoEnv['Bindings']): ConnectAccountService {
-  const db = createDbClient(env);
-  const stripe = createStripeClient(env.STRIPE_SECRET_KEY as string);
-  return new ConnectAccountService(
-    { db, environment: env.ENVIRONMENT ?? 'development' },
-    stripe
-  );
-}
 
 /**
  * POST /connect/onboard
@@ -47,8 +35,7 @@ app.post(
     input: { body: connectOnboardSchema },
     successStatus: 201,
     handler: async (ctx) => {
-      const service = getConnectService(ctx.env);
-      return await service.createAccount(
+      return await ctx.services.connect.createAccount(
         ctx.input.body.organizationId,
         ctx.user.id,
         ctx.input.body.returnUrl,
@@ -71,8 +58,50 @@ app.get(
     },
     input: { query: connectStatusQuerySchema },
     handler: async (ctx) => {
-      const service = getConnectService(ctx.env);
-      const account = await service.getAccount(ctx.input.query.organizationId);
+      const account = await ctx.services.connect.getAccount(
+        ctx.input.query.organizationId
+      );
+
+      if (!account) {
+        return {
+          isConnected: false,
+          accountId: null,
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          status: null,
+        };
+      }
+
+      return {
+        isConnected: true,
+        accountId: account.stripeAccountId,
+        chargesEnabled: account.chargesEnabled,
+        payoutsEnabled: account.payoutsEnabled,
+        status: account.status,
+      };
+    },
+  })
+);
+
+/**
+ * POST /connect/sync
+ * Sync Connect account status with Stripe (polls Stripe API).
+ * Used when webhooks can't reach the server (local dev) or as a fallback.
+ */
+app.post(
+  '/sync',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'strict',
+    },
+    input: { body: connectDashboardSchema },
+    handler: async (ctx) => {
+      const account = await ctx.services.connect.syncAccountStatus(
+        ctx.input.body.organizationId,
+        ctx.user.id
+      );
 
       if (!account) {
         return {
@@ -108,8 +137,9 @@ app.post(
     },
     input: { body: connectDashboardSchema },
     handler: async (ctx) => {
-      const service = getConnectService(ctx.env);
-      return await service.createDashboardLink(ctx.input.body.organizationId);
+      return await ctx.services.connect.createDashboardLink(
+        ctx.input.body.organizationId
+      );
     },
   })
 );

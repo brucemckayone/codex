@@ -3,16 +3,18 @@
 
   The main layout shell for the personal Creator Studio.
   Provides responsive navigation with a mobile header, collapsible sidebar,
-  and main content area. Mirrors the org studio layout but in personal context.
+  and main content area. Mirrors the org studio layout in personal context.
 
-  @prop {LayoutData} data - Server-loaded data containing creator info and organizations list
+  @prop {LayoutData} data - Server-loaded data containing creator info, organizations list, badges
   @prop {Snippet} children - Child route content to render in the main area
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
+  import { browser } from '$app/environment';
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import StudioSwitcher from '$lib/components/layout/StudioSidebar/StudioSwitcher.svelte';
+  import CommandPalette from '$lib/components/command-palette/CommandPalette.svelte';
   import type { LayoutData } from './$types';
   import { MenuIcon, XIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
@@ -21,6 +23,23 @@
 
   // Mobile menu state
   let mobileMenuOpen = $state(false);
+
+  // Collapsible sidebar state (desktop only, persisted in localStorage)
+  const SIDEBAR_KEY = 'codex-studio-sidebar-collapsed';
+  let sidebarCollapsed = $state(
+    browser ? localStorage.getItem(SIDEBAR_KEY) === 'true' : false
+  );
+
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    if (browser) {
+      if (sidebarCollapsed) {
+        localStorage.setItem(SIDEBAR_KEY, 'true');
+      } else {
+        localStorage.removeItem(SIDEBAR_KEY);
+      }
+    }
+  }
 
   const closeMenu = () => (mobileMenuOpen = false);
 
@@ -45,7 +64,7 @@
   });
 </script>
 
-<div class="studio-layout">
+<div class="studio-layout" style:--sidebar-width={sidebarCollapsed ? '56px' : '240px'}>
   <!-- Mobile Header -->
   <header class="studio-header mobile">
     <div class="header-content">
@@ -58,8 +77,16 @@
         <MenuIcon size={24} />
       </button>
 
+      <a href="/studio" class="context-brand">
+        {#if data.creator.avatarUrl}
+          <img src={data.creator.avatarUrl} alt="{data.creator.name}" class="context-logo" />
+        {/if}
+        <span class="context-name">{data.creator.name}</span>
+      </a>
+
       <StudioSwitcher
         currentContext="personal"
+        creatorUsername={data.creator.username}
         orgs={data.orgs}
       />
     </div>
@@ -67,8 +94,15 @@
 
   <!-- Desktop Header -->
   <header class="studio-header desktop">
+    <a href="/studio" class="context-brand">
+      {#if data.creator.avatarUrl}
+        <img src={data.creator.avatarUrl} alt="{data.creator.name}" class="context-logo" />
+      {/if}
+      <span class="context-name">{data.creator.name}</span>
+    </a>
     <StudioSwitcher
       currentContext="personal"
+      creatorUsername={data.creator.username}
       orgs={data.orgs}
     />
   </header>
@@ -80,7 +114,14 @@
 
     <!-- Sidebar -->
     <aside class="studio-sidebar" class:open={mobileMenuOpen}>
-      <StudioSidebar role="owner" context="personal" />
+      <StudioSidebar
+        role="owner"
+        context="personal"
+        user={mobileMenuOpen ? data.studioUser : undefined}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
+        badgeCounts={data.badgeCounts}
+      />
 
       <button
         class="sidebar-close"
@@ -96,6 +137,8 @@
       {@render children()}
     </main>
   </div>
+
+  <CommandPalette />
 </div>
 
 <style>
@@ -106,6 +149,7 @@
     background-color: var(--color-background);
   }
 
+  /* Mobile Header */
   .studio-header.mobile {
     display: flex;
     align-items: center;
@@ -141,16 +185,42 @@
     background-color: var(--color-surface-secondary);
   }
 
+  .context-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+    text-decoration: none;
+  }
+
+  .context-logo {
+    height: var(--space-8);
+    width: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+  }
+
+  .context-name {
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    font-weight: var(--font-bold);
+    color: var(--color-text);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  /* Desktop Header - hidden by default */
   .studio-header.desktop {
     display: none;
   }
 
+  /* Content area */
   .studio-content {
     display: flex;
     flex: 1;
     position: relative;
   }
 
+  /* Sidebar */
   .studio-sidebar {
     position: fixed;
     top: 0;
@@ -197,6 +267,7 @@
     z-index: calc(var(--z-fixed) - 1);
   }
 
+  /* Main content */
   .studio-main {
     flex: 1;
     width: 100%;
@@ -204,6 +275,7 @@
     overflow-y: auto;
   }
 
+  /* Desktop breakpoint */
   @media (--breakpoint-lg) {
     .studio-header.mobile {
       display: none;

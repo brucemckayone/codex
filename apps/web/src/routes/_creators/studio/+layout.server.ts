@@ -9,6 +9,8 @@ import { AUTH_ROLES } from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { getProfile } from '$lib/remote/account.remote';
 import { getMyOrganizations } from '$lib/remote/org.remote';
+import { createServerApi } from '$lib/server/api';
+import { CACHE_HEADERS } from '$lib/server/cache';
 import type { LayoutServerLoad } from './$types';
 
 /** Roles permitted to access the creator studio */
@@ -18,7 +20,14 @@ const STUDIO_ROLES = new Set([
   AUTH_ROLES.PLATFORM_OWNER,
 ]);
 
-export const load: LayoutServerLoad = async ({ locals, depends, url }) => {
+export const load: LayoutServerLoad = async ({
+  locals,
+  depends,
+  url,
+  platform,
+  cookies,
+  setHeaders,
+}) => {
   // Auth gate: must be logged in
   // Use full URL in redirect param to preserve the creators subdomain after login
   if (!locals.user) {
@@ -30,6 +39,9 @@ export const load: LayoutServerLoad = async ({ locals, depends, url }) => {
     redirect(302, '/?error=access_denied');
   }
 
+  // Studio is always user-specific — prevent public caching
+  setHeaders(CACHE_HEADERS.PRIVATE);
+
   depends('cache:studio');
 
   // Load profile and orgs in parallel for sidebar/switcher
@@ -37,6 +49,21 @@ export const load: LayoutServerLoad = async ({ locals, depends, url }) => {
     getProfile().catch(() => null),
     getMyOrganizations().catch(() => []),
   ]);
+
+  // Draft count: lightweight call — limit=1 just to get pagination.total
+  // No organizationId = personal content only
+  let draftCount = 0;
+  try {
+    const api = createServerApi(platform, cookies);
+    const draftParams = new URLSearchParams();
+    draftParams.set('status', 'draft');
+    draftParams.set('limit', '1');
+    draftParams.set('page', '1');
+    const draftResult = await api.content.list(draftParams);
+    draftCount = draftResult?.pagination?.total ?? 0;
+  } catch {
+    // Non-critical — badge just won't show
+  }
 
   const orgs = (orgsResult ?? []).map((o) => ({
     name: o.name,
@@ -52,5 +79,12 @@ export const load: LayoutServerLoad = async ({ locals, depends, url }) => {
       avatarUrl: profile?.image ?? null,
     },
     orgs,
+    studioUser: {
+      name: locals.user.name ?? '',
+      email: locals.user.email ?? '',
+    },
+    badgeCounts: {
+      draftContent: draftCount,
+    },
   };
 };

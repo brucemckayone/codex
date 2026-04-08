@@ -8,7 +8,7 @@
   import type { PageData } from './$types';
   import { hydrateIfNeeded } from '$lib/collections';
   import { buildContentUrl } from '$lib/utils/subdomain';
-  import { extractPlainText } from '$lib/editor/render';
+  import { extractPlainText } from '@codex/validation';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';

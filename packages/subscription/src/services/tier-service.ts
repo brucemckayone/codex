@@ -55,16 +55,12 @@ export class TierService extends BaseService {
     await this.requireActiveConnect(orgId);
 
     try {
-      // Determine next sort order
+      // Determine next sort order — include soft-deleted rows to avoid
+      // unique constraint violation on (organization_id, sort_order)
       const existingTiers = await this.db
         .select({ sortOrder: subscriptionTiers.sortOrder })
         .from(subscriptionTiers)
-        .where(
-          and(
-            eq(subscriptionTiers.organizationId, orgId),
-            isNull(subscriptionTiers.deletedAt)
-          )
-        )
+        .where(eq(subscriptionTiers.organizationId, orgId))
         .orderBy(sql`${subscriptionTiers.sortOrder} DESC`)
         .limit(1);
 

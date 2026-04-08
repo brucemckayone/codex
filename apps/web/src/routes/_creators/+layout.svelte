@@ -15,6 +15,9 @@
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
+  // Studio routes have their own header/sidebar — hide the creators chrome
+  const isStudio = $derived(page.url.pathname.startsWith('/studio'));
+
   const navLinks = [
     { href: '/', label: 'Creators' },
     { href: buildPlatformUrl(page.url, '/discover'), label: 'Discover' },
@@ -23,34 +26,38 @@
 </script>
 
 <div class="creators-layout">
-  <header class="creators-header">
-    <div class="header-inner">
-      <div class="header-left">
-        <a href={buildPlatformUrl(page.url, '/')} class="logo">Revelations</a>
+  {#if !isStudio}
+    <header class="creators-header">
+      <div class="header-inner">
+        <div class="header-left">
+          <a href={buildPlatformUrl(page.url, '/')} class="logo">Revelations</a>
 
-        <nav class="desktop-nav" aria-label="Creators navigation">
-          {#each navLinks as link}
-            <a href={link.href} class="nav-link">{link.label}</a>
-          {/each}
-        </nav>
-      </div>
-
-      <div class="header-right">
-        <div class="desktop-user">
-          <UserMenu user={data.user} />
+          <nav class="desktop-nav" aria-label="Creators navigation">
+            {#each navLinks as link}
+              <a href={link.href} class="nav-link">{link.label}</a>
+            {/each}
+          </nav>
         </div>
-        <MobileNav variant="platform" user={data.user} links={navLinks} />
+
+        <div class="header-right">
+          <div class="desktop-user">
+            <UserMenu user={data.user} />
+          </div>
+          <MobileNav variant="platform" user={data.user} links={navLinks} />
+        </div>
       </div>
-    </div>
-  </header>
+    </header>
+  {/if}
 
   <main class="creators-main" id="main-content">
     {@render children()}
   </main>
 
-  <footer class="creators-footer">
-    <p>&copy; {new Date().getFullYear()} Revelations Studio. All rights reserved.</p>
-  </footer>
+  {#if !isStudio}
+    <footer class="creators-footer">
+      <p>&copy; {new Date().getFullYear()} Revelations Studio. All rights reserved.</p>
+    </footer>
+  {/if}
 </div>
 
 <style>

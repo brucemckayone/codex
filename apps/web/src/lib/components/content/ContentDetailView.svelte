@@ -32,7 +32,7 @@
   import { formatPrice, formatDurationHuman } from '$lib/utils/format';
   import { LockIcon, CheckIcon } from '$lib/components/ui/Icon';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
-  import { extractPlainText } from '$lib/editor/render';
+  import { extractPlainText } from '@codex/validation';
   import type { ContentWithRelations } from '$lib/types';
 
   /**
@@ -63,6 +63,12 @@
     purchasing: boolean;
     creatorName: string;
     titleSuffix: string;
+    /** Whether this content requires a subscription tier */
+    requiresSubscription?: boolean;
+    /** Whether the user has an active subscription to this org */
+    hasSubscription?: boolean;
+    /** Whether the user's tier is high enough for this content */
+    subscriptionCoversContent?: boolean;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
     relatedContent?: ContentDetail[];
@@ -80,6 +86,9 @@
     purchasing,
     creatorName,
     titleSuffix,
+    requiresSubscription,
+    hasSubscription,
+    subscriptionCoversContent,
     creatorAttribution,
     purchaseForm,
     relatedContent,
@@ -105,7 +114,10 @@
   const priceCents = $derived(content.priceCents ?? null);
   const isPaid = $derived(!!priceCents && priceCents > 0);
   const isFree = $derived(!priceCents || priceCents === 0);
-  const needsPurchase = $derived(!hasAccess && isPaid);
+  const needsPurchase = $derived(!hasAccess && isPaid && !requiresSubscription);
+  const needsSubscription = $derived(
+    !hasAccess && requiresSubscription && !subscriptionCoversContent
+  );
 
   const previewUrl = $derived(content.mediaItem?.hlsPreviewUrl ?? undefined);
   const accessState = $derived(
@@ -113,6 +125,9 @@
       hasAccess,
       hasPreview: !!previewUrl,
       isAuthenticated,
+      requiresSubscription,
+      hasSubscription,
+      subscriptionCoversContent,
     })
   );
 
@@ -240,7 +255,38 @@
       <span class="content-detail__completed-badge">{m.content_progress_completed()}</span>
     {/if}
 
-    <!-- Purchase Section -->
+    <!-- Subscription Section (tier-gated content) -->
+    {#if needsSubscription}
+      <div class="content-detail__purchase">
+        <div class="content-detail__price">
+          <span class="content-detail__price-amount">
+            {hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title()}
+          </span>
+          <span class="content-detail__price-label">
+            {hasSubscription ? m.upgrade_cta_description() : m.subscribe_cta_description()}
+          </span>
+        </div>
+
+        {#if isAuthenticated}
+          <a href="/pricing" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+            {hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title()}
+          </a>
+        {:else}
+          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+            {m.checkout_signin_to_purchase()}
+          </a>
+        {/if}
+
+        {#if isPaid}
+          <span class="content-detail__or-divider">or purchase for {displayPrice(priceCents)}</span>
+          {#if isAuthenticated && purchaseForm}
+            {@render purchaseForm()}
+          {/if}
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Purchase Section (one-time purchase) -->
     {#if needsPurchase}
       <div class="content-detail__purchase">
         <div class="content-detail__price">
@@ -568,6 +614,14 @@
     padding: var(--space-2) var(--space-3);
     background: var(--color-error-50);
     border-radius: var(--radius-md);
+  }
+
+  .content-detail__or-divider {
+    display: block;
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    padding: var(--space-2) 0;
   }
 
   :global(.content-detail__purchase-btn) {

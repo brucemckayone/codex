@@ -10,7 +10,7 @@
   @prop {boolean} loading - Whether the data is loading
 -->
 <script lang="ts">
-  import type { OrgMemberItem } from '$lib/server/api';
+  import type { OrgMemberItem } from '$lib/types';
   import * as Table from '$lib/components/ui/Table';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
   import Select from '$lib/components/ui/Select/Select.svelte';

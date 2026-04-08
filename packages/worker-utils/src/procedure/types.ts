@@ -33,6 +33,11 @@ import type {
   SessionData,
   UserData,
 } from '@codex/shared-types';
+import type {
+  ConnectAccountService,
+  SubscriptionService,
+  TierService,
+} from '@codex/subscription';
 import type { TranscodingService } from '@codex/transcoding';
 import type { ExecutionContext, MiddlewareHandler } from 'hono';
 import type { ZodSchema, z } from 'zod';
@@ -122,6 +127,11 @@ export interface ServiceRegistry {
 
   // Commerce domain
   purchase: PurchaseService;
+
+  // Subscription domain
+  subscription: SubscriptionService;
+  tier: TierService;
+  connect: ConnectAccountService;
 
   // Media & Processing domain
   transcoding: TranscodingService;

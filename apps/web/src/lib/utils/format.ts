@@ -47,6 +47,22 @@ export function formatDate(dateStr: string | Date): string {
   return shortDateFormatter.format(new Date(dateStr));
 }
 
+const rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' });
+
+/**
+ * Format a date as a relative time string (e.g. "2 days ago", "yesterday").
+ * Falls back to absolute date for dates older than 30 days.
+ */
+export function formatRelativeTime(dateStr: string | Date): string {
+  const diffMs = new Date(dateStr).getTime() - Date.now();
+  const diffDay = Math.round(diffMs / 86_400_000);
+  if (Math.abs(diffDay) >= 30) return formatDate(dateStr);
+  if (Math.abs(diffDay) >= 1) return rtf.format(diffDay, 'day');
+  const diffHr = Math.round(diffMs / 3_600_000);
+  if (Math.abs(diffHr) >= 1) return rtf.format(diffHr, 'hour');
+  return rtf.format(Math.round(diffMs / 60_000), 'minute');
+}
+
 /** Format pence/cents as `£12.34`. Accepts integer minor units. */
 export function formatPrice(cents: number | null): string {
   if (cents == null) return '';

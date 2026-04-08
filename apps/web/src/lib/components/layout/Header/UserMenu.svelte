@@ -2,7 +2,7 @@
   import type { LayoutUser } from '$lib/types';
   import { page } from '$app/state';
   import { submitFormPost } from '$lib/utils/navigation';
-  import { buildCreatorsUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import { buildCreatorsUrl, buildPlatformUrl, extractSubdomain } from '$lib/utils/subdomain';
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
@@ -19,6 +19,15 @@
   }
 
   const { user }: Props = $props();
+
+  // On org subdomains, Studio link should go to the current org's studio (root-relative)
+  // On platform/creators, go to the creators studio
+  const currentSubdomain = $derived(extractSubdomain(page.url.hostname));
+  const studioHref = $derived(
+    currentSubdomain && currentSubdomain !== 'creators' && currentSubdomain !== 'www'
+      ? '/studio'
+      : buildCreatorsUrl(page.url, '/studio')
+  );
 
   function getInitials(name: string): string {
     return name
@@ -54,7 +63,7 @@
       <a href={buildPlatformUrl(page.url, '/library')}>
         <DropdownMenuItem>{m.nav_library()}</DropdownMenuItem>
       </a>
-      <a href={buildCreatorsUrl(page.url, '/studio')}>
+      <a href={studioHref}>
         <DropdownMenuItem>{m.nav_studio()}</DropdownMenuItem>
       </a>
       <DropdownMenuSeparator />

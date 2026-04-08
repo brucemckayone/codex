@@ -35,3 +35,5 @@ export * from './schemas/subscription';
 export * from './schemas/transcoding';
 // Shared schemas (pagination, etc)
 export * from './shared/pagination-schema';
+// Text extraction utilities (TipTap JSON → plain text)
+export * from './text';

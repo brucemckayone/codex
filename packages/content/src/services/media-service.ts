@@ -22,6 +22,8 @@ import {
 import { mediaItems } from '@codex/database/schema';
 import {
   BaseService,
+  BusinessLogicError,
+  InternalServiceError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -36,7 +38,7 @@ import {
   updateMediaItemSchema,
 } from '@codex/validation';
 import { and, asc, count, desc, eq } from 'drizzle-orm';
-import { MediaNotFoundError, wrapError } from '../errors';
+import { MediaNotFoundError } from '../errors';
 import type {
   MediaItem,
   MediaItemFilters,
@@ -105,7 +107,10 @@ export class MediaItemService extends BaseService {
 
       // Validate generated key matches expected format (defense-in-depth)
       if (!isValidR2Key(r2Key)) {
-        throw new Error(`Generated r2Key '${r2Key}' failed validation`);
+        throw new ValidationError(
+          `Generated r2Key '${r2Key}' failed validation`,
+          { r2Key, creatorId, mediaId }
+        );
       }
 
       const [newMediaItem] = await this.db
@@ -124,7 +129,10 @@ export class MediaItemService extends BaseService {
         .returning();
 
       if (!newMediaItem) {
-        throw new Error('Failed to create media item');
+        throw new InternalServiceError('Failed to create media item', {
+          creatorId,
+          mediaId,
+        });
       }
 
       // Generate presigned upload URL if R2 signing is available.
@@ -148,7 +156,7 @@ export class MediaItemService extends BaseService {
 
       return { ...newMediaItem, presignedUrl };
     } catch (error) {
-      throw wrapError(error, { creatorId, input: validated });
+      this.handleError(error, 'create');
     }
   }
 
@@ -173,17 +181,22 @@ export class MediaItemService extends BaseService {
     creatorId: string
   ): Promise<{ success: true; r2Key: string }> {
     if (!this.r2) {
-      throw new Error('R2 service not configured — cannot upload media files');
+      throw new InternalServiceError(
+        'R2 service not configured — cannot upload media files'
+      );
     }
 
     const media = await this.get(mediaId, creatorId);
     if (!media) throw new MediaNotFoundError(mediaId);
 
     if (media.status !== MEDIA_STATUS.UPLOADING) {
-      throw new Error(`Cannot upload: media status is '${media.status}'`);
+      throw new BusinessLogicError(
+        `Cannot upload: media status is '${media.status}'`,
+        { mediaId, status: media.status }
+      );
     }
     if (!media.r2Key) {
-      throw new Error('Media has no r2Key');
+      throw new ValidationError('Media has no r2Key', { mediaId });
     }
 
     await this.r2.put(media.r2Key, body, undefined, { contentType });
@@ -226,7 +239,7 @@ export class MediaItemService extends BaseService {
 
       return result || null;
     } catch (error) {
-      throw wrapError(error, { mediaItemId: id, creatorId });
+      this.handleError(error, 'get');
     }
   }
 
@@ -303,7 +316,7 @@ export class MediaItemService extends BaseService {
         mediaItemId: id,
         error: error instanceof Error ? error.message : String(error),
       });
-      throw wrapError(error, { mediaItemId: id, creatorId, input: validated });
+      this.handleError(error, 'update');
     }
   }
 
@@ -349,7 +362,7 @@ export class MediaItemService extends BaseService {
       if (error instanceof MediaNotFoundError) {
         throw error;
       }
-      throw wrapError(error, { mediaItemId: id, creatorId });
+      this.handleError(error, 'delete');
     }
   }
 
@@ -436,7 +449,7 @@ export class MediaItemService extends BaseService {
         },
       };
     } catch (error) {
-      throw wrapError(error, { creatorId, filters, pagination });
+      this.handleError(error, 'list');
     }
   }
 

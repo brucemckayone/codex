@@ -51,6 +51,7 @@
       const result = await createSubscriptionCheckoutSession({
         tierId: tier.id,
         billingInterval,
+        organizationId: data.org.id,
       });
       window.location.href = result.sessionUrl;
     } catch {

@@ -52,14 +52,10 @@ export async function handleConnectWebhook(
           type: event.type,
         });
     }
-  } catch (error) {
-    const err = error as Error;
-    obs?.error('Connect webhook handler error', {
-      eventType: event.type,
-      eventId: event.id,
-      error: err.message,
-    });
   } finally {
+    // Errors propagate to createWebhookHandler for transient/permanent classification.
+    // Transient errors (DB failures) → 500 (Stripe retries).
+    // Permanent errors (business logic) → 200 (acknowledged).
     await cleanup();
   }
 }

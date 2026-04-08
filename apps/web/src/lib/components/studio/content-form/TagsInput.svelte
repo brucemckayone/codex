@@ -49,7 +49,7 @@
 
 <div class="tags-input-wrapper">
   <div class="label-row">
-    <span class="field-label">Tags</span>
+    <span class="field-label">Tags <span class="optional-hint">Optional</span></span>
     <span
       class="tag-count"
       data-warning={tags.length >= 18 || undefined}
@@ -106,6 +106,12 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text);
+  }
+
+  .optional-hint {
+    font-size: var(--text-xs);
+    font-weight: var(--font-normal);
+    color: var(--color-text-muted);
   }
 
   .tag-count {

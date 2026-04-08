@@ -14,9 +14,12 @@
   interface Props {
     form: any;
     orgSlug: string | null;
+    creatorUsername?: string | null;
+    organizationId?: string | null;
+    contentId?: string | null;
   }
 
-  const { form, orgSlug }: Props = $props();
+  const { form, orgSlug, creatorUsername, organizationId, contentId }: Props = $props();
 
   const descriptionValue = $derived(form.fields.description.value() ?? '');
 </script>
@@ -42,12 +45,13 @@
     </div>
 
     <!-- Slug -->
-    <SlugField {form} {orgSlug} />
+    <SlugField {form} {orgSlug} {creatorUsername} {organizationId} {contentId} />
 
     <!-- Description -->
     <div class="form-field">
       <label class="field-label" for="description">
         {m.studio_content_form_description_label()}
+        <span class="optional-hint">Optional</span>
       </label>
       <RichTextEditor
         content={descriptionValue}
@@ -123,6 +127,13 @@
     font-size: var(--text-xs);
     color: var(--color-error-600);
     margin: 0;
+  }
+
+  .optional-hint {
+    font-size: var(--text-xs);
+    font-weight: var(--font-normal);
+    color: var(--color-text-muted);
+    margin-left: var(--space-1);
   }
 
 </style>

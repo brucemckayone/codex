@@ -2,7 +2,7 @@
   @component PublishSidebar
 
   Publishing controls sidebar: status, readiness checklist,
-  visibility, pricing, category, tags, and danger zone.
+  access type, pricing, tier, category, tags, and danger zone.
 
   @prop {ContentForm} form - The active form instance
   @prop {boolean} isEdit - Whether in edit mode
@@ -55,7 +55,7 @@
   const contentTypeVal = $derived(form.fields.contentType.value() ?? 'video');
   const mediaItemIdVal = $derived(form.fields.mediaItemId?.value() ?? '');
   const contentBodyVal = $derived(form.fields.contentBody?.value() ?? '');
-  const visibilityVal = $derived(form.fields.visibility.value() ?? 'public');
+  const accessTypeVal = $derived(form.fields.accessType?.value() ?? 'free');
   const priceVal = $derived(form.fields.price?.value() ?? '0.00');
 
   // Tags state (managed locally, serialized to hidden input)
@@ -65,25 +65,52 @@
     tags = newTags;
   }
 
-  // Visibility options for Select component
-  const visibilityOptions = $derived([
-    { value: 'public', label: m.studio_content_form_visibility_public() },
-    { value: 'private', label: m.studio_content_form_visibility_private() },
-    { value: 'members_only', label: m.studio_content_form_visibility_members_only() },
-    { value: 'purchased_only', label: m.studio_content_form_visibility_purchased_only() },
-  ]);
+  // Access type options
+  type AccessTypeOption = { value: string; label: string; description: string };
+  const hasOrg = $derived(!!form.fields.organizationId?.value());
+  const hasTiers = $derived(tiers.length > 0);
 
-  function handleVisibilityChange(val: string | undefined) {
-    if (val) form.fields.visibility.set(val as 'public' | 'private' | 'members_only' | 'purchased_only');
+  const accessTypeOptions = $derived.by((): AccessTypeOption[] => {
+    const options: AccessTypeOption[] = [
+      {
+        value: 'free',
+        label: m.studio_content_form_access_free(),
+        description: m.studio_content_form_access_free_desc(),
+      },
+      {
+        value: 'paid',
+        label: m.studio_content_form_access_paid(),
+        description: m.studio_content_form_access_paid_desc(),
+      },
+    ];
+
+    if (hasTiers) {
+      options.push({
+        value: 'subscribers',
+        label: m.studio_content_form_access_subscribers(),
+        description: m.studio_content_form_access_subscribers_desc(),
+      });
+    }
+
+    if (hasOrg) {
+      options.push({
+        value: 'members',
+        label: m.studio_content_form_access_members(),
+        description: m.studio_content_form_access_members_desc(),
+      });
+    }
+
+    return options;
+  });
+
+  function handleAccessTypeChange(val: string) {
+    form.fields.accessType?.set(val);
+
+    // Clear price when switching to free or members
+    if (val === 'free' || val === 'members') {
+      form.fields.price?.set('0.00');
+    }
   }
-
-  // Visibility descriptions
-  const visibilityDescriptions: Record<string, () => string> = {
-    public: () => m.studio_content_form_visibility_public_desc(),
-    private: () => m.studio_content_form_visibility_private_desc(),
-    members_only: () => m.studio_content_form_visibility_members_only_desc(),
-    purchased_only: () => m.studio_content_form_visibility_purchased_only_desc(),
-  };
 
   // Readiness checklist
   const readinessChecks = $derived.by(() => {
@@ -97,36 +124,60 @@
     if (contentTypeVal === 'written') {
       checks.push({ label: 'Content body written', met: !!contentBodyVal.trim() });
     }
-    if (visibilityVal === 'purchased_only') {
+    if (accessTypeVal === 'paid') {
       checks.push({
         label: 'Price set for paid content',
         met: parseFloat(priceVal || '0') > 0,
+      });
+    }
+    if (accessTypeVal === 'subscribers') {
+      checks.push({
+        label: 'Subscription tier selected',
+        met: !!selectedMinimumTierId,
       });
     }
     return checks;
   });
 
   const isReadyToPublish = $derived(readinessChecks.every((c) => c.met));
-  const showPriceField = $derived(visibilityVal === 'purchased_only');
+  const showPriceField = $derived(accessTypeVal === 'paid' || accessTypeVal === 'subscribers');
+  const showTierField = $derived(accessTypeVal === 'subscribers' && hasTiers);
   let showDangerZone = $state(false);
 
   // Minimum tier selector
   let selectedMinimumTierId = $state<string>(content?.minimumTierId ?? '');
-  const hasTiers = $derived(tiers.length > 0);
   const tierSelectOptions = $derived([
-    { value: '', label: 'No tier required (free/purchased)' },
+    { value: '', label: 'Select a tier' },
     ...tiers.map((t) => ({ value: t.id, label: `${t.name}` })),
   ]);
 
   function handleTierChange(val: string | undefined) {
     selectedMinimumTierId = val ?? '';
   }
+
+  // Derive a legacy visibility value for backwards compat
+  const derivedVisibility = $derived.by(() => {
+    switch (accessTypeVal) {
+      case 'paid':
+      case 'subscribers':
+        return 'purchased_only';
+      case 'members':
+        return 'members_only';
+      default:
+        return 'public';
+    }
+  });
 </script>
 
 <aside class="publish-sidebar">
-  <!-- Hidden input for serialized tags -->
+  <!-- Hidden inputs for form submission -->
   <input type="hidden" name="tags" value={JSON.stringify(tags)} />
-  <!-- Hidden input for category (rendered inline below) -->
+  <input type="hidden" name="accessType" value={accessTypeVal} />
+  <input type="hidden" name="visibility" value={derivedVisibility} />
+  <input type="hidden" name="minimumTierId" value={selectedMinimumTierId || ''} />
+  {#if !showPriceField}
+    <input type="hidden" name="price" value={priceVal} />
+  {/if}
 
   <!-- Status + Primary Action -->
   <div class="sidebar-section">
@@ -209,25 +260,42 @@
     </ul>
   </div>
 
-  <!-- Visibility -->
+  <!-- Access Type -->
   <div class="sidebar-section">
-    <h4 class="sidebar-heading">{m.studio_content_form_visibility_label()}</h4>
-    <input type="hidden" name="visibility" value={visibilityVal} />
-    <Select
-      options={visibilityOptions}
-      value={visibilityVal}
-      onValueChange={handleVisibilityChange}
-      placeholder={m.studio_content_form_visibility_label()}
-    />
-    <span class="field-hint">
-      {visibilityDescriptions[visibilityVal]?.() ?? ''}
-    </span>
+    <h4 class="sidebar-heading">{m.studio_content_form_access_label()}</h4>
+    <div class="access-options" role="radiogroup" aria-label="Content access type">
+      {#each accessTypeOptions as option (option.value)}
+        <label
+          class="access-option"
+          data-selected={accessTypeVal === option.value || undefined}
+        >
+          <input
+            type="radio"
+            name="_accessTypeRadio"
+            value={option.value}
+            checked={accessTypeVal === option.value}
+            onchange={() => handleAccessTypeChange(option.value)}
+            class="access-radio"
+          />
+          <div class="access-option-content">
+            <span class="access-option-label">{option.label}</span>
+            <span class="access-option-desc">{option.description}</span>
+          </div>
+        </label>
+      {/each}
+    </div>
   </div>
 
-  <!-- Price (conditionally shown) -->
+  <!-- Price (shown for paid and subscribers) -->
   {#if showPriceField}
     <div class="sidebar-section" style="animation: slideIn var(--duration-normal) var(--ease-out);">
-      <h4 class="sidebar-heading">{m.studio_content_form_price_label()}</h4>
+      <h4 class="sidebar-heading">
+        {#if accessTypeVal === 'subscribers'}
+          {m.studio_content_form_access_also_purchasable()}
+        {:else}
+          {m.studio_content_form_price_label()}
+        {/if}
+      </h4>
       <div class="price-wrapper">
         <span class="price-prefix">&pound;</span>
         <input
@@ -239,17 +307,18 @@
           placeholder={m.studio_content_form_price_placeholder()}
         />
       </div>
-      {#if parseFloat(priceVal || '0') <= 0}
+      {#if accessTypeVal === 'paid' && parseFloat(priceVal || '0') <= 0}
         <span class="field-warning">Paid content requires a price greater than &pound;0</span>
+      {:else if accessTypeVal === 'subscribers'}
+        <span class="field-hint">Optional. Leave at &pound;0 if only available via subscription.</span>
       {/if}
     </div>
   {/if}
 
-  <!-- Minimum Subscription Tier -->
-  {#if hasTiers}
-    <div class="sidebar-section">
+  <!-- Minimum Subscription Tier (shown for subscribers access type) -->
+  {#if showTierField}
+    <div class="sidebar-section" style="animation: slideIn var(--duration-normal) var(--ease-out);">
       <h4 class="sidebar-heading">Minimum Tier</h4>
-      <input type="hidden" name="minimumTierId" value={selectedMinimumTierId || ''} />
       <Select
         options={tierSelectOptions}
         value={selectedMinimumTierId}
@@ -264,7 +333,7 @@
 
   <!-- Category -->
   <div class="sidebar-section">
-    <h4 class="sidebar-heading">Category</h4>
+    <h4 class="sidebar-heading">Category <span class="optional-hint">Optional</span></h4>
     <input
       {...form.fields.category.as('text')}
       id="category"
@@ -333,6 +402,13 @@
     letter-spacing: var(--tracking-wide);
     color: var(--color-text-secondary);
     margin: 0;
+  }
+
+  .optional-hint {
+    font-weight: var(--font-normal);
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--color-text-muted);
   }
 
   /* Status badge */
@@ -405,6 +481,57 @@
     color: var(--color-warning-600);
   }
 
+  /* Access type radio group */
+  .access-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .access-option {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    cursor: pointer;
+    transition: border-color var(--duration-fast) var(--ease-out),
+                background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .access-option:hover {
+    border-color: var(--color-primary-300);
+  }
+
+  .access-option[data-selected] {
+    border-color: var(--color-primary-500);
+    background-color: var(--color-primary-50);
+  }
+
+  .access-radio {
+    margin-top: var(--space-1);
+    accent-color: var(--color-primary-500);
+  }
+
+  .access-option-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .access-option-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+  }
+
+  .access-option-desc {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: var(--leading-relaxed);
+  }
+
   /* Price */
   .price-wrapper {
     display: flex;
@@ -461,5 +588,4 @@
       transform: translateY(0);
     }
   }
-
 </style>

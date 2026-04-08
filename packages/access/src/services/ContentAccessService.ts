@@ -218,8 +218,50 @@ export class ContentAccessService {
             });
           }
 
-          // Check access - free content, purchase, or org membership
-          if (contentRecord.priceCents && contentRecord.priceCents > 0) {
+          // Members-only access: require active org membership, no purchase/subscription bypass
+          if (contentRecord.accessType === 'members') {
+            if (!contentRecord.organizationId) {
+              throw new AccessDeniedError(userId, input.contentId, {
+                reason: 'members_only_requires_org',
+              });
+            }
+
+            const membership = await tx.query.organizationMemberships.findFirst(
+              {
+                where: and(
+                  eq(
+                    organizationMemberships.organizationId,
+                    contentRecord.organizationId
+                  ),
+                  eq(organizationMemberships.userId, userId),
+                  eq(organizationMemberships.status, 'active')
+                ),
+              }
+            );
+
+            if (!membership) {
+              obs.warn('Access denied - members-only content', {
+                userId,
+                contentId: input.contentId,
+                organizationId: contentRecord.organizationId,
+                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                severity: LOG_SEVERITY.MEDIUM,
+                eventType: LOG_EVENTS.ACCESS_CONTROL,
+              });
+              throw new AccessDeniedError(userId, input.contentId, {
+                organizationId: contentRecord.organizationId,
+                reason: 'members_only',
+              });
+            }
+
+            obs.info('Access granted via membership (members-only content)', {
+              userId,
+              contentId: input.contentId,
+              organizationId: contentRecord.organizationId,
+              membershipRole: membership.role,
+            });
+          } // Check access - free content, purchase, or org membership
+          else if (contentRecord.priceCents && contentRecord.priceCents > 0) {
             // Paid content - check purchase via PurchaseService
             const hasPurchased =
               await this.config.purchaseService.verifyPurchase(

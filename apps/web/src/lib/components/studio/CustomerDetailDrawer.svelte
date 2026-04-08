@@ -2,13 +2,10 @@
   @component CustomerDetailDrawer
 
   Right-anchored slide-out drawer showing customer details:
-  - Profile section: name, email, joined date
-  - Stats section: total spent (GBP), purchase count
-  - Purchase history table: date, content title, amount
+  - Profile section: name, email (with copy button), joined date (relative)
+  - Stats section: total spent (with spend trend), purchase count
+  - Purchase history table: date, content title (linked), amount
   - "Grant Access" button to open GrantAccessDialog
-
-  Uses Melt UI Dialog for overlay/close behaviour (Escape, click-outside).
-  Fetches customer data via the `getCustomerDetail` remote function on open.
 
   @prop {boolean} open - Whether the drawer is open (bindable)
   @prop {string | null} customerId - The customer ID to display
@@ -20,7 +17,9 @@
   import * as Dialog from '$lib/components/ui/Dialog';
   import { Button, Skeleton } from '$lib/components/ui';
   import * as Table from '$lib/components/ui/Table';
-  import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
+  import { CheckIcon, TrendingUpIcon } from '$lib/components/ui/Icon';
+  import { formatDate, formatPrice, formatRelativeTime, getInitials } from '$lib/utils/format';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
   import * as m from '$paraglide/messages';
   import { getCustomerDetail } from '$lib/remote/admin.remote';
   import GrantAccessDialog from './GrantAccessDialog.svelte';
@@ -43,8 +42,8 @@
   let loading = $state(false);
   let error = $state<string | null>(null);
   let grantDialogOpen = $state(false);
+  let emailCopied = $state(false);
 
-  // Fetch customer details whenever customerId changes and drawer is open
   $effect(() => {
     if (open && customerId) {
       loadCustomer(customerId);
@@ -57,7 +56,7 @@
     customer = null;
 
     try {
-      customer = await getCustomerDetail(id);
+      customer = await getCustomerDetail({ customerId: id, organizationId: orgId });
     } catch {
       error = m.studio_customers_drawer_error();
     } finally {
@@ -72,18 +71,42 @@
       customer = null;
       error = null;
       grantDialogOpen = false;
+      emailCopied = false;
     }
   }
 
   function handleGrantSuccess() {
-    // Reload customer to refresh purchase history / access state
     if (customerId) {
       loadCustomer(customerId);
     }
   }
 
+  async function handleCopyEmail() {
+    if (!customer?.email) return;
+    try {
+      await navigator.clipboard.writeText(customer.email);
+      emailCopied = true;
+      setTimeout(() => { emailCopied = false; }, 2000);
+    } catch {
+      toast.error(m.studio_customers_copy_email_failed());
+    }
+  }
+
   const displayName = $derived(customer?.name ?? '--');
   const initials = $derived(getInitials(customer?.name));
+
+  // Spending trend: compare avg of last 3 purchases vs older
+  const spendTrend = $derived.by((): 'up' | 'down' | 'neutral' => {
+    if (!customer?.purchaseHistory || customer.purchaseHistory.length < 4) return 'neutral';
+    const sorted = [...customer.purchaseHistory].sort(
+      (a, b) => new Date(b.purchasedAt).getTime() - new Date(a.purchasedAt).getTime()
+    );
+    const recentAvg = sorted.slice(0, 3).reduce((s, p) => s + p.amountPaidCents, 0) / 3;
+    const olderAvg = sorted.slice(3).reduce((s, p) => s + p.amountPaidCents, 0) / (sorted.length - 3);
+    if (recentAvg > olderAvg * 1.1) return 'up';
+    if (recentAvg < olderAvg * 0.9) return 'down';
+    return 'neutral';
+  });
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
@@ -118,10 +141,28 @@
           <div class="profile-meta">
             <span class="meta-label">{m.studio_customers_drawer_email()}</span>
             <span class="meta-value">{customer.email}</span>
+            <button
+              class="copy-email-btn"
+              onclick={handleCopyEmail}
+              aria-label={m.studio_customers_copy_email()}
+              title={emailCopied ? m.studio_customers_copy_email() : m.studio_customers_copy_email()}
+            >
+              {#if emailCopied}
+                <CheckIcon size={14} />
+              {:else}
+                <!-- Inline clipboard SVG (no icon component exists) -->
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              {/if}
+            </button>
           </div>
           <div class="profile-meta">
             <span class="meta-label">{m.studio_customers_drawer_joined()}</span>
-            <span class="meta-value">{formatDate(customer.createdAt)}</span>
+            <span class="meta-value" title={formatDate(customer.createdAt)}>
+              {formatRelativeTime(customer.createdAt)}
+            </span>
           </div>
         </div>
       </section>
@@ -130,7 +171,18 @@
       <section class="stats-section">
         <div class="stat-card">
           <span class="stat-label">{m.studio_customers_drawer_total_spent()}</span>
-          <span class="stat-value">{formatPrice(customer.totalSpentCents)}</span>
+          <span class="stat-value">
+            {formatPrice(customer.totalSpentCents)}
+            {#if spendTrend === 'up'}
+              <span class="trend trend--up" title={m.studio_customers_trend_up()}>
+                <TrendingUpIcon size={16} />
+              </span>
+            {:else if spendTrend === 'down'}
+              <span class="trend trend--down" title={m.studio_customers_trend_down()}>
+                <TrendingUpIcon size={16} />
+              </span>
+            {/if}
+          </span>
         </div>
         <div class="stat-card">
           <span class="stat-label">{m.studio_customers_drawer_purchases()}</span>
@@ -158,7 +210,9 @@
                       {formatDate(purchase.purchasedAt)}
                     </Table.Cell>
                     <Table.Cell class="history-content-cell">
-                      {purchase.contentTitle}
+                      <a href="/content/{purchase.contentId}" class="content-link">
+                        {purchase.contentTitle}
+                      </a>
                     </Table.Cell>
                     <Table.Cell class="history-amount-cell">
                       {formatPrice(purchase.amountPaidCents)}
@@ -197,11 +251,6 @@
 </Dialog.Root>
 
 <style>
-  /*
-   * Override Dialog positioning for right-anchored drawer.
-   * Uses .dialog-content.drawer-content to beat the base .dialog-content
-   * specificity without !important.
-   */
   :global(.dialog-content.drawer-content) {
     position: fixed;
     top: 0;
@@ -224,7 +273,6 @@
     padding: var(--space-6);
   }
 
-  /* Full-width on mobile */
   @media (max-width: 40rem) {
     :global(.dialog-content.drawer-content) {
       max-width: 100%;
@@ -301,6 +349,7 @@
 
   .profile-meta {
     display: flex;
+    align-items: center;
     gap: var(--space-2);
     font-size: var(--text-sm);
   }
@@ -314,6 +363,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .copy-email-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-0-5);
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: var(--transition-colors);
+    flex-shrink: 0;
+  }
+
+  .copy-email-btn:hover {
+    color: var(--color-interactive);
   }
 
   /* Stats Section */
@@ -342,10 +409,27 @@
   }
 
   .stat-value {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     font-size: var(--text-xl);
     font-weight: var(--font-bold);
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
+  }
+
+  .trend {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .trend--up {
+    color: var(--color-success);
+  }
+
+  .trend--down {
+    color: var(--color-error);
+    transform: rotate(180deg);
   }
 
   /* Purchase History */
@@ -374,11 +458,20 @@
   }
 
   :global(.history-content-cell) {
-    color: var(--color-text);
     max-width: 12rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .content-link {
+    color: var(--color-interactive);
+    text-decoration: none;
+    transition: var(--transition-colors);
+  }
+
+  .content-link:hover {
+    text-decoration: underline;
   }
 
   :global(.history-amount-cell) {
@@ -392,5 +485,11 @@
     color: var(--color-text-secondary);
     margin: 0;
     padding: var(--space-4) 0;
+  }
+
+  :global(.drawer-content .dialog-footer) {
+    margin-top: auto;
+    padding-top: var(--space-4);
+    border-top: var(--border-width) var(--border-style) var(--color-border);
   }
 </style>

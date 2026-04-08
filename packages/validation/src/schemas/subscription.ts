@@ -75,6 +75,7 @@ export const reorderTiersSchema = z.object({
 // ============================================================================
 
 export const createSubscriptionCheckoutSchema = z.object({
+  organizationId: uuidSchema,
   tierId: uuidSchema,
   billingInterval: billingIntervalEnum,
   successUrl: checkoutRedirectUrlSchema,
@@ -98,6 +99,10 @@ export const cancelSubscriptionSchema = z.object({
     .trim()
     .max(500, 'Reason must be 500 characters or less')
     .optional(),
+});
+
+export const reactivateSubscriptionSchema = z.object({
+  organizationId: uuidSchema,
 });
 
 // ============================================================================
@@ -152,6 +157,9 @@ export type CreateSubscriptionCheckoutInput = z.infer<
 >;
 export type ChangeTierInput = z.infer<typeof changeTierSchema>;
 export type CancelSubscriptionInput = z.infer<typeof cancelSubscriptionSchema>;
+export type ReactivateSubscriptionInput = z.infer<
+  typeof reactivateSubscriptionSchema
+>;
 export type ListSubscribersQueryInput = z.infer<
   typeof listSubscribersQuerySchema
 >;

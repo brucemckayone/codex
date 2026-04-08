@@ -8,6 +8,7 @@
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+import { isTransientError } from './error-classification';
 
 /**
  * Webhook handler function type
@@ -60,15 +61,24 @@ export function createWebhookHandler(
       return c.json({ received: true });
     } catch (error) {
       const err = error as Error;
-      obs?.error(`${eventType} webhook handler error`, {
+
+      if (isTransientError(error)) {
+        // Transient failure — return 500 so Stripe retries with exponential backoff
+        obs?.error(`${eventType} webhook transient error (will retry)`, {
+          error: err.message,
+          eventType: event.type,
+          eventId: event.id,
+        });
+        return c.json({ error: 'Temporary failure' }, 500);
+      }
+
+      // Permanent failure — acknowledge receipt to prevent futile retries
+      obs?.warn(`${eventType} webhook permanent error (acknowledged)`, {
         error: err.message,
         eventType: event.type,
         eventId: event.id,
       });
-
-      // Return 200 to Stripe even on handler errors (prevents retries)
-      // Log the error but acknowledge receipt
-      return c.json({ received: true, error: 'Handler error' });
+      return c.json({ received: true }, 200);
     }
   };
 }

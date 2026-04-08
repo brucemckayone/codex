@@ -41,18 +41,20 @@
     fileSizeBytes?: number | null;
     status?: string;
     thumbnailKey?: string | null;
+    thumbnailUrl?: string | null;
   }
 
   interface Props {
     content?: ContentWithRelations;
     organizationId: string | null;
     orgSlug: string | null;
+    creatorUsername?: string | null;
     mediaItems?: MediaItemOption[];
     tiers?: SubscriptionTier[];
     onSuccess?: () => void;
   }
 
-  const { content, organizationId, orgSlug, mediaItems = [], tiers = [], onSuccess }: Props = $props();
+  const { content, organizationId, orgSlug, creatorUsername, mediaItems = [], tiers = [], onSuccess }: Props = $props();
 
   const isEdit = $derived(!!content);
   const form = $derived(isEdit ? updateContentForm : createContentForm);
@@ -65,6 +67,10 @@
   let confirmLeave = $state(false);
   let showSuccess = $state(false);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  // Local status tracking — content prop may be derived (immutable),
+  // so we track status separately for optimistic publish/unpublish updates.
+  let contentStatus = $state(content?.status ?? 'draft');
 
   const contentTypeVal = $derived(form.fields.contentType.value() ?? content?.contentType ?? 'video');
   const formPending = $derived(form.pending > 0);
@@ -85,6 +91,7 @@
         contentType: content.contentType ?? 'video',
         mediaItemId: content.mediaItemId ?? '',
         contentBody: content.contentBody ?? '',
+        accessType: content.accessType ?? 'free',
         visibility: content.visibility ?? 'public',
         price: content.priceCents ? (content.priceCents / 100).toFixed(2) : '0.00',
         category: content.category ?? '',
@@ -100,6 +107,7 @@
         contentType: 'video',
         mediaItemId: '',
         contentBody: '',
+        accessType: 'free',
         visibility: 'public',
         price: '0.00',
         category: '',
@@ -167,13 +175,13 @@
   async function handlePublishToggle() {
     if (!content) return;
     publishing = true;
-    const previousStatus = content.status;
+    const previousStatus = contentStatus;
     try {
-      const optimistic = content.status === 'published' ? 'draft' : 'published';
-      content.status = optimistic;
+      const optimistic = contentStatus === 'published' ? 'draft' : 'published';
+      contentStatus = optimistic;
       await togglePublishStatus(content.id, previousStatus as ContentStatus);
     } catch {
-      content.status = previousStatus;
+      contentStatus = previousStatus;
     } finally {
       publishing = false;
     }
@@ -203,9 +211,7 @@
     selectedMediaId ? mediaItems.find((m) => m.id === selectedMediaId) : null
   );
   const mediaThumbnailUrl = $derived(
-    selectedMedia?.thumbnailKey
-      ? `/cdn/${selectedMedia.thumbnailKey}`
-      : null
+    selectedMedia?.thumbnailUrl ?? null
   );
 </script>
 
@@ -259,17 +265,15 @@
       <ContentTypeSelector {form} {isEdit} currentType={content?.contentType} />
 
       <!-- Details (Title, Slug, Description) -->
-      <ContentDetails {form} {orgSlug} />
+      <ContentDetails {form} {orgSlug} {creatorUsername} {organizationId} contentId={content?.id} />
 
       <!-- Media Section (video/audio only) -->
       {#if contentTypeVal === 'video' || contentTypeVal === 'audio'}
         <MediaSection {form} {mediaItems} {orgSlug} />
       {/if}
 
-      <!-- Written Content Editor (written only) -->
-      {#if contentTypeVal === 'written'}
-        <WrittenContentEditor {form} />
-      {/if}
+      <!-- Content Body Editor -->
+      <WrittenContentEditor {form} optional={contentTypeVal !== 'written'} />
 
       <!-- Thumbnail -->
       <ThumbnailUpload {form} {mediaThumbnailUrl} />
@@ -280,6 +284,7 @@
       {form}
       {isEdit}
       {content}
+      {contentStatus}
       {formPending}
       {publishing}
       {deleting}

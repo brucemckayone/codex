@@ -47,6 +47,7 @@
     "@codex/platform-settings": "workspace:*",
     "@codex/purchase": "workspace:*",
     "@codex/security": "workspace:*",
+    "@codex/subscription": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/transcoding": "workspace:*",

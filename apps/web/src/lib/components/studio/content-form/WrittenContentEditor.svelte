@@ -1,8 +1,8 @@
 <!--
   @component WrittenContentEditor
 
-  Rich text editor for article/written content body.
-  Uses Tiptap with the full preset (headings, images, code blocks, etc).
+  Rich text editor for content body (all content types).
+  Uses Tiptap with the full preset (headings, code blocks, lists, etc).
 
   @prop {any} form - The active form instance
 -->
@@ -12,9 +12,10 @@
 
   interface Props {
     form: any;
+    optional?: boolean;
   }
 
-  const { form }: Props = $props();
+  const { form, optional = false }: Props = $props();
 
   const contentValue = $derived(form.fields.contentBody.value() ?? '');
 
@@ -27,7 +28,10 @@
 </script>
 
 <section class="form-card">
-  <h3 class="card-title">{m.studio_content_form_section_body()}</h3>
+  <h3 class="card-title">
+    {m.studio_content_form_section_body()}
+    {#if optional}<span class="optional-hint">Optional</span>{/if}
+  </h3>
 
   <RichTextEditor
     content={contentValue}
@@ -56,6 +60,13 @@
     font-weight: var(--font-semibold);
     color: var(--color-text);
     margin: 0 0 var(--space-4) 0;
+  }
+
+  .optional-hint {
+    font-size: var(--text-xs);
+    font-weight: var(--font-normal);
+    color: var(--color-text-muted);
+    margin-left: var(--space-1);
   }
 
   .field-error {

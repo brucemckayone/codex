@@ -21,6 +21,7 @@
     userSubscription?: CurrentSubscription | null;
     contentTitle?: string;
     reason: 'subscription_required' | 'higher_tier_required';
+    organizationId: string;
   }
 
   let {
@@ -30,6 +31,7 @@
     userSubscription = null,
     contentTitle,
     reason,
+    organizationId,
   }: Props = $props();
 
   let billingInterval = $state<'month' | 'year'>('month');
@@ -54,6 +56,7 @@
       const result = await createSubscriptionCheckoutSession({
         tierId: tier.id,
         billingInterval,
+        organizationId,
       });
       window.location.href = result.sessionUrl;
     } catch {

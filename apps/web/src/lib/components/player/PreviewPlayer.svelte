@@ -43,7 +43,7 @@
 
   const loginUrl = $derived(`/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
-  const ctaReason = $derived<'auth_required' | 'purchase_required'>(
+  const ctaReason = $derived<'auth_required' | 'purchase_required' | 'subscription_required' | 'higher_tier_required'>(
     accessState.status === 'locked' ? accessState.reason : 'purchase_required'
   );
 
@@ -197,7 +197,11 @@
             {/if}
 
             <p class="preview-player__cta-description">
-              {#if contentTitle}
+              {#if ctaReason === 'subscription_required'}
+                {m.subscribe_cta_description()}
+              {:else if ctaReason === 'higher_tier_required'}
+                {m.upgrade_cta_description()}
+              {:else if contentTitle}
                 {m.purchase_cta_description()}
               {:else}
                 {m.player_preview_cta()}
@@ -207,6 +211,14 @@
             {#if ctaReason === 'auth_required'}
               <a href={loginUrl} class="preview-player__cta-button">
                 {m.purchase_sign_in()}
+              </a>
+            {:else if ctaReason === 'subscription_required'}
+              <a href="/pricing" class="preview-player__cta-button">
+                {m.subscribe_cta_title()}
+              </a>
+            {:else if ctaReason === 'higher_tier_required'}
+              <a href="/pricing" class="preview-player__cta-button">
+                {m.upgrade_cta_title()}
               </a>
             {:else}
               <form {...createCheckout}>

@@ -85,6 +85,7 @@ export const createSubscriptionCheckout = form(
 
     try {
       const result = await api.subscription.checkout({
+        organizationId,
         tierId,
         billingInterval,
         successUrl: successUrl || `${url.origin}/library?subscription=success`,
@@ -108,6 +109,7 @@ export const createSubscriptionCheckout = form(
 const subscriptionCheckoutCommandSchema = z.object({
   tierId: z.string().uuid(),
   billingInterval: z.enum(['month', 'year']),
+  organizationId: z.string().uuid(),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
 });
@@ -118,11 +120,18 @@ const subscriptionCheckoutCommandSchema = z.object({
  */
 export const createSubscriptionCheckoutSession = command(
   subscriptionCheckoutCommandSchema,
-  async ({ tierId, billingInterval, successUrl, cancelUrl }) => {
+  async ({
+    tierId,
+    billingInterval,
+    organizationId,
+    successUrl,
+    cancelUrl,
+  }) => {
     const { platform, cookies, url } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
     const result = await api.subscription.checkout({
+      organizationId,
       tierId,
       billingInterval,
       successUrl: successUrl || `${url.origin}/library?subscription=success`,
@@ -169,6 +178,22 @@ export const cancelSubscription = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     return api.subscription.cancel(input);
+  }
+);
+
+const reactivateCommandSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+/**
+ * Reactivate a subscription that is set to cancel at period end.
+ */
+export const reactivateSubscription = command(
+  reactivateCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.subscription.reactivate(input);
   }
 );
 
@@ -254,6 +279,27 @@ export const reorderTiers = command(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Admin: Feature Toggle
+// ─────────────────────────────────────────────────────────────────────────────
+
+const updateSubscriptionFeatureSchema = z.object({
+  orgId: z.string().uuid(),
+  enabled: z.boolean(),
+});
+
+/**
+ * Toggle the enableSubscriptions feature flag for an org.
+ */
+export const updateSubscriptionFeature = command(
+  updateSubscriptionFeatureSchema,
+  async ({ orgId, enabled }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.updateFeatures(orgId, { enableSubscriptions: enabled });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Admin: Stats & Subscribers Queries
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -316,5 +362,22 @@ export const getConnectDashboardLink = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     return api.connect.getDashboardLink(organizationId);
+  }
+);
+
+const syncConnectCommandSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+/**
+ * Sync Connect account status with Stripe.
+ * Polls Stripe's API directly — used when webhooks can't reach the server.
+ */
+export const syncConnectStatus = command(
+  syncConnectCommandSchema,
+  async ({ organizationId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.connect.syncStatus(organizationId);
   }
 );

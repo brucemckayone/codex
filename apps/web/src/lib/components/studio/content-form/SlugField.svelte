@@ -1,23 +1,35 @@
 <!--
   @component SlugField
 
-  Slug input with prominent URL preview bar.
+  Slug input with prominent URL preview bar and real-time availability check.
   Auto-generates from title value unless manually edited.
 
   @prop {any} form - The active form instance
   @prop {string | null} orgSlug - Organization slug for URL preview (null for personal content)
+  @prop {string | null} [creatorUsername] - Creator username for personal content URL preview
+  @prop {string | null} [organizationId] - Organization ID for slug scope
+  @prop {string | null} [contentId] - Content ID to exclude from check (edit mode)
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
+  import { checkContentSlug } from '$lib/remote/content.remote';
 
   interface Props {
     form: any;
     orgSlug: string | null;
+    creatorUsername?: string | null;
+    organizationId?: string | null;
+    contentId?: string | null;
   }
 
-  const { form, orgSlug }: Props = $props();
+  const { form, orgSlug, creatorUsername, organizationId, contentId }: Props = $props();
 
   let slugManuallyEdited = $state(false);
+  let slugCheckStatus = $state<'idle' | 'checking' | 'available' | 'taken' | 'error'>('idle');
+
+  // Plain variable — NOT $state. Reading $state inside $effect creates a
+  // reactive dependency; ++counter on $state would infinite-loop the effect.
+  let checkRequestId = 0;
 
   const titleValue = $derived(form.fields.title.value() ?? '');
   const slugValue = $derived(form.fields.slug.value() ?? '');
@@ -33,6 +45,43 @@
     }
   });
 
+  // Debounced slug availability check.
+  // The returned teardown clears the timer before each re-run and on unmount.
+  $effect(() => {
+    const slug = slugValue;
+
+    // Don't check empty, too short, or badly formatted slugs
+    if (!slug || slug.length < 2 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      slugCheckStatus = 'idle';
+      return;
+    }
+
+    const thisRequestId = ++checkRequestId;
+
+    const timer = setTimeout(async () => {
+      slugCheckStatus = 'checking';
+
+      try {
+        const result = await checkContentSlug({
+          slug,
+          organizationId: organizationId ?? undefined,
+          excludeContentId: contentId ?? undefined,
+        });
+
+        // Only update if this is still the latest request
+        if (thisRequestId === checkRequestId) {
+          slugCheckStatus = result.available ? 'available' : 'taken';
+        }
+      } catch {
+        if (thisRequestId === checkRequestId) {
+          slugCheckStatus = 'error';
+        }
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  });
+
   function handleSlugInput() {
     slugManuallyEdited = true;
   }
@@ -46,15 +95,23 @@
     {...form.fields.slug.as('text')}
     id="slug"
     class="field-input"
+    class:input-error={slugCheckStatus === 'taken'}
     placeholder={m.studio_content_form_slug_placeholder()}
     oninput={handleSlugInput}
   />
   {#each form.fields.slug.issues() as issue}
     <p class="field-error">{issue.message}</p>
   {/each}
+  {#if slugCheckStatus === 'checking'}
+    <p class="slug-status slug-checking">{m.studio_content_form_slug_checking()}</p>
+  {:else if slugCheckStatus === 'available'}
+    <p class="slug-status slug-available">{m.studio_content_form_slug_available()}</p>
+  {:else if slugCheckStatus === 'taken'}
+    <p class="slug-status slug-taken">{m.studio_content_form_slug_taken()}</p>
+  {/if}
   {#if slugValue}
     <div class="url-preview">
-      <span class="url-prefix">{orgSlug ? `${orgSlug}.lvh.me` : 'creators.lvh.me'}/content/</span><span class="url-slug">{slugValue}</span>
+      <span class="url-prefix">{orgSlug ? `${orgSlug}.lvh.me` : 'creators.lvh.me'}/{orgSlug ? '' : creatorUsername ? `${creatorUsername}/` : ''}content/</span><span class="url-slug">{slugValue}</span>
     </div>
   {/if}
 </div>
@@ -90,7 +147,8 @@
     border-color: var(--color-border-focus);
   }
 
-  .field-input[aria-invalid='true'] {
+  .field-input[aria-invalid='true'],
+  .field-input.input-error {
     border-color: var(--color-error-500);
   }
 
@@ -98,6 +156,23 @@
     font-size: var(--text-xs);
     color: var(--color-error-600);
     margin: 0;
+  }
+
+  .slug-status {
+    font-size: var(--text-xs);
+    margin: 0;
+  }
+
+  .slug-checking {
+    color: var(--color-text-muted);
+  }
+
+  .slug-available {
+    color: var(--color-success-600);
+  }
+
+  .slug-taken {
+    color: var(--color-error-600);
   }
 
   .url-preview {

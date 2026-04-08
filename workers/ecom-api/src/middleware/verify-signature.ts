@@ -31,6 +31,10 @@ function getWebhookSecret(
     return c.env.STRIPE_WEBHOOK_SECRET_BOOKING;
   } else if (path.includes('/dispute')) {
     return c.env.STRIPE_WEBHOOK_SECRET_DISPUTE;
+  } else if (path.includes('/dev')) {
+    // Dev catch-all uses the booking secret (set all secrets to the same
+    // CLI-generated value in .dev.vars for local development)
+    return c.env.STRIPE_WEBHOOK_SECRET_BOOKING;
   }
   return undefined;
 }

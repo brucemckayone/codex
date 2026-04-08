@@ -112,14 +112,6 @@ export async function handleSubscriptionWebhook(
           type: event.type,
         });
     }
-  } catch (error) {
-    const err = error as Error;
-    obs?.error('Subscription webhook handler error', {
-      eventType: event.type,
-      eventId: event.id,
-      error: err.message,
-    });
-    // Don't throw — return 200 to prevent Stripe retries
   } finally {
     await cleanup();
   }

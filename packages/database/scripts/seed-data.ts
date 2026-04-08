@@ -47,6 +47,9 @@ const TABLES_TO_TRUNCATE = [
   'contact_settings',
   'feature_settings',
   'orphaned_image_files',
+  'stripe_connect_accounts',
+  'subscription_tiers',
+  'subscriptions',
 ];
 
 async function confirm(message: string): Promise<boolean> {
@@ -115,10 +118,17 @@ async function seedData() {
   console.log('\n  Login credentials (all accounts):');
   console.log(`    Password: ${SEED_PASSWORD}`);
   console.log('');
-  console.log('    Creator:  creator@test.com  (owner of Studio Alpha)');
-  console.log('    Viewer:   viewer@test.com   (member/subscriber)');
-  console.log('    Admin:    admin@test.com    (owner of Studio Beta)');
-  console.log('    Fresh:    fresh@test.com    (no orgs, no purchases)');
+  console.log(
+    '    Creator:      creator@test.com     (owner of Studio Alpha, Connect active)'
+  );
+  console.log('    Viewer:       viewer@test.com      (member/subscriber)');
+  console.log('    Admin:        admin@test.com       (owner of Studio Beta)');
+  console.log(
+    '    New Creator:  newcreator@test.com  (approved creator, no org yet)'
+  );
+  console.log(
+    '    Fresh:        fresh@test.com       (customer, no orgs, no purchases)'
+  );
   console.log('');
   console.log('  Quick test:');
   console.log('    1. Navigate to lvh.me:3000');

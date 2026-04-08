@@ -22,6 +22,7 @@
     content={data.content}
     organizationId={data.organizationId}
     orgSlug={data.orgSlug}
+    creatorUsername={data.creator?.username}
     mediaItems={data.mediaItems}
   />
 </ErrorBoundary>

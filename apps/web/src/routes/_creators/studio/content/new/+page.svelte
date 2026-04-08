@@ -15,4 +15,4 @@
   <title>New Content | My Studio</title>
 </svelte:head>
 
-<ContentForm organizationId={data.organizationId} orgSlug={data.orgSlug} mediaItems={data.mediaItems} />
+<ContentForm organizationId={data.organizationId} orgSlug={data.orgSlug} creatorUsername={data.creator?.username} mediaItems={data.mediaItems} />

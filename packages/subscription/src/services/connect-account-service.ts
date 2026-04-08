@@ -240,6 +240,31 @@ export class ConnectAccountService extends BaseService {
     return account.chargesEnabled && account.payoutsEnabled;
   }
 
+  /**
+   * Sync local account status with Stripe's current state.
+   * Calls stripe.accounts.retrieve() and updates the local record.
+   * Useful as a fallback when webhooks can't reach the server (local dev, missed events).
+   */
+  async syncAccountStatus(
+    orgId: string,
+    userId?: string
+  ): Promise<StripeConnectAccount | null> {
+    const account = await this.getAccount(orgId, userId);
+    if (!account) {
+      throw new ConnectAccountNotFoundError(orgId);
+    }
+
+    const stripeAccount = await this.stripe.accounts.retrieve(
+      account.stripeAccountId
+    );
+
+    // Reuse the same status derivation logic as handleAccountUpdated
+    await this.handleAccountUpdated(stripeAccount);
+
+    // Return the updated record
+    return this.getAccount(orgId, userId);
+  }
+
   // ─── Private Helpers ─────────────────────────────────────────────────────
 
   private async createOnboardingLink(

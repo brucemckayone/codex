@@ -138,6 +138,7 @@ export {
 // ============================================================================
 
 export type {
+  CheckContentSlugInput,
   ContentQueryInput,
   CreateContentInput,
   CreateMediaItemInput,
@@ -149,6 +150,7 @@ export type {
 } from '@codex/validation';
 
 export {
+  checkContentSlugSchema,
   contentQuerySchema,
   contentStatusEnum,
   contentTypeEnum,

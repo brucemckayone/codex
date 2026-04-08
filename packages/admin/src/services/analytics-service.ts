@@ -7,7 +7,7 @@
 
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { schema } from '@codex/database';
-import { BaseService, NotFoundError, wrapError } from '@codex/service-errors';
+import { BaseService, NotFoundError } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
   PaginationMetadata,
@@ -124,7 +124,7 @@ export class AdminAnalyticsService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, options });
+      this.handleError(error, 'getRevenueStats');
     }
   }
 
@@ -184,7 +184,7 @@ export class AdminAnalyticsService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId });
+      this.handleError(error, 'getCustomerStats');
     }
   }
 
@@ -245,7 +245,7 @@ export class AdminAnalyticsService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, limit });
+      this.handleError(error, 'getTopContent');
     }
   }
 
@@ -365,7 +365,7 @@ export class AdminAnalyticsService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, query });
+      this.handleError(error, 'getRecentActivity');
     }
   }
 
@@ -402,7 +402,7 @@ export class AdminAnalyticsService extends BaseService {
       if (error instanceof NotFoundError) {
         throw error;
       }
-      throw wrapError(error, { organizationId, options });
+      this.handleError(error, 'getDashboardStats');
     }
   }
 }

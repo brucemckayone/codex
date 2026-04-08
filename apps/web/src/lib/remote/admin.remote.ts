@@ -171,6 +171,29 @@ export const getAnalyticsTopContent = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Admin Content List (org-scoped)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const adminContentQuerySchema = z.object({
+  organizationId: z.string().uuid(),
+  status: z.string().optional(),
+  limit: z.coerce.number().min(1).max(100).optional().default(100),
+});
+
+export const listAdminContent = query(
+  adminContentQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', params.organizationId);
+    if (params.status) searchParams.set('status', params.status);
+    searchParams.set('limit', String(params.limit));
+    return api.admin.listContent(searchParams);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Customers List
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -181,6 +204,10 @@ const customersQuerySchema = z.object({
   search: z.string().optional(),
   role: z.string().optional(),
   status: z.string().optional(),
+  contentId: z.string().uuid().optional(),
+  joinedWithin: z.coerce.number().int().positive().optional(),
+  minSpendCents: z.coerce.number().int().nonnegative().optional(),
+  maxSpendCents: z.coerce.number().int().positive().optional(),
 });
 
 /**
@@ -211,6 +238,13 @@ export const getCustomers = query(customersQuerySchema, async (params) => {
   if (params.search) searchParams.set('search', params.search);
   if (params.role) searchParams.set('role', params.role);
   if (params.status) searchParams.set('status', params.status);
+  if (params.contentId) searchParams.set('contentId', params.contentId);
+  if (params.joinedWithin)
+    searchParams.set('joinedWithin', String(params.joinedWithin));
+  if (params.minSpendCents != null)
+    searchParams.set('minSpendCents', String(params.minSpendCents));
+  if (params.maxSpendCents != null)
+    searchParams.set('maxSpendCents', String(params.maxSpendCents));
 
   return api.admin.getCustomers(
     searchParams.toString() ? searchParams : undefined
@@ -289,12 +323,19 @@ export const getActivityFeed = query(
  * <p>{detail.name} — {detail.email}</p>
  * ```
  */
+const customerDetailSchema = z.object({
+  customerId: z.string(),
+  organizationId: z.string().uuid(),
+});
+
 export const getCustomerDetail = query(
-  z.string().uuid(),
-  async (customerId) => {
+  customerDetailSchema,
+  async ({ customerId, organizationId }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.admin.getCustomerDetail(customerId);
+    const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', organizationId);
+    return api.admin.getCustomerDetail(customerId, searchParams);
   }
 );
 
@@ -303,8 +344,9 @@ export const getCustomerDetail = query(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const grantAccessSchema = z.object({
-  customerId: z.string().uuid(),
+  customerId: z.string(),
   contentId: z.string().uuid(),
+  organizationId: z.string().uuid(),
 });
 
 /**
@@ -315,14 +357,16 @@ const grantAccessSchema = z.object({
  *
  * Usage:
  * ```typescript
- * await grantContentAccess({ customerId, contentId });
+ * await grantContentAccess({ customerId, contentId, organizationId });
  * ```
  */
 export const grantContentAccess = command(
   grantAccessSchema,
-  async ({ customerId, contentId }) => {
+  async ({ customerId, contentId, organizationId }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.admin.grantContentAccess(customerId, contentId);
+    const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', organizationId);
+    return api.admin.grantContentAccess(customerId, contentId, searchParams);
   }
 );

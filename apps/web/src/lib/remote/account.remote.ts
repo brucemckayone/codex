@@ -12,7 +12,7 @@
 import { uuidSchema } from '@codex/validation';
 import { invalid, isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
-import { form, getRequestEvent, query } from '$app/server';
+import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
 
@@ -365,6 +365,24 @@ export const portalSessionForm = form(z.object({}), async (_data) => {
           : 'Failed to open billing portal',
     };
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Billing Portal Command (for programmatic redirect)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const billingPortalSchema = z.object({
+  returnUrl: z.string().url(),
+});
+
+/**
+ * Open Stripe Billing Portal programmatically (returns URL for client-side redirect).
+ * Used by subscription management page for "Update Payment" on past_due subscriptions.
+ */
+export const openBillingPortal = command(billingPortalSchema, async (input) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.checkout.createPortalSession({ returnUrl: input.returnUrl });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,13 +1,14 @@
 <script lang="ts">
   import type { LayoutOrganization } from '$lib/types';
   import { page } from '$app/state';
-  import { buildOrgUrl } from '$lib/utils/subdomain';
-  import { UserIcon, ChevronDownIcon, CheckIcon, GlobeIcon } from '$lib/components/ui/Icon';
+  import { buildOrgUrl, buildCreatorsUrl } from '$lib/utils/subdomain';
+  import { UserIcon, ChevronDownIcon, CheckIcon, GlobeIcon, PlusIcon } from '$lib/components/ui/Icon';
   import DropdownMenu from '$lib/components/ui/DropdownMenu/DropdownMenu.svelte';
   import DropdownMenuTrigger from '$lib/components/ui/DropdownMenu/DropdownMenuTrigger.svelte';
   import DropdownMenuContent from '$lib/components/ui/DropdownMenu/DropdownMenuContent.svelte';
   import DropdownMenuItem from '$lib/components/ui/DropdownMenu/DropdownMenuItem.svelte';
   import DropdownMenuSeparator from '$lib/components/ui/DropdownMenu/DropdownMenuSeparator.svelte';
+  import CreateOrganizationDialog from '$lib/components/studio/CreateOrganizationDialog.svelte';
   import * as m from '$paraglide/messages';
 
   interface OrgWithRole {
@@ -20,16 +21,28 @@
   interface Props {
     currentContext: 'personal' | 'org';
     currentSlug?: string;
+    creatorUsername?: string | null;
     orgs: OrgWithRole[];
   }
 
-  const { currentContext, currentSlug, orgs }: Props = $props();
+  const { currentContext, currentSlug, creatorUsername, orgs }: Props = $props();
+
+  let createDialogOpen = $state(false);
 
   const currentOrg = $derived(orgs.find(o => o.slug === currentSlug));
   const label = $derived(
     currentContext === 'personal'
       ? m.studio_switcher_personal()
       : currentOrg?.name ?? m.studio_switcher_organization()
+  );
+
+  // "View Public Site" link: creator profile for personal, org root for org context
+  const publicSiteHref = $derived(
+    currentContext === 'personal' && creatorUsername
+      ? buildCreatorsUrl(page.url, `/${creatorUsername}`)
+      : currentSlug
+        ? buildOrgUrl(page.url, currentSlug, '/')
+        : '/'
   );
 </script>
 
@@ -83,7 +96,17 @@
     {/if}
 
     <DropdownMenuSeparator />
-    <a href="/">
+    <button type="button" class="add-org-trigger" onclick={() => (createDialogOpen = true)}>
+      <DropdownMenuItem>
+        <span class="item-content add-org-item">
+          <PlusIcon size={16} />
+          {m.studio_switcher_add_organisation()}
+        </span>
+      </DropdownMenuItem>
+    </button>
+
+    <DropdownMenuSeparator />
+    <a href={publicSiteHref}>
       <DropdownMenuItem>
         <span class="item-content">
           <GlobeIcon size={16} />
@@ -93,6 +116,8 @@
     </a>
   </DropdownMenuContent>
 </DropdownMenu>
+
+<CreateOrganizationDialog bind:open={createDialogOpen} />
 
 <style>
   :global(.switcher-trigger) {
@@ -187,5 +212,21 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     text-transform: capitalize;
+  }
+
+  .add-org-trigger {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+  }
+
+  .add-org-item {
+    color: var(--color-interactive);
+    font-weight: var(--font-medium);
   }
 </style>

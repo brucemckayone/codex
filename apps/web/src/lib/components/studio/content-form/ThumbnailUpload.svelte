@@ -37,7 +37,11 @@
 </script>
 
 <section class="form-card">
-  <h3 class="card-title">Thumbnail</h3>
+  <h3 class="card-title">Thumbnail <span class="optional-hint">Optional</span></h3>
+  <!-- Always submit the thumbnailUrl value, even when the URL input is hidden -->
+  {#if !showUrlInput}
+    <input type="hidden" name="thumbnailUrl" value={thumbnailValue} />
+  {/if}
 
   <div class="thumbnail-zone">
     {#if hasCustomThumbnail}
@@ -99,6 +103,13 @@
     font-weight: var(--font-semibold);
     color: var(--color-text);
     margin: 0 0 var(--space-4) 0;
+  }
+
+  .optional-hint {
+    font-size: var(--text-xs);
+    font-weight: var(--font-normal);
+    color: var(--color-text-muted);
+    margin-left: var(--space-1);
   }
 
   .thumbnail-zone {
