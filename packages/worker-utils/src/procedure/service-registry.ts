@@ -96,7 +96,6 @@ export function createServiceRegistry(
   let _templates: TemplateService | undefined;
   let _notifications: NotificationsService | undefined;
   let _preferences: NotificationPreferencesService | undefined;
-  let _images: ImageProcessingService | undefined;
   let _identity: IdentityService | undefined;
   let _subscription: SubscriptionService | undefined;
   let _tier: TierService | undefined;

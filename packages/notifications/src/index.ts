@@ -58,10 +58,8 @@ export {
 export {
   BrandingCache,
   NotificationPreferencesService,
-  type NotificationPreferencesServiceConfig,
   NotificationsService,
   TemplateService,
-  type TemplateServiceConfig,
   type UserNotificationPreferences,
 } from './services';
 

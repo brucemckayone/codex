@@ -10,7 +10,7 @@ import {
   ORGANIZATION_STATUS,
   TEMPLATE_SCOPES,
 } from '@codex/constants';
-import { type dbHttp, type dbWs, schema } from '@codex/database';
+import { schema } from '@codex/database';
 import {
   BaseService,
   InternalServiceError,
@@ -27,14 +27,6 @@ import type {
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { TemplateAccessDeniedError, TemplateNotFoundError } from '../errors';
 import type { NotificationsService } from './notifications-service';
-
-/**
- * Configuration for TemplateService
- */
-export interface TemplateServiceConfig {
-  db: typeof dbHttp | typeof dbWs;
-  environment: string;
-}
 
 type EmailTemplate = typeof schema.emailTemplates.$inferSelect;
 

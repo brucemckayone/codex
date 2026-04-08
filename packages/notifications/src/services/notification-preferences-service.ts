@@ -21,14 +21,6 @@ import type { UpdateNotificationPreferencesInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 
 /**
- * Configuration for NotificationPreferencesService
- */
-export interface NotificationPreferencesServiceConfig {
-  db: typeof schema;
-  environment: string;
-}
-
-/**
  * User's notification preferences
  */
 export type UserNotificationPreferences = Omit<

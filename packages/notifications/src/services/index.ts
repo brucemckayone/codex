@@ -9,16 +9,12 @@ export { BrandingCache } from './branding-cache';
 // Notification Preferences Service
 export {
   NotificationPreferencesService,
-  type NotificationPreferencesServiceConfig,
   type UserNotificationPreferences,
 } from './notification-preferences-service';
 // Notifications Service
 export { NotificationsService } from './notifications-service';
 // Template Service
-export {
-  TemplateService,
-  type TemplateServiceConfig,
-} from './template-service';
+export { TemplateService } from './template-service';
 
 /**
  * Module augmentation for @codex/shared-types
