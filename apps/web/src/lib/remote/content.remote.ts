@@ -10,7 +10,7 @@
  * - Typed error handling
  */
 
-import { contentQuerySchema } from '@codex/validation';
+import { checkContentSlugSchema, contentQuerySchema } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -126,6 +126,25 @@ export const getContentBySlug = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Content Slug Availability Check
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Check if a content slug is available
+ *
+ * Used by SlugField for real-time uniqueness feedback.
+ * Scoped to organization (org content) or creator (personal content).
+ */
+export const checkContentSlug = query(
+  checkContentSlugSchema,
+  async ({ slug, organizationId, excludeContentId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.content.checkSlug(slug, organizationId, excludeContentId);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public Content List Query (no auth required)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -220,7 +239,7 @@ const createContentCommandSchema = z.object({
   slug: z.string().min(1),
   description: z.string().optional().nullable(),
   contentType: z.enum(['video', 'audio', 'written']),
-  visibility: z.enum(['public', 'private', 'members_only', 'purchased_only']),
+  accessType: z.enum(['free', 'paid', 'subscribers', 'members']).optional(),
   priceCents: z.number().int().min(0).optional().nullable(),
   organizationId: z.string().uuid().optional().nullable(),
   mediaItemId: z.string().uuid().optional().nullable(),
@@ -228,6 +247,7 @@ const createContentCommandSchema = z.object({
   category: z.string().optional().nullable(),
   tags: z.array(z.string()).optional(),
   thumbnailUrl: z.string().url().optional().nullable(),
+  minimumTierId: z.string().uuid().optional().nullable(),
 });
 
 /**
@@ -239,7 +259,7 @@ const createContentCommandSchema = z.object({
  *   title: 'My Post',
  *   slug: 'my-post',
  *   contentType: 'written',
- *   visibility: 'public',
+ *   accessType: 'free',
  *   organizationId: orgId,
  *   contentBody: 'Hello world',
  * });
@@ -261,9 +281,7 @@ const updateContentCommandSchema = z.object({
     slug: z.string().min(1).optional(),
     description: z.string().optional().nullable(),
     contentType: z.enum(['video', 'audio', 'written']).optional(),
-    visibility: z
-      .enum(['public', 'private', 'members_only', 'purchased_only'])
-      .optional(),
+    accessType: z.enum(['free', 'paid', 'subscribers', 'members']).optional(),
     priceCents: z.number().int().min(0).optional().nullable(),
     organizationId: z.string().uuid().optional().nullable(),
     mediaItemId: z.string().uuid().optional().nullable(),
@@ -362,7 +380,9 @@ const createContentFormSchema = z.object({
   contentType: z.enum(['video', 'audio', 'written']),
   mediaItemId: optionalUuid,
   contentBody: optionalString,
-  visibility: z.enum(['public', 'private', 'members_only', 'purchased_only']),
+  accessType: z
+    .enum(['free', 'paid', 'subscribers', 'members'])
+    .default('free'),
   price: z.string().transform((v) => {
     const parsed = parseFloat(v || '0');
     return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
@@ -381,6 +401,7 @@ const createContentFormSchema = z.object({
     })
     .pipe(z.array(z.string().trim().max(50)).max(20)),
   thumbnailUrl: optionalString,
+  minimumTierId: optionalUuid,
 });
 
 /**
@@ -399,11 +420,12 @@ export const createContentForm = form(
     contentType,
     mediaItemId,
     contentBody,
-    visibility,
+    accessType,
     price,
     category,
     tags,
     thumbnailUrl,
+    minimumTierId,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -416,12 +438,13 @@ export const createContentForm = form(
         contentType,
         mediaItemId,
         contentBody,
-        visibility,
+        accessType,
         organizationId,
         priceCents: price,
         category,
         tags,
         thumbnailUrl,
+        minimumTierId,
       });
 
       return { success: true as const, contentId: result.id };
@@ -444,7 +467,9 @@ const updateContentFormSchema = z.object({
   contentType: z.enum(['video', 'audio', 'written']),
   mediaItemId: optionalUuid,
   contentBody: optionalString,
-  visibility: z.enum(['public', 'private', 'members_only', 'purchased_only']),
+  accessType: z
+    .enum(['free', 'paid', 'subscribers', 'members'])
+    .default('free'),
   price: z.string().transform((v) => {
     const parsed = parseFloat(v || '0');
     return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
@@ -463,6 +488,7 @@ const updateContentFormSchema = z.object({
     })
     .pipe(z.array(z.string().trim().max(50)).max(20)),
   thumbnailUrl: optionalString,
+  minimumTierId: optionalUuid,
 });
 
 /**
@@ -481,11 +507,12 @@ export const updateContentForm = form(
     contentType,
     mediaItemId,
     contentBody,
-    visibility,
+    accessType,
     price,
     category,
     tags,
     thumbnailUrl,
+    minimumTierId,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -498,12 +525,13 @@ export const updateContentForm = form(
         contentType,
         mediaItemId,
         contentBody,
-        visibility,
+        accessType,
         organizationId,
         priceCents: price,
         category,
         tags,
         thumbnailUrl,
+        minimumTierId,
       });
 
       return { success: true as const, data: result };

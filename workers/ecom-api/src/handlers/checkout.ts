@@ -53,6 +53,16 @@ export async function handleCheckoutCompleted(
   const obs = c.get('obs');
   const session = event.data.object as Stripe.Checkout.Session;
 
+  // Only handle payment-mode checkouts (one-time purchases).
+  // Subscription-mode checkouts are handled by handleSubscriptionWebhook.
+  if (session.mode !== 'payment') {
+    obs?.info('Skipping non-payment checkout session', {
+      sessionId: session.id,
+      mode: session.mode,
+    });
+    return;
+  }
+
   obs?.info('Processing checkout.session.completed', {
     sessionId: session.id,
     paymentIntentId: session.payment_intent,
@@ -65,106 +75,89 @@ export async function handleCheckoutCompleted(
     | undefined;
   let amountTotal: number | null | undefined;
 
+  // Extract payment intent ID
+  const paymentIntentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id;
+
+  if (!paymentIntentId) {
+    obs?.error('Missing payment intent ID', { sessionId: session.id });
+    return;
+  }
+
+  // Extract and validate metadata (customerId, contentId from checkout creation)
+  const metadata = session.metadata;
   try {
-    // Extract payment intent ID
-    const paymentIntentId =
-      typeof session.payment_intent === 'string'
-        ? session.payment_intent
-        : session.payment_intent?.id;
-
-    if (!paymentIntentId) {
-      obs?.error('Missing payment intent ID', { sessionId: session.id });
-      return;
-    }
-
-    // Extract and validate metadata (customerId, contentId from checkout creation)
-    const metadata = session.metadata;
-    try {
-      validatedMetadata = checkoutSessionMetadataSchema.parse(metadata);
-    } catch (validationError) {
-      obs?.error('Invalid checkout session metadata', {
-        sessionId: session.id,
-        error:
-          validationError instanceof Error
-            ? validationError.message
-            : 'Unknown validation error',
-        metadata,
-      });
-      return;
-    }
-
-    // Extract amount paid (in cents)
-    amountTotal = session.amount_total; // Already in cents from Stripe
-    if (typeof amountTotal !== 'number') {
-      obs?.error('Invalid amount_total', {
-        sessionId: session.id,
-        amountTotal,
-      });
-      return;
-    }
-
-    // Create per-request db client for transaction support
-    // DATABASE_URL_LOCAL_PROXY is optional and set only in test environments
-    const { db, cleanup } = createPerRequestDbClient({
-      DATABASE_URL: c.env.DATABASE_URL,
-      DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)
-        .DATABASE_URL_LOCAL_PROXY,
-      DB_METHOD: c.env.DB_METHOD,
-    });
-
-    try {
-      // Initialize purchase service with transaction-capable db
-      const purchaseService = new PurchaseService(
-        {
-          db,
-          environment: c.env.ENVIRONMENT || 'development',
-        },
-        stripe
-      );
-
-      // Complete purchase (atomic transaction: purchase + content access)
-      // organizationId already transformed to null by schema if empty/undefined
-      const purchase = await purchaseService.completePurchase(paymentIntentId, {
-        customerId: validatedMetadata.customerId,
-        contentId: validatedMetadata.contentId,
-        organizationId: validatedMetadata.organizationId,
-        amountPaidCents: amountTotal,
-        currency: CURRENCY.GBP,
-      });
-
-      obs?.info('Purchase completed successfully', {
-        purchaseId: purchase.id,
-        customerId: validatedMetadata.customerId,
-        contentId: validatedMetadata.contentId,
-        amountCents: amountTotal,
-      });
-
-      // Bump user library version so other devices detect the new purchase on next load
-      if (c.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: c.env.CACHE_KV });
-        c.executionCtx.waitUntil(
-          cache.invalidate(
-            CacheType.COLLECTION_USER_LIBRARY(validatedMetadata.customerId)
-          )
-        );
-      }
-    } finally {
-      await cleanup();
-    }
-  } catch (error) {
-    const err = error as Error;
-
-    // Provide detailed error context for debugging
-    obs?.error('Failed to complete purchase from Stripe webhook', {
+    validatedMetadata = checkoutSessionMetadataSchema.parse(metadata);
+  } catch (validationError) {
+    obs?.error('Invalid checkout session metadata', {
       sessionId: session.id,
-      customerId: validatedMetadata?.customerId,
-      contentId: validatedMetadata?.contentId,
-      amountCents: amountTotal,
-      errorType: err.name,
-      errorMessage: err.message,
+      error:
+        validationError instanceof Error
+          ? validationError.message
+          : 'Unknown validation error',
+      metadata,
+    });
+    return;
+  }
+
+  // Extract amount paid (in cents)
+  amountTotal = session.amount_total; // Already in cents from Stripe
+  if (typeof amountTotal !== 'number') {
+    obs?.error('Invalid amount_total', {
+      sessionId: session.id,
+      amountTotal,
+    });
+    return;
+  }
+
+  // Create per-request db client for transaction support
+  // DATABASE_URL_LOCAL_PROXY is optional and set only in test environments
+  const { db, cleanup } = createPerRequestDbClient({
+    DATABASE_URL: c.env.DATABASE_URL,
+    DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)
+      .DATABASE_URL_LOCAL_PROXY,
+    DB_METHOD: c.env.DB_METHOD,
+  });
+
+  try {
+    // Initialize purchase service with transaction-capable db
+    const purchaseService = new PurchaseService(
+      {
+        db,
+        environment: c.env.ENVIRONMENT || 'development',
+      },
+      stripe
+    );
+
+    // Complete purchase (atomic transaction: purchase + content access)
+    // organizationId already transformed to null by schema if empty/undefined
+    const purchase = await purchaseService.completePurchase(paymentIntentId, {
+      customerId: validatedMetadata.customerId,
+      contentId: validatedMetadata.contentId,
+      organizationId: validatedMetadata.organizationId,
+      amountPaidCents: amountTotal,
+      currency: CURRENCY.GBP,
     });
 
-    // Don't throw - return 200 to Stripe to prevent retries
-    // Manual investigation required - check error logs and database state
+    obs?.info('Purchase completed successfully', {
+      purchaseId: purchase.id,
+      customerId: validatedMetadata.customerId,
+      contentId: validatedMetadata.contentId,
+      amountCents: amountTotal,
+    });
+
+    // Bump user library version so other devices detect the new purchase on next load
+    if (c.env.CACHE_KV) {
+      const cache = new VersionedCache({ kv: c.env.CACHE_KV });
+      c.executionCtx.waitUntil(
+        cache.invalidate(
+          CacheType.COLLECTION_USER_LIBRARY(validatedMetadata.customerId)
+        )
+      );
+    }
+  } finally {
+    await cleanup();
   }
 }

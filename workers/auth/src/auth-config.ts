@@ -138,10 +138,15 @@ export function createAuthInstance(options: AuthConfigOptions) {
     trustedOrigins: [
       env.WEB_APP_URL,
       env.API_URL,
-      'http://localhost:42069', // Auth worker's own URL for E2E tests
-      'http://lvh.me:3000', // Dev app (cross-subdomain cookies)
-      'http://lvh.me:5173', // Vite dev server
-      'http://*.nip.io', // Phone/LAN testing (any {ip}.nip.io subdomain)
+      // Dev-only origins
+      ...(env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
+        ? [
+            'http://localhost:42069', // Auth worker's own URL for E2E tests
+            'http://lvh.me:3000', // Dev app (cross-subdomain cookies)
+            'http://lvh.me:5173', // Vite dev server
+            'http://*.nip.io', // Phone/LAN testing (any {ip}.nip.io subdomain)
+          ]
+        : []),
     ].filter((url): url is string => Boolean(url)),
 
     // Cross-subdomain cookie support

@@ -11,7 +11,11 @@ import {
   TEMPLATE_SCOPES,
 } from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
-import { BaseService, InternalServiceError } from '@codex/service-errors';
+import {
+  BaseService,
+  InternalServiceError,
+  ServiceError,
+} from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CreateCreatorTemplateInput,
@@ -121,7 +125,7 @@ export class TemplateService extends BaseService {
       return template;
     } catch (error) {
       this.obs.error('Error creating global template', { error, input });
-      if (error instanceof BaseService) throw error; // Re-throw specialized errors
+      if (error instanceof ServiceError) throw error; // Re-throw specialized errors
       throw new InternalServiceError('Failed to create global template', {
         originalError: error,
       });

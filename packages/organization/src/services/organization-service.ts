@@ -416,49 +416,56 @@ export class OrganizationService extends BaseService {
             and(
               eq(organizationMemberships.organizationId, org.id),
               eq(organizationMemberships.status, 'active'),
-              inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+              inArray(organizationMemberships.role, [
+                'owner',
+                'admin',
+                'creator',
+              ])
             )
           ),
         this.db
-        .select({
-          name: users.name,
-          avatarUrl: users.avatarUrl,
-          image: users.image,
-          role: organizationMemberships.role,
-          joinedAt: organizationMemberships.createdAt,
-          contentCount: count(content.id),
-        })
-        .from(organizationMemberships)
-        .innerJoin(users, eq(organizationMemberships.userId, users.id))
-        .leftJoin(
-          content,
-          and(
-            eq(content.creatorId, users.id),
-            eq(content.organizationId, org.id),
-            eq(content.status, 'published'),
-            eq(content.visibility, 'public'),
-            isNull(content.deletedAt)
+          .select({
+            name: users.name,
+            avatarUrl: users.avatarUrl,
+            image: users.image,
+            role: organizationMemberships.role,
+            joinedAt: organizationMemberships.createdAt,
+            contentCount: count(content.id),
+          })
+          .from(organizationMemberships)
+          .innerJoin(users, eq(organizationMemberships.userId, users.id))
+          .leftJoin(
+            content,
+            and(
+              eq(content.creatorId, users.id),
+              eq(content.organizationId, org.id),
+              eq(content.status, 'published'),
+              isNull(content.deletedAt)
+            )
           )
-        )
-        .where(
-          and(
-            eq(organizationMemberships.organizationId, org.id),
-            eq(organizationMemberships.status, 'active'),
-            inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+          .where(
+            and(
+              eq(organizationMemberships.organizationId, org.id),
+              eq(organizationMemberships.status, 'active'),
+              inArray(organizationMemberships.role, [
+                'owner',
+                'admin',
+                'creator',
+              ])
+            )
           )
-        )
-        .groupBy(
-          users.id,
-          organizationMemberships.id,
-          users.name,
-          users.avatarUrl,
-          users.image,
-          organizationMemberships.role,
-          organizationMemberships.createdAt
-        )
-        .orderBy(asc(organizationMemberships.createdAt))
-        .limit(queryLimit)
-        .offset(offset),
+          .groupBy(
+            users.id,
+            organizationMemberships.id,
+            users.name,
+            users.avatarUrl,
+            users.image,
+            organizationMemberships.role,
+            organizationMemberships.createdAt
+          )
+          .orderBy(asc(organizationMemberships.createdAt))
+          .limit(queryLimit)
+          .offset(offset),
       ]);
 
       const totalCount = countResult[0]?.totalCount ?? 0;

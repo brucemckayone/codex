@@ -36,7 +36,7 @@
  */
 
 import type { ObservabilityClient } from '@codex/observability';
-import { mapErrorToResponse } from '@codex/service-errors';
+import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context } from 'hono';
 import {
@@ -145,7 +145,7 @@ export interface MultipartProcedureConfig<
 // File Validation Errors
 // ============================================================================
 
-export class FileTooLargeError extends Error {
+export class FileTooLargeError extends ValidationError {
   constructor(
     public fieldName: string,
     public actualSize: number,
@@ -158,7 +158,7 @@ export class FileTooLargeError extends Error {
   }
 }
 
-export class InvalidFileTypeError extends Error {
+export class InvalidFileTypeError extends ValidationError {
   constructor(
     public fieldName: string,
     public actualType: string,
@@ -171,7 +171,7 @@ export class InvalidFileTypeError extends Error {
   }
 }
 
-export class MissingFileError extends Error {
+export class MissingFileError extends ValidationError {
   constructor(public fieldName: string) {
     super(`Required file '${fieldName}' is missing`);
     this.name = 'MissingFileError';

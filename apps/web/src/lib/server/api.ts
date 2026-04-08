@@ -36,7 +36,9 @@ import type { PurchaseListItem } from '@codex/purchase';
 import type {
   AllSettingsResponse,
   BrandingSettingsResponse,
+  CheckSlugResponse,
   ContactSettingsResponse,
+  FeatureSettingsResponse,
   MyMembershipResponse,
   OrganizationWithRole,
   PaginatedListResponse,
@@ -52,8 +54,10 @@ import type {
   CreatePortalSessionInput,
   CreateSubscriptionCheckoutInput,
   CreateTierInput,
+  ReactivateSubscriptionInput,
   UpdateBrandingInput,
   UpdateContactInput,
+  UpdateFeaturesInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
   UpdateTierInput,
@@ -63,6 +67,8 @@ import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
 import { logger } from '$lib/observability';
 // Import local types that extend DB types with relations
+// OrgMemberItem is in $lib/types (not here) so components can import it
+// without triggering the vite server-only module guard.
 import type {
   CheckoutResponse,
   ConnectAccountStatusResponse,
@@ -72,6 +78,7 @@ import type {
   CurrentSubscription,
   MediaItemWithRelations,
   OrganizationData,
+  OrgMemberItem,
   SubscriberItem,
   SubscriptionCheckoutResponse,
   SubscriptionStats,
@@ -79,19 +86,7 @@ import type {
   UserOrgSubscription,
 } from '../types';
 import { ApiError } from './errors';
-
-/**
- * Organization member item shape returned by the members API
- */
-export interface OrgMemberItem {
-  userId: string;
-  email: string;
-  name: string | null;
-  avatarUrl: string | null;
-  role: string;
-  status: string;
-  joinedAt: string;
-}
+export type { OrgMemberItem };
 
 /**
  * Resolve API URL for a worker
@@ -438,7 +433,7 @@ export function createServerApi(
        * - limit: number (1-100, default: 20)
        * - status: 'draft' | 'published' | 'archived' (optional)
        * - contentType: 'video' | 'audio' | 'written' (optional)
-       * - visibility: 'public' | 'private' | 'members_only' | 'purchased_only' (optional)
+       * - accessType: 'free' | 'paid' | 'subscribers' | 'members' (optional)
        * - category: string filter (max 100 chars, optional)
        * - organizationId: UUID filter (optional)
        * - creatorId: UUID filter (optional)
@@ -544,6 +539,24 @@ export function createServerApi(
           'content',
           `/api/content/public/discover${params ? `?${params}` : ''}`
         ),
+
+      /**
+       * Check if a content slug is available
+       */
+      checkSlug: (
+        slug: string,
+        organizationId?: string | null,
+        excludeContentId?: string | null
+      ) => {
+        const params = new URLSearchParams();
+        if (organizationId) params.set('organizationId', organizationId);
+        if (excludeContentId) params.set('excludeContentId', excludeContentId);
+        const qs = params.toString();
+        return request<CheckSlugResponse>(
+          'content',
+          `/api/content/check-slug/${encodeURIComponent(slug)}${qs ? `?${qs}` : ''}`
+        );
+      },
     },
 
     /**
@@ -601,6 +614,24 @@ export function createServerApi(
      * Organization endpoints
      */
     org: {
+      /**
+       * Create a new organization
+       */
+      create: (data: { name: string; slug: string; description?: string }) =>
+        request<OrganizationData>('org', '/api/organizations', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Check if an organization slug is available
+       */
+      checkSlug: (slug: string) =>
+        request<CheckSlugResponse>(
+          'org',
+          `/api/organizations/check-slug/${encodeURIComponent(slug)}`
+        ),
+
       /**
        * Get organization by slug
        */
@@ -768,6 +799,19 @@ export function createServerApi(
         request<ContactSettingsResponse>(
           'org',
           `/api/organizations/${id}/settings/contact`,
+          {
+            method: 'PUT',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * Update feature settings (subscriptions, purchases, signups)
+       */
+      updateFeatures: (id: string, data: UpdateFeaturesInput) =>
+        request<FeatureSettingsResponse>(
+          'org',
+          `/api/organizations/${id}/settings/features`,
           {
             method: 'PUT',
             body: JSON.stringify(data),
@@ -1081,6 +1125,11 @@ export function createServerApi(
        *
        * @see {@link AdminCustomerListQueryInput}
        */
+      listContent: (params?: URLSearchParams) =>
+        request<
+          PaginatedListResponse<{ id: string; title: string; status: string }>
+        >('admin', `/api/admin/content${params ? `?${params}` : ''}`),
+
       getCustomers: (params?: URLSearchParams) =>
         request<PaginatedListResponse<CustomerListItem>>(
           'admin',
@@ -1118,8 +1167,11 @@ export function createServerApi(
        * @param customerId - Customer's user UUID
        * @returns Customer profile with aggregated stats and purchase history
        */
-      getCustomerDetail: (customerId: string) =>
-        request<CustomerDetails>('admin', `/api/admin/customers/${customerId}`),
+      getCustomerDetail: (customerId: string, params?: URLSearchParams) =>
+        request<CustomerDetails>(
+          'admin',
+          `/api/admin/customers/${customerId}${params ? `?${params}` : ''}`
+        ),
 
       /**
        * Grant complimentary content access to a customer
@@ -1131,10 +1183,14 @@ export function createServerApi(
        * @param contentId - Content UUID to grant access to
        * @returns Success indicator
        */
-      grantContentAccess: (customerId: string, contentId: string) =>
+      grantContentAccess: (
+        customerId: string,
+        contentId: string,
+        params?: URLSearchParams
+      ) =>
         request<{ success: boolean }>(
           'admin',
-          `/api/admin/customers/${customerId}/grant-access/${contentId}`,
+          `/api/admin/customers/${customerId}/grant-access/${contentId}${params ? `?${params}` : ''}`,
           { method: 'POST' }
         ),
     },
@@ -1240,6 +1296,15 @@ export function createServerApi(
         }),
 
       /**
+       * Reactivate a subscription set to cancel at period end
+       */
+      reactivate: (data: ReactivateSubscriptionInput) =>
+        request<CurrentSubscription>('ecom', '/subscriptions/reactivate', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
        * Get subscription stats for an org (admin)
        */
       getStats: (organizationId: string) =>
@@ -1269,10 +1334,14 @@ export function createServerApi(
        * Start Connect onboarding — creates Express account + returns onboarding URL
        */
       onboard: (data: ConnectOnboardInput) =>
-        request<ConnectOnboardResponse>('ecom', '/connect/onboard', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+        request<ConnectOnboardResponse>(
+          'ecom',
+          `/connect/onboard?organizationId=${encodeURIComponent(data.organizationId)}`,
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * Get Connect account status for an org
@@ -1287,10 +1356,27 @@ export function createServerApi(
        * Get Stripe Express dashboard link
        */
       getDashboardLink: (organizationId: string) =>
-        request<ConnectDashboardResponse>('ecom', '/connect/dashboard', {
-          method: 'POST',
-          body: JSON.stringify({ organizationId }),
-        }),
+        request<ConnectDashboardResponse>(
+          'ecom',
+          `/connect/dashboard?organizationId=${encodeURIComponent(organizationId)}`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ organizationId }),
+          }
+        ),
+
+      /**
+       * Sync Connect account status with Stripe (polls Stripe API)
+       */
+      syncStatus: (organizationId: string) =>
+        request<ConnectAccountStatusResponse>(
+          'ecom',
+          `/connect/sync?organizationId=${encodeURIComponent(organizationId)}`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ organizationId }),
+          }
+        ),
     },
   };
 }

@@ -12,10 +12,7 @@
  * - GET  /subscriptions/stats        - Subscriber stats (admin)
  */
 
-import { createDbClient } from '@codex/database';
-import { createStripeClient } from '@codex/purchase';
 import type { HonoEnv } from '@codex/shared-types';
-import { SubscriptionService } from '@codex/subscription';
 import {
   cancelSubscriptionSchema,
   changeTierSchema,
@@ -23,36 +20,27 @@ import {
   getCurrentSubscriptionQuerySchema,
   getSubscriptionStatsQuerySchema,
   listSubscribersQuerySchema,
+  reactivateSubscriptionSchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
-const app = new Hono<HonoEnv>();
-
-function getSubscriptionService(env: HonoEnv['Bindings']): SubscriptionService {
-  const db = createDbClient(env);
-  const stripe = createStripeClient(env.STRIPE_SECRET_KEY as string);
-  return new SubscriptionService(
-    { db, environment: env.ENVIRONMENT ?? 'development' },
-    stripe
-  );
-}
+const subscriptions = new Hono<HonoEnv>();
 
 /**
  * POST /subscriptions/checkout
  * Create a Stripe Checkout session in subscription mode.
  */
-app.post(
+subscriptions.post(
   '/checkout',
   procedure({
     policy: { auth: 'required', rateLimit: 'auth' },
     input: { body: createSubscriptionCheckoutSchema },
     successStatus: 201,
     handler: async (ctx) => {
-      const service = getSubscriptionService(ctx.env);
-      return await service.createCheckoutSession(
+      return await ctx.services.subscription.createCheckoutSession(
         ctx.user.id,
-        ctx.organizationId as string,
+        ctx.input.body.organizationId,
         ctx.input.body.tierId,
         ctx.input.body.billingInterval,
         ctx.input.body.successUrl,
@@ -66,14 +54,13 @@ app.post(
  * GET /subscriptions/current
  * Get the user's current subscription for an org.
  */
-app.get(
+subscriptions.get(
   '/current',
   procedure({
     policy: { auth: 'required' },
     input: { query: getCurrentSubscriptionQuerySchema },
     handler: async (ctx) => {
-      const service = getSubscriptionService(ctx.env);
-      return await service.getSubscription(
+      return await ctx.services.subscription.getSubscription(
         ctx.user.id,
         ctx.input.query.organizationId
       );
@@ -85,14 +72,12 @@ app.get(
  * GET /subscriptions/mine
  * Get all active subscriptions for the authenticated user.
  */
-app.get(
+subscriptions.get(
   '/mine',
   procedure({
     policy: { auth: 'required' },
     handler: async (ctx) => {
-      const service = getSubscriptionService(ctx.env);
-      const subs = await service.getUserSubscriptions(ctx.user.id);
-      return subs;
+      return await ctx.services.subscription.getUserSubscriptions(ctx.user.id);
     },
   })
 );
@@ -101,20 +86,19 @@ app.get(
  * POST /subscriptions/change-tier
  * Upgrade or downgrade the user's subscription tier.
  */
-app.post(
+subscriptions.post(
   '/change-tier',
   procedure({
     policy: { auth: 'required', rateLimit: 'auth' },
     input: { body: changeTierSchema },
     handler: async (ctx) => {
-      const service = getSubscriptionService(ctx.env);
-      await service.changeTier(
+      await ctx.services.subscription.changeTier(
         ctx.user.id,
         ctx.input.body.organizationId,
         ctx.input.body.newTierId,
         ctx.input.body.billingInterval
       );
-      return await service.getSubscription(
+      return await ctx.services.subscription.getSubscription(
         ctx.user.id,
         ctx.input.body.organizationId
       );
@@ -126,19 +110,40 @@ app.post(
  * POST /subscriptions/cancel
  * Cancel subscription at period end.
  */
-app.post(
+subscriptions.post(
   '/cancel',
   procedure({
     policy: { auth: 'required' },
     input: { body: cancelSubscriptionSchema },
     handler: async (ctx) => {
-      const service = getSubscriptionService(ctx.env);
-      await service.cancelSubscription(
+      await ctx.services.subscription.cancelSubscription(
         ctx.user.id,
         ctx.input.body.organizationId,
         ctx.input.body.reason
       );
-      return await service.getSubscription(
+      return await ctx.services.subscription.getSubscription(
+        ctx.user.id,
+        ctx.input.body.organizationId
+      );
+    },
+  })
+);
+
+/**
+ * POST /subscriptions/reactivate
+ * Reactivate a subscription that is set to cancel at period end.
+ */
+subscriptions.post(
+  '/reactivate',
+  procedure({
+    policy: { auth: 'required' },
+    input: { body: reactivateSubscriptionSchema },
+    handler: async (ctx) => {
+      await ctx.services.subscription.reactivateSubscription(
+        ctx.user.id,
+        ctx.input.body.organizationId
+      );
+      return await ctx.services.subscription.getSubscription(
         ctx.user.id,
         ctx.input.body.organizationId
       );
@@ -150,14 +155,15 @@ app.post(
  * GET /subscriptions/stats
  * Subscription stats for an org (admin).
  */
-app.get(
+subscriptions.get(
   '/stats',
   procedure({
     policy: { auth: 'required', requireOrgManagement: true },
     input: { query: getSubscriptionStatsQuerySchema },
     handler: async (ctx) => {
-      const service = getSubscriptionService(ctx.env);
-      return await service.getSubscriptionStats(ctx.input.query.organizationId);
+      return await ctx.services.subscription.getSubscriptionStats(
+        ctx.organizationId as string
+      );
     },
   })
 );
@@ -166,14 +172,13 @@ app.get(
  * GET /subscriptions/subscribers
  * List subscribers for an org (admin). Paginated.
  */
-app.get(
+subscriptions.get(
   '/subscribers',
   procedure({
     policy: { auth: 'required', requireOrgManagement: true },
     input: { query: listSubscribersQuerySchema },
     handler: async (ctx) => {
-      const service = getSubscriptionService(ctx.env);
-      const result = await service.listSubscribers(
+      const result = await ctx.services.subscription.listSubscribers(
         ctx.organizationId as string,
         ctx.input.query
       );
@@ -182,4 +187,4 @@ app.get(
   })
 );
 
-export default app;
+export default subscriptions;

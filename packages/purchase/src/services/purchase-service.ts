@@ -27,7 +27,12 @@ import {
   CURRENCY,
   PURCHASE_STATUS,
 } from '@codex/constants';
-import { content, contentAccess, purchases } from '@codex/database/schema';
+import {
+  content,
+  contentAccess,
+  purchases,
+  stripeConnectAccounts,
+} from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
   CreateCheckoutInput,
@@ -36,6 +41,7 @@ import type {
 import {
   createCheckoutSchema,
   createPortalSessionSchema,
+  extractPlainText,
   getPurchaseSchema,
   purchaseQuerySchema,
 } from '@codex/validation';
@@ -191,7 +197,44 @@ export class PurchaseService extends BaseService {
         throw new AlreadyPurchasedError(validated.contentId, customerId);
       }
 
-      // Step 3: Create Stripe Checkout session
+      // Step 3: Look up creator's Connect account for revenue transfer
+      const [creatorConnect] = await this.db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(
+          and(
+            eq(stripeConnectAccounts.userId, contentRecord.creatorId),
+            eq(
+              stripeConnectAccounts.organizationId,
+              contentRecord.organizationId!
+            )
+          )
+        )
+        .limit(1);
+
+      // Calculate application fee (platform's cut) for destination charges
+      const applicationFeeCents = creatorConnect?.chargesEnabled
+        ? Math.ceil(
+            (contentRecord.priceCents * DEFAULT_PLATFORM_FEE_PERCENTAGE) / 10000
+          )
+        : undefined;
+
+      if (!creatorConnect?.chargesEnabled) {
+        this.obs.warn(
+          'Creator Connect account not ready — purchase will proceed but revenue stays in platform account',
+          {
+            creatorId: contentRecord.creatorId,
+            organizationId: contentRecord.organizationId,
+            contentId: validated.contentId,
+            connectStatus: creatorConnect?.status ?? 'missing',
+          }
+        );
+      }
+
+      // Step 4: Create Stripe Checkout session
+      // Convert TipTap JSON description to plain text for Stripe
+      const plainDescription = extractPlainText(contentRecord.description);
+
       const session = await this.stripe.checkout.sessions.create({
         mode: 'payment',
         payment_method_types: ['card'],
@@ -202,7 +245,9 @@ export class PurchaseService extends BaseService {
               unit_amount: contentRecord.priceCents,
               product_data: {
                 name: contentRecord.title,
-                description: contentRecord.description || undefined,
+                description: plainDescription
+                  ? plainDescription.slice(0, 500)
+                  : undefined,
                 images: contentRecord.thumbnailUrl
                   ? [contentRecord.thumbnailUrl]
                   : undefined,
@@ -211,6 +256,17 @@ export class PurchaseService extends BaseService {
             quantity: 1,
           },
         ],
+        // Destination charges: Stripe routes payment to creator, platform keeps fee
+        ...(creatorConnect?.chargesEnabled && applicationFeeCents !== undefined
+          ? {
+              payment_intent_data: {
+                application_fee_amount: applicationFeeCents,
+                transfer_data: {
+                  destination: creatorConnect.stripeAccountId,
+                },
+              },
+            }
+          : {}),
         success_url: validated.successUrl,
         cancel_url: validated.cancelUrl,
         metadata: {
@@ -593,34 +649,23 @@ export class PurchaseService extends BaseService {
     const validated = getPurchaseSchema.parse({ id: purchaseId });
 
     try {
-      // First query by ID only (no customer filter)
+      // Query scoped by both ID and customer — prevents cross-user access
       const purchase = await this.db.query.purchases.findFirst({
-        where: eq(purchases.id, validated.id),
+        where: and(
+          eq(purchases.id, validated.id),
+          eq(purchases.customerId, customerId)
+        ),
       });
 
-      // Not found - throw 404
       if (!purchase) {
         throw new PurchaseNotFoundError(validated.id);
       }
 
-      // Found but doesn't belong to customer - throw 403
-      if (purchase.customerId !== customerId) {
-        throw new ForbiddenError('You do not have access to this purchase', {
-          purchaseId: validated.id,
-        });
-      }
-
-      // Success - return purchase
       return purchase;
     } catch (error) {
-      // Re-throw known errors
-      if (
-        error instanceof PurchaseNotFoundError ||
-        error instanceof ForbiddenError
-      ) {
+      if (error instanceof PurchaseNotFoundError) {
         throw error;
       }
-      // Wrap unknown errors
       throw wrapError(error, { purchaseId, customerId });
     }
   }

@@ -25,11 +25,11 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
   MEDIA_STATUS,
   MEDIA_TYPES,
-  VISIBILITY,
 } from '@codex/constants';
 import type {
   Content,
@@ -266,7 +266,7 @@ export function createTestContentInput(
       contentType === CONTENT_TYPES.WRITTEN ? 'Test content body' : null,
     category: 'test-category',
     tags: ['test', 'automation'],
-    visibility: VISIBILITY.PUBLIC,
+    accessType: CONTENT_ACCESS_TYPE.FREE,
     priceCents: 0,
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
@@ -302,7 +302,7 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     contentBodyJson: null,
     category: 'test-category',
     tags: ['test', 'automation'],
-    visibility: VISIBILITY.PUBLIC,
+    accessType: CONTENT_ACCESS_TYPE.FREE,
     priceCents: 0,
     minimumTierId: null,
     status: CONTENT_STATUS.DRAFT,
@@ -603,6 +603,7 @@ export function createMockStripeCheckoutEvent(
     object: {
       id: string;
       object: 'checkout.session';
+      mode: 'payment' | 'subscription' | 'setup';
       payment_intent: string | null;
       payment_status: string;
       amount_total: number;
@@ -638,6 +639,7 @@ export function createMockStripeCheckoutEvent(
       object: {
         id: sessionId,
         object: 'checkout.session',
+        mode: 'payment',
         payment_intent: paymentIntentId,
         payment_status: paymentStatus,
         amount_total: amountTotal,

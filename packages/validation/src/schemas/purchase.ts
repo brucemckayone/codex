@@ -33,11 +33,10 @@ const ALLOWED_REDIRECT_DOMAINS = [
   // Staging
   'codex-staging.revelations.studio',
   'app-staging.revelations.studio',
-  // Development
+  // Development (localhost/127.0.0.1 are unreachable externally; lvh.me resolves to 127.0.0.1)
   'localhost',
   '127.0.0.1',
-  'lvh.me', // Local dev with subdomain routing (*.lvh.me resolves to 127.0.0.1)
-  'nip.io', // Phone testing over LAN (*.{ip}.nip.io resolves to {ip})
+  'lvh.me',
 ];
 
 /**

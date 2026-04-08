@@ -16,12 +16,12 @@ import type { R2Bucket } from '@cloudflare/workers-types';
 import { CacheType, type VersionedCache } from '@codex/cache';
 import { type CachePurgeClient, R2Service } from '@codex/cloudflare-clients';
 import {
+  CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
   MEDIA_STATUS,
   MEDIA_TYPES,
   PAGINATION,
-  VISIBILITY,
 } from '@codex/constants';
 import {
   isUniqueViolation,
@@ -38,7 +38,7 @@ import { BaseService } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
-import { and, asc, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, isNull, ne, or } from 'drizzle-orm';
 import {
   BusinessLogicError,
   ContentNotFoundError,
@@ -181,7 +181,7 @@ export class ContentService extends BaseService {
             category: validated.category || null,
             tags: validated.tags || [],
             thumbnailUrl: validated.thumbnailUrl || null,
-            visibility: validated.visibility || VISIBILITY.PURCHASED_ONLY,
+            accessType: validated.accessType || CONTENT_ACCESS_TYPE.FREE,
             priceCents: validated.priceCents ?? null,
             status: CONTENT_STATUS.DRAFT, // Always start as draft
             viewCount: 0,
@@ -385,6 +385,46 @@ export class ContentService extends BaseService {
     );
 
     return result;
+  }
+
+  /**
+   * Check if a content slug is available
+   *
+   * Mirrors the database's partial unique indexes:
+   * - With organizationId: checks slug uniqueness per organization
+   * - Without organizationId: checks slug uniqueness per creator (personal content)
+   *
+   * @param slug - Slug to check
+   * @param creatorId - Creator ID (for personal content scope)
+   * @param organizationId - Organization ID (for org content scope), null for personal
+   * @param excludeContentId - Content ID to exclude from check (for edit mode)
+   * @returns True if slug is available, false if taken
+   */
+  async isSlugAvailable(
+    slug: string,
+    creatorId: string,
+    organizationId?: string | null,
+    excludeContentId?: string | null
+  ): Promise<boolean> {
+    try {
+      const conditions = [
+        eq(content.slug, slug.toLowerCase()),
+        isNull(content.deletedAt),
+        ...(organizationId
+          ? [eq(content.organizationId, organizationId)]
+          : [eq(content.creatorId, creatorId), isNull(content.organizationId)]),
+        ...(excludeContentId ? [ne(content.id, excludeContentId)] : []),
+      ];
+
+      const existing = await this.db.query.content.findFirst({
+        columns: { id: true },
+        where: and(...conditions),
+      });
+
+      return !existing;
+    } catch (error) {
+      throw wrapError(error, { slug, creatorId, organizationId });
+    }
   }
 
   /**
@@ -627,8 +667,8 @@ export class ContentService extends BaseService {
       if (filters.contentType) {
         whereConditions.push(eq(content.contentType, filters.contentType));
       }
-      if (filters.visibility) {
-        whereConditions.push(eq(content.visibility, filters.visibility));
+      if (filters.accessType) {
+        whereConditions.push(eq(content.accessType, filters.accessType));
       }
       if (filters.category) {
         whereConditions.push(eq(content.category, filters.category));

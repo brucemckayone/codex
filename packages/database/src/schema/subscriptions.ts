@@ -8,6 +8,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -64,10 +65,9 @@ export const subscriptionTiers = pgTable(
     ),
 
     // Unique sortOrder per org (only among non-deleted tiers)
-    unique('uq_subscription_tiers_org_sort').on(
-      table.organizationId,
-      table.sortOrder
-    ),
+    uniqueIndex('uq_subscription_tiers_org_sort')
+      .on(table.organizationId, table.sortOrder)
+      .where(sql`${table.deletedAt} IS NULL`),
 
     // CHECK constraints
     check('check_tier_price_monthly_positive', sql`${table.priceMonthly} >= 0`),
@@ -149,6 +149,11 @@ export const subscriptions = pgTable(
       table.status
     ),
     index('idx_subscriptions_user_org').on(table.userId, table.organizationId),
+
+    // One active subscription per user per org
+    uniqueIndex('uq_active_subscription_per_user_org')
+      .on(table.userId, table.organizationId)
+      .where(sql`${table.status} IN ('active', 'past_due', 'cancelling')`),
 
     // CHECK constraints
     check(

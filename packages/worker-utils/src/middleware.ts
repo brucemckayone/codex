@@ -63,19 +63,26 @@ export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
       const exactMatchOrigins = [
         c.env?.WEB_APP_URL,
         c.env?.API_URL,
-        'http://localhost:3000', ///TODO: lets verify these are the real ports we are supposed to be authorizing against
-        'http://localhost:5173',
-        'http://localhost:8787',
-        'http://localhost:8788',
-        'http://localhost:8789',
-        'http://localhost:4001',
-        'http://localhost:4002',
+        // Dev-only localhost origins
+        ...(c.env?.ENVIRONMENT === 'development'
+          ? [
+              'http://localhost:3000',
+              'http://localhost:5173',
+              'http://localhost:8787',
+              'http://localhost:8788',
+              'http://localhost:8789',
+              'http://localhost:4001',
+              'http://localhost:4002',
+            ]
+          : []),
       ].filter(Boolean) as string[];
 
       // Check exact matches
       if (exactMatchOrigins.includes(origin)) {
         return origin;
       }
+
+      const isDev = c.env?.ENVIRONMENT === 'development';
 
       // Pattern-based matching for preview and staging deployments
       const allowedPatterns = [
@@ -85,10 +92,13 @@ export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
         /^https:\/\/[\w-]+-staging\.revelations\.studio$/,
         // Production deployments: *.revelations.studio (any subdomain)
         /^https:\/\/[\w-]+\.revelations\.studio$/,
-        // Local dev: lvh.me or *.lvh.me with any port
-        /^http:\/\/([\w-]+\.)*lvh\.me(:\d+)?$/,
-        // Phone/LAN testing: {ip}.nip.io or *.{ip}.nip.io with any port
-        /^http:\/\/([\w-]+\.)*\d+\.\d+\.\d+\.\d+\.nip\.io(:\d+)?$/,
+        // Dev-only patterns: lvh.me and nip.io for local/LAN testing
+        ...(isDev
+          ? [
+              /^http:\/\/([\w-]+\.)*lvh\.me(:\d+)?$/,
+              /^http:\/\/([\w-]+\.)*\d+\.\d+\.\d+\.\d+\.nip\.io(:\d+)?$/,
+            ]
+          : []),
       ];
 
       for (const pattern of allowedPatterns) {

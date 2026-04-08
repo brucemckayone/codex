@@ -20,7 +20,7 @@
 
   const { data }: Props = $props();
 
-  const jsonLd = $derived(JSON.stringify(data));
+  const jsonLd = $derived(JSON.stringify(data).replace(/</g, '\\u003c'));
 </script>
 
 <svelte:head>

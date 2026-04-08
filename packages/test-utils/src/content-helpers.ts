@@ -77,7 +77,7 @@ export function expectContentEqual(
     expect(actual.contentType).toBe(expected.contentType);
   }
   if (expected.status) expect(actual.status).toBe(expected.status);
-  if (expected.visibility) expect(actual.visibility).toBe(expected.visibility);
+  if (expected.accessType) expect(actual.accessType).toBe(expected.accessType);
   if (expected.priceCents !== undefined) {
     expect(actual.priceCents).toBe(expected.priceCents);
   }

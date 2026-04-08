@@ -1,4 +1,5 @@
 import {
+  CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
   MEDIA_STATUS,
@@ -217,6 +218,17 @@ export const visibilityEnum = z.enum([
 ]);
 
 /**
+ * Content access type enum — defines the content's access model.
+ * Replaces visibility for access control decisions.
+ */
+export const contentAccessTypeEnum = z.enum([
+  CONTENT_ACCESS_TYPE.FREE,
+  CONTENT_ACCESS_TYPE.PAID,
+  CONTENT_ACCESS_TYPE.SUBSCRIBERS,
+  CONTENT_ACCESS_TYPE.MEMBERS,
+]);
+
+/**
  * Content status enum
  * Aligns with database CHECK constraint: line 148
  */
@@ -278,8 +290,9 @@ const baseContentSchema = z.object({
   // Thumbnail (optional custom override)
   thumbnailUrl: urlSchema.optional().nullable(),
 
-  // Access control
-  visibility: visibilityEnum.default(VISIBILITY.PURCHASED_ONLY),
+  // Access control (new model)
+  accessType: contentAccessTypeEnum.default(CONTENT_ACCESS_TYPE.FREE),
+
   priceCents: priceCentsSchema.optional(),
 
   // Subscription tier gating (null = not included in any subscription)
@@ -328,18 +341,41 @@ export const createContentSchema = baseContentSchema
   )
   .refine(
     (data) => {
-      // Free content (null or 0 price) cannot be purchased_only
-      if (
-        (data.priceCents === null || data.priceCents === 0) &&
-        data.visibility === VISIBILITY.PURCHASED_ONLY
-      ) {
-        return false;
+      // 'paid' access type requires priceCents > 0
+      if (data.accessType === CONTENT_ACCESS_TYPE.PAID) {
+        return !!data.priceCents && data.priceCents > 0;
       }
       return true;
     },
     {
-      message: 'Free content cannot have purchased_only visibility',
-      path: ['visibility'],
+      message: 'Paid content requires a price greater than £0',
+      path: ['priceCents'],
+    }
+  )
+  .refine(
+    (data) => {
+      // 'subscribers' access type requires a minimum tier
+      if (data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS) {
+        return !!data.minimumTierId;
+      }
+      return true;
+    },
+    {
+      message: 'Subscriber content requires a minimum subscription tier',
+      path: ['minimumTierId'],
+    }
+  )
+  .refine(
+    (data) => {
+      // 'free' access type cannot have a price or tier
+      if (data.accessType === CONTENT_ACCESS_TYPE.FREE) {
+        return !data.priceCents || data.priceCents === 0;
+      }
+      return true;
+    },
+    {
+      message: 'Free content cannot have a price',
+      path: ['priceCents'],
     }
   );
 
@@ -389,7 +425,7 @@ export const contentQuerySchema = paginationSchema.extend({
   // Filters
   status: contentStatusEnum.optional(),
   contentType: contentTypeEnum.optional(),
-  visibility: visibilityEnum.optional(),
+  accessType: contentAccessTypeEnum.optional(),
   category: z.string().max(100).optional(),
   organizationId: uuidSchema.optional(),
   creatorId: uuidSchema.optional(),
@@ -469,6 +505,26 @@ export const discoverContentQuerySchema = paginationSchema
 export type DiscoverContentQueryInput = z.infer<
   typeof discoverContentQuerySchema
 >;
+
+// ============================================================================
+// Slug Availability Check Schema
+// ============================================================================
+
+/**
+ * Check content slug availability
+ * Used by the SlugField component for real-time uniqueness feedback.
+ *
+ * Scoping mirrors the database partial unique indexes:
+ * - With organizationId: checks slug + org uniqueness
+ * - Without organizationId: checks slug + creator uniqueness (personal content)
+ */
+export const checkContentSlugSchema = z.object({
+  slug: slugSchema,
+  organizationId: uuidSchema.optional().nullable(),
+  excludeContentId: uuidSchema.optional().nullable(),
+});
+
+export type CheckContentSlugInput = z.infer<typeof checkContentSlugSchema>;
 
 /**
  * Organization query schema

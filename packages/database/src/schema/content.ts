@@ -25,7 +25,7 @@ export const organizations = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: varchar('name', { length: 255 }).notNull(),
-    slug: varchar('slug', { length: 255 }).notNull().unique(),
+    slug: varchar('slug', { length: 255 }).notNull(),
     description: text('description'),
 
     // Branding
@@ -42,7 +42,12 @@ export const organizations = pgTable(
       .$onUpdate(() => new Date()),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
-  (table) => [index('idx_organizations_slug').on(table.slug)]
+  (table) => [
+    index('idx_organizations_slug').on(table.slug),
+    uniqueIndex('idx_unique_org_slug')
+      .on(table.slug)
+      .where(sql`${table.deletedAt} IS NULL`),
+  ]
 );
 
 /**
@@ -279,11 +284,12 @@ export const content = pgTable(
     category: varchar('category', { length: 100 }), // Simple string category
     tags: jsonb('tags').$type<string[]>().default([]), // Array of tag strings
 
-    // Access & Pricing
-    visibility: varchar('visibility', { length: 50 })
-      .default('purchased_only')
+    // Access model — defines how content is gated
+    // 'free' | 'paid' | 'subscribers' | 'members'
+    accessType: varchar('access_type', { length: 50 })
+      .default('free')
       .notNull(),
-    // 'public' | 'private' | 'members_only' | 'purchased_only' (Phase 1: public, purchased_only)
+
     priceCents: integer('price_cents'), // NULL = free, INTEGER = price in cents (ACID-compliant)
 
     // Subscription tier gating — minimum tier required for subscription access.
@@ -323,25 +329,30 @@ export const content = pgTable(
     index('idx_content_category').on(table.category),
     index('idx_content_minimum_tier').on(table.minimumTierId),
 
-    // Partial unique indexes for slug uniqueness
+    // Partial unique indexes for slug uniqueness (exclude soft-deleted rows)
     // Unique slug per organization (for organization content)
     uniqueIndex('idx_unique_content_slug_per_org')
       .on(table.slug, table.organizationId)
-      .where(sql`${table.organizationId} IS NOT NULL`),
+      .where(
+        sql`${table.organizationId} IS NOT NULL AND ${table.deletedAt} IS NULL`
+      ),
 
     // Unique slug per creator (for personal content)
     uniqueIndex('idx_unique_content_slug_personal')
       .on(table.slug, table.creatorId)
-      .where(sql`${table.organizationId} IS NULL`),
+      .where(
+        sql`${table.organizationId} IS NULL AND ${table.deletedAt} IS NULL`
+      ),
 
     // CHECK constraints
     check(
       'check_content_status',
       sql`${table.status} IN ('draft', 'published', 'archived')`
     ),
+    index('idx_content_access_type').on(table.accessType),
     check(
-      'check_content_visibility',
-      sql`${table.visibility} IN ('public', 'private', 'members_only', 'purchased_only')`
+      'check_content_access_type',
+      sql`${table.accessType} IN ('free', 'paid', 'subscribers', 'members')`
     ),
     check(
       'check_content_type',

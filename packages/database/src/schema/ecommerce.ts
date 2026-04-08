@@ -307,6 +307,13 @@ export const purchases = pgTable(
       table.purchasedAt
     ),
 
+    // Composite index for library query join path (customer + status + content)
+    index('idx_purchases_customer_status_content').on(
+      table.customerId,
+      table.status,
+      table.contentId
+    ),
+
     // Composite index for admin analytics queries (revenue by org + status + date)
     index('idx_purchases_org_status_created').on(
       table.organizationId,

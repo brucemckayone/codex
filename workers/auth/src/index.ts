@@ -52,8 +52,8 @@ const app = createWorker({
 app.use(
   '*',
   createEnvValidationMiddleware({
-    required: ['DATABASE_URL', 'BETTER_AUTH_SECRET'],
-    optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
+    required: ['DATABASE_URL', 'BETTER_AUTH_SECRET', 'ENVIRONMENT'],
+    optional: ['WEB_APP_URL', 'API_URL'],
   })
 );
 
