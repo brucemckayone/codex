@@ -17,7 +17,9 @@
   import { beforeNavigate, goto, invalidate } from '$app/navigation';
   import { page } from '$app/state';
   import type { LayoutData } from './$types';
-  import OrgHeader from '$lib/components/layout/Header/OrgHeader.svelte';
+  import { SidebarRail } from '$lib/components/layout/SidebarRail';
+  import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
+  import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import BrandEditorPanel from '$lib/components/brand-editor/BrandEditorPanel.svelte';
   import BrandEditorHeader from '$lib/components/brand-editor/BrandEditorHeader.svelte';
   import BrandEditorFooter from '$lib/components/brand-editor/BrandEditorFooter.svelte';
@@ -30,6 +32,7 @@
   import BrandEditorFineTuneColors from '$lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte';
   import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
   import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
+  import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
@@ -48,6 +51,8 @@
 
   // Studio routes have their own header/sidebar — hide the org chrome
   const isStudio = $derived(page.url.pathname.startsWith('/studio'));
+  let searchOpen = $state(false);
+  let moreOpen = $state(false);
 
   // ── Branding ─────────────────────────────────────────────────────
   // Raw inputs — the CSS file (org-brand.css) derives the full palette
@@ -299,10 +304,10 @@
   style:--brand-body-weight={brandBodyWeight}
 >
   {#if !isStudio}
-    <OrgHeader user={data.user} org={data.org} />
+    <SidebarRail variant="org" user={data.user} org={data.org} onSearchClick={() => { searchOpen = true; }} />
   {/if}
 
-  <main id="main-content" class="org-main">
+  <main id="main-content" class="org-main" class:org-main--studio={isStudio}>
     {@render children()}
   </main>
 
@@ -320,6 +325,18 @@
         <p class="copyright">&copy; {new Date().getFullYear()} Codex. All rights reserved.</p>
       </div>
     </footer>
+  {/if}
+
+  {#if !isStudio}
+    <MobileBottomNav
+      variant="org"
+      user={data.user}
+      org={data.org}
+      onSearchClick={() => { searchOpen = true; }}
+      onMoreClick={() => { moreOpen = true; }}
+    />
+    <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} org={data.org} />
+    <CommandPaletteSearch scope="org" orgSlug={data.org.slug} bind:open={searchOpen} />
   {/if}
 </div>
 
@@ -343,6 +360,8 @@
     <BrandEditorLogo />
   {:else if brandEditor.level === 'presets'}
     <BrandEditorPresets />
+  {:else if brandEditor.level === 'hero-effects'}
+    <BrandEditorHeroEffects />
   {:else if brandEditor.level === 'fine-tune-colors'}
     <BrandEditorFineTuneColors />
   {:else if brandEditor.level === 'fine-tune-typography'}
@@ -365,12 +384,35 @@
 
   .org-main {
     flex: 1;
+    margin-left: var(--space-16);
+  }
+
+  .org-main--studio {
+    margin-left: 0;
+  }
+
+  @media (--below-md) {
+    .org-main {
+      margin-left: 0;
+      padding-bottom: var(--space-20);
+    }
+
+    .org-main--studio {
+      padding-bottom: 0;
+    }
   }
 
   .org-footer {
     border-top: var(--border-width) var(--border-style) var(--color-border);
     background-color: var(--color-surface);
     padding: var(--space-8) var(--space-4);
+    margin-left: var(--space-16);
+  }
+
+  @media (--below-md) {
+    .org-footer {
+      margin-left: 0;
+    }
   }
 
   .footer-inner {
