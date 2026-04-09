@@ -399,6 +399,7 @@
   .org-main {
     flex: 1;
     margin-left: var(--space-16);
+    view-transition-name: page-content;
   }
 
   .org-main--studio {
@@ -419,9 +420,9 @@
   .org-footer {
     position: relative;
     border-top: var(--border-width) var(--border-style) var(--color-border);
-    background: color-mix(in srgb, var(--color-surface) 90%, transparent);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     padding: var(--space-8) var(--space-4);
     margin-left: var(--space-16);
   }

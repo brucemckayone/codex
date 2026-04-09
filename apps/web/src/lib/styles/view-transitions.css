@@ -1,0 +1,57 @@
+/* ── Sidebar morph (org rail ↔ studio sidebar) ── */
+
+::view-transition-old(sidebar-nav) {
+  animation: sidebar-morph-out var(--duration-slow) var(--ease-out) both;
+}
+
+::view-transition-new(sidebar-nav) {
+  animation: sidebar-morph-in var(--duration-slow) var(--ease-out) both;
+}
+
+@keyframes sidebar-morph-out {
+  to {
+    opacity: 0;
+    transform: scaleX(0.95);
+  }
+}
+
+@keyframes sidebar-morph-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.95);
+  }
+}
+
+/* ── Page content dissolve (shader shows through) ── */
+
+::view-transition-old(page-content) {
+  animation: content-dissolve-out var(--duration-slow, 300ms) var(--ease-out, ease-out) both;
+}
+
+::view-transition-new(page-content) {
+  animation: content-dissolve-in var(--duration-slow, 300ms) var(--ease-out, ease-out) both;
+}
+
+@keyframes content-dissolve-out {
+  to {
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes content-dissolve-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(sidebar-nav),
+  ::view-transition-new(sidebar-nav),
+  ::view-transition-old(page-content),
+  ::view-transition-new(page-content) {
+    animation-duration: 0.01ms !important;
+  }
+}

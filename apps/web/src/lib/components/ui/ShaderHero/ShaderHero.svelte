@@ -280,6 +280,8 @@
     overflow: hidden;
     pointer-events: none;
     z-index: 0;
+    /* Exclude from view transition snapshots so shader stays live during navigation */
+    view-transition-name: none;
   }
 
   .shader-hero__canvas {
