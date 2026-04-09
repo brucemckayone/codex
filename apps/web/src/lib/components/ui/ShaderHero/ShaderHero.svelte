@@ -227,14 +227,13 @@
     window.addEventListener('touchmove', onTouchMove, { passive: true });
     window.addEventListener('touchend', onTouchEnd);
 
-    // ── IntersectionObserver — pause when off-screen ───────────
-    const observer = new IntersectionObserver(
-      (entries) => {
-        isVisible = entries[0]?.isIntersecting ?? false;
-      },
-      { threshold: 0.05 },
-    );
-    if (containerEl) observer.observe(containerEl);
+    // ── Visibility — pause when tab is hidden ───────────────────
+    // For full-page fixed backgrounds, IntersectionObserver doesn't work
+    // reliably. Use document visibility instead (saves GPU when tab is hidden).
+    function onVisibilityChange() {
+      isVisible = document.visibilityState === 'visible';
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     // ── Resize listener ────────────────────────────────────────
     window.addEventListener('resize', resize);
@@ -249,7 +248,7 @@
     return () => {
       cancelAnimationFrame(animFrameId);
       if (renderer) renderer.destroy(gl!);
-      observer.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
       window.removeEventListener('resize', resize);
       window.removeEventListener('mousemove', onMouseMove);
