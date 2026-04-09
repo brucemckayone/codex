@@ -190,53 +190,42 @@
     }
 
     // ── Mouse / touch events ───────────────────────────────────
+    // Listen on window so mouse interaction works even when content
+    // layers (backdrop-blur divs, links) sit on top of the canvas.
+    function mapMouse(clientX: number, clientY: number) {
+      const rect = canvasEl!.getBoundingClientRect();
+      mouse.x = (clientX - rect.left) / rect.width;
+      mouse.y = 1.0 - (clientY - rect.top) / rect.height;
+    }
+
     function onMouseMove(e: MouseEvent) {
-      const rect = canvasEl!.getBoundingClientRect();
-      mouse.x = (e.clientX - rect.left) / rect.width;
-      mouse.y = 1.0 - (e.clientY - rect.top) / rect.height;
-      mouse.active = true;
-    }
-    function onMouseLeave() {
-      mouse.active = false;
-    }
-    function onMouseEnter(e: MouseEvent) {
-      const rect = canvasEl!.getBoundingClientRect();
-      mouse.x = (e.clientX - rect.left) / rect.width;
-      mouse.y = 1.0 - (e.clientY - rect.top) / rect.height;
+      mapMouse(e.clientX, e.clientY);
       mouse.active = true;
     }
     function onClick(e: MouseEvent) {
-      const rect = canvasEl!.getBoundingClientRect();
-      mouse.x = (e.clientX - rect.left) / rect.width;
-      mouse.y = 1.0 - (e.clientY - rect.top) / rect.height;
+      mapMouse(e.clientX, e.clientY);
       mouse.burstStrength = 1.0;
     }
     function onTouchStart(e: TouchEvent) {
       const t = e.touches[0];
-      const rect = canvasEl!.getBoundingClientRect();
-      mouse.x = (t.clientX - rect.left) / rect.width;
-      mouse.y = 1.0 - (t.clientY - rect.top) / rect.height;
+      mapMouse(t.clientX, t.clientY);
       mouse.active = true;
       mouse.burstStrength = 1.0;
     }
     function onTouchMove(e: TouchEvent) {
       const t = e.touches[0];
-      const rect = canvasEl!.getBoundingClientRect();
-      mouse.x = (t.clientX - rect.left) / rect.width;
-      mouse.y = 1.0 - (t.clientY - rect.top) / rect.height;
+      mapMouse(t.clientX, t.clientY);
       mouse.active = true;
     }
     function onTouchEnd() {
       mouse.active = false;
     }
 
-    canvasEl.addEventListener('mousemove', onMouseMove);
-    canvasEl.addEventListener('mouseleave', onMouseLeave);
-    canvasEl.addEventListener('mouseenter', onMouseEnter);
-    canvasEl.addEventListener('click', onClick);
-    canvasEl.addEventListener('touchstart', onTouchStart, { passive: true });
-    canvasEl.addEventListener('touchmove', onTouchMove, { passive: true });
-    canvasEl.addEventListener('touchend', onTouchEnd);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('click', onClick);
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
 
     // ── IntersectionObserver — pause when off-screen ───────────
     const observer = new IntersectionObserver(
@@ -263,13 +252,11 @@
       observer.disconnect();
       motionQuery.removeEventListener('change', onMotionChange);
       window.removeEventListener('resize', resize);
-      canvasEl?.removeEventListener('mousemove', onMouseMove);
-      canvasEl?.removeEventListener('mouseleave', onMouseLeave);
-      canvasEl?.removeEventListener('mouseenter', onMouseEnter);
-      canvasEl?.removeEventListener('click', onClick);
-      canvasEl?.removeEventListener('touchstart', onTouchStart);
-      canvasEl?.removeEventListener('touchmove', onTouchMove);
-      canvasEl?.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('click', onClick);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
     };
   });
 </script>

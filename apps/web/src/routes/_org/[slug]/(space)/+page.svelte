@@ -330,12 +330,31 @@
     margin: 0 auto;
   }
 
-  /* ── Content backdrop — readable over full-page shader ── */
+  /* ── Content backdrop — soft frosted glass over full-page shader ── */
   .content-area {
     position: relative;
-    background: color-mix(in srgb, var(--color-background) 85%, transparent);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: color-mix(in srgb, var(--color-background) 55%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  /* Gradient fade from transparent hero into frosted content */
+  .content-area::before {
+    content: '';
+    position: absolute;
+    top: -200px;
+    left: 0;
+    right: 0;
+    height: 200px;
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb, var(--color-background) 8%, transparent) 20%,
+      color-mix(in srgb, var(--color-background) 20%, transparent) 45%,
+      color-mix(in srgb, var(--color-background) 40%, transparent) 70%,
+      color-mix(in srgb, var(--color-background) 55%, transparent) 100%
+    );
+    pointer-events: none;
   }
 
   .section__header {
