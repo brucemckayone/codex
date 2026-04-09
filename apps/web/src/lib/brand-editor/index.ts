@@ -4,7 +4,9 @@ export { brandEditor } from './brand-editor-store.svelte';
 // Brand Editor - CSS Injection
 export {
   clearBrandVars,
+  clearTokenOverrides,
   injectBrandVars,
+  injectTokenOverrides,
   loadGoogleFont,
 } from './css-injection';
 // Brand Editor - Navigation

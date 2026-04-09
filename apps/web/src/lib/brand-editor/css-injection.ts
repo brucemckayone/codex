@@ -197,6 +197,38 @@ export function injectBrandVars(state: BrandEditorState): void {
 }
 
 /**
+ * Inject token overrides (from server-loaded tokenOverrides JSON) as CSS
+ * custom properties on the given element.
+ *
+ * Used by the org layout on initial page load so that shader-* and other
+ * override keys are available to ShaderHero (via getComputedStyle) before
+ * the brand editor is ever opened.
+ *
+ * Keys in BRAND_PREFIX_KEYS become `--brand-{key}`, all others become
+ * `--color-{key}` — same mapping as injectBrandVars uses for live preview.
+ */
+export function injectTokenOverrides(
+  el: HTMLElement,
+  overrides: Record<string, string | null>
+): void {
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value == null) continue;
+    const prop = BRAND_PREFIX_KEYS.has(key)
+      ? `--brand-${key}`
+      : `--color-${key}`;
+    el.style.setProperty(prop, value);
+  }
+}
+
+/**
+ * Remove all previously injected token override CSS properties from an element.
+ * Call before re-injecting to ensure removed overrides don't linger.
+ */
+export function clearTokenOverrides(el: HTMLElement): void {
+  removeOverrideVars(el, new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS]));
+}
+
+/**
  * Remove all brand editor CSS overrides, reverting to server-loaded values.
  * Called when the editor closes without saving.
  */

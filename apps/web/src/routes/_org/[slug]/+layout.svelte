@@ -34,7 +34,7 @@
   import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
   import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
-  import { brandEditor } from '$lib/brand-editor';
+  import { brandEditor, injectTokenOverrides, clearTokenOverrides } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -80,6 +80,42 @@
   const brandTextScale = $derived(data.org?.brandFineTune?.textScale ?? undefined);
   const brandHeadingWeight = $derived(data.org?.brandFineTune?.headingWeight ?? undefined);
   const brandBodyWeight = $derived(data.org?.brandFineTune?.bodyWeight ?? undefined);
+
+  // Token overrides from server — includes shader-* keys, color overrides, etc.
+  // Parsed from the JSON string stored in branding_settings.tokenOverrides.
+  // These are injected as CSS vars via $effect so ShaderHero (and other consumers)
+  // can read them via getComputedStyle on initial page load.
+  const serverTokenOverrides = $derived.by(() => {
+    const raw = data.org?.brandFineTune?.tokenOverrides;
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string | null>;
+      return Object.keys(parsed).length > 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Inject token overrides as CSS custom properties on the org layout element.
+  // Runs on mount and whenever serverTokenOverrides changes (e.g. after branding save).
+  // Skipped when brand editor is open — the editor's live injectBrandVars handles it.
+  $effect(() => {
+    if (!browser) return;
+    const overrides = serverTokenOverrides;
+    const editorOpen = !brandEditor.isClosed;
+
+    const el = document.querySelector('.org-layout') as HTMLElement | null;
+    if (!el) return;
+
+    if (editorOpen) return; // Brand editor manages its own CSS injection
+
+    if (overrides) {
+      clearTokenOverrides(el);
+      injectTokenOverrides(el, overrides);
+    } else {
+      clearTokenOverrides(el);
+    }
+  });
 
   // Build Google Fonts URL from selected font families
   const googleFontsUrl = $derived.by(() => {
