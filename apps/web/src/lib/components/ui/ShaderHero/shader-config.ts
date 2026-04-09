@@ -26,6 +26,8 @@ export interface SutureConfig extends ShaderConfigBase {
   preset: 'suture';
   curl: number;
   dissipation: number;
+  advection: number;
+  force: number;
 }
 
 export interface EtherConfig extends ShaderConfigBase {
@@ -33,18 +35,27 @@ export interface EtherConfig extends ShaderConfigBase {
   rotationSpeed: number;
   complexity: number;
   zoom: number;
+  glow: number;
+  scale: number;
+  aberration: number;
 }
 
 export interface WarpConfig extends ShaderConfigBase {
   preset: 'warp';
   warpStrength: number;
   lightAngle: number;
+  speed: number;
+  detail: number;
+  contrast: number;
+  invert: boolean;
 }
 
 export interface RippleConfig extends ShaderConfigBase {
   preset: 'ripple';
   waveSpeed: number;
   damping: number;
+  rippleSize: number;
+  refraction: number;
 }
 
 export interface NoneConfig extends ShaderConfigBase {
@@ -61,18 +72,33 @@ export type ShaderConfig =
 /** Default values matching the spec in 14-final-preset-catalog.md */
 const DEFAULTS = {
   preset: 'none' as ShaderPresetId,
-  intensity: 0.4,
+  intensity: 0.65,
   grain: 0.025,
   vignette: 0.2,
+  // Suture
   curl: 30,
   dissipation: 0.985,
+  advection: 6.0,
+  force: 1.0,
+  // Ether
   rotationSpeed: 0.4,
   complexity: 6,
   zoom: 5.0,
+  glow: 0.5,
+  scale: 2.0,
+  aberration: 0.003,
+  // Warp
   warpStrength: 1.5,
   lightAngle: 135,
+  speed: 0.3,
+  detail: 4,
+  contrast: 1.1,
+  invert: true,
+  // Ripple
   waveSpeed: 0.8,
   damping: 0.995,
+  rippleSize: 0.03,
+  refraction: 0.5,
 };
 
 /** Parse a hex color (#rrggbb) to normalized [0-1, 0-1, 0-1]. */
@@ -171,58 +197,54 @@ export function getShaderConfig(orgLayoutEl?: Element | null): ShaderConfig {
     },
   };
 
+  const rv = (key: string, def: number) =>
+    num(el ? readBrandVar(el, key) : null, def);
+
   switch (resolvedPreset) {
     case 'suture':
       return {
         ...base,
         preset: 'suture',
-        curl: num(el ? readBrandVar(el, 'shader-curl') : null, DEFAULTS.curl),
-        dissipation: num(
-          el ? readBrandVar(el, 'shader-dissipation') : null,
-          DEFAULTS.dissipation
-        ),
+        curl: rv('shader-curl', DEFAULTS.curl),
+        dissipation: rv('shader-dissipation', DEFAULTS.dissipation),
+        advection: rv('shader-advection', DEFAULTS.advection),
+        force: rv('shader-force', DEFAULTS.force),
       };
     case 'ether':
       return {
         ...base,
         preset: 'ether',
-        rotationSpeed: num(
-          el ? readBrandVar(el, 'shader-rotation-speed') : null,
-          DEFAULTS.rotationSpeed
-        ),
-        complexity: Math.round(
-          num(
-            el ? readBrandVar(el, 'shader-complexity') : null,
-            DEFAULTS.complexity
-          )
-        ),
-        zoom: num(el ? readBrandVar(el, 'shader-zoom') : null, DEFAULTS.zoom),
+        rotationSpeed: rv('shader-rotation-speed', DEFAULTS.rotationSpeed),
+        complexity: Math.round(rv('shader-complexity', DEFAULTS.complexity)),
+        zoom: rv('shader-zoom', DEFAULTS.zoom),
+        glow: rv('shader-glow', DEFAULTS.glow),
+        scale: rv('shader-scale', DEFAULTS.scale),
+        aberration: rv('shader-aberration', DEFAULTS.aberration),
       };
-    case 'warp':
+    case 'warp': {
+      const invertRaw = el ? readBrandVar(el, 'shader-invert') : null;
       return {
         ...base,
         preset: 'warp',
-        warpStrength: num(
-          el ? readBrandVar(el, 'shader-warp-strength') : null,
-          DEFAULTS.warpStrength
-        ),
-        lightAngle: num(
-          el ? readBrandVar(el, 'shader-light-angle') : null,
-          DEFAULTS.lightAngle
-        ),
+        warpStrength: rv('shader-warp-strength', DEFAULTS.warpStrength),
+        lightAngle: rv('shader-light-angle', DEFAULTS.lightAngle),
+        speed: rv('shader-speed', DEFAULTS.speed),
+        detail: Math.round(rv('shader-detail', DEFAULTS.detail)),
+        contrast: rv('shader-contrast', DEFAULTS.contrast),
+        invert:
+          invertRaw != null
+            ? invertRaw !== '0' && invertRaw !== 'false'
+            : DEFAULTS.invert,
       };
+    }
     case 'ripple':
       return {
         ...base,
         preset: 'ripple',
-        waveSpeed: num(
-          el ? readBrandVar(el, 'shader-wave-speed') : null,
-          DEFAULTS.waveSpeed
-        ),
-        damping: num(
-          el ? readBrandVar(el, 'shader-damping') : null,
-          DEFAULTS.damping
-        ),
+        waveSpeed: rv('shader-wave-speed', DEFAULTS.waveSpeed),
+        damping: rv('shader-damping', DEFAULTS.damping),
+        rippleSize: rv('shader-ripple-size', DEFAULTS.rippleSize),
+        refraction: rv('shader-refraction', DEFAULTS.refraction),
       };
     default:
       return { ...base, preset: 'none' };

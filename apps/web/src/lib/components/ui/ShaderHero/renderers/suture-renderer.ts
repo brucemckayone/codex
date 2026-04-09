@@ -232,7 +232,9 @@ export function createSutureRenderer(): ShaderRenderer {
 
       // Cache config values for stepSim
       _curlScale = -cfg.curl / 50.0;
-      _advDist = cfg.dissipation > 0.98 ? 6.0 : 6.0 * (cfg.dissipation / 0.985);
+      const advBase = cfg.advection ?? 6.0;
+      _advDist =
+        cfg.dissipation > 0.98 ? advBase : advBase * (cfg.dissipation / 0.985);
 
       frameNum++;
 
@@ -290,7 +292,7 @@ export function createSutureRenderer(): ShaderRenderer {
       // ── Normal sim step with hover ─────────────────────────
       const mouseX = mouse.active ? mouse.x * SIM_RES : -1000;
       const mouseY = mouse.active ? mouse.y * SIM_RES : -1000;
-      stepSim(gl, mouseX, mouseY, mouse.active, 1.0);
+      stepSim(gl, mouseX, mouseY, mouse.active, cfg.force ?? 1.0);
 
       // ── Display pass ───────────────────────────────────────
       displayPass(gl, time, cfg, width, height);

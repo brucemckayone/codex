@@ -223,7 +223,11 @@
   /* ── Hero Section ── */
   .hero {
     position: relative;
-    padding: var(--space-20) var(--space-6);
+    min-height: 70vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-16) var(--space-6);
     background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
     color: var(--color-text-on-brand);
     text-align: center;
@@ -241,67 +245,74 @@
   .hero__inner {
     position: relative;
     z-index: 1;
-    max-width: 720px;
+    max-width: 800px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-4);
+    gap: var(--space-5);
   }
 
   .hero__logo {
-    width: var(--space-28);
-    height: var(--space-28);
+    width: var(--space-24);
+    height: var(--space-24);
     border-radius: var(--radius-full);
     object-fit: cover;
-    border: 3px solid color-mix(in srgb, white 30%, transparent);
-    box-shadow: var(--shadow-lg);
+    border: var(--border-width-thick) solid color-mix(in srgb, white 30%, transparent);
+    box-shadow:
+      var(--shadow-xl),
+      0 0 60px color-mix(in srgb, var(--color-brand-primary) 25%, transparent);
   }
 
   .hero__title {
     margin: 0;
-    font-size: var(--text-4xl);
-    font-weight: var(--font-bold);
-    line-height: var(--leading-tight);
+    font-size: var(--text-5xl);
+    font-weight: var(--font-extrabold);
+    line-height: var(--leading-none);
     letter-spacing: var(--tracking-tight);
+    text-shadow: 0 2px 20px color-mix(in srgb, black 40%, transparent);
   }
 
   .hero__description {
     margin: 0;
-    font-size: var(--text-lg);
-    line-height: var(--leading-normal);
+    font-size: var(--text-xl);
+    line-height: var(--leading-relaxed);
     opacity: var(--opacity-90);
-    max-width: 640px;
+    max-width: 600px;
+    text-shadow: 0 1px 8px color-mix(in srgb, black 30%, transparent);
   }
 
   .hero__actions {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    margin-top: var(--space-4);
+    gap: var(--space-4);
+    margin-top: var(--space-6);
   }
 
   .hero__cta {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-3) var(--space-6);
-    background: var(--color-brand-accent-subtle, color-mix(in srgb, white 20%, transparent));
+    padding: var(--space-3-5) var(--space-8);
+    background: color-mix(in srgb, white 15%, transparent);
     color: var(--color-text-on-brand);
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
-    border: var(--border-width-thick) solid color-mix(in srgb, white 40%, transparent);
-    border-radius: var(--radius-button, var(--radius-lg));
+    border: var(--border-width-thick) solid color-mix(in srgb, white 30%, transparent);
+    border-radius: var(--radius-full);
     text-decoration: none;
+    backdrop-filter: blur(12px);
     transition: background-color var(--duration-normal) var(--ease-default),
       border-color var(--duration-normal) var(--ease-default),
-      transform var(--duration-fast) var(--ease-default);
+      transform var(--duration-fast) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
   }
 
   .hero__cta:hover {
-    background: var(--color-brand-accent, color-mix(in srgb, white 30%, transparent));
-    border-color: color-mix(in srgb, white 60%, transparent);
-    transform: translateY(-1px);
+    background: color-mix(in srgb, white 25%, transparent);
+    border-color: color-mix(in srgb, white 50%, transparent);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px color-mix(in srgb, black 20%, transparent);
   }
 
   .hero__cta:active {
@@ -310,12 +321,12 @@
 
   .hero__cta--secondary {
     background: transparent;
-    border-color: color-mix(in srgb, white 25%, transparent);
+    border-color: color-mix(in srgb, white 20%, transparent);
   }
 
   .hero__cta--secondary:hover {
     background: color-mix(in srgb, white 10%, transparent);
-    border-color: color-mix(in srgb, white 40%, transparent);
+    border-color: color-mix(in srgb, white 35%, transparent);
   }
 
   /* ── Shared Section Styles ── */
@@ -413,11 +424,12 @@
   /* ── Responsive Hero ── */
   @media (--below-sm) {
     .hero {
-      padding: var(--space-10) var(--space-4);
+      min-height: 55vh;
+      padding: var(--space-12) var(--space-4);
     }
 
     .hero__title {
-      font-size: var(--text-2xl);
+      font-size: var(--text-3xl);
     }
 
     .hero__description {
@@ -432,6 +444,7 @@
     .hero__actions {
       flex-direction: column;
       width: 100%;
+      gap: var(--space-3);
     }
 
     .hero__cta {

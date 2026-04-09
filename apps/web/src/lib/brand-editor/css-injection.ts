@@ -31,15 +31,30 @@ const BRAND_PREFIX_KEYS = new Set([
   'shader-intensity',
   'shader-grain',
   'shader-vignette',
+  // Suture
   'shader-curl',
   'shader-dissipation',
+  'shader-advection',
+  'shader-force',
+  // Ether
   'shader-rotation-speed',
   'shader-complexity',
   'shader-zoom',
+  'shader-glow',
+  'shader-scale',
+  'shader-aberration',
+  // Warp
   'shader-warp-strength',
   'shader-light-angle',
+  'shader-speed',
+  'shader-detail',
+  'shader-contrast',
+  'shader-invert',
+  // Ripple
   'shader-wave-speed',
   'shader-damping',
+  'shader-ripple-size',
+  'shader-refraction',
 ]);
 
 /** The CSS variable mappings from editor state to --brand-* properties. */

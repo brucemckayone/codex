@@ -112,7 +112,7 @@ export function createRippleRenderer(): ShaderRenderer {
     gl.uniform2f(simU.uTexel, tx, tx);
     gl.uniform1f(simU.uWaveSpeed, cfg.waveSpeed);
     gl.uniform1f(simU.uDamping, cfg.damping);
-    gl.uniform1f(simU.uRippleSize, DEFAULT_RIPPLE_SIZE);
+    gl.uniform1f(simU.uRippleSize, cfg.rippleSize ?? DEFAULT_RIPPLE_SIZE);
     gl.uniform2f(simU.uMouse, mouseX, mouseY);
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
     gl.uniform1f(simU.uMouseStrength, mouseStr);
@@ -218,7 +218,7 @@ export function createRippleRenderer(): ShaderRenderer {
       gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
       gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
       gl.uniform1f(displayU.uIntensity, cfg.intensity);
-      gl.uniform1f(displayU.uRefraction, DEFAULT_REFRACTION);
+      gl.uniform1f(displayU.uRefraction, cfg.refraction ?? DEFAULT_REFRACTION);
       gl.uniform1f(displayU.uGrain, cfg.grain);
       gl.uniform1f(displayU.uVignette, cfg.vignette);
       gl.uniform1f(displayU.uTime, time);

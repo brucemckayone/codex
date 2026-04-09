@@ -115,13 +115,16 @@ export function createEtherRenderer(): ShaderRenderer {
         uniforms.u_complexity,
         cfg.complexity ?? DEFAULTS.complexity
       );
-      gl.uniform1f(uniforms.u_glow, DEFAULTS.glow);
-      gl.uniform1f(uniforms.u_scale, DEFAULTS.scale);
+      gl.uniform1f(uniforms.u_glow, cfg.glow ?? DEFAULTS.glow);
+      gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
       gl.uniform1f(uniforms.u_zoom, cfg.zoom ?? DEFAULTS.zoom);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
       gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
-      gl.uniform1f(uniforms.u_aberration, DEFAULTS.aberration);
+      gl.uniform1f(
+        uniforms.u_aberration,
+        cfg.aberration ?? DEFAULTS.aberration
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

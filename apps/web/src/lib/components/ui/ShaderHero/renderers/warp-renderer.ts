@@ -107,11 +107,14 @@ export function createWarpRenderer(): ShaderRenderer {
 
       // Preset-specific config with defaults
       gl.uniform1f(uniforms.u_warpStr, cfg.warpStrength ?? DEFAULTS.warpStr);
-      gl.uniform1i(uniforms.u_detail, DEFAULTS.detail);
-      gl.uniform1f(uniforms.u_speed, DEFAULTS.speed);
+      gl.uniform1i(uniforms.u_detail, cfg.detail ?? DEFAULTS.detail);
+      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
       gl.uniform1f(uniforms.u_lightAng, cfg.lightAngle ?? DEFAULTS.lightAng);
-      gl.uniform1f(uniforms.u_contrast, DEFAULTS.contrast);
-      gl.uniform1f(uniforms.u_invert, DEFAULTS.invert ? 1.0 : 0.0);
+      gl.uniform1f(uniforms.u_contrast, cfg.contrast ?? DEFAULTS.contrast);
+      gl.uniform1f(
+        uniforms.u_invert,
+        (cfg.invert ?? DEFAULTS.invert) ? 1.0 : 0.0
+      );
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
       gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);

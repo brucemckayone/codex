@@ -19,36 +19,37 @@
 
   // ── Default values ─────────────────────────────────────────────────────
   const DEFAULTS: Record<string, string> = {
-    'shader-intensity': '0.40',
+    'shader-intensity': '0.65',
     'shader-grain': '0.025',
     'shader-vignette': '0.20',
+    // Suture
     'shader-curl': '30',
     'shader-dissipation': '0.985',
+    'shader-advection': '6.0',
+    'shader-force': '1.00',
+    // Ether
     'shader-rotation-speed': '0.40',
     'shader-complexity': '6',
     'shader-zoom': '5.0',
+    'shader-glow': '0.50',
+    'shader-scale': '2.00',
+    'shader-aberration': '0.003',
+    // Warp
     'shader-warp-strength': '1.50',
     'shader-light-angle': '135',
+    'shader-speed': '0.30',
+    'shader-detail': '4',
+    'shader-contrast': '1.10',
+    'shader-invert': '1',
+    // Ripple
     'shader-wave-speed': '0.80',
     'shader-damping': '0.995',
+    'shader-ripple-size': '0.030',
+    'shader-refraction': '0.50',
   };
 
   /** All shader-* token override keys. */
-  const ALL_SHADER_KEYS = [
-    'shader-preset',
-    'shader-intensity',
-    'shader-grain',
-    'shader-vignette',
-    'shader-curl',
-    'shader-dissipation',
-    'shader-rotation-speed',
-    'shader-complexity',
-    'shader-zoom',
-    'shader-warp-strength',
-    'shader-light-angle',
-    'shader-wave-speed',
-    'shader-damping',
-  ];
+  const ALL_SHADER_KEYS = Object.keys(DEFAULTS).concat('shader-preset');
 
   // ── Read current overrides ─────────────────────────────────────────────
   const overrides = $derived(brandEditor.pending?.tokenOverrides ?? {});
@@ -62,27 +63,38 @@
     return Number.isFinite(n) ? n : Number(DEFAULTS[key]);
   }
 
-  // Shared sliders
+  // Shared
   const intensity = $derived(readNum('shader-intensity'));
   const grain = $derived(readNum('shader-grain'));
   const vignette = $derived(readNum('shader-vignette'));
 
-  // Suture sliders
+  // Suture
   const curl = $derived(readNum('shader-curl'));
   const dissipation = $derived(readNum('shader-dissipation'));
+  const advection = $derived(readNum('shader-advection'));
+  const force = $derived(readNum('shader-force'));
 
-  // Ether sliders
+  // Ether
   const rotationSpeed = $derived(readNum('shader-rotation-speed'));
   const complexity = $derived(readNum('shader-complexity'));
   const zoom = $derived(readNum('shader-zoom'));
+  const glow = $derived(readNum('shader-glow'));
+  const scale = $derived(readNum('shader-scale'));
+  const aberration = $derived(readNum('shader-aberration'));
 
-  // Warp sliders
+  // Warp
   const warpStrength = $derived(readNum('shader-warp-strength'));
   const lightAngle = $derived(readNum('shader-light-angle'));
+  const speed = $derived(readNum('shader-speed'));
+  const detail = $derived(readNum('shader-detail'));
+  const contrast = $derived(readNum('shader-contrast'));
+  const invert = $derived(overrides['shader-invert'] !== '0' && overrides['shader-invert'] !== 'false');
 
-  // Ripple sliders
+  // Ripple
   const waveSpeed = $derived(readNum('shader-wave-speed'));
   const damping = $derived(readNum('shader-damping'));
+  const rippleSize = $derived(readNum('shader-ripple-size'));
+  const refraction = $derived(readNum('shader-refraction'));
 
   // ── Update helpers ─────────────────────────────────────────────────────
   function updateOverride(key: string, value: string) {
@@ -149,11 +161,11 @@
         label="Intensity"
         value={intensity.toFixed(2)}
         min={0.10}
-        max={1.00}
+        max={2.00}
         step={0.05}
         current={intensity}
         minLabel="Subtle"
-        maxLabel="Strong"
+        maxLabel="Vivid"
         oninput={handleSliderInput('shader-intensity')}
       />
 
@@ -214,6 +226,32 @@
           maxLabel="Slow"
           oninput={handleSliderInput('shader-dissipation')}
         />
+
+        <BrandSliderField
+          id="shader-advection"
+          label="Advection"
+          value={advection.toFixed(1)}
+          min={1.0}
+          max={15.0}
+          step={0.5}
+          current={advection}
+          minLabel="Short"
+          maxLabel="Long"
+          oninput={handleSliderInput('shader-advection')}
+        />
+
+        <BrandSliderField
+          id="shader-force"
+          label="Mouse Force"
+          value={force.toFixed(2)}
+          min={0.10}
+          max={3.00}
+          step={0.10}
+          current={force}
+          minLabel="Gentle"
+          maxLabel="Strong"
+          oninput={handleSliderInput('shader-force')}
+        />
       </section>
     {:else if activePreset === 'ether'}
       <section class="hero-fx__section">
@@ -257,6 +295,45 @@
           maxLabel="Far"
           oninput={handleSliderInput('shader-zoom')}
         />
+
+        <BrandSliderField
+          id="shader-glow"
+          label="Glow"
+          value={glow.toFixed(2)}
+          min={0.10}
+          max={1.50}
+          step={0.05}
+          current={glow}
+          minLabel="Dim"
+          maxLabel="Bright"
+          oninput={handleSliderInput('shader-glow')}
+        />
+
+        <BrandSliderField
+          id="shader-scale"
+          label="Scale"
+          value={scale.toFixed(2)}
+          min={0.50}
+          max={4.00}
+          step={0.25}
+          current={scale}
+          minLabel="Small"
+          maxLabel="Large"
+          oninput={handleSliderInput('shader-scale')}
+        />
+
+        <BrandSliderField
+          id="shader-aberration"
+          label="Chromatic Aberration"
+          value={aberration.toFixed(3)}
+          min={0.000}
+          max={0.020}
+          step={0.001}
+          current={aberration}
+          minLabel="None"
+          maxLabel="Heavy"
+          oninput={handleSliderInput('shader-aberration')}
+        />
       </section>
     {:else if activePreset === 'warp'}
       <section class="hero-fx__section">
@@ -287,6 +364,58 @@
           maxLabel="360°"
           oninput={handleSliderInput('shader-light-angle')}
         />
+
+        <BrandSliderField
+          id="shader-speed"
+          label="Animation Speed"
+          value={speed.toFixed(2)}
+          min={0.05}
+          max={1.00}
+          step={0.05}
+          current={speed}
+          minLabel="Slow"
+          maxLabel="Fast"
+          oninput={handleSliderInput('shader-speed')}
+        />
+
+        <BrandSliderField
+          id="shader-detail"
+          label="Detail (octaves)"
+          value={String(Math.round(detail))}
+          min={2}
+          max={6}
+          step={1}
+          current={detail}
+          minLabel="Smooth"
+          maxLabel="Detailed"
+          oninput={handleSliderInput('shader-detail')}
+        />
+
+        <BrandSliderField
+          id="shader-contrast"
+          label="Contrast"
+          value={contrast.toFixed(2)}
+          min={0.50}
+          max={2.00}
+          step={0.10}
+          current={contrast}
+          minLabel="Flat"
+          maxLabel="Punchy"
+          oninput={handleSliderInput('shader-contrast')}
+        />
+
+        <div class="hero-fx__toggle-row">
+          <span class="hero-fx__toggle-label">Invert Colors</span>
+          <button
+            class="hero-fx__toggle"
+            class:hero-fx__toggle--on={invert}
+            onclick={() => updateOverride('shader-invert', invert ? '0' : '1')}
+            role="switch"
+            aria-checked={invert}
+          >
+            <span class="hero-fx__toggle-thumb"></span>
+          </button>
+        </div>
       </section>
     {:else if activePreset === 'ripple'}
       <section class="hero-fx__section">
@@ -316,6 +445,32 @@
           minLabel="Quick"
           maxLabel="Lasting"
           oninput={handleSliderInput('shader-damping')}
+        />
+
+        <BrandSliderField
+          id="shader-ripple-size"
+          label="Ripple Size"
+          value={rippleSize.toFixed(3)}
+          min={0.010}
+          max={0.100}
+          step={0.005}
+          current={rippleSize}
+          minLabel="Tiny"
+          maxLabel="Wide"
+          oninput={handleSliderInput('shader-ripple-size')}
+        />
+
+        <BrandSliderField
+          id="shader-refraction"
+          label="Refraction"
+          value={refraction.toFixed(2)}
+          min={0.10}
+          max={1.00}
+          step={0.05}
+          current={refraction}
+          minLabel="Flat"
+          maxLabel="Deep"
+          oninput={handleSliderInput('shader-refraction')}
         />
       </section>
     {/if}
@@ -393,5 +548,50 @@
 
   .hero-fx__preset-card--active .hero-fx__preset-label {
     color: var(--color-interactive);
+  }
+
+  /* ── Toggle Switch ───────────────────────────── */
+
+  .hero-fx__toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-1) 0;
+  }
+
+  .hero-fx__toggle-label {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .hero-fx__toggle {
+    position: relative;
+    width: var(--space-10);
+    height: var(--space-5);
+    background: var(--color-surface-tertiary);
+    border: none;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: background var(--duration-normal) var(--ease-default);
+    padding: 0;
+  }
+
+  .hero-fx__toggle--on {
+    background: var(--color-interactive);
+  }
+
+  .hero-fx__toggle-thumb {
+    position: absolute;
+    top: var(--space-0-5);
+    left: var(--space-0-5);
+    width: var(--space-4);
+    height: var(--space-4);
+    background: white;
+    border-radius: var(--radius-full);
+    transition: transform var(--duration-normal) var(--ease-default);
+  }
+
+  .hero-fx__toggle--on .hero-fx__toggle-thumb {
+    transform: translateX(var(--space-5));
   }
 </style>
