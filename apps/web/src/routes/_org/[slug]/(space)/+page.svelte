@@ -11,6 +11,7 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import { Badge } from '$lib/components/ui/Badge';
+  import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { hydrateIfNeeded } from '$lib/collections';
   import type { PageData } from './$types';
@@ -51,6 +52,7 @@
 <div class="org-landing">
   <!-- 1. Hero Section -->
   <section class="hero">
+    <ShaderHero />
     <div class="hero__inner">
       {#if logoUrl}
         <img
@@ -238,6 +240,7 @@
 
   .hero__inner {
     position: relative;
+    z-index: 1;
     max-width: 720px;
     margin: 0 auto;
     display: flex;

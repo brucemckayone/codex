@@ -26,6 +26,20 @@ const BRAND_PREFIX_KEYS = new Set([
   'body-weight',
   'shadow-scale',
   'shadow-color',
+  // Shader hero configuration — consumed by ShaderHero component via getComputedStyle
+  'shader-preset',
+  'shader-intensity',
+  'shader-grain',
+  'shader-vignette',
+  'shader-curl',
+  'shader-dissipation',
+  'shader-rotation-speed',
+  'shader-complexity',
+  'shader-zoom',
+  'shader-warp-strength',
+  'shader-light-angle',
+  'shader-wave-speed',
+  'shader-damping',
 ]);
 
 /** The CSS variable mappings from editor state to --brand-* properties. */

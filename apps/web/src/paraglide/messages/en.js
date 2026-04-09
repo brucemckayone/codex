@@ -6912,3 +6912,67 @@ export const brand_editor_auto = () => `Auto`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const brand_editor_customize = () => `Customize`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_form_tags = () => `Tags`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_form_optional = () => `Optional`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_form_tags_placeholder = () => `Add tags...`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_form_tags_hint = (params) => `Press Enter or comma to add. Max ${params.max} chars each.`
+
+
+/**
+ * @param {{ tag: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_form_tags_remove = (params) => `Remove tag ${params.tag}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_search = () => `Search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_sign_in = () => `Sign in`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_register = () => `Register`

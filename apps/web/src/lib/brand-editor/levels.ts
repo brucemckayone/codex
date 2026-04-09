@@ -62,6 +62,14 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
     icon: '✦',
     description: 'Quick-apply brand themes',
   },
+  'hero-effects': {
+    id: 'hero-effects',
+    depth: 1,
+    label: 'Hero Effects',
+    parent: 'home',
+    icon: '◈',
+    description: 'Animated shader backgrounds',
+  },
   'fine-tune-colors': {
     id: 'fine-tune-colors',
     depth: 2,
@@ -83,6 +91,7 @@ export const HOME_CATEGORIES: LevelId[] = [
   'shape',
   'shadows',
   'logo',
+  'hero-effects',
 ];
 
 /** Get the breadcrumb trail for a given level. */

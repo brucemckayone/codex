@@ -881,5 +881,8 @@
   "content_form_optional": "Optional",
   "content_form_tags_placeholder": "Add tags...",
   "content_form_tags_hint": "Press Enter or comma to add. Max {max} chars each.",
-  "content_form_tags_remove": "Remove tag {tag}"
+  "content_form_tags_remove": "Remove tag {tag}",
+  "sidebar_search": "Search",
+  "sidebar_sign_in": "Sign in",
+  "sidebar_register": "Register"
 }

@@ -63,6 +63,7 @@ export type LevelId =
   | 'shadows'
   | 'logo'
   | 'presets'
+  | 'hero-effects'
   | 'fine-tune-colors'
   | 'fine-tune-typography';
 
