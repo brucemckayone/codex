@@ -11,7 +11,6 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import { Badge } from '$lib/components/ui/Badge';
-  import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { hydrateIfNeeded } from '$lib/collections';
   import type { PageData } from './$types';
@@ -52,7 +51,6 @@
 <div class="org-landing">
   <!-- 1. Hero Section -->
   <section class="hero">
-    <ShaderHero />
     <div class="hero__inner">
       {#if logoUrl}
         <img
@@ -77,6 +75,7 @@
     </div>
   </section>
 
+  <div class="content-area">
   <!-- 2. Continue Watching (streamed, auth + has items only) -->
   {#await data.continueWatching}
     <section class="section continue-watching">
@@ -210,6 +209,7 @@
       </section>
     {/if}
   {/await}
+  </div>
 </div>
 
 <style>
@@ -228,18 +228,10 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-16) var(--space-6);
-    background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+    background: transparent;
     color: var(--color-text-on-brand);
     text-align: center;
     overflow: hidden;
-  }
-
-  .hero::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(ellipse at 50% 0%, color-mix(in srgb, white 15%, transparent) 0%, transparent 70%);
-    pointer-events: none;
   }
 
   .hero__inner {
@@ -331,10 +323,19 @@
 
   /* ── Shared Section Styles ── */
   .section {
+    position: relative;
     padding: var(--space-12) var(--space-6);
     max-width: 1200px;
     width: 100%;
     margin: 0 auto;
+  }
+
+  /* ── Content backdrop — readable over full-page shader ── */
+  .content-area {
+    position: relative;
+    background: color-mix(in srgb, var(--color-background) 85%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
   }
 
   .section__header {

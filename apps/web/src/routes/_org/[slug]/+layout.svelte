@@ -33,6 +33,7 @@
   import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
   import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
   import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
+  import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
@@ -304,6 +305,7 @@
   style:--brand-body-weight={brandBodyWeight}
 >
   {#if !isStudio}
+    <ShaderHero class="shader-hero--fullpage" />
     <SidebarRail variant="org" user={data.user} org={data.org} onSearchClick={() => { searchOpen = true; }} />
   {/if}
 
@@ -382,6 +384,18 @@
     color: var(--color-text);
   }
 
+  /* Full-page shader background — fixed behind all content */
+  :global(.shader-hero--fullpage) {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+  }
+
+  :global(.shader-hero--fullpage canvas) {
+    pointer-events: auto;
+  }
+
   .org-main {
     flex: 1;
     margin-left: var(--space-16);
@@ -403,8 +417,11 @@
   }
 
   .org-footer {
+    position: relative;
     border-top: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-surface);
+    background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     padding: var(--space-8) var(--space-4);
     margin-left: var(--space-16);
   }
