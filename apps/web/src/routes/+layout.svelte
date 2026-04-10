@@ -56,7 +56,7 @@
       // but slow server loads (cold workers in dev) can still hit edge cases.
       // skipTransition() completes the transition instantly (no animation),
       // ensuring the DOM always updates without waiting for Chrome's 4s timeout.
-      const safety = setTimeout(() => transition.skipTransition(), 500);
+      const safety = setTimeout(() => transition.skipTransition(), 1200);
       transition.finished
         .finally(() => clearTimeout(safety))
         .catch(() => {});

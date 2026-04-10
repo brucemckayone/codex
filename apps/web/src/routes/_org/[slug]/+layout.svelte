@@ -52,6 +52,9 @@
 
   // Studio routes have their own header/sidebar — hide the org chrome
   const isStudio = $derived(page.url.pathname.startsWith('/studio'));
+  // Landing page needs mix-blend-mode to reach the shader canvas,
+  // which requires dropping view-transition-name (it creates isolation)
+  const isLanding = $derived(page.url.pathname === '/');
   let searchOpen = $state(false);
   let moreOpen = $state(false);
 
@@ -340,12 +343,12 @@
   style:--brand-heading-weight={brandHeadingWeight}
   style:--brand-body-weight={brandBodyWeight}
 >
+  <ShaderHero class="shader-hero--fullpage" />
   {#if !isStudio}
-    <ShaderHero class="shader-hero--fullpage" />
     <SidebarRail variant="org" user={data.user} org={data.org} onSearchClick={() => { searchOpen = true; }} />
   {/if}
 
-  <main id="main-content" class="org-main" class:org-main--studio={isStudio}>
+  <main id="main-content" class="org-main" class:org-main--studio={isStudio} class:org-main--blendable={isLanding} class:org-main--landing={isLanding}>
     {@render children()}
   </main>
 
@@ -432,6 +435,7 @@
     pointer-events: auto;
   }
 
+
   .org-main {
     flex: 1;
     margin-left: var(--space-16);
@@ -441,6 +445,14 @@
   .org-main--studio {
     margin-left: 0;
   }
+
+  /* Landing page: drop view-transition-name + allow blend-mode to reach shader.
+     view-transition-name creates an isolated stacking context that blocks
+     mix-blend-mode from compositing against the shader canvas. */
+  .org-main--blendable {
+    view-transition-name: none;
+  }
+
 
   @media (--below-md) {
     .org-main {

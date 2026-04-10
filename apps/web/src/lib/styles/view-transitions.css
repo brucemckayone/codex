@@ -25,11 +25,11 @@
 /* ── Page content dissolve (shader shows through) ── */
 
 ::view-transition-old(page-content) {
-  animation: content-dissolve-out var(--duration-slow, 300ms) var(--ease-out, ease-out) both;
+  animation: content-dissolve-out 600ms var(--ease-out, ease-out) both;
 }
 
 ::view-transition-new(page-content) {
-  animation: content-dissolve-in var(--duration-slow, 300ms) var(--ease-out, ease-out) both;
+  animation: content-dissolve-in 600ms var(--ease-out, ease-out) 100ms both;
 }
 
 @keyframes content-dissolve-out {
