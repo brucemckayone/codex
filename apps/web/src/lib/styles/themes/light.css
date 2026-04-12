@@ -7,6 +7,7 @@
   --color-surface-tertiary: var(--color-neutral-200);
   --color-surface-elevated: #ffffff;
   --color-surface-overlay: rgb(0 0 0 / 0.5);
+  --color-surface-variant: var(--color-neutral-100);
 
   /* Text */
   --color-text: var(--color-neutral-900);
@@ -22,6 +23,7 @@
   --color-border: var(--color-neutral-200);
   --color-border-strong: var(--color-neutral-300);
   --color-border-subtle: var(--color-neutral-100);
+  --color-border-hover: var(--color-neutral-300);
   --color-border-focus: var(--color-primary-500);
 
   /* Interactive */

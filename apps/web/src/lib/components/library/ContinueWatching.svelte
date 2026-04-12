@@ -10,9 +10,11 @@
 -->
 <script lang="ts">
   import type { LibraryItem } from '$lib/collections';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
-  import ContinueWatchingCard from './ContinueWatchingCard.svelte';
+  import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { buildContentUrl } from '$lib/utils/subdomain';
 
   interface Props {
     items: LibraryItem[];
@@ -37,12 +39,20 @@
       .slice(0, 4);
   });
 
-  const cardSize = $derived(variant === 'prominent' ? 'large' : 'default');
-  const itemMinWidth = $derived(variant === 'prominent' ? '280px' : '220px');
+  const itemMinWidth = $derived(variant === 'prominent' ? '280px' : '240px');
 </script>
 
 {#snippet renderItem(item: LibraryItem)}
-  <ContinueWatchingCard {item} size={cardSize} />
+  <ContentCard
+    variant="resume"
+    id={item.content.id}
+    title={item.content.title}
+    thumbnail={item.content.thumbnailUrl}
+    contentType={(item.content.contentType === 'written' ? 'article' : item.content.contentType) as 'video' | 'audio' | 'article'}
+    duration={item.content.durationSeconds}
+    progress={item.progress}
+    href={buildContentUrl(page.url, item.content)}
+  />
 {/snippet}
 
 <section class="continue-watching" class:continue-watching--prominent={variant === 'prominent'}>

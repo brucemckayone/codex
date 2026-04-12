@@ -30,11 +30,10 @@
   import type { Snippet } from 'svelte';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
-  import { SkeletonContentCard } from '$lib/components/ui/ContentCard';
+  import { ContentCard, SkeletonContentCard } from '$lib/components/ui/ContentCard';
   import { ShoppingBagIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import LibraryFilters from './LibraryFilters.svelte';
   import ContinueWatching from './ContinueWatching.svelte';
-  import LibraryCard from './LibraryCard.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
@@ -198,7 +197,16 @@
     {:else}
       <div class="content-grid content-grid--compact" data-view={viewMode}>
         {#each items as item (item.content.id)}
-          <LibraryCard {item} href={buildItemHref(item)} />
+          <ContentCard
+            id={item.content.id}
+            title={item.content.title}
+            thumbnail={item.content.thumbnailUrl}
+            contentType={(item.content.contentType === 'written' ? 'article' : item.content.contentType) as 'video' | 'audio' | 'article'}
+            duration={item.content.durationSeconds}
+            progress={item.progress}
+            accessType={item.accessType}
+            href={buildItemHref(item)}
+          />
         {/each}
       </div>
 

@@ -1,39 +1,40 @@
 <!--
   @component ContentCard
 
-  Displays a content item with thumbnail, title, description, and creator info.
-  Supports video, audio, and article content types with duration display.
-  Optional progress bar overlay and price badge on the thumbnail.
+  Unified content card for all contexts: browse grids, library lists, featured
+  sections, compact sidebars, and continue-watching carousels.
 
+  @prop {'grid' | 'list' | 'featured' | 'compact' | 'resume'} variant - Layout variant
   @prop {string} id - Unique content identifier
   @prop {string} title - Content title
   @prop {string} thumbnail - Thumbnail image URL
-  @prop {string} description - Optional content description
+  @prop {string} description - Content description (shown in 'featured' variant only)
   @prop {'video' | 'audio' | 'article'} contentType - Type of content
   @prop {number} duration - Duration in seconds
-  @prop {{ username?: string; displayName?: string; avatar?: string }} creator - Creator information
-  @prop {Snippet} actions - Action buttons snippet
+  @prop {{ username?; displayName?; avatar? }} creator - Creator info (shown in grid/featured)
+  @prop {Snippet} actions - Custom action buttons
   @prop {string} href - Link URL
-  @prop {boolean} loading - Show loading state
-  @prop {{ positionSeconds?: number; durationSeconds?: number; completed?: boolean; percentComplete?: number } | null} progress - Playback progress
-  @prop {{ amount: number; currency: string } | null} price - Price info (null = hidden, amount 0 = Free)
+  @prop {boolean} loading - Show skeleton loading state
+  @prop {object | null} progress - Playback progress data
+  @prop {{ amount; currency } | null} price - Price info (null = hidden, 0 = Free)
+  @prop {boolean} purchased - Whether user has purchased this content
+  @prop {'purchased' | 'subscription' | 'membership' | null} accessType - Access type badge
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
   import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
-  import { formatDurationHuman } from '$lib/utils/format';
+  import { formatDuration, formatDurationHuman } from '$lib/utils/format';
   import { calculateProgressPercent } from '$lib/utils/progress';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
-  import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
+  import { PlayIcon, MusicIcon, FileTextIcon, CheckIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
-    /** Card display variant. @default 'explore' */
-    variant?: 'explore' | 'library' | 'featured' | 'compact';
+    variant?: 'grid' | 'list' | 'featured' | 'compact' | 'resume';
     id: string;
     title: string;
     thumbnail?: string | null;
@@ -59,10 +60,11 @@
       currency: string;
     } | null;
     purchased?: boolean;
+    accessType?: 'purchased' | 'subscription' | 'membership' | null;
   }
 
   const {
-    variant = 'explore',
+    variant = 'grid',
     id,
     title,
     thumbnail,
@@ -76,39 +78,79 @@
     progress = null,
     price = null,
     purchased = false,
+    accessType = null,
     class: className,
     ...rest
   }: Props = $props();
 
-  const contentTypeLabels = {
-    video: m.content_type_video(),
-    audio: m.content_type_audio(),
-    article: m.content_type_article(),
-  };
-
+  const titleId = $derived(`cc-title-${id}`);
   const profileHref = $derived(creator?.username ? `/@${creator.username}` : '#');
-
   const progressPercent = $derived(calculateProgressPercent(progress));
-
   const hasProgress = $derived(progress != null && (progress.completed || progressPercent > 0));
+  const isCompleted = $derived(progress?.completed ?? false);
+
+  const contentTypeLabel = $derived.by(() => {
+    switch (contentType) {
+      case 'video': return m.content_type_video();
+      case 'audio': return m.content_type_audio();
+      case 'article': return m.content_type_article();
+      default: return contentType;
+    }
+  });
+
+  const timeRemaining = $derived.by(() => {
+    if (!progress || isCompleted) return null;
+    const remaining = (progress.durationSeconds ?? 0) - (progress.positionSeconds ?? 0);
+    if (remaining <= 0) return null;
+    return formatDurationHuman(remaining);
+  });
+
+  const resumeTime = $derived(formatDuration(progress?.positionSeconds ?? 0));
+
+  const accessBadgeLabel = $derived.by(() => {
+    switch (accessType) {
+      case 'purchased': return m.library_access_badge_purchased();
+      case 'subscription': return m.library_access_badge_subscription();
+      case 'membership': return m.library_access_badge_membership();
+      default: return null;
+    }
+  });
+
+  const showCreator = $derived(variant === 'grid' || variant === 'featured');
+  const showDescription = $derived(variant === 'featured' && description);
+  const showMetadata = $derived(variant !== 'resume');
+  const showPriceBadge = $derived(
+    accessType == null &&
+    variant !== 'compact' && variant !== 'resume' &&
+    (price != null || purchased)
+  );
+  const showAccessBadge = $derived(accessBadgeLabel != null && variant !== 'compact' && variant !== 'resume');
+  const showProgressStatus = $derived(hasProgress && accessType != null && variant !== 'compact' && variant !== 'resume');
+  const showResumeInfo = $derived(variant === 'resume');
 </script>
 
-<article class="content-card {className ?? ''} {loading ? 'content-card--loading' : ''}" data-variant={variant} {...rest}>
+<article
+  class="cc {className ?? ''}"
+  class:cc--loading={loading}
+  data-variant={variant}
+  aria-labelledby={!loading ? titleId : undefined}
+  {...rest}
+>
   {#if loading}
-    <div class="content-card__thumbnail content-card__thumbnail--skeleton">
-      <Skeleton height="100%" />
+    <div class="cc__thumb cc__thumb--skeleton">
+      <Skeleton width="100%" height="100%" />
     </div>
-    <div class="content-card__body">
-      <Skeleton width="75%" height="1.5rem" />
+    <div class="cc__body">
+      <Skeleton width="75%" height="1.25rem" />
       <Skeleton width="50%" height="1rem" />
       <Skeleton width="60%" height="1rem" />
     </div>
   {:else}
-    <a href={href} class="content-card__link">
+    <a href={href} class="cc__link" tabindex="-1" aria-hidden="true">
       <span class="sr-only">{m.content_view({ title })}</span>
     </a>
 
-    <div class="content-card__thumbnail">
+    <div class="cc__thumb">
       {#if thumbnail}
         <img
           src={thumbnail}
@@ -116,10 +158,10 @@
           sizes={DEFAULT_SIZES}
           alt={m.content_thumbnail_alt({ title })}
           loading="lazy"
-          class="content-card__image"
-          onerror={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }}
+          class="cc__image"
+          onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
         />
-        <div class="content-card__placeholder hidden">
+        <div class="cc__placeholder hidden">
           {#if contentType === 'video'}
             <PlayIcon size={32} />
           {:else if contentType === 'audio'}
@@ -129,7 +171,7 @@
           {/if}
         </div>
       {:else}
-        <div class="content-card__placeholder">
+        <div class="cc__placeholder">
           {#if contentType === 'video'}
             <PlayIcon size={32} />
           {:else if contentType === 'audio'}
@@ -140,65 +182,109 @@
         </div>
       {/if}
 
-      {#if duration}
-        <span class="content-card__duration" aria-label="{m.content_duration()}: {formatDurationHuman(duration)}">
+      {#if duration && variant !== 'resume'}
+        <span class="cc__duration" aria-label="{m.content_duration()}: {formatDurationHuman(duration)}">
           {formatDurationHuman(duration)}
         </span>
       {/if}
 
-      <span class="content-card__type-icon" aria-label={contentTypeLabels[contentType]}>
-        {#if contentType === 'video'}
-          <PlayIcon size={16} />
-        {:else if contentType === 'audio'}
-          <MusicIcon size={16} />
-        {:else}
-          <FileTextIcon size={16} />
-        {/if}
-      </span>
+      {#if variant !== 'compact' && variant !== 'resume'}
+        <span class="cc__type-icon" aria-label={contentTypeLabel}>
+          {#if contentType === 'video'}
+            <PlayIcon size={14} />
+          {:else if contentType === 'audio'}
+            <MusicIcon size={14} />
+          {:else}
+            <FileTextIcon size={14} />
+          {/if}
+        </span>
+      {/if}
 
-      {#if price != null || purchased}
+      {#if showPriceBadge}
         <PriceBadge
           amount={price?.amount ?? null}
           currency={price?.currency ?? 'GBP'}
           {purchased}
-          class="content-card__price-badge"
+          class="cc__price-badge"
         />
       {/if}
 
       {#if hasProgress}
-        <div class="content-card__progress-track" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
-          <div class="content-card__progress-fill" style="width: {progressPercent}%"></div>
+        <div
+          class="cc__progress-track"
+          role="progressbar"
+          aria-valuenow={progressPercent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Watch progress"
+        >
+          <div
+            class="cc__progress-fill"
+            class:cc__progress-fill--completed={isCompleted}
+            style="width: {progressPercent}%"
+          ></div>
         </div>
       {/if}
     </div>
 
-    <div class="content-card__body">
-      <h3 class="content-card__title">
+    <div class="cc__body">
+      <h3 class="cc__title" id={titleId}>
         <a href={href}>{title}</a>
       </h3>
 
-      {#if description}
-        <p class="content-card__description">{extractPlainText(description)}</p>
+      {#if showDescription}
+        <p class="cc__description">{extractPlainText(description)}</p>
       {/if}
 
-      {#if hasProgress}
-        <p class="content-card__progress-text">
-          {#if progress?.completed}
-            {m.content_progress_completed()}
-          {:else}
-            {m.content_progress_percent({ percent: String(progressPercent) })}
+      {#if showMetadata}
+        <p class="cc__meta">
+          <span class="cc__meta-type">{contentTypeLabel}</span>
+          {#if duration}
+            <span class="cc__meta-sep" aria-hidden="true">&middot;</span>
+            <span>{formatDurationHuman(duration)}</span>
           {/if}
         </p>
       {/if}
 
-      {#if creator}
-        <div class="content-card__creator">
-          <a href={profileHref} class="content-card__creator-link">
-            <Avatar src={creator.avatar} class="content-card__creator-avatar">
+      {#if showAccessBadge}
+        <span class="cc__access-badge cc__access-badge--{accessType}">
+          {accessBadgeLabel}
+        </span>
+      {/if}
+
+      {#if showProgressStatus}
+        {#if isCompleted}
+          <div class="cc__progress-status cc__progress-status--completed">
+            <CheckIcon size={14} />
+            {m.content_progress_completed()}
+          </div>
+        {:else if hasProgress}
+          <div class="cc__progress-status">
+            {m.content_progress_percent({ percent: String(progressPercent) })}
+            {#if timeRemaining}
+              <span class="cc__meta-sep" aria-hidden="true">&middot;</span>
+              {m.library_time_remaining({ time: timeRemaining })}
+            {/if}
+          </div>
+        {/if}
+      {/if}
+
+      {#if showResumeInfo}
+        <p class="cc__resume-text">{m.library_resume_from({ time: resumeTime })}</p>
+        <span class="cc__resume-pill">
+          <PlayIcon size={14} />
+          {m.library_resume()}
+        </span>
+      {/if}
+
+      {#if showCreator && creator}
+        <div class="cc__creator">
+          <a href={profileHref} class="cc__creator-link">
+            <Avatar src={creator.avatar} class="cc__creator-avatar">
               <AvatarImage src={creator.avatar} alt={creator.displayName ?? 'Creator'} />
               <AvatarFallback>{creator.displayName?.charAt(0).toUpperCase() ?? '?'}</AvatarFallback>
             </Avatar>
-            <span class="content-card__creator-name">
+            <span class="cc__creator-name">
               {creator.displayName ?? creator.username ?? '?'}
             </span>
           </a>
@@ -207,13 +293,17 @@
     </div>
 
     {#if actions}
-      <div class="content-card__actions">{@render actions()}</div>
+      <div class="cc__actions">{@render actions()}</div>
     {/if}
   {/if}
 </article>
 
 <style>
-  .content-card {
+  /* ═══════════════════════════════════════════
+     BASE CARD
+     ═══════════════════════════════════════════ */
+
+  .cc {
     position: relative;
     display: flex;
     flex-direction: column;
@@ -221,50 +311,67 @@
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    transition: var(--transition-colors), var(--transition-shadow), var(--transition-transform);
+    transition:
+      transform 300ms cubic-bezier(0.2, 0, 0, 1),
+      box-shadow 300ms cubic-bezier(0.2, 0, 0, 1),
+      border-color var(--duration-fast) var(--ease-default);
   }
 
-  .content-card:hover,
-  .content-card:focus-within {
+  .cc:hover,
+  .cc:focus-within:has(:focus-visible) {
     border-color: var(--color-border-hover);
     box-shadow: var(--shadow-lg);
-    transform: scale(1.02);
-    z-index: 1;
+    transform: translateY(calc(-1 * var(--space-0-5))) scale(1.02);
+    z-index: 2;
   }
 
-  .content-card--loading {
+  .cc:focus-within:has(:focus-visible) {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  .cc--loading {
     pointer-events: none;
   }
 
-  .content-card__link {
+  .cc__link {
     position: absolute;
     inset: 0;
     z-index: 1;
   }
 
+  /* ═══════════════════════════════════════════
+     THUMBNAIL
+     ═══════════════════════════════════════════ */
 
-  .content-card__thumbnail {
+  .cc__thumb {
     position: relative;
     aspect-ratio: 16 / 9;
     background: var(--color-surface-secondary);
     overflow: hidden;
+    flex-shrink: 0;
   }
 
-  .content-card__thumbnail--skeleton {
+  .cc__thumb--skeleton {
     background: var(--color-surface);
   }
 
-  .content-card__image {
+  .cc__image {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: transform 500ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .cc:hover .cc__image {
+    transform: scale(1.05);
   }
 
   .hidden {
     display: none;
   }
 
-  .content-card__placeholder {
+  .cc__placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -274,42 +381,47 @@
     background: var(--color-surface-secondary);
   }
 
-  .content-card__duration {
+  .cc__duration {
     position: absolute;
     bottom: var(--space-2);
     right: var(--space-2);
-    padding: var(--space-1) var(--space-2);
+    padding: var(--space-0-5) var(--space-2);
     background: var(--color-overlay);
     color: var(--color-text-inverse);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     border-radius: var(--radius-sm);
+    line-height: var(--leading-tight);
   }
 
-  .content-card__type-icon {
+  .cc__type-icon {
     position: absolute;
     bottom: var(--space-2);
     left: var(--space-2);
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-1);
+    padding: var(--space-0-5);
     background: var(--color-overlay);
     color: var(--color-text-inverse);
     border-radius: var(--radius-sm);
     line-height: 0;
   }
 
-  /* Position PriceBadge within thumbnail */
-  :global(.content-card__price-badge) {
+  :global(.cc__price-badge) {
     position: absolute;
     top: var(--space-2);
     right: var(--space-2);
     z-index: 1;
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
   }
 
-  /* Progress bar */
-  .content-card__progress-track {
+  /* ═══════════════════════════════════════════
+     PROGRESS BAR
+     ═══════════════════════════════════════════ */
+
+  .cc__progress-track {
     position: absolute;
     bottom: 0;
     left: 0;
@@ -318,52 +430,61 @@
     background: var(--color-overlay-light);
   }
 
-  .content-card__progress-fill {
+  .cc__progress-fill {
     height: 100%;
     background: var(--color-interactive);
     transition: width var(--duration-slow) var(--ease-default);
-    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
 
-  /* Progress text */
-  .content-card__progress-text {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--color-interactive);
-    font-weight: var(--font-medium);
+  .cc__progress-fill--completed {
+    background: var(--color-success);
   }
 
-  .content-card__body {
+  /* ═══════════════════════════════════════════
+     BODY
+     ═══════════════════════════════════════════ */
+
+  .cc__body {
     padding: var(--space-3);
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: var(--space-1-5);
     flex: 1;
   }
 
-  .content-card__title {
+  .cc__title {
     margin: 0;
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
-    line-height: var(--leading-normal);
+    line-height: var(--leading-tight);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  .content-card__title a {
+  .cc__title a {
     color: inherit;
     text-decoration: none;
     position: relative;
     z-index: 2;
   }
 
-  .content-card__title a:hover {
+  .cc__title a:hover {
     color: var(--color-interactive);
   }
 
-  .content-card__description {
+  .cc__title a:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  .cc__title a:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  .cc__description {
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
@@ -374,14 +495,98 @@
     overflow: hidden;
   }
 
-  .content-card__creator {
+  .cc__meta {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: var(--leading-tight);
+  }
+
+  .cc__meta-sep {
+    opacity: 0.5;
+  }
+
+  .cc__access-badge {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    padding: var(--space-0-5) var(--space-2);
+    font-size: 0.625rem;
+    font-weight: var(--font-semibold);
+    line-height: 1;
+    border-radius: var(--radius-full);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .cc__access-badge--purchased {
+    background-color: var(--color-success-100);
+    color: var(--color-success-700);
+  }
+
+  .cc__access-badge--subscription {
+    background-color: var(--color-info-100);
+    color: var(--color-info-700);
+  }
+
+  .cc__access-badge--membership {
+    background-color: var(--color-warning-100);
+    color: var(--color-warning-700);
+  }
+
+  .cc__progress-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+  }
+
+  .cc__progress-status--completed {
+    color: var(--color-success);
+  }
+
+  .cc__resume-text {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .cc__resume-pill {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: var(--space-1);
+    margin-top: var(--space-0-5);
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-interactive);
+    background: transparent;
+    border: var(--border-width) var(--border-style) var(--color-interactive);
+    border-radius: var(--radius-full);
+    transition: background-color var(--duration-fast) var(--ease-default),
+                color var(--duration-fast) var(--ease-default);
+  }
+
+  .cc:hover .cc__resume-pill {
+    background: var(--color-interactive);
+    color: var(--color-text-inverse);
+  }
+
+  .cc__creator {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     margin-top: auto;
   }
 
-  .content-card__creator-link {
+  .cc__creator-link {
     display: flex;
     align-items: center;
     gap: var(--space-2);
@@ -390,95 +595,116 @@
     z-index: 2;
   }
 
-  .content-card__creator-link:hover .content-card__creator-name {
+  .cc__creator-link:hover .cc__creator-name {
     color: var(--color-interactive);
   }
 
-  .content-card__creator-name {
+  .cc__creator-name {
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    transition: var(--transition-colors);
+    transition: color var(--duration-fast) var(--ease-default);
   }
 
-  :global(.content-card__creator-avatar) {
+  :global(.cc__creator-avatar) {
     height: var(--space-6);
     width: var(--space-6);
     font-size: var(--text-xs);
   }
 
-  .content-card__actions {
-    padding: var(--space-3);
-    padding-top: 0;
+  .cc__actions {
+    padding: 0 var(--space-3) var(--space-3);
   }
 
-  /* ── Variant: Library ── */
-  .content-card[data-variant='library'] {
+  /* ═══════════════════════════════════════════
+     VARIANT: LIST
+     ═══════════════════════════════════════════ */
+
+  .cc[data-variant='list'] {
     flex-direction: row;
   }
 
-  .content-card[data-variant='library'] .content-card__thumbnail {
+  .cc[data-variant='list'] .cc__thumb {
     width: 180px;
     min-width: 180px;
-    flex-shrink: 0;
   }
 
-  .content-card[data-variant='library'] .content-card__body {
+  .cc[data-variant='list'] .cc__body {
     flex: 1;
     min-width: 0;
+    padding: var(--space-3) var(--space-4);
+    gap: var(--space-1);
   }
 
-  .content-card[data-variant='library'] .content-card__description {
-    display: none;
-  }
-
-  @media (--below-sm) {
-    .content-card[data-variant='library'] {
+  @media (max-width: 639px) {
+    .cc[data-variant='list'] {
       flex-direction: column;
     }
 
-    .content-card[data-variant='library'] .content-card__thumbnail {
+    .cc[data-variant='list'] .cc__thumb {
       width: 100%;
       min-width: 0;
     }
   }
 
-  /* ── Variant: Featured ── */
-  .content-card[data-variant='featured'] .content-card__thumbnail {
-    aspect-ratio: 4 / 3;
-  }
+  /* ═══════════════════════════════════════════
+     VARIANT: FEATURED
+     ═══════════════════════════════════════════ */
 
-  .content-card[data-variant='featured'] .content-card__title {
+  .cc[data-variant='featured'] .cc__title {
     font-size: var(--text-lg);
   }
 
-  /* ── Variant: Compact ── */
-  .content-card[data-variant='compact'] {
+  /* ═══════════════════════════════════════════
+     VARIANT: COMPACT
+     ═══════════════════════════════════════════ */
+
+  .cc[data-variant='compact'] {
     flex-direction: row;
     border: none;
     background: transparent;
+    box-shadow: none;
     gap: var(--space-3);
   }
 
-  .content-card[data-variant='compact'] .content-card__thumbnail {
-    width: 120px;
-    min-width: 120px;
-    flex-shrink: 0;
+  .cc[data-variant='compact']:hover,
+  .cc[data-variant='compact']:focus-within:has(:focus-visible) {
+    transform: none;
+    box-shadow: none;
+    border-color: transparent;
+  }
+
+  .cc[data-variant='compact'] .cc__thumb {
+    width: 160px;
+    min-width: 160px;
     border-radius: var(--radius-md);
   }
 
-  .content-card[data-variant='compact'] .content-card__body {
+  .cc[data-variant='compact'] .cc__body {
     padding: 0;
     gap: var(--space-1);
   }
 
-  .content-card[data-variant='compact'] .content-card__title {
+  .cc[data-variant='compact'] .cc__title {
     font-size: var(--text-sm);
     -webkit-line-clamp: 1;
   }
 
-  .content-card[data-variant='compact'] .content-card__description,
-  .content-card[data-variant='compact'] .content-card__creator {
-    display: none;
+  /* ═══════════════════════════════════════════
+     VARIANT: RESUME
+     ═══════════════════════════════════════════ */
+
+  .cc[data-variant='resume'] {
+    min-width: 240px;
+    max-width: 340px;
+    flex-shrink: 0;
+    scroll-snap-align: start;
   }
 
+  .cc[data-variant='resume'] .cc__title {
+    -webkit-line-clamp: 1;
+  }
+
+  .cc[data-variant='resume'] .cc__body {
+    gap: var(--space-1);
+  }
 </style>

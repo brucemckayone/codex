@@ -13,19 +13,19 @@
   const { class: className, ...restProps }: Props = $props();
 </script>
 
-<article class="skeleton-card {className ?? ''}" aria-hidden="true" {...restProps}>
-  <div class="skeleton-card__thumbnail">
+<article class="cc cc--skeleton {className ?? ''}" aria-hidden="true" {...restProps}>
+  <div class="cc__thumb">
     <Skeleton width="100%" height="100%" />
   </div>
-  <div class="skeleton-card__body">
+  <div class="cc__body">
     <Skeleton width="75%" height="1.25rem" />
-    <Skeleton width="50%" height="1rem" />
+    <Skeleton width="45%" height="0.75rem" />
     <Skeleton width="60%" height="1rem" />
   </div>
 </article>
 
 <style>
-  .skeleton-card {
+  .cc {
     display: flex;
     flex-direction: column;
     background: var(--color-surface);
@@ -34,14 +34,14 @@
     overflow: hidden;
   }
 
-  .skeleton-card__thumbnail {
+  .cc__thumb {
     aspect-ratio: 16 / 9;
   }
 
-  .skeleton-card__body {
+  .cc__body {
     padding: var(--space-3);
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: var(--space-1-5);
   }
 </style>

@@ -79,6 +79,8 @@
     border-radius: var(--radius-sm);
     line-height: var(--leading-none);
     white-space: nowrap;
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
   }
 
   .price-badge[data-variant='free'] {
