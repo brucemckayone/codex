@@ -84,11 +84,12 @@
 -->
 {#if data.accessAndProgress}
   {#await data.accessAndProgress}
-    <!-- Skeleton: player/purchase area loading -->
+    <!-- Skeleton: player/purchase area loading — accessLoading hides purchase UI -->
     <ContentDetailView
       content={content}
       contentBodyHtml={data.contentBodyHtml}
       hasAccess={false}
+      accessLoading={true}
       streamingUrl={null}
       progress={null}
       isAuthenticated={true}

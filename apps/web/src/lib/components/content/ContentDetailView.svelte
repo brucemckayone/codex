@@ -30,6 +30,7 @@
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { formatPrice, formatDurationHuman } from '$lib/utils/format';
+  import { PriceBadge } from '$lib/components/ui/PriceBadge';
   import { LockIcon, CheckIcon } from '$lib/components/ui/Icon';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
   import { extractPlainText } from '@codex/validation';
@@ -69,6 +70,8 @@
     hasSubscription?: boolean;
     /** Whether the user's tier is high enough for this content */
     subscriptionCoversContent?: boolean;
+    /** True while the access check is still resolving (skeleton state) */
+    accessLoading?: boolean;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
     relatedContent?: ContentDetail[];
@@ -89,6 +92,7 @@
     requiresSubscription,
     hasSubscription,
     subscriptionCoversContent,
+    accessLoading = false,
     creatorAttribution,
     purchaseForm,
     relatedContent,
@@ -208,6 +212,10 @@
           </div>
         {/snippet}
       </svelte:boundary>
+    {:else if accessLoading}
+      <div class="content-detail__player-skeleton">
+        <div class="skeleton skeleton--player"></div>
+      </div>
     {:else}
       <div class="content-detail__preview">
         {#if thumbnailUrl}
@@ -240,6 +248,9 @@
             {m.content_duration()}: {formatDurationHuman(duration)}
           </span>
         {/if}
+        {#if hasAccess && isPaid}
+          <PriceBadge amount={priceCents} purchased={true} />
+        {/if}
       </div>
     </div>
 
@@ -255,8 +266,8 @@
       <span class="content-detail__completed-badge">{m.content_progress_completed()}</span>
     {/if}
 
-    <!-- Subscription Section (tier-gated content) -->
-    {#if needsSubscription}
+    <!-- Subscription Section (tier-gated content) — hidden during access loading -->
+    {#if !accessLoading && needsSubscription}
       <div class="content-detail__purchase">
         <div class="content-detail__price">
           <span class="content-detail__price-amount">
@@ -286,8 +297,8 @@
       </div>
     {/if}
 
-    <!-- Purchase Section (one-time purchase) -->
-    {#if needsPurchase}
+    <!-- Purchase Section (one-time purchase) — hidden during access loading -->
+    {#if !accessLoading && needsPurchase}
       <div class="content-detail__purchase">
         <div class="content-detail__price">
           <span class="content-detail__price-amount">{displayPrice(priceCents)}</span>
@@ -329,7 +340,7 @@
           </ul>
         </div>
       </div>
-    {:else if isFree && !hasAccess}
+    {:else if !accessLoading && isFree && !hasAccess}
       <div class="content-detail__purchase">
         <div class="content-detail__price">
           <span class="content-detail__price-amount content-detail__price-amount--free">{m.content_price_free()}</span>
@@ -376,6 +387,13 @@
       {#if hasAccess}
         <div class="content-detail__body">
           <ProseContent html={contentBodyHtml} />
+        </div>
+      {:else if accessLoading}
+        <div class="content-detail__body content-detail__body--locked">
+          <div class="content-detail__body-skeleton">
+            <div class="skeleton skeleton--body-line"></div>
+            <div class="skeleton skeleton--body-line skeleton--body-line--short"></div>
+          </div>
         </div>
       {:else}
         <div class="content-detail__body content-detail__body--locked">
@@ -797,6 +815,55 @@
     .content-detail__related-grid {
       grid-template-columns: repeat(4, 1fr);
     }
+  }
+
+  /* Skeleton loading states (access check pending) */
+  .content-detail__player-skeleton {
+    width: 100%;
+    height: 100%;
+  }
+
+  .skeleton--player {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  .content-detail__body-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .skeleton--body-line {
+    height: var(--text-base);
+    border-radius: var(--radius-sm);
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    width: 100%;
+  }
+
+  .skeleton--body-line--short {
+    width: 60%;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   /* Responsive */

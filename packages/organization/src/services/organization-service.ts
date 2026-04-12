@@ -21,6 +21,7 @@ import type { SocialLinks } from '@codex/database/schema';
 import {
   content,
   mediaItems,
+  organizationFollowers,
   organizationMemberships,
   organizations,
   users,
@@ -1241,6 +1242,88 @@ export class OrganizationService extends BaseService {
     const totalOwners = Number(ownerCount[0]?.total ?? 0);
     if (totalOwners <= 1) {
       throw new LastOwnerError();
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // FOLLOWER METHODS (audience relationship — separate from team roles)
+  // ══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Follow an organization (free opt-in).
+   * Idempotent — silently no-ops if already following.
+   */
+  async followOrganization(orgId: string, userId: string): Promise<void> {
+    try {
+      await this.db
+        .insert(organizationFollowers)
+        .values({ organizationId: orgId, userId })
+        .onConflictDoNothing();
+
+      this.obs.info('User followed organization', {
+        organizationId: orgId,
+        userId,
+      });
+    } catch (error) {
+      this.handleError(error, 'followOrganization');
+    }
+  }
+
+  /**
+   * Unfollow an organization.
+   * Idempotent — silently no-ops if not following.
+   */
+  async unfollowOrganization(orgId: string, userId: string): Promise<void> {
+    try {
+      await this.db
+        .delete(organizationFollowers)
+        .where(
+          and(
+            eq(organizationFollowers.organizationId, orgId),
+            eq(organizationFollowers.userId, userId)
+          )
+        );
+
+      this.obs.info('User unfollowed organization', {
+        organizationId: orgId,
+        userId,
+      });
+    } catch (error) {
+      this.handleError(error, 'unfollowOrganization');
+    }
+  }
+
+  /**
+   * Check if a user is following an organization.
+   */
+  async isFollowing(orgId: string, userId: string): Promise<boolean> {
+    try {
+      const row = await this.db.query.organizationFollowers.findFirst({
+        where: and(
+          eq(organizationFollowers.organizationId, orgId),
+          eq(organizationFollowers.userId, userId)
+        ),
+        columns: { id: true },
+      });
+      return !!row;
+    } catch (error) {
+      this.handleError(error, 'isFollowing');
+    }
+  }
+
+  /**
+   * Get the follower count for an organization (public).
+   */
+  async getFollowerCount(orgId: string): Promise<number> {
+    try {
+      const result = await this.db
+        .select({ total: count() })
+        .from(organizationFollowers)
+        .where(eq(organizationFollowers.organizationId, orgId));
+
+      return Number(result[0]?.total ?? 0);
+    } catch (error) {
+      this.handleError(error, 'getFollowerCount');
     }
   }
 }

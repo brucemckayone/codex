@@ -538,6 +538,71 @@ describe('SubscriptionService', () => {
       expect(membership.role).toBe('admin');
       expect(membership.status).toBe('active');
     });
+
+    it('should auto-follow org when subscription is created', async () => {
+      const { org, tier1 } = await createFullOrg('auto-follow');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationFollowers } = await import('@codex/database/schema');
+
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: thirdUserId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleSubscriptionCreated(mockSub);
+
+      const [follower] = await db
+        .select()
+        .from(organizationFollowers)
+        .where(
+          and(
+            eq(organizationFollowers.organizationId, org.id),
+            eq(organizationFollowers.userId, thirdUserId)
+          )
+        );
+
+      expect(follower).toBeDefined();
+      expect(follower.organizationId).toBe(org.id);
+      expect(follower.userId).toBe(thirdUserId);
+    });
+
+    it('should preserve follower row when subscription is deleted', async () => {
+      const { org, tier1 } = await createFullOrg('follow-persist');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationFollowers } = await import('@codex/database/schema');
+
+      // Create subscription (which also creates follower row)
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: thirdUserId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleSubscriptionCreated(mockSub);
+
+      // Delete subscription
+      await service.handleSubscriptionDeleted(
+        mockSub as unknown as Stripe.Subscription
+      );
+
+      // Follower row should still exist
+      const [follower] = await db
+        .select()
+        .from(organizationFollowers)
+        .where(
+          and(
+            eq(organizationFollowers.organizationId, org.id),
+            eq(organizationFollowers.userId, thirdUserId)
+          )
+        );
+
+      expect(follower).toBeDefined();
+    });
   });
 
   // ─── handleSubscriptionUpdated ────────────────────────────────────

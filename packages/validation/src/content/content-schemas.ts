@@ -224,8 +224,10 @@ export const visibilityEnum = z.enum([
 export const contentAccessTypeEnum = z.enum([
   CONTENT_ACCESS_TYPE.FREE,
   CONTENT_ACCESS_TYPE.PAID,
+  CONTENT_ACCESS_TYPE.FOLLOWERS,
   CONTENT_ACCESS_TYPE.SUBSCRIBERS,
-  CONTENT_ACCESS_TYPE.MEMBERS,
+  CONTENT_ACCESS_TYPE.TEAM,
+  CONTENT_ACCESS_TYPE.MEMBERS, // deprecated alias for 'team'
 ]);
 
 /**
@@ -376,6 +378,32 @@ export const createContentSchema = baseContentSchema
     {
       message: 'Free content cannot have a price',
       path: ['priceCents'],
+    }
+  )
+  .refine(
+    (data) => {
+      // 'followers' access type requires an organization
+      if (data.accessType === CONTENT_ACCESS_TYPE.FOLLOWERS) {
+        return !!data.organizationId;
+      }
+      return true;
+    },
+    {
+      message: 'Followers-only content requires an organisation',
+      path: ['organizationId'],
+    }
+  )
+  .refine(
+    (data) => {
+      // 'team' access type requires an organization
+      if (data.accessType === CONTENT_ACCESS_TYPE.TEAM) {
+        return !!data.organizationId;
+      }
+      return true;
+    },
+    {
+      message: 'Team-only content requires an organisation',
+      path: ['organizationId'],
     }
   );
 

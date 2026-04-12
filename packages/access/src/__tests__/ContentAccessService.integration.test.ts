@@ -23,6 +23,8 @@ import {
 } from '@codex/cloudflare-clients';
 import { ContentService, MediaItemService } from '@codex/content';
 import {
+  content,
+  organizationFollowers,
   organizationMemberships,
   organizations,
   purchases,
@@ -36,6 +38,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import { eq } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -1498,17 +1501,21 @@ describe('ContentAccessService Integration', () => {
       });
     });
 
-    describe('Member Access', () => {
-      it('should grant access to members-only content with active membership', async () => {
-        mockPurchaseService.verifyPurchase.mockClear();
-        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
-
+    describe('Team Access (replaces members-only)', () => {
+      /**
+       * Helper: create published content with a given accessType.
+       * Content is created as free (default), then accessType is updated directly.
+       */
+      async function createContentWithAccessType(
+        accessType: string,
+        slugSuffix: string
+      ) {
         const media = await mediaService.create(
           {
-            title: 'Member Access Video',
+            title: `${accessType} Video`,
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/member-access.mp4',
+            r2Key: `originals/${slugSuffix}.mp4`,
             fileSizeBytes: 1024,
           },
           userId
@@ -1517,57 +1524,179 @@ describe('ContentAccessService Integration', () => {
         await mediaService.markAsReady(
           media.id,
           {
-            hlsMasterPlaylistKey: 'hls/member-access/master.m3u8',
-            thumbnailKey: 'thumbnails/member-access.jpg',
+            hlsMasterPlaylistKey: `hls/${slugSuffix}/master.m3u8`,
+            thumbnailKey: `thumbnails/${slugSuffix}.jpg`,
             durationSeconds: 120,
           },
           userId
         );
 
-        const content = await contentService.create(
+        const item = await contentService.create(
           {
             organizationId,
-            title: 'Member Only Content',
-            slug: createUniqueSlug('member-only'),
+            title: `${accessType} Content ${slugSuffix}`,
+            slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
-            priceCents: 1999,
+            visibility: 'public',
+            priceCents: 0,
             tags: [],
           },
           userId
         );
 
-        await contentService.publish(content.id, userId);
+        await contentService.publish(item.id, userId);
 
-        // Create membership for test user
-        const [memberUserId] = await seedTestUsers(db, 1);
+        // Set accessType directly (bypasses validation since we're in tests)
+        await db
+          .update(content)
+          .set({ accessType })
+          .where(eq(content.id, item.id));
+
+        return item;
+      }
+
+      it('should grant team content access to owner', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const item = await createContentWithAccessType('team', 'team-owner');
+
+        const [ownerUser] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
-          userId: memberUserId,
+          userId: ownerUser,
           organizationId,
-          role: 'member',
+          role: 'owner',
           status: 'active',
         });
 
-        // Member should be able to access paid content via membership fallback
-        const result = await accessService.getStreamingUrl(memberUserId, {
-          contentId: content.id,
+        const result = await accessService.getStreamingUrl(ownerUser, {
+          contentId: item.id,
           expirySeconds: 3600,
         });
 
         expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
       });
 
-      it('should deny access to members-only content without membership', async () => {
+      it('should grant team content access to admin', async () => {
         mockPurchaseService.verifyPurchase.mockClear();
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
+        const item = await createContentWithAccessType('team', 'team-admin');
+
+        const [adminUser] = await seedTestUsers(db, 1);
+        await db.insert(organizationMemberships).values({
+          userId: adminUser,
+          organizationId,
+          role: 'admin',
+          status: 'active',
+        });
+
+        const result = await accessService.getStreamingUrl(adminUser, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      });
+
+      it('should deny team content to subscriber', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const item = await createContentWithAccessType('team', 'team-deny-sub');
+
+        const [subUser] = await seedTestUsers(db, 1);
+        await db.insert(organizationMemberships).values({
+          userId: subUser,
+          organizationId,
+          role: 'subscriber',
+          status: 'active',
+        });
+
+        await expect(
+          accessService.getStreamingUrl(subUser, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+      });
+
+      it('should deny team content to follower', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const item = await createContentWithAccessType(
+          'team',
+          'team-deny-follower'
+        );
+
+        const [followerUser] = await seedTestUsers(db, 1);
+        await db
+          .insert(organizationFollowers)
+          .values({ userId: followerUser, organizationId });
+
+        await expect(
+          accessService.getStreamingUrl(followerUser, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+      });
+
+      it('should treat deprecated "members" accessType the same as "team"', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const item = await createContentWithAccessType(
+          'members',
+          'members-compat'
+        );
+
+        // Owner should get access
+        const [ownerUser] = await seedTestUsers(db, 1);
+        await db.insert(organizationMemberships).values({
+          userId: ownerUser,
+          organizationId,
+          role: 'owner',
+          status: 'active',
+        });
+
+        const result = await accessService.getStreamingUrl(ownerUser, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+
+        // Subscriber should be denied
+        const [subUser] = await seedTestUsers(db, 1);
+        await db.insert(organizationMemberships).values({
+          userId: subUser,
+          organizationId,
+          role: 'subscriber',
+          status: 'active',
+        });
+
+        await expect(
+          accessService.getStreamingUrl(subUser, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+      });
+    });
+
+    describe('Follower Access', () => {
+      async function createContentWithAccessType(
+        accessType: string,
+        slugSuffix: string
+      ) {
         const media = await mediaService.create(
           {
-            title: 'No Member Video',
+            title: `${accessType} Video`,
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/no-member.mp4',
+            r2Key: `originals/${slugSuffix}.mp4`,
             fileSizeBytes: 1024,
           },
           userId
@@ -1576,38 +1705,101 @@ describe('ContentAccessService Integration', () => {
         await mediaService.markAsReady(
           media.id,
           {
-            hlsMasterPlaylistKey: 'hls/no-member/master.m3u8',
-            thumbnailKey: 'thumbnails/no-member.jpg',
+            hlsMasterPlaylistKey: `hls/${slugSuffix}/master.m3u8`,
+            thumbnailKey: `thumbnails/${slugSuffix}.jpg`,
             durationSeconds: 120,
           },
           userId
         );
 
-        const content = await contentService.create(
+        const item = await contentService.create(
           {
             organizationId,
-            title: 'Member Only No Access',
-            slug: createUniqueSlug('member-only-deny'),
+            title: `${accessType} Content ${slugSuffix}`,
+            slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
-            priceCents: 1999,
+            visibility: 'public',
+            priceCents: 0,
             tags: [],
           },
           userId
         );
 
-        await contentService.publish(content.id, userId);
+        await contentService.publish(item.id, userId);
 
-        // Fresh user with no membership or purchase
-        const [freshUserId] = await seedTestUsers(db, 1);
+        await db
+          .update(content)
+          .set({ accessType })
+          .where(eq(content.id, item.id));
+
+        return item;
+      }
+
+      it('should grant follower content to a follower', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const item = await createContentWithAccessType(
+          'followers',
+          'follow-grant'
+        );
+
+        const [followerUser] = await seedTestUsers(db, 1);
+        await db
+          .insert(organizationFollowers)
+          .values({ userId: followerUser, organizationId });
+
+        const result = await accessService.getStreamingUrl(followerUser, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      });
+
+      it('should deny follower content to non-follower', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const item = await createContentWithAccessType(
+          'followers',
+          'follow-deny'
+        );
+
+        const [freshUser] = await seedTestUsers(db, 1);
 
         await expect(
-          accessService.getStreamingUrl(freshUserId, {
-            contentId: content.id,
+          accessService.getStreamingUrl(freshUser, {
+            contentId: item.id,
             expirySeconds: 3600,
           })
         ).rejects.toThrow(AccessDeniedError);
+      });
+
+      it('should grant follower content to management (implicit access)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const item = await createContentWithAccessType(
+          'followers',
+          'follow-mgmt'
+        );
+
+        const [creatorUser] = await seedTestUsers(db, 1);
+        await db.insert(organizationMemberships).values({
+          userId: creatorUser,
+          organizationId,
+          role: 'creator',
+          status: 'active',
+        });
+
+        const result = await accessService.getStreamingUrl(creatorUser, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
       });
     });
 
@@ -1721,21 +1913,14 @@ describe('ContentAccessService Integration', () => {
           status: 'active',
         });
 
-        // Subscriber without purchase — behavior depends on service implementation
-        // Subscriber role may or may not grant access depending on whether
-        // the service treats subscribers as "members" for access purposes.
-        // This test documents the current behavior.
-        try {
-          const result = await accessService.getStreamingUrl(subUserId, {
+        // Subscriber role without purchase should be denied for paid content.
+        // Only management roles (owner/admin/creator) bypass purchase requirement.
+        await expect(
+          accessService.getStreamingUrl(subUserId, {
             contentId: content.id,
             expirySeconds: 3600,
-          });
-          // If access is granted, subscriber is treated as member
-          expect(result.streamingUrl).toBeDefined();
-        } catch (error) {
-          // If access is denied, subscriber is NOT treated as member for access bypass
-          expect(error).toBeInstanceOf(AccessDeniedError);
-        }
+          })
+        ).rejects.toThrow(AccessDeniedError);
       });
     });
 

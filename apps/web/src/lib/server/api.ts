@@ -941,6 +941,31 @@ export function createServerApi(
         request<void>('org', `/api/organizations/${id}/members/${userId}`, {
           method: 'DELETE',
         }),
+
+      /**
+       * Follow an organization (idempotent)
+       */
+      follow: (id: string) =>
+        request<null>('org', `/api/organizations/${id}/followers`, {
+          method: 'POST',
+        }),
+
+      /**
+       * Unfollow an organization (idempotent)
+       */
+      unfollow: (id: string) =>
+        request<null>('org', `/api/organizations/${id}/followers`, {
+          method: 'DELETE',
+        }),
+
+      /**
+       * Get follower count for an organization (public)
+       */
+      getFollowerCount: (id: string) =>
+        request<{ count: number }>(
+          'org',
+          `/api/organizations/${id}/followers/count`
+        ),
     },
 
     /**

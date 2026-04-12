@@ -45,17 +45,25 @@ export const ACCESS_TYPES = {
 /**
  * Content access model — defines HOW content is gated.
  *
+ * Hierarchy (each level includes the ones above):
+ *   free < followers < subscribers < team
+ *
  * - free: Anyone can access (price must be null/0, no tier)
  * - paid: One-time purchase required (price > 0, no tier)
+ * - followers: Must follow the org (free opt-in) — subscribers + team also qualify
  * - subscribers: Subscription tier required (tier set, optional price for buy-bypass)
- * - members: Organisation team members only (no price, no tier)
+ * - team: Owner/admin/creator only (org management roles)
+ * - members: @deprecated — alias for 'team', kept for backward compat during migration
  *
  * @see ACCESS_TYPES for per-user grant records (how a user *obtained* access)
  */
 export const CONTENT_ACCESS_TYPE = {
   FREE: 'free',
   PAID: 'paid',
+  FOLLOWERS: 'followers',
   SUBSCRIBERS: 'subscribers',
+  TEAM: 'team',
+  /** @deprecated Use TEAM instead. Alias kept for backward compat during migration. */
   MEMBERS: 'members',
 } as const;
 

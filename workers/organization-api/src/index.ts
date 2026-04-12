@@ -31,6 +31,7 @@ import {
 } from '@codex/worker-utils';
 
 // Import route modules
+import followerRoutes from './routes/followers';
 import memberRoutes from './routes/members';
 import organizationRoutes from './routes/organizations';
 import settingsRoutes from './routes/settings';
@@ -93,6 +94,10 @@ app.route('/api/organizations/:id/settings', settingsRoutes);
 // Mount tier routes under /api/organizations/:id/tiers
 // Subscription tier management for org owners
 app.route('/api/organizations/:id/tiers', tierRoutes);
+
+// Mount follower routes under /api/organizations/:id/followers
+// Free audience relationships (follow/unfollow, follower count)
+app.route('/api/organizations/:id/followers', followerRoutes);
 
 // ============================================================================
 // Export

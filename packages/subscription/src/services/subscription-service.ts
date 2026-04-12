@@ -37,6 +37,7 @@ import {
 import { isUniqueViolation } from '@codex/database';
 import {
   creatorOrganizationAgreements,
+  organizationFollowers,
   organizationMemberships,
   pendingPayouts,
   stripeConnectAccounts,
@@ -331,7 +332,15 @@ export class SubscriptionService extends BaseService {
         creatorPayoutCents: split.creatorPayoutCents,
       });
 
-      // BUG-016: Upsert organization membership with role=subscriber
+      // Auto-follow: subscribers implicitly follow the org (idempotent).
+      // Follower persists after subscription cancellation — user must explicitly unfollow.
+      await this.db
+        .insert(organizationFollowers)
+        .values({ organizationId: orgId, userId })
+        .onConflictDoNothing();
+
+      // BUG-016: Upsert organization membership with role=subscriber (backward compat).
+      // TODO(Phase 3): Remove this once frontend no longer reads membership roles for library access badges.
       // If the user already has a higher-priority role (owner/admin/creator), preserve it.
       // Only set role to 'subscriber' on conflict if current role is 'member' or 'subscriber'.
       await this.db

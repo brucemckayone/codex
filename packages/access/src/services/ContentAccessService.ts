@@ -15,6 +15,7 @@ import { createPerRequestDbClient } from '@codex/database';
 import {
   content,
   mediaItems,
+  organizationFollowers,
   organizationMemberships,
   organizations,
   purchases,
@@ -312,22 +313,35 @@ export class ContentAccessService extends BaseService {
             });
           };
 
+          // ── Reusable helper: check follower relationship ────────────
+          const checkFollower = async (orgId: string) => {
+            return tx.query.organizationFollowers.findFirst({
+              where: and(
+                eq(organizationFollowers.organizationId, orgId),
+                eq(organizationFollowers.userId, userId)
+              ),
+            });
+          };
+
           // ── Access decision: branch on accessType ──────────────────
 
-          // (a) Members-only: require active org membership, no purchase/subscription bypass
-          if (contentRecord.accessType === 'members') {
+          // (a) Team-only (also handles deprecated 'members'): require management role
+          if (
+            contentRecord.accessType === 'team' ||
+            contentRecord.accessType === 'members'
+          ) {
             if (!contentRecord.organizationId) {
               throw new AccessDeniedError(userId, input.contentId, {
-                reason: 'members_only_requires_org',
+                reason: 'team_only_requires_org',
               });
             }
 
-            const membership = await checkOrgMembership(
+            const membership = await checkManagementMembership(
               contentRecord.organizationId
             );
 
             if (!membership) {
-              this.obs.warn('Access denied - members-only content', {
+              this.obs.warn('Access denied - team-only content', {
                 userId,
                 contentId: input.contentId,
                 organizationId: contentRecord.organizationId,
@@ -337,21 +351,80 @@ export class ContentAccessService extends BaseService {
               });
               throw new AccessDeniedError(userId, input.contentId, {
                 organizationId: contentRecord.organizationId,
-                reason: 'members_only',
+                reason: 'team_only',
               });
             }
 
-            this.obs.info(
-              'Access granted via membership (members-only content)',
-              {
+            this.obs.info('Access granted via management role (team content)', {
+              userId,
+              contentId: input.contentId,
+              organizationId: contentRecord.organizationId,
+              membershipRole: membership.role,
+            });
+          }
+          // (b) Followers-only: require follower, subscriber, or management role
+          else if (contentRecord.accessType === 'followers') {
+            if (!contentRecord.organizationId) {
+              throw new AccessDeniedError(userId, input.contentId, {
+                reason: 'followers_only_requires_org',
+              });
+            }
+
+            let granted = false;
+            const orgId = contentRecord.organizationId;
+
+            // Primary check: is user a follower?
+            const follower = await checkFollower(orgId);
+            if (follower) {
+              this.obs.info('Access granted via follower (followers content)', {
                 userId,
                 contentId: input.contentId,
-                organizationId: contentRecord.organizationId,
-                membershipRole: membership.role,
+                organizationId: orgId,
+              });
+              granted = true;
+            }
+
+            // Fallback: active subscription (subscribers implicitly follow)
+            if (!granted) {
+              const hasSub = await checkSubscriptionAccess(orgId, null);
+              if (hasSub) {
+                granted = true;
               }
-            );
+            }
+
+            // Fallback: management membership (team implicitly has access)
+            if (!granted) {
+              const membership = await checkManagementMembership(orgId);
+              if (membership) {
+                this.obs.info(
+                  'Access granted via management role (followers content)',
+                  {
+                    userId,
+                    contentId: input.contentId,
+                    organizationId: orgId,
+                    membershipRole: membership.role,
+                  }
+                );
+                granted = true;
+              }
+            }
+
+            if (!granted) {
+              this.obs.warn('Access denied - followers-only content', {
+                userId,
+                contentId: input.contentId,
+                organizationId: orgId,
+                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                severity: LOG_SEVERITY.MEDIUM,
+                eventType: LOG_EVENTS.ACCESS_CONTROL,
+              });
+              throw new AccessDeniedError(userId, input.contentId, {
+                organizationId: orgId,
+                reason: 'followers_only',
+              });
+            }
           }
-          // (b) Subscribers-only: require active subscription (with optional tier check)
+          // (c) Subscribers-only: require active subscription (with optional tier check)
           else if (contentRecord.accessType === 'subscribers') {
             if (!contentRecord.organizationId) {
               throw new AccessDeniedError(userId, input.contentId, {
@@ -744,14 +817,29 @@ export class ContentAccessService extends BaseService {
           });
     const memberOrgIds = activeMemberships.map((m) => m.organizationId);
 
-    // Partition memberships: management roles see all org content,
-    // regular members only see free + members content
+    // Partition memberships: management roles see all org content
     const managementOrgIds = activeMemberships
       .filter((m) => MANAGEMENT_ROLES.includes(m.role))
       .map((m) => m.organizationId);
-    const regularMemberOrgIds = activeMemberships
-      .filter((m) => !MANAGEMENT_ROLES.includes(m.role))
-      .map((m) => m.organizationId);
+
+    // ── Step 1c: Resolve followed org IDs ────────────────────────────
+    const followerConditions = [eq(organizationFollowers.userId, userId)];
+    if (input.organizationId) {
+      followerConditions.push(
+        eq(organizationFollowers.organizationId, input.organizationId)
+      );
+    }
+
+    const activeFollows =
+      input.accessType === 'purchased' || input.accessType === 'subscription'
+        ? []
+        : await this.db.query.organizationFollowers.findMany({
+            where: and(...followerConditions),
+            columns: { organizationId: true },
+          });
+    const followedOrgIds = activeFollows
+      .map((f) => f.organizationId)
+      .filter((id) => !managementOrgIds.includes(id));
 
     // ── Step 1b: Resolve active subscriptions with tier info ─────────
     const activeSubscriptions =
@@ -938,19 +1026,19 @@ export class ContentAccessService extends BaseService {
       return { items, count: countResult[0]?.count ?? 0 };
     };
 
-    // ── Step 4: Query membership items ────────────────────────────────
+    // ── Step 4: Query membership + follower items ──────────────────────
     const queryMembership = async () => {
       if (
         input.accessType === 'purchased' ||
         input.accessType === 'subscription' ||
-        memberOrgIds.length === 0
+        (memberOrgIds.length === 0 && followedOrgIds.length === 0)
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
       }
 
-      // Build role-aware org membership filter:
+      // Build role-aware content filter:
       // - Management roles (owner/admin/creator) see ALL content from their orgs
-      // - Regular members only see 'free' and 'members' content from their orgs
+      // - Followers see 'free' + 'followers' + 'members' (deprecated alias for team) content
       const membershipContentFilter = (() => {
         const parts: ReturnType<typeof and>[] = [];
 
@@ -959,14 +1047,14 @@ export class ContentAccessService extends BaseService {
           parts.push(inArray(content.organizationId, managementOrgIds));
         }
 
-        if (regularMemberOrgIds.length > 0) {
-          // Regular members: only free + members content
+        if (followedOrgIds.length > 0) {
+          // Followers: see free + followers content from followed orgs
           parts.push(
             and(
-              inArray(content.organizationId, regularMemberOrgIds),
+              inArray(content.organizationId, followedOrgIds),
               inArray(content.accessType, [
                 CONTENT_ACCESS_TYPE.FREE,
-                CONTENT_ACCESS_TYPE.MEMBERS,
+                CONTENT_ACCESS_TYPE.FOLLOWERS,
               ])
             )
           );
@@ -1110,8 +1198,8 @@ export class ContentAccessService extends BaseService {
         // Exclude content the user already purchased (prevents duplicates)
         sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`,
         // Exclude content from management orgs (owner/admin/creator see all via membership query).
-        // Regular member/subscriber orgs are NOT excluded — their membership query only returns
-        // free + members content, so there's no overlap with subscribers content here.
+        // Followed orgs are NOT excluded — the follower query only returns free + followers content,
+        // so there's no overlap with subscribers content here.
         ...(managementOrgIds.length > 0
           ? [
               sql`${content.organizationId} NOT IN (${sql.join(

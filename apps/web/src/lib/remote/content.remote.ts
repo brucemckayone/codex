@@ -239,7 +239,9 @@ const createContentCommandSchema = z.object({
   slug: z.string().min(1),
   description: z.string().optional().nullable(),
   contentType: z.enum(['video', 'audio', 'written']),
-  accessType: z.enum(['free', 'paid', 'subscribers', 'members']).optional(),
+  accessType: z
+    .enum(['free', 'paid', 'followers', 'subscribers', 'team', 'members'])
+    .optional(),
   priceCents: z.number().int().min(0).optional().nullable(),
   organizationId: z.string().uuid().optional().nullable(),
   mediaItemId: z.string().uuid().optional().nullable(),
@@ -281,7 +283,9 @@ const updateContentCommandSchema = z.object({
     slug: z.string().min(1).optional(),
     description: z.string().optional().nullable(),
     contentType: z.enum(['video', 'audio', 'written']).optional(),
-    accessType: z.enum(['free', 'paid', 'subscribers', 'members']).optional(),
+    accessType: z
+      .enum(['free', 'paid', 'followers', 'subscribers', 'team', 'members'])
+      .optional(),
     priceCents: z.number().int().min(0).optional().nullable(),
     organizationId: z.string().uuid().optional().nullable(),
     mediaItemId: z.string().uuid().optional().nullable(),
