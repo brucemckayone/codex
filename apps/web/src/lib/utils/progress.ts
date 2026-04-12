@@ -1,7 +1,7 @@
 /**
  * Shared progress-calculation helpers.
  *
- * Used by ContentCard, LibraryCard, and ContinueWatchingCard to derive a
+ * Used by ContentCard to derive a
  * 0-100 integer percentage from the various progress shapes the API returns.
  */
 

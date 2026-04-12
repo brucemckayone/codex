@@ -8,7 +8,7 @@
   import type { PageData } from './$types';
   import { hydrateIfNeeded } from '$lib/collections';
   import { buildContentUrl } from '$lib/utils/subdomain';
-  import { extractPlainText } from '@codex/validation';
+  import { ContentCard } from '$lib/components/ui/ContentCard';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import * as m from '$paraglide/messages';
@@ -68,24 +68,22 @@
   <section class="content-grid" aria-label="Content results">
     {#if data.content.items && data.content.items.length > 0}
       {#each data.content.items as item (item.id)}
-        <a href={buildContentUrl(page.url, { slug: item.slug, id: item.id, organizationSlug: item.organization?.slug })} class="content-card">
-          <div class="card-thumb">
-            {#if item.mediaItem?.thumbnailUrl}
-              <img src={item.mediaItem.thumbnailUrl} alt="" class="thumb-img" />
-            {:else}
-              <div class="thumb-placeholder"></div>
-            {/if}
-          </div>
-          <div class="card-body">
-            <h3 class="card-title">{item.title}</h3>
-            {#if item.description}
-              <p class="card-desc">{extractPlainText(item.description)}</p>
-            {/if}
-            {#if item.creator?.name}
-              <span class="card-creator">{item.creator.name}</span>
-            {/if}
-          </div>
-        </a>
+        <ContentCard
+          id={item.id}
+          title={item.title}
+          thumbnail={item.mediaItem?.thumbnailUrl ?? null}
+          contentType={(item.contentType === 'written' ? 'article' : item.contentType) as 'video' | 'audio' | 'article'}
+          duration={item.mediaItem?.durationSeconds ?? null}
+          creator={item.creator ? {
+            username: item.creator.name ?? undefined,
+            displayName: item.creator.name ?? undefined,
+          } : undefined}
+          href={buildContentUrl(page.url, { slug: item.slug, id: item.id, organizationSlug: item.organization?.slug })}
+          price={item.priceCents != null ? {
+            amount: item.priceCents,
+            currency: 'GBP',
+          } : null}
+        />
       {/each}
     {:else}
       <EmptyState title={data.search ? m.discover_empty_search({ query: data.search }) : m.discover_empty()} />
@@ -151,67 +149,4 @@
   .search-btn:hover {
     background-color: var(--color-interactive-hover);
   }
-
-  .content-card {
-    display: block;
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    text-decoration: none;
-    transition: var(--transition-transform);
-  }
-
-  .content-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-  }
-
-  .card-thumb {
-    aspect-ratio: 16 / 9;
-    background-color: var(--color-surface-secondary);
-    overflow: hidden;
-  }
-
-  .thumb-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .thumb-placeholder {
-    width: 100%;
-    height: 100%;
-    background-color: var(--color-surface-tertiary);
-  }
-
-  .card-body {
-    padding: var(--space-4);
-  }
-
-  .card-title {
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin-bottom: var(--space-1);
-    line-height: var(--leading-tight);
-  }
-
-  .card-desc {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: var(--leading-normal);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    margin-bottom: var(--space-2);
-  }
-
-  .card-creator {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-  }
-
-
 </style>

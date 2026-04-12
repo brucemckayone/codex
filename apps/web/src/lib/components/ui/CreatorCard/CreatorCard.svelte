@@ -52,10 +52,12 @@
 
   const profileHref = $derived(`/@${username}`);
   const initial = $derived(displayName.charAt(0).toUpperCase());
+  const labelId = $derived(`creator-card-${username}`);
 </script>
 
-<div
+<article
   class="creator-card creator-card--{variant} {className ?? ''}"
+  aria-labelledby={labelId}
   {...rest}
 >
   <a href={profileHref} class="creator-card__link">
@@ -73,7 +75,7 @@
     </a>
 
     <div class="creator-card__info">
-      <h3 class="creator-card__name">
+      <h3 class="creator-card__name" id={labelId}>
         <a href={profileHref}>{displayName}</a>
       </h3>
 
@@ -144,7 +146,7 @@
   {#if actions}
     <div class="creator-card__actions">{@render actions()}</div>
   {/if}
-</div>
+</article>
 
 <style>
   .creator-card {
@@ -155,12 +157,23 @@
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
     padding: var(--space-4);
-    transition: var(--transition-colors), var(--transition-shadow);
+    transition:
+      transform 300ms cubic-bezier(0.2, 0, 0, 1),
+      box-shadow 300ms cubic-bezier(0.2, 0, 0, 1),
+      border-color var(--duration-fast) var(--ease-default);
   }
 
-  .creator-card:hover {
+  .creator-card:hover,
+  .creator-card:focus-within:has(:focus-visible) {
     border-color: var(--color-border-hover);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-lg);
+    transform: translateY(calc(-1 * var(--space-0-5))) scale(1.02);
+    z-index: 2;
+  }
+
+  .creator-card:focus-within:has(:focus-visible) {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .creator-card--compact {
@@ -218,6 +231,16 @@
 
   .creator-card__name a:hover {
     color: var(--color-interactive);
+  }
+
+  .creator-card__name a:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  .creator-card__name a:focus:not(:focus-visible) {
+    outline: none;
   }
 
   .creator-card__bio {
