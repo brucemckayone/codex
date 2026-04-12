@@ -1,0 +1,3 @@
+ALTER TABLE "branding_settings" ADD COLUMN "intro_video_media_item_id" uuid;--> statement-breakpoint
+ALTER TABLE "branding_settings" ADD COLUMN "intro_video_url" text;--> statement-breakpoint
+ALTER TABLE "branding_settings" ADD CONSTRAINT "branding_settings_intro_video_media_item_id_media_items_id_fk" FOREIGN KEY ("intro_video_media_item_id") REFERENCES "public"."media_items"("id") ON DELETE set null ON UPDATE no action;

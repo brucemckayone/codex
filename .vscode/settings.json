@@ -65,7 +65,7 @@
   "svelte.language-server.runtime": "/usr/local/bin/node",
 
   "editor.fontFamily": "Operator Mono, Menlo, Monaco, 'Courier New', monospace",
-  "workbench.colorTheme": "Solarized Light",
+  "workbench.colorTheme": "Bearded Theme feat. Melle Julie Light",
   "editor.fontSize": 17,
   "editor.lineHeight": 25,
   "editor.letterSpacing": 0.5,

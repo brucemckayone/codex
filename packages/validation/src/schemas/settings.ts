@@ -143,6 +143,8 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
     fontHeading: z.string().nullable(),
     radiusValue: z.number(),
     densityValue: z.number(),
+    introVideoMediaItemId: z.string().uuid().nullable(),
+    introVideoUrl: z.string().url().nullable(),
     tokenOverrides: z.string().nullable(),
     darkModeOverrides: z.string().nullable(),
     textColorHex: hexColorSchema.nullable(),
@@ -163,6 +165,8 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
       fontHeading: z.string().nullable(),
       radiusValue: z.number(),
       densityValue: z.number(),
+      introVideoMediaItemId: z.string().uuid().nullable(),
+      introVideoUrl: z.string().url().nullable(),
       tokenOverrides: z.string().nullable(),
       darkModeOverrides: z.string().nullable(),
       textColorHex: z.string().nullable(),
@@ -224,6 +228,8 @@ export const DEFAULT_BRANDING: BrandingSettingsResponse = {
   fontBody: null,
   fontHeading: null,
   radiusValue: 0.5,
+  introVideoMediaItemId: null,
+  introVideoUrl: null,
   tokenOverrides: null,
   darkModeOverrides: null,
   textColorHex: null,
@@ -260,3 +266,16 @@ export const DEFAULT_FEATURES: FeatureSettingsResponse = {
   enablePurchases: true,
   enableSubscriptions: false,
 } as const;
+
+// ============================================================================
+// Intro Video
+// ============================================================================
+
+/**
+ * Link an existing media item as the org's intro video
+ */
+export const linkIntroVideoSchema = z.object({
+  mediaItemId: z.string().uuid(),
+});
+
+export type LinkIntroVideoInput = z.infer<typeof linkIntroVideoSchema>;

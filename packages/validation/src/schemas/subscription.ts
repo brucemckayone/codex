@@ -43,28 +43,50 @@ export const connectAccountStatusEnum = z.enum(
 // Tier Schemas
 // ============================================================================
 
-export const createTierSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, 'Tier name is required')
-    .max(100, 'Tier name must be 100 characters or less'),
-  description: z
-    .string()
-    .trim()
-    .max(500, 'Description must be 500 characters or less')
-    .optional(),
-  priceMonthly: z
-    .number()
-    .int('Price must be a whole number (pence)')
-    .min(100, 'Minimum price is £1.00 (100 pence)'),
-  priceAnnual: z
-    .number()
-    .int('Price must be a whole number (pence)')
-    .min(100, 'Minimum price is £1.00 (100 pence)'),
-});
+export const createTierSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1, 'Tier name is required')
+      .max(100, 'Tier name must be 100 characters or less'),
+    description: z
+      .string()
+      .trim()
+      .max(500, 'Description must be 500 characters or less')
+      .optional(),
+    priceMonthly: z
+      .number()
+      .int('Price must be a whole number (pence)')
+      .min(100, 'Minimum price is £1.00 (100 pence)')
+      .max(10000000, 'Maximum price is £100,000'),
+    priceAnnual: z
+      .number()
+      .int('Price must be a whole number (pence)')
+      .min(100, 'Minimum price is £1.00 (100 pence)')
+      .max(10000000, 'Maximum price is £100,000'),
+  })
+  .refine((data) => data.priceAnnual <= data.priceMonthly * 12, {
+    message: 'Annual price must offer equal or better value than monthly',
+    path: ['priceAnnual'],
+  });
 
-export const updateTierSchema = createTierSchema.partial();
+export const updateTierSchema = createTierSchema
+  .innerType()
+  .partial()
+  .refine(
+    (data) => {
+      // Only validate annual vs monthly when BOTH prices are present
+      if (data.priceMonthly !== undefined && data.priceAnnual !== undefined) {
+        return data.priceAnnual <= data.priceMonthly * 12;
+      }
+      return true;
+    },
+    {
+      message: 'Annual price must offer equal or better value than monthly',
+      path: ['priceAnnual'],
+    }
+  );
 
 export const reorderTiersSchema = z.object({
   tierIds: z.array(uuidSchema).min(1, 'At least one tier ID is required'),

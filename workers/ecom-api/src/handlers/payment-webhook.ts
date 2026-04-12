@@ -11,7 +11,8 @@
 
 import { STRIPE_EVENTS } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
-import { createStripeClient, PurchaseService } from '@codex/purchase';
+import { PurchaseService } from '@codex/purchase';
+import { sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -25,8 +26,7 @@ export async function handlePaymentWebhook(
 
   const { db, cleanup } = createPerRequestDbClient({
     DATABASE_URL: c.env.DATABASE_URL,
-    DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)
-      .DATABASE_URL_LOCAL_PROXY,
+    DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
     DB_METHOD: c.env.DB_METHOD,
   });
 
@@ -51,12 +51,37 @@ export async function handlePaymentWebhook(
           return;
         }
 
-        await service.processRefund(paymentIntentId);
+        // Extract refund details from the Stripe charge object
+        const latestRefund = charge.refunds?.data?.[0];
+        await service.processRefund(paymentIntentId, {
+          stripeRefundId: latestRefund?.id,
+          refundAmountCents: charge.amount_refunded,
+          refundReason: latestRefund?.reason ?? undefined,
+        });
         obs?.info('Charge refund processed', {
           chargeId: charge.id,
           paymentIntentId,
           amountRefunded: charge.amount_refunded,
+          stripeRefundId: latestRefund?.id,
         });
+
+        // Send refund-processed email
+        const refundEmail =
+          charge.billing_details?.email || charge.receipt_email;
+        if (refundEmail) {
+          sendEmailToWorker(c.env, c.executionCtx, {
+            to: refundEmail,
+            templateName: 'refund-processed',
+            category: 'transactional',
+            data: {
+              userName: charge.billing_details?.name || 'there',
+              contentTitle: charge.metadata?.contentTitle || 'Content',
+              refundAmount: `£${(charge.amount_refunded / 100).toFixed(2)}`,
+              originalAmount: `£${(charge.amount / 100).toFixed(2)}`,
+              refundDate: new Date().toLocaleDateString('en-GB'),
+            },
+          });
+        }
         break;
       }
 

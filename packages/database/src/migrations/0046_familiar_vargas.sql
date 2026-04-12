@@ -1,0 +1,1 @@
+ALTER TABLE "content_access" ADD COLUMN "deleted_at" timestamp with time zone;

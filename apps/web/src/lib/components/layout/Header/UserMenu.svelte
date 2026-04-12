@@ -2,6 +2,7 @@
   import type { LayoutUser } from '$lib/types';
   import { page } from '$app/state';
   import { submitFormPost } from '$lib/utils/navigation';
+  import { AUTH_ROLES } from '@codex/constants';
   import { buildCreatorsUrl, buildPlatformUrl, extractSubdomain } from '$lib/utils/subdomain';
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
@@ -19,6 +20,9 @@
   }
 
   const { user }: Props = $props();
+
+  const STUDIO_ROLES = new Set([AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN, AUTH_ROLES.PLATFORM_OWNER]);
+  const canAccessStudio = $derived(!!user?.role && STUDIO_ROLES.has(user.role));
 
   // On org subdomains, Studio link should go to the current org's studio (root-relative)
   // On platform/creators, go to the creators studio
@@ -63,9 +67,11 @@
       <a href={buildPlatformUrl(page.url, '/library')}>
         <DropdownMenuItem>{m.nav_library()}</DropdownMenuItem>
       </a>
-      <a href={studioHref}>
-        <DropdownMenuItem>{m.nav_studio()}</DropdownMenuItem>
-      </a>
+      {#if canAccessStudio}
+        <a href={studioHref}>
+          <DropdownMenuItem>{m.nav_studio()}</DropdownMenuItem>
+        </a>
+      {/if}
       <DropdownMenuSeparator />
       <button type="button" class="logout-button" onclick={() => submitFormPost('/logout')}>
         <DropdownMenuItem>{m.nav_log_out()}</DropdownMenuItem>

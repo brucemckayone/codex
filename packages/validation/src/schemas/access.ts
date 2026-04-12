@@ -46,12 +46,13 @@ export const listUserLibrarySchema = paginationSchema.extend({
     .optional()
     .default('all'),
   sortBy: z.enum(['recent', 'title', 'duration']).optional().default('recent'),
+  // Values match DB content.contentType column
   contentType: z
-    .enum(['all', 'video', 'audio', 'article'])
+    .enum(['all', 'video', 'audio', 'written'])
     .optional()
     .default('all'),
   accessType: z
-    .enum(['all', 'purchased', 'membership'])
+    .enum(['all', 'purchased', 'membership', 'subscription'])
     .optional()
     .default('all'),
   search: z.string().max(200).optional().default(''),

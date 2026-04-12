@@ -43,6 +43,7 @@ import {
   multipartProcedure,
   PaginatedResult,
   procedure,
+  sendEmailToWorker,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
@@ -233,6 +234,12 @@ app.post(
         result.organizationId,
         ctx.obs
       );
+
+      // TODO: Send new-content-published email to subscribers
+      // Requires a subscriber query (users with contentAccess in this org).
+      // Template is seeded and ready — wire up when subscriber list
+      // query is implemented in ContentAccessService.
+
       return result;
     },
   })

@@ -10,7 +10,7 @@
    */
 
   import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
+  import { goto, replaceState } from '$app/navigation';
   import { page } from '$app/state';
   import {
     libraryCollection,
@@ -19,6 +19,7 @@
   } from '$lib/collections';
   import type { LibraryItem } from '$lib/collections';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
   import LibraryPageView from '$lib/components/library/LibraryPageView.svelte';
   import * as m from '$paraglide/messages';
 
@@ -47,6 +48,18 @@
 
   // On mount: if collection is empty, fetch from server
   onMount(async () => {
+    // Show success toast when redirected from subscription checkout
+    if (page.url.searchParams.has('subscription') && page.url.searchParams.get('subscription') === 'success') {
+      toast.success(
+        m.subscription_success_title(),
+        m.subscription_success_description()
+      );
+      // Clean up the query param so it doesn't re-trigger on refresh
+      const cleanUrl = new URL(page.url);
+      cleanUrl.searchParams.delete('subscription');
+      replaceState(cleanUrl, {});
+    }
+
     const hasData = (libraryCollection?.state.size ?? 0) > 0;
     if (!hasData) {
       isLoadingFromServer = true;
@@ -64,6 +77,7 @@
   let sort = $state('recent');
   let contentType = $state('all');
   let progressStatus = $state('all');
+  let accessType = $state('all');
   let search = $state('');
   let currentPage = $state(1);
   const ITEMS_PER_PAGE = 12;
@@ -71,6 +85,7 @@
   const filters = $derived({
     contentType,
     progressStatus,
+    accessType,
     search,
   });
 
@@ -79,6 +94,9 @@
     let items = allItems;
     if (contentType !== 'all') {
       items = items.filter((item) => item.content?.contentType === contentType);
+    }
+    if (accessType !== 'all') {
+      items = items.filter((item) => item.accessType === accessType);
     }
     if (progressStatus !== 'all') {
       if (progressStatus === 'in_progress') {
@@ -173,10 +191,12 @@
   function handleFilterChange(newFilters: {
     contentType: string;
     progressStatus: string;
+    accessType?: string;
     search: string;
   }) {
     contentType = newFilters.contentType ?? 'all';
     progressStatus = newFilters.progressStatus ?? 'all';
+    accessType = newFilters.accessType ?? 'all';
     search = newFilters.search ?? '';
     currentPage = 1;
   }
@@ -184,6 +204,7 @@
   function handleClearFilters() {
     contentType = 'all';
     progressStatus = 'all';
+    accessType = 'all';
     search = '';
     currentPage = 1;
   }

@@ -8,7 +8,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { organizations } from './content';
+import { mediaItems, organizations } from './content';
 
 /**
  * Hub table - exists primarily for CASCADE DELETE coordination
@@ -68,6 +68,13 @@ export const brandingSettings = pgTable(
     densityValue: varchar('density_value', { length: 10 })
       .notNull()
       .default('1'),
+
+    // Intro video (FK to media item, public HLS URL set when transcoding completes)
+    introVideoMediaItemId: uuid('intro_video_media_item_id').references(
+      () => mediaItems.id,
+      { onDelete: 'set null' }
+    ),
+    introVideoUrl: text('intro_video_url'),
 
     // Brand Editor — Level 2 fine-tune fields
     tokenOverrides: text('token_overrides'), // JSON: Record<string, string>

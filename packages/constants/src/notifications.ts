@@ -25,4 +25,5 @@ export const EMAIL_SEND_STATUS = {
   PENDING: 'pending',
   SUCCESS: 'success',
   FAILED: 'failed',
+  SKIPPED: 'skipped',
 } as const;

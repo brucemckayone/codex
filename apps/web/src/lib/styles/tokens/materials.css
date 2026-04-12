@@ -13,6 +13,7 @@
   --blur-md: 8px;
   --blur-lg: 12px;
   --blur-xl: 20px;
+  --blur-2xl: 60px;
 }
 
 [data-theme="dark"] {

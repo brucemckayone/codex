@@ -209,6 +209,15 @@ app.post(
  */
 app.post(
   '/webhooks/stripe/dev',
+  (c, next) => {
+    if (c.env.ENVIRONMENT === 'production') {
+      return c.json(
+        { error: { code: 'NOT_FOUND', message: 'Not found' } },
+        404
+      );
+    }
+    return next();
+  },
   verifyStripeSignature(),
   createWebhookHandler('Dev', routeDevWebhook)
 );

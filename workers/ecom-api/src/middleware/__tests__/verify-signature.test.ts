@@ -378,6 +378,95 @@ describe('verifyStripeSignature middleware', () => {
     });
   });
 
+  describe('signature verification edge cases', () => {
+    it('should return 401 for tampered payload (valid format, wrong body)', async () => {
+      // Simulate a valid-looking signature format but mismatched body
+      (
+        verifyWebhookSignature as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(
+        new Error('Signature verification failed: payload tampered')
+      );
+
+      const app = createTestApp(validEnv);
+
+      const res = await app.request('/webhooks/stripe/booking', {
+        method: 'POST',
+        body: JSON.stringify({ tampered: true }),
+        headers: {
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
+          'stripe-signature': 't=1234567890,v1=valid_format_but_wrong_hmac',
+        },
+      });
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Invalid signature');
+    });
+
+    it('should return 401 for expired timestamp', async () => {
+      // Simulate Stripe SDK rejecting due to timestamp tolerance
+      (
+        verifyWebhookSignature as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(
+        new Error('Timestamp outside the tolerance zone')
+      );
+
+      const app = createTestApp(validEnv);
+
+      // Use a very old timestamp
+      const expiredTimestamp = Math.floor(Date.now() / 1000) - 600; // 10 minutes ago
+      const res = await app.request('/webhooks/stripe/booking', {
+        method: 'POST',
+        body: JSON.stringify({ test: true }),
+        headers: {
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
+          'stripe-signature': `t=${expiredTimestamp},v1=some_signature`,
+        },
+      });
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Invalid signature');
+    });
+
+    it('should rely on Stripe SDK timestamp tolerance + idempotency for replay protection', async () => {
+      // Document: Replay protection is provided by:
+      // 1. Stripe SDK's timestamp tolerance (default 300s / 5 min)
+      //    — rejects events with timestamps outside the tolerance window
+      // 2. Service-level idempotency constraints (e.g., stripePaymentIntentId unique)
+      //    — even if a replay somehow passes signature check, the handler is idempotent
+      //
+      // There is no explicit nonce or replay counter in our middleware.
+      // The Stripe SDK's constructEvent/verifyWebhookSignature handles timestamp checking.
+
+      const app = createTestApp(validEnv);
+
+      // First request succeeds
+      const res1 = await app.request('/webhooks/stripe/booking', {
+        method: 'POST',
+        body: JSON.stringify({ test: true }),
+        headers: {
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
+          'stripe-signature': 't=1234567890,v1=valid_signature',
+        },
+      });
+      expect(res1.status).toBe(200);
+
+      // Same request replayed — if within timestamp tolerance, signature passes
+      // but service-level idempotency prevents duplicate processing
+      const res2 = await app.request('/webhooks/stripe/booking', {
+        method: 'POST',
+        body: JSON.stringify({ test: true }),
+        headers: {
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
+          'stripe-signature': 't=1234567890,v1=valid_signature',
+        },
+      });
+      // Middleware passes (signature still valid) — idempotency is at the handler level
+      expect(res2.status).toBe(200);
+    });
+  });
+
   describe('Stripe client initialization', () => {
     it('should create Stripe client with STRIPE_SECRET_KEY', async () => {
       const app = createTestApp(validEnv);

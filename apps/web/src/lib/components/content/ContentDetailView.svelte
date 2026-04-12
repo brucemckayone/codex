@@ -373,9 +373,26 @@
     {/if}
 
     {#if contentBodyHtml}
-      <div class="content-detail__body">
-        <ProseContent html={contentBodyHtml} />
-      </div>
+      {#if hasAccess}
+        <div class="content-detail__body">
+          <ProseContent html={contentBodyHtml} />
+        </div>
+      {:else}
+        <div class="content-detail__body content-detail__body--locked">
+          <div class="content-detail__body-lock">
+            <LockIcon size={24} class="content-detail__body-lock-icon" />
+            <p class="content-detail__body-lock-text">
+              {#if needsSubscription}
+                {hasSubscription ? m.upgrade_cta_description() : m.subscribe_cta_description()}
+              {:else if !isAuthenticated}
+                {m.checkout_signin_to_purchase()}
+              {:else}
+                {m.content_detail_purchase_cta_description()}
+              {/if}
+            </p>
+          </div>
+        </div>
+      {/if}
     {/if}
   </div>
 
@@ -398,6 +415,7 @@
             price={item.priceCents != null
               ? { amount: item.priceCents, currency: 'GBP' }
               : null}
+            contentAccessType={item.accessType}
           />
         {/each}
       </div>
@@ -716,6 +734,37 @@
     margin-top: var(--space-4);
     padding-top: var(--space-4);
     border-top: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .content-detail__body--locked {
+    position: relative;
+    min-height: var(--space-24);
+  }
+
+  .content-detail__body-lock {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-8) var(--space-4);
+    background: var(--color-surface-secondary);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-lg);
+    text-align: center;
+  }
+
+  :global(.content-detail__body-lock-icon) {
+    color: var(--color-text-muted);
+    opacity: var(--opacity-70);
+  }
+
+  .content-detail__body-lock-text {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    margin: 0;
+    max-width: 320px;
+    line-height: var(--leading-relaxed);
   }
 
   /* Related Content Section */

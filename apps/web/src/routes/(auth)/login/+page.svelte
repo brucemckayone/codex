@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { enhance } from '$app/forms';
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { clearClientState } from '$lib/client/version-manifest';
   import AuthLayout from '$lib/components/auth/AuthLayout.svelte';
@@ -22,13 +21,12 @@
 
   function handleSubmit() {
     loading = true;
-    return async ({ result, update }) => {
+    return async ({ update }) => {
       loading = false;
-      if (result.type === 'redirect') {
-        await goto(result.location);
-      } else {
-        await update();
-      }
+      // update() handles both cases correctly:
+      // - redirect: calls invalidateAll() then goto() — refreshes data.user in root layout
+      // - error: updates form state with validation errors
+      await update();
     };
   }
 </script>

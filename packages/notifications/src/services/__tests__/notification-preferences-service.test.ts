@@ -78,7 +78,9 @@ describe('NotificationPreferencesService', () => {
 
       mockDb.insert.mockReturnValue({
         values: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([newPrefs]),
+          onConflictDoNothing: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([newPrefs]),
+          }),
         }),
       });
 

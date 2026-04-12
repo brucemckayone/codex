@@ -8,14 +8,19 @@
 import type { R2Service } from '@codex/cloudflare-clients';
 import { MIME_TYPES } from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
-import { BaseService, InternalServiceError } from '@codex/service-errors';
+import {
+  BaseService,
+  ForbiddenError,
+  InternalServiceError,
+  NotFoundError,
+} from '@codex/service-errors';
 import type { BrandingSettingsResponse } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   DEFAULT_BRANDING,
   type UpdateBrandingInput,
 } from '@codex/validation';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { InvalidFileTypeError, SettingsUpsertError } from '../errors';
 
 /**
@@ -68,6 +73,8 @@ export class BrandingSettingsService extends BaseService {
         fontHeading: schema.brandingSettings.fontHeading,
         radiusValue: schema.brandingSettings.radiusValue,
         densityValue: schema.brandingSettings.densityValue,
+        introVideoMediaItemId: schema.brandingSettings.introVideoMediaItemId,
+        introVideoUrl: schema.brandingSettings.introVideoUrl,
         tokenOverrides: schema.brandingSettings.tokenOverrides,
         darkModeOverrides: schema.brandingSettings.darkModeOverrides,
         textColorHex: schema.brandingSettings.textColorHex,
@@ -103,6 +110,8 @@ export class BrandingSettingsService extends BaseService {
     fontHeading: string | null;
     radiusValue: string;
     densityValue: string;
+    introVideoMediaItemId: string | null;
+    introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
     textColorHex: string | null;
@@ -122,6 +131,8 @@ export class BrandingSettingsService extends BaseService {
       fontHeading: row.fontHeading,
       radiusValue: parseFloat(row.radiusValue) || 0.5,
       densityValue: parseFloat(row.densityValue) || 1,
+      introVideoMediaItemId: row.introVideoMediaItemId,
+      introVideoUrl: row.introVideoUrl,
       tokenOverrides: row.tokenOverrides,
       darkModeOverrides: row.darkModeOverrides,
       textColorHex: row.textColorHex,
@@ -372,6 +383,228 @@ export class BrandingSettingsService extends BaseService {
 
     return this.get();
   }
+
+  // ── Intro Video ──────────────────────────────────────────────────
+
+  /**
+   * Link a media item as the org's intro video.
+   * The media item must exist, belong to creatorId, and not be soft-deleted.
+   * If the media is already `ready`, auto-sets introVideoUrl.
+   */
+  async linkIntroVideo(
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<BrandingSettingsResponse> {
+    // Validate media item exists, belongs to user, and is not deleted
+    const mediaResult = await this.db
+      .select({
+        id: schema.mediaItems.id,
+        creatorId: schema.mediaItems.creatorId,
+        status: schema.mediaItems.status,
+        hlsMasterPlaylistKey: schema.mediaItems.hlsMasterPlaylistKey,
+      })
+      .from(schema.mediaItems)
+      .where(
+        and(
+          eq(schema.mediaItems.id, mediaItemId),
+          isNull(schema.mediaItems.deletedAt)
+        )
+      )
+      .limit(1);
+
+    const media = mediaResult[0];
+    if (!media) {
+      throw new NotFoundError('Media item not found');
+    }
+    if (media.creatorId !== creatorId) {
+      throw new ForbiddenError('Media item does not belong to this user');
+    }
+
+    // Construct public URL if media is already transcoded
+    const introVideoUrl =
+      media.status === 'ready' &&
+      media.hlsMasterPlaylistKey &&
+      this.r2PublicUrlBase
+        ? `${this.r2PublicUrlBase}/${media.hlsMasterPlaylistKey}`
+        : null;
+
+    await this.ensurePlatformSettingsExists();
+
+    const result = await this.db
+      .insert(schema.brandingSettings)
+      .values({
+        organizationId: this.organizationId,
+        introVideoMediaItemId: mediaItemId,
+        introVideoUrl,
+        primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
+      })
+      .onConflictDoUpdate({
+        target: schema.brandingSettings.organizationId,
+        set: {
+          introVideoMediaItemId: mediaItemId,
+          introVideoUrl,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+
+    this.obs.info('Intro video linked', {
+      organizationId: this.organizationId,
+      mediaItemId,
+      status: media.status,
+      urlSet: !!introVideoUrl,
+    });
+
+    const row = result[0];
+    if (!row) {
+      throw new SettingsUpsertError(
+        'branding',
+        this.organizationId,
+        'intro_video'
+      );
+    }
+    return this.mapRow(row);
+  }
+
+  /**
+   * Get intro video transcoding status.
+   * Auto-finalizes introVideoUrl when media becomes ready (lazy pattern).
+   */
+  async getIntroVideoStatus(): Promise<{
+    status:
+      | 'none'
+      | 'uploading'
+      | 'uploaded'
+      | 'transcoding'
+      | 'ready'
+      | 'failed';
+    introVideoUrl: string | null;
+    progress: number | null;
+    error: string | null;
+  }> {
+    // Get the linked media item ID
+    const brandingResult = await this.db
+      .select({
+        introVideoMediaItemId: schema.brandingSettings.introVideoMediaItemId,
+        introVideoUrl: schema.brandingSettings.introVideoUrl,
+      })
+      .from(schema.brandingSettings)
+      .where(eq(schema.brandingSettings.organizationId, this.organizationId))
+      .limit(1);
+
+    const branding = brandingResult[0];
+    if (!branding?.introVideoMediaItemId) {
+      return {
+        status: 'none',
+        introVideoUrl: null,
+        progress: null,
+        error: null,
+      };
+    }
+
+    // Query media item status
+    const mediaResult = await this.db
+      .select({
+        status: schema.mediaItems.status,
+        hlsMasterPlaylistKey: schema.mediaItems.hlsMasterPlaylistKey,
+        transcodingProgress: schema.mediaItems.transcodingProgress,
+        transcodingError: schema.mediaItems.transcodingError,
+      })
+      .from(schema.mediaItems)
+      .where(eq(schema.mediaItems.id, branding.introVideoMediaItemId))
+      .limit(1);
+
+    const media = mediaResult[0];
+    if (!media) {
+      return {
+        status: 'none',
+        introVideoUrl: null,
+        progress: null,
+        error: null,
+      };
+    }
+
+    // Auto-finalize: if media is ready but URL not yet set, construct and persist it
+    let { introVideoUrl } = branding;
+    if (
+      media.status === 'ready' &&
+      !introVideoUrl &&
+      media.hlsMasterPlaylistKey &&
+      this.r2PublicUrlBase
+    ) {
+      introVideoUrl = `${this.r2PublicUrlBase}/${media.hlsMasterPlaylistKey}`;
+      await this.db
+        .update(schema.brandingSettings)
+        .set({ introVideoUrl, updatedAt: new Date() })
+        .where(eq(schema.brandingSettings.organizationId, this.organizationId));
+
+      this.obs.info('Intro video URL auto-finalized', {
+        organizationId: this.organizationId,
+        introVideoUrl,
+      });
+    }
+
+    return {
+      status: media.status as
+        | 'uploading'
+        | 'uploaded'
+        | 'transcoding'
+        | 'ready'
+        | 'failed',
+      introVideoUrl,
+      progress: media.transcodingProgress,
+      error: media.transcodingError,
+    };
+  }
+
+  /**
+   * Delete the intro video.
+   * Soft-deletes the media item and clears branding references.
+   */
+  async deleteIntroVideo(): Promise<BrandingSettingsResponse> {
+    // Get the linked media item ID
+    const brandingResult = await this.db
+      .select({
+        introVideoMediaItemId: schema.brandingSettings.introVideoMediaItemId,
+      })
+      .from(schema.brandingSettings)
+      .where(eq(schema.brandingSettings.organizationId, this.organizationId))
+      .limit(1);
+
+    const mediaItemId = brandingResult[0]?.introVideoMediaItemId;
+
+    // Soft-delete the media item if it exists
+    if (mediaItemId) {
+      await this.db
+        .update(schema.mediaItems)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(schema.mediaItems.id, mediaItemId),
+            isNull(schema.mediaItems.deletedAt)
+          )
+        );
+
+      this.obs.info('Intro video media item soft-deleted', {
+        organizationId: this.organizationId,
+        mediaItemId,
+      });
+    }
+
+    // Clear branding references
+    await this.db
+      .update(schema.brandingSettings)
+      .set({
+        introVideoMediaItemId: null,
+        introVideoUrl: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.brandingSettings.organizationId, this.organizationId));
+
+    return this.get();
+  }
+
+  // ── Private Helpers ─────────────────────────────────────────────
 
   /**
    * Ensure platform_settings hub row exists for the organization.

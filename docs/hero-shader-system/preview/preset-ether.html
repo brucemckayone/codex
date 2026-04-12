@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Hero Preset — Ether</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;width:100%}
+body{background:#0a0a0a;font-family:system-ui,-apple-system,sans-serif;color:#ccc;overflow:hidden;display:flex}
+#canvas-wrap{flex:1;position:relative;min-width:0;height:100vh}
+canvas{width:100%;height:100%;display:block;cursor:crosshair}
+.hud{position:absolute;top:12px;left:12px;font:11px/1.4 'SF Mono',Menlo,monospace;color:#6ee7b7;background:rgba(0,0,0,.65);padding:5px 10px;border-radius:4px;pointer-events:none;z-index:10}
+.info{position:absolute;bottom:12px;left:12px;font:13px/1.6 system-ui;color:#888;background:rgba(0,0,0,.65);padding:8px 14px;border-radius:6px;max-width:380px;pointer-events:none;z-index:10}
+.info strong{color:#bbb}
+.panel{width:280px;min-width:280px;height:100vh;background:#111;border-left:1px solid #222;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.panel h2{font-size:13px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.panel h3{font-size:11px;font-weight:600;color:#777;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.color-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.color-row label{font-size:12px;color:#999;width:72px;flex-shrink:0}
+.color-row input[type=color]{width:36px;height:24px;border:1px solid #333;border-radius:3px;background:#1a1a1a;cursor:pointer;padding:0}
+.color-row input[type=color]::-webkit-color-swatch-wrapper{padding:1px}
+.color-row input[type=color]::-webkit-color-swatch{border-radius:2px;border:none}
+.color-hex{font:11px/1 monospace;color:#666;width:60px}
+.presets{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.presets button{padding:5px 0;background:#1a1a1a;border:1px solid #333;border-radius:4px;color:#aaa;font:11px system-ui;cursor:pointer;transition:all .15s}
+.presets button:hover{background:#222;border-color:#555}
+.presets button.active{border-color:#7c3aed;background:#1e1b4b;color:#c4b5fd}
+.slider-row{margin-bottom:8px}
+.slider-row .label-row{display:flex;justify-content:space-between;margin-bottom:3px}
+.slider-row label{font-size:12px;color:#999}
+.slider-row .val{font:11px monospace;color:#666}
+.slider-row input[type=range]{width:100%;height:4px;-webkit-appearance:none;background:#2a2a2a;border-radius:2px;outline:none}
+.slider-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:#7c3aed;border-radius:50%;cursor:pointer}
+.slider-row input[type=range]::-moz-range-thumb{width:14px;height:14px;background:#7c3aed;border:none;border-radius:50%;cursor:pointer}
+.btn-reset{margin-top:auto;padding:8px;background:#1a1a1a;border:1px solid #333;border-radius:4px;color:#999;font:12px system-ui;cursor:pointer;transition:all .15s}
+.btn-reset:hover{background:#2a2a2a;border-color:#555;color:#ccc}
+.section{border-top:1px solid #1e1e1e;padding-top:12px}
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+  <div class="hud" id="hud">-- fps</div>
+  <div class="info">
+    <strong>Ether</strong> — Raymarched volumetric light (nimitz 2014)<br>
+    Move mouse to shift perspective. Scroll to zoom.
+  </div>
+</div>
+
+<div class="panel">
+  <div>
+    <h2>Brand Colors</h2>
+    <div class="color-row">
+      <label>Primary</label>
+      <input type="color" id="col-primary" value="#7c3aed">
+      <span class="color-hex" id="hex-primary">#7c3aed</span>
+    </div>
+    <div class="color-row">
+      <label>Secondary</label>
+      <input type="color" id="col-secondary" value="#ec4899">
+      <span class="color-hex" id="hex-secondary">#ec4899</span>
+    </div>
+    <div class="color-row">
+      <label>Accent</label>
+      <input type="color" id="col-accent" value="#f59e0b">
+      <span class="color-hex" id="hex-accent">#f59e0b</span>
+    </div>
+    <div class="color-row">
+      <label>Background</label>
+      <input type="color" id="col-bg" value="#0f172a">
+      <span class="color-hex" id="hex-bg">#0f172a</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Presets</h3>
+    <div class="presets" id="presets"></div>
+  </div>
+
+  <div class="section">
+    <h3>Raymarch</h3>
+    <div class="slider-row">
+      <div class="label-row"><label>Rotation Speed</label><span class="val" id="v-rotspeed">0.40</span></div>
+      <input type="range" id="s-rotspeed" min="10" max="100" value="40" step="1">
+    </div>
+    <div class="slider-row">
+      <div class="label-row"><label>Complexity</label><span class="val" id="v-complexity">6</span></div>
+      <input type="range" id="s-complexity" min="3" max="8" value="6" step="1">
+    </div>
+    <div class="slider-row">
+      <div class="label-row"><label>Glow Intensity</label><span class="val" id="v-glow">0.50</span></div>
+      <input type="range" id="s-glow" min="10" max="100" value="50" step="1">
+    </div>
+    <div class="slider-row">
+      <div class="label-row"><label>Scale</label><span class="val" id="v-scale">2.00</span></div>
+      <input type="range" id="s-scale" min="50" max="300" value="200" step="1">
+    </div>
+    <div class="slider-row">
+      <div class="label-row"><label>Zoom</label><span class="val" id="v-zoom">5.0</span></div>
+      <input type="range" id="s-zoom" min="10" max="80" value="50" step="1">
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Display</h3>
+    <div class="slider-row">
+      <div class="label-row"><label>Intensity</label><span class="val" id="v-intensity">0.40</span></div>
+      <input type="range" id="s-intensity" min="10" max="100" value="40" step="1">
+    </div>
+    <div class="slider-row">
+      <div class="label-row"><label>Grain</label><span class="val" id="v-grain">0.020</span></div>
+      <input type="range" id="s-grain" min="0" max="80" value="20" step="1">
+    </div>
+    <div class="slider-row">
+      <div class="label-row"><label>Vignette</label><span class="val" id="v-vignette">0.20</span></div>
+      <input type="range" id="s-vignette" min="0" max="60" value="20" step="1">
+    </div>
+    <div class="slider-row">
+      <div class="label-row"><label>Chromatic Ab.</label><span class="val" id="v-aberration">0.003</span></div>
+      <input type="range" id="s-aberration" min="0" max="20" value="3" step="1">
+    </div>
+  </div>
+
+  <button class="btn-reset" id="btn-reset">Reset Defaults</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// Ether — Faithful port of MsjSW3 by nimitz (2014)
+// https://www.shadertoy.com/view/MsjSW3
+//
+// Single-pass raymarched volumetric light. No FBOs needed.
+// The map() function creates organic 3D forms via SDF + sine waves.
+// 6-step raymarch with multiplicative color accumulation.
+// ═══════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false });
+if (!gl) { document.body.innerHTML = '<h1 style="padding:40px;color:red">WebGL2 required</h1>'; throw 0; }
+
+const config = {
+  rotSpeed: 0.40,
+  complexity: 6,
+  glow: 0.50,
+  scale: 2.0,
+  zoom: 5.0,
+  intensity: 0.40,
+  grain: 0.020,
+  vignette: 0.20,
+  aberration: 0.003,
+  colors: {
+    primary:   [0.486, 0.227, 0.929],
+    secondary: [0.925, 0.282, 0.600],
+    accent:    [0.961, 0.620, 0.043],
+    bg:        [0.059, 0.090, 0.165],
+  }
+};
+
+const PALETTES = {
+  'Vibrant': { primary: '#7c3aed', secondary: '#ec4899', accent: '#f59e0b', bg: '#0f172a' },
+  'Neon':    { primary: '#22d3ee', secondary: '#a3e635', accent: '#f472b6', bg: '#09090b' },
+  'Ocean':   { primary: '#0284c7', secondary: '#0891b2', accent: '#34d399', bg: '#0c4a6e' },
+  'Sunset':  { primary: '#e11d48', secondary: '#f97316', accent: '#fbbf24', bg: '#1c1917' },
+  'Ember':   { primary: '#dc2626', secondary: '#ea580c', accent: '#fcd34d', bg: '#1c1917' },
+  'Mono':    { primary: '#e5e5e5', secondary: '#a3a3a3', accent: '#525252', bg: '#0a0a0a' },
+};
+
+// ── GL helpers ───────────────────────────────────────────────
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error('Shader error:', gl.getShaderInfoLog(s));
+    console.error(src.split('\n').map((l,i) => `${i+1}: ${l}`).join('\n'));
+    return null;
+  }
+  return s;
+}
+function createProgram(vSrc, fSrc) {
+  const p = gl.createProgram();
+  const vs = compileShader(gl.VERTEX_SHADER, vSrc);
+  const fs = compileShader(gl.FRAGMENT_SHADER, fSrc);
+  if (!vs || !fs) return null;
+  gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { console.error(gl.getProgramInfoLog(p)); return null; }
+  return p;
+}
+function getUniforms(prog, names) {
+  const u = {};
+  for (const n of names) u[n] = gl.getUniformLocation(prog, n);
+  return u;
+}
+
+const VS = `#version 300 es
+in vec2 a_position;
+out vec2 v_uv;
+void main() { v_uv = a_position * 0.5 + 0.5; gl_Position = vec4(a_position, 0, 1); }`;
+
+// ══════════════════════════════════════════════════════════════
+// ETHER FRAGMENT SHADER
+//
+// Core algorithm from nimitz (2014):
+//   - map() defines an organic SDF with rotating sine waves
+//   - Raymarch 3-8 steps accumulating color multiplicatively
+//   - cl = cl*l + smoothstep(...)*glow*l creates ethereal glow
+//
+// Enhancements:
+//   - Brand color injection (replaces hardcoded vec3 constants)
+//   - Mouse parallax (shifts view origin for perspective shift)
+//   - Configurable rotation speed, scale, zoom, complexity
+//   - Post-processing: tone mapping, grain, vignette, chromatic ab.
+// ══════════════════════════════════════════════════════════════
+const etherProg = createProgram(VS, `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;         // normalized 0-1, lerped
+uniform vec3 u_brandPrimary;
+uniform vec3 u_brandSecondary;
+uniform vec3 u_brandAccent;
+uniform vec3 u_bgColor;
+uniform float u_rotSpeed;
+uniform int u_complexity;     // 3-8 raymarch steps
+uniform float u_glow;         // glow intensity multiplier
+uniform float u_scale;        // map() detail scale
+uniform float u_zoom;         // camera Z distance
+uniform float u_intensity;    // overall blend intensity
+uniform float u_grain;
+uniform float u_vignette;
+uniform float u_aberration;
+
+// ── nimitz's rotation matrix ─────────────────────────────────
+mat2 m(float a) {
+  float c = cos(a), s = sin(a);
+  return mat2(c, -s, s, c);
+}
+
+// ── The SDF map function — heart of the shader ──────────────
+// Organic form: rotating log-distance + nested sine waves
+float map(vec3 p, float t, float rotSpd, float scl) {
+  p.xz *= m(t * rotSpd);
+  p.xy *= m(t * rotSpd * 0.75);
+  vec3 q = p * scl + t;
+  return length(p + vec3(sin(t * 0.7))) * log(length(p) + 1.0)
+       + sin(q.x + sin(q.z + sin(q.y))) * 0.5 - 1.0;
+}
+
+// ── Hash for film grain ─────────────────────────────────────
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+  float t = u_time;
+
+  // Mouse parallax: shift view origin for perspective effect
+  float mx = (u_mouse.x - 0.5) * 0.3;
+  float my = (u_mouse.y - 0.5) * 0.2;
+
+  // Shadertoy-style coordinate mapping
+  // Original: fragCoord.xy/iResolution.y - vec2(.9,.5)
+  vec2 uv = gl_FragCoord.xy / u_resolution.y - vec2(
+    0.9 + mx,
+    0.5 + my
+  );
+
+  // Brand color setup:
+  // Base light replaces vec3(0.1, 0.3, 0.4)
+  vec3 baseLight = u_brandPrimary * 0.3;
+  // Highlight replaces vec3(5.0, 2.5, 3.0) — mix secondary+accent, scaled up
+  vec3 highlight = mix(u_brandSecondary, u_brandAccent, 0.4) * 4.0;
+
+  // ── Raymarch loop ────────────────────────────────────────
+  vec3 cl = vec3(0.0);
+  float d = 2.5;
+
+  // Unroll manually up to 8 steps (controlled by u_complexity)
+  for (int i = 0; i <= 7; i++) {
+    if (i >= u_complexity) break;
+
+    vec3 p = vec3(0.0, 0.0, u_zoom) + normalize(vec3(uv, -1.0)) * d;
+    float rz = map(p, t, u_rotSpeed, u_scale);
+    float f = clamp((rz - map(p + vec3(0.1), t, u_rotSpeed, u_scale)) * 0.5, -0.1, 1.0);
+
+    // Brand-colored lighting
+    vec3 l = baseLight + highlight * f;
+    cl = cl * l + smoothstep(2.5, 0.0, rz) * u_glow * l;
+
+    d += min(rz, 1.0);
+  }
+
+  // ── Post-processing ─────────────────────────────────────
+
+  // Reinhard tone mapping
+  vec3 etherColor = cl / (1.0 + cl);
+
+  // Cap maximum brightness
+  etherColor = min(etherColor, vec3(0.7));
+
+  // Intensity blend: mix background with ether
+  vec3 color = mix(u_bgColor, etherColor, u_intensity);
+
+  // Chromatic aberration on bright areas
+  {
+    float lum = dot(etherColor, vec3(0.299, 0.587, 0.114));
+    float abStr = u_aberration * smoothstep(0.2, 0.6, lum);
+    // Shift R and B channels based on distance from center
+    // Full per-pixel re-raymarch would be too expensive, so we
+    // use a screen-space color split proportional to brightness
+    color.r = mix(color.r, etherColor.r * 0.9 + 0.05, abStr * 2.0);
+    color.b = mix(color.b, etherColor.b * 1.1, abStr * 2.0);
+  }
+
+  // Vignette
+  vec2 vc = v_uv * 2.0 - 1.0;
+  color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
+
+  // Film grain
+  color += (hash(gl_FragCoord.xy + fract(t * 7.13)) - 0.5) * u_grain;
+
+  // Final clamp
+  fragColor = vec4(clamp(color, 0.0, 0.7), 1.0);
+}
+`);
+const etherU = getUniforms(etherProg, [
+  'u_time', 'u_resolution', 'u_mouse',
+  'u_brandPrimary', 'u_brandSecondary', 'u_brandAccent', 'u_bgColor',
+  'u_rotSpeed', 'u_complexity', 'u_glow', 'u_scale', 'u_zoom',
+  'u_intensity', 'u_grain', 'u_vignette', 'u_aberration'
+]);
+
+// ── Quad ─────────────────────────────────────────────────────
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+function bindQuad(prog) {
+  const a = gl.getAttribLocation(prog, 'a_position');
+  gl.enableVertexAttribArray(a);
+  gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+}
+
+// ── Mouse (lerped for smoothness) ───────────────────────────
+let mouseRaw = { x: 0.5, y: 0.5 };
+let mouseLerped = { x: 0.5, y: 0.5 };
+const MOUSE_LERP = 0.04;
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouseRaw.x = (e.clientX - rect.left) / rect.width;
+  mouseRaw.y = 1.0 - (e.clientY - rect.top) / rect.height;
+});
+canvas.addEventListener('mouseleave', () => {
+  // Drift back to center
+  mouseRaw.x = 0.5;
+  mouseRaw.y = 0.5;
+});
+
+// Touch support
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  mouseRaw.x = (t.clientX - rect.left) / rect.width;
+  mouseRaw.y = 1.0 - (t.clientY - rect.top) / rect.height;
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  mouseRaw.x = (t.clientX - rect.left) / rect.width;
+  mouseRaw.y = 1.0 - (t.clientY - rect.top) / rect.height;
+}, { passive: false });
+canvas.addEventListener('touchend', () => {
+  mouseRaw.x = 0.5;
+  mouseRaw.y = 0.5;
+});
+
+// Scroll to zoom
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  config.zoom = Math.max(1.0, Math.min(8.0, config.zoom + e.deltaY * 0.005));
+  // Sync slider
+  const s = document.getElementById('s-zoom');
+  const d = document.getElementById('v-zoom');
+  s.value = Math.round(config.zoom * 10);
+  d.textContent = config.zoom.toFixed(1);
+}, { passive: false });
+
+// ── Resize ───────────────────────────────────────────────────
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  canvas.width = wrap.clientWidth * dpr;
+  canvas.height = wrap.clientHeight * dpr;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Render ───────────────────────────────────────────────────
+let fpsCount = 0, fpsTime = 0, fpsVal = 0;
+let startTime = 0;
+
+function frame(time) {
+  requestAnimationFrame(frame);
+
+  if (!startTime) startTime = time;
+  const elapsed = (time - startTime) * 0.001;
+
+  // FPS counter
+  fpsCount++;
+  if (time - fpsTime > 1000) {
+    fpsVal = Math.round(fpsCount * 1000 / (time - fpsTime));
+    fpsTime = time; fpsCount = 0;
+    document.getElementById('hud').textContent =
+      `${fpsVal} fps | ${canvas.width}x${canvas.height} | ${config.complexity} steps`;
+  }
+
+  // Lerp mouse for smooth parallax
+  mouseLerped.x += (mouseRaw.x - mouseLerped.x) * MOUSE_LERP;
+  mouseLerped.y += (mouseRaw.y - mouseLerped.y) * MOUSE_LERP;
+
+  // Draw
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(etherProg);
+  bindQuad(etherProg);
+
+  gl.uniform1f(etherU.u_time, elapsed);
+  gl.uniform2f(etherU.u_resolution, canvas.width, canvas.height);
+  gl.uniform2f(etherU.u_mouse, mouseLerped.x, mouseLerped.y);
+
+  const c = config.colors;
+  gl.uniform3fv(etherU.u_brandPrimary, c.primary);
+  gl.uniform3fv(etherU.u_brandSecondary, c.secondary);
+  gl.uniform3fv(etherU.u_brandAccent, c.accent);
+  gl.uniform3fv(etherU.u_bgColor, c.bg);
+
+  gl.uniform1f(etherU.u_rotSpeed, config.rotSpeed);
+  gl.uniform1i(etherU.u_complexity, config.complexity);
+  gl.uniform1f(etherU.u_glow, config.glow);
+  gl.uniform1f(etherU.u_scale, config.scale);
+  gl.uniform1f(etherU.u_zoom, config.zoom);
+  gl.uniform1f(etherU.u_intensity, config.intensity);
+  gl.uniform1f(etherU.u_grain, config.grain);
+  gl.uniform1f(etherU.u_vignette, config.vignette);
+  gl.uniform1f(etherU.u_aberration, config.aberration);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ── UI ───────────────────────────────────────────────────────
+function hexToRgb(h) {
+  return [parseInt(h.slice(1,3),16)/255, parseInt(h.slice(3,5),16)/255, parseInt(h.slice(5,7),16)/255];
+}
+
+['primary','secondary','accent','bg'].forEach(key => {
+  const inp = document.getElementById(`col-${key}`);
+  const hex = document.getElementById(`hex-${key}`);
+  inp.addEventListener('input', () => {
+    config.colors[key] = hexToRgb(inp.value);
+    hex.textContent = inp.value;
+    document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+  });
+});
+
+const presetsEl = document.getElementById('presets');
+Object.entries(PALETTES).forEach(([name, pal]) => {
+  const btn = document.createElement('button');
+  btn.textContent = name;
+  btn.addEventListener('click', () => {
+    config.colors.primary = hexToRgb(pal.primary);
+    config.colors.secondary = hexToRgb(pal.secondary);
+    config.colors.accent = hexToRgb(pal.accent);
+    config.colors.bg = hexToRgb(pal.bg);
+    ['primary','secondary','accent','bg'].forEach(k => {
+      document.getElementById(`col-${k}`).value = pal[k];
+      document.getElementById(`hex-${k}`).textContent = pal[k];
+    });
+    document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+  if (name === 'Vibrant') btn.classList.add('active');
+  presetsEl.appendChild(btn);
+});
+
+function wireSlider(id, key, xform, fmt) {
+  const s = document.getElementById(`s-${id}`);
+  const d = document.getElementById(`v-${id}`);
+  s.addEventListener('input', () => {
+    const v = xform(+s.value);
+    config[key] = v;
+    d.textContent = fmt(v);
+  });
+}
+wireSlider('rotspeed',   'rotSpeed',   v => v / 100,  v => v.toFixed(2));
+wireSlider('complexity', 'complexity', v => v,         v => v.toFixed(0));
+wireSlider('glow',       'glow',       v => v / 100,  v => v.toFixed(2));
+wireSlider('scale',      'scale',      v => v / 100,  v => v.toFixed(2));
+wireSlider('zoom',       'zoom',       v => v / 10,   v => v.toFixed(1));
+wireSlider('intensity',  'intensity',  v => v / 100,  v => v.toFixed(2));
+wireSlider('grain',      'grain',      v => v / 1000, v => v.toFixed(3));
+wireSlider('vignette',   'vignette',   v => v / 100,  v => v.toFixed(2));
+wireSlider('aberration', 'aberration', v => v / 1000, v => v.toFixed(3));
+
+// ── Reset ────────────────────────────────────────────────────
+document.getElementById('btn-reset').addEventListener('click', () => {
+  // Reset config
+  config.rotSpeed = 0.40;
+  config.complexity = 6;
+  config.glow = 0.50;
+  config.scale = 2.0;
+  config.zoom = 5.0;
+  config.intensity = 0.40;
+  config.grain = 0.020;
+  config.vignette = 0.20;
+  config.aberration = 0.003;
+
+  // Reset colors to Vibrant
+  const pal = PALETTES['Vibrant'];
+  config.colors.primary = hexToRgb(pal.primary);
+  config.colors.secondary = hexToRgb(pal.secondary);
+  config.colors.accent = hexToRgb(pal.accent);
+  config.colors.bg = hexToRgb(pal.bg);
+  ['primary','secondary','accent','bg'].forEach(k => {
+    document.getElementById(`col-${k}`).value = pal[k];
+    document.getElementById(`hex-${k}`).textContent = pal[k];
+  });
+  document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+  presetsEl.querySelector('button').classList.add('active');
+
+  // Reset sliders
+  const sliderDefaults = {
+    rotspeed: 40, complexity: 6, glow: 50, scale: 200, zoom: 50,
+    intensity: 40, grain: 20, vignette: 20, aberration: 3
+  };
+  for (const [id, val] of Object.entries(sliderDefaults)) {
+    document.getElementById(`s-${id}`).value = val;
+  }
+
+  // Reset displayed values
+  document.getElementById('v-rotspeed').textContent = '0.40';
+  document.getElementById('v-complexity').textContent = '6';
+  document.getElementById('v-glow').textContent = '0.50';
+  document.getElementById('v-scale').textContent = '2.00';
+  document.getElementById('v-zoom').textContent = '5.0';
+  document.getElementById('v-intensity').textContent = '0.40';
+  document.getElementById('v-grain').textContent = '0.020';
+  document.getElementById('v-vignette').textContent = '0.20';
+  document.getElementById('v-aberration').textContent = '0.003';
+
+  // Reset mouse
+  mouseRaw.x = 0.5;
+  mouseRaw.y = 0.5;
+});
+
+// ── Boot ─────────────────────────────────────────────────────
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

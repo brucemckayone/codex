@@ -17,14 +17,19 @@ import {
   whereNotDeleted,
   withPagination,
 } from '@codex/database';
+import type { SocialLinks } from '@codex/database/schema';
 import {
   content,
+  mediaItems,
   organizationMemberships,
   organizations,
   users,
 } from '@codex/database/schema';
 import { BaseService, InternalServiceError } from '@codex/service-errors';
-import type { PaginatedListResponse } from '@codex/shared-types';
+import type {
+  OrganizationPublicStatsResponse,
+  PaginatedListResponse,
+} from '@codex/shared-types';
 import type {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -43,6 +48,8 @@ import {
   inArray,
   isNull,
   or,
+  sql,
+  sum,
 } from 'drizzle-orm';
 import {
   ConflictError,
@@ -387,10 +394,24 @@ export class OrganizationService extends BaseService {
   ): Promise<
     PaginatedListResponse<{
       name: string;
+      username: string | null;
       avatarUrl: string | null;
+      bio: string | null;
+      socialLinks: SocialLinks | null;
       role: string;
       joinedAt: string;
       contentCount: number;
+      recentContent: {
+        title: string;
+        slug: string;
+        thumbnailUrl: string | null;
+        contentType: string;
+      }[];
+      organizations: {
+        name: string;
+        slug: string;
+        logoUrl: string | null;
+      }[];
     }>
   > {
     const { page = 1, limit = PAGINATION.DEFAULT } = pagination ?? {};
@@ -427,9 +448,13 @@ export class OrganizationService extends BaseService {
           ),
         this.db
           .select({
+            userId: users.id,
             name: users.name,
+            username: users.username,
             avatarUrl: users.avatarUrl,
             image: users.image,
+            bio: users.bio,
+            socialLinks: users.socialLinks,
             role: organizationMemberships.role,
             joinedAt: organizationMemberships.createdAt,
             contentCount: count(content.id),
@@ -460,8 +485,11 @@ export class OrganizationService extends BaseService {
             users.id,
             organizationMemberships.id,
             users.name,
+            users.username,
             users.avatarUrl,
             users.image,
+            users.bio,
+            users.socialLinks,
             organizationMemberships.role,
             organizationMemberships.createdAt
           )
@@ -473,13 +501,108 @@ export class OrganizationService extends BaseService {
       const totalCount = countResult[0]?.totalCount ?? 0;
       const totalPages = Math.ceil(totalCount / limit);
 
+      // Fetch recent published content per creator (up to 4 each, for drawer gallery)
+      const creatorIdsWithContent = members
+        .filter((m) => Number(m.contentCount ?? 0) > 0)
+        .map((m) => m.userId);
+
+      type ContentItem = {
+        title: string;
+        slug: string;
+        thumbnailUrl: string | null;
+        contentType: string;
+      };
+      const recentContentMap = new Map<string, ContentItem[]>();
+
+      if (creatorIdsWithContent.length > 0) {
+        const recentItems = await this.db
+          .select({
+            creatorId: content.creatorId,
+            title: content.title,
+            slug: content.slug,
+            thumbnailUrl: content.thumbnailUrl,
+            contentType: content.contentType,
+            publishedAt: content.publishedAt,
+          })
+          .from(content)
+          .where(
+            and(
+              inArray(content.creatorId, creatorIdsWithContent),
+              eq(content.organizationId, org.id),
+              eq(content.status, 'published'),
+              isNull(content.deletedAt)
+            )
+          )
+          .orderBy(desc(content.publishedAt));
+
+        // Collect up to 4 most recent per creator
+        for (const item of recentItems) {
+          const existing = recentContentMap.get(item.creatorId) ?? [];
+          if (existing.length < 4) {
+            existing.push({
+              title: item.title,
+              slug: item.slug,
+              thumbnailUrl: item.thumbnailUrl,
+              contentType: item.contentType,
+            });
+            recentContentMap.set(item.creatorId, existing);
+          }
+        }
+      }
+
+      // Fetch other org memberships per creator (for org logo row)
+      const allUserIds = members.map((m) => m.userId);
+      const otherOrgsMap = new Map<
+        string,
+        { name: string; slug: string; logoUrl: string | null }[]
+      >();
+
+      if (allUserIds.length > 0) {
+        const otherMemberships = await this.db
+          .select({
+            userId: organizationMemberships.userId,
+            name: organizations.name,
+            slug: organizations.slug,
+            logoUrl: organizations.logoUrl,
+          })
+          .from(organizationMemberships)
+          .innerJoin(
+            organizations,
+            eq(organizationMemberships.organizationId, organizations.id)
+          )
+          .where(
+            and(
+              inArray(organizationMemberships.userId, allUserIds),
+              eq(organizationMemberships.status, 'active'),
+              whereNotDeleted(organizations),
+              // Exclude the current org
+              sql`${organizationMemberships.organizationId} != ${org.id}`
+            )
+          );
+
+        for (const row of otherMemberships) {
+          const existing = otherOrgsMap.get(row.userId) ?? [];
+          existing.push({
+            name: row.name,
+            slug: row.slug,
+            logoUrl: row.logoUrl,
+          });
+          otherOrgsMap.set(row.userId, existing);
+        }
+      }
+
       return {
         items: members.map((m) => ({
           name: m.name,
+          username: m.username ?? null,
           avatarUrl: m.avatarUrl ?? m.image ?? null,
+          bio: m.bio ?? null,
+          socialLinks: (m.socialLinks as SocialLinks) ?? null,
           role: m.role,
           joinedAt: m.joinedAt.toISOString(),
           contentCount: Number(m.contentCount ?? 0),
+          recentContent: recentContentMap.get(m.userId) ?? [],
+          organizations: otherOrgsMap.get(m.userId) ?? [],
         })),
         pagination: {
           page,
@@ -989,6 +1112,110 @@ export class OrganizationService extends BaseService {
         throw error;
       }
       this.handleError(error, 'getPublicMembers');
+    }
+  }
+
+  /**
+   * Get public aggregate statistics for an organization.
+   *
+   * Returns content counts by type, total duration, creator count,
+   * and total views. All counts exclude soft-deleted and unpublished items.
+   *
+   * @param slug - Organization slug
+   * @returns Aggregate statistics for hero section display
+   * @throws {OrganizationNotFoundError} If organization doesn't exist
+   */
+  async getPublicStats(slug: string): Promise<OrganizationPublicStatsResponse> {
+    try {
+      const org = await this.db.query.organizations.findFirst({
+        where: and(
+          eq(organizations.slug, slug.toLowerCase()),
+          whereNotDeleted(organizations)
+        ),
+        columns: { id: true },
+      });
+
+      if (!org) {
+        throw new OrganizationNotFoundError(slug);
+      }
+
+      const publishedContentFilter = and(
+        eq(content.organizationId, org.id),
+        eq(content.status, 'published'),
+        isNull(content.deletedAt)
+      );
+
+      // Run all aggregation queries concurrently
+      const [contentStats, durationResult, creatorCount, categoryResult] =
+        await Promise.all([
+          // Content counts by type + total views in a single query
+          this.db
+            .select({
+              total: count(),
+              videoCount: sql<number>`count(*) filter (where ${content.contentType} = 'video')`,
+              audioCount: sql<number>`count(*) filter (where ${content.contentType} = 'audio')`,
+              writtenCount: sql<number>`count(*) filter (where ${content.contentType} = 'written')`,
+              totalViews: sql<number>`coalesce(sum(${content.viewCount}), 0)`,
+            })
+            .from(content)
+            .where(publishedContentFilter),
+
+          // Total duration from media items linked to published content
+          this.db
+            .select({
+              totalSeconds: sql<number>`coalesce(sum(${mediaItems.durationSeconds}), 0)`,
+            })
+            .from(content)
+            .innerJoin(mediaItems, eq(content.mediaItemId, mediaItems.id))
+            .where(publishedContentFilter),
+
+          // Active creator count (owner/admin/creator roles)
+          this.db
+            .select({ total: count() })
+            .from(organizationMemberships)
+            .where(
+              and(
+                eq(organizationMemberships.organizationId, org.id),
+                eq(organizationMemberships.status, 'active'),
+                inArray(organizationMemberships.role, [
+                  'owner',
+                  'admin',
+                  'creator',
+                ])
+              )
+            ),
+
+          // Top distinct categories (non-null, limit 5)
+          this.db
+            .selectDistinct({ category: content.category })
+            .from(content)
+            .where(
+              and(publishedContentFilter, sql`${content.category} is not null`)
+            )
+            .limit(5),
+        ]);
+
+      const stats = contentStats[0];
+
+      return {
+        content: {
+          total: Number(stats?.total ?? 0),
+          video: Number(stats?.videoCount ?? 0),
+          audio: Number(stats?.audioCount ?? 0),
+          written: Number(stats?.writtenCount ?? 0),
+        },
+        totalDurationSeconds: Number(durationResult[0]?.totalSeconds ?? 0),
+        creators: Number(creatorCount[0]?.total ?? 0),
+        totalViews: Number(stats?.totalViews ?? 0),
+        categories: categoryResult
+          .map((r) => r.category)
+          .filter((c): c is string => c !== null),
+      };
+    } catch (error) {
+      if (error instanceof OrganizationNotFoundError) {
+        throw error;
+      }
+      this.handleError(error, 'getPublicStats');
     }
   }
 

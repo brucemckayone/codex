@@ -5,7 +5,7 @@
   "description": "Local-only CDN proxy for Miniflare R2 — never deployed to Cloudflare",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 4100 --inspector-port 9240 --persist-to ../../.wrangler/state",
+    "dev": "wrangler dev --port 4100 --ip 0.0.0.0 --inspector-port 9240 --persist-to ../../.wrangler/state",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types"
   },

@@ -13,6 +13,7 @@ import { error } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
+import type { SubscriptionTier } from '$lib/types';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({
@@ -63,6 +64,8 @@ export const load: LayoutServerLoad = async ({
           headingWeight?: string | null;
           bodyWeight?: string | null;
         };
+        introVideoUrl?: string | null;
+        enableSubscriptions?: boolean;
       };
 
       // Read version keys for staleness detection on the client
@@ -72,10 +75,20 @@ export const load: LayoutServerLoad = async ({
         locals.user?.id
       );
 
+      // Stream subscription context for "Included" badges (non-blocking)
+      const subscriptionContext = locals.user
+        ? loadUserSubscriptionContext(api, typedOrg.id)
+        : Promise.resolve({
+            userTierSortOrder: null as number | null,
+            tiers: [] as SubscriptionTier[],
+          });
+
       return {
         org: typedOrg,
+        enableSubscriptions: typedOrg.enableSubscriptions ?? true,
         user: locals.user,
         versions,
+        subscriptionContext,
       };
     }
   } catch (err) {
@@ -99,6 +112,14 @@ export const load: LayoutServerLoad = async ({
 
       const versions = await readOrgVersions(platform, org.id, locals.user?.id);
 
+      // Stream subscription context for "Included" badges (non-blocking)
+      const subscriptionContext = locals.user
+        ? loadUserSubscriptionContext(api, org.id)
+        : Promise.resolve({
+            userTierSortOrder: null as number | null,
+            tiers: [] as SubscriptionTier[],
+          });
+
       return {
         org: {
           id: org.id,
@@ -111,9 +132,13 @@ export const load: LayoutServerLoad = async ({
           brandRadius: org.brandRadius,
           brandDensity: org.brandDensity,
           brandFineTune: org.brandFineTune,
+          introVideoUrl: org.introVideoUrl ?? null,
         },
+        // Auth fallback doesn't include feature flags — default to true
+        enableSubscriptions: true,
         user: locals.user,
         versions,
+        subscriptionContext,
       };
     }
   } catch (err) {
@@ -128,6 +153,29 @@ export const load: LayoutServerLoad = async ({
 
   error(404, `Organization "${slug}" not found`);
 };
+
+/**
+ * Load subscription context for badge display.
+ *
+ * Fetches the user's current subscription and org tiers in parallel.
+ * Returns userTierSortOrder (null if no subscription) and the full tiers list
+ * so child pages can compute "Included" badges per content item.
+ *
+ * Streamed (not awaited) to avoid blocking page load.
+ */
+async function loadUserSubscriptionContext(
+  api: ReturnType<typeof createServerApi>,
+  orgId: string
+): Promise<{ userTierSortOrder: number | null; tiers: SubscriptionTier[] }> {
+  const [currentSubscription, tiers] = await Promise.all([
+    api.subscription.getCurrent(orgId).catch(() => null),
+    api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]),
+  ]);
+
+  const userTierSortOrder = currentSubscription?.tier?.sortOrder ?? null;
+
+  return { userTierSortOrder, tiers };
+}
 
 /**
  * Read org-related version keys from KV for client-side staleness detection.

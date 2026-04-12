@@ -1,6 +1,17 @@
+import { EMAIL_SEND_STATUS } from '@codex/constants';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Database, EmailProvider } from '../../types';
 import { NotificationsService } from '../notifications-service';
+
+// Shared mock for hasOptedOut — individual tests override the resolved value
+const mockHasOptedOut = vi.fn().mockResolvedValue(false);
+
+// Mock the NotificationPreferencesService module
+vi.mock('../notification-preferences-service', () => ({
+  NotificationPreferencesService: vi
+    .fn()
+    .mockImplementation(() => ({ hasOptedOut: mockHasOptedOut })),
+}));
 
 // Mock dependencies
 const mockDb = {
@@ -242,5 +253,184 @@ describe('NotificationsService', () => {
 
     // Verify limit constraint
     expect(calls[0][0].limit).toBe(3);
+  });
+
+  // ===========================================================================
+  // Preference Checking
+  // ===========================================================================
+
+  describe('preference checking', () => {
+    it('skips marketing email when user opted out', async () => {
+      mockHasOptedOut.mockResolvedValue(true);
+
+      const result = await service.sendEmail({
+        to: 'user@example.com',
+        templateName: 'promo-blast',
+        data: {},
+        category: 'marketing',
+        userId: 'user-1',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.skipped).toBe('opted_out');
+      expect(mockEmailProvider.send).not.toHaveBeenCalled();
+    });
+
+    it('skips digest email when user opted out', async () => {
+      mockHasOptedOut.mockResolvedValue(true);
+
+      const result = await service.sendEmail({
+        to: 'user@example.com',
+        templateName: 'weekly-summary',
+        data: {},
+        category: 'digest',
+        userId: 'user-1',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.skipped).toBe('opted_out');
+      expect(mockEmailProvider.send).not.toHaveBeenCalled();
+    });
+
+    it('always sends transactional email regardless of preferences', async () => {
+      // Even if hasOptedOut would return true, transactional bypasses the check entirely
+      mockHasOptedOut.mockResolvedValue(true);
+
+      // Template mock needed since transactional emails proceed past preference check
+      (
+        mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([
+        {
+          id: 'template-1',
+          name: 'order-receipt',
+          subject: 'Your receipt',
+          htmlBody: '<p>Thanks</p>',
+          textBody: 'Thanks',
+          scope: 'global',
+        },
+      ]);
+      (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        messageId: 'msg-456',
+      });
+
+      const result = await service.sendEmail({
+        to: 'user@example.com',
+        templateName: 'order-receipt',
+        data: {},
+        category: 'transactional',
+        userId: 'user-1',
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockEmailProvider.send).toHaveBeenCalled();
+      // hasOptedOut should never be called for transactional
+      expect(mockHasOptedOut).not.toHaveBeenCalled();
+    });
+
+    it('sends email when no userId provided (skip preference check)', async () => {
+      mockHasOptedOut.mockResolvedValue(true);
+
+      // Template mock needed since emails proceed past preference check
+      (
+        mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([
+        {
+          id: 'template-1',
+          name: 'promo-blast',
+          subject: 'New content available',
+          htmlBody: '<p>Check it out</p>',
+          textBody: 'Check it out',
+          scope: 'global',
+        },
+      ]);
+      (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        messageId: 'msg-789',
+      });
+
+      const result = await service.sendEmail({
+        to: 'user@example.com',
+        templateName: 'promo-blast',
+        data: {},
+        category: 'marketing',
+        // no userId — cannot check preferences
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockEmailProvider.send).toHaveBeenCalled();
+      // Preferences service should not be consulted without userId
+      expect(mockHasOptedOut).not.toHaveBeenCalled();
+    });
+
+    it('sends email when no category provided (skip preference check)', async () => {
+      mockHasOptedOut.mockResolvedValue(true);
+
+      // Use a custom template name (not in templateDataSchemas) to avoid Zod validation
+      (
+        mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([
+        {
+          id: 'template-1',
+          name: 'custom-notification',
+          subject: 'Hello',
+          htmlBody: '<p>Hello</p>',
+          textBody: 'Hello',
+          scope: 'global',
+        },
+      ]);
+      (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        messageId: 'msg-101',
+      });
+
+      const result = await service.sendEmail({
+        to: 'user@example.com',
+        templateName: 'custom-notification',
+        data: {},
+        userId: 'user-1',
+        // no category — cannot check preferences
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockEmailProvider.send).toHaveBeenCalled();
+      // Preferences service should not be consulted without category
+      expect(mockHasOptedOut).not.toHaveBeenCalled();
+    });
+
+    it('writes audit log with skipped status when preference blocks send', async () => {
+      mockHasOptedOut.mockResolvedValue(true);
+
+      await service.sendEmail({
+        to: 'user@example.com',
+        templateName: 'newsletter',
+        data: { foo: 'bar' },
+        category: 'marketing',
+        userId: 'user-1',
+        organizationId: 'org-1',
+        creatorId: 'creator-1',
+      });
+
+      // Verify audit log was written via db.insert().values()
+      expect(mockDb.insert).toHaveBeenCalled();
+      expect(mockDb.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          templateName: 'newsletter',
+          recipientEmail: 'user@example.com',
+          organizationId: 'org-1',
+          creatorId: 'creator-1',
+          status: EMAIL_SEND_STATUS.SKIPPED,
+          metadata: expect.stringContaining('"skipReason":"opted_out"'),
+        })
+      );
+
+      // Verify metadata contains category and preserves original data
+      const valuesCall = (mockDb.values as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      const parsedMetadata = JSON.parse(valuesCall.metadata);
+      expect(parsedMetadata.skipReason).toBe('opted_out');
+      expect(parsedMetadata.category).toBe('marketing');
+      expect(parsedMetadata.foo).toBe('bar');
+    });
   });
 });

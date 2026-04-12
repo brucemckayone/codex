@@ -172,33 +172,220 @@ export const passwordChangedDataSchema = z.object({
 export const purchaseReceiptDataSchema = z.object({
   userName: z.string(),
   contentTitle: z.string(),
-  priceFormatted: z.string(), // e.g., "9.99"
+  priceFormatted: z.string(), // e.g., "£9.99"
   purchaseDate: z.string(),
   contentUrl: z.string().url(),
+  orgName: z.string().optional(),
 });
 
-// Map template names to their data schemas
+// ============================================
+// Commerce Templates
+// ============================================
+
+export const subscriptionCreatedDataSchema = z.object({
+  userName: z.string(),
+  planName: z.string(),
+  priceFormatted: z.string(),
+  billingInterval: z.string(),
+  nextBillingDate: z.string(),
+  manageUrl: z.string().url(),
+});
+
+export const subscriptionRenewedDataSchema = z.object({
+  userName: z.string(),
+  planName: z.string(),
+  priceFormatted: z.string(),
+  billingDate: z.string(),
+  nextBillingDate: z.string(),
+  manageUrl: z.string().url(),
+});
+
+export const paymentFailedDataSchema = z.object({
+  userName: z.string(),
+  planName: z.string(),
+  priceFormatted: z.string(),
+  retryDate: z.string(),
+  updatePaymentUrl: z.string().url(),
+});
+
+export const subscriptionCancelledDataSchema = z.object({
+  userName: z.string(),
+  planName: z.string(),
+  accessEndDate: z.string(),
+  resubscribeUrl: z.string().url(),
+});
+
+export const refundProcessedDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  refundAmount: z.string(),
+  originalAmount: z.string(),
+  refundDate: z.string(),
+});
+
+// ============================================
+// Organization Templates
+// ============================================
+
+export const orgMemberInvitationDataSchema = z.object({
+  inviterName: z.string(),
+  orgName: z.string(),
+  roleName: z.string(),
+  acceptUrl: z.string().url(),
+  expiryDays: z.string(),
+});
+
+export const memberRoleChangedDataSchema = z.object({
+  userName: z.string(),
+  orgName: z.string(),
+  oldRole: z.string(),
+  newRole: z.string(),
+});
+
+export const memberRemovedDataSchema = z.object({
+  userName: z.string(),
+  orgName: z.string(),
+});
+
+// ============================================
+// Auth / Onboarding Templates
+// ============================================
+
+export const welcomeDataSchema = z.object({
+  userName: z.string(),
+  loginUrl: z.string().url(),
+  exploreUrl: z.string().url(),
+});
+
+// ============================================
+// Media / Transcoding Templates
+// ============================================
+
+export const transcodingCompleteDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  contentUrl: z.string().url(),
+  duration: z.string(),
+});
+
+export const transcodingFailedDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  errorSummary: z.string(),
+  retryUrl: z.string().url(),
+});
+
+// ============================================
+// Creator Templates
+// ============================================
+
+export const newSaleDataSchema = z.object({
+  creatorName: z.string(),
+  contentTitle: z.string(),
+  saleAmount: z.string(),
+  buyerName: z.string(),
+  dashboardUrl: z.string().url(),
+});
+
+export const connectAccountStatusDataSchema = z.object({
+  creatorName: z.string(),
+  accountStatus: z.string(),
+  actionRequired: z.string(),
+  dashboardUrl: z.string().url(),
+});
+
+// ============================================
+// Engagement Templates
+// ============================================
+
+export const newContentPublishedDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  creatorName: z.string(),
+  contentUrl: z.string().url(),
+  contentDescription: z.string(),
+});
+
+export const weeklyDigestDataSchema = z.object({
+  userName: z.string(),
+  newContentCount: z.string(),
+  topContent: z.string(),
+  platformUrl: z.string().url(),
+});
+
+// ============================================
+// Template Data Schema Map (all 18 templates)
+// ============================================
+
 export const templateDataSchemas = {
+  // Auth
   'email-verification': emailVerificationDataSchema,
   'password-reset': passwordResetDataSchema,
   'password-changed': passwordChangedDataSchema,
+  welcome: welcomeDataSchema,
+  // Commerce
   'purchase-receipt': purchaseReceiptDataSchema,
+  'subscription-created': subscriptionCreatedDataSchema,
+  'subscription-renewed': subscriptionRenewedDataSchema,
+  'payment-failed': paymentFailedDataSchema,
+  'subscription-cancelled': subscriptionCancelledDataSchema,
+  'refund-processed': refundProcessedDataSchema,
+  // Organization
+  'org-member-invitation': orgMemberInvitationDataSchema,
+  'member-role-changed': memberRoleChangedDataSchema,
+  'member-removed': memberRemovedDataSchema,
+  // Media
+  'transcoding-complete': transcodingCompleteDataSchema,
+  'transcoding-failed': transcodingFailedDataSchema,
+  // Creator
+  'new-sale': newSaleDataSchema,
+  'connect-account-status': connectAccountStatusDataSchema,
+  // Engagement
+  'new-content-published': newContentPublishedDataSchema,
+  'weekly-digest': weeklyDigestDataSchema,
 } as const;
 
 // Type for template data keys (enables compile-time checking)
 export type TemplateDataKey = keyof typeof templateDataSchemas;
 
 // ============================================
+// Internal Send Email Schema (worker-to-worker)
+// ============================================
+
+export const emailCategoryEnum = z.enum([
+  'transactional',
+  'marketing',
+  'digest',
+]);
+export type EmailCategory = z.infer<typeof emailCategoryEnum>;
+
+export const internalSendEmailSchema = z.object({
+  to: z.string().email(),
+  toName: z.string().optional(),
+  templateName: templateNameSchema,
+  data: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .refine(
+      (obj) => Object.keys(obj).length <= 50,
+      'Maximum 50 data keys allowed'
+    ),
+  organizationId: uuidSchema.optional().nullable(),
+  creatorId: z.string().optional().nullable(),
+  category: emailCategoryEnum,
+  userId: z.string().optional(),
+});
+export type InternalSendEmailInput = z.infer<typeof internalSendEmailSchema>;
+
+// ============================================
 // Notification Preferences Schemas
 // ============================================
 
 /**
- * Update notification preferences schema
- * All fields are optional - only include fields to update
+ * Update notification preferences schema.
+ * emailTransactional is excluded — transactional emails cannot be disabled.
  */
 export const updateNotificationPreferencesSchema = z.object({
   emailMarketing: z.boolean().optional(),
-  emailTransactional: z.boolean().optional(),
   emailDigest: z.boolean().optional(),
 });
 export type UpdateNotificationPreferencesInput = z.infer<

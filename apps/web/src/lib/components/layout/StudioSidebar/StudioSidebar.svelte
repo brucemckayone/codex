@@ -23,6 +23,7 @@
     ChevronsRightIcon,
   } from '$lib/components/ui/Icon';
   import NavBadge from './NavBadge.svelte';
+  import ThemeToggle from '$lib/components/ui/ThemeToggle/ThemeToggle.svelte';
   import type { SidebarIcon } from '$lib/config/navigation';
   import type { Component } from 'svelte';
   import * as m from '$paraglide/messages';
@@ -163,6 +164,11 @@
     {/if}
   </nav>
 
+  <!-- Theme toggle -->
+  <div class="theme-toggle-wrapper">
+    <ThemeToggle showLabel size={18} />
+  </div>
+
   <!-- Collapse toggle (desktop only) -->
   {#if onToggleCollapse}
     <button
@@ -215,6 +221,7 @@
     display: flex;
     flex-direction: column;
     transition: width var(--duration-normal) var(--ease-default);
+    view-transition-name: sidebar-nav;
   }
 
   .sidebar-nav {
@@ -285,6 +292,12 @@
     letter-spacing: var(--tracking-wide);
   }
 
+  /* Theme toggle */
+  .theme-toggle-wrapper {
+    padding: 0 var(--space-3);
+    margin-top: auto;
+  }
+
   /* Collapse toggle */
   .collapse-toggle {
     display: none;
@@ -322,12 +335,15 @@
   .sidebar[data-collapsed='true'] .nav-label,
   .sidebar[data-collapsed='true'] .section-label,
   .sidebar[data-collapsed='true'] .section-divider,
-  .sidebar[data-collapsed='true'] .collapse-label {
+  .sidebar[data-collapsed='true'] .collapse-label,
+  .sidebar[data-collapsed='true'] :global(.theme-toggle__label) {
     display: none;
   }
 
-  .sidebar[data-collapsed='true'] .collapse-toggle {
+  .sidebar[data-collapsed='true'] .collapse-toggle,
+  .sidebar[data-collapsed='true'] :global(.theme-toggle) {
     justify-content: center;
+    padding: var(--space-2);
   }
 
   .sidebar[data-collapsed='true'] :global(.nav-badge) {

@@ -12,6 +12,11 @@ export {
 } from './auth-middleware';
 // Body parsing middleware
 export { createBodyParsingMiddleware } from './body-parsing-middleware';
+// Email sending helper (worker-to-worker)
+export {
+  type SendEmailToWorkerParams,
+  sendEmailToWorker,
+} from './email/send-email';
 // Environment validation
 export {
   createEnvValidationMiddleware,

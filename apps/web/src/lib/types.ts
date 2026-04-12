@@ -50,6 +50,7 @@ export interface LayoutUser {
   name: string;
   email: string;
   image?: string;
+  role?: string;
 }
 
 export interface LayoutOrganization {
@@ -210,4 +211,5 @@ export interface OrganizationData {
   brandRadius?: number;
   brandDensity?: number;
   brandFineTune?: OrgBrandFineTune;
+  introVideoUrl?: string | null;
 }

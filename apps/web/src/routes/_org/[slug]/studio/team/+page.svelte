@@ -98,7 +98,7 @@
       </div>
     {:else}
       <MemberTable
-        members={membersQuery?.current?.items ?? []}
+        members={(membersQuery?.current?.items ?? []).filter((m) => m.role !== 'subscriber')}
         onChangeRole={handleChangeRole}
         onRemove={handleRemove}
       />

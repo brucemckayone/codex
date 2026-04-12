@@ -181,13 +181,11 @@ describe('SubscriptionService', () => {
 
     it('should throw AlreadySubscribedError for active subscription', async () => {
       const { org, tier1 } = await createFullOrg('checkout-dupe');
-      await db
-        .insert(subscriptions)
-        .values(
-          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
-            status: 'active',
-          })
-        );
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
 
       await expect(
         service.createCheckoutSession(
@@ -296,6 +294,249 @@ describe('SubscriptionService', () => {
 
       // Should not throw — just returns silently
       await service.handleSubscriptionCreated(mockSub);
+    });
+  });
+
+  // ─── membership role hierarchy ────────────────────────────────────
+
+  describe('membership role hierarchy', () => {
+    it('should preserve owner role when subscription is created', async () => {
+      const { org, tier1 } = await createFullOrg('role-owner');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+
+      // Create owner membership
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: otherCreatorId,
+        role: 'owner',
+        status: 'active',
+      });
+
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleSubscriptionCreated(mockSub);
+
+      const [membership] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, otherCreatorId)
+          )
+        );
+
+      expect(membership.role).toBe('owner');
+    });
+
+    it('should preserve admin role when subscription is created', async () => {
+      const { org, tier1 } = await createFullOrg('role-admin');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: otherCreatorId,
+        role: 'admin',
+        status: 'active',
+      });
+
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleSubscriptionCreated(mockSub);
+
+      const [membership] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, otherCreatorId)
+          )
+        );
+
+      expect(membership.role).toBe('admin');
+    });
+
+    it('should preserve creator role when subscription is created', async () => {
+      const { org, tier1 } = await createFullOrg('role-creator');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: otherCreatorId,
+        role: 'creator',
+        status: 'active',
+      });
+
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleSubscriptionCreated(mockSub);
+
+      const [membership] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, otherCreatorId)
+          )
+        );
+
+      expect(membership.role).toBe('creator');
+    });
+
+    it('should create subscriber membership when no existing membership', async () => {
+      const { org, tier1 } = await createFullOrg('role-new-sub');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: thirdUserId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleSubscriptionCreated(mockSub);
+
+      const [membership] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, thirdUserId)
+          )
+        );
+
+      expect(membership).toBeDefined();
+      expect(membership.role).toBe('subscriber');
+      expect(membership.status).toBe('active');
+    });
+
+    it('should only deactivate subscriber role on subscription deletion', async () => {
+      const { org, tier1 } = await createFullOrg('role-del-sub');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+
+      // Create subscription + subscriber membership via handleSubscriptionCreated
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: thirdUserId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleSubscriptionCreated(mockSub);
+
+      // Verify subscriber membership exists
+      const [beforeDelete] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, thirdUserId)
+          )
+        );
+      expect(beforeDelete.role).toBe('subscriber');
+      expect(beforeDelete.status).toBe('active');
+
+      // handleSubscriptionCreated already inserted the subscription DB record.
+      // Delete subscription — pass metadata so handler can resolve userId/orgId
+      await service.handleSubscriptionDeleted(
+        mockSub as unknown as Stripe.Subscription
+      );
+
+      const [afterDelete] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, thirdUserId)
+          )
+        );
+
+      expect(afterDelete.status).toBe('inactive');
+    });
+
+    it('should preserve admin role on subscription deletion', async () => {
+      const { org, tier1 } = await createFullOrg('role-del-admin');
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+
+      // Create admin membership
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: otherCreatorId,
+        role: 'admin',
+        status: 'active',
+      });
+
+      // Create subscription
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      // Delete subscription
+      await service.handleSubscriptionDeleted({
+        id: sub.stripeSubscriptionId,
+      } as unknown as Stripe.Subscription);
+
+      const [membership] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, otherCreatorId)
+          )
+        );
+
+      // Admin role should NOT be deactivated (only subscriber role is deactivated)
+      expect(membership.role).toBe('admin');
+      expect(membership.status).toBe('active');
     });
   });
 
@@ -505,13 +746,11 @@ describe('SubscriptionService', () => {
   describe('cancelSubscription', () => {
     it('should set cancel_at_period_end and status to CANCELLING', async () => {
       const { org, tier1 } = await createFullOrg('cancel');
-      await db
-        .insert(subscriptions)
-        .values(
-          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
-            status: 'active',
-          })
-        );
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
 
       await service.cancelSubscription(otherCreatorId, org.id, 'Too expensive');
 
@@ -547,13 +786,11 @@ describe('SubscriptionService', () => {
   describe('reactivateSubscription', () => {
     it('should remove cancel_at_period_end and set status to ACTIVE', async () => {
       const { org, tier1 } = await createFullOrg('reactivate');
-      await db
-        .insert(subscriptions)
-        .values(
-          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
-            status: 'cancelling',
-          })
-        );
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'cancelling',
+        })
+      );
 
       await service.reactivateSubscription(otherCreatorId, org.id);
 
@@ -578,13 +815,11 @@ describe('SubscriptionService', () => {
 
     it('should throw if not in CANCELLING state', async () => {
       const { org, tier1 } = await createFullOrg('react-active');
-      await db
-        .insert(subscriptions)
-        .values(
-          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
-            status: 'active',
-          })
-        );
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
 
       await expect(
         service.reactivateSubscription(otherCreatorId, org.id)
@@ -597,13 +832,11 @@ describe('SubscriptionService', () => {
   describe('getSubscription', () => {
     it('should return subscription with nested tier', async () => {
       const { org, tier1 } = await createFullOrg('get-sub');
-      await db
-        .insert(subscriptions)
-        .values(
-          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
-            status: 'active',
-          })
-        );
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
 
       const result = await service.getSubscription(otherCreatorId, org.id);
       expect(result).not.toBeNull();

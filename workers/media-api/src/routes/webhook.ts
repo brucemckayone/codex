@@ -99,6 +99,11 @@ app.post(
         await service.handleProgressWebhook(result.data);
       } else {
         await service.handleWebhook(result.data);
+
+        // TODO: Send transcoding status email to creator
+        // Requires DB join (mediaItems → content → users) to resolve creator email.
+        // Templates transcoding-complete and transcoding-failed are seeded and ready.
+        // Wire up when TranscodingService returns creator context from handleWebhook().
       }
 
       // Return success - RunPod expects 200 OK to acknowledge receipt

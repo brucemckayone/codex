@@ -64,6 +64,7 @@ export type LevelId =
   | 'logo'
   | 'presets'
   | 'hero-effects'
+  | 'intro-video'
   | 'fine-tune-colors'
   | 'fine-tune-typography';
 

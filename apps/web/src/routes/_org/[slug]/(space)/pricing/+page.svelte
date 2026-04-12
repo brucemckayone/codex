@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import { page } from '$app/state';
+  import { onMount } from 'svelte';
   import * as m from '$paraglide/messages';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import { Badge, EmptyState } from '$lib/components/ui';
@@ -17,8 +18,27 @@
 
   let { data } = $props();
 
-  let billingInterval = $state<'month' | 'year'>('month');
+  // Restore billing interval and tier selection from login redirect query params
+  const initialInterval = page.url.searchParams.get('billingInterval');
+  let billingInterval = $state<'month' | 'year'>(
+    initialInterval === 'year' ? 'year' : 'month'
+  );
   let checkoutLoading = $state<string | null>(null);
+  let checkoutError = $state('');
+  const restoredTierId = page.url.searchParams.get('tierId');
+
+  /** Feature flag from org layout — hides subscription tiers when disabled */
+  const enableSubscriptions = $derived(data.enableSubscriptions ?? true);
+
+  // After login redirect, auto-trigger checkout for the previously selected tier
+  onMount(() => {
+    if (restoredTierId && data.isAuthenticated) {
+      const tier = tiers.find((t) => t.id === restoredTierId);
+      if (tier) {
+        handleSubscribe(tier);
+      }
+    }
+  });
 
   const tiers: SubscriptionTier[] = $derived(data.tiers ?? []);
   const currentTierId = $derived(data.currentSubscription?.tierId ?? null);
@@ -35,12 +55,13 @@
 
   async function handleSubscribe(tier: SubscriptionTier) {
     if (!data.isAuthenticated) {
-      const returnUrl = encodeURIComponent(page.url.pathname);
-      window.location.href = `/login?redirect=${returnUrl}`;
+      const returnPath = `${page.url.pathname}?tierId=${encodeURIComponent(tier.id)}&billingInterval=${encodeURIComponent(billingInterval)}`;
+      window.location.href = `/login?redirect=${encodeURIComponent(returnPath)}`;
       return;
     }
 
     checkoutLoading = tier.id;
+    checkoutError = '';
     try {
       const result = await createSubscriptionCheckoutSession({
         tierId: tier.id,
@@ -48,7 +69,9 @@
         organizationId: data.org.id,
       });
       window.location.href = result.sessionUrl;
-    } catch {
+    } catch (err) {
+      checkoutError =
+        err instanceof Error ? err.message : m.subscription_checkout_error();
       checkoutLoading = null;
     }
   }
@@ -65,9 +88,20 @@
     <p class="pricing-subtitle">{m.subscription_pricing_subtitle()}</p>
   </header>
 
-  {#if tiers.length === 0}
+  {#if !enableSubscriptions}
+    <EmptyState
+      title={m.subscription_disabled_title()}
+      description={m.subscription_disabled_description()}
+    />
+  {:else if tiers.length === 0}
     <EmptyState title={m.pricing_no_tiers()} />
   {:else}
+    {#if checkoutError}
+      <div class="checkout-error" role="alert">
+        <p>{checkoutError}</p>
+      </div>
+    {/if}
+
     <!-- Billing Toggle -->
     <div class="billing-toggle" role="radiogroup" aria-label="Billing period">
       <button
@@ -315,5 +349,21 @@
   :global(.tier-cta) {
     width: 100%;
     margin-top: auto;
+  }
+
+  /* Checkout error alert */
+  .checkout-error {
+    width: 100%;
+    padding: var(--space-3);
+    background-color: var(--color-error-50);
+    border: var(--border-width) var(--border-style) var(--color-error-200);
+    border-radius: var(--radius-md);
+    color: var(--color-error-700);
+    font-size: var(--text-sm);
+    text-align: center;
+  }
+
+  .checkout-error p {
+    margin: 0;
   }
 </style>

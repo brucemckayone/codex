@@ -1,3 +1,4 @@
+import { getOrgLogoKey } from '../../../transcoding/src/paths';
 import type { dbWs as DbClient } from '../../src';
 import { schema } from '../../src';
 import { MEMBERSHIPS, ORGS, SETTINGS, USERS } from './constants';
@@ -37,10 +38,10 @@ export async function seedOrganizations(db: typeof DbClient) {
       updatedAt: now,
     },
     {
-      id: MEMBERSHIPS.viewerAlphaMember.id,
+      id: MEMBERSHIPS.viewerAlphaSubscriber.id,
       organizationId: ORGS.alpha.id,
       userId: USERS.viewer.id,
-      role: 'member',
+      role: 'subscriber',
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -81,6 +82,52 @@ export async function seedOrganizations(db: typeof DbClient) {
       createdAt: now,
       updatedAt: now,
     },
+    // Customer memberships for Studio Alpha
+    {
+      id: MEMBERSHIPS.customer1AlphaMember.id,
+      organizationId: ORGS.alpha.id,
+      userId: USERS.customer1.id,
+      role: 'member',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: MEMBERSHIPS.customer2AlphaMember.id,
+      organizationId: ORGS.alpha.id,
+      userId: USERS.customer2.id,
+      role: 'member',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: MEMBERSHIPS.customer3AlphaMember.id,
+      organizationId: ORGS.alpha.id,
+      userId: USERS.customer3.id,
+      role: 'member',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: MEMBERSHIPS.customer4AlphaMember.id,
+      organizationId: ORGS.alpha.id,
+      userId: USERS.customer4.id,
+      role: 'member',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: MEMBERSHIPS.customer5AlphaMember.id,
+      organizationId: ORGS.alpha.id,
+      userId: USERS.customer5.id,
+      role: 'member',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
   ]);
 
   // Platform settings hub (required FK target for spoke tables)
@@ -89,17 +136,19 @@ export async function seedOrganizations(db: typeof DbClient) {
     { organizationId: ORGS.beta.id, createdAt: now, updatedAt: now },
   ]);
 
-  // Branding settings
+  // Branding settings (with logo URLs pointing to seeded R2 files)
   await db.insert(schema.brandingSettings).values([
     {
       organizationId: ORGS.alpha.id,
       primaryColorHex: ORGS.alpha.primaryColor,
+      logoUrl: `http://localhost:4100/${getOrgLogoKey(ORGS.alpha.id, 'md')}`,
       createdAt: now,
       updatedAt: now,
     },
     {
       organizationId: ORGS.beta.id,
       primaryColorHex: ORGS.beta.primaryColor,
+      logoUrl: `http://localhost:4100/${getOrgLogoKey(ORGS.beta.id, 'md')}`,
       createdAt: now,
       updatedAt: now,
     },
@@ -133,6 +182,7 @@ export async function seedOrganizations(db: typeof DbClient) {
       organizationId: ORGS.alpha.id,
       enableSignups: true,
       enablePurchases: true,
+      enableSubscriptions: true,
       createdAt: now,
       updatedAt: now,
     },

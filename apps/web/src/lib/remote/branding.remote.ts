@@ -340,3 +340,48 @@ export const deleteLogo = command(z.string().uuid(), async (orgId) => {
 
   return result;
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Intro Video
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Link a media item as the org's intro video.
+ * Called after the frontend uploads the video via content-api's media pipeline.
+ */
+export const linkIntroVideo = command(
+  z.object({ orgId: z.string().uuid(), mediaItemId: z.string().uuid() }),
+  async ({ orgId, mediaItemId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const result = await api.org.linkIntroVideo(orgId, mediaItemId);
+    await invalidateCache(platform, orgId);
+
+    return result;
+  }
+);
+
+/**
+ * Get intro video transcoding status.
+ * Polls this until status is 'ready' or 'failed'.
+ */
+export const getIntroVideoStatus = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.org.getIntroVideoStatus(orgId);
+});
+
+/**
+ * Delete the org's intro video.
+ * Soft-deletes the media item and clears branding references.
+ */
+export const deleteIntroVideo = command(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  const result = await api.org.deleteIntroVideo(orgId);
+  await invalidateCache(platform, orgId);
+
+  return result;
+});

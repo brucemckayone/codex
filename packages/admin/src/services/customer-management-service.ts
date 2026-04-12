@@ -20,7 +20,17 @@ import {
   ConflictError,
   NotFoundError,
 } from '@codex/service-errors';
-import { and, countDistinct, desc, eq, gte, ilike, or, sql } from 'drizzle-orm';
+import {
+  and,
+  countDistinct,
+  desc,
+  eq,
+  gte,
+  ilike,
+  isNull,
+  or,
+  sql,
+} from 'drizzle-orm';
 import type {
   CustomerDetails,
   CustomerWithStats,
@@ -364,26 +374,40 @@ export class AdminCustomerManagementService extends BaseService {
           });
         }
 
-        // Check for existing access (idempotent operation)
+        // Check for existing active access (idempotent operation)
         const existingAccess = await tx.query.contentAccess.findFirst({
           where: and(
             eq(schema.contentAccess.userId, customerId),
-            eq(schema.contentAccess.contentId, contentId)
+            eq(schema.contentAccess.contentId, contentId),
+            isNull(schema.contentAccess.deletedAt)
           ),
         });
 
         if (existingAccess) {
-          // Already has access - idempotent success
+          // Already has active access - idempotent success
           return;
         }
 
-        // Insert complimentary access record
-        await tx.insert(schema.contentAccess).values({
-          userId: customerId,
-          contentId,
-          organizationId,
-          accessType: ACCESS_TYPES.COMPLIMENTARY,
-        });
+        // Insert complimentary access record (upsert handles re-grant after refund)
+        await tx
+          .insert(schema.contentAccess)
+          .values({
+            userId: customerId,
+            contentId,
+            organizationId,
+            accessType: ACCESS_TYPES.COMPLIMENTARY,
+          })
+          .onConflictDoUpdate({
+            target: [
+              schema.contentAccess.userId,
+              schema.contentAccess.contentId,
+            ],
+            set: {
+              deletedAt: null,
+              accessType: ACCESS_TYPES.COMPLIMENTARY,
+              updatedAt: new Date(),
+            },
+          });
       });
 
       return true;

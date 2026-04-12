@@ -4,7 +4,9 @@
   import type { NavLink } from '$lib/config/navigation';
   import { page } from '$app/state';
   import { submitFormPost } from '$lib/utils/navigation';
+  import { AUTH_ROLES } from '@codex/constants';
   import { XIcon } from '$lib/components/ui/Icon';
+  import ThemeToggle from '$lib/components/ui/ThemeToggle/ThemeToggle.svelte';
   import * as m from '$paraglide/messages';
   interface Props {
     variant: 'platform' | 'org' | 'studio';
@@ -14,6 +16,9 @@
   }
 
   const { variant, user, links, actions }: Props = $props();
+
+  const STUDIO_ROLES = new Set([AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN, AUTH_ROLES.PLATFORM_OWNER]);
+  const canAccessStudio = $derived(!!user?.role && STUDIO_ROLES.has(user.role));
 
   let open = $state(false);
 
@@ -86,13 +91,16 @@
     {/if}
 
     <div class="drawer-footer">
+      <div class="theme-toggle-row">
+        <ThemeToggle showLabel size={20} />
+      </div>
       {#if user}
         <div class="user-section">
           <span class="user-name">{user.name}</span>
           <span class="user-email">{user.email}</span>
         </div>
         <a href="/account" class="nav-item" onclick={close}>{m.nav_account()}</a>
-        {#if variant === 'org'}
+        {#if variant === 'org' && canAccessStudio}
           <a href="/studio" class="nav-item" onclick={close}>{m.nav_studio()}</a>
         {/if}
         <button type="button" class="nav-item logout-item" onclick={() => submitFormPost('/logout')}>{m.nav_log_out()}</button>
@@ -267,5 +275,15 @@
 
   .logout-item:hover {
     background-color: var(--color-error-50);
+  }
+
+  /* Theme toggle — label always visible in mobile drawer */
+  .theme-toggle-row {
+    margin-bottom: var(--space-2);
+  }
+
+  .theme-toggle-row :global(.theme-toggle__label) {
+    opacity: 1 !important;
+    transform: none !important;
   }
 </style>

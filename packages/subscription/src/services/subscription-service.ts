@@ -37,10 +37,12 @@ import {
 import { isUniqueViolation } from '@codex/database';
 import {
   creatorOrganizationAgreements,
+  organizationMemberships,
   pendingPayouts,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
+  users,
 } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -82,6 +84,31 @@ interface SubscriptionStats {
     subscriberCount: number;
     mrrCents: number;
   }>;
+}
+
+/**
+ * Email payload shape returned by webhook handlers.
+ * Mirrors SendEmailToWorkerParams so the handler can pass it directly
+ * to sendEmailToWorker() without composing email data itself.
+ */
+export interface WebhookEmailPayload {
+  to: string;
+  toName?: string;
+  templateName: string;
+  category: 'transactional' | 'marketing' | 'digest';
+  userId?: string;
+  data: Record<string, string | number | boolean>;
+}
+
+/**
+ * Result returned by webhook handler methods.
+ * Contains all side-effect data the handler needs (cache invalidation, email).
+ */
+export interface WebhookHandlerResult {
+  /** User ID for cache invalidation (COLLECTION_USER_LIBRARY) */
+  userId?: string;
+  /** Composed email payload ready for sendEmailToWorker() */
+  email?: WebhookEmailPayload;
 }
 
 export class SubscriptionService extends BaseService {
@@ -169,12 +196,21 @@ export class SubscriptionService extends BaseService {
         );
       }
 
+      // BUG-022: Look up user email so Stripe reuses an existing Customer object
+      // instead of creating a duplicate on every checkout.
+      const [user] = await this.db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
       // Create Stripe Checkout Session
       const session = await this.stripe.checkout.sessions.create({
         mode: 'subscription',
         line_items: [{ price: stripePriceId, quantity: 1 }],
         success_url: successUrl,
         cancel_url: cancelUrl,
+        ...(user?.email && { customer_email: user.email }),
         metadata: {
           codex_user_id: userId,
           codex_organization_id: orgId,
@@ -215,10 +251,18 @@ export class SubscriptionService extends BaseService {
    * Handle checkout.session.completed for subscription mode.
    * Creates the subscription record in our database.
    * Idempotent via stripeSubscriptionId unique constraint.
+   *
+   * Returns a result object with:
+   * - userId for cache invalidation
+   * - email payload for the subscription-created notification
+   *
+   * @param stripeSubscription The Stripe subscription object
+   * @param webAppUrl The web app base URL for email links (optional)
    */
   async handleSubscriptionCreated(
-    stripeSubscription: Stripe.Subscription
-  ): Promise<void> {
+    stripeSubscription: Stripe.Subscription,
+    webAppUrl?: string
+  ): Promise<WebhookHandlerResult | void> {
     const stripeSubId = stripeSubscription.id;
     const metadata = stripeSubscription.metadata;
 
@@ -234,11 +278,23 @@ export class SubscriptionService extends BaseService {
       return;
     }
 
-    // Get amount from the subscription's latest invoice
-    const amountCents =
-      stripeSubscription.items.data[0]?.price?.unit_amount ?? 0;
+    // Get amount actually charged from the latest invoice (respects coupons, trials, prorations)
+    // Matches the pattern used in handleInvoicePaymentSucceeded() — use amount_paid, not unit_amount
+    let amountCents = 0;
+    const latestInvoice = stripeSubscription.latest_invoice;
+    if (latestInvoice && typeof latestInvoice === 'object') {
+      // latest_invoice is expanded — use amount_paid directly
+      amountCents = latestInvoice.amount_paid;
+    } else if (typeof latestInvoice === 'string') {
+      // latest_invoice is just an ID — retrieve the full invoice
+      const invoice = await this.stripe.invoices.retrieve(latestInvoice);
+      amountCents = invoice.amount_paid;
+    }
+    // If latest_invoice is null (e.g. trial with no invoice yet), amountCents stays 0
+
+    const item = stripeSubscription.items.data[0];
     const billingInterval =
-      stripeSubscription.items.data[0]?.price?.recurring?.interval === 'year'
+      item?.price?.recurring?.interval === 'year'
         ? BILLING_INTERVAL.YEAR
         : BILLING_INTERVAL.MONTH;
 
@@ -250,9 +306,8 @@ export class SubscriptionService extends BaseService {
     );
 
     // In Stripe v19+, period dates are on the subscription item, not the subscription
-    const firstItem = stripeSubscription.items.data[0];
-    const periodStart = firstItem?.current_period_start ?? 0;
-    const periodEnd = firstItem?.current_period_end ?? 0;
+    const periodStart = item?.current_period_start ?? 0;
+    const periodEnd = item?.current_period_end ?? 0;
 
     // Insert subscription record — rely on unique constraint for idempotency
     // (eliminates TOCTOU race between SELECT check and INSERT)
@@ -276,6 +331,29 @@ export class SubscriptionService extends BaseService {
         creatorPayoutCents: split.creatorPayoutCents,
       });
 
+      // BUG-016: Upsert organization membership with role=subscriber
+      // If the user already has a higher-priority role (owner/admin/creator), preserve it.
+      // Only set role to 'subscriber' on conflict if current role is 'member' or 'subscriber'.
+      await this.db
+        .insert(organizationMemberships)
+        .values({
+          organizationId: orgId,
+          userId,
+          role: 'subscriber',
+          status: 'active',
+        })
+        .onConflictDoUpdate({
+          target: [
+            organizationMemberships.organizationId,
+            organizationMemberships.userId,
+          ],
+          set: {
+            status: 'active',
+            role: sql`CASE WHEN ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+            updatedAt: new Date(),
+          },
+        });
+
       this.obs.info('Subscription created from webhook', {
         stripeSubscriptionId: stripeSubId,
         organizationId: orgId,
@@ -291,15 +369,88 @@ export class SubscriptionService extends BaseService {
       }
       throw error;
     }
+
+    // Build email notification data — look up tier name from DB
+    const email = await this.buildSubscriptionCreatedEmail(
+      userId,
+      tierId,
+      stripeSubscription,
+      amountCents,
+      billingInterval,
+      webAppUrl
+    );
+
+    return { userId, email: email ?? undefined };
+  }
+
+  /**
+   * Build the subscription-created email payload.
+   * Looks up tier name and user email from DB.
+   */
+  private async buildSubscriptionCreatedEmail(
+    userId: string,
+    tierId: string,
+    stripeSubscription: Stripe.Subscription,
+    amountCents: number,
+    billingInterval: string,
+    webAppUrl?: string
+  ): Promise<WebhookEmailPayload | null> {
+    // Look up user email
+    const [user] = await this.db
+      .select({ email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user?.email) return null;
+
+    // Look up tier name
+    let planName = 'Subscription';
+    const [tier] = await this.db
+      .select({ name: subscriptionTiers.name })
+      .from(subscriptionTiers)
+      .where(eq(subscriptionTiers.id, tierId))
+      .limit(1);
+    if (tier) planName = tier.name;
+
+    const item = stripeSubscription.items.data[0];
+    const priceAmount = item?.price?.unit_amount ?? amountCents;
+    const interval = item?.price?.recurring?.interval ?? 'month';
+
+    return {
+      to: user.email,
+      toName: user.name || undefined,
+      templateName: 'subscription-created',
+      category: 'transactional',
+      data: {
+        userName: user.name || 'there',
+        planName,
+        priceFormatted: `£${(priceAmount / 100).toFixed(2)}`,
+        billingInterval: interval,
+        nextBillingDate: stripeSubscription.billing_cycle_anchor
+          ? new Date(
+              stripeSubscription.billing_cycle_anchor * 1000
+            ).toLocaleDateString('en-GB')
+          : 'See account page',
+        manageUrl: `${webAppUrl || ''}/account/subscriptions`,
+      },
+    };
   }
 
   /**
    * Handle invoice.payment_succeeded for subscription renewals.
    * Extends subscription period and creates revenue transfers.
+   *
+   * Returns a result object with:
+   * - email payload for the subscription-renewed notification (only for renewal invoices)
+   *
+   * @param stripeInvoice The Stripe invoice object
+   * @param webAppUrl The web app base URL for email links (optional)
    */
   async handleInvoicePaymentSucceeded(
-    stripeInvoice: Stripe.Invoice
-  ): Promise<void> {
+    stripeInvoice: Stripe.Invoice,
+    webAppUrl?: string
+  ): Promise<WebhookHandlerResult | void> {
     // Stripe v19+: subscription ID is in parent.subscription_details
     const subDetails = stripeInvoice.parent?.subscription_details;
     const stripeSubId =
@@ -402,6 +553,109 @@ export class SubscriptionService extends BaseService {
       invoiceId: stripeInvoice.id,
       amountCents,
     });
+
+    // Build renewal email only for recurring invoices (not first payment)
+    let email: WebhookEmailPayload | undefined;
+    if (
+      stripeInvoice.billing_reason === 'subscription_cycle' &&
+      stripeInvoice.customer_email
+    ) {
+      // Use subscription's current_period_end for next billing date
+      let nextBillingDate = 'See account page';
+      if (subItem?.current_period_end) {
+        nextBillingDate = new Date(
+          subItem.current_period_end * 1000
+        ).toLocaleDateString('en-GB');
+      }
+
+      email = {
+        to: stripeInvoice.customer_email,
+        toName: stripeInvoice.customer_name || undefined,
+        templateName: 'subscription-renewed',
+        category: 'transactional',
+        data: {
+          userName: stripeInvoice.customer_name || 'there',
+          planName: stripeInvoice.lines.data[0]?.description || 'Subscription',
+          priceFormatted: `£${((stripeInvoice.amount_paid ?? 0) / 100).toFixed(2)}`,
+          billingDate: new Date().toLocaleDateString('en-GB'),
+          nextBillingDate,
+          manageUrl: `${webAppUrl || ''}/account/subscriptions`,
+        },
+      };
+    }
+
+    return { userId: sub.userId, email };
+  }
+
+  /**
+   * Handle invoice.payment_failed — update subscription status to past_due.
+   *
+   * Extracts the subscription ID from the invoice, updates the local
+   * subscription record, and returns an email payload for the payment-failed
+   * notification.
+   *
+   * @param stripeInvoice The Stripe invoice object
+   * @param webAppUrl The web app base URL for email links (optional)
+   */
+  async handleInvoicePaymentFailed(
+    stripeInvoice: Stripe.Invoice,
+    webAppUrl?: string
+  ): Promise<WebhookHandlerResult | void> {
+    // Stripe v19+: subscription ID is in parent.subscription_details
+    const subDetails = stripeInvoice.parent?.subscription_details;
+    const stripeSubId =
+      typeof subDetails?.subscription === 'string'
+        ? subDetails.subscription
+        : (subDetails?.subscription?.id ?? null);
+
+    if (stripeSubId) {
+      await this.db
+        .update(subscriptions)
+        .set({
+          status: SUBSCRIPTION_STATUS.PAST_DUE,
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+
+      this.obs.info('Subscription status updated to past_due', {
+        stripeSubscriptionId: stripeSubId,
+      });
+    }
+
+    // Build payment-failed email
+    let email: WebhookEmailPayload | undefined;
+    if (stripeInvoice.customer_email) {
+      email = {
+        to: stripeInvoice.customer_email,
+        toName: stripeInvoice.customer_name || undefined,
+        templateName: 'payment-failed',
+        category: 'transactional',
+        data: {
+          userName: stripeInvoice.customer_name || 'there',
+          planName: stripeInvoice.lines.data[0]?.description || 'Subscription',
+          priceFormatted: `£${((stripeInvoice.amount_due ?? 0) / 100).toFixed(2)}`,
+          retryDate: stripeInvoice.next_payment_attempt
+            ? new Date(
+                stripeInvoice.next_payment_attempt * 1000
+              ).toLocaleDateString('en-GB')
+            : 'soon',
+          updatePaymentUrl: `${webAppUrl || ''}/account/subscriptions`,
+        },
+      };
+    }
+
+    // Look up userId from subscription record for cache invalidation
+    let userId: string | undefined;
+    if (stripeSubId) {
+      const [sub] = await this.db
+        .select({ userId: subscriptions.userId })
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+        .limit(1);
+      userId = sub?.userId;
+    }
+
+    return { userId, email };
   }
 
   /**
@@ -461,11 +715,22 @@ export class SubscriptionService extends BaseService {
 
   /**
    * Handle customer.subscription.deleted — subscription cancelled/expired.
+   *
+   * Returns a result object with:
+   * - userId for cache invalidation
+   * - email payload for the subscription-cancelled notification
+   *
+   * @param stripeSubscription The Stripe subscription object
+   * @param webAppUrl The web app base URL for email links (optional)
    */
   async handleSubscriptionDeleted(
-    stripeSubscription: Stripe.Subscription
-  ): Promise<void> {
+    stripeSubscription: Stripe.Subscription,
+    webAppUrl?: string
+  ): Promise<WebhookHandlerResult> {
     const stripeSubId = stripeSubscription.id;
+    const metadata = stripeSubscription.metadata ?? {};
+    const userId = metadata.codex_user_id;
+    const orgId = metadata.codex_organization_id;
 
     await this.db
       .update(subscriptions)
@@ -476,9 +741,85 @@ export class SubscriptionService extends BaseService {
       })
       .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
 
+    // BUG-016: Update organization membership on subscription cancellation.
+    // Only deactivate if the member's role is 'subscriber' — preserve higher roles.
+    if (userId && orgId) {
+      await this.db
+        .update(organizationMemberships)
+        .set({
+          status: 'inactive',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, orgId),
+            eq(organizationMemberships.userId, userId),
+            eq(organizationMemberships.role, 'subscriber')
+          )
+        );
+    }
+
     this.obs.info('Subscription deleted/cancelled from webhook', {
       stripeSubscriptionId: stripeSubId,
     });
+
+    // Build cancellation email
+    const email = userId
+      ? await this.buildSubscriptionCancelledEmail(
+          userId,
+          stripeSubscription,
+          webAppUrl
+        )
+      : undefined;
+
+    return { userId: userId || undefined, email: email ?? undefined };
+  }
+
+  /**
+   * Build the subscription-cancelled email payload.
+   * Looks up user email/name and tier name from DB.
+   */
+  private async buildSubscriptionCancelledEmail(
+    userId: string,
+    stripeSubscription: Stripe.Subscription,
+    webAppUrl?: string
+  ): Promise<WebhookEmailPayload | null> {
+    const [user] = await this.db
+      .select({ email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user?.email) return null;
+
+    // Look up tier name
+    let planName = 'Subscription';
+    const tierId = stripeSubscription.metadata?.codex_tier_id;
+    if (tierId) {
+      const [tier] = await this.db
+        .select({ name: subscriptionTiers.name })
+        .from(subscriptionTiers)
+        .where(eq(subscriptionTiers.id, tierId))
+        .limit(1);
+      if (tier) planName = tier.name;
+    }
+
+    return {
+      to: user.email,
+      toName: user.name || undefined,
+      templateName: 'subscription-cancelled',
+      category: 'transactional',
+      data: {
+        userName: user.name || 'there',
+        planName,
+        accessEndDate: stripeSubscription.cancel_at
+          ? new Date(stripeSubscription.cancel_at * 1000).toLocaleDateString(
+              'en-GB'
+            )
+          : 'Immediately',
+        resubscribeUrl: `${webAppUrl || ''}/account/subscriptions`,
+      },
+    };
   }
 
   // ─── Subscription Management ───────────────────────────────────────────────
@@ -546,15 +887,35 @@ export class SubscriptionService extends BaseService {
         },
       });
 
-      // Update local record
-      await this.db
-        .update(subscriptions)
-        .set({
-          tierId: newTierId,
-          billingInterval,
-          updatedAt: new Date(),
-        })
-        .where(eq(subscriptions.id, sub.id));
+      // BUG-020: Stripe update succeeded — now update local record.
+      // If this DB write fails, the Stripe subscription is already changed.
+      // The customer.subscription.updated webhook (handleSubscriptionUpdated)
+      // will reconcile local state from Stripe's metadata, so eventual
+      // consistency is guaranteed. We log the failure for observability.
+      try {
+        await this.db
+          .update(subscriptions)
+          .set({
+            tierId: newTierId,
+            billingInterval,
+            updatedAt: new Date(),
+          })
+          .where(eq(subscriptions.id, sub.id));
+      } catch (dbError) {
+        this.obs.error(
+          'changeTier: DB update failed after Stripe succeeded — webhook will reconcile',
+          {
+            subscriptionId: sub.id,
+            stripeSubscriptionId: sub.stripeSubscriptionId,
+            oldTierId: sub.tierId,
+            newTierId,
+            billingInterval,
+            error: (dbError as Error).message,
+          }
+        );
+        // Don't re-throw — the Stripe change is authoritative and the webhook
+        // (customer.subscription.updated) will bring local state into sync.
+      }
 
       this.obs.info('Subscription tier changed', {
         subscriptionId: sub.id,
@@ -697,7 +1058,18 @@ export class SubscriptionService extends BaseService {
 
     const conditions = [eq(subscriptions.organizationId, orgId)];
     if (tierId) conditions.push(eq(subscriptions.tierId, tierId));
-    if (status) conditions.push(eq(subscriptions.status, status));
+    if (status) {
+      conditions.push(eq(subscriptions.status, status));
+    } else {
+      // BUG-023: Exclude cancelled subscriptions by default when no status filter given
+      conditions.push(
+        inArray(subscriptions.status, [
+          SUBSCRIPTION_STATUS.ACTIVE,
+          SUBSCRIPTION_STATUS.CANCELLING,
+          SUBSCRIPTION_STATUS.PAST_DUE,
+        ])
+      );
+    }
 
     const [items, [totalResult]] = await Promise.all([
       this.db
@@ -730,10 +1102,10 @@ export class SubscriptionService extends BaseService {
    * Get subscription stats for an org dashboard.
    */
   async getSubscriptionStats(orgId: string): Promise<SubscriptionStats> {
-    // Total and active counts
+    // BUG-024: totalSubscribers should only count active/cancelling/past_due, not cancelled
     const [totals] = await this.db
       .select({
-        total: sql<number>`count(*)::int`,
+        total: sql<number>`count(*) FILTER (WHERE ${subscriptions.status} IN ('active', 'cancelling', 'past_due'))::int`,
         active: sql<number>`count(*) FILTER (WHERE ${subscriptions.status} IN ('active', 'cancelling'))::int`,
       })
       .from(subscriptions)
@@ -787,6 +1159,114 @@ export class SubscriptionService extends BaseService {
     };
   }
 
+  // ─── Pending Payout Resolution ──────────────────────────────────────────
+
+  /**
+   * BUG-014: Resolve accumulated pending payouts for a user within an org.
+   *
+   * Called when a Connect account transitions to chargesEnabled + payoutsEnabled.
+   * For each unresolved payout:
+   *   - Attempts stripe.transfers.create()
+   *   - On success: sets resolvedAt and stripeTransferId
+   *   - On failure: logs and continues to the next payout (batch is best-effort)
+   *
+   * Returns the count of successfully resolved payouts.
+   */
+  async resolvePendingPayouts(
+    orgId: string,
+    stripeAccountId: string
+  ): Promise<{ resolved: number; failed: number }> {
+    let resolved = 0;
+    let failed = 0;
+
+    // Query all unresolved payouts for this org that belong to the user
+    // whose Connect account just became active.
+    const [connectAccount] = await this.db
+      .select({ userId: stripeConnectAccounts.userId })
+      .from(stripeConnectAccounts)
+      .where(
+        and(
+          eq(stripeConnectAccounts.stripeAccountId, stripeAccountId),
+          eq(stripeConnectAccounts.organizationId, orgId)
+        )
+      )
+      .limit(1);
+
+    if (!connectAccount) {
+      this.obs.warn('resolvePendingPayouts: Connect account not found', {
+        organizationId: orgId,
+        stripeAccountId,
+      });
+      return { resolved: 0, failed: 0 };
+    }
+
+    const unresolvedPayouts = await this.db
+      .select()
+      .from(pendingPayouts)
+      .where(
+        and(
+          eq(pendingPayouts.userId, connectAccount.userId),
+          eq(pendingPayouts.organizationId, orgId),
+          isNull(pendingPayouts.resolvedAt)
+        )
+      );
+
+    if (unresolvedPayouts.length === 0) {
+      return { resolved: 0, failed: 0 };
+    }
+
+    this.obs.info('Resolving pending payouts', {
+      organizationId: orgId,
+      stripeAccountId,
+      userId: connectAccount.userId,
+      count: unresolvedPayouts.length,
+    });
+
+    for (const payout of unresolvedPayouts) {
+      try {
+        const transfer = await this.stripe.transfers.create({
+          amount: payout.amountCents,
+          currency: payout.currency,
+          destination: stripeAccountId,
+          metadata: {
+            pending_payout_id: payout.id,
+            subscription_id: payout.subscriptionId,
+            type: 'pending_payout_resolution',
+          },
+        });
+
+        await this.db
+          .update(pendingPayouts)
+          .set({
+            resolvedAt: new Date(),
+            stripeTransferId: transfer.id,
+          })
+          .where(eq(pendingPayouts.id, payout.id));
+
+        resolved++;
+      } catch (error) {
+        failed++;
+        this.obs.error('Failed to resolve pending payout', {
+          pendingPayoutId: payout.id,
+          subscriptionId: payout.subscriptionId,
+          amountCents: payout.amountCents,
+          error: (error as Error).message,
+        });
+        // Continue to next payout — don't fail the whole batch
+      }
+    }
+
+    this.obs.info('Pending payout resolution complete', {
+      organizationId: orgId,
+      stripeAccountId,
+      resolved,
+      failed,
+      total: unresolvedPayouts.length,
+    });
+
+    return { resolved, failed };
+  }
+
   // ─── Private Helpers ─────────────────────────────────────────────────────
 
   private async getSubscriptionOrThrow(
@@ -814,6 +1294,25 @@ export class SubscriptionService extends BaseService {
     }
 
     return sub;
+  }
+
+  /**
+   * Resolve the org owner's userId from organization_memberships.
+   * Returns null if no owner membership is found.
+   */
+  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
+    const [owner] = await this.db
+      .select({ userId: organizationMemberships.userId })
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, orgId),
+          eq(organizationMemberships.role, 'owner')
+        )
+      )
+      .limit(1);
+
+    return owner?.userId ?? null;
   }
 
   /**
@@ -879,22 +1378,34 @@ export class SubscriptionService extends BaseService {
         }
       }
     } else if (orgFeeCents > 0) {
-      // Accumulate if Connect not ready
-      try {
-        await this.db.insert(pendingPayouts).values({
-          userId: orgConnect?.userId ?? '',
-          organizationId: orgId,
-          subscriptionId,
-          amountCents: orgFeeCents,
-          reason: 'connect_not_ready',
-        });
-      } catch (insertError) {
-        this.obs.error('Failed to record pending payout (Connect not ready)', {
-          subscriptionId,
-          organizationId: orgId,
-          amountCents: orgFeeCents,
-          error: (insertError as Error).message,
-        });
+      // Accumulate if Connect not ready — resolve the org owner's userId
+      const ownerId =
+        orgConnect?.userId ?? (await this.resolveOrgOwnerId(orgId));
+      if (!ownerId) {
+        this.obs.error(
+          'Cannot record pending payout: no Connect account and no org owner found',
+          { subscriptionId, organizationId: orgId, amountCents: orgFeeCents }
+        );
+      } else {
+        try {
+          await this.db.insert(pendingPayouts).values({
+            userId: ownerId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: orgFeeCents,
+            reason: 'connect_not_ready',
+          });
+        } catch (insertError) {
+          this.obs.error(
+            'Failed to record pending payout (Connect not ready)',
+            {
+              subscriptionId,
+              organizationId: orgId,
+              amountCents: orgFeeCents,
+              error: (insertError as Error).message,
+            }
+          );
+        }
       }
     }
 
@@ -942,13 +1453,27 @@ export class SubscriptionService extends BaseService {
               error: (transferError as Error).message,
             }
           );
-          await this.db.insert(pendingPayouts).values({
-            userId: orgConnect.userId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: creatorPayoutCents,
-            reason: 'transfer_failed',
-          });
+          // BUG-036: Wrap pending payout insert in try/catch so a DB failure
+          // doesn't crash the entire transfer flow.
+          try {
+            await this.db.insert(pendingPayouts).values({
+              userId: orgConnect.userId,
+              organizationId: orgId,
+              subscriptionId,
+              amountCents: creatorPayoutCents,
+              reason: 'transfer_failed',
+            });
+          } catch (insertError) {
+            this.obs.error(
+              'Failed to record pending payout for creator pool to owner',
+              {
+                subscriptionId,
+                organizationId: orgId,
+                amountCents: creatorPayoutCents,
+                error: (insertError as Error).message,
+              }
+            );
+          }
         }
       }
       return;
@@ -1008,23 +1533,51 @@ export class SubscriptionService extends BaseService {
             amountCents: creatorAmount,
             error: (transferError as Error).message,
           });
+          // BUG-036: Wrap pending payout insert in try/catch so a DB failure
+          // doesn't crash the entire transfer flow.
+          try {
+            await this.db.insert(pendingPayouts).values({
+              userId: agreement.creatorId,
+              organizationId: orgId,
+              subscriptionId,
+              amountCents: creatorAmount,
+              reason: 'transfer_failed',
+            });
+          } catch (insertError) {
+            this.obs.error(
+              'Failed to record pending payout for creator transfer failure',
+              {
+                subscriptionId,
+                creatorId: agreement.creatorId,
+                amountCents: creatorAmount,
+                error: (insertError as Error).message,
+              }
+            );
+          }
+        }
+      } else {
+        // Accumulate pending payout
+        // BUG-036: Wrap pending payout insert in try/catch so a DB failure
+        // doesn't crash the entire transfer flow.
+        try {
           await this.db.insert(pendingPayouts).values({
             userId: agreement.creatorId,
             organizationId: orgId,
             subscriptionId,
             amountCents: creatorAmount,
-            reason: 'transfer_failed',
+            reason: creatorConnect ? 'connect_restricted' : 'connect_not_ready',
           });
+        } catch (insertError) {
+          this.obs.error(
+            'Failed to record pending payout (Connect not ready)',
+            {
+              subscriptionId,
+              creatorId: agreement.creatorId,
+              amountCents: creatorAmount,
+              error: (insertError as Error).message,
+            }
+          );
         }
-      } else {
-        // Accumulate pending payout
-        await this.db.insert(pendingPayouts).values({
-          userId: agreement.creatorId,
-          organizationId: orgId,
-          subscriptionId,
-          amountCents: creatorAmount,
-          reason: creatorConnect ? 'connect_restricted' : 'connect_not_ready',
-        });
 
         this.obs.warn('Creator payout accumulated (Connect not ready)', {
           creatorId: agreement.creatorId,

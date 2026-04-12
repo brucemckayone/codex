@@ -114,7 +114,7 @@ app.all(
   '/internal/orphan-cleanup/*',
   async (c, next) => {
     // Enforce worker-to-worker HMAC auth before forwarding to DO
-    const secret = (c.env as Record<string, string>).WORKER_SHARED_SECRET;
+    const secret = c.env.WORKER_SHARED_SECRET;
     if (!secret) {
       return c.json({ error: 'Worker auth not configured' }, 503);
     }

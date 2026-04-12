@@ -29,6 +29,10 @@ function resolveR2Urls(
     mediaItem: item.mediaItem
       ? {
           ...item.mediaItem,
+          thumbnailUrl:
+            item.mediaItem.thumbnailKey && r2Base
+              ? `${r2Base}/${item.mediaItem.thumbnailKey}`
+              : null,
           hlsPreviewUrl:
             item.mediaItem.hlsPreviewKey && r2Base
               ? `${r2Base}/${item.mediaItem.hlsPreviewKey}`

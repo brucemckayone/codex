@@ -86,12 +86,6 @@ export class SlugConflictError extends ConflictError {
   }
 }
 
-export class ContentAlreadyPublishedError extends BusinessLogicError {
-  constructor(contentId: string) {
-    super('Content is already published', { contentId });
-  }
-}
-
 export class MediaOwnershipError extends ForbiddenError {
   constructor(mediaItemId: string, userId: string) {
     super('User does not own this media item', { mediaItemId, userId });

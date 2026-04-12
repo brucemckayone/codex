@@ -127,6 +127,14 @@ export type {
 export type { EmailTemplate, NewEmailTemplate, TemplateScope, TemplateStatus };
 
 /**
+ * Email category for preference checking.
+ * - transactional: Always sent (receipts, password resets, security)
+ * - marketing: Opt-out respected (promotions, new content)
+ * - digest: Opt-out respected (weekly summary)
+ */
+export type EmailCategory = 'transactional' | 'marketing' | 'digest';
+
+/**
  * Response for GET/PUT /api/user/notification-preferences
  */
 export interface NotificationPreferencesResponse {

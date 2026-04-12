@@ -48,6 +48,7 @@ const TABLES_TO_TRUNCATE = [
   'feature_settings',
   'orphaned_image_files',
   'stripe_connect_accounts',
+  'pending_payouts',
   'subscription_tiers',
   'subscriptions',
 ];

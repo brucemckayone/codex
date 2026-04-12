@@ -21,6 +21,7 @@ import { CURRENCY } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';
 import { checkoutSessionMetadataSchema } from '@codex/validation';
+import { sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -112,12 +113,25 @@ export async function handleCheckoutCompleted(
     return;
   }
 
+  // Extract the application fee Stripe was told to collect (for reconciliation).
+  // The PaymentIntent carries the application_fee_amount we set at checkout creation.
+  let stripeApplicationFeeCents: number | null = null;
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    stripeApplicationFeeCents = paymentIntent.application_fee_amount ?? null;
+  } catch (piError) {
+    // Non-fatal — reconciliation is best-effort
+    obs?.warn('Could not retrieve PaymentIntent for fee reconciliation', {
+      paymentIntentId,
+      error: piError instanceof Error ? piError.message : String(piError),
+    });
+  }
+
   // Create per-request db client for transaction support
   // DATABASE_URL_LOCAL_PROXY is optional and set only in test environments
   const { db, cleanup } = createPerRequestDbClient({
     DATABASE_URL: c.env.DATABASE_URL,
-    DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)
-      .DATABASE_URL_LOCAL_PROXY,
+    DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
     DB_METHOD: c.env.DB_METHOD,
   });
 
@@ -139,6 +153,7 @@ export async function handleCheckoutCompleted(
       organizationId: validatedMetadata.organizationId,
       amountPaidCents: amountTotal,
       currency: CURRENCY.GBP,
+      stripeApplicationFeeCents,
     });
 
     obs?.info('Purchase completed successfully', {
@@ -156,6 +171,31 @@ export async function handleCheckoutCompleted(
           CacheType.COLLECTION_USER_LIBRARY(validatedMetadata.customerId)
         )
       );
+    }
+
+    // Send purchase receipt email (fire-and-forget)
+    const customerEmail = session.customer_details?.email;
+    const customerName = session.customer_details?.name || 'there';
+    if (customerEmail) {
+      // Resolve content title from metadata or use fallback
+      const contentTitle =
+        metadata?.contentTitle || metadata?.contentName || 'Content purchase';
+      const penceAmount = amountTotal ?? 0;
+      const formatted = `£${(penceAmount / 100).toFixed(2)}`;
+      sendEmailToWorker(c.env, c.executionCtx, {
+        to: customerEmail,
+        toName: customerName,
+        templateName: 'purchase-receipt',
+        category: 'transactional',
+        userId: validatedMetadata.customerId,
+        data: {
+          userName: customerName,
+          contentTitle,
+          priceFormatted: formatted,
+          purchaseDate: new Date().toLocaleDateString('en-GB'),
+          contentUrl: `${c.env.WEB_APP_URL || ''}/content/${validatedMetadata.contentId}`,
+        },
+      });
     }
   } finally {
     await cleanup();

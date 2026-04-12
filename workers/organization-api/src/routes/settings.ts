@@ -30,6 +30,7 @@ import type {
 } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
+  linkIntroVideoSchema,
   MAX_LOGO_FILE_SIZE_BYTES,
   updateBrandingSchema,
   updateContactSchema,
@@ -98,6 +99,8 @@ export async function updateBrandCache(
         fontHeading: settings.branding?.fontHeading ?? null,
         radiusValue: Number(settings.branding?.radiusValue ?? 0.5),
         densityValue: Number(settings.branding?.densityValue ?? 1),
+        introVideoMediaItemId: settings.branding?.introVideoMediaItemId ?? null,
+        introVideoUrl: settings.branding?.introVideoUrl ?? null,
         tokenOverrides: settings.branding?.tokenOverrides ?? null,
         darkModeOverrides: settings.branding?.darkModeOverrides ?? null,
         textColorHex: settings.branding?.textColorHex ?? null,
@@ -135,6 +138,8 @@ export async function updateBrandCache(
         fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
+        introVideoMediaItemId: null,
+        introVideoUrl: null,
         tokenOverrides: null,
         darkModeOverrides: null,
         textColorHex: null,
@@ -327,6 +332,70 @@ app.delete(
         throw new InternalServiceError('Logo operations not configured');
       }
       const result = await ctx.services.settings.deleteLogo();
+
+      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
+
+      return result;
+    },
+  })
+);
+
+// ============================================================================
+// Intro Video Endpoints
+// ============================================================================
+
+/**
+ * POST /api/organizations/:id/settings/branding/intro-video
+ * Link a media item as the org's intro video.
+ * The media item is created via content-api (presigned upload flow).
+ */
+app.post(
+  '/branding/intro-video',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
+      params: orgIdParamSchema,
+      body: linkIntroVideoSchema,
+    },
+    handler: async (ctx): Promise<BrandingSettingsResponse> => {
+      const result = await ctx.services.settings.linkIntroVideo(
+        ctx.input.body.mediaItemId,
+        ctx.user.id
+      );
+
+      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
+
+      return result;
+    },
+  })
+);
+
+/**
+ * GET /api/organizations/:id/settings/branding/intro-video/status
+ * Poll intro video transcoding status. Auto-finalizes URL when ready.
+ */
+app.get(
+  '/branding/intro-video/status',
+  procedure({
+    policy: { auth: 'required', requireOrgMembership: true },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx) => {
+      return await ctx.services.settings.getIntroVideoStatus();
+    },
+  })
+);
+
+/**
+ * DELETE /api/organizations/:id/settings/branding/intro-video
+ * Remove the intro video. Soft-deletes the media item.
+ */
+app.delete(
+  '/branding/intro-video',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { params: orgIdParamSchema },
+    handler: async (ctx): Promise<BrandingSettingsResponse> => {
+      const result = await ctx.services.settings.deleteIntroVideo();
 
       invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 

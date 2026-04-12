@@ -31,6 +31,7 @@
   let cancelLoading = $state(false);
   let cancelError = $state('');
   let reactivateLoading = $state<string | null>(null);
+  let reactivateError = $state('');
 
   function statusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
     switch (status) {
@@ -79,11 +80,12 @@
 
   async function handleReactivate(sub: UserOrgSubscription) {
     reactivateLoading = sub.id;
+    reactivateError = '';
     try {
       await reactivateSubscription({ organizationId: sub.organizationId });
       await invalidate('cache:versions');
     } catch (error) {
-      cancelError = error instanceof Error ? error.message : 'Failed to reactivate subscription';
+      reactivateError = error instanceof Error ? error.message : 'Failed to reactivate subscription';
     } finally {
       reactivateLoading = null;
     }
@@ -203,6 +205,10 @@
                   </Button>
                 {/if}
               </div>
+
+              {#if reactivateError && reactivateLoading === null}
+                <Alert variant="error">{reactivateError}</Alert>
+              {/if}
             </div>
           </Card.Content>
         </Card.Root>

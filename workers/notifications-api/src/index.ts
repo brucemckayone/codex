@@ -26,8 +26,10 @@ import {
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 // Import route modules
+import internalRoutes from './routes/internal';
 import previewRoutes from './routes/preview';
 import templateRoutes from './routes/templates';
+import unsubscribeRoutes from './routes/unsubscribe';
 
 // ============================================================================
 // Application Setup
@@ -54,7 +56,7 @@ const app = createWorker({
 app.use(
   '*',
   createEnvValidationMiddleware({
-    required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
+    required: ['DATABASE_URL', 'RATE_LIMIT_KV', 'WORKER_SHARED_SECRET'],
     optional: [
       'ENVIRONMENT',
       'WEB_APP_URL',
@@ -80,8 +82,22 @@ app.use(
  */
 app.route('/api/templates', templateRoutes);
 app.route('/api/templates', previewRoutes);
+app.route('/internal', internalRoutes);
+app.route('/unsubscribe', unsubscribeRoutes);
 // ============================================================================
-// Export
+// Export (with Cron Trigger support for weekly digest)
 // ============================================================================
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(
+    _event: ScheduledEvent,
+    env: Record<string, unknown>,
+    ctx: ExecutionContext
+  ) {
+    // Weekly digest cron handler
+    // Configured in wrangler.toml: crons = ["0 9 * * 1"] (Monday 09:00 UTC)
+    // TODO: Implement handleWeeklyDigest — query opted-in users,
+    // fetch new content from last 7 days, batch-send digest emails.
+  },
+};

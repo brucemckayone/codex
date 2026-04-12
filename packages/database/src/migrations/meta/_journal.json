@@ -309,6 +309,27 @@
       "when": 1775750000000,
       "tag": "0043_code_review_schema_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1775850000000,
+      "tag": "0044_add_email_skipped_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1775826920424,
+      "tag": "0045_unique_northstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1775892842915,
+      "tag": "0046_familiar_vargas",
+      "breakpoints": true
     }
   ]
 }

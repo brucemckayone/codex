@@ -30,7 +30,7 @@ export class BrandingCache {
 
     // Check expiration
     if (Date.now() > entry.expiresAt) {
-      this.cache.delete(organizationId);
+      this.cache.delete(key);
       return null;
     }
 

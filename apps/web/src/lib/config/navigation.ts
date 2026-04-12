@@ -28,7 +28,6 @@ export interface SidebarLink extends NavLink {
 /** Platform-level navigation (top header on codex.com) */
 export const PLATFORM_NAV: NavLink[] = [
   { href: '/discover', label: 'Discover' },
-  { href: '/pricing', label: 'Pricing' },
   { href: '/library', label: 'Library' },
 ];
 
@@ -76,10 +75,11 @@ export const SIDEBAR_PERSONAL_LINKS: SidebarLink[] = [
   { href: '/studio/settings', label: 'Settings', icon: 'settings' },
 ];
 
-/** Studio settings sub-navigation (General, Branding) */
+/** Studio settings sub-navigation (General, Branding, Email Templates) */
 export const SETTINGS_NAV: NavLink[] = [
   { href: '/studio/settings', label: 'General' },
   { href: '/studio/settings/branding', label: 'Branding' },
+  { href: '/studio/settings/email-templates', label: 'Email Templates' },
 ];
 
 /** Account settings sub-navigation */
@@ -89,3 +89,51 @@ export const ACCOUNT_NAV: NavLink[] = [
   { href: '/account/payment', label: 'Payments' },
   { href: '/account/notifications', label: 'Notifications' },
 ];
+
+// ── Rail Navigation (sidebar rail for platform/org) ──────────────────
+
+export type RailIcon =
+  | 'home'
+  | 'compass'
+  | 'tag'
+  | 'library'
+  | 'search'
+  | 'users';
+
+export interface RailNavLink extends NavLink {
+  icon: RailIcon;
+}
+
+/** Platform sidebar rail navigation */
+export const PLATFORM_RAIL_NAV: RailNavLink[] = [
+  { href: '/', label: 'Home', icon: 'home' },
+  { href: '/discover', label: 'Discover', icon: 'compass' },
+  { href: '/library', label: 'Library', icon: 'library' },
+];
+
+/** Org sidebar rail navigation (subdomain — paths are root-relative) */
+export function getOrgRailNav(): RailNavLink[] {
+  return [
+    { href: '/', label: 'Home', icon: 'home' },
+    { href: '/explore', label: 'Explore', icon: 'compass' },
+    { href: '/creators', label: 'Creators', icon: 'users' },
+    { href: '/pricing', label: 'Pricing', icon: 'tag' },
+    { href: '/library', label: 'Library', icon: 'library' },
+  ];
+}
+
+/** Platform mobile bottom nav (subset — search + more handled separately) */
+export const PLATFORM_MOBILE_NAV: RailNavLink[] = [
+  { href: '/', label: 'Home', icon: 'home' },
+  { href: '/discover', label: 'Discover', icon: 'compass' },
+  { href: '/library', label: 'Library', icon: 'library' },
+];
+
+/** Org mobile bottom nav (subset — search + more handled separately) */
+export function getOrgMobileNav(): RailNavLink[] {
+  return [
+    { href: '/', label: 'Home', icon: 'home' },
+    { href: '/explore', label: 'Explore', icon: 'compass' },
+    { href: '/library', label: 'Library', icon: 'library' },
+  ];
+}

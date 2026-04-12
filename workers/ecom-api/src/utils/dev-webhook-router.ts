@@ -19,6 +19,7 @@ import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { handleCheckoutCompleted } from '../handlers/checkout';
 import { handleConnectWebhook } from '../handlers/connect-webhook';
+import { handlePaymentWebhook } from '../handlers/payment-webhook';
 import { handleSubscriptionWebhook } from '../handlers/subscription-webhook';
 import type { StripeWebhookEnv } from '../types';
 
@@ -33,10 +34,15 @@ const EVENT_ROUTES: Array<{
   ) => Promise<void> | void;
 }> = [
   {
-    // checkout.session.completed (payment mode) → purchase handler
+    // checkout.session.completed → both purchase and subscription handlers.
+    // In production Stripe sends this event to both endpoints independently;
+    // each handler filters by session.mode (payment vs subscription).
     match: (type) => type === STRIPE_EVENTS.CHECKOUT_COMPLETED,
-    label: 'Checkout',
-    handler: handleCheckoutCompleted,
+    label: 'Checkout (dual dispatch)',
+    handler: async (event, stripe, c) => {
+      await handleCheckoutCompleted(event, stripe, c);
+      await handleSubscriptionWebhook(event, stripe, c);
+    },
   },
   {
     // customer.subscription.* and invoice.* → subscription handler
@@ -44,6 +50,13 @@ const EVENT_ROUTES: Array<{
       type.startsWith('customer.subscription.') || type.startsWith('invoice.'),
     label: 'Subscription',
     handler: handleSubscriptionWebhook,
+  },
+  {
+    // charge.* and payment_intent.* → payment handler
+    match: (type) =>
+      type.startsWith('charge.') || type.startsWith('payment_intent.'),
+    label: 'Payment',
+    handler: handlePaymentWebhook,
   },
   {
     // account.* → connect handler

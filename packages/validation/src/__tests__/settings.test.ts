@@ -431,6 +431,8 @@ describe('default constants', () => {
       fontHeading: null,
       radiusValue: 0.5,
       densityValue: 1,
+      introVideoMediaItemId: null,
+      introVideoUrl: null,
       tokenOverrides: null,
       darkModeOverrides: null,
       textColorHex: null,

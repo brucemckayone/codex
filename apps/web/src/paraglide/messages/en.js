@@ -1247,7 +1247,127 @@ export const org_landing_featured_empty = () => `No featured content available y
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const org_hero_explore = () => `Explore Content`
+export const org_hero_explore = () => `Start Exploring`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_browse = () => `Browse Content`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_continue = (params) => `Continue: ${params.title}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_go_to_studio = () => `Go to Studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_my_library = () => `My Library`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meet_creators = () => `Meet Creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_watch_intro = () => `Watch Intro`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_watch_now = () => `Watch Now`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_latest_release = () => `Latest Release`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_free = () => `Free`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_video_count = (params) => `${params.count} Videos`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_audio_count = (params) => `${params.count} Audio`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_written_count = (params) => `${params.count} Written`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_items_count = (params) => `${params.count} items`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_creators_count = (params) => `${params.count} creators`
+
+
+/**
+ * @param {{ hours: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_hours = (params) => `${params.hours} hrs of content`
 
 
 /**
@@ -1551,7 +1671,7 @@ export const explore_results_count = (params) => `${params.count} results`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const org_creators_title = () => `Creators`
+export const org_creators_title = () => `Our Creators`
 
 
 /**
@@ -1559,7 +1679,7 @@ export const org_creators_title = () => `Creators`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const org_creators_subtitle = () => `Meet the talented creators in our community`
+export const org_creators_subtitle = () => `Meet the talented people behind the content`
 
 
 /**
@@ -1567,7 +1687,7 @@ export const org_creators_subtitle = () => `Meet the talented creators in our co
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const org_creators_empty = () => `No creators found`
+export const org_creators_empty = () => `No creators yet`
 
 
 /**
@@ -1575,7 +1695,15 @@ export const org_creators_empty = () => `No creators found`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const org_creators_empty_description = () => `No creators have joined this organization yet.`
+export const org_creators_empty_description = () => `No creators have joined this organization yet. Check back soon.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_creators_latest_release = () => `Latest release`
 
 
 /**
@@ -1936,6 +2064,14 @@ export const content_price_free = () => `Free`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const content_price_purchased = () => `Purchased`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_included = () => `Included`
 
 
 /**
@@ -3039,6 +3175,46 @@ export const subscription_cancelling_message = (params) => `This subscription wi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const subscription_disabled_title = () => `Subscriptions Not Available`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_disabled_description = () => `This organisation does not currently offer subscription plans.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_checkout_error = () => `Something went wrong starting your subscription. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_success_title = () => `Subscription activated!`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_success_description = () => `Welcome! Your subscription is now active and you have access to all included content.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const library_search_placeholder = () => `Search your library...`
 
 
@@ -3127,7 +3303,39 @@ export const library_filter_purchased = () => `Purchased`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const library_filter_subscription = () => `Subscription`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const library_filter_membership = () => `Member Access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_badge_purchased = () => `Purchased`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_badge_subscription = () => `Subscribed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_badge_membership = () => `Member`
 
 
 /**
@@ -3600,6 +3808,70 @@ export const creator_view_profile = (params) => `View ${params.name}'s profile`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const creator_content_count = (params) => `${params.count} content items`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_latest = () => `Latest Release`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_view_profile = () => `View Full Profile`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_no_content = () => `No content published yet`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_joined = (params) => `Joined ${params.date}`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_content_items = (params) => `${params.count} content items`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_role_owner = () => `Owner`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_role_admin = () => `Admin`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_role_creator = () => `Creator`
 
 
 /**
@@ -6959,6 +7231,54 @@ export const content_form_tags_remove = (params) => `Remove tag ${params.tag}`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const sidebar_home = () => `Home`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_discover = () => `Discover`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_explore = () => `Explore`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_creators = () => `Creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_pricing = () => `Pricing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_library = () => `Library`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sidebar_search = () => `Search`
 
 
@@ -6967,7 +7287,7 @@ export const sidebar_search = () => `Search`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sidebar_sign_in = () => `Sign in`
+export const sidebar_sign_in = () => `Sign In`
 
 
 /**
@@ -6976,3 +7296,67 @@ export const sidebar_sign_in = () => `Sign in`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const sidebar_register = () => `Register`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_theme_light = () => `Light mode`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sidebar_theme_dark = () => `Dark mode`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mobile_more = () => `More`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mobile_search = () => `Search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_placeholder = () => `Search content, creators...`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_recent = () => `Recent`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_content = () => `Content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const command_palette_creators = () => `Creators`

@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Shader Hero v2 — 2-Pass RDA</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#e5e5e5;font-family:system-ui,-apple-system,sans-serif}
+.app{display:flex;height:100vh}
+.preview{flex:1;position:relative;overflow:hidden;cursor:crosshair}
+canvas{width:100%;height:100%;display:block}
+.panel{width:280px;flex-shrink:0;padding:14px;background:#111;border-left:1px solid #222;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+h1{font-size:13px;font-weight:600;color:#fff}
+h2{font-size:9px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px}
+.preset-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}
+.preset-btn{padding:8px 6px;border:1px solid #2a2a2a;border-radius:6px;background:#1a1a1a;color:#999;font-size:10px;cursor:pointer;text-align:center;transition:all .15s;line-height:1.3}
+.preset-btn:hover{border-color:#555;background:#222}
+.preset-btn.active{border-color:#7c3aed;background:#1e1b4b;color:#fff}
+.preset-btn small{display:block;font-size:8px;color:#555;margin-top:2px}
+.active small{color:#8b7cc8}
+.sr{display:grid;grid-template-columns:60px 1fr 32px;align-items:center;gap:5px}
+.sr label{font-size:11px;color:#777}
+.sr input[type=range]{width:100%;accent-color:#7c3aed}
+.sr .v{font-size:9px;color:#444;font-family:monospace;text-align:right}
+.cr{display:flex;align-items:center;gap:6px}
+.cr label{font-size:11px;color:#777;width:65px}
+.cr input[type=color]{width:28px;height:22px;border:1px solid #333;border-radius:3px;cursor:pointer;background:none;padding:0}
+.cr input[type=text]{flex:1;padding:2px 4px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#bbb;font-family:monospace;font-size:10px}
+.bg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.bb{display:flex;align-items:center;gap:4px;padding:4px 6px;border:1px solid #222;border-radius:4px;background:#1a1a1a;cursor:pointer;font-size:9px;color:#888;transition:all .15s}
+.bb:hover{border-color:#444}
+.bs{width:10px;height:10px;border-radius:50%;border:1px solid #444;flex-shrink:0}
+.hud{position:absolute;top:8px;left:8px;font:10px/1.3 monospace;color:#0f0;background:rgba(0,0,0,.7);padding:2px 6px;border-radius:3px;pointer-events:none}
+section{display:flex;flex-direction:column;gap:5px}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="preview">
+  <canvas id="c"></canvas>
+  <div class="hud" id="hud">--</div>
+</div>
+<div class="panel">
+  <h1>Shader Hero v2</h1>
+  <section><h2>Display Mode</h2><div class="preset-grid" id="pg"></div></section>
+  <section><h2>Simulation</h2>
+    <div class="sr"><label>Curl</label><input type="range" id="curl" min="1" max="80" value="30"><span class="v" id="curlV">30</span></div>
+    <div class="sr"><label>Dissipation</label><input type="range" id="diss" min="0.9" max="0.999" step="0.001" value="0.985"><span class="v" id="dissV">.985</span></div>
+    <div class="sr"><label>Force</label><input type="range" id="force" min="0.1" max="3" step="0.1" value="1"><span class="v" id="forceV">1.0</span></div>
+    <div class="sr"><label>Speed</label><input type="range" id="speed" min="0.1" max="2" step="0.1" value="0.5"><span class="v" id="speedV">0.5</span></div>
+  </section>
+  <section><h2>Brand Colors</h2>
+    <div class="cr"><label>Primary</label><input type="color" id="c1" value="#7C3AED"><input type="text" id="c1t" value="#7C3AED"></div>
+    <div class="cr"><label>Secondary</label><input type="color" id="c2" value="#EC4899"><input type="text" id="c2t" value="#EC4899"></div>
+    <div class="cr"><label>Accent</label><input type="color" id="c3" value="#F59E0B"><input type="text" id="c3t" value="#F59E0B"></div>
+    <div class="cr"><label>Background</label><input type="color" id="cbg" value="#0F172A"><input type="text" id="cbgt" value="#0F172A"></div>
+  </section>
+  <section><h2>Palettes</h2><div class="bg" id="brandGrid"></div></section>
+</div>
+</div>
+<script>
+// ═══════════════════════════════════════════════════
+// V2: 2-Pass Reaction-Diffusion-Advection Engine
+// Based on cornusammonis/XddSRX "Suture Fluid"
+// ═══════════════════════════════════════════════════
+const canvas=document.getElementById('c');
+const gl=canvas.getContext('webgl2',{alpha:false,antialias:false,depth:false,stencil:false});
+if(!gl){document.body.innerHTML='<h1 style="padding:40px;color:red">WebGL2 required</h1>';throw 0;}
+gl.getExtension('EXT_color_buffer_float');
+gl.getExtension('OES_texture_float_linear');
+
+const SIM=512;
+let curlStr=30, dissipation=0.985, forceMult=1.0, animSpeed=0.5;
+
+// Palettes
+const PAL={
+  Vibrant:{c1:'#7C3AED',c2:'#EC4899',c3:'#F59E0B',bg:'#0F172A'},
+  Neon:{c1:'#22D3EE',c2:'#A3E635',c3:'#F472B6',bg:'#09090B'},
+  Ocean:{c1:'#0284C7',c2:'#0891B2',c3:'#34D399',bg:'#0C4A6E'},
+  Sunset:{c1:'#E11D48',c2:'#F97316',c3:'#FBBF24',bg:'#1C1917'},
+  Ember:{c1:'#DC2626',c2:'#EA580C',c3:'#FCD34D',bg:'#1C1917'},
+  Mono:{c1:'#E5E5E5',c2:'#A3A3A3',c3:'#525252',bg:'#0A0A0A'},
+};
+let colors={c1:'#7C3AED',c2:'#EC4899',c3:'#F59E0B',bg:'#0F172A'};
+function h2r(h){return[parseInt(h.slice(1,3),16)/255,parseInt(h.slice(3,5),16)/255,parseInt(h.slice(5,7),16)/255];}
+
+// Compile
+const VS=`#version 300 es\nin vec2 a_pos;out vec2 vUv;void main(){vUv=a_pos*.5+.5;gl_Position=vec4(a_pos,0,1);}`;
+function mk(fs){const p=gl.createProgram(),v=gl.createShader(gl.VERTEX_SHADER),f=gl.createShader(gl.FRAGMENT_SHADER);gl.shaderSource(v,VS);gl.compileShader(v);if(!gl.getShaderParameter(v,gl.COMPILE_STATUS))console.error('VS:',gl.getShaderInfoLog(v));gl.shaderSource(f,fs);gl.compileShader(f);if(!gl.getShaderParameter(f,gl.COMPILE_STATUS)){console.error('FS:',gl.getShaderInfoLog(f));return null;}gl.attachShader(p,v);gl.attachShader(p,f);gl.linkProgram(p);gl.deleteShader(v);gl.deleteShader(f);if(!gl.getProgramParameter(p,gl.LINK_STATUS)){console.error('Link:',gl.getProgramInfoLog(p));return null;}return p;}
+function gu(p,...n){const u={};n.forEach(k=>u[k]=gl.getUniformLocation(p,k));return u;}
+
+// Quad
+const qb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,qb);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+function bq(p){const a=gl.getAttribLocation(p,'a_pos');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);}
+
+// FBO
+function mkFBO(w,h){
+  const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,w,h,0,gl.RGBA,gl.HALF_FLOAT,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  return{fbo:f,tex:t,w,h};
+}
+let simA=mkFBO(SIM,SIM),simB=mkFBO(SIM,SIM);
+function swapSim(){[simA,simB]=[simB,simA];}
+
+function blit(target){
+  if(target){gl.bindFramebuffer(gl.FRAMEBUFFER,target.fbo);gl.viewport(0,0,target.w,target.h);}
+  else{gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,canvas.width,canvas.height);}
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+}
+
+// ═══════════════════════════════════════════════════
+// PASS 1: RDA Simulation (single buffer feedback)
+// Based on cornusammonis XddSRX "Suture Fluid"
+// State: vec4(velX, velY, divergence, dye_intensity)
+// ═══════════════════════════════════════════════════
+const simProg=mk(`#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
+uniform sampler2D uPrev;
+uniform vec2 uTexel;
+uniform vec2 uMouse;
+uniform vec2 uMouseVel;
+uniform float uMouseActive;
+uniform float uCurl;
+uniform float uDiss;
+uniform float uForce;
+uniform float uTime;
+uniform float uInit;
+
+// 3x3 Laplacian kernel weights (discrete Laplacian)
+#define K0 -20.0/6.0
+#define K1  4.0/6.0
+#define K2  1.0/6.0
+
+vec4 s(vec2 o){return texture(uPrev,vUv+o*uTexel);}
+
+void main(){
+  // Sample neighbors for Laplacian
+  vec4 c =s(vec2( 0, 0));
+  vec4 n =s(vec2( 0, 1));
+  vec4 s2=s(vec2( 0,-1));
+  vec4 e =s(vec2( 1, 0));
+  vec4 w =s(vec2(-1, 0));
+  vec4 ne=s(vec2( 1, 1));
+  vec4 nw=s(vec2(-1, 1));
+  vec4 se=s(vec2( 1,-1));
+  vec4 sw=s(vec2(-1,-1));
+
+  // Laplacian (weighted 3x3 stencil)
+  vec4 lapl = K0*c + K1*(n+s2+e+w) + K2*(ne+nw+se+sw);
+
+  // Curl (vorticity) from velocity field
+  float curl = 0.5*((e.y-w.y) - (n.x-s2.x));
+
+  // Divergence
+  float div = 0.5*((e.x-w.x) + (n.y-s2.y));
+
+  // Reverse advection (sample upstream) — higher scale for smoother transport
+  float advScale = 6.0;
+  vec2 advUv = vUv - c.xy * advScale * uTexel;
+
+  // Gaussian-weighted 3x3 sample at advected position (smooths velocity field)
+  vec4 aC = texture(uPrev, advUv);
+  vec4 aN = texture(uPrev, advUv + vec2(0., uTexel.y));
+  vec4 aS = texture(uPrev, advUv - vec2(0., uTexel.y));
+  vec4 aE = texture(uPrev, advUv + vec2(uTexel.x, 0.));
+  vec4 aW = texture(uPrev, advUv - vec2(uTexel.x, 0.));
+  vec4 a = aC * 0.5 + (aN + aS + aE + aW) * 0.125;
+
+  // Curl-driven rotation
+  float curlPow = 0.25;
+  float sc = uCurl * 0.001 * sign(curl) * pow(abs(curl), curlPow);
+  float cs2 = cos(sc), sn = sin(sc);
+  vec2 rotVel = vec2(a.x*cs2 - a.y*sn, a.x*sn + a.y*cs2);
+
+  // Divergence pressure feedback
+  float divPress = 0.2;
+  float laplPress = 0.1;
+  float newDiv = a.z + divPress * div + laplPress * lapl.z;
+
+  // Update blend
+  float upd = 0.15;
+  vec4 result;
+  result.xy = mix(c.xy, rotVel, upd);
+  result.z = mix(c.z, newDiv, upd);
+  result.w = a.w * uDiss; // Dye dissipation
+
+  // Mouse force (hover-based, always active)
+  if(uMouseActive > 0.5){
+    vec2 d = vUv - uMouse;
+    d.x *= float(textureSize(uPrev,0).x) / float(textureSize(uPrev,0).y);
+    float dist = length(d);
+    float radius = 0.06;
+    float m = exp(-dist*dist/(radius*radius));
+
+    // Directional force from mouse velocity
+    result.xy += uMouseVel * m * uForce * 0.5;
+
+    // Radial push (subtle, adds to directional)
+    vec2 radial = normalize(d + 0.0001);
+    result.xy += radial * m * uForce * 0.15;
+
+    // Inject dye
+    result.w += m * uForce * 0.3;
+  }
+
+  // Initialization (first frames: seed with noise)
+  if(uInit > 0.5){
+    vec2 p = vUv * 6.0 - 3.0;
+    float n1 = sin(p.x*2.1+1.3)*cos(p.y*1.7+0.8)*0.5;
+    float n2 = cos(p.x*1.5-0.7)*sin(p.y*2.3+1.1)*0.5;
+    result = vec4(n1*0.3, n2*0.3, 0.0, 0.5);
+  }
+
+  fragColor = result;
+}`);
+const simU=gu(simProg,'uPrev','uTexel','uMouse','uMouseVel','uMouseActive','uCurl','uDiss','uForce','uTime','uInit');
+
+// ═══════════════════════════════════════════════════
+// PASS 2: Display shaders (read sim buffer → screen)
+// ═══════════════════════════════════════════════════
+const DISP_HEAD=`#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
+uniform sampler2D uSim;
+uniform vec3 uC1,uC2,uC3,uBg;
+uniform float uTime;
+uniform vec2 uRes;
+
+vec3 srgb2lin(vec3 c){return pow(max(c,0.),vec3(2.2));}
+vec3 lin2srgb(vec3 c){return pow(max(c,0.),vec3(1./2.2));}
+vec3 lin2ok(vec3 c){float l=.4122*c.r+.5363*c.g+.0514*c.b;float m=.2119*c.r+.6807*c.g+.1074*c.b;float s=.0883*c.r+.2220*c.g+.6897*c.b;float l_=pow(l,1./3.);float m_=pow(m,1./3.);float s_=pow(s,1./3.);return vec3(.2105*l_+.7936*m_-.0041*s_,1.978*l_-2.429*m_+.4506*s_,.0259*l_+.7828*m_-.8087*s_);}
+vec3 ok2lin(vec3 lab){float l_=lab.x+.3963*lab.y+.2158*lab.z;float m_=lab.x-.1056*lab.y-.0639*lab.z;float s_=lab.x-.0895*lab.y-1.291*lab.z;return vec3(4.077*l_*l_*l_-3.308*m_*m_*m_+.231*s_*s_*s_,-1.268*l_*l_*l_+2.610*m_*m_*m_-.341*s_*s_*s_,-.004*l_*l_*l_-.703*m_*m_*m_+1.708*s_*s_*s_);}
+vec3 okMix(vec3 a,vec3 b,float t){return lin2srgb(ok2lin(mix(lin2ok(srgb2lin(a)),lin2ok(srgb2lin(b)),t)));}
+vec3 okPal(float t,vec3 a,vec3 b,vec3 c){t=clamp(t,0.,1.);return t<.5?okMix(a,b,t*2.):okMix(b,c,(t-.5)*2.);}
+
+// Dithered sim UV — breaks up bilinear grid artifacts
+const float SIM_RES = 512.0;
+vec2 ditherUv(vec2 uv){
+  vec2 n=vec2(
+    fract(sin(dot(uv*uRes,vec2(12.9898,78.233)))*43758.5453),
+    fract(sin(dot(uv*uRes+.5,vec2(12.9898,78.233)))*43758.5453)
+  );
+  return uv+(n-0.5)/SIM_RES*0.5;
+}
+
+vec3 post(vec3 c,vec2 uv){
+  c=c/(1.+c)*.85+c*.15;
+  c=smoothstep(vec3(0.),vec3(1.),c);
+  float l=dot(c,vec3(.299,.587,.114));c=mix(vec3(l),c,1.2);
+  vec2 v=uv*2.-1.;c*=max(1.-dot(v,v)*.25,0.);
+  float g=fract(sin(dot(uv+uTime*.01,vec2(12.9898,78.233)))*43758.5453);
+  c+=(g-.5)*mix(.035,.012,l);
+  return clamp(c,0.,1.);
+}
+`;
+
+const DISPLAYS={
+'fluid-paint':{name:'Fluid Paint',desc:'Velocity → color',frag:DISP_HEAD+`
+void main(){
+  vec2 duv=ditherUv(vUv);
+  vec4 sim=texture(uSim,duv);
+  vec2 vel=sim.xy;
+  float mag=length(vel);
+  float ang=atan(vel.y,vel.x);
+  // Map velocity direction to brand palette
+  float t=ang*0.159+0.5; // -pi..pi → 0..1
+
+  // Chromatic aberration — offset per channel for premium look
+  float aberration=mag*0.003;
+  vec4 simR=texture(uSim,duv+vec2(aberration,0.));
+  vec4 simB=texture(uSim,duv-vec2(aberration,0.));
+  float angR=atan(simR.y,simR.x); float tR=angR*0.159+0.5;
+  float angB=atan(simB.y,simB.x); float tB=angB*0.159+0.5;
+  vec3 colorR=okPal(tR,uC1,uC2,uC3);
+  vec3 colorG=okPal(t,uC1,uC2,uC3);
+  vec3 colorB=okPal(tB,uC1,uC2,uC3);
+  vec3 color=vec3(colorR.r,colorG.g,colorB.b);
+
+  // Brightness from magnitude + dye
+  color*=0.3+mag*8.0+sim.w*1.5;
+  // Background blend
+  color=max(color,uBg*0.15);
+  color=post(color,vUv);
+  fragColor=vec4(color,1.);
+}`},
+
+'fluid-marble':{name:'Fluid Marble',desc:'Divergence patterns',frag:DISP_HEAD+`
+void main(){
+  vec2 duv=ditherUv(vUv);
+  vec4 sim=texture(uSim,duv);
+  float div=sim.z;
+  float mag=length(sim.xy);
+
+  // Chromatic aberration — offset per channel
+  float aberration=mag*0.003;
+  vec4 simR=texture(uSim,duv+vec2(aberration,0.));
+  vec4 simB=texture(uSim,duv-vec2(aberration,0.));
+
+  // Divergence creates veined marble patterns
+  float marble =sin(div*20.+mag*10.)*0.5+0.5;
+  float marbleR=sin(simR.z*20.+length(simR.xy)*10.)*0.5+0.5;
+  float marbleB=sin(simB.z*20.+length(simB.xy)*10.)*0.5+0.5;
+  vec3 colorR=okPal(marbleR,uC1,uC2,uC3);
+  vec3 colorG=okPal(marble,uC1,uC2,uC3);
+  vec3 colorB=okPal(marbleB,uC1,uC2,uC3);
+  vec3 color=vec3(colorR.r,colorG.g,colorB.b);
+
+  color*=0.4+mag*4.0+sim.w*1.0;
+  color=max(color,uBg*0.1);
+  color=post(color,vUv);
+  fragColor=vec4(color,1.);
+}`},
+
+'fluid-silk':{name:'Fluid Silk',desc:'Smooth flowing fabric',frag:DISP_HEAD+`
+void main(){
+  vec2 duv=ditherUv(vUv);
+  vec4 sim=texture(uSim,duv);
+  vec2 vel=sim.xy;
+  float mag=length(vel);
+
+  // Chromatic aberration
+  float aberration=mag*0.002;
+  vec4 simR=texture(uSim,duv+vec2(aberration,0.));
+  vec4 simB=texture(uSim,duv-vec2(aberration,0.));
+
+  // Silk: smooth gradient from velocity angle, soft brightness
+  float ang=atan(vel.y,vel.x);
+  float t=sin(ang*2.+sim.z*5.)*0.5+0.5;
+  float tR=sin(atan(simR.y,simR.x)*2.+simR.z*5.)*0.5+0.5;
+  float tB=sin(atan(simB.y,simB.x)*2.+simB.z*5.)*0.5+0.5;
+  vec3 colorR=okPal(tR,uC1,uC2,uC3);
+  vec3 colorG=okPal(t,uC1,uC2,uC3);
+  vec3 colorB=okPal(tB,uC1,uC2,uC3);
+  vec3 color=vec3(colorR.r,colorG.g,colorB.b);
+
+  // Very soft, fabric-like illumination
+  float light=0.35+mag*3.0+sim.w*0.8;
+  color*=light;
+  // Add subtle specular at velocity peaks
+  float spec=pow(mag*5.,3.)*0.15;
+  color+=uC3*spec;
+  color=max(color,uBg*0.12);
+  color=post(color,vUv);
+  fragColor=vec4(color,1.);
+}`},
+
+'warp-organic':{name:'Warp Organic',desc:'FBM + fluid distortion',frag:DISP_HEAD+`
+// Simple noise for domain warping
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*noise(p);p=mat2(.8,.6,-.6,.8)*p*2.;a*=.5;}return v;}
+
+void main(){
+  vec2 duv=ditherUv(vUv);
+  vec4 sim=texture(uSim,duv);
+  vec2 vel=sim.xy;
+  float t=uTime*0.08;
+  float mag=length(vel);
+
+  // Chromatic aberration
+  float aberration=mag*0.002;
+  vec4 simR=texture(uSim,duv+vec2(aberration,0.));
+  vec4 simB=texture(uSim,duv-vec2(aberration,0.));
+
+  // Fluid velocity warps the domain
+  vec2 uv2=vUv*3.;
+  uv2.x*=uRes.x/uRes.y;
+  uv2+=vel*15.; // Fluid distortion
+
+  // IQ-style domain warping: fbm(p + fbm(p + fbm(p)))
+  vec2 q=vec2(fbm(uv2+vec2(t*.3,t*.2)),fbm(uv2+vec2(t*.2,-t*.3)+5.2));
+  vec2 r=vec2(fbm(uv2+4.*q+vec2(t*.1,t*.15)+1.7),fbm(uv2+4.*q+vec2(-t*.12,t*.08)+8.3));
+  float f=fbm(uv2+4.*r);
+
+  // Map to brand palette
+  float n=f*0.5+0.5;
+  n=clamp(n+length(q)*0.3,0.,1.);
+  vec3 color=okPal(n,uC1,uC2,uC3);
+
+  // Lightweight chromatic aberration — shift palette index per channel
+  float nR=clamp(n+aberration*8.,0.,1.);
+  float nB=clamp(n-aberration*8.,0.,1.);
+  color.r=okPal(nR,uC1,uC2,uC3).r;
+  color.b=okPal(nB,uC1,uC2,uC3).b;
+
+  // Fluid dye adds brightness
+  color*=0.5+sim.w*1.5+mag*3.;
+  color=max(color,uBg*0.15);
+  color=post(color,vUv);
+  fragColor=vec4(color,1.);
+}`},
+
+'warp-subtle':{name:'Warp Subtle',desc:'Gentle, text-friendly',frag:DISP_HEAD+`
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*noise(p);p=mat2(.8,.6,-.6,.8)*p*2.;a*=.5;}return v;}
+
+void main(){
+  vec2 duv=ditherUv(vUv);
+  vec4 sim=texture(uSim,duv);
+  vec2 vel=sim.xy;
+  float t=uTime*0.05;
+
+  // Very gentle warping — designed for text readability
+  vec2 uv2=vUv*2.;
+  uv2.x*=uRes.x/uRes.y;
+  uv2+=vel*5.; // Subtle fluid
+
+  float f=fbm(uv2+vec2(t,t*0.7));
+  float n=f*0.3+0.5; // Narrow range — low contrast
+
+  // Soft brand gradient with subtle CA
+  float mag=length(vel);
+  float aberration=mag*0.001;
+  float nR=clamp(n+aberration*6.,0.,1.);
+  float nB=clamp(n-aberration*6.,0.,1.);
+  vec3 color;
+  color.r=okMix(uC1,uC2,nR).r;
+  color.g=okMix(uC1,uC2,n).g;
+  color.b=okMix(uC1,uC2,nB).b;
+  color=mix(color,uBg,0.4); // Blend toward bg for subtlety
+
+  // Minimal fluid influence
+  color+=uC3*mag*0.8*sim.w;
+
+  color=post(color,vUv);
+  fragColor=vec4(color,1.);
+}`},
+
+'metaballs':{name:'Metaballs',desc:'Interactive blobs',frag:DISP_HEAD+`
+uniform vec2 uMouse;
+
+void main(){
+  vec2 duv=ditherUv(vUv);
+  vec4 sim=texture(uSim,duv);
+  vec2 vel=sim.xy;
+  float t=uTime*0.3;
+  vec2 p=vUv;p.x*=uRes.x/uRes.y;
+
+  // 5 ambient blobs + 1 mouse blob
+  float pot=0.;
+  vec3 wCol=vec3(0.);float wt=0.;
+  vec3 cols[3];cols[0]=uC1;cols[1]=uC2;cols[2]=uC3;
+
+  // Ambient blobs
+  for(int i=0;i<5;i++){
+    float fi=float(i);
+    vec2 c=vec2(.5+sin(t*(.2+fi*.07)+fi*1.3)*.3,.5+cos(t*(.15+fi*.06)+fi*2.1)*.25);
+    c.x*=uRes.x/uRes.y;
+    // Fluid pushes blob centers
+    vec2 bfv=texture(uSim,clamp(vec2(c.x/(uRes.x/uRes.y),c.y),0.,1.)).xy;
+    c+=bfv*3.;
+    float r=.08+sin(fi*3.7)*.02;
+    float d=distance(p,c);
+    float ct=(r*r)/(d*d+.0005);
+    pot+=ct;
+    float cw=ct*ct;wt+=cw;
+    wCol+=cols[i-i/3*3]*cw;
+  }
+  // Mouse blob
+  vec2 mc=uMouse;mc.x*=uRes.x/uRes.y;
+  float md=distance(p,mc);
+  float mct=(.09*.09)/(md*md+.0005);
+  pot+=mct;float mcw=mct*mct;wt+=mcw;
+  wCol+=uC3*mcw;
+
+  float edge=smoothstep(.8,1.3,pot);
+  vec3 blobCol=wCol/(wt+.001);
+
+  // Iridescence from fluid velocity on blob surface
+  float vm=length(vel)*400.;
+  float iri=atan(vel.y,vel.x+.001)*.159+.5;
+  vec3 iriC=okPal(iri,uC1,uC3,uC2);
+  blobCol=mix(blobCol,iriC,vm*edge*.2);
+
+  vec3 bg=uBg*.12;
+  vec3 color=mix(bg,blobCol,edge);
+
+  // Glow at edges
+  float glow=smoothstep(1.3,.6,pot)*smoothstep(.3,.8,pot);
+  color+=blobCol*.3*glow;
+
+  color=post(color,vUv);
+  fragColor=vec4(color,1.);
+}`},
+};
+
+// Compile display programs
+let dispProgs={},dispU={};
+const dispNames=['uSim','uC1','uC2','uC3','uBg','uTime','uRes','uMouse'];
+Object.keys(DISPLAYS).forEach(id=>{
+  const p=mk(DISPLAYS[id].frag);
+  if(p){dispProgs[id]=p;dispU[id]=gu(p,...dispNames);}
+  else console.error('Failed:',id);
+});
+
+// ═══════════════════════════════════════════════════
+// MOUSE
+// ═══════════════════════════════════════════════════
+let mx=.5,my=.5,pmx=.5,pmy=.5,mvx=0,mvy=0,mActive=false;
+const prev=document.querySelector('.preview');
+prev.addEventListener('mousemove',e=>{
+  const r=prev.getBoundingClientRect();
+  pmx=mx;pmy=my;
+  mx=(e.clientX-r.left)/r.width;
+  my=1-(e.clientY-r.top)/r.height;
+  mvx=(mx-pmx)*3000;mvy=(my-pmy)*3000;
+  mActive=true;
+});
+prev.addEventListener('mouseleave',()=>{mActive=false;});
+prev.addEventListener('click',()=>{
+  // Burst: add strong radial force
+  mvx+=(Math.random()-.5)*5000;mvy+=(Math.random()-.5)*5000;
+});
+prev.addEventListener('touchmove',e=>{
+  e.preventDefault();const t=e.touches[0];const r=prev.getBoundingClientRect();
+  pmx=mx;pmy=my;mx=t.clientX/r.width;my=1-t.clientY/r.height;
+  mvx=(mx-pmx)*3000;mvy=(my-pmy)*3000;mActive=true;
+},{passive:false});
+
+// ═══════════════════════════════════════════════════
+// RENDER LOOP
+// ═══════════════════════════════════════════════════
+let currentDisp='fluid-paint';
+let initFrames=10;
+const t0=performance.now();
+let frames=0,lfps=performance.now();
+
+function resize(){const d=Math.min(devicePixelRatio,2);canvas.width=Math.floor(canvas.clientWidth*d);canvas.height=Math.floor(canvas.clientHeight*d);}
+resize();window.addEventListener('resize',resize);
+
+function loop(now){
+  requestAnimationFrame(loop);
+  frames++;if(now-lfps>500){document.getElementById('hud').textContent=Math.round(frames/((now-lfps)/1000))+' fps | '+SIM+'x'+SIM+' sim | 2 passes';frames=0;lfps=now;}
+
+  const t=(now-t0)/1000*animSpeed;
+
+  // Velocity decay
+  mvx*=0.92;mvy*=0.92;
+
+  // PASS 1: Simulation
+  gl.useProgram(simProg);bq(simProg);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,simA.tex);
+  gl.uniform1i(simU.uPrev,0);
+  gl.uniform2f(simU.uTexel,1/SIM,1/SIM);
+  gl.uniform2f(simU.uMouse,mx,my);
+  gl.uniform2f(simU.uMouseVel,mvx*.001,mvy*.001);
+  gl.uniform1f(simU.uMouseActive,mActive?1:0);
+  gl.uniform1f(simU.uCurl,curlStr);
+  gl.uniform1f(simU.uDiss,dissipation);
+  gl.uniform1f(simU.uForce,forceMult);
+  gl.uniform1f(simU.uTime,t);
+  gl.uniform1f(simU.uInit,initFrames>0?1:0);
+  if(initFrames>0)initFrames--;
+  blit(simB);swapSim();
+
+  // PASS 2: Display
+  const dp=dispProgs[currentDisp];
+  const du=dispU[currentDisp];
+  if(!dp)return;
+  gl.useProgram(dp);bq(dp);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,simA.tex);
+  gl.uniform1i(du.uSim,0);
+  const r1=h2r(colors.c1),r2=h2r(colors.c2),r3=h2r(colors.c3),rb=h2r(colors.bg);
+  gl.uniform3fv(du.uC1,r1);gl.uniform3fv(du.uC2,r2);gl.uniform3fv(du.uC3,r3);gl.uniform3fv(du.uBg,rb);
+  gl.uniform1f(du.uTime,t);
+  gl.uniform2f(du.uRes,canvas.width,canvas.height);
+  if(du.uMouse)gl.uniform2f(du.uMouse,mx,my);
+  blit(null);
+}
+requestAnimationFrame(loop);
+
+// ═══════════════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════════════
+const pg=document.getElementById('pg');
+Object.keys(DISPLAYS).forEach(id=>{
+  const b=document.createElement('button');
+  b.className='preset-btn'+(id===currentDisp?' active':'');
+  b.innerHTML=DISPLAYS[id].name+'<small>'+DISPLAYS[id].desc+'</small>';
+  b.dataset.id=id;
+  b.onclick=()=>{currentDisp=id;pg.querySelectorAll('.preset-btn').forEach(x=>x.classList.toggle('active',x.dataset.id===id));};
+  pg.appendChild(b);
+});
+
+document.getElementById('curl').oninput=e=>{curlStr=+e.target.value;document.getElementById('curlV').textContent=curlStr;};
+document.getElementById('diss').oninput=e=>{dissipation=+e.target.value;document.getElementById('dissV').textContent=dissipation.toFixed(3);};
+document.getElementById('force').oninput=e=>{forceMult=+e.target.value;document.getElementById('forceV').textContent=forceMult.toFixed(1);};
+document.getElementById('speed').oninput=e=>{animSpeed=+e.target.value;document.getElementById('speedV').textContent=animSpeed.toFixed(1);};
+
+function wc(pid,tid,k){const p=document.getElementById(pid),t2=document.getElementById(tid);p.oninput=()=>{colors[k]=p.value;t2.value=p.value;};t2.oninput=()=>{if(/^#[0-9a-fA-F]{6}$/.test(t2.value)){colors[k]=t2.value;p.value=t2.value;}};}
+wc('c1','c1t','c1');wc('c2','c2t','c2');wc('c3','c3t','c3');wc('cbg','cbgt','bg');
+
+const bg2=document.getElementById('brandGrid');
+Object.keys(PAL).forEach(n=>{const b=document.createElement('button');b.className='bb';b.innerHTML='<span class="bs" style="background:'+PAL[n].c1+'"></span>'+n;b.onclick=()=>{colors=Object.assign({},PAL[n]);['c1','c2','c3'].forEach(k=>{document.getElementById(k).value=colors[k];document.getElementById(k+'t').value=colors[k];});document.getElementById('cbg').value=colors.bg;document.getElementById('cbgt').value=colors.bg;};bg2.appendChild(b);});
+</script>
+</body>
+</html>

@@ -38,6 +38,9 @@ coverage/
 # Biome
 .biome-cache/
 
+# Seed image cache
+.cache/
+
 # IDE settings
 .vscode/
 

@@ -18,7 +18,8 @@
   @prop {object | null} progress - Playback progress data
   @prop {{ amount; currency } | null} price - Price info (null = hidden, 0 = Free)
   @prop {boolean} purchased - Whether user has purchased this content
-  @prop {'purchased' | 'subscription' | 'membership' | null} accessType - Access type badge
+  @prop {boolean} included - Whether user's subscription covers this content
+  @prop {'purchased' | 'subscription' | 'membership' | null} accessType - Access type badge (list variant)
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -60,7 +61,10 @@
       currency: string;
     } | null;
     purchased?: boolean;
+    included?: boolean;
     accessType?: 'purchased' | 'subscription' | 'membership' | null;
+    /** Content-level access strategy from DB (forwarded to PriceBadge) */
+    contentAccessType?: 'free' | 'paid' | 'subscribers' | 'members' | null;
   }
 
   const {
@@ -78,7 +82,9 @@
     progress = null,
     price = null,
     purchased = false,
+    included = false,
     accessType = null,
+    contentAccessType = null,
     class: className,
     ...rest
   }: Props = $props();
@@ -122,7 +128,7 @@
   const showPriceBadge = $derived(
     accessType == null &&
     variant !== 'compact' && variant !== 'resume' &&
-    (price != null || purchased)
+    (price != null || purchased || included || contentAccessType != null)
   );
   const showAccessBadge = $derived(accessBadgeLabel != null && variant !== 'compact' && variant !== 'resume');
   const showProgressStatus = $derived(hasProgress && accessType != null && variant !== 'compact' && variant !== 'resume');
@@ -146,10 +152,12 @@
       <Skeleton width="60%" height="1rem" />
     </div>
   {:else}
+    <!-- Full-card click overlay (invisible, not focusable) -->
     <a href={href} class="cc__link" tabindex="-1" aria-hidden="true">
       <span class="sr-only">{m.content_view({ title })}</span>
     </a>
 
+    <!-- Thumbnail -->
     <div class="cc__thumb">
       {#if thumbnail}
         <img
@@ -182,12 +190,14 @@
         </div>
       {/if}
 
+      <!-- Duration badge (bottom-right) -->
       {#if duration && variant !== 'resume'}
         <span class="cc__duration" aria-label="{m.content_duration()}: {formatDurationHuman(duration)}">
           {formatDurationHuman(duration)}
         </span>
       {/if}
 
+      <!-- Type icon (bottom-left) -->
       {#if variant !== 'compact' && variant !== 'resume'}
         <span class="cc__type-icon" aria-label={contentTypeLabel}>
           {#if contentType === 'video'}
@@ -200,15 +210,19 @@
         </span>
       {/if}
 
+      <!-- Price badge (top-right) -->
       {#if showPriceBadge}
         <PriceBadge
           amount={price?.amount ?? null}
           currency={price?.currency ?? 'GBP'}
           {purchased}
+          {included}
+          accessType={contentAccessType}
           class="cc__price-badge"
         />
       {/if}
 
+      <!-- Progress bar (bottom of thumbnail) -->
       {#if hasProgress}
         <div
           class="cc__progress-track"
@@ -227,6 +241,7 @@
       {/if}
     </div>
 
+    <!-- Body -->
     <div class="cc__body">
       <h3 class="cc__title" id={titleId}>
         <a href={href}>{title}</a>
@@ -334,6 +349,7 @@
     pointer-events: none;
   }
 
+  /* Full-card click overlay */
   .cc__link {
     position: absolute;
     inset: 0;
@@ -363,6 +379,7 @@
     transition: transform 500ms cubic-bezier(0.2, 0, 0, 1);
   }
 
+  /* Inner image zoom on card hover (creates depth, Netflix-style) */
   .cc:hover .cc__image {
     transform: scale(1.05);
   }
@@ -381,6 +398,7 @@
     background: var(--color-surface-secondary);
   }
 
+  /* Duration badge */
   .cc__duration {
     position: absolute;
     bottom: var(--space-2);
@@ -394,6 +412,7 @@
     line-height: var(--leading-tight);
   }
 
+  /* Type icon badge */
   .cc__type-icon {
     position: absolute;
     bottom: var(--space-2);
@@ -408,6 +427,7 @@
     line-height: 0;
   }
 
+  /* PriceBadge position */
   :global(.cc__price-badge) {
     position: absolute;
     top: var(--space-2);
@@ -495,6 +515,7 @@
     overflow: hidden;
   }
 
+  /* Metadata row */
   .cc__meta {
     margin: 0;
     display: flex;
@@ -509,6 +530,7 @@
     opacity: 0.5;
   }
 
+  /* Access badge (list variant) */
   .cc__access-badge {
     display: inline-flex;
     align-items: center;
@@ -538,6 +560,7 @@
     color: var(--color-warning-700);
   }
 
+  /* Progress status text (list variant) */
   .cc__progress-status {
     display: flex;
     align-items: center;
@@ -551,6 +574,7 @@
     color: var(--color-success);
   }
 
+  /* Resume info (resume variant) */
   .cc__resume-text {
     margin: 0;
     font-size: var(--text-xs);
@@ -579,6 +603,7 @@
     color: var(--color-text-inverse);
   }
 
+  /* Creator row */
   .cc__creator {
     display: flex;
     align-items: center;
@@ -616,7 +641,7 @@
   }
 
   /* ═══════════════════════════════════════════
-     VARIANT: LIST
+     VARIANT: LIST (replaces LibraryCard)
      ═══════════════════════════════════════════ */
 
   .cc[data-variant='list'] {
@@ -690,7 +715,7 @@
   }
 
   /* ═══════════════════════════════════════════
-     VARIANT: RESUME
+     VARIANT: RESUME (replaces ContinueWatchingCard)
      ═══════════════════════════════════════════ */
 
   .cc[data-variant='resume'] {

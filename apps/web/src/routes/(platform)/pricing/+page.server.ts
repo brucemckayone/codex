@@ -1,10 +1,12 @@
 /**
  * Pricing page - server load
- * Sets public cache headers for edge caching.
+ *
+ * Platform-level pricing is a static placeholder. Real pricing lives on
+ * each org's subdomain (/pricing). Redirect visitors to /discover.
  */
-import { CACHE_HEADERS } from '$lib/server/cache';
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ setHeaders }) => {
-  setHeaders(CACHE_HEADERS.STATIC_PUBLIC);
+export const load: PageServerLoad = async () => {
+  throw redirect(301, '/discover');
 };

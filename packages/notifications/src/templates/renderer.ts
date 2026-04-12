@@ -142,7 +142,8 @@ export function renderEmailTemplate(options: {
 }
 
 /**
- * Token registry - defines allowed tokens per template type
+ * Token registry - defines allowed tokens per template type.
+ * Token names MUST match the Zod schema field names in @codex/validation.
  */
 export const TEMPLATE_TOKENS: Record<string, string[]> = {
   // Brand tokens (available to all templates)
@@ -155,24 +156,143 @@ export const TEMPLATE_TOKENS: Record<string, string[]> = {
     'contactUrl',
   ],
 
-  // Template-specific tokens
+  // Unsubscribe tokens (injected for non-transactional templates)
+  _unsubscribe: ['unsubscribeUrl', 'preferencesUrl'],
+
+  // Auth
   'email-verification': ['userName', 'verificationUrl', 'expiryHours'],
   'password-reset': ['userName', 'resetUrl', 'expiryHours'],
   'password-changed': ['userName', 'supportUrl'],
+  welcome: ['userName', 'loginUrl', 'exploreUrl'],
+
+  // Commerce
   'purchase-receipt': [
     'userName',
     'contentTitle',
     'priceFormatted',
     'purchaseDate',
     'contentUrl',
+    'orgName',
   ],
+  'subscription-created': [
+    'userName',
+    'planName',
+    'priceFormatted',
+    'billingInterval',
+    'nextBillingDate',
+    'manageUrl',
+  ],
+  'subscription-renewed': [
+    'userName',
+    'planName',
+    'priceFormatted',
+    'billingDate',
+    'nextBillingDate',
+    'manageUrl',
+  ],
+  'payment-failed': [
+    'userName',
+    'planName',
+    'priceFormatted',
+    'retryDate',
+    'updatePaymentUrl',
+  ],
+  'subscription-cancelled': [
+    'userName',
+    'planName',
+    'accessEndDate',
+    'resubscribeUrl',
+  ],
+  'refund-processed': [
+    'userName',
+    'contentTitle',
+    'refundAmount',
+    'originalAmount',
+    'refundDate',
+  ],
+
+  // Organization
+  'org-member-invitation': [
+    'inviterName',
+    'orgName',
+    'roleName',
+    'acceptUrl',
+    'expiryDays',
+  ],
+  'member-role-changed': ['userName', 'orgName', 'oldRole', 'newRole'],
+  'member-removed': ['userName', 'orgName'],
+
+  // Media
+  'transcoding-complete': [
+    'userName',
+    'contentTitle',
+    'contentUrl',
+    'duration',
+  ],
+  'transcoding-failed': [
+    'userName',
+    'contentTitle',
+    'errorSummary',
+    'retryUrl',
+  ],
+
+  // Creator
+  'new-sale': [
+    'creatorName',
+    'contentTitle',
+    'saleAmount',
+    'buyerName',
+    'dashboardUrl',
+  ],
+  'connect-account-status': [
+    'creatorName',
+    'accountStatus',
+    'actionRequired',
+    'dashboardUrl',
+  ],
+
+  // Engagement
+  'new-content-published': [
+    'userName',
+    'contentTitle',
+    'creatorName',
+    'contentUrl',
+    'contentDescription',
+  ],
+  'weekly-digest': ['userName', 'newContentCount', 'topContent', 'platformUrl'],
 };
 
 /**
- * Get all allowed tokens for a template (brand + template-specific)
+ * Transactional templates never include unsubscribe links.
+ * Receipts, security notices, and account alerts must always be delivered.
+ */
+const TRANSACTIONAL_TEMPLATES = new Set([
+  'email-verification',
+  'password-reset',
+  'password-changed',
+  'purchase-receipt',
+  'subscription-created',
+  'subscription-renewed',
+  'subscription-cancelled',
+  'payment-failed',
+  'refund-processed',
+  'org-member-invitation',
+  'member-role-changed',
+  'member-removed',
+  'transcoding-complete',
+  'transcoding-failed',
+  'connect-account-status',
+]);
+
+/**
+ * Get all allowed tokens for a template.
+ * Returns: brand + template-specific + unsubscribe (for non-transactional only)
  */
 export function getAllowedTokens(templateName: string): string[] {
   const brandTokens = TEMPLATE_TOKENS._brand || [];
   const templateTokens = TEMPLATE_TOKENS[templateName] || [];
-  return [...brandTokens, ...templateTokens];
+  const unsubscribeTokens = TRANSACTIONAL_TEMPLATES.has(templateName)
+    ? []
+    : TEMPLATE_TOKENS._unsubscribe || [];
+  return [...brandTokens, ...unsubscribeTokens, ...templateTokens];
 }

@@ -56,6 +56,8 @@ export interface CompletePurchaseMetadata {
   amountPaidCents: number;
   /** Currency code (default: 'gbp') */
   currency?: string;
+  /** Application fee Stripe actually collected (from PaymentIntent), for reconciliation */
+  stripeApplicationFeeCents?: number | null;
 }
 
 /**

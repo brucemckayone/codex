@@ -1,11 +1,14 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 import {
+  CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   ENV_NAMES,
   MEDIA_STATUS,
   MEDIA_TYPES,
+  ORGANIZATION_ROLES,
   PURCHASE_STATUS,
+  SUBSCRIPTION_STATUS,
   VIDEO_PROGRESS,
 } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
@@ -88,8 +91,8 @@ interface UserLibraryItem {
     durationSeconds: number;
     organizationSlug: string | null;
   };
-  /** How the user has access: 'purchased' or 'membership' */
-  accessType: 'purchased' | 'membership';
+  /** How the user has access: 'purchased', 'membership', or 'subscription' */
+  accessType: 'purchased' | 'membership' | 'subscription';
   purchase: {
     purchasedAt: string;
     priceCents: number;
@@ -223,7 +226,95 @@ export class ContentAccessService extends BaseService {
             });
           }
 
-          // Members-only access: require active org membership, no purchase/subscription bypass
+          // ── Reusable helper: check active subscription access ──────
+          // Returns true if user has an active subscription to the org
+          // that meets the content's minimum tier requirement.
+          // When minimumTierId is null, any active subscription grants access.
+          const checkSubscriptionAccess = async (
+            orgId: string,
+            minimumTierId: string | null
+          ): Promise<boolean> => {
+            const userSub = await tx.query.subscriptions.findFirst({
+              where: and(
+                eq(subscriptions.userId, userId),
+                eq(subscriptions.organizationId, orgId),
+                inArray(subscriptions.status, [
+                  SUBSCRIPTION_STATUS.ACTIVE,
+                  SUBSCRIPTION_STATUS.CANCELLING,
+                ]),
+                gt(subscriptions.currentPeriodEnd, new Date())
+              ),
+              with: { tier: true },
+            });
+
+            if (!userSub) return false;
+
+            // No minimum tier set — any active subscription grants access
+            if (!minimumTierId) {
+              this.obs.info('Access granted via subscription (any tier)', {
+                userId,
+                contentId: input.contentId,
+                subscriptionTier: userSub.tier.name,
+              });
+              return true;
+            }
+
+            // Minimum tier set — compare sortOrder
+            const contentTier = await tx.query.subscriptionTiers.findFirst({
+              where: eq(subscriptionTiers.id, minimumTierId),
+            });
+
+            if (
+              contentTier &&
+              userSub.tier.sortOrder >= contentTier.sortOrder
+            ) {
+              this.obs.info('Access granted via subscription', {
+                userId,
+                contentId: input.contentId,
+                subscriptionTier: userSub.tier.name,
+                contentMinTier: contentTier.name,
+              });
+              return true;
+            }
+
+            return false;
+          };
+
+          // ── Reusable helper: check org membership ──────────────────
+          const checkOrgMembership = async (orgId: string) => {
+            return tx.query.organizationMemberships.findFirst({
+              where: and(
+                eq(organizationMemberships.organizationId, orgId),
+                eq(organizationMemberships.userId, userId),
+                eq(organizationMemberships.status, 'active')
+              ),
+            });
+          };
+
+          // ── Reusable helper: check management membership ────────────
+          // Only owner/admin/creator roles bypass payment requirements.
+          // Regular 'member' and 'subscriber' roles must purchase or
+          // subscribe to access paid/subscriber content.
+          const MANAGEMENT_ROLES: string[] = [
+            ORGANIZATION_ROLES.OWNER,
+            ORGANIZATION_ROLES.ADMIN,
+            ORGANIZATION_ROLES.CREATOR,
+          ];
+
+          const checkManagementMembership = async (orgId: string) => {
+            return tx.query.organizationMemberships.findFirst({
+              where: and(
+                eq(organizationMemberships.organizationId, orgId),
+                eq(organizationMemberships.userId, userId),
+                eq(organizationMemberships.status, 'active'),
+                inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+              ),
+            });
+          };
+
+          // ── Access decision: branch on accessType ──────────────────
+
+          // (a) Members-only: require active org membership, no purchase/subscription bypass
           if (contentRecord.accessType === 'members') {
             if (!contentRecord.organizationId) {
               throw new AccessDeniedError(userId, input.contentId, {
@@ -231,17 +322,8 @@ export class ContentAccessService extends BaseService {
               });
             }
 
-            const membership = await tx.query.organizationMemberships.findFirst(
-              {
-                where: and(
-                  eq(
-                    organizationMemberships.organizationId,
-                    contentRecord.organizationId
-                  ),
-                  eq(organizationMemberships.userId, userId),
-                  eq(organizationMemberships.status, 'active')
-                ),
-              }
+            const membership = await checkOrgMembership(
+              contentRecord.organizationId
             );
 
             if (!membership) {
@@ -268,7 +350,82 @@ export class ContentAccessService extends BaseService {
                 membershipRole: membership.role,
               }
             );
-          } // Check access - free content, purchase, or org membership
+          }
+          // (b) Subscribers-only: require active subscription (with optional tier check)
+          else if (contentRecord.accessType === 'subscribers') {
+            if (!contentRecord.organizationId) {
+              throw new AccessDeniedError(userId, input.contentId, {
+                reason: 'subscribers_only_requires_org',
+              });
+            }
+
+            let granted = false;
+
+            // Primary check: active subscription to the org
+            const hasSubAccess = await checkSubscriptionAccess(
+              contentRecord.organizationId,
+              contentRecord.minimumTierId
+            );
+
+            if (hasSubAccess) {
+              granted = true;
+            }
+
+            // Fallback: individual purchase (user may have bought it separately)
+            if (!granted) {
+              const hasPurchased = await this.purchaseService.verifyPurchase(
+                input.contentId,
+                userId
+              );
+              if (hasPurchased) {
+                this.obs.info(
+                  'Access granted via purchase (subscriber content)',
+                  {
+                    userId,
+                    contentId: input.contentId,
+                  }
+                );
+                granted = true;
+              }
+            }
+
+            // Fallback: management membership (owner/admin/creator only)
+            // Regular 'member' and 'subscriber' roles must subscribe or purchase
+            if (!granted) {
+              const membership = await checkManagementMembership(
+                contentRecord.organizationId
+              );
+              if (membership) {
+                this.obs.info(
+                  'Access granted via management membership (subscriber content)',
+                  {
+                    userId,
+                    contentId: input.contentId,
+                    organizationId: contentRecord.organizationId,
+                    membershipRole: membership.role,
+                  }
+                );
+                granted = true;
+              }
+            }
+
+            if (!granted) {
+              this.obs.warn('Access denied - subscriber-only content', {
+                userId,
+                contentId: input.contentId,
+                organizationId: contentRecord.organizationId,
+                minimumTierId: contentRecord.minimumTierId,
+                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                severity: LOG_SEVERITY.MEDIUM,
+                eventType: LOG_EVENTS.ACCESS_CONTROL,
+              });
+              throw new AccessDeniedError(userId, input.contentId, {
+                organizationId: contentRecord.organizationId,
+                reason: 'subscribers_only',
+              });
+            }
+          }
+          // (c) Paid content: check purchase, then subscription, then membership
           else if (contentRecord.priceCents && contentRecord.priceCents > 0) {
             // Paid content - check purchase via PurchaseService
             const hasPurchased = await this.purchaseService.verifyPurchase(
@@ -282,46 +439,16 @@ export class ContentAccessService extends BaseService {
                 contentId: input.contentId,
               });
             } else {
-              // No purchase — check subscription tier access
+              // No purchase — check subscription tier access ONLY if content
+              // is also subscriber-gated (has minimumTierId). Pure paid content
+              // (accessType='paid', no minimumTierId) requires a purchase.
               let hasSubscriptionAccess = false;
 
-              if (contentRecord.minimumTierId && contentRecord.organizationId) {
-                const userSub = await tx.query.subscriptions.findFirst({
-                  where: and(
-                    eq(subscriptions.userId, userId),
-                    eq(
-                      subscriptions.organizationId,
-                      contentRecord.organizationId
-                    ),
-                    inArray(subscriptions.status, ['active', 'cancelling']),
-                    gt(subscriptions.currentPeriodEnd, new Date())
-                  ),
-                  with: { tier: true },
-                });
-
-                if (userSub) {
-                  // Get the content's minimum tier for sort order comparison
-                  const contentTier =
-                    await tx.query.subscriptionTiers.findFirst({
-                      where: eq(
-                        subscriptionTiers.id,
-                        contentRecord.minimumTierId
-                      ),
-                    });
-
-                  if (
-                    contentTier &&
-                    userSub.tier.sortOrder >= contentTier.sortOrder
-                  ) {
-                    hasSubscriptionAccess = true;
-                    this.obs.info('Access granted via subscription', {
-                      userId,
-                      contentId: input.contentId,
-                      subscriptionTier: userSub.tier.name,
-                      contentMinTier: contentTier.name,
-                    });
-                  }
-                }
+              if (contentRecord.organizationId && contentRecord.minimumTierId) {
+                hasSubscriptionAccess = await checkSubscriptionAccess(
+                  contentRecord.organizationId,
+                  contentRecord.minimumTierId
+                );
               }
 
               if (!hasSubscriptionAccess) {
@@ -346,19 +473,14 @@ export class ContentAccessService extends BaseService {
                   });
                 }
 
-                // Check if user is active member of content's organization
+                // Check if user is a management member (owner/admin/creator)
+                // Regular 'member' and 'subscriber' roles must purchase or subscribe
                 const membership =
-                  await tx.query.organizationMemberships.findFirst({
-                    where: and(
-                      eq(organizationMemberships.organizationId, contentOrgId),
-                      eq(organizationMemberships.userId, userId),
-                      eq(organizationMemberships.status, 'active')
-                    ),
-                  });
+                  await checkManagementMembership(contentOrgId);
 
                 if (!membership) {
                   this.obs.warn(
-                    'Access denied - no purchase and not org member',
+                    'Access denied - no purchase and not management member',
                     {
                       userId,
                       contentId: input.contentId,
@@ -375,7 +497,7 @@ export class ContentAccessService extends BaseService {
                   });
                 }
 
-                this.obs.info('Access granted via organization membership', {
+                this.obs.info('Access granted via management membership', {
                   userId,
                   contentId: input.contentId,
                   organizationId: contentOrgId,
@@ -383,7 +505,9 @@ export class ContentAccessService extends BaseService {
                 });
               } // end if (!hasSubscriptionAccess)
             }
-          } else {
+          }
+          // (d) Free content: grant access
+          else {
             this.obs.info('Free content - access granted', {
               contentId: input.contentId,
             });
@@ -605,14 +729,48 @@ export class ContentAccessService extends BaseService {
       );
     }
 
+    const MANAGEMENT_ROLES: string[] = [
+      ORGANIZATION_ROLES.OWNER,
+      ORGANIZATION_ROLES.ADMIN,
+      ORGANIZATION_ROLES.CREATOR,
+    ];
+
     const activeMemberships =
-      input.accessType === 'purchased'
+      input.accessType === 'purchased' || input.accessType === 'subscription'
         ? []
         : await this.db.query.organizationMemberships.findMany({
             where: and(...membershipConditions),
-            columns: { organizationId: true },
+            columns: { organizationId: true, role: true },
           });
     const memberOrgIds = activeMemberships.map((m) => m.organizationId);
+
+    // Partition memberships: management roles see all org content,
+    // regular members only see free + members content
+    const managementOrgIds = activeMemberships
+      .filter((m) => MANAGEMENT_ROLES.includes(m.role))
+      .map((m) => m.organizationId);
+    const regularMemberOrgIds = activeMemberships
+      .filter((m) => !MANAGEMENT_ROLES.includes(m.role))
+      .map((m) => m.organizationId);
+
+    // ── Step 1b: Resolve active subscriptions with tier info ─────────
+    const activeSubscriptions =
+      input.accessType === 'purchased' || input.accessType === 'membership'
+        ? []
+        : await this.db.query.subscriptions.findMany({
+            where: and(
+              eq(subscriptions.userId, userId),
+              inArray(subscriptions.status, [
+                SUBSCRIPTION_STATUS.ACTIVE,
+                SUBSCRIPTION_STATUS.CANCELLING,
+              ]),
+              gt(subscriptions.currentPeriodEnd, new Date()),
+              ...(input.organizationId
+                ? [eq(subscriptions.organizationId, input.organizationId)]
+                : [])
+            ),
+            with: { tier: true },
+          });
 
     // ── Step 2: Build shared filter conditions ────────────────────────
     const buildContentFilters = () => {
@@ -681,7 +839,10 @@ export class ContentAccessService extends BaseService {
 
     // ── Step 3: Query purchased items ─────────────────────────────────
     const queryPurchased = async () => {
-      if (input.accessType === 'membership') {
+      if (
+        input.accessType === 'membership' ||
+        input.accessType === 'subscription'
+      ) {
         return { items: [] as UserLibraryItem[], count: 0 };
       }
 
@@ -779,12 +940,43 @@ export class ContentAccessService extends BaseService {
 
     // ── Step 4: Query membership items ────────────────────────────────
     const queryMembership = async () => {
-      if (input.accessType === 'purchased' || memberOrgIds.length === 0) {
+      if (
+        input.accessType === 'purchased' ||
+        input.accessType === 'subscription' ||
+        memberOrgIds.length === 0
+      ) {
         return { items: [] as UserLibraryItem[], count: 0 };
       }
 
+      // Build role-aware org membership filter:
+      // - Management roles (owner/admin/creator) see ALL content from their orgs
+      // - Regular members only see 'free' and 'members' content from their orgs
+      const membershipContentFilter = (() => {
+        const parts: ReturnType<typeof and>[] = [];
+
+        if (managementOrgIds.length > 0) {
+          // Management roles: all content from these orgs
+          parts.push(inArray(content.organizationId, managementOrgIds));
+        }
+
+        if (regularMemberOrgIds.length > 0) {
+          // Regular members: only free + members content
+          parts.push(
+            and(
+              inArray(content.organizationId, regularMemberOrgIds),
+              inArray(content.accessType, [
+                CONTENT_ACCESS_TYPE.FREE,
+                CONTENT_ACCESS_TYPE.MEMBERS,
+              ])
+            )
+          );
+        }
+
+        return parts.length === 1 ? parts[0]! : or(...parts)!;
+      })();
+
       const conditions = [
-        inArray(content.organizationId, memberOrgIds),
+        membershipContentFilter,
         eq(content.status, CONTENT_STATUS.PUBLISHED),
         isNull(content.deletedAt),
         // Exclude content the user already purchased
@@ -869,28 +1061,173 @@ export class ContentAccessService extends BaseService {
       return { items, count: countResult[0]?.count ?? 0 };
     };
 
-    // ── Step 5: Execute both queries in parallel ──────────────────────
-    const [purchaseResult, membershipResult] = await Promise.all([
-      queryPurchased(),
-      queryMembership(),
-    ]);
+    // ── Step 4b: Query subscription items ───────────────────────────
+    const querySubscription = async () => {
+      if (
+        input.accessType === 'purchased' ||
+        input.accessType === 'membership' ||
+        activeSubscriptions.length === 0
+      ) {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+
+      // Build a tier-aware filter: for each subscription, include content
+      // from that org where the user's tier sortOrder >= content's minimum tier
+      // sortOrder (or content has no minimum tier).
+      const subOrgIds = activeSubscriptions.map((s) => s.organizationId);
+
+      // Build per-subscription tier conditions using SQL:
+      // For each sub, content.organizationId = sub.orgId AND
+      //   (content.minimumTierId IS NULL
+      //    OR content.minimumTierId IN (tiers with sortOrder <= user's tier sortOrder))
+      //
+      // Since each subscription may be to a different org with a different tier,
+      // we build an OR of per-subscription conditions.
+      const subConditions = activeSubscriptions.map((sub) => {
+        const tierSortOrder = sub.tier.sortOrder;
+        return and(
+          eq(content.organizationId, sub.organizationId),
+          or(
+            isNull(content.minimumTierId),
+            // minimumTierId's sortOrder must be <= user's subscription tier sortOrder
+            sql`${content.minimumTierId} IN (
+              SELECT ${subscriptionTiers.id} FROM ${subscriptionTiers}
+              WHERE ${subscriptionTiers.sortOrder} <= ${tierSortOrder}
+                AND ${subscriptionTiers.organizationId} = ${sub.organizationId}
+                AND ${subscriptionTiers.deletedAt} IS NULL
+            )`
+          )
+        );
+      });
+
+      const conditions = [
+        // Content must be subscriber-gated and published
+        eq(content.accessType, CONTENT_ACCESS_TYPE.SUBSCRIBERS),
+        eq(content.status, CONTENT_STATUS.PUBLISHED),
+        isNull(content.deletedAt),
+        // Must belong to one of the user's subscribed orgs (with tier check)
+        or(...subConditions)!,
+        // Exclude content the user already purchased (prevents duplicates)
+        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`,
+        // Exclude content from management orgs (owner/admin/creator see all via membership query).
+        // Regular member/subscriber orgs are NOT excluded — their membership query only returns
+        // free + members content, so there's no overlap with subscribers content here.
+        ...(managementOrgIds.length > 0
+          ? [
+              sql`${content.organizationId} NOT IN (${sql.join(
+                managementOrgIds.map((id) => sql`${id}`),
+                sql`, `
+              )})`,
+            ]
+          : []),
+        ...contentFilters,
+        ...progressFilters,
+      ];
+
+      const sortClause =
+        input.sortBy === 'title'
+          ? content.title
+          : input.sortBy === 'duration'
+            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
+            : content.createdAt;
+
+      const baseFrom = this.db
+        .select({
+          contentId: content.id,
+          contentSlug: content.slug,
+          contentTitle: content.title,
+          contentDescription: content.description,
+          contentThumbnailUrl: content.thumbnailUrl,
+          contentType: content.contentType,
+          mediaThumbnailKey: mediaItems.thumbnailKey,
+          mediaDurationSeconds: mediaItems.durationSeconds,
+          orgSlug: organizations.slug,
+          contentCreatedAt: content.createdAt,
+          progressPositionSeconds: videoPlayback.positionSeconds,
+          progressDurationSeconds: videoPlayback.durationSeconds,
+          progressCompleted: videoPlayback.completed,
+          progressUpdatedAt: videoPlayback.updatedAt,
+        })
+        .from(content)
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(organizations, eq(organizations.id, content.organizationId))
+        .leftJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        );
+
+      const countQuery = this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(content)
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .where(and(...conditions));
+
+      const dataQuery = baseFrom
+        .where(and(...conditions))
+        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
+        .limit(input.limit)
+        .offset(offset);
+
+      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
+
+      const items: UserLibraryItem[] = rows.map((row) => ({
+        content: {
+          id: row.contentId,
+          slug: row.contentSlug,
+          title: row.contentTitle,
+          description: row.contentDescription || '',
+          thumbnailUrl:
+            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+          contentType: row.contentType ?? 'video',
+          durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationSlug: row.orgSlug ?? null,
+        },
+        accessType: 'subscription' as const,
+        purchase: null,
+        progress: mapProgress(row),
+      }));
+
+      return { items, count: countResult[0]?.count ?? 0 };
+    };
+
+    // ── Step 5: Execute all queries in parallel ──────────────────────
+    const [purchaseResult, membershipResult, subscriptionResult] =
+      await Promise.all([
+        queryPurchased(),
+        queryMembership(),
+        querySubscription(),
+      ]);
 
     // ── Step 6: Merge, sort, and paginate ─────────────────────────────
-    // When both sources contribute items, we need to merge-sort them.
-    // When only one source is active (accessType filter or no memberships),
-    // the DB already handled pagination — return directly.
-    const singleSource =
+    // Collect all sources that contributed items.
+    const sources = [purchaseResult, membershipResult, subscriptionResult];
+    const activeSources = sources.filter((s) => s.count > 0);
+
+    // When a specific accessType filter is applied or only one source has
+    // items, the DB already handled pagination — return directly.
+    const filteredAccessType =
       input.accessType === 'purchased' ||
       input.accessType === 'membership' ||
-      memberOrgIds.length === 0 ||
-      purchaseResult.count === 0 ||
-      membershipResult.count === 0;
+      input.accessType === 'subscription';
 
-    if (singleSource) {
-      const result =
-        purchaseResult.count > 0 || input.accessType === 'purchased'
+    if (filteredAccessType || activeSources.length <= 1) {
+      const result = filteredAccessType
+        ? input.accessType === 'purchased'
           ? purchaseResult
-          : membershipResult;
+          : input.accessType === 'membership'
+            ? membershipResult
+            : subscriptionResult
+        : (activeSources[0] ?? purchaseResult);
       return {
         items: result.items,
         pagination: {
@@ -902,10 +1239,10 @@ export class ContentAccessService extends BaseService {
       };
     }
 
-    // Both sources have items — merge sort (both fetched with LIMIT/OFFSET
-    // from their own source, so we re-fetch without offset for merge)
-    const totalCount = purchaseResult.count + membershipResult.count;
-    const allItems = [...purchaseResult.items, ...membershipResult.items];
+    // Multiple sources have items — merge sort (each fetched with LIMIT/OFFSET
+    // from their own source, so we merge and trim to page size)
+    const totalCount = sources.reduce((sum, s) => sum + s.count, 0);
+    const allItems = sources.flatMap((s) => s.items);
 
     if (input.sortBy === 'title') {
       allItems.sort((a, b) => a.content.title.localeCompare(b.content.title));

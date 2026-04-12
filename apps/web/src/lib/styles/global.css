@@ -26,6 +26,9 @@
 /* Base Element Styles (headings, forms, tables, code, lists, focus) */
 @import '../theme/base.css';
 
+/* View Transitions */
+@import './view-transitions.css';
+
 /* Utilities */
 @import './utilities.css';
 

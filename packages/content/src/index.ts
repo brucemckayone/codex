@@ -106,7 +106,6 @@ export type {
 export {
   BusinessLogicError,
   ConflictError,
-  ContentAlreadyPublishedError,
   ContentNotFoundError,
   ContentServiceError,
   ContentTypeMismatchError,

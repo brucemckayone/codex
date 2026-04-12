@@ -115,6 +115,10 @@
   let tierFormError = $state('');
   let tierFormLoading = $state(false);
 
+  // Delete dialog state
+  let deleteLoading = $state(false);
+  let deleteError = $state('');
+
   // Connect state
   let connectLoading = $state(false);
   let connectError = $state('');
@@ -177,6 +181,7 @@
 
   function openDeleteTier(tier: SubscriptionTier) {
     deletingTier = tier;
+    deleteError = '';
     deleteDialogOpen = true;
   }
 
@@ -213,13 +218,17 @@
 
   async function handleDeleteTier() {
     if (!deletingTier) return;
+    deleteLoading = true;
+    deleteError = '';
     try {
       await deleteTier({ orgId, tierId: deletingTier.id });
       deleteDialogOpen = false;
       deletingTier = null;
       await invalidateAll();
     } catch (error) {
-      tierFormError = error instanceof Error ? error.message : 'Failed to delete tier';
+      deleteError = error instanceof Error ? error.message : 'Failed to delete tier';
+    } finally {
+      deleteLoading = false;
     }
   }
 
@@ -563,14 +572,14 @@
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>
     </Dialog.Header>
     <p class="delete-confirm">{m.monetisation_tiers_delete_confirm()}</p>
-    {#if tierFormError}
-      <Alert variant="error">{tierFormError}</Alert>
+    {#if deleteError}
+      <Alert variant="error">{deleteError}</Alert>
     {/if}
     <Dialog.Footer>
-      <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }}>
+      <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }} disabled={deleteLoading}>
         {m.monetisation_cancel()}
       </Button>
-      <Button variant="destructive" onclick={handleDeleteTier}>
+      <Button variant="destructive" onclick={handleDeleteTier} loading={deleteLoading}>
         {m.monetisation_tiers_delete()}
       </Button>
     </Dialog.Footer>

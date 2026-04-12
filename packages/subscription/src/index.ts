@@ -62,5 +62,9 @@ export {
   calculateRevenueSplit,
   type RevenueSplit,
 } from './services/revenue-split';
+export type {
+  WebhookEmailPayload,
+  WebhookHandlerResult,
+} from './services/subscription-service';
 export { SubscriptionService } from './services/subscription-service';
 export { TierService } from './services/tier-service';

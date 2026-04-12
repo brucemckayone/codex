@@ -123,15 +123,6 @@ export interface SingleItemResponse<T> {
 // ============================================================================
 
 /**
- * @deprecated Organization DELETE now returns 204 No Content.
- * Kept temporarily for backward compatibility with any external consumers.
- */
-export interface DeleteOrganizationResponse {
-  success: true;
-  message: string;
-}
-
-/**
  * Response for GET /api/organizations/check-slug/:slug
  * Indicates whether a slug is available for new organizations
  * @example
@@ -204,6 +195,9 @@ export interface BrandingSettingsResponse {
   fontHeading: string | null;
   radiusValue: number;
   densityValue: number;
+  // Intro video
+  introVideoMediaItemId: string | null;
+  introVideoUrl: string | null;
   // Brand Editor fine-tune fields
   tokenOverrides: string | null;
   darkModeOverrides: string | null;
@@ -249,6 +243,24 @@ export interface AllSettingsResponse {
 }
 
 /**
+ * Public organization statistics for hero section display.
+ * Aggregated counts of published content, creators, and total duration.
+ * All counts exclude soft-deleted and unpublished items.
+ */
+export interface OrganizationPublicStatsResponse {
+  content: {
+    total: number;
+    video: number;
+    audio: number;
+    written: number;
+  };
+  totalDurationSeconds: number;
+  creators: number;
+  totalViews: number;
+  categories: string[];
+}
+
+/**
  * Public branding response shape (for unauthenticated endpoints)
  */
 export interface PublicBrandingResponse {
@@ -261,4 +273,5 @@ export interface PublicBrandingResponse {
   fontHeading: string | null;
   radiusValue: number;
   densityValue: number;
+  introVideoUrl: string | null;
 }

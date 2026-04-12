@@ -79,9 +79,15 @@ export async function loadSubscriptionContext(
   orgId: string,
   contentMinimumTierId: string | null,
   platform: App.Platform | undefined,
-  cookies: Cookies
+  cookies: Cookies,
+  contentAccessType?: string
 ): Promise<SubscriptionContext> {
-  if (!contentMinimumTierId) {
+  // Content requires a subscription if accessType is 'subscribers' OR if a minimum tier is set.
+  // When accessType is 'subscribers' with no minimumTierId, any active subscription grants access.
+  const isSubscriberContent =
+    contentAccessType === 'subscribers' || !!contentMinimumTierId;
+
+  if (!isSubscriberContent) {
     return {
       requiresSubscription: false,
       hasSubscription: false,
@@ -102,11 +108,16 @@ export async function loadSubscriptionContext(
   let subscriptionCoversContent = false;
 
   if (currentSubscription) {
-    // Find the content's minimum tier to compare sortOrder
-    const contentTier = tiers.find((t) => t.id === contentMinimumTierId);
-    if (contentTier) {
-      subscriptionCoversContent =
-        currentSubscription.tier.sortOrder >= contentTier.sortOrder;
+    if (!contentMinimumTierId) {
+      // No minimum tier set — any active subscription grants access
+      subscriptionCoversContent = true;
+    } else {
+      // Minimum tier set — compare sortOrder
+      const contentTier = tiers.find((t) => t.id === contentMinimumTierId);
+      if (contentTier) {
+        subscriptionCoversContent =
+          currentSubscription.tier.sortOrder >= contentTier.sortOrder;
+      }
     }
   }
 

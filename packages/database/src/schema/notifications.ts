@@ -30,6 +30,7 @@ export const emailSendStatusEnum = pgEnum('email_send_status', [
   'pending',
   'success',
   'failed',
+  'skipped',
 ]);
 
 /**

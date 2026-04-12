@@ -69,9 +69,11 @@ export const load: PageServerLoad = async ({
       org.id,
       content.minimumTierId ?? null,
       platform,
-      cookies
+      cookies,
+      content.accessType
     ).catch(() => ({
-      requiresSubscription: !!content.minimumTierId,
+      requiresSubscription:
+        content.accessType === 'subscribers' || !!content.minimumTierId,
       hasSubscription: false,
       subscriptionCoversContent: false,
       currentSubscription: null,
@@ -111,9 +113,11 @@ export const load: PageServerLoad = async ({
       org.id,
       content.minimumTierId ?? null,
       platform,
-      cookies
+      cookies,
+      content.accessType
     ).catch(() => ({
-      requiresSubscription: !!content.minimumTierId,
+      requiresSubscription:
+        content.accessType === 'subscribers' || !!content.minimumTierId,
       hasSubscription: false,
       subscriptionCoversContent: false,
       currentSubscription: null,

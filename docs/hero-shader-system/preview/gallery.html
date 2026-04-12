@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Shader Hero — Preset Gallery</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#e5e5e5;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;padding:40px 20px}
+.header{text-align:center;margin-bottom:48px}
+h1{font-size:28px;font-weight:700;color:#fff;letter-spacing:-0.02em}
+.subtitle{font-size:14px;color:#666;margin-top:8px;max-width:500px;margin-left:auto;margin-right:auto;line-height:1.5}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:24px;max-width:1200px;margin:0 auto}
+.card{border:1px solid #1e1e1e;border-radius:12px;overflow:hidden;background:#111;transition:all .2s}
+.card:hover{border-color:#333;transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.card a{text-decoration:none;color:inherit;display:block}
+.card-thumb{height:200px;position:relative;overflow:hidden}
+.card-thumb iframe{width:100%;height:100%;border:none;pointer-events:none}
+.card-thumb .overlay{position:absolute;inset:0;background:linear-gradient(transparent 60%,rgba(0,0,0,.8));pointer-events:none}
+.card-thumb .play{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:48px;height:48px;border-radius:50%;background:rgba(124,58,237,.9);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s}
+.card:hover .play{opacity:1}
+.play::after{content:'';width:0;height:0;border-left:16px solid white;border-top:10px solid transparent;border-bottom:10px solid transparent;margin-left:3px}
+.card-body{padding:16px}
+.card-title{font-size:16px;font-weight:600;color:#fff}
+.card-ref{font-size:11px;color:#555;margin-top:2px;font-family:monospace}
+.card-desc{font-size:13px;color:#888;margin-top:8px;line-height:1.5}
+.card-tags{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.tag{padding:3px 8px;border-radius:4px;font-size:10px;font-weight:500}
+.tag-pass{background:#1e1b4b;color:#a78bfa;border:1px solid #2e2563}
+.tag-type{background:#1b2e1b;color:#86efac;border:1px solid #1e3a1e}
+.tag-status{background:#2e1b1b;color:#fca5a5;border:1px solid #3a1e1e}
+.tag-ok{background:#1b2e1b;color:#86efac;border:1px solid #1e3a1e}
+.section-title{font-size:12px;font-weight:600;color:#444;text-transform:uppercase;letter-spacing:.1em;margin:32px 0 16px;max-width:1200px;margin-left:auto;margin-right:auto;padding-left:4px}
+.note{max-width:1200px;margin:40px auto 0;padding:16px;background:#111;border:1px solid #1e1e1e;border-radius:8px;font-size:12px;color:#666;line-height:1.6}
+.note strong{color:#888}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Shader Hero Presets</h1>
+  <p class="subtitle">Interactive shader backgrounds for org hero sections. Each preset is configurable with brand colors, mouse interaction, and animation controls.</p>
+</div>
+
+<div class="section-title">Working Presets</div>
+<div class="grid">
+
+  <div class="card">
+    <a href="preset-suture.html">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1e1b4b,#4c1d95,#7c3aed)">
+        <div class="overlay"></div>
+        <div class="play"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Suture Fluid</div>
+        <div class="card-ref">Based on XddSRX by cornusammonis</div>
+        <div class="card-desc">Reaction-diffusion-advection system. Organic viscous fingering patterns that respond to mouse movement. Self-sustaining — patterns emerge and evolve continuously.</div>
+        <div class="card-tags">
+          <span class="tag tag-pass">2-pass (ping-pong FBO)</span>
+          <span class="tag tag-type">Fluid sim</span>
+          <span class="tag tag-ok">Approved</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="preset-ether.html">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0f172a,#1e1b4b,#312e81)">
+        <div class="overlay"></div>
+        <div class="play"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Ether</div>
+        <div class="card-ref">Based on MsjSW3 by nimitz</div>
+        <div class="card-desc">Raymarched 3D volumetric glow. Ethereal organic forms floating in branded space. Mouse creates parallax perspective shift. Scroll to zoom.</div>
+        <div class="card-tags">
+          <span class="tag tag-pass">Single-pass</span>
+          <span class="tag tag-type">Raymarch</span>
+          <span class="tag tag-ok">Delivered</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="preset-warp.html">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1c1917,#78350f,#92400e)">
+        <div class="overlay"></div>
+        <div class="play"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Domain Warp</div>
+        <div class="card-ref">Technique from lsl3RH (domain warping)</div>
+        <div class="card-desc">Recursive FBM domain warping with bump-mapped lighting. Creates organic marble, cloud, and lava textures. Mouse magnifies warping near cursor.</div>
+        <div class="card-tags">
+          <span class="tag tag-pass">Single-pass</span>
+          <span class="tag tag-type">Procedural</span>
+          <span class="tag tag-status">Verify fix</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="preset-ripple.html">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0c4a6e,#0284c7,#0891b2)">
+        <div class="overlay"></div>
+        <div class="play"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Water Ripple</div>
+        <div class="card-ref">Inspired by Mt33DH</div>
+        <div class="card-desc">2D wave equation with persistent ripples. Mouse hover creates continuous soft ripples, click for splashes. Normal-mapped surface with refraction and caustics.</div>
+        <div class="card-tags">
+          <span class="tag tag-pass">2-pass (ping-pong FBO)</span>
+          <span class="tag tag-type">Wave sim</span>
+          <span class="tag tag-status">Building</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+</div>
+
+<div class="section-title">Earlier Prototypes (Superseded)</div>
+<div class="grid">
+
+  <div class="card" style="opacity:0.5">
+    <a href="fluid.html">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#09090b,#1e1b4b,#4c1d95)">
+        <div class="overlay"></div>
+        <div class="play"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Navier-Stokes Fluid</div>
+        <div class="card-ref">25-pass full NS solver</div>
+        <div class="card-desc">Full Navier-Stokes simulation. User approved the interaction quality but it was superseded by the 2-pass Suture approach which achieves similar results with less GPU cost.</div>
+        <div class="card-tags">
+          <span class="tag tag-pass">25-pass</span>
+          <span class="tag tag-type">Fluid sim</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="card" style="opacity:0.5">
+    <a href="v2.html">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a0a0a,#1a1a2e,#2a1a3e)">
+        <div class="overlay"></div>
+        <div class="play"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">V2 RDA Engine</div>
+        <div class="card-ref">2-pass RDA + 6 display modes</div>
+        <div class="card-desc">First attempt at the 2-pass architecture with multiple display modes. "Too intense" — led to the individual preset approach with better intensity control.</div>
+        <div class="card-tags">
+          <span class="tag tag-pass">2-pass</span>
+          <span class="tag tag-type">Multi-mode</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+</div>
+
+<div class="section-title">Planned</div>
+<div class="grid">
+
+  <div class="card" style="opacity:0.35">
+    <div class="card-thumb" style="background:#111"></div>
+    <div class="card-body">
+      <div class="card-title">Geometry Object</div>
+      <div class="card-ref">Inspired by WdB3Dw</div>
+      <div class="card-desc">Raymarched geometric forms — rotating polyhedra or abstract sculpture rendered via signed distance fields.</div>
+      <div class="card-tags"><span class="tag tag-status">Planned</span></div>
+    </div>
+  </div>
+
+  <div class="card" style="opacity:0.35">
+    <div class="card-thumb" style="background:#111"></div>
+    <div class="card-body">
+      <div class="card-title">Fluid Overlay</div>
+      <div class="card-ref">Inspired by WdVXWy</div>
+      <div class="card-desc">Very subtle fluid effect designed to overlay content at low opacity. Designed for maximum text readability.</div>
+      <div class="card-tags"><span class="tag tag-status">Planned</span></div>
+    </div>
+  </div>
+
+  <div class="card" style="opacity:0.35">
+    <div class="card-thumb" style="background:#111"></div>
+    <div class="card-body">
+      <div class="card-title">Logo SDF</div>
+      <div class="card-ref">Inspired by ssjyWc</div>
+      <div class="card-desc">Org logo rendered as a signed distance field with fluid/growth effects. The logo shape becomes a living, breathing element. Requires SVG→SDF pipeline.</div>
+      <div class="card-tags"><span class="tag tag-status">Future</span></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+  <strong>Architecture note:</strong> Each preset is a standalone HTML file with WebGL2. "Single-pass" presets run one fragment shader per frame (cheapest). "2-pass" presets use ping-pong framebuffers for persistent state (fluid sim, wave sim). All presets support brand color injection, mouse interaction, and configurable parameters. For production, these will be ported to Svelte components reading brand colors from the existing <code>tokenOverrides</code> system.
+</div>
+
+</body>
+</html>

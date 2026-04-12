@@ -1,9 +1,103 @@
 /**
  * Embedded placeholder media files for R2 seeding.
  *
- * Uses SVG for thumbnails/avatars/logos (renders at any size, no deps).
- * Keeps minimal JPEG/WebP for format-specific slots (HLS thumbnails, etc.).
+ * Content thumbnails: real photographs fetched from picsum.photos (cached locally).
+ * Avatars/logos: SVG generators (realistic for these use cases).
+ * HLS/waveform: minimal format-specific placeholders.
  */
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+const PROJECT_ROOT = path.resolve(import.meta.dirname, '../../../../');
+const CACHE_DIR = path.join(PROJECT_ROOT, '.cache/seed-images');
+
+/**
+ * Fetch a real photograph from picsum.photos with local file caching.
+ * Uses a deterministic seed so re-running always produces the same image.
+ * Cached in .cache/seed-images/ to avoid re-downloading.
+ */
+export async function fetchRealImage(
+  seed: string,
+  width: number,
+  height: number
+): Promise<Buffer> {
+  const cacheKey = `${seed}-${width}x${height}.jpg`;
+  const cachePath = path.join(CACHE_DIR, cacheKey);
+
+  if (fs.existsSync(cachePath)) {
+    return fs.readFileSync(cachePath);
+  }
+
+  const url = `https://picsum.photos/seed/${seed}/${width}/${height}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${url} (${response.status})`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+  fs.writeFileSync(cachePath, buffer);
+  return buffer;
+}
+
+/**
+ * Portrait image URLs from randomuser.me (adults only, deterministic by index).
+ * Each seed user gets a fixed portrait number to ensure consistency across re-runs.
+ */
+const PORTRAIT_URLS: Record<string, string> = {
+  alexcreator: 'https://randomuser.me/api/portraits/men/32.jpg',
+  samviewer: 'https://randomuser.me/api/portraits/women/44.jpg',
+  jordanadmin: 'https://randomuser.me/api/portraits/men/75.jpg',
+  freshuser: 'https://randomuser.me/api/portraits/women/68.jpg',
+  rileynewcreator: 'https://randomuser.me/api/portraits/men/85.jpg',
+  mariasantos: 'https://randomuser.me/api/portraits/women/90.jpg',
+  jameschen: 'https://randomuser.me/api/portraits/men/22.jpg',
+  priyapatel: 'https://randomuser.me/api/portraits/women/55.jpg',
+  lucaswalker: 'https://randomuser.me/api/portraits/men/41.jpg',
+  emmawilson: 'https://randomuser.me/api/portraits/women/17.jpg',
+};
+
+/**
+ * Fetch an adult portrait photo from randomuser.me with local file caching.
+ * Uses a deterministic mapping so re-running always produces the same face.
+ * Cached in .cache/seed-images/ to avoid re-downloading.
+ */
+export async function fetchPortraitImage(
+  seed: string,
+  _size: number
+): Promise<Buffer> {
+  const cacheKey = `portrait-${seed}.jpg`;
+  const cachePath = path.join(CACHE_DIR, cacheKey);
+
+  if (fs.existsSync(cachePath)) {
+    return fs.readFileSync(cachePath);
+  }
+
+  // Use mapped URL or fall back to a deterministic index
+  const url =
+    PORTRAIT_URLS[seed] ??
+    `https://randomuser.me/api/portraits/men/${Math.abs(hashCode(seed)) % 99}.jpg`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch portrait: ${url} (${response.status})`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+  fs.writeFileSync(cachePath, buffer);
+  return buffer;
+}
+
+/** Simple string hash for deterministic fallback index */
+function hashCode(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
 
 // ── SVG Placeholder Generators ───────────────────────────────────────────
 

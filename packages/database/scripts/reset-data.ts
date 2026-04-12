@@ -48,6 +48,11 @@ const TABLES_TO_TRUNCATE = [
   'feature_settings',
   // Storage
   'orphaned_image_files',
+  // Subscriptions & Connect (child → parent FK order)
+  'pending_payouts',
+  'subscriptions',
+  'subscription_tiers',
+  'stripe_connect_accounts',
 ];
 
 async function confirm(message: string): Promise<boolean> {

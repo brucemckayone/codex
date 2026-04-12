@@ -211,11 +211,16 @@ export class PurchaseService extends BaseService {
         )
         .limit(1);
 
-      // Calculate application fee (platform's cut) for destination charges
+      // Calculate application fee (platform's cut) for destination charges.
+      // Uses calculateRevenueSplit() — the single source of truth shared with
+      // completePurchase() — so the Stripe-collected fee can never diverge
+      // from the DB-recorded platform fee.
       const applicationFeeCents = creatorConnect?.chargesEnabled
-        ? Math.ceil(
-            (contentRecord.priceCents * DEFAULT_PLATFORM_FEE_PERCENTAGE) / 10000
-          )
+        ? calculateRevenueSplit(
+            contentRecord.priceCents,
+            DEFAULT_PLATFORM_FEE_PERCENTAGE,
+            DEFAULT_ORG_FEE_PERCENTAGE
+          ).platformFeeCents
         : undefined;
 
       if (!creatorConnect?.chargesEnabled) {
@@ -273,6 +278,7 @@ export class PurchaseService extends BaseService {
           customerId,
           organizationId: contentRecord.organizationId, // Must exist (validated above)
           creatorId: contentRecord.creatorId,
+          contentTitle: contentRecord.title,
         },
         client_reference_id: customerId,
       });
@@ -370,6 +376,25 @@ export class PurchaseService extends BaseService {
           orgFeePercentage
         );
 
+        // Step 3a: Reconcile Stripe-collected fee against calculated split.
+        // If the application fee Stripe actually charged differs from what
+        // calculateRevenueSplit() produces, something drifted — log but don't throw.
+        if (
+          metadata.stripeApplicationFeeCents != null &&
+          metadata.stripeApplicationFeeCents !== revenueSplit.platformFeeCents
+        ) {
+          this.obs.warn(
+            'Platform fee mismatch: Stripe-collected application fee differs from calculated split',
+            {
+              stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
+              calculatedPlatformFeeCents: revenueSplit.platformFeeCents,
+              amountPaidCents: metadata.amountPaidCents,
+              stripePaymentIntentId,
+              contentId: metadata.contentId,
+            }
+          );
+        }
+
         // Step 3.5: Fetch organizationId from content if not in metadata
         let organizationId = metadata.organizationId;
         if (!organizationId) {
@@ -429,14 +454,24 @@ export class PurchaseService extends BaseService {
           });
         }
 
-        // Step 5: Grant content access atomically
-        await tx.insert(contentAccess).values({
-          userId: metadata.customerId,
-          contentId: metadata.contentId,
-          organizationId: organizationId, // Use same fetched value
-          accessType: ACCESS_TYPES.PURCHASED,
-          expiresAt: null, // Permanent access for purchases
-        });
+        // Step 5: Grant content access atomically (upsert handles re-purchase after refund)
+        await tx
+          .insert(contentAccess)
+          .values({
+            userId: metadata.customerId,
+            contentId: metadata.contentId,
+            organizationId: organizationId, // Use same fetched value
+            accessType: ACCESS_TYPES.PURCHASED,
+            expiresAt: null, // Permanent access for purchases
+          })
+          .onConflictDoUpdate({
+            target: [contentAccess.userId, contentAccess.contentId],
+            set: {
+              deletedAt: null, // Un-delete the soft-deleted row
+              accessType: ACCESS_TYPES.PURCHASED,
+              updatedAt: new Date(),
+            },
+          });
 
         return purchase;
       });
@@ -666,7 +701,14 @@ export class PurchaseService extends BaseService {
    *
    * Idempotent: If purchase is already refunded, this is a no-op.
    */
-  async processRefund(paymentIntentId: string): Promise<void> {
+  async processRefund(
+    paymentIntentId: string,
+    refundDetails?: {
+      stripeRefundId?: string;
+      refundAmountCents?: number;
+      refundReason?: string;
+    }
+  ): Promise<void> {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),
@@ -686,23 +728,33 @@ export class PurchaseService extends BaseService {
         return;
       }
 
-      // Update purchase status
-      await this.db
-        .update(purchases)
-        .set({ status: PURCHASE_STATUS.REFUNDED, updatedAt: new Date() })
-        .where(eq(purchases.id, purchase.id));
+      // Atomically update purchase status AND revoke content access
+      await this.db.transaction(async (tx) => {
+        // Update purchase status to refunded with tracking fields
+        await tx
+          .update(purchases)
+          .set({
+            status: PURCHASE_STATUS.REFUNDED,
+            updatedAt: new Date(),
+            refundedAt: new Date(),
+            refundAmountCents: refundDetails?.refundAmountCents ?? null,
+            stripeRefundId: refundDetails?.stripeRefundId ?? null,
+            refundReason: refundDetails?.refundReason ?? null,
+          })
+          .where(eq(purchases.id, purchase.id));
 
-      // Revoke content access (soft delete)
-      await this.db
-        .update(contentAccess)
-        .set({ deletedAt: new Date() })
-        .where(
-          and(
-            eq(contentAccess.userId, purchase.customerId),
-            eq(contentAccess.contentId, purchase.contentId),
-            isNull(contentAccess.deletedAt)
-          )
-        );
+        // Revoke content access (soft delete)
+        await tx
+          .update(contentAccess)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              eq(contentAccess.userId, purchase.customerId),
+              eq(contentAccess.contentId, purchase.contentId),
+              isNull(contentAccess.deletedAt)
+            )
+          );
+      });
 
       this.obs.info('Refund processed', {
         purchaseId: purchase.id,

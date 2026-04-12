@@ -133,6 +133,9 @@ describe('Content Access Validation Schemas', () => {
         limit: 20,
         filter: 'all',
         sortBy: 'recent',
+        contentType: 'all',
+        accessType: 'all',
+        search: '',
       });
     });
 
@@ -140,8 +143,11 @@ describe('Content Access Validation Schemas', () => {
       const input = {
         page: 2,
         limit: 50,
-        filter: 'in-progress',
+        filter: 'in_progress',
         sortBy: 'title',
+        contentType: 'video',
+        accessType: 'purchased',
+        search: 'test',
       };
       const result = listUserLibrarySchema.parse(input);
       expect(result).toEqual(input);

@@ -137,6 +137,30 @@ export class PlatformSettingsFacade {
     return this.branding.deleteLogo();
   }
 
+  /**
+   * Link a media item as the org's intro video
+   */
+  async linkIntroVideo(
+    mediaItemId: string,
+    creatorId: string
+  ): Promise<BrandingSettingsResponse> {
+    return this.branding.linkIntroVideo(mediaItemId, creatorId);
+  }
+
+  /**
+   * Get intro video transcoding status
+   */
+  async getIntroVideoStatus() {
+    return this.branding.getIntroVideoStatus();
+  }
+
+  /**
+   * Delete the intro video
+   */
+  async deleteIntroVideo(): Promise<BrandingSettingsResponse> {
+    return this.branding.deleteIntroVideo();
+  }
+
   // ============================================================================
   // Contact Settings (delegated)
   // ============================================================================

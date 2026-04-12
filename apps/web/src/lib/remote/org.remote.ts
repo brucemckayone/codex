@@ -137,6 +137,25 @@ export const getPublicCreators = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Public Stats (Unauthenticated)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get public aggregate statistics for an organization.
+ * Returns content counts by type, total duration, creator count, and views.
+ * Used by hero section for social proof and content type pills.
+ */
+export const getPublicStats = query(z.string().min(1), async (slug) => {
+  const { platform, cookies } = getRequestEvent();
+  try {
+    const api = createServerApi(platform, cookies);
+    return await api.org.getPublicStats(slug);
+  } catch {
+    return null;
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Organization Settings (Authenticated Admin)
 // ─────────────────────────────────────────────────────────────────────────────
 

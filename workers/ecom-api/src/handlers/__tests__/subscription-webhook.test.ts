@@ -60,6 +60,7 @@ describe('handleSubscriptionWebhook', () => {
   let mockHandleUpdated: ReturnType<typeof vi.fn>;
   let mockHandleDeleted: ReturnType<typeof vi.fn>;
   let mockHandleInvoiceSuccess: ReturnType<typeof vi.fn>;
+  let mockHandleInvoiceFailed: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -68,16 +69,15 @@ describe('handleSubscriptionWebhook', () => {
     mockHandleUpdated = vi.fn().mockResolvedValue(undefined);
     mockHandleDeleted = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
+    mockHandleInvoiceFailed = vi.fn().mockResolvedValue(undefined);
     mockCleanup = vi.fn();
     mockDb = { mock: 'database' };
 
-    const mockSubRetrieve = vi
-      .fn()
-      .mockResolvedValue(
-        createMockStripeSubscription({
-          metadata: { userId: 'user_1', orgId: 'org_1', tierId: 'tier_1' },
-        })
-      );
+    const mockSubRetrieve = vi.fn().mockResolvedValue(
+      createMockStripeSubscription({
+        metadata: { userId: 'user_1', orgId: 'org_1', tierId: 'tier_1' },
+      })
+    );
     mockStripe = {
       subscriptions: { retrieve: mockSubRetrieve },
     } as unknown as Stripe;
@@ -94,6 +94,7 @@ describe('handleSubscriptionWebhook', () => {
       handleSubscriptionUpdated: mockHandleUpdated,
       handleSubscriptionDeleted: mockHandleDeleted,
       handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
+      handleInvoicePaymentFailed: mockHandleInvoiceFailed,
     }));
   });
 
@@ -128,7 +129,10 @@ describe('handleSubscriptionWebhook', () => {
       expect(mockStripe.subscriptions.retrieve).toHaveBeenCalledWith(
         'sub_new_123'
       );
-      expect(mockHandleCreated).toHaveBeenCalled();
+      expect(mockHandleCreated).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String)
+      );
       expect(mock._obs.info).toHaveBeenCalledWith(
         'Subscription created from checkout',
         expect.objectContaining({ subscriptionId: 'sub_new_123' })
@@ -207,7 +211,7 @@ describe('handleSubscriptionWebhook', () => {
   // ─── customer.subscription.deleted ──────────────────────────────────────────
 
   describe('customer.subscription.deleted', () => {
-    it('should call handleSubscriptionDeleted with subscription object', async () => {
+    it('should call handleSubscriptionDeleted with subscription object and webAppUrl', async () => {
       const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_DELETED, {
         id: 'sub_del_321',
         status: 'canceled',
@@ -217,7 +221,8 @@ describe('handleSubscriptionWebhook', () => {
       await handleSubscriptionWebhook(event, mockStripe, context);
 
       expect(mockHandleDeleted).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'sub_del_321' })
+        expect.objectContaining({ id: 'sub_del_321' }),
+        expect.any(String)
       );
       expect(mock._obs.info).toHaveBeenCalledWith(
         'Subscription deleted',
@@ -229,7 +234,7 @@ describe('handleSubscriptionWebhook', () => {
   // ─── invoice.payment_succeeded ──────────────────────────────────────────────
 
   describe('invoice.payment_succeeded', () => {
-    it('should call handleInvoicePaymentSucceeded with invoice object', async () => {
+    it('should call handleInvoicePaymentSucceeded with invoice object and webAppUrl', async () => {
       const event = createEvent(STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED, {
         id: 'in_success_001',
         amount_paid: 999,
@@ -239,7 +244,8 @@ describe('handleSubscriptionWebhook', () => {
       await handleSubscriptionWebhook(event, mockStripe, context);
 
       expect(mockHandleInvoiceSuccess).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'in_success_001' })
+        expect.objectContaining({ id: 'in_success_001' }),
+        expect.any(String)
       );
       expect(mock._obs.info).toHaveBeenCalledWith(
         'Invoice payment succeeded',
@@ -251,7 +257,7 @@ describe('handleSubscriptionWebhook', () => {
   // ─── invoice.payment_failed ─────────────────────────────────────────────────
 
   describe('invoice.payment_failed', () => {
-    it('should log warning but not call any service method', async () => {
+    it('should log warning and call handleInvoicePaymentFailed', async () => {
       const event = createEvent(STRIPE_EVENTS.INVOICE_PAYMENT_FAILED, {
         id: 'in_fail_002',
         amount_due: 999,
@@ -267,6 +273,11 @@ describe('handleSubscriptionWebhook', () => {
           amountDue: 999,
         })
       );
+      expect(mockHandleInvoiceFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'in_fail_002' }),
+        expect.any(String)
+      );
+      // Other service methods should not be called
       expect(mockHandleCreated).not.toHaveBeenCalled();
       expect(mockHandleUpdated).not.toHaveBeenCalled();
       expect(mockHandleDeleted).not.toHaveBeenCalled();

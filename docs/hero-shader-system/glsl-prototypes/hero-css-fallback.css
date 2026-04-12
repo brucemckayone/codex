@@ -1,0 +1,213 @@
+/**
+ * hero-css-fallback.css — CSS-Only Animated Fallback for Hero Section
+ *
+ * PROTOTYPE — docs only. In production, merge into org-brand.css or
+ * add as a scoped <style> block in ShaderHero.svelte.
+ *
+ * Three-tier fallback:
+ *   Tier 1: CSS @property gradient animation (Chrome, Edge, Safari — ~90%)
+ *   Tier 2: mix-blend-mode animated blobs (all browsers — ~95%, including Firefox)
+ *   Tier 3: Static gradient (100% — current behavior, zero regression)
+ *
+ * ShaderHero.svelte detects support and applies the appropriate class:
+ *   .hero--css-property  → Tier 1 (smoothly animated gradient)
+ *   .hero--css-blend     → Tier 2 (animated blobs with blend modes)
+ *   .hero--static        → Tier 3 (or no class at all — default)
+ *
+ * Detection logic in JS:
+ *   if (CSS.registerProperty) → Tier 1
+ *   else → Tier 2 (mix-blend-mode is universally supported)
+ *
+ * All CSS uses design tokens. No hardcoded values.
+ */
+
+/* ═══════════════════════════════════════════════════════════════════
+ * TIER 1: CSS @property Gradient Animation
+ * Browser: Chrome 85+, Edge 85+, Safari 15.4+ (NOT Firefox as of 2026-04)
+ * ═══════════════════════════════════════════════════════════════════ */
+
+@property --hero-angle {
+  syntax: '<angle>';
+  initial-value: 135deg;
+  inherits: false;
+}
+
+@property --hero-stop-1 {
+  syntax: '<percentage>';
+  initial-value: 0%;
+  inherits: false;
+}
+
+@property --hero-stop-2 {
+  syntax: '<percentage>';
+  initial-value: 50%;
+  inherits: false;
+}
+
+.hero--css-property {
+  background: linear-gradient(
+    var(--hero-angle),
+    var(--color-brand-primary) var(--hero-stop-1),
+    var(--color-brand-secondary) var(--hero-stop-2),
+    var(--color-brand-accent, var(--color-brand-secondary)) 100%
+  );
+  animation: hero-gradient-shift 12s ease-in-out infinite alternate;
+}
+
+@keyframes hero-gradient-shift {
+  0% {
+    --hero-angle: 135deg;
+    --hero-stop-1: 0%;
+    --hero-stop-2: 50%;
+  }
+  25% {
+    --hero-angle: 180deg;
+    --hero-stop-1: 10%;
+    --hero-stop-2: 60%;
+  }
+  50% {
+    --hero-angle: 225deg;
+    --hero-stop-1: 5%;
+    --hero-stop-2: 45%;
+  }
+  75% {
+    --hero-angle: 300deg;
+    --hero-stop-1: 15%;
+    --hero-stop-2: 55%;
+  }
+  100% {
+    --hero-angle: 45deg;
+    --hero-stop-1: 0%;
+    --hero-stop-2: 50%;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * TIER 2: mix-blend-mode Animated Blobs
+ * Browser: ALL (Firefox, Safari, Chrome, Edge — ~95%)
+ * Visual quality: ~60-70% of WebGL. Smooth, organic, uses brand colors.
+ *
+ * Technique: 3 overlapping radial gradient divs with different blend
+ * modes and CSS animation. Creates a soft, slowly-moving color field.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.hero--css-blend {
+  /* Base gradient (same as static fallback) */
+  background: linear-gradient(
+    135deg,
+    var(--color-brand-primary),
+    var(--color-brand-secondary)
+  );
+  position: relative;
+  overflow: hidden;
+}
+
+/* Blob layer 1: Primary color, large, slow */
+.hero--css-blend::before {
+  content: '';
+  position: absolute;
+  /* Oversized to allow movement without showing edges */
+  width: 150%;
+  height: 150%;
+  top: -25%;
+  left: -25%;
+  border-radius: 40% 60% 55% 45% / 55% 40% 60% 45%;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    var(--color-brand-primary),
+    transparent 65%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.5;
+  animation: hero-blob-1 15s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+/* Blob layer 2: Secondary color, medium, medium speed */
+.hero--css-blend::after {
+  content: '';
+  position: absolute;
+  width: 130%;
+  height: 130%;
+  top: -15%;
+  left: -15%;
+  border-radius: 55% 45% 40% 60% / 45% 55% 45% 55%;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    var(--color-brand-accent, var(--color-brand-secondary)),
+    transparent 60%
+  );
+  mix-blend-mode: soft-light;
+  opacity: 0.4;
+  animation: hero-blob-2 12s ease-in-out infinite alternate-reverse;
+  pointer-events: none;
+}
+
+/* NOTE: A third blob requires a child element since ::before and ::after
+   are already used. In production, ShaderHero.svelte would render a
+   <div class="hero__blob-3"> element for this.
+
+   For this prototype, 2 blobs provide a good visual effect.
+*/
+
+@keyframes hero-blob-1 {
+  0% {
+    transform: translate(-10%, -5%) rotate(0deg) scale(1);
+  }
+  33% {
+    transform: translate(5%, 10%) rotate(60deg) scale(1.1);
+  }
+  66% {
+    transform: translate(10%, -5%) rotate(120deg) scale(0.95);
+  }
+  100% {
+    transform: translate(-5%, 5%) rotate(180deg) scale(1.05);
+  }
+}
+
+@keyframes hero-blob-2 {
+  0% {
+    transform: translate(10%, 5%) rotate(0deg) scale(1.1);
+  }
+  33% {
+    transform: translate(-5%, -10%) rotate(-80deg) scale(0.9);
+  }
+  66% {
+    transform: translate(-10%, 5%) rotate(-160deg) scale(1.05);
+  }
+  100% {
+    transform: translate(5%, -5%) rotate(-240deg) scale(1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * REDUCED MOTION: All tiers
+ * ═══════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .hero--css-property,
+  .hero--css-blend {
+    animation: none;
+  }
+
+  .hero--css-blend::before,
+  .hero--css-blend::after {
+    animation: none;
+    /* Freeze at a nice position */
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * TIER 3: Static gradient (no class needed — default hero CSS)
+ *
+ * .hero {
+ *   background: linear-gradient(
+ *     135deg,
+ *     var(--color-brand-primary),
+ *     var(--color-brand-secondary)
+ *   );
+ * }
+ *
+ * This is the existing CSS. Zero regression path.
+ * ═══════════════════════════════════════════════════════════════════ */

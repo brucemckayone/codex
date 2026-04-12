@@ -9,9 +9,9 @@ import { createServerApi } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
 const DEFAULT_PREFERENCES = {
-  emailMarketing: false,
+  emailMarketing: true,
   emailTransactional: true,
-  emailDigest: false,
+  emailDigest: true,
 };
 
 export const load: PageServerLoad = async ({ locals, platform, cookies }) => {

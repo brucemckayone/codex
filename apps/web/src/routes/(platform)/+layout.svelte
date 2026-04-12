@@ -6,7 +6,9 @@
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
   import { beforeNavigate, invalidate } from '$app/navigation';
-  import { PlatformHeader } from '$lib/components/layout';
+  import { SidebarRail } from '$lib/components/layout/SidebarRail';
+  import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
+  import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { Footer, PageContainer } from '$lib/components/ui';
   import type { LayoutUser } from '$lib/types';
   import type { LayoutData } from './$types';
@@ -16,9 +18,12 @@
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
 
+  let searchOpen = $state(false);
+  let moreOpen = $state(false);
+
   const user = $derived<LayoutUser | null>(
     data.user
-      ? { name: data.user.name ?? '', email: data.user.email ?? '', image: data.user.image ?? undefined }
+      ? { name: data.user.name ?? '', email: data.user.email ?? '', image: data.user.image ?? undefined, role: data.user.role }
       : null
   );
 
@@ -60,9 +65,9 @@
   });
 </script>
 
-<div class="platform-layout">
-  <PlatformHeader {user} />
+<SidebarRail variant="platform" {user} onSearchClick={() => { searchOpen = true; }} />
 
+<div class="platform-layout">
   <main id="main-content">
     <PageContainer>
       {@render children()}
@@ -72,14 +77,36 @@
   <Footer />
 </div>
 
+<MobileBottomNav
+  variant="platform"
+  {user}
+  onSearchClick={() => { searchOpen = true; }}
+  onMoreClick={() => { moreOpen = true; }}
+/>
+<MobileBottomSheet bind:open={moreOpen} variant="platform" {user} />
+<CommandPaletteSearch scope="platform" bind:open={searchOpen} />
+
 <style>
   .platform-layout {
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    margin-left: var(--space-16);
+  }
+
+  @media (--below-md) {
+    .platform-layout {
+      margin-left: 0;
+    }
   }
 
   main {
     flex: 1;
+  }
+
+  @media (--below-md) {
+    main {
+      padding-bottom: var(--space-20);
+    }
   }
 </style>

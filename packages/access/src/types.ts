@@ -41,8 +41,8 @@ export interface UserLibraryResponse {
       durationSeconds: number;
       organizationSlug: string | null;
     };
-    /** Access type: 'purchased' = bought, 'membership' = org member access */
-    accessType: 'purchased' | 'membership';
+    /** Access type: 'purchased' = bought, 'membership' = org member access, 'subscription' = active subscription */
+    accessType: 'purchased' | 'membership' | 'subscription';
     purchase: {
       purchasedAt: string; // ISO 8601 timestamp
       priceCents: number;

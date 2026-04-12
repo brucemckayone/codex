@@ -53,7 +53,7 @@ export class SettingsUpsertError extends InternalServiceError {
   constructor(
     settingsType: SettingsTable,
     organizationId: string,
-    operation: 'update' | 'logo_upload' = 'update'
+    operation: 'update' | 'logo_upload' | 'intro_video' = 'update'
   ) {
     super(
       `${settingsType} settings ${operation} returned no rows for organization ${organizationId}`,

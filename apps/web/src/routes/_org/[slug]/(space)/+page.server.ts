@@ -8,7 +8,7 @@
 
 import type { UserLibraryResponse } from '@codex/access';
 import { getPublicContent } from '$lib/remote/content.remote';
-import { getPublicCreators } from '$lib/remote/org.remote';
+import { getPublicCreators, getPublicStats } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
@@ -39,6 +39,8 @@ export const load: PageServerLoad = async ({
     limit: 3,
   });
 
+  const statsPromise = getPublicStats(org.slug);
+
   // Continue watching: only for authenticated users
   let continueWatchingPromise: Promise<UserLibraryResponse> | null = null;
   if (locals.user) {
@@ -51,11 +53,15 @@ export const load: PageServerLoad = async ({
     continueWatchingPromise = api.access.getUserLibrary(params);
   }
 
-  // Await only what's critical for first paint (hero + new releases)
-  const contentResult = await contentPromise.catch(() => null);
+  // Await only what's critical for first paint (hero + new releases + stats)
+  const [contentResult, statsResult] = await Promise.all([
+    contentPromise.catch(() => null),
+    statsPromise.catch(() => null),
+  ]);
 
   return {
     newReleases: contentResult?.items ?? [],
+    stats: statsResult,
     // Stream non-critical data — bare promises resolve client-side.
     // .catch() on each prevents "unhandled promise rejection" server crashes.
     creators: creatorsPromise

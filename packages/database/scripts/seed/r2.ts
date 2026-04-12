@@ -14,13 +14,14 @@ import {
   getWaveformImageKey,
   getWaveformKey,
 } from '../../../transcoding/src/paths';
-import { MEDIA, ORGS, USERS } from './constants';
+import { MEDIA, ORGS, THUMBNAIL_SEEDS, USERS } from './constants';
 import {
+  fetchPortraitImage,
+  fetchRealImage,
   generateAudioMasterPlaylist,
   generateAvatarSvg,
   generateLogoSvg,
   generateMasterPlaylist,
-  generateThumbnailSvg,
   generateVariantPlaylist,
   generateWaveformJson,
   PLACEHOLDER_JPEG,
@@ -109,9 +110,10 @@ export async function clearR2Buckets() {
 }
 
 /**
- * Collect all placeholder files for ready media items.
+ * Collect all files for ready media items.
+ * Fetches real photographs from picsum.photos for thumbnails (cached locally).
  */
-function collectMediaFiles(): R2File[] {
+async function collectMediaFiles(): Promise<R2File[]> {
   const files: R2File[] = [];
 
   const readyVideos = [
@@ -121,6 +123,8 @@ function collectMediaFiles(): R2File[] {
   ];
 
   for (const { media, creatorId } of readyVideos) {
+    const seed = THUMBNAIL_SEEDS[media.id] ?? media.id;
+
     files.push({
       bucket: MEDIA_BUCKET_NAME,
       key: getOriginalKey(creatorId, media.id, 'video.mp4'),
@@ -154,33 +158,30 @@ function collectMediaFiles(): R2File[] {
       });
     }
 
+    // Raw thumbnail (original size)
     files.push({
       bucket: MEDIA_BUCKET_NAME,
       key: getThumbnailKey(creatorId, media.id),
-      data: generateThumbnailSvg(media.title),
-      contentType: 'image/svg+xml',
+      data: await fetchRealImage(seed, 800, 450),
+      contentType: 'image/jpeg',
     });
 
+    // Responsive thumbnail variants (sm/md/lg)
     const sizes = { sm: [320, 180], md: [640, 360], lg: [800, 450] } as const;
     for (const size of ['sm', 'md', 'lg'] as const) {
       files.push({
         bucket: ASSETS_BUCKET_NAME,
         key: getMediaThumbnailKey(creatorId, media.id, size),
-        data: generateThumbnailSvg(
-          media.title,
-          '#1e293b',
-          '#60a5fa',
-          sizes[size][0],
-          sizes[size][1]
-        ),
-        contentType: 'image/svg+xml',
+        data: await fetchRealImage(seed, sizes[size][0], sizes[size][1]),
+        contentType: 'image/jpeg',
       });
     }
   }
 
-  // Audio: Tech Podcast
+  // Audio: Tech Podcast — also gets a real cover image
   const podcastCreatorId = USERS.creator.id;
   const podcast = MEDIA.podcast;
+  const podcastSeed = THUMBNAIL_SEEDS[podcast.id] ?? podcast.id;
 
   files.push({
     bucket: MEDIA_BUCKET_NAME,
@@ -216,37 +217,73 @@ function collectMediaFiles(): R2File[] {
   files.push({
     bucket: MEDIA_BUCKET_NAME,
     key: getWaveformImageKey(podcastCreatorId, podcast.id),
-    data: PLACEHOLDER_JPEG,
-    contentType: 'image/png',
+    data: await fetchRealImage(podcastSeed, 800, 200),
+    contentType: 'image/jpeg',
   });
+
+  // Podcast also needs thumbnail variants so content cards can display them
+  files.push({
+    bucket: MEDIA_BUCKET_NAME,
+    key: getThumbnailKey(podcastCreatorId, podcast.id),
+    data: await fetchRealImage(podcastSeed, 800, 450),
+    contentType: 'image/jpeg',
+  });
+
+  const sizes = { sm: [320, 180], md: [640, 360], lg: [800, 450] } as const;
+  for (const size of ['sm', 'md', 'lg'] as const) {
+    files.push({
+      bucket: ASSETS_BUCKET_NAME,
+      key: getMediaThumbnailKey(podcastCreatorId, podcast.id, size),
+      data: await fetchRealImage(podcastSeed, sizes[size][0], sizes[size][1]),
+      contentType: 'image/jpeg',
+    });
+  }
 
   return files;
 }
 
 /**
  * Collect user avatar and org logo files.
+ * Avatars use real portrait photos from i.pravatar.cc (cached locally).
  */
-function collectAssetFiles(): R2File[] {
+async function collectAssetFiles(): Promise<R2File[]> {
   const files: R2File[] = [];
 
-  const avatarColors: Record<string, string> = {
+  // Fetch real portrait photos for avatars
+  const avatarSizes = { sm: 200, md: 400, lg: 800 } as const;
+  const avatarFallbackColors: Record<string, string> = {
     [USERS.creator.id]: '#6366f1',
     [USERS.viewer.id]: '#0891b2',
     [USERS.admin.id]: '#059669',
   };
-  const avatarSizes = { sm: 64, md: 128, lg: 256 } as const;
+
+  console.log('  Fetching portrait images (cached after first run)...');
   for (const user of Object.values(USERS)) {
     for (const size of ['sm', 'md', 'lg'] as const) {
-      files.push({
-        bucket: ASSETS_BUCKET_NAME,
-        key: getUserAvatarKey(user.id, size),
-        data: generateAvatarSvg(
-          user.name,
-          avatarColors[user.id] ?? '#6366f1',
+      try {
+        const imageData = await fetchPortraitImage(
+          user.username ?? user.id,
           avatarSizes[size]
-        ),
-        contentType: 'image/svg+xml',
-      });
+        );
+        files.push({
+          bucket: ASSETS_BUCKET_NAME,
+          key: getUserAvatarKey(user.id, size),
+          data: imageData,
+          contentType: 'image/jpeg',
+        });
+      } catch {
+        // Fallback to SVG if portrait fetch fails
+        files.push({
+          bucket: ASSETS_BUCKET_NAME,
+          key: getUserAvatarKey(user.id, size),
+          data: generateAvatarSvg(
+            user.name,
+            avatarFallbackColors[user.id] ?? '#6366f1',
+            avatarSizes[size]
+          ),
+          contentType: 'image/svg+xml',
+        });
+      }
     }
   }
 
@@ -270,7 +307,11 @@ function collectAssetFiles(): R2File[] {
  * Uses the same persistence path as dev-cdn, so files are immediately servable.
  */
 export async function seedR2Files() {
-  const allFiles = [...collectMediaFiles(), ...collectAssetFiles()];
+  console.log('  Fetching thumbnail images (cached after first run)...');
+  const allFiles = [
+    ...(await collectMediaFiles()),
+    ...(await collectAssetFiles()),
+  ];
 
   let count = 0;
   for (const file of allFiles) {

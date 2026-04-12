@@ -53,6 +53,9 @@ export const contentAccess = pgTable(
       .defaultNow()
       .notNull()
       .$onUpdate(() => new Date()),
+
+    // Soft delete (null = active, set on refund/revocation)
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
     // Indexes

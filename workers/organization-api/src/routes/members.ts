@@ -21,7 +21,11 @@ import {
   userIdSchema,
   uuidSchema,
 } from '@codex/validation';
-import { PaginatedResult, procedure } from '@codex/worker-utils';
+import {
+  PaginatedResult,
+  procedure,
+  sendEmailToWorker,
+} from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -71,11 +75,27 @@ app.post(
     },
     successStatus: 201,
     handler: async (ctx) => {
-      return await ctx.services.organization.inviteMember(
+      const result = await ctx.services.organization.inviteMember(
         ctx.input.params.id,
         ctx.input.body,
         ctx.user.id
       );
+
+      // Send invitation email (fire-and-forget)
+      sendEmailToWorker(ctx.env, ctx.executionCtx, {
+        to: ctx.input.body.email,
+        templateName: 'org-member-invitation',
+        category: 'transactional',
+        data: {
+          inviterName: ctx.user.name || 'A team member',
+          orgName: 'the organisation', // TODO: resolve from ctx.services.organization.getById()
+          roleName: ctx.input.body.role,
+          acceptUrl: `${ctx.env.WEB_APP_URL || ''}/accept-invite`,
+          expiryDays: '7',
+        },
+      });
+
+      return result;
     },
   })
 );

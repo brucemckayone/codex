@@ -117,6 +117,7 @@ export const subscriptions = pgTable(
     }).notNull(),
 
     // Cancellation
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false).notNull(),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     cancelReason: text('cancel_reason'),
 

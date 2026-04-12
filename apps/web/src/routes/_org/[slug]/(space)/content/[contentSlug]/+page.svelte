@@ -41,14 +41,27 @@
 
   let purchasing = $state(false);
 
-  // Subscription context — resolves asynchronously without blocking render
+  /** Feature flag from org layout — when false, subscription UI is hidden */
+  const enableSubscriptions = $derived(data.enableSubscriptions ?? true);
+
+  // Subscription context — resolves asynchronously without blocking render.
+  // Gate on enableSubscriptions: when disabled, never show subscription prompts.
   let subCtx = $state({
-    requiresSubscription: !!data.content.minimumTierId,
+    requiresSubscription:
+      data.content.accessType === 'subscribers' || !!data.content.minimumTierId,
     hasSubscription: false,
     subscriptionCoversContent: false,
   });
 
   $effect(() => {
+    if (!enableSubscriptions) {
+      subCtx = {
+        requiresSubscription: false,
+        hasSubscription: false,
+        subscriptionCoversContent: false,
+      };
+      return;
+    }
     data.subscriptionContext?.then((ctx) => {
       subCtx = {
         requiresSubscription: ctx.requiresSubscription,
@@ -219,6 +232,7 @@
               price={item.priceCents != null
                 ? { amount: item.priceCents, currency: 'GBP' }
                 : null}
+              contentAccessType={item.accessType}
             />
           {/each}
         </div>

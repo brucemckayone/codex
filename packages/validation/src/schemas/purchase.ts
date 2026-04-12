@@ -151,6 +151,7 @@ export const checkoutSessionMetadataSchema = z.object({
   customerId: userIdSchema,
   contentId: uuidSchema,
   organizationId: uuidSchema.nullable().default(null),
+  contentTitle: z.string().optional(),
 });
 
 /**

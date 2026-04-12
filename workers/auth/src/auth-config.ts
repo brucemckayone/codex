@@ -11,7 +11,11 @@ import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { sendVerificationEmail } from './email';
+import {
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+  sendWelcomeEmail,
+} from './email';
 import type { AuthBindings } from './types';
 
 interface AuthConfigOptions {
@@ -123,6 +127,9 @@ export function createAuthInstance(options: AuthConfigOptions) {
       // needed, override the BetterAuth error handler to return generic "Invalid credentials".
       requireEmailVerification: true,
       autoSignIn: true,
+      sendResetPassword: async ({ user, url }) => {
+        await sendPasswordResetEmail(env, user, url);
+      },
     },
     user: {
       additionalFields: {

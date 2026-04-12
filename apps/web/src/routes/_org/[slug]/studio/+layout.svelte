@@ -152,7 +152,9 @@
     display: flex;
     flex-direction: column;
     min-height: 100vh;
-    background-color: var(--color-background);
+    position: relative;
+    z-index: 1;
+    background: color-mix(in srgb, var(--color-background) 80%, transparent);
   }
 
   /* Mobile Header */

@@ -8,17 +8,53 @@
  * - invoice.payment_succeeded → extend period, execute revenue transfers
  * - invoice.payment_failed → update status to past_due
  *
+ * Business logic (DB queries, email composition, tier lookups) lives in
+ * SubscriptionService — this handler only orchestrates Stripe event extraction,
+ * service calls, cache invalidation, and fire-and-forget email dispatch.
+ *
  * Security:
  * - Signature already verified by verifyStripeSignature middleware
  * - Idempotent via stripeSubscriptionId unique constraint
  */
 
+import { CacheType, VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
+import type { WebhookHandlerResult } from '@codex/subscription';
 import { SubscriptionService } from '@codex/subscription';
+import { sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+
+/**
+ * Invalidate user library cache after subscription changes.
+ * Fire-and-forget via waitUntil.
+ */
+function invalidateUserLibraryCache(
+  c: Context<StripeWebhookEnv>,
+  userId: string | undefined
+): void {
+  if (userId && c.env.CACHE_KV) {
+    const cache = new VersionedCache({ kv: c.env.CACHE_KV });
+    c.executionCtx.waitUntil(
+      cache.invalidate(CacheType.COLLECTION_USER_LIBRARY(userId))
+    );
+  }
+}
+
+/**
+ * Dispatch email notification from a webhook handler result.
+ * Fire-and-forget via sendEmailToWorker (uses waitUntil internally).
+ */
+function dispatchEmail(
+  c: Context<StripeWebhookEnv>,
+  result: WebhookHandlerResult | void
+): void {
+  if (result?.email) {
+    sendEmailToWorker(c.env, c.executionCtx, result.email);
+  }
+}
 
 export async function handleSubscriptionWebhook(
   event: Stripe.Event,
@@ -26,11 +62,11 @@ export async function handleSubscriptionWebhook(
   c: Context<StripeWebhookEnv>
 ) {
   const obs = c.get('obs');
+  const webAppUrl = c.env.WEB_APP_URL || '';
 
   const { db, cleanup } = createPerRequestDbClient({
     DATABASE_URL: c.env.DATABASE_URL,
-    DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)
-      .DATABASE_URL_LOCAL_PROXY,
+    DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
     DB_METHOD: c.env.DB_METHOD,
   });
 
@@ -61,7 +97,14 @@ export async function handleSubscriptionWebhook(
         // Retrieve the full subscription object for period dates + metadata
         const subscription =
           await stripe.subscriptions.retrieve(subscriptionId);
-        await service.handleSubscriptionCreated(subscription);
+        const result = await service.handleSubscriptionCreated(
+          subscription,
+          webAppUrl
+        );
+
+        // Bump user library version so other devices detect the new subscription
+        invalidateUserLibraryCache(c, result?.userId);
+        dispatchEmail(c, result);
 
         obs?.info('Subscription created from checkout', {
           sessionId: session.id,
@@ -81,7 +124,15 @@ export async function handleSubscriptionWebhook(
 
       case STRIPE_EVENTS.SUBSCRIPTION_DELETED: {
         const subscription = event.data.object as Stripe.Subscription;
-        await service.handleSubscriptionDeleted(subscription);
+        const result = await service.handleSubscriptionDeleted(
+          subscription,
+          webAppUrl
+        );
+
+        // Bump user library version so other devices detect the cancelled subscription
+        invalidateUserLibraryCache(c, result?.userId);
+        dispatchEmail(c, result);
+
         obs?.info('Subscription deleted', {
           subscriptionId: subscription.id,
         });
@@ -90,7 +141,13 @@ export async function handleSubscriptionWebhook(
 
       case STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED: {
         const invoice = event.data.object as Stripe.Invoice;
-        await service.handleInvoicePaymentSucceeded(invoice);
+        const result = await service.handleInvoicePaymentSucceeded(
+          invoice,
+          webAppUrl
+        );
+
+        dispatchEmail(c, result);
+
         obs?.info('Invoice payment succeeded', {
           invoiceId: invoice.id,
         });
@@ -103,7 +160,13 @@ export async function handleSubscriptionWebhook(
           invoiceId: invoice.id,
           amountDue: invoice.amount_due,
         });
-        // Status update handled by customer.subscription.updated event
+
+        const result = await service.handleInvoicePaymentFailed(
+          invoice,
+          webAppUrl
+        );
+
+        dispatchEmail(c, result);
         break;
       }
 

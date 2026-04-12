@@ -86,3 +86,13 @@ export { TemplateRepository } from './repositories/template-repository';
 // ============================================================================
 
 export { renderTemplate } from './templates/renderer';
+
+// ============================================================================
+// Unsubscribe
+// ============================================================================
+
+export {
+  generateUnsubscribeToken,
+  type UnsubscribePayload,
+  verifyUnsubscribeToken,
+} from './unsubscribe';

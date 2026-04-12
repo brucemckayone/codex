@@ -9,7 +9,7 @@ import { getPublicCreators } from '$lib/remote/org.remote';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
 
-const PAGE_LIMIT = 20;
+const PAGE_LIMIT = 12;
 
 export const load: PageServerLoad = async ({ url, setHeaders, parent }) => {
   setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);

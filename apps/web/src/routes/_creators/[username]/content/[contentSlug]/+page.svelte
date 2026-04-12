@@ -41,7 +41,8 @@
 
   // Subscription context — resolves asynchronously without blocking render
   let subCtx = $state({
-    requiresSubscription: !!data.content.minimumTierId,
+    requiresSubscription:
+      data.content.accessType === 'subscribers' || !!data.content.minimumTierId,
     hasSubscription: false,
     subscriptionCoversContent: false,
   });
@@ -240,6 +241,7 @@
               price={item.priceCents != null
                 ? { amount: item.priceCents, currency: 'GBP' }
                 : null}
+              contentAccessType={item.accessType}
             />
           {/each}
         </div>

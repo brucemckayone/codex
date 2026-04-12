@@ -30,7 +30,10 @@ import {
   createOrganizationSchema,
   updateOrganizationSchema,
 } from '@codex/organization';
-import { BrandingSettingsService } from '@codex/platform-settings';
+import {
+  BrandingSettingsService,
+  FeatureSettingsService,
+} from '@codex/platform-settings';
 import { NotFoundError } from '@codex/service-errors';
 import type {
   Bindings,
@@ -178,6 +181,7 @@ app.get(
         fontHeading: info.brandFonts.heading ?? null,
         radiusValue: info.brandRadius ?? 0.5,
         densityValue: info.brandDensity ?? 1,
+        introVideoUrl: info.introVideoUrl ?? null,
       };
     },
   })
@@ -230,6 +234,7 @@ async function fetchPublicOrgInfo(
     fontHeading: string | null;
     radiusValue: number;
     densityValue: number;
+    introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
     shadowScale: string | null;
@@ -247,6 +252,7 @@ async function fetchPublicOrgInfo(
     fontHeading: null,
     radiusValue: 0.5,
     densityValue: 1,
+    introVideoUrl: null,
     tokenOverrides: null,
     darkModeOverrides: null,
     shadowScale: null,
@@ -267,6 +273,7 @@ async function fetchPublicOrgInfo(
       fontHeading: b.fontHeading ?? null,
       radiusValue: b.radiusValue ?? 0.5,
       densityValue: b.densityValue ?? 1,
+      introVideoUrl: b.introVideoUrl ?? null,
       tokenOverrides: b.tokenOverrides ?? null,
       darkModeOverrides: b.darkModeOverrides ?? null,
       shadowScale: b.shadowScale ?? null,
@@ -277,6 +284,22 @@ async function fetchPublicOrgInfo(
     };
   } catch {
     // Branding fetch failed — use defaults (non-critical)
+  }
+
+  // Fetch feature flags (enableSubscriptions) for public pages (pricing, content detail).
+  // Non-critical — defaults to true so subscriptions aren't hidden on fetch failure.
+  let enableSubscriptions = true;
+  try {
+    const featureDb = createDbClient(ctx.env);
+    const featureSvc = new FeatureSettingsService({
+      db: featureDb,
+      environment: ctx.env.ENVIRONMENT ?? 'development',
+      organizationId: organization.id,
+    });
+    const features = await featureSvc.get();
+    enableSubscriptions = features.enableSubscriptions;
+  } catch {
+    // Feature fetch failed — default to enabled (non-critical)
   }
 
   return {
@@ -297,6 +320,7 @@ async function fetchPublicOrgInfo(
     },
     brandRadius: branding.radiusValue,
     brandDensity: branding.densityValue,
+    introVideoUrl: branding.introVideoUrl,
     brandFineTune: {
       tokenOverrides: branding.tokenOverrides,
       darkModeOverrides: branding.darkModeOverrides,
@@ -306,6 +330,7 @@ async function fetchPublicOrgInfo(
       headingWeight: branding.headingWeight,
       bodyWeight: branding.bodyWeight,
     },
+    enableSubscriptions,
   };
 }
 
@@ -344,11 +369,50 @@ app.get(
 );
 
 /**
+ * GET /api/organizations/public/:slug/stats
+ * Public organization statistics - no auth required
+ *
+ * Returns aggregate statistics for an organization:
+ * - Content counts by type (video, audio, written)
+ * - Total duration in seconds (from linked media items)
+ * - Active creator count
+ * - Total views across all published content
+ *
+ * Designed for hero section display — lightweight, cacheable.
+ *
+ * Returns: OrganizationPublicStatsResponse (200)
+ * Security: No auth required, API rate limited
+ */
+app.get(
+  '/public/:slug/stats',
+  procedure({
+    policy: { auth: 'none', rateLimit: 'api' },
+    input: { params: z.object({ slug: createSlugSchema(255) }) },
+    handler: async (ctx) => {
+      const slug = ctx.input.params.slug;
+
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        return cache.get(
+          slug,
+          CacheType.ORG_STATS,
+          () => ctx.services.organization.getPublicStats(slug),
+          { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
+        );
+      }
+
+      return ctx.services.organization.getPublicStats(slug);
+    },
+  })
+);
+
+/**
  * GET /api/organizations/public/:slug/creators
  * Public creators endpoint - no auth required
  *
  * Returns paginated public creator profiles for an organization.
- * Includes name, avatar, role, joinedAt, and published content count.
+ * Includes name, username, avatar, bio, social links, role, joinedAt,
+ * published content count, and the latest published content item.
  * Only active members with owner/admin/creator roles are included.
  * No emails or internal user IDs are exposed.
  *
@@ -356,7 +420,7 @@ app.get(
  * - page: Page number (default: 1, min: 1)
  * - limit: Items per page (default: 20, min: 1, max: 100)
  *
- * Returns: PaginatedListResponse<{ name, avatarUrl, role, joinedAt, contentCount }> (200)
+ * Returns: PaginatedListResponse<{ name, username, avatarUrl, bio, socialLinks, role, joinedAt, contentCount, latestContent }> (200)
  * Security: No auth required, API rate limited
  */
 app.get(

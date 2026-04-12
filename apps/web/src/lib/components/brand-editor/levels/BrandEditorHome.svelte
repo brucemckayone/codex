@@ -4,7 +4,7 @@
   import type { LevelId } from '$lib/brand-editor';
 
   const CUSTOMIZE_CATEGORIES: LevelId[] = ['typography', 'shape'];
-  const ADVANCED_CATEGORIES: LevelId[] = ['shadows', 'logo', 'hero-effects'];
+  const ADVANCED_CATEGORIES: LevelId[] = ['shadows', 'logo', 'intro-video', 'hero-effects'];
 
   let showPalettes = $state(false);
 

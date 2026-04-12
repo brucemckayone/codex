@@ -19,9 +19,14 @@ import type {
 } from '../providers/types';
 import { TemplateRepository } from '../repositories/template-repository';
 import { getAllowedTokens, renderTemplate } from '../templates/renderer';
-import type { NotificationsServiceConfig, TemplateData } from '../types';
+import type {
+  EmailCategory,
+  NotificationsServiceConfig,
+  TemplateData,
+} from '../types';
 import { validateTemplateData } from '../validation/template-validation';
 import { BrandingCache } from './branding-cache';
+import { NotificationPreferencesService } from './notification-preferences-service';
 
 export interface RetryConfig {
   maxRetries: number;
@@ -42,11 +47,16 @@ interface SendEmailParams {
   creatorId?: string | null;
   locale?: string;
   replyTo?: string;
+  /** Email category for preference checking */
+  category?: EmailCategory;
+  /** User ID for preference lookup (skip check if undefined) */
+  userId?: string;
 }
 
 export class NotificationsService extends BaseService {
   private readonly emailProvider: EmailProvider;
   private readonly templateRepository: TemplateRepository;
+  private readonly preferencesService: NotificationPreferencesService;
   private readonly defaultFrom: { email: string; name?: string };
   private readonly brandDefaults: Required<
     NonNullable<NotificationsServiceConfig['defaults']>
@@ -57,6 +67,10 @@ export class NotificationsService extends BaseService {
   constructor(config: NotificationsServiceConfig) {
     super(config);
     this.templateRepository = new TemplateRepository(this.db);
+    this.preferencesService = new NotificationPreferencesService({
+      db: this.db,
+      environment: this.environment,
+    });
     this.brandingCache = new BrandingCache(); // 5 minute TTL by default
     this.brandTokenResolver = config.brandTokenResolver;
     this.brandDefaults = {
@@ -136,6 +150,7 @@ export class NotificationsService extends BaseService {
         secondaryColor: this.brandDefaults.secondaryColor,
         logoUrl,
         supportEmail,
+        contactUrl: supportEmail ? `mailto:${supportEmail}` : '',
       };
 
       // Cache the result
@@ -143,7 +158,12 @@ export class NotificationsService extends BaseService {
       return tokens;
     } catch (error) {
       this.obs.warn('Failed to load branding', { organizationId, error });
-      return { ...this.brandDefaults };
+      return {
+        ...this.brandDefaults,
+        contactUrl: this.brandDefaults.supportEmail
+          ? `mailto:${this.brandDefaults.supportEmail}`
+          : '',
+      };
     }
   }
 
@@ -174,9 +194,41 @@ export class NotificationsService extends BaseService {
         templateName,
       });
       throw new ValidationError('Invalid email address', {
-        email: to,
         errors: validEmail.error.issues,
       });
+    }
+
+    // 0. Check notification preferences (skip for transactional or when userId unknown)
+    if (
+      params.category &&
+      params.category !== 'transactional' &&
+      params.userId
+    ) {
+      const optedOut = await this.preferencesService.hasOptedOut(
+        params.userId,
+        params.category
+      );
+      if (optedOut) {
+        this.obs.info('Email skipped due to user opt-out', {
+          templateName,
+          category: params.category,
+        });
+
+        await this.db.insert(schema.emailAuditLogs).values({
+          templateName,
+          recipientEmail: to,
+          organizationId: organizationId || null,
+          creatorId: creatorId || null,
+          status: EMAIL_SEND_STATUS.SKIPPED,
+          metadata: JSON.stringify({
+            ...data,
+            skipReason: 'opted_out',
+            category: params.category,
+          }),
+        });
+
+        return { success: false, skipped: 'opted_out' };
+      }
     }
 
     // 1. Resolve Template
@@ -196,7 +248,12 @@ export class NotificationsService extends BaseService {
     // 3. Resolve Branding (if organization context exists)
     const brandTokens = organizationId
       ? await this.resolveBrandTokens(organizationId)
-      : { ...this.brandDefaults };
+      : {
+          ...this.brandDefaults,
+          contactUrl: this.brandDefaults.supportEmail
+            ? `mailto:${this.brandDefaults.supportEmail}`
+            : '',
+        };
 
     // 4. Render Template
     const mergedData = { ...brandTokens, ...validatedData };

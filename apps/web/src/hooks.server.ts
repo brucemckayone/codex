@@ -76,9 +76,50 @@ const securityHook: Handle = async ({ event, resolve }) => {
 };
 
 /**
+ * Dev-only: rewrite CDN URLs for LAN access via nip.io
+ *
+ * API workers return CDN URLs as http://localhost:4100/... (via R2_PUBLIC_URL_BASE).
+ * When accessing the app from a mobile device over LAN using nip.io DNS,
+ * "localhost" on the phone points to the phone itself. This hook rewrites
+ * those URLs to use the nip.io hostname so the mobile browser reaches dev-cdn.
+ */
+const cdnRewriteHook: Handle = async ({ event, resolve }) => {
+  if (!dev) return resolve(event);
+
+  const host = event.url.hostname;
+  if (!host.endsWith('nip.io')) return resolve(event);
+
+  const ipMatch = host.match(/(\d+\.\d+\.\d+\.\d+)\.nip\.io$/);
+  if (!ipMatch) return resolve(event);
+
+  const from = 'localhost:4100';
+  const to = `${ipMatch[1]}.nip.io:4100`;
+
+  const response = await resolve(event, {
+    transformPageChunk: ({ html }) => html.replaceAll(from, to),
+  });
+
+  // transformPageChunk covers HTML; intercept JSON for __data.json & remote functions
+  const contentType = response.headers.get('content-type') ?? '';
+  if (contentType.includes('text/html')) return response;
+
+  if (contentType.includes('application/json')) {
+    const body = await response.text();
+    if (!body.includes(from)) return new Response(body, response);
+    return new Response(body.replaceAll(from, to), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  }
+
+  return response;
+};
+
+/**
  * Combine hooks in sequence
  */
-export const handle = sequence(sessionHook, securityHook);
+export const handle = sequence(sessionHook, securityHook, cdnRewriteHook);
 
 /**
  * Global error handler

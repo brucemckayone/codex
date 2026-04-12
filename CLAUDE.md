@@ -98,6 +98,12 @@ These rules are MANDATORY. Every agent working anywhere in this codebase MUST fo
 - **NEVER** expose internal error details (stack traces, SQL, DB URLs) in API responses — `mapErrorToResponse()` handles this
 - **NEVER** log PII (passwords, tokens, emails) — use `@codex/observability` redaction
 
+### Service Registry
+
+- **MUST** use `ctx.services.*` from the service registry for all services in `procedure()` handlers — NEVER create ad-hoc service instances with `createDbClient(env)` in route files
+- **MUST** add new services to the registry (`packages/worker-utils/src/procedure/service-registry.ts`) following the lazy getter pattern before using them in route handlers
+- Webhook handlers that bypass `procedure()` (Stripe HMAC, RunPod) are the only exception — they manage their own DB lifecycle with `createPerRequestDbClient` + `waitUntil(cleanup())`
+
 ### Error Handling
 
 - **MUST** throw typed `ServiceError` subclasses (`NotFoundError`, `ForbiddenError`, etc.) — NEVER throw raw strings or generic `Error`

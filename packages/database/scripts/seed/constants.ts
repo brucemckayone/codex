@@ -57,7 +57,62 @@ export const USERS = {
     role: 'customer',
     username: 'freshuser',
   },
+  newCreator: {
+    id: seedTextId('seed-user-new-creator'),
+    name: 'Riley NewCreator',
+    email: 'newcreator@test.com',
+    role: 'creator',
+    username: 'rileynewcreator',
+  },
+  // ── Additional customers (for testing customer table filters) ──
+  customer1: {
+    id: seedTextId('seed-user-customer1'),
+    name: 'Maria Santos',
+    email: 'maria@test.com',
+    role: 'customer',
+    username: 'mariasantos',
+  },
+  customer2: {
+    id: seedTextId('seed-user-customer2'),
+    name: 'James Chen',
+    email: 'james@test.com',
+    role: 'customer',
+    username: 'jameschen',
+  },
+  customer3: {
+    id: seedTextId('seed-user-customer3'),
+    name: 'Priya Patel',
+    email: 'priya@test.com',
+    role: 'customer',
+    username: 'priyapatel',
+  },
+  customer4: {
+    id: seedTextId('seed-user-customer4'),
+    name: 'Lucas Walker',
+    email: 'lucas@test.com',
+    role: 'customer',
+    username: 'lucaswalker',
+  },
+  customer5: {
+    id: seedTextId('seed-user-customer5'),
+    name: 'Emma Wilson',
+    email: 'emma@test.com',
+    role: 'customer',
+    username: 'emmawilson',
+  },
 } as const;
+
+/**
+ * Override join dates for specific users (days ago).
+ * Users not listed here default to "now" in the seed.
+ */
+export const USER_JOINED_DAYS_AGO: Partial<Record<string, number>> = {
+  [USERS.customer1.id]: 2,
+  [USERS.customer2.id]: 8,
+  [USERS.customer3.id]: 3,
+  [USERS.customer4.id]: 50,
+  [USERS.customer5.id]: 85,
+};
 
 // ── Accounts (BetterAuth credential entries) ─────────────────
 export const ACCOUNTS = {
@@ -65,6 +120,12 @@ export const ACCOUNTS = {
   viewer: { id: seedTextId('seed-account-viewer') },
   admin: { id: seedTextId('seed-account-admin') },
   fresh: { id: seedTextId('seed-account-fresh') },
+  newCreator: { id: seedTextId('seed-account-new-creator') },
+  customer1: { id: seedTextId('seed-account-customer1') },
+  customer2: { id: seedTextId('seed-account-customer2') },
+  customer3: { id: seedTextId('seed-account-customer3') },
+  customer4: { id: seedTextId('seed-account-customer4') },
+  customer5: { id: seedTextId('seed-account-customer5') },
 } as const;
 
 // ── Sessions ─────────────────────────────────────────────────
@@ -84,6 +145,30 @@ export const SESSIONS = {
   fresh: {
     id: seedTextId('seed-session-fresh'),
     token: seedTextId('seed-token-fresh'),
+  },
+  newCreator: {
+    id: seedTextId('seed-session-new-creator'),
+    token: seedTextId('seed-token-new-creator'),
+  },
+  customer1: {
+    id: seedTextId('seed-session-customer1'),
+    token: seedTextId('seed-token-customer1'),
+  },
+  customer2: {
+    id: seedTextId('seed-session-customer2'),
+    token: seedTextId('seed-token-customer2'),
+  },
+  customer3: {
+    id: seedTextId('seed-session-customer3'),
+    token: seedTextId('seed-token-customer3'),
+  },
+  customer4: {
+    id: seedTextId('seed-session-customer4'),
+    token: seedTextId('seed-token-customer4'),
+  },
+  customer5: {
+    id: seedTextId('seed-session-customer5'),
+    token: seedTextId('seed-token-customer5'),
   },
 } as const;
 
@@ -108,13 +193,30 @@ export const ORGS = {
 // ── Organization Memberships ─────────────────────────────────
 export const MEMBERSHIPS = {
   creatorAlphaOwner: { id: seedUuid('seed-membership-creator-alpha-owner') },
-  viewerAlphaMember: { id: seedUuid('seed-membership-viewer-alpha-member') },
+  viewerAlphaSubscriber: {
+    id: seedUuid('seed-membership-viewer-alpha-subscriber'),
+  },
   adminBetaOwner: { id: seedUuid('seed-membership-admin-beta-owner') },
   viewerBetaSubscriber: {
     id: seedUuid('seed-membership-viewer-beta-subscriber'),
   },
   adminAlphaAdmin: { id: seedUuid('seed-membership-admin-alpha-admin') },
   creatorBetaCreator: { id: seedUuid('seed-membership-creator-beta-creator') },
+  customer1AlphaMember: {
+    id: seedUuid('seed-membership-customer1-alpha-member'),
+  },
+  customer2AlphaMember: {
+    id: seedUuid('seed-membership-customer2-alpha-member'),
+  },
+  customer3AlphaMember: {
+    id: seedUuid('seed-membership-customer3-alpha-member'),
+  },
+  customer4AlphaMember: {
+    id: seedUuid('seed-membership-customer4-alpha-member'),
+  },
+  customer5AlphaMember: {
+    id: seedUuid('seed-membership-customer5-alpha-member'),
+  },
 } as const;
 
 // ── Media Items ──────────────────────────────────────────────
@@ -181,6 +283,36 @@ export const MEDIA = {
   },
 } as const;
 
+// ── Subscription Tiers (defined before CONTENT because content references tier IDs) ──
+export const TIERS = {
+  alphaStandard: {
+    id: seedUuid('seed-tier-alpha-standard'),
+    name: 'Standard',
+    description:
+      'Access to standard-tier content including tutorials and workshops.',
+    sortOrder: 1,
+    priceMonthly: 499, // £4.99/mo
+    priceAnnual: 4799, // £47.99/yr (~20% discount)
+  },
+  alphaPro: {
+    id: seedUuid('seed-tier-alpha-pro'),
+    name: 'Pro',
+    description:
+      'Full access to all content including deep-dives and masterclasses.',
+    sortOrder: 2,
+    priceMonthly: 999, // £9.99/mo
+    priceAnnual: 9599, // £95.99/yr (~20% discount)
+  },
+  betaStandard: {
+    id: seedUuid('seed-tier-beta-standard'),
+    name: 'Standard',
+    description: 'Access to all Studio Beta tutorials and API courses.',
+    sortOrder: 1,
+    priceMonthly: 699, // £6.99/mo
+    priceAnnual: 6699, // £66.99/yr (~20% discount)
+  },
+} as const;
+
 // ── Content ──────────────────────────────────────────────────
 export const CONTENT = {
   introTs: {
@@ -188,7 +320,6 @@ export const CONTENT = {
     title: 'Intro to TypeScript',
     slug: 'intro-to-typescript',
     contentType: 'video' as const,
-    visibility: 'public' as const,
     priceCents: null,
     status: 'published' as const,
     orgId: ORGS.alpha.id,
@@ -199,24 +330,25 @@ export const CONTENT = {
   },
   advancedSvelte: {
     id: seedUuid('seed-content-advanced-svelte'),
-    title: 'Advanced Svelte Patterns',
+    title: 'Advanced Svelte Patterns [Pro Only]',
     slug: 'advanced-svelte-patterns',
     contentType: 'video' as const,
-    visibility: 'purchased_only' as const,
-    priceCents: 1999,
+    accessType: 'subscribers' as const,
+    priceCents: null, // Pro subscription only — no one-off purchase
+    minimumTierId: TIERS.alphaPro.id, // Requires Pro tier — viewer's Standard won't cover it
     status: 'published' as const,
     orgId: ORGS.alpha.id,
     mediaId: MEDIA.advancedSvelte.id,
     creatorId: USERS.creator.id,
     viewCount: 3200,
-    purchaseCount: 187,
+    purchaseCount: 0,
   },
   honoApis: {
     id: seedUuid('seed-content-hono-apis'),
     title: 'Building APIs with Hono',
     slug: 'building-apis-with-hono',
     contentType: 'video' as const,
-    visibility: 'purchased_only' as const,
+    accessType: 'paid' as const,
     priceCents: 2999,
     status: 'published' as const,
     orgId: ORGS.beta.id,
@@ -230,7 +362,6 @@ export const CONTENT = {
     title: 'Tech Podcast Ep 1',
     slug: 'tech-podcast-ep-1',
     contentType: 'audio' as const,
-    visibility: 'public' as const,
     priceCents: null,
     status: 'published' as const,
     orgId: ORGS.alpha.id,
@@ -244,7 +375,6 @@ export const CONTENT = {
     title: 'Draft Video Lesson',
     slug: 'draft-video-lesson',
     contentType: 'video' as const,
-    visibility: 'public' as const,
     priceCents: null,
     status: 'draft' as const,
     orgId: ORGS.alpha.id,
@@ -255,24 +385,24 @@ export const CONTENT = {
   },
   membersOnly: {
     id: seedUuid('seed-content-members-only'),
-    title: 'Members Only Workshop',
+    title: 'Production Workshop [Standard + £9.99]',
     slug: 'members-only-workshop',
     contentType: 'video' as const,
-    visibility: 'members_only' as const,
-    priceCents: null,
+    accessType: 'subscribers' as const,
+    priceCents: 999, // Standard subscription OR £9.99 one-off purchase
+    minimumTierId: TIERS.alphaStandard.id,
     status: 'published' as const,
     orgId: ORGS.alpha.id,
     mediaId: MEDIA.introTs.id, // reuse media
     creatorId: USERS.creator.id,
     viewCount: 430,
-    purchaseCount: 0,
+    purchaseCount: 12,
   },
   privateNotes: {
     id: seedUuid('seed-content-private-notes'),
     title: 'Private Notes',
     slug: 'private-notes',
     contentType: 'written' as const,
-    visibility: 'private' as const,
     priceCents: null,
     status: 'draft' as const,
     orgId: ORGS.alpha.id,
@@ -286,7 +416,6 @@ export const CONTENT = {
     title: 'Written Tutorial: Getting Started',
     slug: 'written-tutorial-getting-started',
     contentType: 'written' as const,
-    visibility: 'public' as const,
     priceCents: null,
     status: 'published' as const,
     orgId: ORGS.beta.id,
@@ -300,7 +429,7 @@ export const CONTENT = {
     title: 'Legacy TypeScript Fundamentals',
     slug: 'legacy-typescript-fundamentals',
     contentType: 'video' as const,
-    visibility: 'public' as const,
+    accessType: 'paid' as const,
     priceCents: 999,
     status: 'archived' as const,
     orgId: ORGS.alpha.id,
@@ -308,6 +437,36 @@ export const CONTENT = {
     creatorId: USERS.creator.id,
     viewCount: 4200,
     purchaseCount: 156,
+  },
+  // ── Additional paid content for Alpha (testing content filter) ──
+  tsDeepDive: {
+    id: seedUuid('seed-content-ts-deep-dive'),
+    title: 'TypeScript Deep Dive [Standard Only]',
+    slug: 'typescript-deep-dive',
+    contentType: 'video' as const,
+    accessType: 'subscribers' as const,
+    priceCents: null, // Standard subscription only — no one-off purchase
+    minimumTierId: TIERS.alphaStandard.id,
+    status: 'published' as const,
+    orgId: ORGS.alpha.id,
+    mediaId: MEDIA.introTs.id, // reuse media
+    creatorId: USERS.creator.id,
+    viewCount: 2100,
+    purchaseCount: 0,
+  },
+  cssMasterclass: {
+    id: seedUuid('seed-content-css-masterclass'),
+    title: 'CSS Variables Masterclass [£4.99 Only]',
+    slug: 'css-variables-masterclass',
+    contentType: 'video' as const,
+    accessType: 'paid' as const,
+    priceCents: 499,
+    status: 'published' as const,
+    orgId: ORGS.alpha.id,
+    mediaId: MEDIA.introTs.id, // reuse media
+    creatorId: USERS.creator.id,
+    viewCount: 1500,
+    purchaseCount: 67,
   },
 } as const;
 
@@ -326,6 +485,17 @@ export const PURCHASES = {
   viewerSvelte: { id: seedUuid('seed-purchase-viewer-svelte') },
   viewerHono: { id: seedUuid('seed-purchase-viewer-hono') },
   adminSvelte: { id: seedUuid('seed-purchase-admin-svelte') },
+  // Additional purchases for customer filter testing
+  c1Svelte: { id: seedUuid('seed-purchase-c1-svelte') },
+  c1TsDeep: { id: seedUuid('seed-purchase-c1-ts-deep') },
+  c1Css: { id: seedUuid('seed-purchase-c1-css') },
+  c2Svelte: { id: seedUuid('seed-purchase-c2-svelte') },
+  c2TsDeep: { id: seedUuid('seed-purchase-c2-ts-deep') },
+  c3Css: { id: seedUuid('seed-purchase-c3-css') },
+  c4Svelte: { id: seedUuid('seed-purchase-c4-svelte') },
+  c4TsDeep: { id: seedUuid('seed-purchase-c4-ts-deep') },
+  c4Css: { id: seedUuid('seed-purchase-c4-css') },
+  c5TsDeep: { id: seedUuid('seed-purchase-c5-ts-deep') },
 } as const;
 
 // ── Content Access ───────────────────────────────────────────
@@ -334,6 +504,17 @@ export const CONTENT_ACCESS = {
   viewerSvelte: { id: seedUuid('seed-access-viewer-svelte') },
   viewerHono: { id: seedUuid('seed-access-viewer-hono') },
   adminSvelte: { id: seedUuid('seed-access-admin-svelte') },
+  // Additional access for customer filter testing
+  c1Svelte: { id: seedUuid('seed-access-c1-svelte') },
+  c1TsDeep: { id: seedUuid('seed-access-c1-ts-deep') },
+  c1Css: { id: seedUuid('seed-access-c1-css') },
+  c2Svelte: { id: seedUuid('seed-access-c2-svelte') },
+  c2TsDeep: { id: seedUuid('seed-access-c2-ts-deep') },
+  c3Css: { id: seedUuid('seed-access-c3-css') },
+  c4Svelte: { id: seedUuid('seed-access-c4-svelte') },
+  c4TsDeep: { id: seedUuid('seed-access-c4-ts-deep') },
+  c4Css: { id: seedUuid('seed-access-c4-css') },
+  c5TsDeep: { id: seedUuid('seed-access-c5-ts-deep') },
 } as const;
 
 // ── Playback ─────────────────────────────────────────────────
@@ -345,11 +526,18 @@ export const PLAYBACK = {
   adminSvelte: { id: seedUuid('seed-playback-admin-svelte') },
 } as const;
 
+// ── Subscriptions ───────────────────────────────────────────
+export const SUBSCRIPTIONS = {
+  viewerAlphaStandard: {
+    id: seedUuid('seed-subscription-viewer-alpha-standard'),
+  },
+} as const;
+
 // ── Stripe Connect Accounts ─────────────────────────────────
 export const CONNECT_ACCOUNTS = {
   alphaCreator: {
     id: seedUuid('seed-connect-alpha-creator'),
-    stripeAccountId: 'acct_seed_alpha_creator',
+    // stripeAccountId is created dynamically via Stripe API during seeding
   },
 } as const;
 

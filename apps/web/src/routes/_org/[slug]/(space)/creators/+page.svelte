@@ -1,13 +1,15 @@
 <!--
   @component OrgCreatorsPage
 
-  Organization creators directory page with a responsive grid of CreatorCard
-  components and pagination. Displays public creator profiles for the org.
+  Photo-dominant creators directory. Each creator is displayed as a
+  portrait card (showcase variant). Clicking a card opens a profile
+  drawer with full details, social links, and latest content.
 -->
 <script lang="ts">
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import { CreatorCard } from '$lib/components/ui/CreatorCard';
+  import { CreatorCard, CreatorProfileDrawer } from '$lib/components/ui/CreatorCard';
+  import type { CreatorDrawerData } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
@@ -19,13 +21,29 @@
   const items = $derived(data.creators?.items ?? []);
   const total = $derived(data.creators?.total ?? 0);
   const currentPage = $derived(data.pagination?.page ?? 1);
-  const limit = $derived(data.pagination?.limit ?? 20);
+  const limit = $derived(data.pagination?.limit ?? 12);
   const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
 
-  /**
-   * Build the baseUrl for Pagination links, preserving current path
-   * but without the 'page' param (Pagination adds it).
-   */
+  // Drawer state
+  let selectedCreator = $state<CreatorDrawerData | null>(null);
+  let drawerOpen = $state(false);
+
+  function openCreator(creator: typeof items[number]) {
+    selectedCreator = {
+      name: creator.name,
+      username: creator.username ?? null,
+      avatarUrl: creator.avatarUrl ?? null,
+      bio: creator.bio ?? null,
+      socialLinks: creator.socialLinks ?? null,
+      role: creator.role,
+      joinedAt: creator.joinedAt,
+      contentCount: creator.contentCount,
+      recentContent: creator.recentContent ?? [],
+      organizations: creator.organizations ?? [],
+    };
+    drawerOpen = true;
+  }
+
   const paginationBaseUrl = $derived.by(() => {
     const url = new URL(page.url);
     url.searchParams.delete('page');
@@ -50,13 +68,18 @@
 
   <!-- Creators Grid -->
   {#if items.length > 0}
-    <div class="creators__grid">
-      {#each items as creator (creator.name + creator.joinedAt)}
+    <div class="creators__grid" class:creators__grid--single={items.length === 1}>
+      {#each items as creator (creator.username ?? creator.name)}
         <CreatorCard
-          username={creator.name.toLowerCase().replace(/\s+/g, '-')}
+          variant="showcase"
+          username={creator.username ?? creator.name.toLowerCase().replace(/\s+/g, '-')}
           displayName={creator.name}
           avatar={creator.avatarUrl}
+          bio={creator.bio}
           contentCount={creator.contentCount}
+          role={creator.role}
+          recentContent={creator.recentContent}
+          onclick={() => openCreator(creator)}
         />
       {/each}
     </div>
@@ -72,60 +95,80 @@
       </div>
     {/if}
   {:else}
-    <EmptyState title={m.org_creators_empty()} description={m.org_creators_empty_description()} icon={UsersIcon} />
+    <EmptyState
+      title={m.org_creators_empty()}
+      description={m.org_creators_empty_description()}
+      icon={UsersIcon}
+    />
   {/if}
 </div>
+
+<!-- Profile Drawer -->
+<CreatorProfileDrawer
+  bind:open={drawerOpen}
+  creator={selectedCreator}
+  orgSlug={data.org?.slug ?? ''}
+/>
 
 <style>
   /* ── Layout ── */
   .creators {
-    max-width: 1200px;
+    max-width: 960px;
     width: 100%;
     margin: 0 auto;
-    padding: var(--space-8) var(--space-6);
+    padding: var(--space-12) var(--space-6);
     display: flex;
     flex-direction: column;
-    gap: var(--space-8);
+    gap: var(--space-10);
   }
 
   /* ── Header ── */
   .creators__header {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    align-items: center;
+    text-align: center;
+    gap: var(--space-3);
   }
 
   .creators__title {
     margin: 0;
-    font-size: var(--text-3xl);
+    font-size: var(--text-4xl);
     font-weight: var(--font-bold);
-    color: var(--color-text-primary);
+    font-family: var(--font-heading);
+    color: var(--color-text);
     line-height: var(--leading-tight);
   }
 
   .creators__subtitle {
     margin: 0;
-    font-size: var(--text-base);
+    font-size: var(--text-lg);
     color: var(--color-text-secondary);
-    line-height: var(--leading-normal);
+    line-height: var(--leading-relaxed);
+    max-width: 420px;
   }
 
-  /* ── Grid ── */
+  /* ── Grid — bento-style, large cards ── */
   .creators__grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: var(--space-6);
   }
 
+  /* Single creator: constrain width */
+  .creators__grid--single {
+    max-width: 400px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
   @media (--breakpoint-sm) {
     .creators__grid {
       grid-template-columns: repeat(2, 1fr);
     }
-  }
 
-  @media (--breakpoint-lg) {
-    .creators__grid {
-      grid-template-columns: repeat(3, 1fr);
+    .creators__grid--single {
+      grid-template-columns: 1fr;
     }
   }
 
@@ -139,12 +182,16 @@
   /* ── Responsive ── */
   @media (--below-sm) {
     .creators {
-      padding: var(--space-6) var(--space-4);
-      gap: var(--space-6);
+      padding: var(--space-8) var(--space-4);
+      gap: var(--space-8);
     }
 
     .creators__title {
       font-size: var(--text-2xl);
+    }
+
+    .creators__subtitle {
+      font-size: var(--text-base);
     }
   }
 </style>

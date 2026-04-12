@@ -10,7 +10,10 @@
 
 import { STRIPE_EVENTS } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
-import { ConnectAccountService } from '@codex/subscription';
+import {
+  ConnectAccountService,
+  SubscriptionService,
+} from '@codex/subscription';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -24,8 +27,7 @@ export async function handleConnectWebhook(
 
   const { db, cleanup } = createPerRequestDbClient({
     DATABASE_URL: c.env.DATABASE_URL,
-    DATABASE_URL_LOCAL_PROXY: (c.env as Record<string, string | undefined>)
-      .DATABASE_URL_LOCAL_PROXY,
+    DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
     DB_METHOD: c.env.DB_METHOD,
   });
 
@@ -38,23 +40,82 @@ export async function handleConnectWebhook(
     switch (event.type) {
       case STRIPE_EVENTS.ACCOUNT_UPDATED: {
         const account = event.data.object as Stripe.Account;
+        // Check previous values to detect activation transition
+        const previousAttributes = event.data.previous_attributes as
+          | Partial<Stripe.Account>
+          | undefined;
+        const wasChargesEnabled =
+          previousAttributes?.charges_enabled !== undefined
+            ? previousAttributes.charges_enabled
+            : account.charges_enabled;
+        const wasPayoutsEnabled =
+          previousAttributes?.payouts_enabled !== undefined
+            ? previousAttributes.payouts_enabled
+            : account.payouts_enabled;
+        const wasActive = wasChargesEnabled && wasPayoutsEnabled;
+        const isNowActive = account.charges_enabled && account.payouts_enabled;
+
         await service.handleAccountUpdated(account);
         obs?.info('Connect account updated', {
           accountId: account.id,
           chargesEnabled: account.charges_enabled,
           payoutsEnabled: account.payouts_enabled,
         });
+
+        // BUG-014: When an account transitions to fully active, resolve any
+        // accumulated pending payouts via fire-and-forget (waitUntil).
+        if (isNowActive && !wasActive) {
+          const orgId = account.metadata?.codex_organization_id;
+          if (orgId) {
+            const { db: subDb, cleanup: subCleanup } = createPerRequestDbClient(
+              {
+                DATABASE_URL: c.env.DATABASE_URL,
+                DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
+                DB_METHOD: c.env.DB_METHOD,
+              }
+            );
+            const subscriptionService = new SubscriptionService(
+              { db: subDb, environment: c.env.ENVIRONMENT || 'development' },
+              stripe
+            );
+            c.executionCtx.waitUntil(
+              subscriptionService
+                .resolvePendingPayouts(orgId, account.id)
+                .then((result) => {
+                  obs?.info('Pending payouts resolved on account activation', {
+                    accountId: account.id,
+                    organizationId: orgId,
+                    ...result,
+                  });
+                })
+                .catch((err) => {
+                  obs?.error('Failed to resolve pending payouts', {
+                    accountId: account.id,
+                    organizationId: orgId,
+                    error: (err as Error).message,
+                  });
+                })
+                .finally(() => subCleanup())
+            );
+          }
+        }
         break;
       }
 
       case STRIPE_EVENTS.ACCOUNT_DEAUTHORIZED: {
         // account.application.deauthorized — the connected account
-        // has disconnected from our platform. Disable locally to
-        // stop future transfer attempts.
-        const account = event.data.object as Stripe.Account;
-        await service.handleAccountDeauthorized(account.id);
+        // has disconnected from our platform. The event object is an
+        // Application, but the account ID is in event.account.
+        const accountId = event.account;
+        if (!accountId) {
+          obs?.warn('Connect deauthorized event missing account ID', {
+            type: event.type,
+          });
+          break;
+        }
+        await service.handleAccountDeauthorized(accountId);
         obs?.info('Connect account deauthorized', {
-          accountId: account.id,
+          accountId,
         });
         break;
       }

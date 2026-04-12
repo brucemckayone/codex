@@ -83,6 +83,7 @@
             amount: item.priceCents,
             currency: 'GBP',
           } : null}
+          contentAccessType={item.accessType}
         />
       {/each}
     {:else}

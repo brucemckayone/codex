@@ -10,6 +10,8 @@ export interface SendResult {
   success: boolean;
   messageId?: string;
   error?: string;
+  /** Set when email was skipped (e.g., user opted out of this category) */
+  skipped?: string;
 }
 
 export interface EmailProvider {

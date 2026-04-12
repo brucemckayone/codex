@@ -40,6 +40,7 @@ import type {
   ContactSettingsResponse,
   FeatureSettingsResponse,
   MyMembershipResponse,
+  OrganizationPublicStatsResponse,
   OrganizationWithRole,
   PaginatedListResponse,
   PublicBrandingResponse,
@@ -714,6 +715,51 @@ export function createServerApi(
         ),
 
       /**
+       * Link a media item as the org's intro video
+       */
+      linkIntroVideo: (id: string, mediaItemId: string) =>
+        request<BrandingSettingsResponse>(
+          'org',
+          `/api/organizations/${id}/settings/branding/intro-video`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ mediaItemId }),
+          }
+        ),
+
+      /**
+       * Get intro video transcoding status
+       */
+      getIntroVideoStatus: (id: string) =>
+        request<{
+          status:
+            | 'none'
+            | 'uploading'
+            | 'uploaded'
+            | 'transcoding'
+            | 'ready'
+            | 'failed';
+          introVideoUrl: string | null;
+          progress: number | null;
+          error: string | null;
+        }>(
+          'org',
+          `/api/organizations/${id}/settings/branding/intro-video/status`
+        ),
+
+      /**
+       * Delete the org's intro video
+       */
+      deleteIntroVideo: (id: string) =>
+        request<BrandingSettingsResponse>(
+          'org',
+          `/api/organizations/${id}/settings/branding/intro-video`,
+          {
+            method: 'DELETE',
+          }
+        ),
+
+      /**
        * Get current user's organizations
        */
       getMyOrganizations: () =>
@@ -759,14 +805,43 @@ export function createServerApi(
         request<
           PaginatedListResponse<{
             name: string;
+            username: string | null;
             avatarUrl: string | null;
+            bio: string | null;
+            socialLinks: {
+              website?: string;
+              twitter?: string;
+              youtube?: string;
+              instagram?: string;
+            } | null;
             role: string;
             joinedAt: string;
             contentCount: number;
+            recentContent: {
+              title: string;
+              slug: string;
+              thumbnailUrl: string | null;
+              contentType: string;
+            }[];
+            organizations: {
+              name: string;
+              slug: string;
+              logoUrl: string | null;
+            }[];
           }>
         >(
           'org',
           `/api/organizations/public/${slug}/creators${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get public aggregate statistics for an organization.
+       * Returns content counts by type, total duration, creator count, and views.
+       */
+      getPublicStats: (slug: string) =>
+        request<OrganizationPublicStatsResponse>(
+          'org',
+          `/api/organizations/public/${slug}/stats`
         ),
 
       /**

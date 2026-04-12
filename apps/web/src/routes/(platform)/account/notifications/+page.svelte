@@ -12,9 +12,9 @@
 	const preferences = data.preferences;
 
 	// Local state for Switch bindings and conditional hidden input rendering
-	let marketingChecked = $state(preferences?.emailMarketing ?? false);
+	let marketingChecked = $state(preferences?.emailMarketing ?? true);
 	let transactionalChecked = $state(preferences?.emailTransactional ?? true);
-	let digestChecked = $state(preferences?.emailDigest ?? false);
+	let digestChecked = $state(preferences?.emailDigest ?? true);
 
 	let showSuccess = $state(false);
 	let successTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -44,6 +44,10 @@
 <div class="notifications">
 	<h1>{m.account_notifications_title()}</h1>
 	<p class="description">{m.account_notifications_description()}</p>
+
+	<Alert variant="info" style="margin-bottom: var(--space-4)">
+		Some emails (like purchase receipts, password resets, and security notices) will always be sent for compliance and account security.
+	</Alert>
 
 	{#if showSuccess}
 		<Alert variant="success" style="margin-bottom: var(--space-4)">
@@ -75,16 +79,15 @@
 			<Switch id="emailMarketing" bind:checked={marketingChecked} disabled={updateNotificationsForm.pending > 0} />
 		</div>
 
-		<!-- Transactional Emails -->
+		<!-- Transactional Emails (always on — cannot be disabled) -->
 		<div class="toggle-row">
 			<div class="toggle-info">
 				<Label for="emailTransactional">{m.account_notifications_transactional()}</Label>
 				<span class="toggle-desc">{m.account_notifications_transactional_desc()}</span>
+				<span class="always-on">Always on — required for account security</span>
 			</div>
-			{#if transactionalChecked}
-				<input type="hidden" name="b:emailTransactional" value="on" />
-			{/if}
-			<Switch id="emailTransactional" bind:checked={transactionalChecked} disabled={updateNotificationsForm.pending > 0} />
+			<input type="hidden" name="b:emailTransactional" value="on" />
+			<Switch id="emailTransactional" checked={true} disabled={true} />
 		</div>
 
 		<!-- Weekly Digest -->
@@ -163,6 +166,12 @@
 		font-size: var(--text-xs);
 		color: var(--color-text-secondary);
 		line-height: var(--leading-relaxed);
+	}
+
+	.always-on {
+		font-size: var(--text-xs);
+		color: var(--color-text-tertiary);
+		font-style: italic;
 	}
 
 	.form-actions {

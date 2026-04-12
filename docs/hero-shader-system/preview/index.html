@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Shader Hero — Preset Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; color: #e5e5e5; font-family: system-ui, -apple-system, sans-serif; }
+
+  .app { display: flex; height: 100vh; }
+
+  /* Canvas area */
+  .preview { flex: 1; position: relative; overflow: hidden; }
+  canvas { width: 100%; height: 100%; display: block; }
+
+  /* Controls panel */
+  .controls {
+    width: 320px; flex-shrink: 0; padding: 20px;
+    background: #141414; border-left: 1px solid #2a2a2a;
+    overflow-y: auto; display: flex; flex-direction: column; gap: 20px;
+  }
+  h1 { font-size: 16px; font-weight: 600; color: #fff; }
+  h2 { font-size: 11px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* Preset grid */
+  .preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .preset-btn {
+    padding: 8px 4px; border: 1px solid #2a2a2a; border-radius: 8px;
+    background: #1a1a1a; color: #ccc; font-size: 11px; cursor: pointer;
+    text-align: center; transition: all 0.15s;
+  }
+  .preset-btn:hover { border-color: #555; background: #222; }
+  .preset-btn.active { border-color: #7c3aed; background: #1e1b4b; color: #fff; }
+
+  /* Sliders */
+  .slider-row { display: grid; grid-template-columns: 70px 1fr 36px; align-items: center; gap: 8px; }
+  .slider-row label { font-size: 13px; color: #999; }
+  .slider-row input[type=range] { width: 100%; accent-color: #7c3aed; }
+  .slider-row .val { font-size: 11px; color: #666; font-family: monospace; text-align: right; }
+
+  /* Color inputs */
+  .color-row { display: flex; align-items: center; gap: 10px; }
+  .color-row label { font-size: 13px; color: #999; width: 80px; }
+  .color-row input[type=color] { width: 36px; height: 28px; border: 1px solid #333; border-radius: 4px; cursor: pointer; background: none; }
+  .color-row input[type=text] { width: 80px; padding: 4px 6px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #ccc; font-family: monospace; font-size: 12px; }
+
+  /* Brand preset buttons */
+  .brand-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .brand-btn {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border: 1px solid #2a2a2a; border-radius: 6px; background: #1a1a1a;
+    cursor: pointer; font-size: 11px; color: #aaa; transition: all 0.15s;
+  }
+  .brand-btn:hover { border-color: #555; }
+  .brand-swatch { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #444; flex-shrink: 0; }
+
+  /* FPS counter */
+  .fps { position: absolute; top: 10px; left: 10px; font-size: 12px; font-family: monospace; color: #0f0; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 4px; pointer-events: none; }
+
+  /* Toggle */
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; }
+  .toggle-row label { font-size: 13px; color: #999; }
+  .toggle-btn {
+    padding: 4px 12px; border: 1px solid #333; border-radius: 4px;
+    background: #1a1a1a; color: #888; font-size: 11px; cursor: pointer;
+  }
+  .toggle-btn.on { border-color: #7c3aed; background: #1e1b4b; color: #c4b5fd; }
+
+  section { display: flex; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="preview">
+    <canvas id="canvas"></canvas>
+    <div class="fps" id="fps">-- fps</div>
+  </div>
+  <div class="controls">
+    <h1>Shader Hero Preview</h1>
+
+    <section>
+      <h2>Preset</h2>
+      <div class="preset-grid" id="presetGrid"></div>
+    </section>
+
+    <section>
+      <h2>Animation</h2>
+      <div class="slider-row">
+        <label>Speed</label>
+        <input type="range" id="speed" min="0.1" max="2" step="0.1" value="0.5">
+        <span class="val" id="speedVal">0.5</span>
+      </div>
+      <div class="slider-row">
+        <label>Intensity</label>
+        <input type="range" id="intensity" min="0" max="1" step="0.05" value="0.8">
+        <span class="val" id="intensityVal">0.8</span>
+      </div>
+      <div class="slider-row">
+        <label>Detail</label>
+        <input type="range" id="complexity" min="0.1" max="1" step="0.1" value="0.5">
+        <span class="val" id="complexityVal">0.5</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>Interaction</h2>
+      <div class="toggle-row">
+        <label>Mouse tracking</label>
+        <button class="toggle-btn on" id="mouseToggle">On</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Brand Colors</h2>
+      <div class="color-row">
+        <label>Primary</label>
+        <input type="color" id="c1" value="#7C3AED">
+        <input type="text" id="c1text" value="#7C3AED">
+      </div>
+      <div class="color-row">
+        <label>Secondary</label>
+        <input type="color" id="c2" value="#EC4899">
+        <input type="text" id="c2text" value="#EC4899">
+      </div>
+      <div class="color-row">
+        <label>Accent</label>
+        <input type="color" id="c3" value="#F59E0B">
+        <input type="text" id="c3text" value="#F59E0B">
+      </div>
+      <div class="color-row">
+        <label>Background</label>
+        <input type="color" id="cbg" value="#0F172A">
+        <input type="text" id="cbgtext" value="#0F172A">
+      </div>
+    </section>
+
+    <section>
+      <h2>Brand Presets</h2>
+      <div class="brand-grid" id="brandGrid"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// VERTEX SHADER
+// ═══════════════════════════════════════════════════════════════
+const VERT = `
+attribute vec2 a_position;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+
+// ═══════════════════════════════════════════════════════════════
+// COMMON GLSL (stripped of multi-line comments for inline use)
+// ═══════════════════════════════════════════════════════════════
+const COMMON = `
+precision mediump float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform float u_speed;
+uniform float u_intensity;
+uniform float u_complexity;
+uniform vec2 u_mouse;
+uniform float u_mouse_influence;
+uniform float u_scroll;
+uniform vec3 u_color_primary;
+uniform vec3 u_color_secondary;
+uniform vec3 u_color_accent;
+uniform vec3 u_color_bg;
+varying vec2 v_uv;
+
+vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
+vec2 mod289v2(vec2 x){return x-floor(x*(1./289.))*289.;}
+vec3 permute(vec3 x){return mod289(((x*34.)+1.)*x);}
+
+float snoise2(vec2 v){
+  const vec4 C=vec4(0.211324865405187,0.366025403784439,-0.577350269189626,0.024390243902439);
+  vec2 i=floor(v+dot(v,C.yy));
+  vec2 x0=v-i+dot(i,C.xx);
+  vec2 i1=(x0.x>x0.y)?vec2(1.,0.):vec2(0.,1.);
+  vec4 x12=x0.xyxy+C.xxzz;x12.xy-=i1;
+  i=mod289v2(i);
+  vec3 p=permute(permute(i.y+vec3(0.,i1.y,1.))+i.x+vec3(0.,i1.x,1.));
+  vec3 m=max(.5-vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)),0.);
+  m=m*m;m=m*m;
+  vec3 x=2.*fract(p*C.www)-1.;
+  vec3 h=abs(x)-.5;
+  vec3 ox=floor(x+.5);
+  vec3 a0=x-ox;
+  m*=1.79284291400159-.85373472095314*(a0*a0+h*h);
+  vec3 g;
+  g.x=a0.x*x0.x+h.x*x0.y;
+  g.yz=a0.yz*x12.xz+h.yz*x12.yw;
+  return 130.*dot(m,g);
+}
+
+vec4 mod289v4(vec4 x){return x-floor(x*(1./289.))*289.;}
+vec4 permute4(vec4 x){return mod289v4(((x*34.)+1.)*x);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-.85373472095314*r;}
+
+float snoise3(vec3 v){
+  const vec2 C=vec2(1./6.,1./3.);
+  const vec4 D=vec4(0.,.5,1.,2.);
+  vec3 i=floor(v+dot(v,C.yyy));
+  vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g=step(x0.yzx,x0.xyz);
+  vec3 l=1.-g;
+  vec3 i1=min(g.xyz,l.zxy);
+  vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+C.xxx;
+  vec3 x2=x0-i2+C.yyy;
+  vec3 x3=x0-D.yyy;
+  i=mod289(i);
+  vec4 p=permute4(permute4(permute4(i.z+vec4(0.,i1.z,i2.z,1.))+i.y+vec4(0.,i1.y,i2.y,1.))+i.x+vec4(0.,i1.x,i2.x,1.));
+  float n_=.142857142857;
+  vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z);
+  vec4 y_=floor(j-7.*x_);
+  vec4 xx=x_*ns.x+ns.yyyy;
+  vec4 yy=y_*ns.x+ns.yyyy;
+  vec4 hh=1.-abs(xx)-abs(yy);
+  vec4 b0=vec4(xx.xy,yy.xy);
+  vec4 b1=vec4(xx.zw,yy.zw);
+  vec4 s0=floor(b0)*2.+1.;
+  vec4 s1=floor(b1)*2.+1.;
+  vec4 sh=-step(hh,vec4(0.));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;
+  vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,hh.x);
+  vec3 p1=vec3(a0.zw,hh.y);
+  vec3 p2=vec3(a1.xy,hh.z);
+  vec3 p3=vec3(a1.zw,hh.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+  vec4 m=max(.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.);
+  m=m*m;
+  return 42.*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}
+
+float fbm2(vec2 p,int oct){float v=0.,a=.5,f=1.;for(int i=0;i<8;i++){if(i>=oct)break;v+=a*snoise2(p*f);a*=.5;f*=2.;}return v;}
+
+float smoothmin(float a,float b,float k){float h=clamp(.5+.5*(b-a)/k,0.,1.);return mix(b,a,h)-k*h*(1.-h);}
+vec2 hash2(vec2 p){p=vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3)));return -1.+2.*fract(sin(p)*43758.5453123);}
+vec3 brandPalette(float t,vec3 c1,vec3 c2,vec3 c3){t=clamp(t,0.,1.);return t<.5?mix(c1,c2,t*2.):mix(c2,c3,(t-.5)*2.);}
+float scrollFade(){return 1.-smoothstep(.3,.9,u_scroll);}
+
+vec3 blendScreen(vec3 a,vec3 b){return 1.-(1.-a)*(1.-b);}
+vec3 blendOverlay(vec3 base,vec3 blend){return vec3(base.r<.5?2.*base.r*blend.r:1.-2.*(1.-base.r)*(1.-blend.r),base.g<.5?2.*base.g*blend.g:1.-2.*(1.-base.g)*(1.-blend.g),base.b<.5?2.*base.b*blend.b:1.-2.*(1.-base.b)*(1.-blend.b));}
+
+vec3 srgbToLinear(vec3 c){return pow(max(c,0.),vec3(2.2));}
+vec3 linearToSrgb(vec3 c){return pow(max(c,0.),vec3(1./2.2));}
+vec3 linearToOklab(vec3 c){float l=.4122214708*c.r+.5363325363*c.g+.0514459929*c.b;float m=.2119034982*c.r+.6806995451*c.g+.1073969566*c.b;float s=.0883024619*c.r+.2220049171*c.g+.6896926210*c.b;float l_=pow(l,1./3.);float m_=pow(m,1./3.);float s_=pow(s,1./3.);return vec3(.2104542553*l_+.7936177850*m_-.0040720468*s_,1.9779984951*l_-2.4285922050*m_+.4505937099*s_,.0259040371*l_+.7827717662*m_-.8086757660*s_);}
+vec3 oklabToLinear(vec3 lab){float l_=lab.x+.3963377774*lab.y+.2158037573*lab.z;float m_=lab.x-.1055613458*lab.y-.0638541728*lab.z;float s_=lab.x-.0894841775*lab.y-1.2914855480*lab.z;return vec3(4.0767416621*l_*l_*l_-3.3077115913*m_*m_*m_+.2309699292*s_*s_*s_,-1.2684380046*l_*l_*l_+2.6097574011*m_*m_*m_-.3413193965*s_*s_*s_,-.0041960863*l_*l_*l_-.7034186147*m_*m_*m_+1.7076147010*s_*s_*s_);}
+vec3 oklabMix(vec3 c1,vec3 c2,float t){return linearToSrgb(oklabToLinear(mix(linearToOklab(srgbToLinear(c1)),linearToOklab(srgbToLinear(c2)),t)));}
+vec3 oklabPalette(float t,vec3 c1,vec3 c2,vec3 c3){t=clamp(t,0.,1.);return t<.5?oklabMix(c1,c2,t*2.):oklabMix(c2,c3,(t-.5)*2.);}
+
+// Post-processing: film grain + contrast + saturation + vignette
+vec3 applyFilmGrain(vec3 c,vec2 uv,float time){float g=fract(sin(dot(uv*time*.5+vec2(12.9898,78.233),vec2(12.9898,78.233)))*43758.5453);float luma=dot(c,vec3(.299,.587,.114));float amt=mix(.04,.015,luma);return c+(g-.5)*amt;}
+vec3 postProcess(vec3 c,vec2 uv,float time){
+  c=c/(1.+c)*.9+c*.1; // tone map
+  c=smoothstep(vec3(0.),vec3(1.),c); // contrast S-curve
+  float luma=dot(c,vec3(.299,.587,.114));c=mix(vec3(luma),c,1.15); // saturation
+  vec2 v=uv*2.-1.;c*=max(1.-dot(v,v)*.3,0.); // vignette 30%
+  c=applyFilmGrain(c,uv,time); // film grain
+  return clamp(c,0.,1.);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════
+// FRAGMENT SHADERS (one per preset)
+// ═══════════════════════════════════════════════════════════════
+const PRESETS = {
+'gradient-mesh': {name:'Gradient Mesh', frag:`
+void main(){
+  vec2 uv=v_uv;
+  vec2 mo=(u_mouse-.5)*u_mouse_influence*.15;uv+=mo;
+  vec2 p=uv*2.-1.;p.x*=u_resolution.x/u_resolution.y;
+  float t=u_time*.1;
+  // Wide frequency spread: 0.4/0.8/1.4 (not 0.6/0.7/0.8)
+  // Speed ratio: 1x/2.5x/5x (creates depth hierarchy)
+  float n1=snoise3(vec3(p*.4,t*.15))*.5+.5;
+  float n2=snoise3(vec3(p*.8+3.7,t*.35))*.5+.5;
+  float n3=snoise3(vec3(p*1.4+7.3,t*.65))*.5+.5;
+  // Soft blob shaping (smoothstep not pow — no dead zones)
+  float soft=.25+(1.-u_intensity)*.2;
+  n1=smoothstep(soft,1.-soft,n1);
+  n2=smoothstep(soft,1.-soft,n2);
+  n3=smoothstep(soft,1.-soft,n3);
+  // Weighted composite to single palette value (no Screen washout)
+  float comp=n1*.5+n2*.3+n3*.2;
+  comp+=(uv.x*.15+uv.y*.1-.125);
+  comp=clamp(comp,0.,1.);
+  // Map through OKLAB palette (perceptually uniform)
+  vec3 color=oklabPalette(comp,u_color_primary,u_color_secondary,u_color_accent);
+  // Subtle highlight at blob peaks
+  color+=smoothstep(.7,1.,n1)*u_intensity*.12;
+  // Mouse glow
+  float md=distance(v_uv,u_mouse);
+  color+=smoothstep(.3,0.,md)*u_mouse_influence*.08;
+  // Intensity blend to flat gradient
+  vec3 flat=oklabMix(u_color_primary,u_color_secondary,uv.x*.7+uv.y*.3);
+  color=mix(flat,color,u_intensity);
+  // Post-process (grain, contrast, vignette)
+  color=postProcess(color,v_uv,u_time);
+  gl_FragColor=vec4(color,scrollFade());
+}`},
+
+'noise-flow': {name:'Noise Flow', frag:`
+void main(){
+  vec2 uv=v_uv;
+  vec2 p=uv*3.;p.x*=u_resolution.x/u_resolution.y;
+  float t=u_time*.15;
+  int oct=int(u_complexity*4.)+1;
+  float w1=fbm2(p+vec2(t*.3,t*.2),oct);
+  float w2=fbm2(p+vec2(-t*.2,t*.35)+5.2,oct);
+  float ws=.3+u_intensity*.4;
+  vec2 warped=p+vec2(w1,w2)*ws;
+  float md=distance(uv,u_mouse);
+  float mw=smoothstep(.35,0.,md)*u_mouse_influence;
+  warped+=(u_mouse-uv)*mw*.6;
+  float n=fbm2(warped+vec2(t*.08),oct)*.5+.5;
+  n=pow(n,.5+u_intensity);n=clamp(n,0.,1.);
+  vec3 color=brandPalette(n,u_color_primary,u_color_secondary,u_color_accent);
+  color+=smoothstep(.75,.95,n)*u_intensity*.3;
+  color+=smoothstep(.3,0.,md)*u_mouse_influence*.15;
+  vec2 e=v_uv*2.-1.;color*=1.-dot(e,e)*.08;
+  gl_FragColor=vec4(color,scrollFade());
+}`},
+
+'aurora': {name:'Aurora', frag:`
+void main(){
+  vec2 uv=v_uv;float t=u_time*.25;
+  float asp=u_resolution.x/u_resolution.y;
+  float msy=(u_mouse.y-.5)*u_mouse_influence*.2;
+  float md=distance(uv,u_mouse);
+  float mb=smoothstep(.4,0.,md)*u_mouse_influence*.4;
+  float yp=uv.y+msy;
+  int layers=int(u_complexity*5.)+2;
+  float wave=0.;
+  float nx0=snoise2(vec2(uv.x*1.5,t*.2))*.4;
+  wave+=sin(uv.x*asp*2.+t*.3+nx0)*.18;
+  if(layers>=2){float nx1=snoise2(vec2(uv.x*2.+3.7,t*.25))*.35;wave+=sin(uv.x*asp*3.5+t*.4+nx1)*.14;}
+  if(layers>=3){float nx2=snoise2(vec2(uv.x*2.5+7.1,t*.3))*.3;wave+=sin(uv.x*asp*5.+t*.5+nx2)*.10;}
+  if(layers>=4){wave+=sin(uv.x*asp*7.+t*.55)*.07;}
+  if(layers>=5){wave+=sin(uv.x*asp*9.+t*.65)*.05;}
+  float b1=smoothstep(.25,0.,abs(yp-.45-wave));
+  float b2=smoothstep(.20,0.,abs(yp-.60-wave*.7))*.7;
+  float br=b1+b2;
+  float sh=snoise2(vec2(uv.x*8.,uv.y*5.+t*1.5))*.12+.88;
+  br*=sh;br+=mb;
+  vec3 ac=brandPalette(yp,u_color_primary,u_color_secondary,u_color_accent);
+  vec3 base=u_color_bg*.08;
+  vec3 glow=ac*br*u_intensity;
+  vec3 color=base+glow;color=min(color,vec3(1.));
+  float ef=smoothstep(0.,.15,uv.y)*smoothstep(1.,.85,uv.y);
+  color=mix(base,color,ef);
+  gl_FragColor=vec4(color,scrollFade());
+}`},
+
+'voronoi': {name:'Voronoi', frag:`
+void main(){
+  vec2 uv=v_uv;vec2 p=uv;p.x*=u_resolution.x/u_resolution.y;
+  float t=u_time*.2;
+  float dens=3.+u_complexity*4.;p*=dens;
+  vec2 tile=floor(p);vec2 loc=fract(p);
+  float md1=10.,md2=10.;float nid=0.;
+  for(int dx=-1;dx<=1;dx++)for(int dy=-1;dy<=1;dy++){
+    vec2 nb=vec2(float(dx),float(dy));vec2 nt=tile+nb;
+    vec2 seed=hash2(nt);
+    float sh=fract(sin(dot(nt,vec2(53.7,91.3)))*43758.5453);
+    seed+=vec2(sin(t*(.5+sh*.5)+sh*6.28)*.3,cos(t*(.4+sh*.4)+sh*3.14)*.3);
+    seed=.5+.5*seed;
+    vec2 diff=nb+seed-loc;float d=length(diff);
+    if(d<md1){md2=md1;md1=d;nid=sh;}else if(d<md2){md2=d;}
+  }
+  float edge=md2-md1;
+  float ew=.05+(1.-u_intensity)*.1;
+  float em=smoothstep(0.,ew,edge);
+  vec3 cc=brandPalette(nid,u_color_primary,u_color_secondary,u_color_accent);
+  cc*=.7+(1.-md1*.8)*.3;
+  vec3 ec=mix(u_color_accent,u_color_primary,edge*5.)*1.3;
+  vec3 color=mix(ec,cc,em);
+  color=mix(u_color_bg*.1,color,.85+u_intensity*.15);
+  gl_FragColor=vec4(color,scrollFade());
+}`},
+
+'metaballs': {name:'Metaballs', frag:`
+#define MB 8
+void main(){
+  vec2 uv=v_uv;vec2 p=uv;p.x*=u_resolution.x/u_resolution.y;
+  float t=u_time*.3;int bc=int(u_complexity*5.)+3;
+  vec2 c[MB];float r[MB];
+  c[0]=vec2(.5+sin(t*.23)*.3,.5+cos(t*.19)*.25);r[0]=.12;
+  c[1]=vec2(.5+sin(t*.31+1.7)*.25,.5+cos(t*.27+2.3)*.3);r[1]=.10;
+  c[2]=vec2(.5+sin(t*.41+3.1)*.2,.5+cos(t*.37+.7)*.2);r[2]=.09;
+  c[3]=vec2(.5+sin(t*.17+5.3)*.35,.5+sin(t*.23+4.1)*.28);r[3]=.11;
+  c[4]=vec2(.5+sin(t*.29)*.25,.5+sin(t*.58+1.)*.15);r[4]=.08;
+  c[5]=vec2(.5+cos(t*.13+2.7)*.3,.5+sin(t*.11+1.3)*.25);r[5]=.10;
+  c[6]=vec2(.5+sin(t*.37+4.7)*.22,.5+abs(sin(t*.43+3.1))*.3-.15);r[6]=.07;
+  c[7]=vec2(mix(.5+sin(t*.19+6.1)*.2,u_mouse.x,u_mouse_influence),mix(.5+cos(t*.23+5.7)*.2,u_mouse.y,u_mouse_influence));r[7]=.09;
+  float asp=u_resolution.x/u_resolution.y;
+  c[7].x*=asp;
+  for(int i=0;i<MB-1;i++)c[i].x*=asp;
+  float pot=0.;vec3 wc=vec3(0.);float tw=0.;
+  for(int i=0;i<MB;i++){
+    if(i>=bc)break;
+    float d=distance(p,c[i]);float rr=r[i]*(.8+u_intensity*.4);
+    float ct=(rr*rr)/(d*d+.001);pot+=ct;
+    float cw=ct*ct;tw+=cw;
+    vec3 bc2;int ci=i-(i/3)*3;
+    if(ci==0)bc2=u_color_primary;else if(ci==1)bc2=u_color_secondary;else bc2=u_color_accent;
+    wc+=bc2*cw;
+  }
+  float th=1.2;float edge=smoothstep(th-.3,th+.1,pot);
+  vec3 bc3=wc/(tw+.001);
+  float eg=smoothstep(th+.1,th-.1,pot)*smoothstep(th-.8,th-.1,pot);
+  vec3 color=mix(bc3,bc3*1.3,eg*.3);
+  vec3 bg=u_color_bg*.15;color=mix(bg,color,edge);
+  float ce=smoothstep(0.,.05,uv.x)*smoothstep(1.,.95,uv.x)*smoothstep(0.,.05,uv.y)*smoothstep(1.,.95,uv.y);
+  gl_FragColor=vec4(color,scrollFade()*ce);
+}`},
+
+'waves': {name:'Waves', frag:`
+void main(){
+  vec2 uv=v_uv;vec2 p=uv;p.x*=u_resolution.x/u_resolution.y;
+  float t=u_time*.4;int wc=int(u_complexity*3.)+2;
+  float asp=u_resolution.x/u_resolution.y;
+  vec2 src[5];
+  src[0]=vec2(.3*asp,.3);src[1]=vec2(.7*asp,.6);src[2]=vec2(.5*asp,.8);src[3]=vec2(.2*asp,.7);
+  src[4]=vec2(mix(.5*asp+sin(t*.2)*.2,u_mouse.x*asp,u_mouse_influence),mix(.5+cos(t*.15)*.2,u_mouse.y,u_mouse_influence));
+  src[0]+=vec2(sin(t*.11)*.08,cos(t*.13)*.06);
+  src[1]+=vec2(cos(t*.09)*.07,sin(t*.12)*.08);
+  src[2]+=vec2(sin(t*.14)*.05,cos(t*.08)*.07);
+  src[3]+=vec2(cos(t*.07)*.09,sin(t*.10)*.05);
+  float ws=0.;float freq=12.+u_intensity*8.;float spd=t*2.;
+  for(int i=0;i<5;i++){if(i>=wc)break;float d=distance(p,src[i]);ws+=sin(d*freq-spd+float(i)*1.3)/(1.+d*3.);}
+  ws=ws/float(wc)*.5+.5;
+  float caus=1.-pow(abs(ws-.5)*2.,.6);
+  caus=pow(caus,1.5+u_intensity);
+  vec3 deep=mix(u_color_primary,u_color_secondary,.3)*.4;
+  vec3 bright=mix(u_color_secondary,u_color_accent,caus);
+  vec3 color=mix(deep,bright,caus*u_intensity);
+  color+=snoise2(vec2(p.x*20.,p.y*15.+t*.8))*.05;
+  float md=distance(uv,u_mouse);
+  color+=u_color_accent*smoothstep(.25,0.,md)*u_mouse_influence*.12;
+  gl_FragColor=vec4(color,scrollFade());
+}`},
+
+'particles': {name:'Star Field', frag:`
+float cellHash(vec2 c){return fract(sin(dot(c,vec2(127.1,311.7)))*43758.5453);}
+float particle(vec2 uv2,vec2 c,float sz){float rx=cellHash(c);float ry=cellHash(c+17.3);vec2 ctr=vec2(rx,ry);float d=length(uv2-ctr);return smoothstep(sz,sz*.3,d)+smoothstep(sz*3.,0.,d)*.2;}
+void main(){
+  vec2 uv=v_uv;float t=u_time*.15;float asp=u_resolution.x/u_resolution.y;
+  vec2 mw=(uv-u_mouse)*u_mouse_influence*.04;
+  int lc=int(u_complexity*2.)+1;
+  vec3 tc=vec3(0.);
+  for(int layer=0;layer<3;layer++){
+    if(layer>=lc)break;
+    float dens=layer==0?12.:layer==1?7.:4.;
+    float spd=layer==0?.05:layer==1?.1:.18;
+    float sz=layer==0?.06:layer==1?.09:.12;
+    float wt=layer==0?.4:layer==1?.35:.25;
+    vec3 lc2=layer==0?u_color_secondary:layer==1?u_color_primary:u_color_accent;
+    vec2 luv=uv;luv.x*=asp;luv+=mw*float(layer+1)*.7;luv+=vec2(t*spd,t*spd*(layer==1?-.2:.3));
+    vec2 gr=luv*dens;vec2 cl=floor(gr);vec2 lo=fract(gr);
+    float br=0.;
+    for(int dx=-1;dx<=1;dx++)for(int dy=-1;dy<=1;dy++){
+      vec2 nb=cl+vec2(float(dx),float(dy));
+      float pp=particle(lo-vec2(float(dx),float(dy)),nb,sz);
+      float sb=pow(cellHash(nb+100.+float(layer)*200.),layer==0?2.:1.5);
+      float tw=sin(t*(3.-float(layer)*.7)+cellHash(nb+200.+float(layer)*200.)*6.28)*.25+.75;
+      br+=pp*sb*tw;
+    }
+    tc+=lc2*br*wt;
+  }
+  vec3 bg=u_color_bg*.06;
+  vec3 color=bg+tc*u_intensity*2.;color=min(color,vec3(1.));
+  color+=snoise2(uv*5.+t*.1)*.015;
+  gl_FragColor=vec4(color,scrollFade());
+}`},
+
+'geometric': {name:'Geometric', frag:`
+#define PI 3.14159265359
+#define TAU 6.28318530718
+void main(){
+  vec2 uv=v_uv;vec2 p=uv*2.-1.;p.x*=u_resolution.x/u_resolution.y;
+  vec2 mc=(u_mouse*2.-1.)*u_mouse_influence*.2;mc.x*=u_resolution.x/u_resolution.y;
+  p-=mc;float t=u_time*.15;
+  float rad=length(p);float ang=atan(p.y,p.x);
+  float sym=floor(4.+u_complexity*8.);float sa=TAU/sym;
+  float fa=mod(ang+t*.3,sa);
+  if(fa>sa*.5)fa=sa-fa;
+  vec2 sp=vec2(cos(fa),sin(fa))*rad;
+  float na=.1+u_intensity*.15;
+  sp+=vec2(snoise2(vec2(sp.x*3.+t*.4,sp.y*3.))*na,snoise2(vec2(sp.y*3.+t*.3,sp.x*3.+5.))*na);
+  float rf=3.+u_complexity*4.;
+  float rl=fract(rad*rf+t*.1);rl=1.-(smoothstep(.02,.04,rl)*smoothstep(.98,.96,rl));
+  float ringf=4.+u_complexity*6.;
+  float rings=fract(length(sp)*ringf-t*.15);rings=1.-(smoothstep(.02,.05,rings)*smoothstep(.98,.95,rings));
+  float spokes=fract(fa/sa*sym*.5);spokes=1.-(smoothstep(.02,.06,spokes)*smoothstep(.98,.94,spokes));
+  float pat=max(rl*.4,rings*.6);pat=max(pat,spokes*.3);
+  pat*=smoothstep(1.5,.2,rad);
+  float cp=fract(rad*2.+fa/sa);
+  vec3 lc=brandPalette(cp,u_color_primary,u_color_secondary,u_color_accent);
+  vec3 bg=u_color_bg*.08;
+  vec3 color=mix(bg,lc,pat*u_intensity);
+  color+=mix(u_color_primary,u_color_accent,.5)*smoothstep(.15,0.,rad)*u_intensity*.5;
+  color*=sin(ang*sym+t*2.)*.05+.95;
+  float md=distance(uv,u_mouse);
+  color+=u_color_accent*smoothstep(.3,0.,md)*u_mouse_influence*.1;
+  gl_FragColor=vec4(color,scrollFade());
+}`}
+};
+
+// ═══════════════════════════════════════════════════════════════
+// BRAND COLOR PRESETS
+// ═══════════════════════════════════════════════════════════════
+const BRAND_PRESETS = [
+  {name:'Vibrant', c1:'#7C3AED',c2:'#EC4899',c3:'#F59E0B',bg:'#0F172A'},
+  {name:'Corporate', c1:'#1E40AF',c2:'#4B5563',c3:'#059669',bg:'#FFFFFF'},
+  {name:'Neon', c1:'#22D3EE',c2:'#A3E635',c3:'#F472B6',bg:'#09090B'},
+  {name:'Sunset', c1:'#E11D48',c2:'#F97316',c3:'#FBBF24',bg:'#1C1917'},
+  {name:'Ocean', c1:'#0284C7',c2:'#0891B2',c3:'#34D399',bg:'#0C4A6E'},
+  {name:'Ember', c1:'#DC2626',c2:'#EA580C',c3:'#FCD34D',bg:'#1C1917'},
+  {name:'Mono', c1:'#E5E5E5',c2:'#A3A3A3',c3:'#525252',bg:'#0A0A0A'},
+  {name:'Paper', c1:'#78716C',c2:'#A8A29E',c3:'#B45309',bg:'#FAFAF9'},
+];
+
+// ═══════════════════════════════════════════════════════════════
+// WebGL RENDERER
+// ═══════════════════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl', {alpha:true,antialias:false,depth:false,stencil:false,premultipliedAlpha:true,preserveDrawingBuffer:false});
+if(!gl){document.body.innerHTML='<h1 style="padding:40px;color:red">WebGL not available</h1>';throw new Error('No WebGL');}
+
+// State
+let currentPreset = 'gradient-mesh';
+let speed = 0.5, intensity = 0.8, complexity = 0.5;
+let mouseEnabled = true;
+let colors = {c1:'#7C3AED',c2:'#EC4899',c3:'#F59E0B',bg:'#0F172A'};
+let mouseX = 0.5, mouseY = 0.5, targetX = 0.5, targetY = 0.5;
+let program = null, locs = {};
+
+function hexToRGB(hex){return[parseInt(hex.slice(1,3),16)/255,parseInt(hex.slice(3,5),16)/255,parseInt(hex.slice(5,7),16)/255];}
+
+// Quad buffer
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+function compile(vsrc, fsrc) {
+  const vs = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs, vsrc); gl.compileShader(vs);
+  if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS)){console.error('VS:',gl.getShaderInfoLog(vs));gl.deleteShader(vs);return null;}
+  const fs = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs, fsrc); gl.compileShader(fs);
+  if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS)){console.error('FS:',gl.getShaderInfoLog(fs));gl.deleteShader(vs);gl.deleteShader(fs);return null;}
+  const pg = gl.createProgram();
+  gl.attachShader(pg,vs); gl.attachShader(pg,fs); gl.linkProgram(pg);
+  gl.deleteShader(vs); gl.deleteShader(fs);
+  if(!gl.getProgramParameter(pg,gl.LINK_STATUS)){console.error('Link:',gl.getProgramInfoLog(pg));gl.deleteProgram(pg);return null;}
+  return pg;
+}
+
+function buildProgram(presetId) {
+  if(program) gl.deleteProgram(program);
+  const frag = COMMON + '\n' + PRESETS[presetId].frag;
+  program = compile(VERT, frag);
+  if(!program) return;
+  gl.useProgram(program);
+  const a = gl.getAttribLocation(program,'a_position');
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.enableVertexAttribArray(a);
+  gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
+  locs = {};
+  ['u_resolution','u_time','u_speed','u_intensity','u_complexity','u_mouse','u_mouse_influence','u_scroll','u_color_primary','u_color_secondary','u_color_accent','u_color_bg'].forEach(n => locs[n] = gl.getUniformLocation(program,n));
+}
+
+buildProgram(currentPreset);
+
+// FPS tracking
+let frames = 0, lastFpsTime = performance.now();
+const fpsEl = document.getElementById('fps');
+
+// Render loop
+const startTime = performance.now();
+function render(now) {
+  requestAnimationFrame(render);
+  if(!program) return;
+
+  // FPS
+  frames++;
+  if(now - lastFpsTime > 500){fpsEl.textContent=Math.round(frames/((now-lastFpsTime)/1000))+' fps';frames=0;lastFpsTime=now;}
+
+  // Mouse lerp
+  mouseX += (targetX - mouseX) * 0.05;
+  mouseY += (targetY - mouseY) * 0.05;
+
+  // Resize
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  const w = Math.floor(canvas.clientWidth * dpr);
+  const h = Math.floor(canvas.clientHeight * dpr);
+  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}
+
+  const elapsed = (now - startTime) / 1000;
+  const c1=hexToRGB(colors.c1),c2=hexToRGB(colors.c2),c3=hexToRGB(colors.c3),bg=hexToRGB(colors.bg);
+
+  gl.useProgram(program);
+  gl.uniform2f(locs.u_resolution,w,h);
+  gl.uniform1f(locs.u_time, elapsed*speed);
+  gl.uniform1f(locs.u_speed, speed);
+  gl.uniform1f(locs.u_intensity, intensity);
+  gl.uniform1f(locs.u_complexity, complexity);
+  gl.uniform2f(locs.u_mouse, mouseX, mouseY);
+  gl.uniform1f(locs.u_mouse_influence, mouseEnabled?1:0);
+  gl.uniform1f(locs.u_scroll, 0);
+  gl.uniform3fv(locs.u_color_primary, c1);
+  gl.uniform3fv(locs.u_color_secondary, c2);
+  gl.uniform3fv(locs.u_color_accent, c3);
+  gl.uniform3fv(locs.u_color_bg, bg);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+requestAnimationFrame(render);
+
+// ═══════════════════════════════════════════════════════════════
+// UI WIRING
+// ═══════════════════════════════════════════════════════════════
+
+// Mouse tracking
+const preview = document.querySelector('.preview');
+preview.addEventListener('mousemove', e => {
+  const r = preview.getBoundingClientRect();
+  targetX = (e.clientX - r.left) / r.width;
+  targetY = 1 - (e.clientY - r.top) / r.height;
+});
+preview.addEventListener('mouseleave', () => { targetX = 0.5; targetY = 0.5; });
+
+// Preset buttons
+const grid = document.getElementById('presetGrid');
+Object.keys(PRESETS).forEach(id => {
+  const btn = document.createElement('button');
+  btn.className = 'preset-btn' + (id===currentPreset?' active':'');
+  btn.textContent = PRESETS[id].name;
+  btn.dataset.id = id;
+  btn.onclick = () => {
+    currentPreset = id;
+    buildProgram(id);
+    grid.querySelectorAll('.preset-btn').forEach(b => b.classList.toggle('active', b.dataset.id===id));
+  };
+  grid.appendChild(btn);
+});
+
+// Sliders
+document.getElementById('speed').oninput = e => { speed = +e.target.value; document.getElementById('speedVal').textContent = speed.toFixed(1); };
+document.getElementById('intensity').oninput = e => { intensity = +e.target.value; document.getElementById('intensityVal').textContent = intensity.toFixed(2); };
+document.getElementById('complexity').oninput = e => { complexity = +e.target.value; document.getElementById('complexityVal').textContent = complexity.toFixed(1); };
+
+// Mouse toggle
+const mt = document.getElementById('mouseToggle');
+mt.onclick = () => { mouseEnabled = !mouseEnabled; mt.textContent = mouseEnabled?'On':'Off'; mt.classList.toggle('on',mouseEnabled); };
+
+// Color inputs
+function wireColor(pickId, textId, key) {
+  const pick = document.getElementById(pickId);
+  const text = document.getElementById(textId);
+  pick.oninput = () => { colors[key] = pick.value; text.value = pick.value; };
+  text.oninput = () => { if(/^#[0-9a-fA-F]{6}$/.test(text.value)){colors[key]=text.value;pick.value=text.value;} };
+}
+wireColor('c1','c1text','c1');
+wireColor('c2','c2text','c2');
+wireColor('c3','c3text','c3');
+wireColor('cbg','cbgtext','bg');
+
+// Brand preset buttons
+const brandGrid = document.getElementById('brandGrid');
+BRAND_PRESETS.forEach(bp => {
+  const btn = document.createElement('button');
+  btn.className = 'brand-btn';
+  btn.innerHTML = `<span class="brand-swatch" style="background:${bp.c1}"></span>${bp.name}`;
+  btn.onclick = () => {
+    colors = {c1:bp.c1,c2:bp.c2,c3:bp.c3,bg:bp.bg};
+    document.getElementById('c1').value=bp.c1;document.getElementById('c1text').value=bp.c1;
+    document.getElementById('c2').value=bp.c2;document.getElementById('c2text').value=bp.c2;
+    document.getElementById('c3').value=bp.c3;document.getElementById('c3text').value=bp.c3;
+    document.getElementById('cbg').value=bp.bg;document.getElementById('cbgtext').value=bp.bg;
+  };
+  brandGrid.appendChild(btn);
+});
+</script>
+</body>
+</html>

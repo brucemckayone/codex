@@ -33,6 +33,7 @@
   import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
   import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
   import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
+  import BrandEditorIntroVideo from '$lib/components/brand-editor/levels/BrandEditorIntroVideo.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import { brandEditor, injectTokenOverrides, clearTokenOverrides } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
@@ -327,6 +328,8 @@
 
 <div
   class="org-layout"
+  class:org-layout--studio={isStudio}
+  class:org-layout--landing={isLanding}
   data-org-brand={hasBranding ? '' : undefined}
   data-org-bg={brandBackground ? '' : undefined}
   style:--brand-color={brandPrimary}
@@ -344,6 +347,7 @@
   style:--brand-body-weight={brandBodyWeight}
 >
   <ShaderHero class="shader-hero--fullpage" />
+  <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
   {#if !isStudio}
     <SidebarRail variant="org" user={data.user} org={data.org} onSearchClick={() => { searchOpen = true; }} />
   {/if}
@@ -403,6 +407,8 @@
     <BrandEditorPresets />
   {:else if brandEditor.level === 'hero-effects'}
     <BrandEditorHeroEffects />
+  {:else if brandEditor.level === 'intro-video'}
+    <BrandEditorIntroVideo />
   {:else if brandEditor.level === 'fine-tune-colors'}
     <BrandEditorFineTuneColors />
   {:else if brandEditor.level === 'fine-tune-typography'}
@@ -423,6 +429,43 @@
     color: var(--color-text);
   }
 
+  .org-layout--studio {
+    background-color: transparent;
+  }
+
+  /* Non-landing pages: blur the shader canvas directly via CSS filter.
+     backdrop-filter doesn't reliably composite against WebGL canvases
+     when view-transition-name creates a stacking context on org-main. */
+  .org-layout:not(.org-layout--landing) :global(.shader-hero--fullpage) {
+    filter: blur(var(--blur-2xl));
+  }
+
+  /* Landing page: backdrop-filter overlay with gradient mask.
+     Works here because org-main--blendable removes view-transition-name,
+     placing content in normal flow (step 3) below the overlay (step 6). */
+  .shader-blur-overlay {
+    display: none;
+  }
+
+  .shader-blur-overlay--landing {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    backdrop-filter: blur(var(--blur-2xl));
+    -webkit-backdrop-filter: blur(var(--blur-2xl));
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      transparent 70vh,
+      color-mix(in srgb, var(--color-brand-primary, black) 40%, transparent) 90vh,
+      color-mix(in srgb, var(--color-background) 80%, transparent) 120vh
+    );
+    mask-image: linear-gradient(to bottom, transparent 0%, transparent 70vh, black 110vh);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 70vh, black 110vh);
+  }
+
   /* Full-page shader background — fixed behind all content */
   :global(.shader-hero--fullpage) {
     position: fixed !important;
@@ -440,6 +483,7 @@
     flex: 1;
     margin-left: var(--space-16);
     view-transition-name: page-content;
+    background: color-mix(in srgb, var(--color-background) 80%, transparent);
   }
 
   .org-main--studio {
@@ -451,6 +495,7 @@
      mix-blend-mode from compositing against the shader canvas. */
   .org-main--blendable {
     view-transition-name: none;
+    background: transparent;
   }
 
 

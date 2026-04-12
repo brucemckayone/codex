@@ -46,7 +46,7 @@
     { value: 'all', label: m.library_filter_all_types() },
     { value: 'video', label: m.library_filter_video() },
     { value: 'audio', label: m.library_filter_audio() },
-    { value: 'article', label: m.library_filter_article() },
+    { value: 'written', label: m.library_filter_article() },
   ];
 
   const progressOptions = [
@@ -59,6 +59,7 @@
   const accessTypeOptions = [
     { value: 'all', label: m.library_filter_all_access() },
     { value: 'purchased', label: m.library_filter_purchased() },
+    { value: 'subscription', label: m.library_filter_subscription() },
     { value: 'membership', label: m.library_filter_membership() },
   ];
 

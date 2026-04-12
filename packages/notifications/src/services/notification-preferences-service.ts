@@ -151,14 +151,29 @@ export class NotificationPreferencesService extends BaseService {
     const [created] = await this.db
       .insert(schema.notificationPreferences)
       .values(defaults)
+      .onConflictDoNothing({
+        target: schema.notificationPreferences.userId,
+      })
       .returning();
 
     if (!created) {
+      // Race condition: another request already created defaults.
+      // Re-read instead of throwing.
+      const existing = await this.db.query.notificationPreferences.findFirst({
+        where: eq(schema.notificationPreferences.userId, userId),
+      });
+      if (existing) {
+        return {
+          emailMarketing: existing.emailMarketing,
+          emailTransactional: existing.emailTransactional,
+          emailDigest: existing.emailDigest,
+          createdAt: existing.createdAt,
+          updatedAt: existing.updatedAt,
+        };
+      }
       throw new InternalServiceError(
         'Failed to create notification preferences',
-        {
-          userId,
-        }
+        { userId }
       );
     }
 

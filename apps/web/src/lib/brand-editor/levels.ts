@@ -70,6 +70,14 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
     icon: '◈',
     description: 'Animated shader backgrounds',
   },
+  'intro-video': {
+    id: 'intro-video',
+    depth: 1,
+    label: 'Intro Video',
+    parent: 'home',
+    icon: '▶',
+    description: 'Upload hero video',
+  },
   'fine-tune-colors': {
     id: 'fine-tune-colors',
     depth: 2,
