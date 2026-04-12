@@ -315,11 +315,8 @@ export const getMyOrganizations = query(async () => {
 export const getMyMembership = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  const response = await api.org.getMyMembership(orgId);
-  return response;
-}) as unknown as (
-  orgId: string
-) => Promise<{ role: string | null; joinedAt: string | null }>;
+  return api.org.getMyMembership(orgId);
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Follower (audience relationship — free opt-in)
