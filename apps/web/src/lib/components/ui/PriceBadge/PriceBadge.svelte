@@ -29,7 +29,7 @@
     currency?: string;
     purchased?: boolean;
     included?: boolean;
-    accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'members' | null;
+    accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
   }
 
   const {
@@ -47,7 +47,7 @@
     if (included) return 'included';
     if (accessType === 'subscribers') return 'subscribers';
     if (accessType === 'followers') return 'followers';
-    if (accessType === 'team' || accessType === 'members') return 'team';
+    if (accessType === 'team') return 'team';
     if (amount === 0 || accessType === 'free') return 'free';
     return 'paid';
   });
@@ -61,7 +61,7 @@
       return m.content_price_subscribers();
     }
     if (accessType === 'followers') return m.content_price_followers();
-    if (accessType === 'team' || accessType === 'members') return m.content_price_team();
+    if (accessType === 'team') return m.content_price_team();
     if (amount === 0 || accessType === 'free') return m.content_price_free();
     if (amount != null) return formatPrice(amount);
     return '';

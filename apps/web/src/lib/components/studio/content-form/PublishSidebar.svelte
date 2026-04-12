@@ -115,7 +115,7 @@
     form.fields.accessType?.set(val);
 
     // Clear price when switching to non-priced access types
-    if (val === 'free' || val === 'followers' || val === 'team' || val === 'members') {
+    if (val === 'free' || val === 'followers' || val === 'team') {
       form.fields.price?.set('0.00');
     }
   }
@@ -170,9 +170,7 @@
       case 'subscribers':
         return 'purchased_only';
       case 'followers':
-        return 'members_only';
       case 'team':
-      case 'members':
         return 'members_only';
       default:
         return 'public';

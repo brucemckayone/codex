@@ -63,8 +63,6 @@ export const CONTENT_ACCESS_TYPE = {
   FOLLOWERS: 'followers',
   SUBSCRIBERS: 'subscribers',
   TEAM: 'team',
-  /** @deprecated Use TEAM instead. Alias kept for backward compat during migration. */
-  MEMBERS: 'members',
 } as const;
 
 export type ContentAccessType =

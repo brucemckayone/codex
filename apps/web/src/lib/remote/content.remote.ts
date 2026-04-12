@@ -240,7 +240,7 @@ const createContentCommandSchema = z.object({
   description: z.string().optional().nullable(),
   contentType: z.enum(['video', 'audio', 'written']),
   accessType: z
-    .enum(['free', 'paid', 'followers', 'subscribers', 'team', 'members'])
+    .enum(['free', 'paid', 'followers', 'subscribers', 'team'])
     .optional(),
   priceCents: z.number().int().min(0).optional().nullable(),
   organizationId: z.string().uuid().optional().nullable(),
@@ -284,7 +284,7 @@ const updateContentCommandSchema = z.object({
     description: z.string().optional().nullable(),
     contentType: z.enum(['video', 'audio', 'written']).optional(),
     accessType: z
-      .enum(['free', 'paid', 'followers', 'subscribers', 'team', 'members'])
+      .enum(['free', 'paid', 'followers', 'subscribers', 'team'])
       .optional(),
     priceCents: z.number().int().min(0).optional().nullable(),
     organizationId: z.string().uuid().optional().nullable(),
@@ -385,7 +385,7 @@ const createContentFormSchema = z.object({
   mediaItemId: optionalUuid,
   contentBody: optionalString,
   accessType: z
-    .enum(['free', 'paid', 'subscribers', 'members'])
+    .enum(['free', 'paid', 'followers', 'subscribers', 'team'])
     .default('free'),
   price: z.string().transform((v) => {
     const parsed = parseFloat(v || '0');
@@ -472,7 +472,7 @@ const updateContentFormSchema = z.object({
   mediaItemId: optionalUuid,
   contentBody: optionalString,
   accessType: z
-    .enum(['free', 'paid', 'subscribers', 'members'])
+    .enum(['free', 'paid', 'followers', 'subscribers', 'team'])
     .default('free'),
   price: z.string().transform((v) => {
     const parsed = parseFloat(v || '0');

@@ -325,11 +325,8 @@ export class ContentAccessService extends BaseService {
 
           // ── Access decision: branch on accessType ──────────────────
 
-          // (a) Team-only (also handles deprecated 'members'): require management role
-          if (
-            contentRecord.accessType === 'team' ||
-            contentRecord.accessType === 'members'
-          ) {
+          // (a) Team-only: require management role (owner/admin/creator)
+          if (contentRecord.accessType === 'team') {
             if (!contentRecord.organizationId) {
               throw new AccessDeniedError(userId, input.contentId, {
                 reason: 'team_only_requires_org',
@@ -1038,7 +1035,7 @@ export class ContentAccessService extends BaseService {
 
       // Build role-aware content filter:
       // - Management roles (owner/admin/creator) see ALL content from their orgs
-      // - Followers see 'free' + 'followers' + 'members' (deprecated alias for team) content
+      // - Followers see 'free' + 'followers' content from followed orgs
       const membershipContentFilter = (() => {
         const parts: ReturnType<typeof and>[] = [];
 

@@ -64,7 +64,7 @@
     included?: boolean;
     accessType?: 'purchased' | 'subscription' | 'membership' | null;
     /** Content-level access strategy from DB (forwarded to PriceBadge) */
-    contentAccessType?: 'free' | 'paid' | 'subscribers' | 'members' | null;
+    contentAccessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
   }
 
   const {

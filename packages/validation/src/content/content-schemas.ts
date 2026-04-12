@@ -227,7 +227,6 @@ export const contentAccessTypeEnum = z.enum([
   CONTENT_ACCESS_TYPE.FOLLOWERS,
   CONTENT_ACCESS_TYPE.SUBSCRIBERS,
   CONTENT_ACCESS_TYPE.TEAM,
-  CONTENT_ACCESS_TYPE.MEMBERS, // deprecated alias for 'team'
 ]);
 
 /**

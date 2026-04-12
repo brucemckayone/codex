@@ -337,6 +337,13 @@
       "when": 1776027501450,
       "tag": "0047_slimy_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1776120000000,
+      "tag": "0048_migrate_members_to_team",
+      "breakpoints": true
     }
   ]
 }

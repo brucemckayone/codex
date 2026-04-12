@@ -122,6 +122,12 @@
   const needsSubscription = $derived(
     !hasAccess && requiresSubscription && !subscriptionCoversContent
   );
+  const isFollowersOnly = $derived(
+    !hasAccess && content.accessType === 'followers'
+  );
+  const isTeamOnly = $derived(
+    !hasAccess && content.accessType === 'team'
+  );
 
   const previewUrl = $derived(content.mediaItem?.hlsPreviewUrl ?? undefined);
   const accessState = $derived(
@@ -264,6 +270,44 @@
 
     {#if progress?.completed}
       <span class="content-detail__completed-badge">{m.content_progress_completed()}</span>
+    {/if}
+
+    <!-- Team-only Section — only management roles can access -->
+    {#if !accessLoading && isTeamOnly}
+      <div class="content-detail__purchase">
+        <div class="content-detail__price">
+          <span class="content-detail__price-amount">{m.team_only_cta_title()}</span>
+          <span class="content-detail__price-label">{m.team_only_cta_description()}</span>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Followers-only Section — follow to access -->
+    {#if !accessLoading && isFollowersOnly}
+      <div class="content-detail__purchase">
+        <div class="content-detail__price">
+          <span class="content-detail__price-amount">{m.followers_only_cta_title()}</span>
+          <span class="content-detail__price-label">{m.followers_only_cta_description()}</span>
+        </div>
+
+        {#if isAuthenticated}
+          <button class="content-detail__purchase-btn" onclick={() => {
+            import('$lib/remote/org.remote').then(({ followOrganization }) => {
+              if (content.organizationId) {
+                followOrganization(content.organizationId).then(() => {
+                  window.location.reload();
+                });
+              }
+            });
+          }}>
+            {m.org_follow()}
+          </button>
+        {:else}
+          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+            {m.checkout_signin_to_purchase()}
+          </a>
+        {/if}
+      </div>
     {/if}
 
     <!-- Subscription Section (tier-gated content) — hidden during access loading -->

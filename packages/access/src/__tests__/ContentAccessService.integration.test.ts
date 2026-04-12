@@ -1643,47 +1643,6 @@ describe('ContentAccessService Integration', () => {
           })
         ).rejects.toThrow(AccessDeniedError);
       });
-
-      it('should treat deprecated "members" accessType the same as "team"', async () => {
-        mockPurchaseService.verifyPurchase.mockClear();
-        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
-
-        const item = await createContentWithAccessType(
-          'members',
-          'members-compat'
-        );
-
-        // Owner should get access
-        const [ownerUser] = await seedTestUsers(db, 1);
-        await db.insert(organizationMemberships).values({
-          userId: ownerUser,
-          organizationId,
-          role: 'owner',
-          status: 'active',
-        });
-
-        const result = await accessService.getStreamingUrl(ownerUser, {
-          contentId: item.id,
-          expirySeconds: 3600,
-        });
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
-
-        // Subscriber should be denied
-        const [subUser] = await seedTestUsers(db, 1);
-        await db.insert(organizationMemberships).values({
-          userId: subUser,
-          organizationId,
-          role: 'subscriber',
-          status: 'active',
-        });
-
-        await expect(
-          accessService.getStreamingUrl(subUser, {
-            contentId: item.id,
-            expirySeconds: 3600,
-          })
-        ).rejects.toThrow(AccessDeniedError);
-      });
     });
 
     describe('Follower Access', () => {

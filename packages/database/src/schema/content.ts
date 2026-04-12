@@ -352,7 +352,7 @@ export const content = pgTable(
     index('idx_content_access_type').on(table.accessType),
     check(
       'check_content_access_type',
-      sql`${table.accessType} IN ('free', 'paid', 'subscribers', 'members', 'followers', 'team')`
+      sql`${table.accessType} IN ('free', 'paid', 'followers', 'subscribers', 'team')`
     ),
     check(
       'check_content_type',
