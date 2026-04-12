@@ -1399,6 +1399,70 @@ export const org_view_all_content = () => `View all content`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const org_follow = () => `Follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_following = () => `Following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_unfollow = () => `Unfollow`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_followers_count = (params) => `${params.count} followers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const followers_only_cta_title = () => `Followers Only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const followers_only_cta_description = () => `Follow this organisation to access this content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_only_cta_title = () => `Team Only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_only_cta_description = () => `This content is only available to team members`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const org_continue_watching_title = () => `Continue Watching`
 
 
@@ -2448,6 +2512,22 @@ export const members_only_cta_description = () => `This content is only availabl
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const content_price_subscribers = () => `Subscription`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_followers = () => `Followers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_price_team = () => `Team`
 
 
 /**
@@ -4936,6 +5016,38 @@ export const studio_content_form_access_subscribers = () => `Subscribers`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_subscribers_desc = () => `Available to subscribers at or above a tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_followers = () => `Followers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_followers_desc = () => `Must follow your organisation (free)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_team = () => `Team only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_team_desc = () => `Only team members (owners, admins, creators)`
 
 
 /**

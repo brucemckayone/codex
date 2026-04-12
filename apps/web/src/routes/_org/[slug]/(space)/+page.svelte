@@ -17,6 +17,7 @@
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { hydrateIfNeeded } from '$lib/collections';
+  import { followOrganization, unfollowOrganization } from '$lib/remote/org.remote';
   import type { SubscriptionTier } from '$lib/types';
   import type { PageData } from './$types';
 
@@ -49,6 +50,31 @@
   const stats = $derived(data.stats);
   const user = $derived(data.user);
   const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
+
+  // Follow state
+  let isFollowing = $state(data.isFollowing ?? false);
+  let followLoading = $state(false);
+
+  async function handleFollowToggle() {
+    if (!user) {
+      window.location.href = `/login?redirect=${encodeURIComponent(page.url.pathname)}`;
+      return;
+    }
+    followLoading = true;
+    try {
+      if (isFollowing) {
+        await unfollowOrganization(data.org.id);
+        isFollowing = false;
+      } else {
+        await followOrganization(data.org.id);
+        isFollowing = true;
+      }
+    } catch {
+      // Silently fail — optimistic UI can retry
+    } finally {
+      followLoading = false;
+    }
+  }
 
   // Subscription context for "Included" badges — streamed from layout
   let resolvedSubCtx = $state<{ userTierSortOrder: number | null; tiers: SubscriptionTier[] } | null>(null);
@@ -187,6 +213,14 @@
           <a href="/explore" class="hero__cta hero__cta--primary">{m.org_hero_explore()}</a>
           <a href="/creators" class="hero__cta hero__cta--glass">{m.org_hero_meet_creators()}</a>
         {/if}
+        <button
+          class="hero__cta hero__cta--glass hero__follow"
+          class:hero__follow--active={isFollowing}
+          onclick={handleFollowToggle}
+          disabled={followLoading}
+        >
+          {isFollowing ? m.org_following() : m.org_follow()}
+        </button>
         {#if introVideoUrl}
           <button class="hero__cta hero__cta--glass hero__play" onclick={() => { videoActive = true; }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -560,6 +594,11 @@
 
   .hero__play {
     gap: var(--space-2);
+  }
+
+  .hero__follow--active {
+    background: color-mix(in srgb, white 25%, transparent);
+    border-color: color-mix(in srgb, white 40%, transparent);
   }
 
   /* ── Centered play button (desktop only) ──

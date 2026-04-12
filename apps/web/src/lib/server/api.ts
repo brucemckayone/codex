@@ -959,6 +959,15 @@ export function createServerApi(
         }),
 
       /**
+       * Check if authenticated user is following an organization
+       */
+      isFollowing: (id: string) =>
+        request<{ following: boolean }>(
+          'org',
+          `/api/organizations/${id}/followers/me`
+        ),
+
+      /**
        * Get follower count for an organization (public)
        */
       getFollowerCount: (id: string) =>

@@ -320,3 +320,39 @@ export const getMyMembership = query(z.string().uuid(), async (orgId) => {
 }) as unknown as (
   orgId: string
 ) => Promise<{ role: string | null; joinedAt: string | null }>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Follower (audience relationship — free opt-in)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Follow an organization (idempotent).
+ */
+export const followOrganization = command(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  await api.org.follow(orgId);
+  return { success: true as const };
+});
+
+/**
+ * Unfollow an organization (idempotent).
+ */
+export const unfollowOrganization = command(
+  z.string().uuid(),
+  async (orgId) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    await api.org.unfollow(orgId);
+    return { success: true as const };
+  }
+);
+
+/**
+ * Get follower count for an organization (public).
+ */
+export const getFollowerCount = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.org.getFollowerCount(orgId);
+});

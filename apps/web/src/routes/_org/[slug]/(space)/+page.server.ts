@@ -41,8 +41,9 @@ export const load: PageServerLoad = async ({
 
   const statsPromise = getPublicStats(org.slug);
 
-  // Continue watching: only for authenticated users
+  // Continue watching + follow status: only for authenticated users
   let continueWatchingPromise: Promise<UserLibraryResponse> | null = null;
+  let isFollowingPromise: Promise<boolean> | null = null;
   if (locals.user) {
     const api = createServerApi(platform, cookies);
     const params = new URLSearchParams();
@@ -51,6 +52,10 @@ export const load: PageServerLoad = async ({
     params.set('limit', '6');
     params.set('sortBy', 'recent');
     continueWatchingPromise = api.access.getUserLibrary(params);
+    isFollowingPromise = api.org
+      .isFollowing(org.id)
+      .then((r) => r.following)
+      .catch(() => false);
   }
 
   // Await only what's critical for first paint (hero + new releases + stats)
@@ -74,5 +79,6 @@ export const load: PageServerLoad = async ({
       continueWatchingPromise
         ?.then((r) => r?.items ?? undefined)
         ?.catch(() => undefined) ?? Promise.resolve(undefined),
+    isFollowing: isFollowingPromise ? await isFollowingPromise : false,
   };
 };

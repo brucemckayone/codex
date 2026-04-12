@@ -7,7 +7,8 @@
   - "Purchased" (info + check icon) when purchased is true
   - "Included" (brand + check icon) when included is true (subscription covers this content)
   - "Subscription" (purple) for subscriber-gated content
-  - "Members" (secondary) for members-only content
+  - "Followers" (info) for followers-only content
+  - "Team" (secondary) for team-only content (replaces "Members")
 
   Priority: purchased > included > accessType > price
 
@@ -28,7 +29,7 @@
     currency?: string;
     purchased?: boolean;
     included?: boolean;
-    accessType?: 'free' | 'paid' | 'subscribers' | 'members' | null;
+    accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'members' | null;
   }
 
   const {
@@ -45,7 +46,8 @@
     if (purchased) return 'purchased';
     if (included) return 'included';
     if (accessType === 'subscribers') return 'subscribers';
-    if (accessType === 'members') return 'members';
+    if (accessType === 'followers') return 'followers';
+    if (accessType === 'team' || accessType === 'members') return 'team';
     if (amount === 0 || accessType === 'free') return 'free';
     return 'paid';
   });
@@ -58,7 +60,8 @@
       if (amount && amount > 0) return formatPrice(amount);
       return m.content_price_subscribers();
     }
-    if (accessType === 'members') return m.content_price_members();
+    if (accessType === 'followers') return m.content_price_followers();
+    if (accessType === 'team' || accessType === 'members') return m.content_price_team();
     if (amount === 0 || accessType === 'free') return m.content_price_free();
     if (amount != null) return formatPrice(amount);
     return '';
@@ -121,7 +124,13 @@
     border: var(--border-width) var(--border-style) var(--color-primary-200);
   }
 
-  .price-badge[data-variant='members'] {
+  .price-badge[data-variant='followers'] {
+    background: var(--color-info-50);
+    color: var(--color-info-700);
+    border: var(--border-width) var(--border-style) var(--color-info-200);
+  }
+
+  .price-badge[data-variant='team'] {
     background: var(--color-surface-secondary);
     color: var(--color-text-secondary);
     border: var(--border-width) var(--border-style) var(--color-border);

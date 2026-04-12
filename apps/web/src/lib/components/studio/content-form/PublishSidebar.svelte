@@ -84,6 +84,14 @@
       },
     ];
 
+    if (hasOrg) {
+      options.push({
+        value: 'followers',
+        label: m.studio_content_form_access_followers(),
+        description: m.studio_content_form_access_followers_desc(),
+      });
+    }
+
     if (hasTiers) {
       options.push({
         value: 'subscribers',
@@ -94,9 +102,9 @@
 
     if (hasOrg) {
       options.push({
-        value: 'members',
-        label: m.studio_content_form_access_members(),
-        description: m.studio_content_form_access_members_desc(),
+        value: 'team',
+        label: m.studio_content_form_access_team(),
+        description: m.studio_content_form_access_team_desc(),
       });
     }
 
@@ -106,8 +114,8 @@
   function handleAccessTypeChange(val: string) {
     form.fields.accessType?.set(val);
 
-    // Clear price when switching to free or members
-    if (val === 'free' || val === 'members') {
+    // Clear price when switching to non-priced access types
+    if (val === 'free' || val === 'followers' || val === 'team' || val === 'members') {
       form.fields.price?.set('0.00');
     }
   }
@@ -161,6 +169,9 @@
       case 'paid':
       case 'subscribers':
         return 'purchased_only';
+      case 'followers':
+        return 'members_only';
+      case 'team':
       case 'members':
         return 'members_only';
       default:

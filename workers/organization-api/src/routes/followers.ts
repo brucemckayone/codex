@@ -64,6 +64,27 @@ app.delete(
 );
 
 /**
+ * GET /api/organizations/:id/followers/me
+ * Check if the authenticated user is following this organization.
+ *
+ * Security: Authenticated
+ */
+app.get(
+  '/me',
+  procedure({
+    policy: { auth: 'required' },
+    input: { params: z.object({ id: uuidSchema }) },
+    handler: async (ctx) => {
+      const following = await ctx.services.organization.isFollowing(
+        ctx.input.params.id,
+        ctx.user.id
+      );
+      return { following };
+    },
+  })
+);
+
+/**
  * GET /api/organizations/:id/followers/count
  * Get the total follower count for an organization (public).
  *
