@@ -25,6 +25,16 @@ uniform float uIntensity, uGrain, uVignette, uTime;
 uniform float uWaveScale, uCamHeight, uCamTarget, uSpecular;
 uniform vec2 uResolution;
 
+// Logo SDF (optional — guarded by uHasLogo)
+uniform sampler2D uSdf;
+uniform float uHasLogo;
+
+// Audio reactivity (0.0 when no audio active)
+uniform float uAudioBass;
+uniform float uAudioMids;
+uniform float uAudioTreble;
+uniform float uAudioAmplitude;
+
 #define HEIGHTMAPSCALE 90.0
 #define MARCHSTEPS 10
 
@@ -47,7 +57,9 @@ vec3 cam(in vec2 p, out vec3 cameraPos) {
 
 // ── Heightfield ───────────────────────────────────────────────────
 float h(vec3 p) {
-  return uWaveScale * texture(uState, p.xz / HEIGHTMAPSCALE + 0.5).x;
+  // Audio: bass amplifies wave height for more dramatic surface
+  float audioScale = 1.0 + uAudioBass * 1.5 + uAudioAmplitude * 0.5;
+  return uWaveScale * audioScale * texture(uState, p.xz / HEIGHTMAPSCALE + 0.5).x;
 }
 
 float DE(vec3 p) { return 1.2 * (p.y - h(p)); }
@@ -98,10 +110,25 @@ void main() {
   float dif = 1.52 * (0.7 + 0.3 * ndotL);
   float ao = mix(0.6, 0.64, smoothstep(0.0, 1.0, (h0 + 1.5) / 6.0));
 
-  vec3 col = uPulseColor * dif * ao * uIntensity;
+  // Audio: blend accent color in on mids/treble, boost intensity with amplitude
+  vec3 surfaceColor = mix(uPulseColor, uColorAccent, uAudioTreble * 0.4);
+  float audioIntensity = uIntensity * (1.0 + uAudioAmplitude * 0.6);
+  vec3 col = surfaceColor * dif * ao * audioIntensity;
 
-  float s = uSpecular * pow(clamp(dot(L, reflect(rd, n)), 0.0, 1.0), 4000.0);
+  // Audio: specular sharpens and brightens with amplitude
+  float specPower = mix(4000.0, 2000.0, uAudioBass);
+  float s = uSpecular * (1.0 + uAudioAmplitude * 2.0) * pow(clamp(dot(L, reflect(rd, n)), 0.0, 1.0), specPower);
   col += s;
+
+  // ── Logo edge glow on the raymarched surface ──────────────────
+  if (uHasLogo > 0.5) {
+    vec2 logoUV = p.xz / HEIGHTMAPSCALE + 0.5;
+    if (logoUV.x > 0.0 && logoUV.x < 1.0 && logoUV.y > 0.0 && logoUV.y < 1.0) {
+      float sdf = texture(uSdf, logoUV).r;
+      float edgeGlow = exp(-abs(sdf - 0.5) * 50.0) * 0.25;
+      col += uPulseColor * edgeGlow;
+    }
+  }
 
   // ── Post-processing ───────────────────────────────────────────
   col = col / (1.0 + col);

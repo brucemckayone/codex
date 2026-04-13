@@ -4,9 +4,16 @@
  * 3D perspective raymarched wave surface based on tomkh's wave equation.
  * Sim runs at 512x512 in a ping-pong double FBO (identical physics to ripple).
  * Display pass raymarches the heightfield from a configurable camera angle.
+ *
+ * Optional logo SDF integration: when an org logo URL is present in the
+ * shader config, the logo is converted to a signed distance field (SDF)
+ * which drives an attractor force in the wave equation. Waves naturally
+ * accumulate along the logo boundary, making the logo emerge from the fluid.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import type { SDFResult } from '../jfa-sdf';
+import { destroyLogoTexture, loadLogoTexture } from '../logo-texture';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { PulseConfig, ShaderConfig } from '../shader-config';
 import { PULSE_DISPLAY_FRAG } from '../shaders/pulse-display.frag';
 import { PULSE_SIM_FRAG } from '../shaders/pulse-sim.frag';
@@ -40,6 +47,11 @@ const SIM_UNIFORM_NAMES = [
   'uMouse',
   'uMouseActive',
   'uMouseStrength',
+  'uSdf',
+  'uHasLogo',
+  'uTime',
+  'uAudioBass',
+  'uAudioAmplitude',
 ] as const;
 
 const DISPLAY_UNIFORM_NAMES = [
@@ -58,6 +70,12 @@ const DISPLAY_UNIFORM_NAMES = [
   'uCamTarget',
   'uSpecular',
   'uResolution',
+  'uSdf',
+  'uHasLogo',
+  'uAudioBass',
+  'uAudioMids',
+  'uAudioTreble',
+  'uAudioAmplitude',
 ] as const;
 
 function screenToHeightmapUV(
@@ -114,21 +132,91 @@ export function createPulseRenderer(): ShaderRenderer {
   let lastAmbientTime = 0;
   let clickSplashes: Array<{ u: number; v: number; frames: number }> = [];
 
+  // ── Logo SDF state ──────────────────────────────────────────────
+  let sdfResult: SDFResult | null = null;
+  let currentLogoUrl: string | null = null;
+  let logoLoading = false;
+
+  async function loadAndGenerateSDF(
+    gl: WebGL2RenderingContext,
+    url: string | undefined
+  ): Promise<void> {
+    if (logoLoading) return;
+    logoLoading = true;
+
+    try {
+      // Logo removed — clean up
+      if (!url) {
+        if (sdfResult) {
+          sdfResult.destroy();
+          sdfResult = null;
+        }
+        currentLogoUrl = null;
+        return;
+      }
+
+      // Load logo as texture
+      const logoTex = await loadLogoTexture(gl, url, SIM_RES);
+      if (!logoTex) {
+        console.warn(
+          '[pulse] Logo texture load failed, continuing without SDF'
+        );
+        currentLogoUrl = url; // prevent retry loop
+        return;
+      }
+
+      // Generate SDF from logo mask (synchronous GPU work, <3ms)
+      const { generateSDF } = await import('../jfa-sdf');
+      const newSDF = generateSDF(gl, logoTex, SIM_RES, quad!);
+
+      // Clean up: logo bitmap no longer needed, only the SDF persists
+      destroyLogoTexture(gl, logoTex);
+
+      // Replace old SDF
+      if (sdfResult) sdfResult.destroy();
+      sdfResult = newSDF;
+      currentLogoUrl = url;
+    } catch (err) {
+      console.warn('[pulse] SDF generation failed:', err);
+      currentLogoUrl = url; // prevent retry loop
+    } finally {
+      logoLoading = false;
+    }
+  }
+
+  // Audio values set by render() before calling stepSim
+  let currentAudioBass = 0;
+  let currentAudioAmplitude = 0;
+
   function stepSim(
     gl: WebGL2RenderingContext,
     mouseU: number,
     mouseV: number,
     mouseOn: boolean,
     mouseStr: number,
-    cfg: PulseConfig
+    cfg: PulseConfig,
+    time: number
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
     gl.viewport(0, 0, SIM_RES, SIM_RES);
     gl.useProgram(simProg);
     quad.bind(simProg);
+
+    // TEXTURE0: simulation state
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
     gl.uniform1i(simU.uState, 0);
+
+    // TEXTURE1: SDF (if available)
+    const hasLogo = sdfResult != null;
+    if (hasLogo) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, sdfResult!.sdfTexture);
+      gl.uniform1i(simU.uSdf, 1);
+    }
+    gl.uniform1f(simU.uHasLogo, hasLogo ? 1.0 : 0.0);
+    gl.uniform1f(simU.uTime, time);
+
     const tx = 1.0 / SIM_RES;
     gl.uniform2f(simU.uTexel, tx, tx);
     gl.uniform1f(simU.uDamping, cfg.damping);
@@ -136,6 +224,11 @@ export function createPulseRenderer(): ShaderRenderer {
     gl.uniform2f(simU.uMouse, mouseU, mouseV);
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
     gl.uniform1f(simU.uMouseStrength, mouseStr);
+
+    // Audio uniforms for sim
+    gl.uniform1f(simU.uAudioBass, currentAudioBass);
+    gl.uniform1f(simU.uAudioAmplitude, currentAudioAmplitude);
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -164,11 +257,27 @@ export function createPulseRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!simProg || !displayProg || !simU || !displayU || !simBuf || !quad)
         return;
       const cfg = config as PulseConfig;
+
+      // Audio values (0 when no audio) — shared with stepSim via closure
+      const bass = audio?.bass ?? 0;
+      const mids = audio?.mids ?? 0;
+      const treble = audio?.treble ?? 0;
+      const amplitude = audio?.amplitude ?? 0;
+      currentAudioBass = bass;
+      currentAudioAmplitude = amplitude;
+
+      // ── Logo SDF change detection ───────────────────────────────
+      const logoUrl = cfg.logoUrl ?? null;
+      if (logoUrl !== currentLogoUrl && !logoLoading) {
+        void loadAndGenerateSDF(gl, logoUrl ?? undefined);
+      }
+
       const aspect = width / height;
       const mapped = mouse.active
         ? screenToHeightmapUV(
@@ -180,15 +289,35 @@ export function createPulseRenderer(): ShaderRenderer {
           )
         : null;
 
-      if (time - lastAmbientTime > 2.5 + Math.random() * 1.5) {
+      // Ambient splashes — more frequent and stronger when audio is active
+      const ambientInterval = audio?.active
+        ? Math.max(0.3, 1.5 - bass * 1.2)
+        : 2.5 + Math.random() * 1.5;
+      if (time - lastAmbientTime > ambientInterval) {
         lastAmbientTime = time;
+        const ambientStrength = audio?.active ? 0.6 + bass * 2.0 : 0.6;
         stepSim(
           gl,
           0.15 + Math.random() * 0.7,
           0.15 + Math.random() * 0.7,
           true,
-          0.6,
-          cfg
+          ambientStrength,
+          cfg,
+          time
+        );
+      }
+
+      // Bass-driven impulses — fire additional splashes on strong bass hits
+      if (audio?.active && bass > 0.4) {
+        const impulseStrength = bass * 3.5;
+        stepSim(
+          gl,
+          0.2 + Math.random() * 0.6,
+          0.2 + Math.random() * 0.6,
+          true,
+          impulseStrength,
+          cfg,
+          time
         );
       }
 
@@ -199,7 +328,15 @@ export function createPulseRenderer(): ShaderRenderer {
       for (let i = clickSplashes.length - 1; i >= 0; i--) {
         const sp = clickSplashes[i];
         if (sp.frames < 6) {
-          stepSim(gl, sp.u, sp.v, true, 3.0 * (1.0 - sp.frames / 6.0), cfg);
+          stepSim(
+            gl,
+            sp.u,
+            sp.v,
+            true,
+            3.0 * (1.0 - sp.frames / 6.0),
+            cfg,
+            time
+          );
           sp.frames++;
         } else {
           clickSplashes.splice(i, 1);
@@ -212,16 +349,30 @@ export function createPulseRenderer(): ShaderRenderer {
         mapped ? mapped[1] : -10.0,
         mapped != null,
         1.0,
-        cfg
+        cfg,
+        time
       );
-      stepSim(gl, -10.0, -10.0, false, 0.0, cfg);
+      stepSim(gl, -10.0, -10.0, false, 0.0, cfg, time);
 
+      // ── Display pass ────────────────────────────────────────────
       gl.viewport(0, 0, width, height);
       gl.useProgram(displayProg);
       quad.bind(displayProg);
+
+      // TEXTURE0: heightfield
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
+
+      // TEXTURE1: SDF for edge glow (if available)
+      const hasLogo = sdfResult != null;
+      if (hasLogo) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, sdfResult!.sdfTexture);
+        gl.uniform1i(displayU.uSdf, 1);
+      }
+      gl.uniform1f(displayU.uHasLogo, hasLogo ? 1.0 : 0.0);
+
       gl.uniform3fv(displayU.uColorPrimary, cfg.colors.primary);
       gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);
       gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
@@ -236,6 +387,13 @@ export function createPulseRenderer(): ShaderRenderer {
       gl.uniform1f(displayU.uCamTarget, cfg.camTarget);
       gl.uniform1f(displayU.uSpecular, cfg.specular);
       gl.uniform2f(displayU.uResolution, width, height);
+
+      // Audio uniforms for display
+      gl.uniform1f(displayU.uAudioBass, bass);
+      gl.uniform1f(displayU.uAudioMids, mids);
+      gl.uniform1f(displayU.uAudioTreble, treble);
+      gl.uniform1f(displayU.uAudioAmplitude, amplitude);
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);
     },
@@ -261,6 +419,14 @@ export function createPulseRenderer(): ShaderRenderer {
     },
 
     destroy(gl: WebGL2RenderingContext): void {
+      // Clean up SDF resources
+      if (sdfResult) {
+        sdfResult.destroy();
+        sdfResult = null;
+      }
+      currentLogoUrl = null;
+      logoLoading = false;
+
       if (simBuf) {
         destroyDoubleFBO(gl, simBuf);
         simBuf = null;

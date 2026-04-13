@@ -34,6 +34,15 @@ uniform vec2 uMouse;
 uniform float uMouseActive;
 uniform float uMouseStrength;
 
+// Logo SDF attractor (optional — guarded by uHasLogo)
+uniform sampler2D uSdf;
+uniform float uHasLogo;
+uniform float uTime;
+
+// Audio reactivity (0.0 when no audio active)
+uniform float uAudioBass;
+uniform float uAudioAmplitude;
+
 void main() {
   // Sample center and 4 neighbors
   vec4 center = texture(uState, v_uv);
@@ -52,7 +61,38 @@ void main() {
   float next = 2.0 * current - previous + 0.25 * laplacian;
 
   // Per-frame damping
-  next *= uDamping;
+  float effectiveDamping = uDamping;
+
+  // Logo SDF attractor: waves are gently attracted toward the logo boundary
+  if (uHasLogo > 0.5) {
+    float sdf = texture(uSdf, v_uv).r;  // 0.5 = boundary
+
+    // Distance from logo boundary (0 = on boundary, 1 = far away)
+    float boundaryDist = abs(sdf - 0.5) * 2.0;
+
+    // Exponential attraction — peaks at boundary, decays within ~15% of texture
+    float edgeProximity = exp(-boundaryDist * 8.0);
+
+    // Oscillating force prevents static equilibrium — logo "breathes"
+    float attractForce = 0.002 * edgeProximity * sin(uTime * 1.5 + sdf * 6.28);
+    next += attractForce;
+
+    // Reduced damping near boundary — waves persist longer on logo edges
+    float boundaryBoost = smoothstep(0.15, 0.0, boundaryDist);
+    effectiveDamping = mix(uDamping, min(uDamping + 0.012, 0.999), boundaryBoost);
+  }
+
+  // Audio: reduce damping when loud (waves persist longer during loud passages)
+  effectiveDamping = mix(effectiveDamping, min(effectiveDamping + 0.02, 0.998), uAudioAmplitude);
+
+  next *= effectiveDamping;
+
+  // Audio: bass-driven radial pulse from center
+  if (uAudioBass > 0.3) {
+    float dist = length(v_uv - vec2(0.5));
+    float ring = smoothstep(0.25, 0.15, dist) * smoothstep(0.0, 0.1, dist);
+    next += ring * uAudioBass * 0.08;
+  }
 
   // Mouse impulse: Gaussian deposit at pre-mapped UV position
   if (uMouseActive > 0.5) {
