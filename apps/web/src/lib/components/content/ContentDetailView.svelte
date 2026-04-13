@@ -183,7 +183,7 @@
 <div class="content-detail" data-access={hasAccess ? 'full' : 'preview'}>
   <!-- Player / Preview Section (hidden for written content) -->
   {#if content.contentType !== 'written'}
-  <div class="content-detail__player">
+  <div class="content-detail__player" data-content-type={content.contentType}>
     {#if hasAccess && streamingUrl}
       {#if content.contentType === 'audio'}
         <AudioPlayer
@@ -512,6 +512,11 @@
     background: var(--color-surface-tertiary);
     aspect-ratio: 16 / 9;
     margin-bottom: var(--space-6);
+  }
+
+  .content-detail__player[data-content-type='audio'] {
+    aspect-ratio: unset;
+    background: transparent;
   }
 
   .content-detail__preview {

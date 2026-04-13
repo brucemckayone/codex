@@ -65,11 +65,32 @@
     const progress = playProgress;
 
     if (!data || data.length === 0) {
-      // Fallback: simple progress bar
-      ctx.fillStyle = unplayedColour;
-      ctx.fillRect(0, h * 0.4, w, h * 0.2);
-      ctx.fillStyle = playedColour;
-      ctx.fillRect(0, h * 0.4, w * progress, h * 0.2);
+      // Fallback: generate pseudo-random bars for visual interest
+      const fallbackBars = 80;
+      const barW = w / fallbackBars;
+      const gapF = Math.max(1, barW * 0.25);
+      const actualW = barW - gapF;
+
+      for (let i = 0; i < fallbackBars; i++) {
+        // Deterministic pseudo-random heights based on bar index
+        const seed = Math.sin(i * 12.9898 + 78.233) * 43758.5453;
+        const amplitude = 0.15 + (seed - Math.floor(seed)) * 0.7;
+        const barH = Math.max(4, amplitude * h * 0.85);
+        const x = i * barW + gapF / 2;
+        const y = (h - barH) / 2;
+        const barProgress = (i + 0.5) / fallbackBars;
+        ctx.fillStyle = barProgress <= progress ? playedColour : unplayedColour;
+        ctx.fillRect(x, y, actualW, barH);
+      }
+
+      // Playhead
+      const phX = progress * w;
+      ctx.strokeStyle = playheadColour;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(phX, 0);
+      ctx.lineTo(phX, h);
+      ctx.stroke();
       return;
     }
 
