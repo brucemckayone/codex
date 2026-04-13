@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import type { Action } from 'svelte/action';
   import { createAudioAnalyser, type AudioAnalyserHandle } from './audio-analyser';
   import { loadRenderer } from '$lib/components/ui/ShaderHero/load-renderer';
   import { getShaderConfig, type ShaderPresetId, type ShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
@@ -230,11 +231,25 @@
   });
 
   const seekProgress = $derived(duration > 0 ? (currentTime / duration) * 100 : 0);
+
+  /**
+   * Portal action — moves the element to document.body so it escapes
+   * the org-main stacking context (created by view-transition-name).
+   */
+  const portal: Action = (node) => {
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        node.remove();
+      },
+    };
+  };
 </script>
 
 <div
   class="immersive"
   bind:this={overlayEl}
+  use:portal
   onpointermove={handlePointerMove}
   onclick={handleClick}
   role="application"
