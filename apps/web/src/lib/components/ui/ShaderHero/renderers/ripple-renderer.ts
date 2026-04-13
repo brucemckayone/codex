@@ -10,7 +10,7 @@
  * Display pass renders to the full canvas viewport.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { RippleConfig, ShaderConfig } from '../shader-config';
 import { RIPPLE_DISPLAY_FRAG } from '../shaders/ripple-display.frag';
 import { RIPPLE_SIM_FRAG } from '../shaders/ripple-sim.frag';
@@ -156,19 +156,38 @@ export function createRippleRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!simProg || !displayProg || !simU || !displayU || !simBuf || !quad)
         return;
 
       const cfg = config as RippleConfig;
+      const bass = audio?.bass ?? 0;
+      const amplitude = audio?.amplitude ?? 0;
 
-      // ── Ambient drips (every ~2.5-4 seconds) ───────────────
-      if (time - lastAmbientTime > 2.5 + Math.random() * 1.5) {
+      // ── Ambient drips — more frequent with audio ───────────
+      const ambientInterval = audio?.active
+        ? Math.max(0.2, 1.2 - bass * 1.0)
+        : 2.5 + Math.random() * 1.5;
+      if (time - lastAmbientTime > ambientInterval) {
         lastAmbientTime = time;
         const ax = 0.15 + Math.random() * 0.7;
         const ay = 0.15 + Math.random() * 0.7;
-        stepSim(gl, ax, ay, true, 0.6, cfg);
+        const strength = audio?.active ? 0.6 + bass * 2.5 : 0.6;
+        stepSim(gl, ax, ay, true, strength, cfg);
+      }
+
+      // ── Bass-driven extra impulses ─────────────────────────
+      if (audio?.active && bass > 0.35) {
+        stepSim(
+          gl,
+          0.2 + Math.random() * 0.6,
+          0.2 + Math.random() * 0.6,
+          true,
+          bass * 4.0,
+          cfg
+        );
       }
 
       // ── Click splashes: inject over several frames ─────────
@@ -217,8 +236,14 @@ export function createRippleRenderer(): ShaderRenderer {
       gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);
       gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
       gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
-      gl.uniform1f(displayU.uIntensity, cfg.intensity);
-      gl.uniform1f(displayU.uRefraction, cfg.refraction ?? DEFAULT_REFRACTION);
+      gl.uniform1f(
+        displayU.uIntensity,
+        cfg.intensity * (1.0 + amplitude * 0.5)
+      );
+      gl.uniform1f(
+        displayU.uRefraction,
+        (cfg.refraction ?? DEFAULT_REFRACTION) * (1.0 + bass * 1.5)
+      );
       gl.uniform1f(displayU.uGrain, cfg.grain);
       gl.uniform1f(displayU.uVignette, cfg.vignette);
       gl.uniform1f(displayU.uTime, time);

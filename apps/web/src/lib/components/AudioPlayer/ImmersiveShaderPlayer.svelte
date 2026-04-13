@@ -145,8 +145,8 @@
       };
     }
 
-    // Build config from defaults (no CSS vars in fullscreen overlay)
-    const config = getShaderConfig();
+    // Build config with the immersive preset (not the org's hero preset)
+    const config = getShaderConfig(null, shaderPreset as ShaderPresetId);
 
     renderer.render(gl, time, mouse, config, w, h, audioState);
     animFrameId = requestAnimationFrame(renderFrame);

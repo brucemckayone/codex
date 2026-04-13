@@ -44,6 +44,9 @@ export type ShaderPresetId =
   | 'julia'
   | 'vapor'
   | 'tunnel'
+  | 'plasma'
+  | 'flow'
+  | 'spore'
   | 'none';
 
 /** Shared configuration fields present on all presets. */
@@ -52,6 +55,8 @@ export interface ShaderConfigBase {
   intensity: number;
   grain: number;
   vignette: number;
+  /** Org logo URL for SDF-based shader integration (optional). */
+  logoUrl?: string;
   /** Brand colors parsed from CSS custom properties. */
   colors: {
     primary: [number, number, number];
@@ -411,6 +416,33 @@ export interface TunnelConfig extends ShaderConfigBase {
   twist: number;
 }
 
+export interface SporeConfig extends ShaderConfigBase {
+  preset: 'spore';
+  sensorAngle: number;
+  sensorOffset: number;
+  stepSize: number;
+  rotation: number;
+  decay: number;
+}
+
+export interface FlowConfig extends ShaderConfigBase {
+  preset: 'flow';
+  curl: number;
+  advection: number;
+  smoothing: number;
+  contrast: number;
+  fieldSpeed: number;
+}
+
+export interface PlasmaConfig extends ShaderConfigBase {
+  preset: 'plasma';
+  speed: number;
+  bands: number;
+  pressure: number;
+  turn: number;
+  diffusion: number;
+}
+
 export interface NoneConfig extends ShaderConfigBase {
   preset: 'none';
 }
@@ -454,6 +486,9 @@ export type ShaderConfig =
   | JuliaConfig
   | VaporConfig
   | TunnelConfig
+  | PlasmaConfig
+  | FlowConfig
+  | SporeConfig
   | NoneConfig;
 
 /** Default values matching the spec in 14-final-preset-catalog.md */
@@ -697,6 +732,24 @@ const DEFAULTS = {
   tunnelRadius: 2.0,
   tunnelBrightness: 1.0,
   tunnelTwist: 0.07,
+  // Plasma
+  plasmaSpeed: 0.8,
+  plasmaBands: 25.0,
+  plasmaPressure: 0.9,
+  plasmaTurn: 0.11,
+  plasmaDiffusion: 1.2,
+  // Flow
+  flowCurl: 0.6,
+  flowAdvection: 6.0,
+  flowSmoothing: 0.8,
+  flowContrast: 12.0,
+  flowFieldSpeed: 1.0,
+  // Spore
+  sporeSensorAngle: 12.5,
+  sporeSensorOffset: 3.0,
+  sporeStepSize: 6.0,
+  sporeRotation: 22.5,
+  sporeDecay: 0.998,
 };
 
 /** Parse a hex color (#rrggbb) to normalized [0-1, 0-1, 0-1]. */
@@ -756,12 +809,15 @@ function num(val: string | null, fallback: number): number {
  * Read shader configuration from CSS custom properties on the org layout element.
  * Returns a fully typed ShaderConfig with defaults for any missing values.
  */
-export function getShaderConfig(orgLayoutEl?: Element | null): ShaderConfig {
+export function getShaderConfig(
+  orgLayoutEl?: Element | null,
+  presetOverride?: ShaderPresetId
+): ShaderConfig {
   const el = orgLayoutEl ?? document.querySelector('.org-layout');
 
-  const preset = (
-    el ? readBrandVar(el, 'shader-preset') : null
-  ) as ShaderPresetId | null;
+  const preset =
+    presetOverride ??
+    ((el ? readBrandVar(el, 'shader-preset') : null) as ShaderPresetId | null);
   const resolvedPreset = preset ?? DEFAULTS.preset;
 
   // Read brand colors from the org's CSS custom properties
@@ -776,6 +832,9 @@ export function getShaderConfig(orgLayoutEl?: Element | null): ShaderConfig {
   ];
   const bg = (el ? readColorVar(el, 'brand-bg') : null) ?? [0.059, 0.09, 0.165];
 
+  // Read logo URL for SDF-based shader integration
+  const logoUrl = el ? readBrandVar(el, 'shader-logo-url') : null;
+
   const base: ShaderConfigBase = {
     preset: resolvedPreset,
     intensity: num(
@@ -787,6 +846,7 @@ export function getShaderConfig(orgLayoutEl?: Element | null): ShaderConfig {
       el ? readBrandVar(el, 'shader-vignette') : null,
       DEFAULTS.vignette
     ),
+    logoUrl: logoUrl ?? undefined,
     colors: {
       primary: primary as [number, number, number],
       secondary: secondary as [number, number, number],
@@ -1217,6 +1277,39 @@ export function getShaderConfig(orgLayoutEl?: Element | null): ShaderConfig {
         radius: rv('shader-tunnel-radius', DEFAULTS.tunnelRadius),
         brightness: rv('shader-tunnel-brightness', DEFAULTS.tunnelBrightness),
         twist: rv('shader-tunnel-twist', DEFAULTS.tunnelTwist),
+      };
+    case 'spore':
+      return {
+        ...base,
+        preset: 'spore',
+        sensorAngle: rv('shader-spore-sensor-angle', DEFAULTS.sporeSensorAngle),
+        sensorOffset: rv(
+          'shader-spore-sensor-offset',
+          DEFAULTS.sporeSensorOffset
+        ),
+        stepSize: rv('shader-spore-step-size', DEFAULTS.sporeStepSize),
+        rotation: rv('shader-spore-rotation', DEFAULTS.sporeRotation),
+        decay: rv('shader-spore-decay', DEFAULTS.sporeDecay),
+      };
+    case 'flow':
+      return {
+        ...base,
+        preset: 'flow',
+        curl: rv('shader-flow-curl', DEFAULTS.flowCurl),
+        advection: rv('shader-flow-advection', DEFAULTS.flowAdvection),
+        smoothing: rv('shader-flow-smoothing', DEFAULTS.flowSmoothing),
+        contrast: rv('shader-flow-contrast', DEFAULTS.flowContrast),
+        fieldSpeed: rv('shader-flow-field-speed', DEFAULTS.flowFieldSpeed),
+      };
+    case 'plasma':
+      return {
+        ...base,
+        preset: 'plasma',
+        speed: rv('shader-plasma-speed', DEFAULTS.plasmaSpeed),
+        bands: rv('shader-plasma-bands', DEFAULTS.plasmaBands),
+        pressure: rv('shader-plasma-pressure', DEFAULTS.plasmaPressure),
+        turn: rv('shader-plasma-turn', DEFAULTS.plasmaTurn),
+        diffusion: rv('shader-plasma-diffusion', DEFAULTS.plasmaDiffusion),
       };
     default:
       return { ...base, preset: 'none' };
