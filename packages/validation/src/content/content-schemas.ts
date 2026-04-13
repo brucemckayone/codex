@@ -298,6 +298,20 @@ const baseContentSchema = z.object({
 
   // Subscription tier gating (null = not included in any subscription)
   minimumTierId: uuidSchema.optional().nullable(),
+
+  // Shader preset for immersive audio playback mode
+  shaderPreset: z
+    .string()
+    .trim()
+    .max(50, 'Shader preset must be 50 characters or less')
+    .optional()
+    .nullable(),
+
+  // Per-preset parameter overrides (intensity, grain, etc.)
+  shaderConfig: z
+    .record(z.string(), z.union([z.number(), z.boolean()]))
+    .optional()
+    .nullable(),
 });
 
 /**

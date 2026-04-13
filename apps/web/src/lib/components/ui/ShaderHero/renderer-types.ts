@@ -18,6 +18,23 @@ export interface MouseState {
   burstStrength: number;
 }
 
+/**
+ * Audio frequency data for audio-reactive shader mode.
+ * Provided by the AudioAnalyser when in immersive playback.
+ */
+export interface AudioState {
+  /** Low-frequency energy, normalised 0-1 */
+  bass: number;
+  /** Mid-range energy, normalised 0-1 */
+  mids: number;
+  /** High-frequency energy, normalised 0-1 */
+  treble: number;
+  /** Overall amplitude, normalised 0-1 */
+  amplitude: number;
+  /** Whether audio is actively playing */
+  active: boolean;
+}
+
 export interface ShaderRenderer {
   /**
    * Initialize WebGL resources (programs, FBOs, uniforms).
@@ -40,7 +57,8 @@ export interface ShaderRenderer {
     mouse: MouseState,
     config: ShaderConfig,
     width: number,
-    height: number
+    height: number,
+    audio?: AudioState
   ): void;
 
   /**
