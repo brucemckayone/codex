@@ -130,6 +130,30 @@ export async function seedOrganizations(db: typeof DbClient) {
     },
   ]);
 
+  // Organization followers (audience relationships — separate from team memberships)
+  await db.insert(schema.organizationFollowers).values([
+    {
+      organizationId: ORGS.alpha.id,
+      userId: USERS.viewer.id,
+      createdAt: now,
+    },
+    {
+      organizationId: ORGS.beta.id,
+      userId: USERS.viewer.id,
+      createdAt: now,
+    },
+    {
+      organizationId: ORGS.alpha.id,
+      userId: USERS.customer1.id,
+      createdAt: now,
+    },
+    {
+      organizationId: ORGS.alpha.id,
+      userId: USERS.customer2.id,
+      createdAt: now,
+    },
+  ]);
+
   // Platform settings hub (required FK target for spoke tables)
   await db.insert(schema.platformSettings).values([
     { organizationId: ORGS.alpha.id, createdAt: now, updatedAt: now },

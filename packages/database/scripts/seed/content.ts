@@ -40,6 +40,10 @@ const DESCRIPTIONS: Record<string, string> = {
     'Go beyond the basics with advanced TypeScript patterns — conditional types, template literals, mapped types. Requires Standard subscription.',
   'css-variables-masterclass':
     'Master CSS custom properties and design tokens. Build themeable, maintainable design systems. One-off purchase £4.99.',
+  'community-qa-behind-the-scenes':
+    'Exclusive behind-the-scenes Q&A for followers. Follow the organisation to watch this free content.',
+  'internal-planning-session':
+    'Private team discussion about upcoming content and roadmap. Only visible to team members.',
 };
 
 export async function seedContent(db: typeof DbClient) {

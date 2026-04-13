@@ -468,6 +468,35 @@ export const CONTENT = {
     viewCount: 1500,
     purchaseCount: 67,
   },
+  // ── Follower & Team access type examples ──
+  followersOnly: {
+    id: seedUuid('seed-content-followers-only'),
+    title: 'Community Q&A: Behind the Scenes [Followers]',
+    slug: 'community-qa-behind-the-scenes',
+    contentType: 'video' as const,
+    accessType: 'followers' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.alpha.id,
+    mediaId: MEDIA.introTs.id, // reuse media
+    creatorId: USERS.creator.id,
+    viewCount: 890,
+    purchaseCount: 0,
+  },
+  teamOnly: {
+    id: seedUuid('seed-content-team-only'),
+    title: 'Internal Planning Session [Team Only]',
+    slug: 'internal-planning-session',
+    contentType: 'video' as const,
+    accessType: 'team' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.alpha.id,
+    mediaId: MEDIA.introTs.id, // reuse media
+    creatorId: USERS.creator.id,
+    viewCount: 15,
+    purchaseCount: 0,
+  },
 } as const;
 
 // ── Thumbnail Image Seeds (picsum.photos) ───────────────────
