@@ -284,6 +284,11 @@ export const content = pgTable(
     category: varchar('category', { length: 100 }), // Simple string category
     tags: jsonb('tags').$type<string[]>().default([]), // Array of tag strings
 
+    // Shader preset for immersive audio playback mode (Phase 2)
+    shaderPreset: varchar('shader_preset', { length: 50 }),
+    shaderConfig:
+      jsonb('shader_config').$type<Record<string, number | boolean>>(),
+
     // Access model — defines how content is gated
     // 'free' | 'paid' | 'subscribers' | 'members'
     accessType: varchar('access_type', { length: 50 })

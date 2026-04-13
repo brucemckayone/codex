@@ -1,7 +1,7 @@
 /**
  * Progress Tracker (Svelte 5 Runes)
  *
- * Reactively tracks video playback progress and syncs it
+ * Reactively tracks media playback progress and syncs it
  * to the local progress collection. The collection handles
  * background sync to the server.
  *
@@ -19,16 +19,16 @@ const SAVE_INTERVAL_MS = 30_000;
 
 export interface ProgressTrackerOptions {
   getContentId: () => string;
-  getVideo: () => HTMLVideoElement | null;
+  getMedia: () => HTMLMediaElement | null;
 }
 
 export function createProgressTracker(options: ProgressTrackerOptions) {
-  const { getContentId, getVideo } = options;
+  const { getContentId, getMedia } = options;
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
 
   function save(): void {
-    const video = getVideo();
+    const video = getMedia();
     if (!video || !video.duration || Number.isNaN(video.duration)) return;
 
     updateLocalProgress(getContentId(), video.currentTime, video.duration);
@@ -71,7 +71,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
   }
 
   function attach(): void {
-    const video = getVideo();
+    const video = getMedia();
     if (!video) return;
 
     video.addEventListener('play', handlePlay);
@@ -89,7 +89,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
   }
 
   function detach(): void {
-    const video = getVideo();
+    const video = getMedia();
     if (video) {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);

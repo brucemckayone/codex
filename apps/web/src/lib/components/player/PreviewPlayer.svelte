@@ -78,7 +78,7 @@
 
     try {
       hlsInstance = await createHlsPlayer({
-        video: videoEl,
+        media: videoEl,
         src: previewUrl,
         onError: (msg) => {
           errorMessage = msg;

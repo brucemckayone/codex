@@ -43,7 +43,7 @@
 
   const tracker = createProgressTracker({
     getContentId: () => contentId,
-    getVideo: () => videoEl ?? null,
+    getMedia: () => videoEl ?? null,
   });
 
   function handleCanPlay() {
@@ -68,7 +68,7 @@
       await import('media-chrome');
 
       hlsInstance = await createHlsPlayer({
-        video: videoEl,
+        media: videoEl,
         src,
         onError: (msg) => {
           errorMessage = msg;

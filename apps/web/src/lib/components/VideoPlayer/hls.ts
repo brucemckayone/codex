@@ -14,7 +14,7 @@ import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
 
 export interface HlsPlayerOptions {
-  video: HTMLVideoElement;
+  media: HTMLMediaElement;
   src: string;
   onError?: (message: string) => void;
 }
@@ -37,11 +37,11 @@ function supportsNativeHls(): boolean {
 export async function createHlsPlayer(
   options: HlsPlayerOptions
 ): Promise<Hls | null> {
-  const { video, src, onError } = options;
+  const { media, src, onError } = options;
 
   // Safari / iOS: use native HLS
   if (supportsNativeHls()) {
-    video.src = src;
+    media.src = src;
     return null;
   }
 
@@ -49,7 +49,7 @@ export async function createHlsPlayer(
 
   if (!HlsJs.isSupported()) {
     // Fallback: try direct source (may work for mp4 URLs)
-    video.src = src;
+    media.src = src;
     return null;
   }
 
@@ -91,7 +91,7 @@ export async function createHlsPlayer(
   });
 
   hls.loadSource(src);
-  hls.attachMedia(video);
+  hls.attachMedia(media);
 
   return hls;
 }

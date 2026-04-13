@@ -344,6 +344,13 @@
       "when": 1776120000000,
       "tag": "0048_migrate_members_to_team",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1776307200000,
+      "tag": "0050_add_shader_preset_to_content",
+      "breakpoints": true
     }
   ]
 }

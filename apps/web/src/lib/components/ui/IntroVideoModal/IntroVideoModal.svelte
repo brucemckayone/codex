@@ -43,7 +43,7 @@
       error = null;
       try {
         hlsInstance = await createHlsPlayer({
-          video: videoEl,
+          media: videoEl,
           src,
           onError: (msg) => { error = msg; },
         });
