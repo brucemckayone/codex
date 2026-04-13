@@ -232,10 +232,56 @@ export function createRippleRenderer(): ShaderRenderer {
       const tx = 1.0 / SIM_RES;
       gl.uniform2f(displayU.uTexel, tx, tx);
 
-      gl.uniform3fv(displayU.uColorPrimary, cfg.colors.primary);
-      gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);
-      gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
-      gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
+      // ── Audio-reactive colour mixing ─────────────────────────
+      // In immersive mode, colours shift freely with audio:
+      // - Bass blends primary toward accent
+      // - Treble blends secondary toward a hue-rotated primary
+      // - Mids brighten the background slightly
+      const p = cfg.colors.primary;
+      const s = cfg.colors.secondary;
+      const a = cfg.colors.accent;
+      const bg = cfg.colors.bg;
+
+      if (audio?.active) {
+        // Bass: primary shifts toward accent
+        const bMix = bass * 0.6;
+        gl.uniform3f(
+          displayU.uColorPrimary,
+          p[0] * (1 - bMix) + a[0] * bMix,
+          p[1] * (1 - bMix) + a[1] * bMix,
+          p[2] * (1 - bMix) + a[2] * bMix
+        );
+        // Treble: secondary shifts toward complementary of primary
+        const tMix = (audio.treble ?? 0) * 0.5;
+        gl.uniform3f(
+          displayU.uColorSecondary,
+          s[0] * (1 - tMix) + (1 - p[0]) * tMix,
+          s[1] * (1 - tMix) + (1 - p[1]) * tMix,
+          s[2] * (1 - tMix) + (1 - p[2]) * tMix
+        );
+        // Accent gets boosted saturation with amplitude
+        const aSat = 1 + amplitude * 0.8;
+        gl.uniform3f(
+          displayU.uColorAccent,
+          Math.min(1, a[0] * aSat),
+          Math.min(1, a[1] * aSat),
+          Math.min(1, a[2] * aSat)
+        );
+        // Background lightens subtly with mids
+        const mBright = (audio.mids ?? 0) * 0.15;
+        gl.uniform3f(
+          displayU.uBgColor,
+          Math.min(1, bg[0] + mBright),
+          Math.min(1, bg[1] + mBright),
+          Math.min(1, bg[2] + mBright)
+        );
+      } else {
+        gl.uniform3fv(displayU.uColorPrimary, p);
+        gl.uniform3fv(displayU.uColorSecondary, s);
+        gl.uniform3fv(displayU.uColorAccent, a);
+        gl.uniform3fv(displayU.uBgColor, bg);
+      }
+
       gl.uniform1f(
         displayU.uIntensity,
         cfg.intensity * (1.0 + amplitude * 0.5)
@@ -245,7 +291,10 @@ export function createRippleRenderer(): ShaderRenderer {
         (cfg.refraction ?? DEFAULT_REFRACTION) * (1.0 + bass * 1.5)
       );
       gl.uniform1f(displayU.uGrain, cfg.grain);
-      gl.uniform1f(displayU.uVignette, cfg.vignette);
+      gl.uniform1f(
+        displayU.uVignette,
+        Math.max(0, cfg.vignette - amplitude * 0.1)
+      );
       gl.uniform1f(displayU.uTime, time);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
