@@ -129,6 +129,7 @@
       contentBodyHtml={data.contentBodyHtml}
       hasAccess={accessData.hasAccess}
       streamingUrl={accessData.streamingUrl}
+      waveformUrl={accessData.waveformUrl}
       progress={accessData.progress}
       isAuthenticated={true}
       formResult={form}

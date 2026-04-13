@@ -13,6 +13,7 @@ import type { PaginationMetadata, ProgressData } from '@codex/shared-types';
  */
 export interface StreamingUrlResponse {
   streamingUrl: string;
+  waveformUrl: string | null;
   expiresAt: string; // ISO 8601 timestamp
   contentType: string;
 }

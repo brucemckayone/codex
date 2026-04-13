@@ -182,6 +182,7 @@ export class ContentAccessService extends BaseService {
     input: GetStreamingUrlInput
   ): Promise<{
     streamingUrl: string;
+    waveformUrl: string | null;
     expiresAt: Date;
     contentType: 'video' | 'audio';
   }> {
@@ -194,7 +195,7 @@ export class ContentAccessService extends BaseService {
     try {
       // Step 1 & 2: Verify access and fetch content/media data within transaction
       // Transaction ensures consistent snapshot for access verification
-      const { r2Key, mediaType } = await this.db.transaction(
+      const { r2Key, mediaType, waveformKey } = await this.db.transaction(
         async (tx) => {
           // Get content with media details (any organization)
           const contentRecord = await tx.query.content.findFirst({
@@ -635,6 +636,7 @@ export class ContentAccessService extends BaseService {
           return {
             r2Key,
             mediaType: mediaType as 'video' | 'audio',
+            waveformKey: contentRecord.mediaItem.waveformKey,
           };
         },
         {
@@ -649,17 +651,25 @@ export class ContentAccessService extends BaseService {
           r2Key,
           input.expirySeconds
         );
+
+        const waveformUrl =
+          mediaType === 'audio' && waveformKey
+            ? await this.r2.generateSignedUrl(waveformKey, input.expirySeconds)
+            : null;
+
         const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
 
         this.obs.info('Streaming URL generated successfully', {
           userId,
           contentId: input.contentId,
           contentType: mediaType,
+          hasWaveform: !!waveformUrl,
           expiresAt: expiresAt.toISOString(),
         });
 
         return {
           streamingUrl,
+          waveformUrl,
           expiresAt,
           contentType: mediaType,
         };

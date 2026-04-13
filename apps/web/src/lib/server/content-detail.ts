@@ -18,6 +18,7 @@ import { ApiError } from './errors';
 interface AccessAndProgress {
   hasAccess: boolean;
   streamingUrl: string | null;
+  waveformUrl: string | null;
   progress: {
     positionSeconds: number;
     durationSeconds: number;
@@ -58,6 +59,7 @@ export async function loadAccessAndProgress(
 
   const hasAccess = !!streamResult?.streamingUrl;
   const streamingUrl = streamResult?.streamingUrl ?? null;
+  const waveformUrl = streamResult?.waveformUrl ?? null;
   const progress = progressResult
     ? {
         positionSeconds: progressResult.positionSeconds,
@@ -66,7 +68,7 @@ export async function loadAccessAndProgress(
       }
     : null;
 
-  return { hasAccess, streamingUrl, progress };
+  return { hasAccess, streamingUrl, waveformUrl, progress };
 }
 
 /**

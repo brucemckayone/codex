@@ -55,6 +55,7 @@
     contentBodyHtml: string | null;
     hasAccess: boolean;
     streamingUrl: string | null;
+    waveformUrl?: string | null;
     progress: {
       positionSeconds: number;
       durationSeconds: number;
@@ -84,6 +85,7 @@
     contentBodyHtml,
     hasAccess,
     streamingUrl,
+    waveformUrl,
     progress,
     isAuthenticated,
     formResult,
@@ -190,6 +192,7 @@
           src={streamingUrl}
           contentId={content.id}
           initialProgress={progress?.positionSeconds ?? 0}
+          waveformUrl={waveformUrl}
           poster={thumbnailUrl}
           title={content.title}
         />
