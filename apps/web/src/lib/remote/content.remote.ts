@@ -406,6 +406,7 @@ const createContentFormSchema = z.object({
     .pipe(z.array(z.string().trim().max(50)).max(20)),
   thumbnailUrl: optionalString,
   minimumTierId: optionalUuid,
+  shaderPreset: optionalString,
 });
 
 /**
@@ -430,6 +431,7 @@ export const createContentForm = form(
     tags,
     thumbnailUrl,
     minimumTierId,
+    shaderPreset,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -449,6 +451,7 @@ export const createContentForm = form(
         tags,
         thumbnailUrl,
         minimumTierId,
+        shaderPreset,
       });
 
       return { success: true as const, contentId: result.id };
@@ -493,6 +496,7 @@ const updateContentFormSchema = z.object({
     .pipe(z.array(z.string().trim().max(50)).max(20)),
   thumbnailUrl: optionalString,
   minimumTierId: optionalUuid,
+  shaderPreset: optionalString,
 });
 
 /**
@@ -517,6 +521,7 @@ export const updateContentForm = form(
     tags,
     thumbnailUrl,
     minimumTierId,
+    shaderPreset,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -536,6 +541,7 @@ export const updateContentForm = form(
         tags,
         thumbnailUrl,
         minimumTierId,
+        shaderPreset,
       });
 
       return { success: true as const, data: result };

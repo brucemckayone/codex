@@ -1,3 +1,4 @@
+export { loadRenderer } from './load-renderer';
 export type { AudioState, MouseState, ShaderRenderer } from './renderer-types';
 export { default as ShaderHero } from './ShaderHero.svelte';
 export {

@@ -195,6 +195,7 @@
           waveformUrl={waveformUrl}
           poster={thumbnailUrl}
           title={content.title}
+          shaderPreset={content.shaderPreset ?? null}
         />
       {:else}
         <VideoPlayer

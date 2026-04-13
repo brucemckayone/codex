@@ -32,6 +32,7 @@
   import WrittenContentEditor from './content-form/WrittenContentEditor.svelte';
   import ThumbnailUpload from './content-form/ThumbnailUpload.svelte';
   import PublishSidebar from './content-form/PublishSidebar.svelte';
+  import ShaderPicker from './content-form/ShaderPicker.svelte';
 
   interface MediaItemOption {
     id: string;
@@ -72,6 +73,9 @@
   // so we track status separately for optimistic publish/unpublish updates.
   let contentStatus = $state(content?.status ?? 'draft');
 
+  // Shader preset for immersive audio mode
+  let shaderPreset: string | null = $state(content?.shaderPreset ?? null);
+
   const contentTypeVal = $derived(form.fields.contentType.value() ?? content?.contentType ?? 'video');
   const formPending = $derived(form.pending > 0);
 
@@ -97,6 +101,7 @@
         category: content.category ?? '',
         tags: JSON.stringify(content.tags ?? []),
         thumbnailUrl: content.thumbnailUrl ?? '',
+        shaderPreset: content.shaderPreset ?? '',
       });
     } else {
       createContentForm.fields.set({
@@ -113,6 +118,7 @@
         category: '',
         tags: '[]',
         thumbnailUrl: '',
+        shaderPreset: '',
       });
     }
   });
@@ -272,6 +278,19 @@
         <MediaSection {form} {mediaItems} {orgSlug} />
       {/if}
 
+      <!-- Shader Preset (audio only) -->
+      {#if contentTypeVal === 'audio'}
+        <section class="content-form__section">
+          <h3 class="section-title">Immersive Shader</h3>
+          <p class="section-description">Choose a shader preset for immersive audio playback</p>
+          <input type="hidden" name="shaderPreset" value={shaderPreset ?? ''} />
+          <ShaderPicker
+            value={shaderPreset}
+            onchange={(preset) => { shaderPreset = preset; }}
+          />
+        </section>
+      {/if}
+
       <!-- Content Body Editor -->
       <WrittenContentEditor {form} optional={contentTypeVal !== 'written'} />
 
@@ -378,6 +397,27 @@
     .content-form-layout :global(.publish-sidebar) {
       position: static;
     }
+  }
+
+  /* Form sections */
+  .content-form__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .section-title {
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    margin: 0;
+  }
+
+  .section-description {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    margin: 0;
   }
 
 </style>

@@ -16,8 +16,9 @@
   import { onMount, onDestroy } from 'svelte';
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { createProgressTracker } from '$lib/components/VideoPlayer/progress.svelte.ts';
-  import { AlertCircleIcon, PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon } from '$lib/components/ui/Icon';
+  import { AlertCircleIcon, PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, MaximizeIcon } from '$lib/components/ui/Icon';
   import Waveform from './Waveform.svelte';
+  import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
 
   import type Hls from 'hls.js';
 
@@ -28,6 +29,7 @@
     waveformUrl?: string | null;
     poster?: string | null;
     title?: string;
+    shaderPreset?: string | null;
   }
 
   const {
@@ -37,6 +39,7 @@
     waveformUrl = null,
     poster = null,
     title = '',
+    shaderPreset = null,
   }: Props = $props();
 
   let audioEl: HTMLAudioElement | undefined = $state();
@@ -58,6 +61,9 @@
 
   // Mini-player
   let miniMode = $state(false);
+
+  // Immersive shader mode
+  let showImmersive = $state(false);
 
   const tracker = createProgressTracker({
     getContentId: () => contentId,
@@ -343,6 +349,18 @@
               </button>
             {/each}
           </div>
+
+          <!-- Immersive mode (only when shader preset is set) -->
+          {#if shaderPreset && shaderPreset !== 'none'}
+            <button
+              class="audio-player__btn audio-player__btn--immersive"
+              onclick={() => { showImmersive = true; }}
+              aria-label="Enter immersive mode"
+              title="Immersive shader mode"
+            >
+              <MaximizeIcon size={18} />
+            </button>
+          {/if}
         </div>
       </div>
     </div>
@@ -384,6 +402,15 @@
       &times;
     </button>
   </div>
+{/if}
+
+<!-- Immersive shader player (fullscreen overlay) -->
+{#if showImmersive && audioEl && shaderPreset && shaderPreset !== 'none'}
+  <ImmersiveShaderPlayer
+    audioElement={audioEl}
+    {shaderPreset}
+    onclose={() => { showImmersive = false; }}
+  />
 {/if}
 
 <svelte:window
@@ -562,6 +589,17 @@
     color: var(--color-primary-500);
     border-color: var(--color-primary-500);
     font-weight: var(--font-medium);
+  }
+
+  .audio-player__btn--immersive {
+    padding: var(--space-2);
+    background: var(--color-surface-secondary);
+    border-radius: var(--radius-md);
+  }
+
+  .audio-player__btn--immersive:hover {
+    background: var(--color-primary-500);
+    color: var(--color-text-on-primary, #fff);
   }
 
   .audio-player__error {
