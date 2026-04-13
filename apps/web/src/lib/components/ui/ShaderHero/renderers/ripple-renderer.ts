@@ -166,26 +166,26 @@ export function createRippleRenderer(): ShaderRenderer {
       const bass = audio?.bass ?? 0;
       const amplitude = audio?.amplitude ?? 0;
 
-      // ── Ambient drips — more frequent with audio ───────────
+      // ── Ambient drips — gently more frequent with audio ────
       const ambientInterval = audio?.active
-        ? Math.max(0.2, 1.2 - bass * 1.0)
+        ? Math.max(0.8, 2.0 - amplitude * 0.8)
         : 2.5 + Math.random() * 1.5;
       if (time - lastAmbientTime > ambientInterval) {
         lastAmbientTime = time;
         const ax = 0.15 + Math.random() * 0.7;
         const ay = 0.15 + Math.random() * 0.7;
-        const strength = audio?.active ? 0.6 + bass * 2.5 : 0.6;
+        const strength = audio?.active ? 0.4 + bass * 0.6 : 0.6;
         stepSim(gl, ax, ay, true, strength, cfg);
       }
 
-      // ── Bass-driven extra impulses ─────────────────────────
-      if (audio?.active && bass > 0.35) {
+      // ── Gentle bass-driven drips ───────────────────────────
+      if (audio?.active && bass > 0.5) {
         stepSim(
           gl,
           0.2 + Math.random() * 0.6,
           0.2 + Math.random() * 0.6,
           true,
-          bass * 4.0,
+          0.5 + bass * 0.5,
           cfg
         );
       }
@@ -296,13 +296,10 @@ export function createRippleRenderer(): ShaderRenderer {
         gl.uniform3fv(displayU.uBgColor, bg);
       }
 
-      gl.uniform1f(
-        displayU.uIntensity,
-        cfg.intensity * (1.0 + amplitude * 0.5)
-      );
+      gl.uniform1f(displayU.uIntensity, cfg.intensity);
       gl.uniform1f(
         displayU.uRefraction,
-        (cfg.refraction ?? DEFAULT_REFRACTION) * (1.0 + bass * 1.5)
+        (cfg.refraction ?? DEFAULT_REFRACTION) * (1.0 + bass * 0.3)
       );
       gl.uniform1f(displayU.uGrain, cfg.grain);
       gl.uniform1f(displayU.uVignette, 0.0);
