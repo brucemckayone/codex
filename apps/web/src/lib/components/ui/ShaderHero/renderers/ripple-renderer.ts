@@ -232,48 +232,62 @@ export function createRippleRenderer(): ShaderRenderer {
       const tx = 1.0 / SIM_RES;
       gl.uniform2f(displayU.uTexel, tx, tx);
 
-      // ── Audio-reactive colour mixing ─────────────────────────
-      // In immersive mode, colours shift freely with audio:
-      // - Bass blends primary toward accent
-      // - Treble blends secondary toward a hue-rotated primary
-      // - Mids brighten the background slightly
+      // ── Immersive colour cycling ────────────────────────────
+      // Colours drift continuously using time-based sinusoidal mixing
+      // across all brand colours + complementary tones. Audio gently
+      // nudges the phase but doesn't hard-drive it.
       const p = cfg.colors.primary;
       const s = cfg.colors.secondary;
       const a = cfg.colors.accent;
       const bg = cfg.colors.bg;
 
       if (audio?.active) {
-        // Bass: primary shifts toward accent
-        const bMix = bass * 0.6;
+        // Slow oscillating phases — each colour channel drifts at different rates
+        const t = time;
+        const phase1 = Math.sin(t * 0.3) * 0.5 + 0.5;
+        const phase2 = Math.sin(t * 0.2 + 2.1) * 0.5 + 0.5;
+        const phase3 = Math.sin(t * 0.15 + 4.2) * 0.5 + 0.5;
+
+        // Audio nudges the phases slightly
+        const audioShift = amplitude * 0.2;
+
+        // Primary drifts between primary → accent → complement
+        const comp = [1 - p[0], 1 - p[1], 1 - p[2]];
+        const mix1 = phase1 + audioShift;
         gl.uniform3f(
           displayU.uColorPrimary,
-          p[0] * (1 - bMix) + a[0] * bMix,
-          p[1] * (1 - bMix) + a[1] * bMix,
-          p[2] * (1 - bMix) + a[2] * bMix
+          p[0] * (1 - mix1) + a[0] * mix1 * 0.6 + comp[0] * mix1 * 0.4,
+          p[1] * (1 - mix1) + a[1] * mix1 * 0.6 + comp[1] * mix1 * 0.4,
+          p[2] * (1 - mix1) + a[2] * mix1 * 0.6 + comp[2] * mix1 * 0.4
         );
-        // Treble: secondary shifts toward complementary of primary
-        const tMix = (audio.treble ?? 0) * 0.5;
+
+        // Secondary drifts between secondary → primary → warm tone
+        const warm = [0.95, 0.6, 0.3];
+        const mix2 = phase2 + audioShift;
         gl.uniform3f(
           displayU.uColorSecondary,
-          s[0] * (1 - tMix) + (1 - p[0]) * tMix,
-          s[1] * (1 - tMix) + (1 - p[1]) * tMix,
-          s[2] * (1 - tMix) + (1 - p[2]) * tMix
+          s[0] * (1 - mix2) + p[0] * mix2 * 0.5 + warm[0] * mix2 * 0.5,
+          s[1] * (1 - mix2) + p[1] * mix2 * 0.5 + warm[1] * mix2 * 0.5,
+          s[2] * (1 - mix2) + p[2] * mix2 * 0.5 + warm[2] * mix2 * 0.5
         );
-        // Accent gets boosted saturation with amplitude
-        const aSat = 1 + amplitude * 0.8;
+
+        // Accent drifts between accent → cool tone → secondary
+        const cool = [0.3, 0.5, 0.95];
+        const mix3 = phase3 + audioShift;
         gl.uniform3f(
           displayU.uColorAccent,
-          Math.min(1, a[0] * aSat),
-          Math.min(1, a[1] * aSat),
-          Math.min(1, a[2] * aSat)
+          a[0] * (1 - mix3) + cool[0] * mix3 * 0.6 + s[0] * mix3 * 0.4,
+          a[1] * (1 - mix3) + cool[1] * mix3 * 0.6 + s[1] * mix3 * 0.4,
+          a[2] * (1 - mix3) + cool[2] * mix3 * 0.6 + s[2] * mix3 * 0.4
         );
-        // Background lightens subtly with mids
-        const mBright = (audio.mids ?? 0) * 0.15;
+
+        // Background slowly shifts between dark tones
+        const bgPhase = Math.sin(t * 0.1) * 0.5 + 0.5;
         gl.uniform3f(
           displayU.uBgColor,
-          Math.min(1, bg[0] + mBright),
-          Math.min(1, bg[1] + mBright),
-          Math.min(1, bg[2] + mBright)
+          bg[0] + bgPhase * 0.08 + bass * 0.04,
+          bg[1] + bgPhase * 0.04,
+          bg[2] + bgPhase * 0.06 + (audio.treble ?? 0) * 0.03
         );
       } else {
         gl.uniform3fv(displayU.uColorPrimary, p);
@@ -291,10 +305,7 @@ export function createRippleRenderer(): ShaderRenderer {
         (cfg.refraction ?? DEFAULT_REFRACTION) * (1.0 + bass * 1.5)
       );
       gl.uniform1f(displayU.uGrain, cfg.grain);
-      gl.uniform1f(
-        displayU.uVignette,
-        Math.max(0, cfg.vignette - amplitude * 0.1)
-      );
+      gl.uniform1f(displayU.uVignette, 0.0);
       gl.uniform1f(displayU.uTime, time);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
