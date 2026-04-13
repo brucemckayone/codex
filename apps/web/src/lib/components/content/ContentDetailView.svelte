@@ -27,6 +27,7 @@
   import type { Snippet } from 'svelte';
   import * as m from '$paraglide/messages';
   import VideoPlayer from '$lib/components/VideoPlayer/VideoPlayer.svelte';
+  import { AudioPlayer } from '$lib/components/AudioPlayer';
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { formatPrice, formatDurationHuman } from '$lib/utils/format';
@@ -184,12 +185,22 @@
   {#if content.contentType !== 'written'}
   <div class="content-detail__player">
     {#if hasAccess && streamingUrl}
-      <VideoPlayer
-        src={streamingUrl}
-        contentId={content.id}
-        initialProgress={progress?.positionSeconds ?? 0}
-        poster={thumbnailUrl}
-      />
+      {#if content.contentType === 'audio'}
+        <AudioPlayer
+          src={streamingUrl}
+          contentId={content.id}
+          initialProgress={progress?.positionSeconds ?? 0}
+          poster={thumbnailUrl}
+          title={content.title}
+        />
+      {:else}
+        <VideoPlayer
+          src={streamingUrl}
+          contentId={content.id}
+          initialProgress={progress?.positionSeconds ?? 0}
+          poster={thumbnailUrl}
+        />
+      {/if}
     {:else if previewUrl && accessState.status === 'preview'}
       <svelte:boundary>
         <PreviewPlayer
