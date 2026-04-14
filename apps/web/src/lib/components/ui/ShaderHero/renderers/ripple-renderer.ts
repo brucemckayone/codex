@@ -10,6 +10,7 @@
  * Display pass renders to the full canvas viewport.
  */
 
+import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { RippleConfig, ShaderConfig } from '../shader-config';
 import { RIPPLE_DISPLAY_FRAG } from '../shaders/ripple-display.frag';
@@ -232,69 +233,15 @@ export function createRippleRenderer(): ShaderRenderer {
       const tx = 1.0 / SIM_RES;
       gl.uniform2f(displayU.uTexel, tx, tx);
 
-      // ── Immersive colour cycling ────────────────────────────
-      // Colours drift continuously using time-based sinusoidal mixing
-      // across all brand colours + complementary tones. Audio gently
-      // nudges the phase but doesn't hard-drive it.
-      const p = cfg.colors.primary;
-      const s = cfg.colors.secondary;
-      const a = cfg.colors.accent;
-      const bg = cfg.colors.bg;
+      // ── Immersive colour cycling (shared utility) ──────────
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amplitude)
+        : cfg.colors;
 
-      if (audio?.active) {
-        // Slow oscillating phases — each colour channel drifts at different rates
-        const t = time;
-        const phase1 = Math.sin(t * 0.3) * 0.5 + 0.5;
-        const phase2 = Math.sin(t * 0.2 + 2.1) * 0.5 + 0.5;
-        const phase3 = Math.sin(t * 0.15 + 4.2) * 0.5 + 0.5;
-
-        // Audio nudges the phases slightly
-        const audioShift = amplitude * 0.2;
-
-        // Primary drifts between primary → accent → complement
-        const comp = [1 - p[0], 1 - p[1], 1 - p[2]];
-        const mix1 = phase1 + audioShift;
-        gl.uniform3f(
-          displayU.uColorPrimary,
-          p[0] * (1 - mix1) + a[0] * mix1 * 0.6 + comp[0] * mix1 * 0.4,
-          p[1] * (1 - mix1) + a[1] * mix1 * 0.6 + comp[1] * mix1 * 0.4,
-          p[2] * (1 - mix1) + a[2] * mix1 * 0.6 + comp[2] * mix1 * 0.4
-        );
-
-        // Secondary drifts between secondary → primary → warm tone
-        const warm = [0.95, 0.6, 0.3];
-        const mix2 = phase2 + audioShift;
-        gl.uniform3f(
-          displayU.uColorSecondary,
-          s[0] * (1 - mix2) + p[0] * mix2 * 0.5 + warm[0] * mix2 * 0.5,
-          s[1] * (1 - mix2) + p[1] * mix2 * 0.5 + warm[1] * mix2 * 0.5,
-          s[2] * (1 - mix2) + p[2] * mix2 * 0.5 + warm[2] * mix2 * 0.5
-        );
-
-        // Accent drifts between accent → cool tone → secondary
-        const cool = [0.3, 0.5, 0.95];
-        const mix3 = phase3 + audioShift;
-        gl.uniform3f(
-          displayU.uColorAccent,
-          a[0] * (1 - mix3) + cool[0] * mix3 * 0.6 + s[0] * mix3 * 0.4,
-          a[1] * (1 - mix3) + cool[1] * mix3 * 0.6 + s[1] * mix3 * 0.4,
-          a[2] * (1 - mix3) + cool[2] * mix3 * 0.6 + s[2] * mix3 * 0.4
-        );
-
-        // Background slowly shifts between dark tones
-        const bgPhase = Math.sin(t * 0.1) * 0.5 + 0.5;
-        gl.uniform3f(
-          displayU.uBgColor,
-          bg[0] + bgPhase * 0.08 + bass * 0.04,
-          bg[1] + bgPhase * 0.04,
-          bg[2] + bgPhase * 0.06 + (audio.treble ?? 0) * 0.03
-        );
-      } else {
-        gl.uniform3fv(displayU.uColorPrimary, p);
-        gl.uniform3fv(displayU.uColorSecondary, s);
-        gl.uniform3fv(displayU.uColorAccent, a);
-        gl.uniform3fv(displayU.uBgColor, bg);
-      }
+      gl.uniform3fv(displayU.uColorPrimary, colours.primary);
+      gl.uniform3fv(displayU.uColorSecondary, colours.secondary);
+      gl.uniform3fv(displayU.uColorAccent, colours.accent);
+      gl.uniform3fv(displayU.uBgColor, colours.bg);
 
       gl.uniform1f(displayU.uIntensity, cfg.intensity);
       gl.uniform1f(
