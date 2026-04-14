@@ -7,7 +7,8 @@
  * Brand colors: primary=cloud body, secondary=sky top, accent=ridge glow.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { CloudsConfig, ShaderConfig } from '../shader-config';
 import { CLOUDS_FRAG } from '../shaders/clouds.frag';
 import {
@@ -75,11 +76,13 @@ export function createCloudsRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as CloudsConfig;
+      const amp = audio?.amplitude ?? 0;
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -96,22 +99,28 @@ export function createCloudsRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_mouseActive, mouse.active ? 1.0 : 0.0);
       gl.uniform1f(uniforms.u_burst, mouse.burstStrength ?? 0.0);
 
-      // Brand colors
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling when audio is active
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
       gl.uniform1f(uniforms.u_cover, cfg.cover ?? DEFAULTS.cover);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
+      gl.uniform1f(uniforms.u_speed, (cfg.speed ?? DEFAULTS.speed) + amp * 0.1);
       gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
       gl.uniform1f(uniforms.u_dark, cfg.dark ?? DEFAULTS.dark);
       gl.uniform1f(uniforms.u_light, cfg.light ?? DEFAULTS.light);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

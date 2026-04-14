@@ -8,7 +8,8 @@
  * Warm-up: 40 coast steps on reset to let organisms form.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { LifeConfig, ShaderConfig } from '../shader-config';
 import { LIFE_DISPLAY_FRAG } from '../shaders/life-display.frag';
 import { LIFE_SIM_FRAG } from '../shaders/life-sim.frag';
@@ -170,13 +171,21 @@ export function createLifeRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!simProg || !displayProg || !simU || !displayU || !simBuf || !quad)
         return;
 
       const cfg = config as LifeConfig;
-      const steps = Math.max(1, Math.min(4, Math.round(cfg.speed)));
+      const amp = audio?.amplitude ?? 0;
+
+      // Gentle speed boost with audio (up to +0.15 extra steps)
+      const audioSpeedBoost = audio?.active ? amp * 0.15 : 0;
+      const steps = Math.max(
+        1,
+        Math.min(4, Math.round(cfg.speed + audioSpeedBoost))
+      );
 
       // Click bursts: deposit large blob of life
       if (mouse.burstStrength > 0) {
@@ -194,14 +203,32 @@ export function createLifeRenderer(): ShaderRenderer {
         }
       }
 
-      // Ambient deposits every 3-5s
+      // Ambient deposits — gently more frequent with audio
       let dropX = -10.0;
       let dropY = -10.0;
-      if (time - lastAmbientTime > nextAmbientInterval) {
+      const effectiveInterval = audio?.active
+        ? Math.max(1.5, nextAmbientInterval - amp * 1.0)
+        : nextAmbientInterval;
+      if (time - lastAmbientTime > effectiveInterval) {
         lastAmbientTime = time;
         nextAmbientInterval = 3.0 + Math.random() * 2.0;
         dropX = 0.15 + Math.random() * 0.7;
         dropY = 0.15 + Math.random() * 0.7;
+      }
+
+      // Gentle bass-driven life deposits
+      if (audio?.active && (audio.bass ?? 0) > 0.5) {
+        stepSim(
+          gl,
+          time,
+          0.2 + Math.random() * 0.6,
+          0.2 + Math.random() * 0.6,
+          true,
+          0.5 + (audio.bass ?? 0) * 0.5,
+          -10,
+          -10,
+          cfg
+        );
       }
 
       // Run sim steps
@@ -229,13 +256,18 @@ export function createLifeRenderer(): ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
 
-      gl.uniform3fv(displayU.uColorPrimary, cfg.colors.primary);
-      gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);
-      gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
-      gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
+      // Immersive colour cycling
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(displayU.uColorPrimary, colours.primary);
+      gl.uniform3fv(displayU.uColorSecondary, colours.secondary);
+      gl.uniform3fv(displayU.uColorAccent, colours.accent);
+      gl.uniform3fv(displayU.uBgColor, colours.bg);
       gl.uniform1f(displayU.uIntensity, cfg.intensity);
       gl.uniform1f(displayU.uGrain, cfg.grain);
-      gl.uniform1f(displayU.uVignette, cfg.vignette);
+      gl.uniform1f(displayU.uVignette, audio?.active ? 0.0 : cfg.vignette);
       gl.uniform1f(displayU.uTime, time);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

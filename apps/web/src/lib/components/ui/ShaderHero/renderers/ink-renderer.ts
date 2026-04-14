@@ -9,7 +9,8 @@
  * Display pass renders to the full canvas viewport.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { InkConfig, ShaderConfig } from '../shader-config';
 import { INK_DISPLAY_FRAG } from '../shaders/ink-display.frag';
 import { INK_SIM_FRAG } from '../shaders/ink-sim.frag';
@@ -182,12 +183,15 @@ export function createInkRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!simProg || !displayProg || !simU || !displayU || !simBuf || !quad)
         return;
 
       const cfg = config as InkConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
 
       // ── Rotate hover channel every ~45 frames ──────────────
       hoverFrameCounter++;
@@ -196,18 +200,42 @@ export function createInkRenderer(): ShaderRenderer {
         hoverChannel = (hoverChannel + 1) % 3;
       }
 
-      // ── Ambient drops (every 2-3.5s, rotating channels) ────
+      // ── Ambient drops — gently more frequent with audio ────
       let ambDropX = -10.0;
       let ambDropY = -10.0;
       let ambDropCh = 0;
 
-      if (time - lastAmbientTime > nextAmbientInterval) {
+      const effectiveInterval = audio?.active
+        ? Math.max(0.8, nextAmbientInterval - amp * 1.0)
+        : nextAmbientInterval;
+
+      if (time - lastAmbientTime > effectiveInterval) {
         lastAmbientTime = time;
         nextAmbientInterval = 2.0 + Math.random() * 1.5;
         ambDropX = 0.15 + Math.random() * 0.7;
         ambDropY = 0.15 + Math.random() * 0.7;
         ambDropCh = ambientChannel;
         ambientChannel = (ambientChannel + 1) % 3;
+      }
+
+      // ── Gentle bass-driven ink drops ───────────────────────
+      if (audio?.active && bass > 0.5) {
+        const bx = 0.2 + Math.random() * 0.6;
+        const by = 0.2 + Math.random() * 0.6;
+        const bCh = Math.floor(Math.random() * 3);
+        stepSim(
+          gl,
+          time,
+          bx,
+          by,
+          true,
+          0.5 + bass * 0.5,
+          bCh,
+          -10.0,
+          -10.0,
+          0,
+          cfg
+        );
       }
 
       // ── Click bursts: 3 offset deposits (one per channel) ─
@@ -278,13 +306,18 @@ export function createInkRenderer(): ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
 
-      gl.uniform3fv(displayU.uColorPrimary, cfg.colors.primary);
-      gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);
-      gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
-      gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
+      // Immersive colour cycling
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(displayU.uColorPrimary, colours.primary);
+      gl.uniform3fv(displayU.uColorSecondary, colours.secondary);
+      gl.uniform3fv(displayU.uColorAccent, colours.accent);
+      gl.uniform3fv(displayU.uBgColor, colours.bg);
       gl.uniform1f(displayU.uIntensity, cfg.intensity);
       gl.uniform1f(displayU.uGrain, cfg.grain);
-      gl.uniform1f(displayU.uVignette, cfg.vignette);
+      gl.uniform1f(displayU.uVignette, audio?.active ? 0.0 : cfg.vignette);
       gl.uniform1f(displayU.uTime, time);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

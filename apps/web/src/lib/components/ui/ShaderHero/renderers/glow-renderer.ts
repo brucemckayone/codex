@@ -10,7 +10,8 @@
  * Brightness cap 0.65 (lower than standard 0.75 for dark scene).
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
 import { GLOW_FRAG } from '../shaders/glow.frag';
 import {
@@ -101,11 +102,14 @@ export function createGlowRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as unknown as GlowCfg;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
 
       // Lerp mouse for smooth attraction
       const targetX = mouse.active ? mouse.x : 0.5;
@@ -123,24 +127,36 @@ export function createGlowRenderer(): ShaderRenderer {
       gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
       gl.uniform1f(uniforms.u_burstStrength, mouse.burstStrength);
 
-      // Brand colors
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling when audio is active
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
       // count and depth are int uniforms
       gl.uniform1i(uniforms.u_count, Math.round(cfg.count ?? DEFAULTS.count));
-      gl.uniform1f(uniforms.u_pulse, cfg.pulse ?? DEFAULTS.pulse);
+      gl.uniform1f(
+        uniforms.u_pulse,
+        (cfg.pulse ?? DEFAULTS.pulse) + bass * 0.1
+      );
       gl.uniform1f(uniforms.u_size, cfg.size ?? DEFAULTS.size);
-      gl.uniform1f(uniforms.u_drift, cfg.drift ?? DEFAULTS.drift);
+      gl.uniform1f(
+        uniforms.u_drift,
+        (cfg.drift ?? DEFAULTS.drift) + amp * 0.15
+      );
       gl.uniform1f(uniforms.u_trail, cfg.trail ?? DEFAULTS.trail);
       gl.uniform1i(uniforms.u_depth, Math.round(cfg.depth ?? DEFAULTS.depth));
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

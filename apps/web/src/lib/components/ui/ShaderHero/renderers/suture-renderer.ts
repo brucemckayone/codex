@@ -9,7 +9,8 @@
  * Display pass renders to the full canvas viewport.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, SutureConfig } from '../shader-config';
 import { SUTURE_DISPLAY_FRAG } from '../shaders/suture-display.frag';
 import { SUTURE_SIM_FRAG } from '../shaders/suture-sim.frag';
@@ -150,6 +151,11 @@ export function createSutureRenderer(): ShaderRenderer {
   let _advDist = 6.0;
 
   // ── Display pass helper ────────────────────────────────────
+  /** Current audio state, passed through from render(). */
+  let _audio: AudioState | undefined;
+  /** Current amplitude, cached for display pass. */
+  let _amp = 0;
+
   function displayPass(
     gl: WebGL2RenderingContext,
     time: number,
@@ -167,13 +173,18 @@ export function createSutureRenderer(): ShaderRenderer {
     gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
     gl.uniform1i(displayU.uState, 0);
 
-    gl.uniform3fv(displayU.uColorA, cfg.colors.primary);
-    gl.uniform3fv(displayU.uColorB, cfg.colors.secondary);
-    gl.uniform3fv(displayU.uColorC, cfg.colors.accent);
-    gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
+    // Immersive colour cycling
+    const colours = _audio?.active
+      ? computeImmersiveColours(time, cfg.colors, _amp)
+      : cfg.colors;
+
+    gl.uniform3fv(displayU.uColorA, colours.primary);
+    gl.uniform3fv(displayU.uColorB, colours.secondary);
+    gl.uniform3fv(displayU.uColorC, colours.accent);
+    gl.uniform3fv(displayU.uBgColor, colours.bg);
     gl.uniform1f(displayU.uIntensity, cfg.intensity);
     gl.uniform1f(displayU.uGrain, cfg.grain);
-    gl.uniform1f(displayU.uVignette, cfg.vignette);
+    gl.uniform1f(displayU.uVignette, _audio?.active ? 0.0 : cfg.vignette);
     gl.uniform1f(displayU.uTime, time);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -214,7 +225,8 @@ export function createSutureRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (
         !initProg ||
@@ -254,17 +266,31 @@ export function createSutureRenderer(): ShaderRenderer {
         return;
       }
 
-      // ── Ambient force (every ~3.5 seconds) ─────────────────
-      if (time - lastAmbientTime > 3.5) {
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
+      _audio = audio;
+      _amp = amp;
+
+      // ── Ambient force — gently more frequent with audio ────
+      const ambientInterval = audio?.active
+        ? Math.max(1.5, 3.5 - amp * 1.2)
+        : 3.5;
+      if (time - lastAmbientTime > ambientInterval) {
         lastAmbientTime = time;
         const ax = (0.15 + Math.random() * 0.7) * SIM_RES;
         const ay = (0.15 + Math.random() * 0.7) * SIM_RES;
+        const force = cfg.dissipation > 0.98 ? 1.0 : cfg.dissipation;
+        stepSim(gl, ax, ay, true, force);
+      }
+
+      // ── Gentle bass-driven impulses ────────────────────────
+      if (audio?.active && bass > 0.5) {
         stepSim(
           gl,
-          ax,
-          ay,
+          (0.2 + Math.random() * 0.6) * SIM_RES,
+          (0.2 + Math.random() * 0.6) * SIM_RES,
           true,
-          cfg.dissipation > 0.98 ? 1.0 : cfg.dissipation
+          0.5 + bass * 0.5
         );
       }
 

@@ -1,21 +1,23 @@
 /**
- * Frost renderer — Ice crystal dendrite growth (2-pass FBO).
+ * Spore renderer — Explicit agent Physarum transport network (2-pass FBO).
  *
- * Ping-pong FBO (512x512): R = frozen state, G = diffusion field, B = freeze age.
- * DLA-inspired crystal growth with anisotropic branching (N-fold symmetry).
- * Mouse acts as heat source that melts frozen regions.
- * Click plants a new seed crystal. Ambient seeds spawn every 5-10s.
- * Two substeps per frame for smoother crystal evolution.
+ * Ping-pong FBO (512x512): R = trail, G = secondary trail, B = heading, A = agent flag.
+ * ~30% of texels act as agents performing the Jones (2010) Physarum algorithm:
+ * sense pheromone at 3 angular sensors, turn toward strongest, deposit trail.
+ * Trail diffuses via 3x3 blur and decays each frame.
+ * Mouse deposits attractant trail; click seeds agents toward cursor.
  *
- * Display pass renders frozen crystals with age-based colour transition
- * and growth front glow on newly frozen edges.
+ * Display maps trail density to brand colors with agent accent glow.
+ *
+ * Distinct from existing 'physarum' preset: uses explicit sensor geometry
+ * parameters (SA/SO/SS/RA) from the Jones paper for tighter networks.
  */
 
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
-import type { ShaderConfig } from '../shader-config';
-import { FROST_DISPLAY_FRAG } from '../shaders/frost-display.frag';
-import { FROST_SIM_FRAG } from '../shaders/frost-sim.frag';
+import type { ShaderConfig, SporeConfig } from '../shader-config';
+import { SPORE_DISPLAY_FRAG } from '../shaders/spore-display.frag';
+import { SPORE_SIM_FRAG } from '../shaders/spore-sim.frag';
 import {
   createDoubleFBO,
   createProgram,
@@ -29,49 +31,50 @@ import {
 
 const SIM_RES = 512;
 
-interface FrostCfg {
-  growth?: number;
-  branch?: number;
-  symmetry?: number;
-  melt?: number;
-  glow?: number;
-  intensity?: number;
-  grain?: number;
-  vignette?: number;
-  colors: {
-    primary: [number, number, number];
-    secondary: [number, number, number];
-    accent: [number, number, number];
-    bg: [number, number, number];
-  };
-}
-
-/** Init shader — all liquid, low ambient diffusion. */
-const FROST_INIT_FRAG = `#version 300 es
+/** Init shader: seeds random trail deposits + random agent headings. */
+const SPORE_INIT_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 out vec4 fragColor;
+
+float hash21(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
 void main() {
-  // R=0 (liquid), G=0.1 (low ambient diffusion), B=0 (no age), A=1
-  fragColor = vec4(0.0, 0.1, 0.0, 1.0);
+  float h1 = hash21(v_uv * 64.0);
+  float h2 = hash21(v_uv * 128.0 + 42.0);
+  float h3 = hash21(v_uv * 96.0 + 17.0);
+
+  // Seed scattered trail deposits to kickstart network
+  float trail = step(0.85, h1) * 0.5;
+  // Secondary trail
+  float trail2 = step(0.9, h3) * 0.3;
+  // Random heading
+  float heading = h2;
+  // Agent marker
+  float agent = step(0.7, h1);
+
+  fragColor = vec4(trail, trail2, heading, agent);
 }
 `;
 
-/** Sim uniform names. */
 const SIM_UNIFORM_NAMES = [
   'uState',
   'uTexel',
-  'uGrowth',
-  'uBranch',
-  'uSymmetry',
-  'uMelt',
   'uTime',
   'uMouse',
   'uMouseActive',
-  'uSeedPos',
+  'uBurst',
+  'uSensorAngle',
+  'uSensorOffset',
+  'uStepSize',
+  'uRotation',
+  'uDecay',
 ] as const;
 
-/** Display uniform names. */
 const DISPLAY_UNIFORM_NAMES = [
   'uState',
   'uColorPrimary',
@@ -81,22 +84,21 @@ const DISPLAY_UNIFORM_NAMES = [
   'uIntensity',
   'uGrain',
   'uVignette',
-  'uGlow',
   'uTime',
 ] as const;
 
 const DEFAULTS = {
-  growth: 0.6,
-  branch: 0.3,
-  symmetry: 6,
-  melt: 1.0,
-  glow: 0.8,
+  sensorAngle: 12.5,
+  sensorOffset: 3.0,
+  stepSize: 6.0,
+  rotation: 22.5,
+  decay: 0.998,
   intensity: 0.65,
   grain: 0.025,
   vignette: 0.2,
 } as const;
 
-export function createFrostRenderer(): ShaderRenderer {
+export function createSporeRenderer(): ShaderRenderer {
   let initProg: WebGLProgram | null = null;
   let simProg: WebGLProgram | null = null;
   let displayProg: WebGLProgram | null = null;
@@ -113,11 +115,6 @@ export function createFrostRenderer(): ShaderRenderer {
   let quad: ReturnType<typeof createQuad> | null = null;
   let simBuf: DoubleFBO | null = null;
 
-  /** Timestamp (seconds) of last ambient seed. */
-  let lastSeedTime = 0;
-  /** Next ambient seed interval (randomised 5-10s). */
-  let nextSeedInterval = 5.0 + Math.random() * 5.0;
-
   // ── Sim step helper ────────────────────────────────────────
   function stepSim(
     gl: WebGL2RenderingContext,
@@ -125,9 +122,8 @@ export function createFrostRenderer(): ShaderRenderer {
     mouseX: number,
     mouseY: number,
     mouseOn: boolean,
-    seedX: number,
-    seedY: number,
-    cfg: FrostCfg
+    burst: number,
+    cfg: SporeConfig
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
@@ -141,14 +137,16 @@ export function createFrostRenderer(): ShaderRenderer {
 
     const tx = 1.0 / SIM_RES;
     gl.uniform2f(simU.uTexel, tx, tx);
-    gl.uniform1f(simU.uGrowth, cfg.growth ?? DEFAULTS.growth);
-    gl.uniform1f(simU.uBranch, cfg.branch ?? DEFAULTS.branch);
-    gl.uniform1i(simU.uSymmetry, Math.round(cfg.symmetry ?? DEFAULTS.symmetry));
-    gl.uniform1f(simU.uMelt, cfg.melt ?? DEFAULTS.melt);
     gl.uniform1f(simU.uTime, time);
     gl.uniform2f(simU.uMouse, mouseX, mouseY);
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
-    gl.uniform2f(simU.uSeedPos, seedX, seedY);
+    gl.uniform1f(simU.uBurst, burst);
+
+    gl.uniform1f(simU.uSensorAngle, cfg.sensorAngle ?? DEFAULTS.sensorAngle);
+    gl.uniform1f(simU.uSensorOffset, cfg.sensorOffset ?? DEFAULTS.sensorOffset);
+    gl.uniform1f(simU.uStepSize, cfg.stepSize ?? DEFAULTS.stepSize);
+    gl.uniform1f(simU.uRotation, cfg.rotation ?? DEFAULTS.rotation);
+    gl.uniform1f(simU.uDecay, cfg.decay ?? DEFAULTS.decay);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
@@ -158,26 +156,21 @@ export function createFrostRenderer(): ShaderRenderer {
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
-      // Check required extensions
       if (!gl.getExtension('EXT_color_buffer_float')) return false;
       gl.getExtension('OES_texture_float_linear');
 
-      // Compile programs
-      initProg = createProgram(gl, VERTEX_SHADER, FROST_INIT_FRAG);
-      simProg = createProgram(gl, VERTEX_SHADER, FROST_SIM_FRAG);
-      displayProg = createProgram(gl, VERTEX_SHADER, FROST_DISPLAY_FRAG);
+      initProg = createProgram(gl, VERTEX_SHADER, SPORE_INIT_FRAG);
+      simProg = createProgram(gl, VERTEX_SHADER, SPORE_SIM_FRAG);
+      displayProg = createProgram(gl, VERTEX_SHADER, SPORE_DISPLAY_FRAG);
 
       if (!initProg || !simProg || !displayProg) return false;
 
-      // Get uniform locations
       simU = getUniforms(gl, simProg, SIM_UNIFORM_NAMES);
       displayU = getUniforms(gl, displayProg, DISPLAY_UNIFORM_NAMES);
 
-      // Create geometry and FBOs
       quad = createQuad(gl);
       simBuf = createDoubleFBO(gl, SIM_RES, SIM_RES);
 
-      // Seed initial state
       this.reset(gl);
 
       return true;
@@ -195,41 +188,32 @@ export function createFrostRenderer(): ShaderRenderer {
       if (!simProg || !displayProg || !simU || !displayU || !simBuf || !quad)
         return;
 
-      const cfg = config as unknown as FrostCfg;
+      const cfg = config as SporeConfig;
       const amp = audio?.amplitude ?? 0;
 
-      // ── Ambient seed (every 5-10s) ──────────────────────────
-      let seedX = -10.0;
-      let seedY = -10.0;
-      if (time - lastSeedTime > nextSeedInterval) {
-        lastSeedTime = time;
-        nextSeedInterval = 5.0 + Math.random() * 5.0;
-        seedX = 0.15 + Math.random() * 0.7;
-        seedY = 0.15 + Math.random() * 0.7;
-      }
+      // Gentle agent speed boost with audio
+      const audioCfg = audio?.active
+        ? {
+            ...cfg,
+            stepSize: (cfg.stepSize ?? DEFAULTS.stepSize) + amp * 0.15,
+          }
+        : cfg;
 
-      // ── Click seed ──────────────────────────────────────────
-      if (mouse.burstStrength > 0) {
-        seedX = mouse.x;
-        seedY = mouse.y;
-      }
-
-      // ── Substep 1: with input (mouse melt + seed) ──────────
+      // ── Substep 1: with mouse input ───────────────────────
       stepSim(
         gl,
         time,
         mouse.active ? mouse.x : -10.0,
         mouse.active ? mouse.y : -10.0,
         mouse.active,
-        seedX,
-        seedY,
-        cfg
+        mouse.burstStrength ?? 0.0,
+        audioCfg
       );
 
-      // ── Substep 2: coast (no input, no seed) ────────────────
-      stepSim(gl, time, -10.0, -10.0, false, -10.0, -10.0, cfg);
+      // ── Substep 2: coast (no input) ───────────────────────
+      stepSim(gl, time + 0.016, -10.0, -10.0, false, 0.0, audioCfg);
 
-      // ── Display pass ────────────────────────────────────────
+      // ── Display pass ──────────────────────────────────────
       gl.viewport(0, 0, width, height);
       gl.useProgram(displayProg);
       quad.bind(displayProg);
@@ -238,7 +222,7 @@ export function createFrostRenderer(): ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
 
-      // Immersive colour cycling when audio is active
+      // Immersive colour cycling
       const colours = audio?.active
         ? computeImmersiveColours(time, cfg.colors, amp)
         : cfg.colors;
@@ -253,7 +237,6 @@ export function createFrostRenderer(): ShaderRenderer {
         displayU.uVignette,
         audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
       );
-      gl.uniform1f(displayU.uGlow, (cfg.glow ?? DEFAULTS.glow) + amp * 0.1);
       gl.uniform1f(displayU.uTime, time);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -262,45 +245,21 @@ export function createFrostRenderer(): ShaderRenderer {
 
     resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
       // FBO sim resolution is fixed at 512x512.
-      // Display pass viewport is set each frame in render().
     },
 
     reset(gl: WebGL2RenderingContext): void {
       if (!initProg || !simBuf || !quad) return;
 
-      lastSeedTime = 0;
-      nextSeedInterval = 5.0 + Math.random() * 5.0;
-
-      // Clear both FBO sides with init shader
       gl.viewport(0, 0, SIM_RES, SIM_RES);
       gl.useProgram(initProg);
       quad.bind(initProg);
 
+      // Seed both FBO sides
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.read.fbo);
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
       drawQuad(gl);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-      // Seed initial crystal points for immediate visual interest
-      const seedCount = 3 + Math.floor(Math.random() * 3);
-      for (let i = 0; i < seedCount; i++) {
-        const sx = 0.2 + Math.random() * 0.6;
-        const sy = 0.2 + Math.random() * 0.6;
-        // Run a sim step with seed to plant crystal point
-        stepSim(gl, 0, -10.0, -10.0, false, sx, sy, {
-          growth: DEFAULTS.growth,
-          branch: DEFAULTS.branch,
-          symmetry: DEFAULTS.symmetry,
-          melt: DEFAULTS.melt,
-          colors: {
-            primary: [0.5, 0.5, 0.5],
-            secondary: [0.5, 0.5, 0.5],
-            accent: [0.5, 0.5, 0.5],
-            bg: [0.05, 0.05, 0.05],
-          },
-        });
-      }
     },
 
     destroy(gl: WebGL2RenderingContext): void {
@@ -324,7 +283,6 @@ export function createFrostRenderer(): ShaderRenderer {
         gl.deleteBuffer(quad.buffer);
         quad = null;
       }
-
       simU = null;
       displayU = null;
     },
