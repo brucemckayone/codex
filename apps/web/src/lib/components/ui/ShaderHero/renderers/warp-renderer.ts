@@ -12,7 +12,8 @@
  * Brand colors mapped from intermediate warp vectors (q, r) in 4 layers.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, WarpConfig } from '../shader-config';
 import { WARP_FRAG } from '../shaders/warp.frag';
 import {
@@ -79,11 +80,14 @@ export function createWarpRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as WarpConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
 
       // Warp uses mouse directly (no internal lerp — the component lerps MouseState)
       const mx = mouse.active ? mouse.x : 0.5;
@@ -98,17 +102,26 @@ export function createWarpRenderer(): ShaderRenderer {
       gl.uniform2f(uniforms.u_resolution, width, height);
       gl.uniform2f(uniforms.u_mouse, mx, my);
 
-      // Brand colors
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling when audio is active
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
-      gl.uniform1f(uniforms.u_warpStr, cfg.warpStrength ?? DEFAULTS.warpStr);
+      gl.uniform1f(
+        uniforms.u_warpStr,
+        (cfg.warpStrength ?? DEFAULTS.warpStr) + bass * 0.1
+      );
       gl.uniform1i(uniforms.u_detail, cfg.detail ?? DEFAULTS.detail);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
+      gl.uniform1f(
+        uniforms.u_speed,
+        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
+      );
       gl.uniform1f(uniforms.u_lightAng, cfg.lightAngle ?? DEFAULTS.lightAng);
       gl.uniform1f(uniforms.u_contrast, cfg.contrast ?? DEFAULTS.contrast);
       gl.uniform1f(
@@ -117,7 +130,10 @@ export function createWarpRenderer(): ShaderRenderer {
       );
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

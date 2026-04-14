@@ -7,7 +7,8 @@
  * Brand colors as uniforms (primary, secondary, accent, bg).
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { EtherConfig, ShaderConfig } from '../shader-config';
 import { ETHER_FRAG } from '../shaders/ether.frag';
 import {
@@ -81,11 +82,14 @@ export function createEtherRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as EtherConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
 
       // Lerp mouse for smooth parallax
       const targetX = mouse.active ? mouse.x : 0.5;
@@ -102,25 +106,34 @@ export function createEtherRenderer(): ShaderRenderer {
       gl.uniform2f(uniforms.u_resolution, width, height);
       gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
 
-      // Brand colors
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling when audio is active
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
-      gl.uniform1f(uniforms.u_rotSpeed, cfg.rotationSpeed ?? DEFAULTS.rotSpeed);
+      gl.uniform1f(
+        uniforms.u_rotSpeed,
+        (cfg.rotationSpeed ?? DEFAULTS.rotSpeed) + amp * 0.15
+      );
       gl.uniform1i(
         uniforms.u_complexity,
         cfg.complexity ?? DEFAULTS.complexity
       );
-      gl.uniform1f(uniforms.u_glow, cfg.glow ?? DEFAULTS.glow);
+      gl.uniform1f(uniforms.u_glow, (cfg.glow ?? DEFAULTS.glow) + bass * 0.1);
       gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
       gl.uniform1f(uniforms.u_zoom, cfg.zoom ?? DEFAULTS.zoom);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
       gl.uniform1f(
         uniforms.u_aberration,
         cfg.aberration ?? DEFAULTS.aberration

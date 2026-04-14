@@ -8,7 +8,8 @@
  * Very cheap (~0.5ms per frame).
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { AuroraConfig, ShaderConfig } from '../shader-config';
 import { AURORA_FRAG } from '../shaders/aurora.frag';
 import {
@@ -75,11 +76,15 @@ export function createAuroraRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as AuroraConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
+      const treble = audio?.treble ?? 0;
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -94,24 +99,37 @@ export function createAuroraRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_mouseActive, mouse.active ? 1.0 : 0.0);
       gl.uniform1f(uniforms.u_burst, mouse.burstStrength ?? 0.0);
 
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling when audio is active
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // CRITICAL: u_layers is int — use uniform1i, NOT uniform1f
       gl.uniform1i(
         uniforms.u_layers,
         Math.round(cfg.layers ?? DEFAULTS.layers)
       );
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
-      gl.uniform1f(uniforms.u_height, cfg.height ?? DEFAULTS.height);
+      gl.uniform1f(uniforms.u_speed, (cfg.speed ?? DEFAULTS.speed) + amp * 0.2);
+      gl.uniform1f(
+        uniforms.u_height,
+        (cfg.height ?? DEFAULTS.height) + bass * 0.15
+      );
       gl.uniform1f(uniforms.u_spread, cfg.spread ?? DEFAULTS.spread);
-      gl.uniform1f(uniforms.u_shimmer, cfg.shimmer ?? DEFAULTS.shimmer);
+      gl.uniform1f(
+        uniforms.u_shimmer,
+        (cfg.shimmer ?? DEFAULTS.shimmer) + treble * 0.2
+      );
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);

@@ -11,7 +11,8 @@
  * u_depth is an int uniform — uses gl.uniform1i().
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { NebulaConfig, ShaderConfig } from '../shader-config';
 import { NEBULA_FRAG } from '../shaders/nebula.frag';
 import {
@@ -87,11 +88,14 @@ export function createNebulaRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as NebulaConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
 
       // Lerp mouse for smooth stellar wind
       const targetX = mouse.active ? mouse.x : 0.5;
@@ -111,23 +115,32 @@ export function createNebulaRenderer(): ShaderRenderer {
       // Burst strength (click flash)
       gl.uniform1f(uniforms.u_burstStrength, mouse.burstStrength);
 
-      // Brand colors
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling (shared utility)
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
       gl.uniform1f(uniforms.u_density, cfg.density ?? DEFAULTS.density);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
+      gl.uniform1f(
+        uniforms.u_speed,
+        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
+      );
       gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
       gl.uniform1i(uniforms.u_depth, Math.round(cfg.depth ?? DEFAULTS.depth));
-      gl.uniform1f(uniforms.u_wind, cfg.wind ?? DEFAULTS.wind);
+      gl.uniform1f(uniforms.u_wind, (cfg.wind ?? DEFAULTS.wind) + bass * 0.2);
       gl.uniform1f(uniforms.u_stars, cfg.stars ?? DEFAULTS.stars);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

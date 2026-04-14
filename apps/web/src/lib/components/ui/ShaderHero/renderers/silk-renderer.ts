@@ -7,7 +7,8 @@
  * Primary = fabric colour. Secondary in deep valleys via lining param.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, SilkConfig } from '../shader-config';
 import { SILK_FRAG } from '../shaders/silk.frag';
 import {
@@ -75,11 +76,15 @@ export function createSilkRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as SilkConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
+      const treble = audio?.treble ?? 0;
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -96,22 +101,36 @@ export function createSilkRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_mouseActive, mouse.active ? 1.0 : 0.0);
       gl.uniform1f(uniforms.u_burst, mouse.burstStrength ?? 0.0);
 
-      // Brand colors (no accent for silk)
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling when audio is active
+      // Silk only uses primary + secondary (no accent uniform), but we still
+      // cycle all channels so the palette drifts coherently.
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
       gl.uniform1f(uniforms.u_foldScale, cfg.foldScale ?? DEFAULTS.foldScale);
-      gl.uniform1f(uniforms.u_foldDepth, cfg.foldDepth ?? DEFAULTS.foldDepth);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
+      gl.uniform1f(
+        uniforms.u_foldDepth,
+        (cfg.foldDepth ?? DEFAULTS.foldDepth) + bass * 0.1
+      );
+      gl.uniform1f(uniforms.u_speed, (cfg.speed ?? DEFAULTS.speed) + amp * 0.2);
       gl.uniform1f(uniforms.u_softness, cfg.softness ?? DEFAULTS.softness);
-      gl.uniform1f(uniforms.u_sheen, cfg.sheen ?? DEFAULTS.sheen);
+      gl.uniform1f(
+        uniforms.u_sheen,
+        (cfg.sheen ?? DEFAULTS.sheen) + treble * 0.15
+      );
       gl.uniform1f(uniforms.u_lining, cfg.lining ?? DEFAULTS.lining);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

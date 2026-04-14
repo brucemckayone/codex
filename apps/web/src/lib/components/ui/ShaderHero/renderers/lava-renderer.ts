@@ -9,7 +9,8 @@
  * Brand colors as uniforms (primary, secondary, accent, bg).
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { LavaConfig, ShaderConfig } from '../shader-config';
 import { LAVA_FRAG } from '../shaders/lava.frag';
 import {
@@ -85,11 +86,14 @@ export function createLavaRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as LavaConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
 
       // Lerp mouse for smooth interaction
       const targetX = mouse.active ? mouse.x : 0.5;
@@ -108,12 +112,15 @@ export function createLavaRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_mouseActive, mouse.active ? 1.0 : 0.0);
       gl.uniform1f(uniforms.u_burst, mouse.burstStrength);
 
-      // Brand colors
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling (shared utility)
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
       gl.uniform1f(
@@ -124,13 +131,19 @@ export function createLavaRenderer(): ShaderRenderer {
         uniforms.u_crackWidth,
         cfg.crackWidth ?? DEFAULTS.crackWidth
       );
-      gl.uniform1f(uniforms.u_glow, cfg.glow ?? DEFAULTS.glow);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
+      gl.uniform1f(uniforms.u_glow, (cfg.glow ?? DEFAULTS.glow) + bass * 0.1);
+      gl.uniform1f(
+        uniforms.u_speed,
+        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
+      );
       gl.uniform1f(uniforms.u_crust, cfg.crust ?? DEFAULTS.crust);
       gl.uniform1f(uniforms.u_heat, cfg.heat ?? DEFAULTS.heat);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
