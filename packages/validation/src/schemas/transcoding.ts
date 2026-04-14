@@ -118,9 +118,11 @@ export const runpodWebhookOutputSchema = z.object({
     .optional(),
 
   // Media metadata
-  durationSeconds: z.number().int().min(1).max(86400).optional(), // Max 24 hours
-  width: z.number().int().min(1).max(7680).optional(), // Max 8K
-  height: z.number().int().min(1).max(4320).optional(), // Max 8K
+  // NOTE: nullable() is required because Python sends None → JSON null for audio
+  // files (no video dimensions). Zod .optional() only accepts undefined, not null.
+  durationSeconds: z.number().int().min(1).max(86400).nullable().optional(), // Max 24 hours
+  width: z.number().int().min(1).max(7680).nullable().optional(), // Max 8K
+  height: z.number().int().min(1).max(4320).nullable().optional(), // Max 8K
 
   // HLS variants that are ready (bounded to prevent DoS via unbounded array)
   readyVariants: z.array(hlsVariantSchema).min(1).max(10),

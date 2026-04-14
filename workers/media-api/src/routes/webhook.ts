@@ -69,7 +69,10 @@ app.post(
       // Validate against union schema (completed | failed | progress)
       const result = runpodWebhookUnionSchema.safeParse(payload);
       if (!result.success) {
-        throw new ValidationError('Invalid webhook payload');
+        const zodErrors = result.error.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ');
+        throw new ValidationError(`Invalid webhook payload: ${zodErrors}`);
       }
 
       // Create database client and TranscodingService
@@ -119,6 +122,8 @@ app.post(
         error instanceof Error ? error.message : 'Unknown webhook error';
 
       if (isPermanent) {
+        // Log so schema mismatches are visible in Worker logs
+        console.error('[webhook] Permanent webhook error:', message);
         // Acknowledge receipt so RunPod doesn't retry a non-fixable error
         return c.json({ received: true, error: message }, 200);
       }

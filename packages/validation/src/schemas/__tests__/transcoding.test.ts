@@ -136,3 +136,71 @@ describe('RunPod Webhook Output Schema', () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe('RunPod Webhook Output Schema — Audio Payloads', () => {
+  const validAudioOutput = {
+    mediaId: '8f9f8d8e-6f58-43bf-9511-4f2223ba449a',
+    type: 'audio' as const,
+    hlsMasterKey: 'creator-123/hls/media-456/master.m3u8',
+    waveformKey: 'creator-123/waveforms/media-456/waveform.json',
+    waveformImageKey: 'creator-123/waveforms/media-456/waveform.png',
+    durationSeconds: 2290,
+    width: null,
+    height: null,
+    readyVariants: ['audio'] as const,
+    loudnessIntegrated: -2117,
+    loudnessPeak: -8,
+    loudnessRange: 1170,
+  };
+
+  it('should accept audio payload with null width/height', () => {
+    const result = runpodWebhookOutputSchema.safeParse(validAudioOutput);
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept audio payload with omitted width/height', () => {
+    const { width, height, ...withoutDimensions } = validAudioOutput;
+    const result = runpodWebhookOutputSchema.safeParse(withoutDimensions);
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept audio readyVariants', () => {
+    const result = runpodWebhookOutputSchema.safeParse(validAudioOutput);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.readyVariants).toEqual(['audio']);
+    }
+  });
+
+  it('should accept null durationSeconds defensively', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validAudioOutput,
+      durationSeconds: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept full audio payload matching Python handler output', () => {
+    // Exact shape the Python handler sends for audio transcoding
+    const pythonPayload = {
+      mediaId: '8f9f8d8e-6f58-43bf-9511-4f2223ba449a',
+      type: 'audio',
+      hlsMasterKey: 'creator-123/hls/media-456/master.m3u8',
+      hlsPreviewKey: null,
+      thumbnailKey: null,
+      thumbnailVariants: null,
+      waveformKey: 'creator-123/waveforms/media-456/waveform.json',
+      waveformImageKey: 'creator-123/waveforms/media-456/waveform.png',
+      mezzanineKey: null,
+      durationSeconds: 2290,
+      width: null,
+      height: null,
+      readyVariants: ['audio'],
+      loudnessIntegrated: -2117,
+      loudnessPeak: -8,
+      loudnessRange: 1170,
+    };
+    const result = runpodWebhookOutputSchema.safeParse(pythonPayload);
+    expect(result.success).toBe(true);
+  });
+});
