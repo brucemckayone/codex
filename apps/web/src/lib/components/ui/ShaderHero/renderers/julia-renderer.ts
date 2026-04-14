@@ -8,7 +8,8 @@
  * Brand colors derive the cosine palette vectors.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import { computeImmersiveColours } from '../immersive-colours';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { JuliaConfig, ShaderConfig } from '../shader-config';
 import { JULIA_FRAG } from '../shaders/julia.frag';
 import {
@@ -81,11 +82,14 @@ export function createJuliaRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as JuliaConfig;
+      const amp = audio?.amplitude ?? 0;
+      const bass = audio?.bass ?? 0;
 
       // Lerp mouse for smooth fractal exploration
       const targetX = mouse.active ? mouse.x : 0.5;
@@ -105,16 +109,22 @@ export function createJuliaRenderer(): ShaderRenderer {
       // Burst strength (click recentre)
       gl.uniform1f(uniforms.u_burstStrength, mouse.burstStrength);
 
-      // Brand colors
-      const c = cfg.colors;
-      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
-      gl.uniform3fv(uniforms.u_bgColor, c.bg);
+      // Immersive colour cycling (shared utility)
+      const colours = audio?.active
+        ? computeImmersiveColours(time, cfg.colors, amp)
+        : cfg.colors;
+
+      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
+      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
-      gl.uniform1f(uniforms.u_zoom, cfg.zoom ?? DEFAULTS.zoom);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
+      gl.uniform1f(uniforms.u_zoom, (cfg.zoom ?? DEFAULTS.zoom) + bass * 0.05);
+      gl.uniform1f(
+        uniforms.u_speed,
+        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
+      );
       // CRITICAL: u_iterations is int — use uniform1i, NOT uniform1f
       gl.uniform1i(
         uniforms.u_iterations,
@@ -127,7 +137,10 @@ export function createJuliaRenderer(): ShaderRenderer {
       );
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      gl.uniform1f(
+        uniforms.u_vignette,
+        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+      );
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
