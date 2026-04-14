@@ -50,6 +50,7 @@ app.get(
 
       return {
         streamingUrl: result.streamingUrl,
+        waveformUrl: result.waveformUrl,
         expiresAt: result.expiresAt.toISOString(),
         contentType: result.contentType,
       };
