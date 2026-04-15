@@ -67,6 +67,11 @@ export {
 // QueryClient is defined in ./query-client.ts to avoid circular dependencies.
 // Collections import it directly from there; we re-export for external consumers.
 export { queryClient } from './query-client';
+export {
+  loadSubscriptionFromServer,
+  type SubscriptionItem,
+  subscriptionCollection,
+} from './subscription';
 /**
  * SSR-safe useLiveQuery wrapper.
  * Replaces the vanilla @tanstack/svelte-db export to handle SSR gracefully.

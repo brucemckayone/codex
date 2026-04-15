@@ -43,6 +43,12 @@ export const CacheType = {
   /** Content access control data */
   CONTENT_ACCESS: 'content:access',
 
+  /** Organization subscription tiers (sorted list, public) */
+  ORG_TIERS: 'org:tiers',
+
+  /** Org content list with auth-only sort (popular, top-selling) — TTL-only, no event invalidation */
+  ORG_CONTENT_SORTED: 'org:content:sorted',
+
   /** User session data (complements BetterAuth KV cache) */
   USER_SESSION: 'user:session',
 
@@ -71,6 +77,14 @@ export const CacheType = {
    * Tracked in client manifest for cross-device staleness detection.
    */
   COLLECTION_USER_LIBRARY: (userId: string): string => `user:${userId}:library`,
+
+  /**
+   * Client manifest + server KV — user-scoped subscription per org.
+   * Bumped when subscription changes (checkout, tier change, cancel, reactivate).
+   * Tracked in client manifest for cross-device staleness detection.
+   */
+  COLLECTION_USER_SUBSCRIPTION: (userId: string, orgId: string): string =>
+    `user:${userId}:subscription:${orgId}`,
 } as const;
 
 /**

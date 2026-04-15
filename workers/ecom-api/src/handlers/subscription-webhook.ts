@@ -44,6 +44,27 @@ function invalidateUserLibraryCache(
 }
 
 /**
+ * Invalidate subscription version key for cross-device staleness detection.
+ * Reads userId and orgId from Stripe subscription metadata.
+ * Fire-and-forget via waitUntil.
+ */
+function invalidateSubscriptionCache(
+  c: Context<StripeWebhookEnv>,
+  stripeSubscription: Stripe.Subscription
+): void {
+  const userId = stripeSubscription.metadata?.codex_user_id;
+  const orgId = stripeSubscription.metadata?.codex_organization_id;
+  if (userId && orgId && c.env.CACHE_KV) {
+    const cache = new VersionedCache({ kv: c.env.CACHE_KV });
+    c.executionCtx.waitUntil(
+      cache
+        .invalidate(CacheType.COLLECTION_USER_SUBSCRIPTION(userId, orgId))
+        .catch(() => {})
+    );
+  }
+}
+
+/**
  * Dispatch email notification from a webhook handler result.
  * Fire-and-forget via sendEmailToWorker (uses waitUntil internally).
  */
@@ -104,6 +125,7 @@ export async function handleSubscriptionWebhook(
 
         // Bump user library version so other devices detect the new subscription
         invalidateUserLibraryCache(c, result?.userId);
+        invalidateSubscriptionCache(c, subscription);
         dispatchEmail(c, result);
 
         obs?.info('Subscription created from checkout', {
@@ -116,6 +138,7 @@ export async function handleSubscriptionWebhook(
       case STRIPE_EVENTS.SUBSCRIPTION_UPDATED: {
         const subscription = event.data.object as Stripe.Subscription;
         await service.handleSubscriptionUpdated(subscription);
+        invalidateSubscriptionCache(c, subscription);
         obs?.info('Subscription updated', {
           subscriptionId: subscription.id,
         });
@@ -131,6 +154,7 @@ export async function handleSubscriptionWebhook(
 
         // Bump user library version so other devices detect the cancelled subscription
         invalidateUserLibraryCache(c, result?.userId);
+        invalidateSubscriptionCache(c, subscription);
         dispatchEmail(c, result);
 
         obs?.info('Subscription deleted', {

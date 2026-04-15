@@ -5,6 +5,8 @@
  * Auth-aware: authenticated users get additional sort options (viewCount, purchaseCount)
  * via the authenticated content endpoint; unauthenticated users use the public endpoint.
  */
+import type { KVNamespace } from '@cloudflare/workers-types';
+import { CacheType, VersionedCache } from '@codex/cache';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
@@ -24,6 +26,26 @@ const AUTH_SORT_MAP: Record<string, { sortBy: string; sortOrder: string }> = {
   'top-selling': { sortBy: 'purchaseCount', sortOrder: 'desc' },
 };
 const PAGE_LIMIT = 12;
+
+async function fetchAuthContent(
+  api: ReturnType<typeof createServerApi>,
+  orgId: string,
+  sort: string,
+  q: string | undefined,
+  contentType: string | undefined,
+  page: number
+) {
+  const params = new URLSearchParams();
+  params.set('organizationId', orgId);
+  params.set('status', 'published');
+  if (q) params.set('search', q);
+  if (contentType) params.set('contentType', contentType);
+  params.set('sortBy', AUTH_SORT_MAP[sort].sortBy);
+  params.set('sortOrder', AUTH_SORT_MAP[sort].sortOrder);
+  params.set('page', String(page));
+  params.set('limit', String(PAGE_LIMIT));
+  return api.content.list(params);
+}
 
 export const load: PageServerLoad = async ({
   url,
@@ -67,16 +89,31 @@ export const load: PageServerLoad = async ({
   if (AUTH_ONLY_SORTS.has(sort) && locals.user) {
     setHeaders(CACHE_HEADERS.PRIVATE);
     const api = createServerApi(platform, cookies);
-    const params = new URLSearchParams();
-    params.set('organizationId', org.id);
-    params.set('status', 'published');
-    if (q) params.set('search', q);
-    if (contentType) params.set('contentType', contentType);
-    params.set('sortBy', AUTH_SORT_MAP[sort].sortBy);
-    params.set('sortOrder', AUTH_SORT_MAP[sort].sortOrder);
-    params.set('page', String(page));
-    params.set('limit', String(PAGE_LIMIT));
-    contentResult = await api.content.list(params);
+
+    // Cache sort-based browse queries (no search) — popularity shifts slowly (3min TTL).
+    // Search queries bypass cache: too dynamic, key space explodes.
+    const shouldCache = !q && platform?.env?.CACHE_KV;
+    if (shouldCache) {
+      const cacheId = `${org.id}:${sort}:${contentType ?? 'all'}:${page}`;
+      const cache = new VersionedCache({
+        kv: platform.env.CACHE_KV as KVNamespace,
+      });
+      contentResult = await cache.get(
+        cacheId,
+        CacheType.ORG_CONTENT_SORTED,
+        () => fetchAuthContent(api, org.id, sort, q, contentType, page),
+        { ttl: 180 }
+      );
+    } else {
+      contentResult = await fetchAuthContent(
+        api,
+        org.id,
+        sort,
+        q,
+        contentType,
+        page
+      );
+    }
   } else {
     setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
     contentResult = await getPublicContent({

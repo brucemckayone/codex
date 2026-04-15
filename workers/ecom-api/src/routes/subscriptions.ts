@@ -12,6 +12,7 @@
  * - GET  /subscriptions/stats        - Subscriber stats (admin)
  */
 
+import { CacheType, VersionedCache } from '@codex/cache';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   cancelSubscriptionSchema,
@@ -24,6 +25,29 @@ import {
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+
+/**
+ * Bump subscription version key for cross-device staleness detection.
+ * Fire-and-forget via waitUntil — never blocks the mutation response.
+ */
+function invalidateSubscriptionVersion(
+  ctx: {
+    env: { CACHE_KV?: import('@cloudflare/workers-types').KVNamespace };
+    executionCtx: { waitUntil(p: Promise<unknown>): void };
+    user: { id: string };
+  },
+  organizationId: string
+): void {
+  if (!ctx.env.CACHE_KV) return;
+  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  ctx.executionCtx.waitUntil(
+    cache
+      .invalidate(
+        CacheType.COLLECTION_USER_SUBSCRIPTION(ctx.user.id, organizationId)
+      )
+      .catch(() => {})
+  );
+}
 
 const subscriptions = new Hono<HonoEnv>();
 
@@ -98,6 +122,7 @@ subscriptions.post(
         ctx.input.body.newTierId,
         ctx.input.body.billingInterval
       );
+      invalidateSubscriptionVersion(ctx, ctx.input.body.organizationId);
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,
         ctx.input.body.organizationId
@@ -121,6 +146,7 @@ subscriptions.post(
         ctx.input.body.organizationId,
         ctx.input.body.reason
       );
+      invalidateSubscriptionVersion(ctx, ctx.input.body.organizationId);
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,
         ctx.input.body.organizationId
@@ -143,6 +169,7 @@ subscriptions.post(
         ctx.user.id,
         ctx.input.body.organizationId
       );
+      invalidateSubscriptionVersion(ctx, ctx.input.body.organizationId);
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,
         ctx.input.body.organizationId

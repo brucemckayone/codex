@@ -17,6 +17,8 @@ const CODEX_STORAGE_KEYS = [
   MANIFEST_KEY,
   'codex-library',
   'codex-playback-progress',
+  'codex-following',
+  'codex-subscription',
 ] as const;
 
 /**
@@ -52,14 +54,17 @@ export function getStoredVersions(): Record<string, string> {
 /**
  * Diff SSR versions against stored manifest. Returns stale keys.
  *
- * - Missing from stored = stale (first visit or cleared storage)
+ * - Missing from stored = NOT stale (first visit — trust SSR data)
  * - Null SSR version = NOT stale (no data cached yet, nothing to invalidate)
  * - Mismatch = stale (server version advanced since last visit)
  */
 export function getStaleKeys(ssrVersions: VersionMap): string[] {
   const stored = getStoredVersions();
   return Object.entries(ssrVersions)
-    .filter(([key, version]) => version !== null && stored[key] !== version)
+    .filter(
+      ([key, version]) =>
+        version !== null && stored[key] !== undefined && stored[key] !== version
+    )
     .map(([key]) => key);
 }
 

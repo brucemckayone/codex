@@ -34,14 +34,16 @@
   import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
   import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
   import BrandEditorIntroVideo from '$lib/components/brand-editor/levels/BrandEditorIntroVideo.svelte';
+  import BrandEditorHeaderLayout from '$lib/components/brand-editor/levels/BrandEditorHeaderLayout.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import { brandEditor, injectTokenOverrides, clearTokenOverrides } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
-  import { invalidateCollection } from '$lib/collections';
+  import { invalidateCollection, loadSubscriptionFromServer } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
+  import { followingStore } from '$lib/client/following.svelte';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -76,7 +78,31 @@
     const v = Number(data.org?.brandDensity);
     return Number.isFinite(v) ? String(v) : undefined;
   });
+  const brandLogoUrl = $derived(
+    brandEditor.isOpen
+      ? (brandEditor.pending?.logoUrl ?? data.org?.logoUrl ?? undefined)
+      : (data.org?.logoUrl ?? undefined)
+  );
   const hasBranding = $derived(!!brandPrimary);
+
+  // Hero element visibility — reads from brand editor when open, server tokenOverrides otherwise.
+  // Stored as tokenOverrides keys: 'hero-hide-stats', 'hero-hide-pills', etc.
+  const heroHideFlags = $derived.by(() => {
+    const overrides = brandEditor.isOpen
+      ? (brandEditor.pending?.tokenOverrides ?? {})
+      : (() => {
+          const raw = data.org?.brandFineTune?.tokenOverrides;
+          if (!raw) return {};
+          try { return JSON.parse(raw) as Record<string, string | null>; } catch { return {}; }
+        })();
+    return {
+      stats: overrides['hero-hide-stats'] === '1',
+      pills: overrides['hero-hide-pills'] === '1',
+      description: overrides['hero-hide-description'] === '1',
+      logo: overrides['hero-hide-logo'] === '1',
+      title: overrides['hero-hide-title'] === '1',
+    };
+  });
 
   // Fine-tune branding fields — injected as CSS vars alongside core branding
   const brandShadowScale = $derived(data.org?.brandFineTune?.shadowScale ?? undefined);
@@ -131,19 +157,29 @@
     return `https://fonts.googleapis.com/css2?${params}&display=swap`;
   });
 
+  // Google Fonts stylesheet is loaded directly in <svelte:head> below.
+  // display=swap in the URL ensures text renders immediately with fallback fonts.
+
   // Reactive staleness check — runs on mount AND whenever data.versions changes.
-  // data.versions changes after invalidate('cache:org-versions') re-runs the server load.
+  // data.versions is streamed (a Promise) so we resolve it before checking.
   // Guard with `browser` since $effect runs during SSR in Svelte 5.
   $effect(() => {
     if (!browser) return;
-    const staleKeys = getStaleKeys(data.versions ?? {});
-    if (staleKeys.some((k) => k.includes(':content'))) {
-      void invalidateCollection('content');
-    }
-    if (staleKeys.some((k) => k.includes(':library'))) {
-      void invalidateCollection('library');
-    }
-    updateStoredVersions(data.versions ?? {});
+    // Track data.versions as reactive dependency (promise reference changes on invalidation)
+    const versionsRef = data.versions;
+    void Promise.resolve(versionsRef).then((versions) => {
+      const staleKeys = getStaleKeys(versions ?? {});
+      if (staleKeys.some((k) => k.includes(':content'))) {
+        void invalidateCollection('content');
+      }
+      if (staleKeys.some((k) => k.includes(':library'))) {
+        void invalidateCollection('library');
+      }
+      if (staleKeys.some((k) => k.includes(':subscription'))) {
+        void loadSubscriptionFromServer(data.org.id);
+      }
+      updateStoredVersions(versions ?? {});
+    });
   });
 
   // Sync org background to html element so scrollbar gutter area matches.
@@ -177,12 +213,42 @@
   onMount(() => {
     // Re-check KV versions on tab return — detects content published/unpublished
     // while this tab was hidden, or org settings changed on another device.
+    // Throttled to avoid hammering the server on rapid tab switches.
+    let lastVersionCheck = 0;
+    const VERSION_CHECK_COOLDOWN_MS = 60_000; // 60 seconds
+
     function handleVisibility() {
       if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        if (now - lastVersionCheck < VERSION_CHECK_COOLDOWN_MS) return;
+        lastVersionCheck = now;
         void invalidate('cache:org-versions');
       }
     }
     document.addEventListener('visibilitychange', handleVisibility);
+
+    // Periodic version check — catches staleness during long browsing sessions
+    // where visibilitychange never fires (user stays on tab for 20+ min).
+    // Cheap: 3-4 parallel KV reads (~10ms). Only polls when tab is visible.
+    const VERSION_POLL_INTERVAL_MS = 5 * 60 * 1000;
+    const versionPollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void invalidate('cache:org-versions');
+      }
+    }, VERSION_POLL_INTERVAL_MS);
+
+    // Hydrate following store from layout's streamed server data.
+    // No-op if org is already in localStorage (return visit or optimistic update).
+    void Promise.resolve(data.isFollowing).then((following) => {
+      followingStore.hydrate(data.org.id, following);
+    });
+
+    // Hydrate subscription collection from server on first visit.
+    // Populates localStorage with full subscription details so subsequent
+    // navigations get zero-latency reads from the collection.
+    if (data.user) {
+      void loadSubscriptionFromServer(data.org.id);
+    }
 
     // Activate progress sync on org subdomain — content is watched here,
     // so the 30s flush, visibility handler, and beforeunload beacon are needed.
@@ -192,6 +258,7 @@
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(versionPollInterval);
       cleanupProgressSync();
     };
   });
@@ -234,6 +301,7 @@
         logoUrl: data.org.logoUrl ?? null,
         tokenOverrides: Object.keys(savedOverrides).length > 0 ? savedOverrides : {},
         darkOverrides: savedDarkOverrides,
+        heroLayout: data.org?.heroLayout ?? 'default',
       };
       brandEditor.open(data.org.id, saved);
     }
@@ -295,6 +363,7 @@
         headingWeight: overrides['heading-weight'] ?? '',
         bodyWeight: overrides['body-weight'] ?? '',
         darkModeOverrides: payload.darkOverrides ? JSON.stringify(payload.darkOverrides) : '',
+        heroLayout: payload.heroLayout,
       });
       brandEditor.markSaved();
       toast.success('Brand settings saved');
@@ -332,6 +401,14 @@
   class:org-layout--landing={isLanding}
   data-org-brand={hasBranding ? '' : undefined}
   data-org-bg={brandBackground ? '' : undefined}
+  data-hero-layout={brandEditor.isOpen
+    ? (brandEditor.pending?.heroLayout ?? 'default')
+    : (data.org?.heroLayout ?? 'default')}
+  data-hero-hide-stats={heroHideFlags.stats ? '' : undefined}
+  data-hero-hide-pills={heroHideFlags.pills ? '' : undefined}
+  data-hero-hide-description={heroHideFlags.description ? '' : undefined}
+  data-hero-hide-logo={heroHideFlags.logo ? '' : undefined}
+  data-hero-hide-title={heroHideFlags.title ? '' : undefined}
   style:--brand-color={brandPrimary}
   style:--brand-secondary={brandSecondary}
   style:--brand-accent={brandAccent}
@@ -345,6 +422,7 @@
   style:--brand-text-scale={brandTextScale}
   style:--brand-heading-weight={brandHeadingWeight}
   style:--brand-body-weight={brandBodyWeight}
+  style:--brand-shader-logo-url={brandLogoUrl}
 >
   <ShaderHero class="shader-hero--fullpage" />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
@@ -409,6 +487,8 @@
     <BrandEditorHeroEffects />
   {:else if brandEditor.level === 'intro-video'}
     <BrandEditorIntroVideo />
+  {:else if brandEditor.level === 'header-layout'}
+    <BrandEditorHeaderLayout />
   {:else if brandEditor.level === 'fine-tune-colors'}
     <BrandEditorFineTuneColors />
   {:else if brandEditor.level === 'fine-tune-typography'}
@@ -447,23 +527,11 @@
     display: none;
   }
 
+  /* Landing page: blur is now handled by .content-area's own
+     backdrop-filter in +page.svelte — no fixed overlay needed.
+     The content area blurs the fixed shader behind it as it scrolls. */
   .shader-blur-overlay--landing {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    backdrop-filter: blur(var(--blur-2xl));
-    -webkit-backdrop-filter: blur(var(--blur-2xl));
-    background: linear-gradient(
-      to bottom,
-      transparent 0%,
-      transparent 70vh,
-      color-mix(in srgb, var(--color-brand-primary, black) 40%, transparent) 90vh,
-      color-mix(in srgb, var(--color-background) 80%, transparent) 120vh
-    );
-    mask-image: linear-gradient(to bottom, transparent 0%, transparent 70vh, black 110vh);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 70vh, black 110vh);
+    display: none;
   }
 
   /* Full-page shader background — fixed behind all content */
@@ -546,7 +614,7 @@
 
   .powered-by {
     font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+    color: var(--color-text-tertiary);
   }
 
   .footer-links {
@@ -556,7 +624,7 @@
 
   .footer-links a {
     font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+    color: var(--color-text-tertiary);
     transition: var(--transition-colors);
   }
 

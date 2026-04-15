@@ -12,6 +12,7 @@
  * - POST   /reorder          - Reorder tiers
  */
 
+import { CacheType, VersionedCache } from '@codex/cache';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createTierSchema,
@@ -22,6 +23,35 @@ import {
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
+
+/**
+ * Write-through: invalidate + re-warm the tier cache.
+ * Fire-and-forget via waitUntil — never blocks the mutation response.
+ */
+function warmTierCache(
+  ctx: {
+    env: { CACHE_KV?: import('@cloudflare/workers-types').KVNamespace };
+    executionCtx: { waitUntil(p: Promise<unknown>): void };
+    services: { tier: { listTiers(orgId: string): Promise<unknown> } };
+  },
+  orgId: string
+): void {
+  if (!ctx.env.CACHE_KV) return;
+  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  ctx.executionCtx.waitUntil(
+    (async () => {
+      await cache.invalidate(orgId);
+      await cache.get(
+        orgId,
+        CacheType.ORG_TIERS,
+        () => ctx.services.tier.listTiers(orgId),
+        {
+          ttl: 86400,
+        }
+      );
+    })().catch(() => {})
+  );
+}
 
 const app = new Hono<HonoEnv>();
 
@@ -45,7 +75,9 @@ app.post(
     successStatus: 201,
     handler: async (ctx) => {
       const orgId = ctx.organizationId as string;
-      return await ctx.services.tier.createTier(orgId, ctx.input.body);
+      const tier = await ctx.services.tier.createTier(orgId, ctx.input.body);
+      warmTierCache(ctx, orgId);
+      return tier;
     },
   })
 );
@@ -61,7 +93,17 @@ app.get(
     policy: { auth: 'optional' },
     input: { params: orgIdParamSchema },
     handler: async (ctx) => {
-      return await ctx.services.tier.listTiers(ctx.input.params.id);
+      const orgId = ctx.input.params.id;
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        return await cache.get(
+          orgId,
+          CacheType.ORG_TIERS,
+          () => ctx.services.tier.listTiers(orgId),
+          { ttl: 86400 }
+        );
+      }
+      return await ctx.services.tier.listTiers(orgId);
     },
   })
 );
@@ -85,7 +127,13 @@ app.patch(
     handler: async (ctx) => {
       const orgId = ctx.organizationId as string;
       const { tierId } = ctx.input.params;
-      return await ctx.services.tier.updateTier(tierId, orgId, ctx.input.body);
+      const tier = await ctx.services.tier.updateTier(
+        tierId,
+        orgId,
+        ctx.input.body
+      );
+      warmTierCache(ctx, orgId);
+      return tier;
     },
   })
 );
@@ -110,6 +158,7 @@ app.delete(
       const orgId = ctx.organizationId as string;
       const { tierId } = ctx.input.params;
       await ctx.services.tier.deleteTier(tierId, orgId);
+      warmTierCache(ctx, orgId);
       return null;
     },
   })
@@ -132,6 +181,7 @@ app.post(
     handler: async (ctx) => {
       const orgId = ctx.organizationId as string;
       await ctx.services.tier.reorderTiers(orgId, ctx.input.body.tierIds);
+      warmTierCache(ctx, orgId);
       return null;
     },
   })

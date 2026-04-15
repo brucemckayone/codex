@@ -65,15 +65,13 @@ export const load: LayoutServerLoad = async ({
           bodyWeight?: string | null;
         };
         introVideoUrl?: string | null;
+        heroLayout?: string;
         enableSubscriptions?: boolean;
       };
 
-      // Read version keys for staleness detection on the client
-      const versions = await readOrgVersions(
-        platform,
-        typedOrg.id,
-        locals.user?.id
-      );
+      // Stream version keys for client-side staleness detection (non-blocking).
+      // Versions don't affect first paint — only used by $effect after hydration.
+      const versions = readOrgVersions(platform, typedOrg.id, locals.user?.id);
 
       // Stream subscription context for "Included" badges (non-blocking)
       const subscriptionContext = locals.user
@@ -83,12 +81,24 @@ export const load: LayoutServerLoad = async ({
             tiers: [] as SubscriptionTier[],
           });
 
+      // Stream follower status for contextual badge labels (non-blocking)
+      const isFollowing = locals.user
+        ? api.org
+            .isFollowing(typedOrg.id)
+            .then((r) => r.following)
+            .catch(() => false)
+        : Promise.resolve(false);
+
       return {
         org: typedOrg,
         enableSubscriptions: typedOrg.enableSubscriptions ?? true,
         user: locals.user,
         versions,
-        subscriptionContext,
+        subscriptionContext: subscriptionContext.catch(() => ({
+          userTierSortOrder: null as number | null,
+          tiers: [] as SubscriptionTier[],
+        })),
+        isFollowing,
       };
     }
   } catch (err) {
@@ -110,7 +120,7 @@ export const load: LayoutServerLoad = async ({
     if (org) {
       layoutTimer.end({ slug, path: 'auth-fallback' });
 
-      const versions = await readOrgVersions(platform, org.id, locals.user?.id);
+      const versions = readOrgVersions(platform, org.id, locals.user?.id);
 
       // Stream subscription context for "Included" badges (non-blocking)
       const subscriptionContext = locals.user
@@ -119,6 +129,14 @@ export const load: LayoutServerLoad = async ({
             userTierSortOrder: null as number | null,
             tiers: [] as SubscriptionTier[],
           });
+
+      // Stream follower status for contextual badge labels (non-blocking)
+      const isFollowing = locals.user
+        ? api.org
+            .isFollowing(org.id)
+            .then((r) => r.following)
+            .catch(() => false)
+        : Promise.resolve(false);
 
       return {
         org: {
@@ -138,7 +156,11 @@ export const load: LayoutServerLoad = async ({
         enableSubscriptions: true,
         user: locals.user,
         versions,
-        subscriptionContext,
+        subscriptionContext: subscriptionContext.catch(() => ({
+          userTierSortOrder: null as number | null,
+          tiers: [] as SubscriptionTier[],
+        })),
+        isFollowing,
       };
     }
   } catch (err) {
@@ -199,11 +221,15 @@ async function readOrgVersions(
     const libraryKey = userId
       ? CacheType.COLLECTION_USER_LIBRARY(userId)
       : null;
+    const subscriptionKey = userId
+      ? CacheType.COLLECTION_USER_SUBSCRIPTION(userId, orgId)
+      : null;
 
     const keys = [
       orgConfigKey,
       orgContentKey,
       ...(libraryKey ? [libraryKey] : []),
+      ...(subscriptionKey ? [subscriptionKey] : []),
     ];
     const results = await Promise.all(keys.map((k) => cache.getVersion(k)));
     for (let i = 0; i < keys.length; i++) {
