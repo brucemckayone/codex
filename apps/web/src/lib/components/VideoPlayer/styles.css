@@ -24,19 +24,12 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Cinema mode — full viewport width, centered
+ * Cinema mode — styling handled by parent; wrapper removes constraints
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .video-player-wrapper--cinema {
-  width: 100vw;
-  max-height: 85vh;
-  margin-inline: calc(-50vw + 50%);
+  max-height: none;
   border-radius: 0;
-  transition:
-    width var(--duration-slow) var(--ease-out),
-    max-height var(--duration-slow) var(--ease-out),
-    margin var(--duration-slow) var(--ease-out),
-    border-radius var(--duration-fast) var(--ease-default);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

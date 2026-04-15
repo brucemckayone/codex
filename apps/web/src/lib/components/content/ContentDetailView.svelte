@@ -187,7 +187,7 @@
 <div class="content-detail" data-access={hasAccess ? 'full' : 'preview'}>
   <!-- Video Player / Preview — renders FIRST (hero position) -->
   {#if content.contentType === 'video'}
-  <div class="content-detail__player" data-content-type="video">
+  <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video">
     {#if hasAccess && streamingUrl}
       <VideoPlayer
         src={streamingUrl}
@@ -529,6 +529,21 @@
     background: var(--color-surface-tertiary);
     aspect-ratio: 16 / 9;
     margin-bottom: var(--space-6);
+  }
+
+  /* Cinema mode — break out to full viewport width */
+  .content-detail__player--cinema {
+    width: 100vw;
+    max-width: none;
+    margin-left: calc(-50vw + 50%);
+    border-radius: 0;
+    aspect-ratio: auto;
+    max-height: 85vh;
+    transition:
+      width var(--duration-slow) var(--ease-out),
+      margin var(--duration-slow) var(--ease-out),
+      border-radius var(--duration-fast) var(--ease-default),
+      max-height var(--duration-slow) var(--ease-out);
   }
 
   /* Audio player — sits inline within the info section, not as a hero */
