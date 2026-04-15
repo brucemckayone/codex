@@ -17,10 +17,13 @@
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { createProgressTracker } from '$lib/components/VideoPlayer/progress.svelte.ts';
   import { AlertCircleIcon, PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, MaximizeIcon } from '$lib/components/ui/Icon';
+  import { createAudioAnalyser } from './audio-analyser';
   import Waveform from './Waveform.svelte';
+  import WaveformShader from './WaveformShader.svelte';
   import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
 
   import type Hls from 'hls.js';
+  import type { AudioAnalysis, AudioAnalyserHandle } from './audio-analyser';
 
   interface Props {
     src: string;
@@ -58,12 +61,42 @@
 
   // Waveform data
   let waveformData: number[] | null = $state(null);
+  let waveformLoaded = $state(false);
+
+  // Track initialized src to prevent duplicate init on prop change
+  let initializedSrc = $state('');
 
   // Mini-player
   let miniMode = $state(false);
 
   // Immersive shader mode
   let showImmersive = $state(false);
+
+  // Audio analysis for waveform reactivity
+  let analyserHandle: AudioAnalyserHandle | null = null;
+  let audioAnalysis: AudioAnalysis | null = $state(null);
+  let analysisRafId = 0;
+
+  function startAnalysisLoop() {
+    if (!analyserHandle || analysisRafId) return;
+    function tick() {
+      if (!analyserHandle) return;
+      audioAnalysis = analyserHandle.getAnalysis();
+      analysisRafId = requestAnimationFrame(tick);
+    }
+    analysisRafId = requestAnimationFrame(tick);
+  }
+
+  function stopAnalysisLoop() {
+    if (analysisRafId) {
+      cancelAnimationFrame(analysisRafId);
+      analysisRafId = 0;
+    }
+    // Set active to false so waveform can decay
+    if (audioAnalysis) {
+      audioAnalysis = { ...audioAnalysis, active: false };
+    }
+  }
 
   const tracker = createProgressTracker({
     getContentId: () => contentId,
@@ -110,6 +143,12 @@
     playbackRate = rate;
   }
 
+  function cyclePlaybackRate() {
+    const idx = RATES.indexOf(playbackRate as (typeof RATES)[number]);
+    const next = RATES[(idx + 1) % RATES.length];
+    setPlaybackRate(next);
+  }
+
   function handleSeek(time: number) {
     if (!audioEl) return;
     audioEl.currentTime = Math.max(0, Math.min(time, duration));
@@ -129,14 +168,22 @@
 
   function handlePlay() {
     isPlaying = true;
+    // Lazily create audio analyser on first play (requires user gesture for AudioContext)
+    if (audioEl && !analyserHandle) {
+      analyserHandle = createAudioAnalyser(audioEl);
+      analyserHandle.resume();
+    }
+    startAnalysisLoop();
   }
 
   function handlePause() {
     isPlaying = false;
+    stopAnalysisLoop();
   }
 
   function handleEnded() {
     isPlaying = false;
+    stopAnalysisLoop();
   }
 
   function handleCanPlay() {
@@ -151,12 +198,34 @@
   }
 
   async function loadWaveform() {
-    if (!waveformUrl) return;
+    if (!waveformUrl || waveformLoaded) return;
+    waveformLoaded = true;
     try {
       const res = await fetch(waveformUrl);
       if (res.ok) {
         const json = await res.json();
-        waveformData = Array.isArray(json) ? json : (json.data ?? json.peaks ?? null);
+        const raw: number[] | null = Array.isArray(json)
+          ? json
+          : (json.data ?? json.peaks ?? null);
+        if (!raw) {
+          waveformData = null;
+          return;
+        }
+
+        // Audiowaveform v2: interleaved [min, max, min, max, ...] pairs (8/16-bit signed)
+        // Convert to normalised 0-1 amplitude per sample
+        if (json.version === 2 || (raw.length > 1 && raw[0] < 0)) {
+          const maxVal = (json.bits ?? 8) === 16 ? 32768 : 128;
+          const normalised: number[] = [];
+          for (let i = 0; i < raw.length; i += 2) {
+            const absMin = Math.abs(raw[i]);
+            const absMax = Math.abs(raw[i + 1] ?? raw[i]);
+            normalised.push(Math.max(absMin, absMax) / maxVal);
+          }
+          waveformData = normalised;
+        } else {
+          waveformData = raw;
+        }
       }
     } catch {
       // Waveform load failure is non-critical — Waveform.svelte falls back to progress bar
@@ -164,12 +233,22 @@
   }
 
   async function initPlayer() {
-    if (!audioEl) return;
+    if (!audioEl || !src) return;
+
+    // Guard: skip re-init if src hasn't changed (prevents duplicate init on reactive prop updates)
+    if (initializedSrc === src) return;
+    initializedSrc = src;
 
     loading = true;
     errorMessage = '';
 
     try {
+      // Destroy previous instance if re-initializing with a different src
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+
       hlsInstance = await createHlsPlayer({
         media: audioEl,
         src,
@@ -228,6 +307,11 @@
 
   onDestroy(() => {
     tracker.detach();
+    stopAnalysisLoop();
+    if (analyserHandle) {
+      analyserHandle.destroy();
+      analyserHandle = null;
+    }
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
@@ -268,35 +352,13 @@
       </button>
     </div>
   {:else}
-    <div class="audio-player__body">
-      <!-- Cover art -->
-      {#if poster}
-        <div class="audio-player__artwork">
-          <img src={poster} alt="" class="audio-player__artwork-img" />
-        </div>
-      {/if}
-
-      <div class="audio-player__main">
-        <!-- Waveform / seek bar -->
-        <div class="audio-player__waveform">
-          {#if loading}
-            <div class="audio-player__waveform-skeleton">
-              <div class="skeleton skeleton--waveform"></div>
-            </div>
-          {:else}
-            <Waveform
-              data={waveformData}
-              {currentTime}
-              {duration}
-              onseek={handleSeek}
-            />
-          {/if}
-        </div>
-
-        <!-- Controls bar -->
-        <div class="audio-player__controls">
+    <WaveformShader {audioAnalysis} {poster}>
+      <div class="audio-player__body">
+        <div class="audio-player__main">
+          <!-- Play button (left-aligned overlay) -->
           <button
             class="audio-player__btn audio-player__btn--play"
+            class:audio-player__btn--playing={isPlaying}
             onclick={togglePlay}
             aria-label={isPlaying ? 'Pause' : 'Play'}
             disabled={loading}
@@ -308,6 +370,27 @@
             {/if}
           </button>
 
+          <!-- Waveform / seek bar -->
+          <div class="audio-player__waveform">
+            {#if loading}
+              <div class="audio-player__waveform-skeleton">
+                <div class="skeleton skeleton--waveform"></div>
+              </div>
+            {:else}
+              <Waveform
+                data={waveformData}
+                {currentTime}
+                {duration}
+                playing={isPlaying}
+                onseek={handleSeek}
+                {audioAnalysis}
+              />
+            {/if}
+          </div>
+        </div>
+
+        <!-- Controls bar (inside immersive area) -->
+        <div class="audio-player__controls">
           <span class="audio-player__time">
             {formatTime(currentTime)} / {formatTime(duration)}
           </span>
@@ -335,19 +418,29 @@
             value={isMuted ? 0 : volume}
             oninput={handleVolumeChange}
             aria-label="Volume"
+            style:--volume-fill="{(isMuted ? 0 : volume) * 100}%"
           />
 
-          <!-- Playback speed -->
-          <div class="audio-player__speed">
-            {#each RATES as rate}
-              <button
-                class="audio-player__speed-btn"
-                class:active={playbackRate === rate}
-                onclick={() => setPlaybackRate(rate)}
-              >
-                {rate}x
-              </button>
-            {/each}
+          <!-- Playback speed — tap to cycle (mobile), hover to expand (desktop) -->
+          <div class="audio-player__speed" role="group" aria-label="Playback speed">
+            <button
+              class="audio-player__speed-current"
+              onclick={cyclePlaybackRate}
+              aria-label="Playback speed: {playbackRate}x — tap to change"
+            >
+              {playbackRate}x
+            </button>
+            <div class="audio-player__speed-options">
+              {#each RATES as rate}
+                <button
+                  class="audio-player__speed-btn"
+                  class:active={playbackRate === rate}
+                  onclick={() => setPlaybackRate(rate)}
+                >
+                  {rate}x
+                </button>
+              {/each}
+            </div>
           </div>
 
           <!-- Immersive mode (only when shader preset is set) -->
@@ -363,7 +456,7 @@
           {/if}
         </div>
       </div>
-    </div>
+    </WaveformShader>
   {/if}
 </div>
 
@@ -447,48 +540,33 @@
 <style>
   .audio-player {
     width: 100%;
-    background: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
   }
 
+  /* Immersive body — all content sits over the shader background */
   .audio-player__body {
-    display: flex;
-    gap: var(--space-4);
-    padding: var(--space-4);
-  }
-
-  .audio-player__artwork {
-    flex-shrink: 0;
-    width: 120px;
-    height: 120px;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-
-  .audio-player__artwork-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .audio-player__main {
-    flex: 1;
-    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    justify-content: center;
+    padding: var(--space-5);
+  }
+
+  /* Main area: play button + waveform side by side */
+  .audio-player__main {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
   }
 
   .audio-player__waveform {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
   }
 
   .audio-player__waveform-skeleton {
-    height: var(--space-16, 64px);
-    border-radius: var(--radius-sm);
+    height: var(--waveform-height, var(--space-24, 96px));
+    border-radius: var(--radius-md);
     overflow: hidden;
   }
 
@@ -497,9 +575,9 @@
     height: 100%;
     background: linear-gradient(
       90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary, var(--color-surface-secondary)) 50%,
-      var(--color-surface-secondary) 75%
+      hsl(0 0% 100% / 0.05) 25%,
+      hsl(0 0% 100% / 0.1) 50%,
+      hsl(0 0% 100% / 0.05) 75%
     );
     background-size: 200% 100%;
     animation: shimmer 1.5s ease-in-out infinite;
@@ -510,10 +588,13 @@
     100% { background-position: -200% 0; }
   }
 
+  /* Controls inside the immersive area — light text on dark bg */
   .audio-player__controls {
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid hsl(0 0% 100% / 0.1);
   }
 
   .audio-player__btn {
@@ -523,35 +604,58 @@
     padding: var(--space-1);
     background: none;
     border: none;
-    color: var(--color-text);
+    color: hsl(0 0% 100% / 0.8);
     cursor: pointer;
     border-radius: var(--radius-sm);
-    transition: background var(--transition-colors);
+    transition: var(--transition-colors), var(--transition-transform);
   }
 
   .audio-player__btn:hover {
-    background: var(--color-surface-secondary);
+    background: hsl(0 0% 100% / 0.1);
+    color: #fff;
   }
 
   .audio-player__btn:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
+  /* Play button — left-aligned inside waveform area */
   .audio-player__btn--play {
-    padding: var(--space-2);
-    background: var(--color-primary-500);
-    color: var(--color-text-on-primary, #fff);
+    flex-shrink: 0;
+    width: var(--space-12);
+    height: var(--space-12);
+    padding: 0;
+    background: hsl(0 0% 100% / 0.15);
+    color: #fff;
     border-radius: var(--radius-full);
+    backdrop-filter: blur(8px);
+    transition: var(--transition-colors), var(--transition-transform);
   }
 
   .audio-player__btn--play:hover {
-    background: var(--color-primary-600);
+    background: hsl(0 0% 100% / 0.25);
+    transform: scale(1.05);
+  }
+
+  .audio-player__btn--play:active {
+    transform: scale(0.95);
+  }
+
+  /* Shrink + fade when playing (Disney: secondary action) */
+  .audio-player__btn--playing {
+    width: var(--space-10);
+    height: var(--space-10);
+    opacity: 0.6;
+  }
+
+  .audio-player__btn--playing:hover {
+    opacity: 1;
   }
 
   .audio-player__time {
     font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+    color: hsl(0 0% 100% / 0.7);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -560,46 +664,128 @@
     flex: 1;
   }
 
+  /* Volume slider — brand fill, no thumb, expands on hover */
   .audio-player__volume {
     width: 80px;
-    accent-color: var(--color-primary-500);
+    height: 4px;
+    appearance: none;
+    background: linear-gradient(
+      to right,
+      var(--color-brand-primary, var(--color-primary-500)) var(--volume-fill, 100%),
+      hsl(0 0% 100% / 0.15) var(--volume-fill, 100%)
+    );
+    border-radius: var(--radius-full);
+    outline: none;
+    cursor: pointer;
+    transition: height var(--duration-fast) var(--ease-out);
+  }
+
+  .audio-player__volume:hover {
+    height: 6px;
+  }
+
+  .audio-player__volume::-webkit-slider-thumb {
+    appearance: none;
+    width: 0;
+    height: 0;
+  }
+
+  .audio-player__volume::-moz-range-thumb {
+    width: 0;
+    height: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .audio-player__volume::-webkit-slider-runnable-track {
+    height: inherit;
+    border-radius: var(--radius-full);
+    background: transparent;
+  }
+
+  .audio-player__volume::-moz-range-track {
+    height: inherit;
+    background: transparent;
+    border-radius: var(--radius-full);
+    border: none;
   }
 
   .audio-player__speed {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .audio-player__speed-current {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: hsl(0 0% 100% / 0.7);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid hsl(0 0% 100% / 0.2);
+    border-radius: var(--radius-sm);
+    background: none;
+    cursor: pointer;
+    transition: var(--transition-colors);
+    font-variant-numeric: tabular-nums;
+    font-family: inherit;
+  }
+
+  .audio-player__speed-current:hover,
+  .audio-player__speed:hover .audio-player__speed-current {
+    color: #fff;
+    background: hsl(0 0% 100% / 0.1);
+    border-color: hsl(0 0% 100% / 0.3);
+  }
+
+  .audio-player__speed-options {
     display: flex;
     gap: var(--space-1);
+    overflow: hidden;
+    max-width: 0;
+    opacity: 0;
+    transition: max-width var(--duration-slow) var(--ease-out),
+                opacity var(--duration-normal) var(--ease-out);
+  }
+
+  .audio-player__speed:hover .audio-player__speed-options,
+  .audio-player__speed:focus-within .audio-player__speed-options {
+    max-width: 200px;
+    opacity: 1;
   }
 
   .audio-player__speed-btn {
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-xs);
     background: none;
-    border: var(--border-width) var(--border-style) transparent;
-    color: var(--color-text-secondary);
+    border: 1px solid transparent;
+    color: hsl(0 0% 100% / 0.5);
     cursor: pointer;
     border-radius: var(--radius-sm);
-    transition: all var(--transition-colors);
+    transition: var(--transition-colors);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   .audio-player__speed-btn:hover {
-    background: var(--color-surface-secondary);
+    background: hsl(0 0% 100% / 0.1);
+    color: hsl(0 0% 100% / 0.8);
   }
 
   .audio-player__speed-btn.active {
-    color: var(--color-primary-500);
-    border-color: var(--color-primary-500);
+    color: #fff;
+    border-color: hsl(0 0% 100% / 0.3);
     font-weight: var(--font-medium);
   }
 
   .audio-player__btn--immersive {
     padding: var(--space-2);
-    background: var(--color-surface-secondary);
+    background: hsl(0 0% 100% / 0.1);
     border-radius: var(--radius-md);
   }
 
   .audio-player__btn--immersive:hover {
     background: var(--color-primary-500);
-    color: var(--color-text-on-primary, #fff);
+    color: #fff;
   }
 
   .audio-player__error {
@@ -709,20 +895,44 @@
   /* Responsive */
   @media (max-width: 640px) {
     .audio-player__body {
-      flex-direction: column;
+      padding: var(--space-3);
+      gap: var(--space-2);
     }
 
-    .audio-player__artwork {
-      width: 100%;
-      height: 200px;
+    /* Wrap controls to a second row on mobile */
+    .audio-player__controls {
+      flex-wrap: wrap;
+      gap: var(--space-2);
     }
 
+    /* Volume gets wider on mobile for easier touch */
     .audio-player__volume {
+      width: 60px;
+      height: 6px;
+    }
+
+    /* On mobile: cycle button only, hide expanded options (no hover) */
+    .audio-player__speed-options {
       display: none;
     }
 
-    .audio-player__speed {
-      display: none;
+    .audio-player__speed-current {
+      min-height: var(--space-8);
+      min-width: var(--space-10);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Larger touch targets */
+    .audio-player__btn {
+      min-width: var(--space-10);
+      min-height: var(--space-10);
+    }
+
+    .audio-player__speed-btn {
+      min-height: var(--space-8);
+      padding: var(--space-1) var(--space-3);
     }
   }
 </style>

@@ -21,7 +21,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { createHlsPlayer } from './hls';
   import { createProgressTracker } from './progress.svelte.ts';
-  import { AlertCircleIcon } from '$lib/components/ui/Icon';
+  import { AlertCircleIcon, PlayIcon, PauseIcon } from '$lib/components/ui/Icon';
   import './styles.css';
 
   import type Hls from 'hls.js';
@@ -40,6 +40,63 @@
   let hlsInstance: Hls | null = null;
   let loading = $state(true);
   let errorMessage = $state('');
+
+  // Playback & interaction state for premium controls
+  let isPaused = $state(true);
+  let isHovering = $state(false);
+  let hideControlsTimer: ReturnType<typeof setTimeout> | null = null;
+  let showPlayOverlay = $derived(isPaused && !loading && !errorMessage);
+  let controlsVisible = $derived(!isPaused && isHovering);
+
+  function handlePlay() {
+    isPaused = false;
+    scheduleHideControls();
+  }
+
+  function handlePause() {
+    isPaused = true;
+    clearHideTimer();
+  }
+
+  function togglePlay() {
+    if (!videoEl) return;
+    if (videoEl.paused) {
+      videoEl.play();
+    } else {
+      videoEl.pause();
+    }
+  }
+
+  function handleMouseEnter() {
+    isHovering = true;
+    clearHideTimer();
+  }
+
+  function handleMouseLeave() {
+    isHovering = false;
+    if (!isPaused) {
+      scheduleHideControls();
+    }
+  }
+
+  function handleMouseMove() {
+    isHovering = true;
+    scheduleHideControls();
+  }
+
+  function scheduleHideControls() {
+    clearHideTimer();
+    hideControlsTimer = setTimeout(() => {
+      isHovering = false;
+    }, 2500);
+  }
+
+  function clearHideTimer() {
+    if (hideControlsTimer) {
+      clearTimeout(hideControlsTimer);
+      hideControlsTimer = null;
+    }
+  }
 
   const tracker = createProgressTracker({
     getContentId: () => contentId,
@@ -112,6 +169,7 @@
 
   onDestroy(() => {
     tracker.detach();
+    clearHideTimer();
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
@@ -119,7 +177,14 @@
   });
 </script>
 
-<div class="video-player-wrapper">
+<div
+  class="video-player-wrapper"
+  class:video-player-wrapper--controls-visible={controlsVisible}
+  onmouseenter={handleMouseEnter}
+  onmouseleave={handleMouseLeave}
+  onmousemove={handleMouseMove}
+  ontouchstart={handleMouseEnter}
+>
   {#if loading}
     <div class="video-player-loading">
       <div class="video-player-loading-spinner" aria-label="Loading video"></div>
@@ -135,9 +200,24 @@
       </button>
     </div>
   {:else}
+    <!-- Large centered play/pause overlay -->
+    <button
+      class="video-player-overlay-btn"
+      class:video-player-overlay-btn--visible={showPlayOverlay}
+      class:video-player-overlay-btn--hover={isHovering && !isPaused}
+      onclick={togglePlay}
+      aria-label={isPaused ? 'Play video' : 'Pause video'}
+    >
+      {#if isPaused}
+        <PlayIcon size={40} />
+      {:else}
+        <PauseIcon size={28} />
+      {/if}
+    </button>
+
     <media-controller
       hotkeys="noarrowleft noarrowright nospace nom nof"
-      autohide="2"
+      autohide="-1"
     >
       <video
         bind:this={videoEl}
@@ -148,21 +228,33 @@
         poster={poster}
         oncanplay={handleCanPlay}
         onerror={handleError}
+        onplay={handlePlay}
+        onpause={handlePause}
       >
         {#if captionsSrc}<track kind="captions" src={captionsSrc} />{/if}
       </video>
 
       <media-loading-indicator slot="centered-chrome" noautohide></media-loading-indicator>
 
-      <media-control-bar>
-        <media-play-button></media-play-button>
-        <media-mute-button></media-mute-button>
-        <media-volume-range class="video-player-volume-range"></media-volume-range>
-        <media-time-range></media-time-range>
-        <media-time-display showduration></media-time-display>
+      <!-- Controls container — slides up on hover during playback -->
+      <div class="video-player-controls-container {controlsVisible ? 'video-player-controls-container--visible' : ''}">
+      <!-- Progress bar — full width, above controls -->
+      <media-time-range class="video-player-time-range"></media-time-range>
+
+      <!-- Control bar — no play button (overlay handles it) -->
+      <media-control-bar class="video-player-control-bar">
+        <div class="video-player-volume-group">
+          <media-mute-button></media-mute-button>
+          <div class="video-player-volume-popover">
+            <media-volume-range class="video-player-volume-range"></media-volume-range>
+          </div>
+        </div>
+        <div class="video-player-spacer"></div>
+        <media-time-display showduration notoggle></media-time-display>
         <media-playback-rate-button rates="0.5 1 1.5 2"></media-playback-rate-button>
         <media-fullscreen-button></media-fullscreen-button>
       </media-control-bar>
+      </div>
     </media-controller>
   {/if}
 </div>

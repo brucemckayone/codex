@@ -183,28 +183,16 @@
 </svelte:head>
 
 <div class="content-detail" data-access={hasAccess ? 'full' : 'preview'}>
-  <!-- Player / Preview Section (hidden for written content) -->
-  {#if content.contentType !== 'written'}
-  <div class="content-detail__player" data-content-type={content.contentType}>
+  <!-- Video Player / Preview — renders FIRST (hero position) -->
+  {#if content.contentType === 'video'}
+  <div class="content-detail__player" data-content-type="video">
     {#if hasAccess && streamingUrl}
-      {#if content.contentType === 'audio'}
-        <AudioPlayer
-          src={streamingUrl}
-          contentId={content.id}
-          initialProgress={progress?.positionSeconds ?? 0}
-          waveformUrl={waveformUrl}
-          poster={thumbnailUrl}
-          title={content.title}
-          shaderPreset={content.shaderPreset ?? null}
-        />
-      {:else}
-        <VideoPlayer
-          src={streamingUrl}
-          contentId={content.id}
-          initialProgress={progress?.positionSeconds ?? 0}
-          poster={thumbnailUrl}
-        />
-      {/if}
+      <VideoPlayer
+        src={streamingUrl}
+        contentId={content.id}
+        initialProgress={progress?.positionSeconds ?? 0}
+        poster={thumbnailUrl}
+      />
     {:else if previewUrl && accessState.status === 'preview'}
       <svelte:boundary>
         <PreviewPlayer
@@ -258,7 +246,7 @@
   </div>
   {/if}
 
-  <!-- Content Info Section -->
+  <!-- Content Info Section (title, meta, creator) -->
   <div class="content-detail__info">
     <div class="content-detail__header">
       <h1 class="content-detail__title">{content.title}</h1>
@@ -285,6 +273,27 @@
 
     {#if progress?.completed}
       <span class="content-detail__completed-badge">{m.content_progress_completed()}</span>
+    {/if}
+
+    <!-- Audio Player — positioned below title/meta, above purchase/about -->
+    {#if content.contentType === 'audio'}
+      <div class="content-detail__player content-detail__player--audio" data-content-type="audio">
+        {#if hasAccess && streamingUrl}
+          <AudioPlayer
+            src={streamingUrl}
+            contentId={content.id}
+            initialProgress={progress?.positionSeconds ?? 0}
+            waveformUrl={waveformUrl}
+            poster={thumbnailUrl}
+            title={content.title}
+            shaderPreset={content.shaderPreset ?? null}
+          />
+        {:else if accessLoading}
+          <div class="audio-player-skeleton">
+            <div class="skeleton skeleton--audio"></div>
+          </div>
+        {/if}
+      </div>
     {/if}
 
     <!-- Team-only Section — only management roles can access -->
@@ -518,9 +527,31 @@
     margin-bottom: var(--space-6);
   }
 
-  .content-detail__player[data-content-type='audio'] {
+  /* Audio player — sits inline within the info section, not as a hero */
+  .content-detail__player--audio {
     aspect-ratio: unset;
     background: transparent;
+    margin-bottom: var(--space-4);
+    margin-top: var(--space-2);
+  }
+
+  .audio-player-skeleton {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .skeleton--audio {
+    width: 100%;
+    height: var(--space-24, 96px);
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 25%,
+      var(--color-surface-tertiary) 50%,
+      var(--color-surface-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-lg);
   }
 
   .content-detail__preview {

@@ -9,7 +9,7 @@
   while relatedContent and accessAndProgress are streamed as bare promises.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -46,7 +46,8 @@
 
   // Subscription context — resolves asynchronously without blocking render.
   // Gate on enableSubscriptions: when disabled, never show subscription prompts.
-  let subCtx = $state({
+  // Writable $derived: resets to content-based defaults on navigation, overwritten by $effect below.
+  let subCtx = $derived({
     requiresSubscription:
       data.content.accessType === 'subscribers' || !!data.content.minimumTierId,
     hasSubscription: false,
@@ -68,6 +69,50 @@
         hasSubscription: ctx.hasSubscription,
         subscriptionCoversContent: ctx.subscriptionCoversContent,
       };
+    });
+  });
+
+  // Access state — resolved reactively from the streaming promise.
+  // A single ContentDetailView stays mounted; only these props change.
+  let accessState = $state({
+    hasAccess: false,
+    streamingUrl: null as string | null,
+    waveformUrl: null as string | null,
+    progress: null as {
+      positionSeconds: number;
+      durationSeconds: number;
+      completed: boolean;
+    } | null,
+    loading: !!data.accessAndProgress,
+  });
+
+  // Track which promise we've already resolved to prevent re-triggering
+  let resolvedPromise: Promise<unknown> | null = null;
+
+  $effect(() => {
+    const promise = data.accessAndProgress;
+    // untrack writes to avoid reactive loop (reading promise, writing accessState)
+    untrack(() => {
+      if (promise && promise !== resolvedPromise) {
+        accessState.loading = true;
+        resolvedPromise = promise;
+        promise.then((result) => {
+          if (resolvedPromise === promise) {
+            accessState.hasAccess = result.hasAccess;
+            accessState.streamingUrl = result.streamingUrl;
+            accessState.waveformUrl = result.waveformUrl ?? null;
+            accessState.progress = result.progress;
+            accessState.loading = false;
+          }
+        });
+      } else if (!promise) {
+        accessState.hasAccess = false;
+        accessState.streamingUrl = null;
+        accessState.waveformUrl = null;
+        accessState.progress = null;
+        accessState.loading = false;
+        resolvedPromise = null;
+      }
     });
   });
 
@@ -94,88 +139,34 @@
 </script>
 
 <!--
-  Unauthenticated: accessAndProgress is null, flat fields hold static values.
-  Authenticated: accessAndProgress is a promise — await it for player/purchase area.
+  Single ContentDetailView instance — props update reactively when
+  the streaming promise resolves. This avoids destroying/recreating
+  the component tree (and remounting AudioPlayer/HLS/waveform).
 -->
-{#if data.accessAndProgress}
-  {#await data.accessAndProgress}
-    <!-- Skeleton: player/purchase area loading — accessLoading hides purchase UI -->
-    <ContentDetailView
-      content={content}
-      contentBodyHtml={data.contentBodyHtml}
-      hasAccess={false}
-      accessLoading={true}
-      streamingUrl={null}
-      progress={null}
-      isAuthenticated={true}
-      formResult={form}
-      {purchasing}
-      {creatorName}
-      {titleSuffix}
-      requiresSubscription={subCtx.requiresSubscription}
-      hasSubscription={subCtx.hasSubscription}
-      subscriptionCoversContent={subCtx.subscriptionCoversContent}
-    >
-      {#snippet purchaseForm()}
-        <div class="access-skeleton">
-          <div class="skeleton skeleton--wide"></div>
-          <div class="skeleton skeleton--button"></div>
-        </div>
-      {/snippet}
-    </ContentDetailView>
-  {:then accessData}
-    <ContentDetailView
-      content={content}
-      contentBodyHtml={data.contentBodyHtml}
-      hasAccess={accessData.hasAccess}
-      streamingUrl={accessData.streamingUrl}
-      waveformUrl={accessData.waveformUrl}
-      progress={accessData.progress}
-      isAuthenticated={true}
-      formResult={form}
-      {purchasing}
-      {creatorName}
-      {titleSuffix}
-      requiresSubscription={subCtx.requiresSubscription}
-      hasSubscription={subCtx.hasSubscription}
-      subscriptionCoversContent={subCtx.subscriptionCoversContent}
-    >
-      {#snippet purchaseForm()}
-        <form method="POST" action="?/purchase" use:enhance={handlePurchase}>
-          <input type="hidden" name="contentId" value={content.id} />
-          <button
-            type="submit"
-            class="content-detail__purchase-btn"
-            disabled={purchasing}
-          >
-            {#if purchasing}
-              {m.checkout_processing()}
-            {:else}
-              {m.checkout_purchase_button({ price: displayPrice(priceCents) })}
-            {/if}
-          </button>
-        </form>
-      {/snippet}
-    </ContentDetailView>
-  {/await}
-{:else}
-  <!-- Unauthenticated: no streaming needed for access state -->
-  <ContentDetailView
-    content={content}
-    contentBodyHtml={data.contentBodyHtml}
-    hasAccess={false}
-    streamingUrl={null}
-    progress={null}
-    isAuthenticated={false}
-    formResult={form}
-    {purchasing}
-    {creatorName}
-    {titleSuffix}
-    requiresSubscription={subCtx.requiresSubscription}
-    hasSubscription={subCtx.hasSubscription}
-    subscriptionCoversContent={subCtx.subscriptionCoversContent}
-  >
-    {#snippet purchaseForm()}
+<ContentDetailView
+  content={content}
+  contentBodyHtml={data.contentBodyHtml}
+  hasAccess={accessState.hasAccess}
+  accessLoading={accessState.loading}
+  streamingUrl={accessState.streamingUrl}
+  waveformUrl={accessState.waveformUrl}
+  progress={accessState.progress}
+  isAuthenticated={!!data.accessAndProgress}
+  formResult={form}
+  {purchasing}
+  {creatorName}
+  {titleSuffix}
+  requiresSubscription={subCtx.requiresSubscription}
+  hasSubscription={subCtx.hasSubscription}
+  subscriptionCoversContent={subCtx.subscriptionCoversContent}
+>
+  {#snippet purchaseForm()}
+    {#if accessState.loading}
+      <div class="access-skeleton">
+        <div class="skeleton skeleton--wide"></div>
+        <div class="skeleton skeleton--button"></div>
+      </div>
+    {:else}
       <form method="POST" action="?/purchase" use:enhance={handlePurchase}>
         <input type="hidden" name="contentId" value={content.id} />
         <button
@@ -190,9 +181,9 @@
           {/if}
         </button>
       </form>
-    {/snippet}
-  </ContentDetailView>
-{/if}
+    {/if}
+  {/snippet}
+</ContentDetailView>
 
 <!-- Streamed related content section (below fold) -->
 {#await data.relatedContent}
