@@ -532,20 +532,13 @@
   }
 
   /* Cinema mode — break out to full viewport width.
-     Uses fixed positioning approach: take element out of constrained flow. */
+     margin-inline trick offsets from content-box center to viewport edge. */
   .content-detail__player--cinema {
     width: 100vw;
     max-width: none;
-    /* Negate parent padding + center offset via margin trick.
-       Parent is .content-detail: max-width 960px, centered, padding --space-4.
-       margin-inline: calc(-50vw + 50%) offsets from content-box center to viewport edge. */
     margin-inline: calc(-50vw + 50%);
     border-radius: 0;
-    overflow: visible;
-    aspect-ratio: auto;
-    max-height: 85vh;
     transition:
-      max-height var(--duration-slow) var(--ease-out),
       border-radius var(--duration-fast) var(--ease-default);
   }
 
