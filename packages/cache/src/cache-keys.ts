@@ -31,6 +31,9 @@ export const CacheType = {
   /** Organization public aggregate statistics (content counts, creators, duration) */
   ORG_STATS: 'org:stats',
 
+  /** Organization public creators (paginated, includes content counts + recent content) */
+  ORG_CREATORS: 'org:creators',
+
   /** Organization member lists */
   ORG_MEMBERS: 'org:members',
 

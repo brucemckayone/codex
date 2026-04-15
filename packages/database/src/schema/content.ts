@@ -105,6 +105,9 @@ export const organizationMemberships = pgTable(
     index('idx_org_memberships_user_id').on(table.userId),
     index('idx_org_memberships_role').on(table.organizationId, table.role),
     index('idx_org_memberships_status').on(table.organizationId, table.status),
+    index('idx_org_memberships_org_active_role')
+      .on(table.organizationId, table.status, table.role)
+      .where(sql`${table.status} = 'active'`),
 
     // CHECK constraints for enum values
     check(
@@ -333,6 +336,14 @@ export const content = pgTable(
     index('idx_content_published_at').on(table.publishedAt),
     index('idx_content_category').on(table.category),
     index('idx_content_minimum_tier').on(table.minimumTierId),
+
+    // Composite indexes for landing page query performance
+    index('idx_content_org_published')
+      .on(table.organizationId, table.status, table.publishedAt)
+      .where(sql`${table.deletedAt} IS NULL`),
+    index('idx_content_creator_org_published')
+      .on(table.creatorId, table.organizationId, table.status)
+      .where(sql`${table.deletedAt} IS NULL`),
 
     // Partial unique indexes for slug uniqueness (exclude soft-deleted rows)
     // Unique slug per organization (for organization content)

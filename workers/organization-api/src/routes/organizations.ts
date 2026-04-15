@@ -182,6 +182,7 @@ app.get(
         radiusValue: info.brandRadius ?? 0.5,
         densityValue: info.brandDensity ?? 1,
         introVideoUrl: info.introVideoUrl ?? null,
+        heroLayout: info.heroLayout ?? 'default',
       };
     },
   })
@@ -214,7 +215,7 @@ async function fetchPublicOrgInfo(
     throw new NotFoundError('Organization not found', { slug });
   }
 
-  // Create a branding service scoped to the found org's ID.
+  // Fetch branding + features in parallel (both need org.id, but are independent).
   // Can't use ctx.services.settings — requires requireOrgMembership
   // which isn't available on this public (no-auth) endpoint.
   const brandingDb = createDbClient(ctx.env);
@@ -223,8 +224,19 @@ async function fetchPublicOrgInfo(
     environment: ctx.env.ENVIRONMENT ?? 'development',
     organizationId: organization.id,
   });
+  const featureDb = createDbClient(ctx.env);
+  const featureSvc = new FeatureSettingsService({
+    db: featureDb,
+    environment: ctx.env.ENVIRONMENT ?? 'development',
+    organizationId: organization.id,
+  });
 
-  let branding: {
+  const [brandingResult, featuresResult] = await Promise.allSettled([
+    brandingSvc.get(),
+    featureSvc.get(),
+  ]);
+
+  type BrandingInfo = {
     logoUrl: string | null;
     primaryColorHex: string;
     secondaryColorHex: string | null;
@@ -242,7 +254,10 @@ async function fetchPublicOrgInfo(
     textScale: string | null;
     headingWeight: string | null;
     bodyWeight: string | null;
-  } = {
+    heroLayout: string;
+  };
+
+  const brandingDefaults: BrandingInfo = {
     logoUrl: null,
     primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
     secondaryColorHex: null,
@@ -260,9 +275,12 @@ async function fetchPublicOrgInfo(
     textScale: null,
     headingWeight: null,
     bodyWeight: null,
+    heroLayout: 'default',
   };
-  try {
-    const b = await brandingSvc.get();
+
+  let branding: BrandingInfo = brandingDefaults;
+  if (brandingResult.status === 'fulfilled') {
+    const b = brandingResult.value;
     branding = {
       logoUrl: b.logoUrl ?? null,
       primaryColorHex: b.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
@@ -281,26 +299,15 @@ async function fetchPublicOrgInfo(
       textScale: b.textScale ?? null,
       headingWeight: b.headingWeight ?? null,
       bodyWeight: b.bodyWeight ?? null,
+      heroLayout: b.heroLayout ?? 'default',
     };
-  } catch {
-    // Branding fetch failed — use defaults (non-critical)
   }
 
-  // Fetch feature flags (enableSubscriptions) for public pages (pricing, content detail).
   // Non-critical — defaults to true so subscriptions aren't hidden on fetch failure.
-  let enableSubscriptions = true;
-  try {
-    const featureDb = createDbClient(ctx.env);
-    const featureSvc = new FeatureSettingsService({
-      db: featureDb,
-      environment: ctx.env.ENVIRONMENT ?? 'development',
-      organizationId: organization.id,
-    });
-    const features = await featureSvc.get();
-    enableSubscriptions = features.enableSubscriptions;
-  } catch {
-    // Feature fetch failed — default to enabled (non-critical)
-  }
+  const enableSubscriptions =
+    featuresResult.status === 'fulfilled'
+      ? featuresResult.value.enableSubscriptions
+      : true;
 
   return {
     id: organization.id,
@@ -321,6 +328,7 @@ async function fetchPublicOrgInfo(
     brandRadius: branding.radiusValue,
     brandDensity: branding.densityValue,
     introVideoUrl: branding.introVideoUrl,
+    heroLayout: branding.heroLayout,
     brandFineTune: {
       tokenOverrides: branding.tokenOverrides,
       darkModeOverrides: branding.darkModeOverrides,
@@ -437,10 +445,24 @@ app.get(
         .optional(),
     },
     handler: async (ctx) => {
-      const result = await ctx.services.organization.getPublicCreators(
-        ctx.input.params.slug,
-        ctx.input.query ?? { page: 1, limit: 20 }
-      );
+      const slug = ctx.input.params.slug;
+      const { page, limit } = ctx.input.query ?? { page: 1, limit: 20 };
+
+      const fetcher = () =>
+        ctx.services.organization.getPublicCreators(slug, { page, limit });
+
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const result = await cache.get(
+          slug,
+          `${CacheType.ORG_CREATORS}:${page}:${limit}`,
+          fetcher,
+          { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
+        );
+        return new PaginatedResult(result.items, result.pagination);
+      }
+
+      const result = await fetcher();
       return new PaginatedResult(result.items, result.pagination);
     },
   })

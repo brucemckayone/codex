@@ -812,13 +812,13 @@ export class ContentService extends BaseService {
         }
       }
 
-      // Determine sort order
+      // Determine sort order — use publishedAt for public listings (not createdAt)
       const orderByClause =
         params.sort === 'oldest'
-          ? asc(content.createdAt)
+          ? asc(content.publishedAt)
           : params.sort === 'title'
             ? asc(content.title)
-            : desc(content.createdAt);
+            : desc(content.publishedAt);
 
       // Run items + count queries concurrently (independent queries)
       const [items, countResult] = await Promise.all([

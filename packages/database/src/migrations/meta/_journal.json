@@ -351,6 +351,13 @@
       "when": 1776307200000,
       "tag": "0050_add_shader_preset_to_content",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1776480000000,
+      "tag": "0051_add_landing_page_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,8 @@
  * - DELETE /:userId         - Remove member
  */
 
+import { VersionedCache } from '@codex/cache';
+import { createDbClient, eq, schema } from '@codex/database';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   inviteMemberSchema,
@@ -28,6 +30,37 @@ import {
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
+
+/**
+ * Invalidate slug-keyed cache (public org info, stats, creators) after membership changes.
+ * Resolves slug from orgId in fire-and-forget fashion.
+ */
+function invalidateOrgSlugCache(ctx: {
+  env: { CACHE_KV?: unknown; ENVIRONMENT?: string };
+  executionCtx: { waitUntil(p: Promise<unknown>): void };
+  input: { params: { id: string } };
+}) {
+  if (!ctx.env.CACHE_KV) return;
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV as import('@cloudflare/workers-types').KVNamespace,
+  });
+  ctx.executionCtx.waitUntil(
+    (async () => {
+      try {
+        const db = createDbClient(ctx.env as Parameters<typeof createDbClient>[0]);
+        const org = await db.query.organizations.findFirst({
+          where: eq(schema.organizations.id, ctx.input.params.id),
+          columns: { slug: true },
+        });
+        if (org?.slug) {
+          await cache.invalidate(org.slug);
+        }
+      } catch {
+        // Non-critical — slug cache expires via TTL
+      }
+    })()
+  );
+}
 
 const app = new Hono<HonoEnv>();
 
@@ -81,6 +114,9 @@ app.post(
         ctx.user.id
       );
 
+      // Invalidate public creators cache (membership changed)
+      invalidateOrgSlugCache(ctx);
+
       // Send invitation email (fire-and-forget)
       sendEmailToWorker(ctx.env, ctx.executionCtx, {
         to: ctx.input.body.email,
@@ -117,11 +153,13 @@ app.patch(
       body: updateMemberRoleSchema,
     },
     handler: async (ctx) => {
-      return await ctx.services.organization.updateMemberRole(
+      const result = await ctx.services.organization.updateMemberRole(
         ctx.input.params.id,
         ctx.input.params.userId,
         ctx.input.body.role
       );
+      invalidateOrgSlugCache(ctx);
+      return result;
     },
   })
 );
@@ -146,6 +184,7 @@ app.delete(
         ctx.input.params.id,
         ctx.input.params.userId
       );
+      invalidateOrgSlugCache(ctx);
       return null;
     },
   })

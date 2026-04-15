@@ -18,6 +18,7 @@
 
 import { CacheType, VersionedCache } from '@codex/cache';
 import { AUTH_ROLES } from '@codex/constants';
+import { createDbClient, eq, schema } from '@codex/database';
 import type {
   ContentResponse,
   CreateContentResponse,
@@ -54,6 +55,8 @@ interface Logger {
 
 /**
  * Bump the org content version in KV after publish/unpublish/delete.
+ * Also invalidates the slug-keyed cache (public org info, stats, creators)
+ * since content changes affect creator contentCount and org stats.
  * Fire-and-forget via waitUntil — does not block the response.
  */
 function bumpOrgContentVersion(
@@ -65,13 +68,30 @@ function bumpOrgContentVersion(
   if (!organizationId || !env.CACHE_KV) return;
   const cache = new VersionedCache({ kv: env.CACHE_KV });
   executionCtx.waitUntil(
-    cache
-      .invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId))
-      .catch((err: unknown) => {
-        obs?.warn('Cache invalidation failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
+    Promise.all([
+      // Invalidate org content collection version
+      cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
+      // Invalidate slug-keyed cache (stats, creators, public info)
+      // Resolve slug from orgId — non-critical, fails gracefully
+      (async () => {
+        try {
+          const db = createDbClient(env);
+          const org = await db.query.organizations.findFirst({
+            where: eq(schema.organizations.id, organizationId),
+            columns: { slug: true },
+          });
+          if (org?.slug) {
+            await cache.invalidate(org.slug);
+          }
+        } catch {
+          // Non-critical — slug cache expires via TTL
+        }
+      })(),
+    ]).catch((err: unknown) => {
+      obs?.warn('Cache invalidation failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
   );
 }
 
