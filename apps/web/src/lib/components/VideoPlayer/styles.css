@@ -253,16 +253,18 @@ media-controller video {
   color: white;
   cursor: pointer;
   flex-shrink: 0;
-  transition: var(--transition-transform);
+  transition: transform var(--duration-normal) var(--ease-bounce);
 }
 
+/* Disney: Anticipation + Follow-Through — slight squash on press, overshoot bounce on release */
 .video-player-play-btn:hover {
-  transform: scale(1.1);
+  transform: scale(1.12);
 }
 
 .video-player-play-btn:active {
-  transform: scale(0.9);
-  transition-duration: var(--duration-fast);
+  /* Disney: Squash — compress on impact */
+  transform: scale(0.82) scaleY(0.92);
+  transition-duration: 60ms;
 }
 
 .video-player-play-btn:focus-visible {
@@ -270,9 +272,14 @@ media-controller video {
   outline-offset: 2px;
 }
 
-/* Play ↔ Pause SVG morph */
+/* Play icon — slight rotation gives organic feel */
+.video-player-play-icon {
+  transition: transform var(--duration-slow) var(--ease-bounce);
+}
+
+/* Play ↔ Pause SVG morph — spring-bounce easing for Disney "snap" */
 .video-player-morph-path {
-  transition: d var(--duration-normal) var(--ease-out);
+  transition: d var(--duration-slow) var(--ease-bounce);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -296,28 +303,109 @@ media-controller video {
   transition: background var(--duration-fast) var(--ease-default);
 }
 
-.video-player-volume-pill media-mute-button {
-  --media-icon-color: white;
+/* ─── Animated mute button ─── */
+
+.video-player-mute-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  padding: 0;
   border: none;
   border-radius: var(--radius-full);
+  background: transparent;
+  color: white;
+  cursor: pointer;
   flex-shrink: 0;
-  transition: transform var(--duration-fast) var(--ease-out),
-              color var(--duration-fast) var(--ease-default);
+  transition: transform var(--duration-normal) var(--ease-bounce);
 }
 
-.video-player-volume-pill media-mute-button:hover {
+/* Disney: Anticipation — slight scale-up before action */
+.video-player-mute-btn:hover {
   transform: scale(1.15);
 }
 
-.video-player-volume-pill media-mute-button:active {
-  transform: scale(0.85);
-  transition-duration: 80ms;
+/* Disney: Squash — compress on click for tactile feel */
+.video-player-mute-btn:active {
+  transform: scale(0.8) scaleY(0.88);
+  transition-duration: 60ms;
 }
 
-/* Muted state — brand color + strikethrough visual */
-.video-player-volume-pill media-mute-button[mediavolumelevel="off"] {
-  --media-icon-color: var(--color-brand-primary, var(--color-primary-500));
+.video-player-mute-btn:focus-visible {
+  outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: 2px;
 }
+
+/* ─── Volume icon animated parts ─── */
+
+.video-player-volume-icon {
+  overflow: visible;
+}
+
+/* Speaker body — Disney: Slow In/Slow Out for body bounce */
+.video-player-vol-body {
+  fill: currentColor;
+  stroke: none;
+  transition: transform var(--duration-slow) var(--ease-bounce);
+  transform-origin: center;
+}
+
+/* Speaker body squash on mute */
+.video-player-mute-btn:active .video-player-vol-body {
+  transform: scaleX(0.85);
+}
+
+/* Sound waves — Disney: Secondary Action + Follow-Through */
+.video-player-vol-wave1,
+.video-player-vol-wave2 {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+  opacity: 0;
+  transform: scaleX(0.3) translateX(-4px);
+  transition:
+    opacity var(--duration-slow) var(--ease-out),
+    transform var(--duration-slow) var(--ease-bounce);
+}
+
+/* Stagger: wave 2 follows wave 1 (Disney: Overlapping Action) */
+.video-player-vol-wave2 {
+  transition-delay: 60ms;
+}
+
+/* Active waves — spring in with overshoot */
+.video-player-vol-wave--active {
+  opacity: 1;
+  transform: scaleX(1) translateX(0);
+}
+
+/* Mute X lines — Disney: Arcs + Snap */
+.video-player-vol-mute-x {
+  stroke: var(--color-brand-primary, var(--color-primary-500));
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  animation: vp-mute-x-in var(--duration-slow) var(--ease-bounce) both;
+}
+
+@keyframes vp-mute-x-in {
+  from {
+    opacity: 0;
+    stroke-dasharray: 10;
+    stroke-dashoffset: 10;
+    transform: scale(0.5) rotate(-15deg);
+  }
+  to {
+    opacity: 1;
+    stroke-dasharray: 10;
+    stroke-dashoffset: 0;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* ─── Volume slider ─── */
 
 .video-player-volume-pill .video-player-volume-range {
   --media-range-bar-color: var(--color-brand-primary, var(--color-primary-500));
@@ -327,10 +415,10 @@ media-controller video {
   --media-range-thumb-height: 12px;
   --media-range-thumb-background: white;
   --media-range-thumb-border-radius: var(--radius-full);
-  --media-range-thumb-transition: transform var(--duration-fast) var(--ease-out);
   width: 60px;
   height: 24px;
   flex-shrink: 0;
+  transition: width var(--duration-normal) var(--ease-out);
 }
 
 .video-player-volume-pill:hover .video-player-volume-range {
@@ -377,7 +465,7 @@ media-controller video {
   border-radius: var(--radius-full);
   transition:
     background var(--duration-fast) var(--ease-default),
-    transform var(--duration-fast) var(--ease-out);
+    transform var(--duration-normal) var(--ease-bounce);
 }
 
 .video-player-config-pill media-playback-rate-button:hover {
@@ -385,8 +473,8 @@ media-controller video {
 }
 
 .video-player-config-pill media-playback-rate-button:active {
-  transform: scale(0.9);
-  transition-duration: 80ms;
+  transform: scale(0.85) scaleY(0.92);
+  transition-duration: 60ms;
 }
 
 .video-player-cinema-btn {
@@ -399,17 +487,20 @@ media-controller video {
   background: transparent;
   color: white;
   cursor: pointer;
-  transition: var(--transition-transform), var(--transition-colors);
+  transition:
+    transform var(--duration-normal) var(--ease-bounce),
+    color var(--duration-normal) var(--ease-default),
+    background var(--duration-fast) var(--ease-default);
 }
 
 .video-player-cinema-btn:hover {
-  transform: scale(1.05);
+  transform: scale(1.1);
   background: hsl(0 0% 100% / 0.1);
 }
 
 .video-player-cinema-btn:active {
-  transform: scale(0.92);
-  transition-duration: var(--duration-fast);
+  transform: scale(0.82) scaleY(0.9);
+  transition-duration: 60ms;
 }
 
 .video-player-cinema-btn[aria-pressed="true"] {
@@ -424,16 +515,16 @@ media-controller video {
 .video-player-config-pill media-fullscreen-button {
   border: none;
   border-radius: var(--radius-full);
-  transition: var(--transition-transform);
+  transition: transform var(--duration-normal) var(--ease-bounce);
 }
 
 .video-player-config-pill media-fullscreen-button:hover {
-  transform: scale(1.05);
+  transform: scale(1.1);
 }
 
 .video-player-config-pill media-fullscreen-button:active {
-  transform: scale(0.92);
-  transition-duration: 80ms;
+  transform: scale(0.82) scaleY(0.9);
+  transition-duration: 60ms;
 }
 
 .video-player-config-pill media-fullscreen-button:focus-visible {

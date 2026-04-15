@@ -51,6 +51,13 @@
   let controlsVisible = $derived(isHovering);
   let showRemaining = $state(false);
 
+  // Volume state for animated icon
+  let isMuted = $state(false);
+  let volumeLevel = $state(1); // 0-1
+  let volumeState = $derived<'off' | 'low' | 'high'>(
+    isMuted || volumeLevel === 0 ? 'off' : volumeLevel < 0.5 ? 'low' : 'high'
+  );
+
   function toggleCinemaMode() {
     oncinemachange?.(!cinemaMode);
   }
@@ -203,10 +210,15 @@
       videoEl.volume = prefs.volume;
       videoEl.muted = prefs.muted;
       videoEl.playbackRate = prefs.playbackRate;
+      volumeLevel = prefs.volume;
+      isMuted = prefs.muted;
 
-      // Save preferences on change
+      // Track volume changes for animated icon + preferences
       videoEl.addEventListener('volumechange', () => {
-        if (videoEl) savePlayerPreferences({ volume: videoEl.volume, muted: videoEl.muted });
+        if (!videoEl) return;
+        volumeLevel = videoEl.volume;
+        isMuted = videoEl.muted;
+        savePlayerPreferences({ volume: videoEl.volume, muted: videoEl.muted });
       });
       videoEl.addEventListener('ratechange', () => {
         if (videoEl) savePlayerPreferences({ playbackRate: videoEl.playbackRate });
@@ -351,24 +363,25 @@
             aria-label={isPaused ? 'Play' : 'Pause'}
           >
             <svg
-              width="20"
-              height="20"
+              class="video-player-play-icon"
+              width="22"
+              height="22"
               viewBox="0 0 24 24"
-              fill="currentColor"
-              stroke="none"
               aria-hidden="true"
             >
               <path
                 class="video-player-morph-path video-player-morph-path--left"
+                fill="currentColor"
                 d={isPaused
-                  ? 'M 5,3 L 5,3 L 12,12 L 12,12 L 5,21 Z'
-                  : 'M 5,4 L 5,4 L 10,4 L 10,4 L 10,20 L 5,20 Z'}
+                  ? 'M 6,4 C 6,3 6,3 7,3 L 12,12 L 12,12 L 7,21 C 6,21 6,21 6,20 Z'
+                  : 'M 5,5 C 5,4 5.5,4 6,4 L 10,4 C 10.5,4 11,4 11,5 L 11,19 C 11,20 10.5,20 10,20 L 6,20 C 5.5,20 5,20 5,19 Z'}
               />
               <path
                 class="video-player-morph-path video-player-morph-path--right"
+                fill="currentColor"
                 d={isPaused
-                  ? 'M 5,3 L 19,12 L 19,12 L 19,12 L 5,21 Z'
-                  : 'M 14,4 L 19,4 L 19,4 L 19,20 L 19,20 L 14,20 Z'}
+                  ? 'M 7,3 C 7,3 8,3.5 8.5,4 L 19,12 L 19,12 L 8.5,20 C 8,20.5 7,21 7,21 Z'
+                  : 'M 13,5 C 13,4 13.5,4 14,4 L 18,4 C 18.5,4 19,4 19,5 L 19,19 C 19,20 18.5,20 18,20 L 14,20 C 13.5,20 13,20 13,19 Z'}
               />
             </svg>
           </button>
@@ -376,7 +389,44 @@
           <media-time-range class="video-player-time-range"></media-time-range>
 
           <div class="video-player-pill video-player-volume-pill">
-            <media-mute-button></media-mute-button>
+            <button
+              class="video-player-mute-btn"
+              onclick={() => { if (videoEl) videoEl.muted = !videoEl.muted; }}
+              aria-label={isMuted ? 'Unmute' : 'Mute'}
+            >
+              <svg
+                class="video-player-volume-icon"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <!-- Speaker body — always visible -->
+                <path class="video-player-vol-body" d="M11 5L6 9H2v6h4l5 4V5z" />
+                <!-- Sound wave 1 (small arc) — visible when low or high -->
+                <path
+                  class="video-player-vol-wave1"
+                  class:video-player-vol-wave--active={volumeState !== 'off'}
+                  d="M15.54 8.46a5 5 0 0 1 0 7.07"
+                />
+                <!-- Sound wave 2 (large arc) — visible only when high -->
+                <path
+                  class="video-player-vol-wave2"
+                  class:video-player-vol-wave--active={volumeState === 'high'}
+                  d="M19.07 4.93a10 10 0 0 1 0 14.14"
+                />
+                <!-- Mute X — visible when off -->
+                {#if volumeState === 'off'}
+                  <line class="video-player-vol-mute-x" x1="23" y1="9" x2="17" y2="15" />
+                  <line class="video-player-vol-mute-x" x1="17" y1="9" x2="23" y2="15" />
+                {/if}
+              </svg>
+            </button>
             <media-volume-range class="video-player-volume-range"></media-volume-range>
           </div>
         </div>
