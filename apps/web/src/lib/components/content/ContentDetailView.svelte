@@ -531,15 +531,24 @@
     margin-bottom: var(--space-6);
   }
 
-  /* Cinema mode — break out to full viewport width.
-     margin-inline trick offsets from content-box center to viewport edge. */
+  /* Cinema mode — break out to fill the main content area (viewport minus sidebar).
+     --space-16 = sidebar rail width (64px). The calc accounts for the sidebar
+     so the player's left edge aligns with the main area, not hidden under the rail. */
   .content-detail__player--cinema {
-    width: 100vw;
+    --cinema-width: calc(100vw - var(--space-16));
+    width: var(--cinema-width);
     max-width: none;
-    margin-inline: calc(-50vw + 50%);
+    margin-inline: calc(var(--cinema-width) / -2 + 50%);
     border-radius: 0;
     transition:
       border-radius var(--duration-fast) var(--ease-default);
+  }
+
+  /* Mobile: no sidebar, use full viewport */
+  @media (--below-md) {
+    .content-detail__player--cinema {
+      --cinema-width: 100vw;
+    }
   }
 
   /* Audio player — sits inline within the info section, not as a hero */
