@@ -448,13 +448,18 @@ media-controller video {
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .video-player-config-pill media-playback-rate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--space-7);
   font-variant-numeric: tabular-nums;
   font-weight: var(--font-medium, 500);
   font-size: var(--text-xs);
-  padding: var(--space-1) var(--space-2);
+  padding: 0 var(--space-2);
   border: none;
   background: transparent;
   border-radius: var(--radius-full);
+  --media-control-padding: 0;
   transition:
     background var(--duration-fast) var(--ease-default),
     transform var(--duration-normal) var(--ease-bounce);
@@ -473,7 +478,9 @@ media-controller video {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-1);
+  width: var(--space-7);
+  height: var(--space-7);
+  padding: 0;
   border: none;
   border-radius: var(--radius-full);
   background: transparent;
@@ -505,8 +512,18 @@ media-controller video {
 }
 
 .video-player-config-pill media-fullscreen-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-7);
+  height: var(--space-7);
+  padding: 0;
   border: none;
   border-radius: var(--radius-full);
+  vertical-align: middle;
+  --media-control-padding: 0;
+  --media-button-icon-width: 18px;
+  --media-button-icon-height: 18px;
   transition: transform var(--duration-normal) var(--ease-bounce);
 }
 
