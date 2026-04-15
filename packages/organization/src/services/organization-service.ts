@@ -516,38 +516,44 @@ export class OrganizationService extends BaseService {
       const recentContentMap = new Map<string, ContentItem[]>();
 
       if (creatorIdsWithContent.length > 0) {
-        const recentItems = await this.db
-          .select({
-            creatorId: content.creatorId,
-            title: content.title,
-            slug: content.slug,
-            thumbnailUrl: content.thumbnailUrl,
-            contentType: content.contentType,
-            publishedAt: content.publishedAt,
-          })
-          .from(content)
-          .where(
-            and(
-              inArray(content.creatorId, creatorIdsWithContent),
-              eq(content.organizationId, org.id),
-              eq(content.status, 'published'),
-              isNull(content.deletedAt)
-            )
-          )
-          .orderBy(desc(content.publishedAt));
+        // Use ROW_NUMBER() window function to fetch only top 4 per creator
+        // instead of fetching ALL content then truncating in JS
+        const recentItems = await this.db.execute<{
+          creator_id: string;
+          title: string;
+          slug: string;
+          thumbnail_url: string | null;
+          content_type: string;
+        }>(sql`
+          SELECT creator_id, title, slug, thumbnail_url, content_type FROM (
+            SELECT
+              ${content.creatorId} AS creator_id,
+              ${content.title} AS title,
+              ${content.slug} AS slug,
+              ${content.thumbnailUrl} AS thumbnail_url,
+              ${content.contentType} AS content_type,
+              ROW_NUMBER() OVER (
+                PARTITION BY ${content.creatorId}
+                ORDER BY ${content.publishedAt} DESC
+              ) AS rn
+            FROM ${content}
+            WHERE ${inArray(content.creatorId, creatorIdsWithContent)}
+              AND ${content.organizationId} = ${org.id}
+              AND ${content.status} = 'published'
+              AND ${content.deletedAt} IS NULL
+          ) ranked
+          WHERE rn <= 4
+        `);
 
-        // Collect up to 4 most recent per creator
-        for (const item of recentItems) {
-          const existing = recentContentMap.get(item.creatorId) ?? [];
-          if (existing.length < 4) {
-            existing.push({
-              title: item.title,
-              slug: item.slug,
-              thumbnailUrl: item.thumbnailUrl,
-              contentType: item.contentType,
-            });
-            recentContentMap.set(item.creatorId, existing);
-          }
+        for (const item of recentItems.rows) {
+          const existing = recentContentMap.get(item.creator_id) ?? [];
+          existing.push({
+            title: item.title,
+            slug: item.slug,
+            thumbnailUrl: item.thumbnail_url,
+            contentType: item.content_type,
+          });
+          recentContentMap.set(item.creator_id, existing);
         }
       }
 

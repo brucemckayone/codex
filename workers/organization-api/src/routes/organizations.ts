@@ -218,18 +218,14 @@ async function fetchPublicOrgInfo(
   // Fetch branding + features in parallel (both need org.id, but are independent).
   // Can't use ctx.services.settings — requires requireOrgMembership
   // which isn't available on this public (no-auth) endpoint.
-  const brandingDb = createDbClient(ctx.env);
-  const brandingSvc = new BrandingSettingsService({
-    db: brandingDb,
+  const db = createDbClient(ctx.env);
+  const svcOpts = {
+    db,
     environment: ctx.env.ENVIRONMENT ?? 'development',
     organizationId: organization.id,
-  });
-  const featureDb = createDbClient(ctx.env);
-  const featureSvc = new FeatureSettingsService({
-    db: featureDb,
-    environment: ctx.env.ENVIRONMENT ?? 'development',
-    organizationId: organization.id,
-  });
+  };
+  const brandingSvc = new BrandingSettingsService(svcOpts);
+  const featureSvc = new FeatureSettingsService(svcOpts);
 
   const [brandingResult, featuresResult] = await Promise.allSettled([
     brandingSvc.get(),
