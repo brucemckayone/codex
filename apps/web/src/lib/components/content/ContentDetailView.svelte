@@ -107,6 +107,8 @@
     return formatPrice(cents);
   }
 
+  let cinemaMode = $state(false);
+
   const contentTypeBadge = $derived(
     content.contentType === 'video'
       ? m.content_type_video()
@@ -192,6 +194,8 @@
         contentId={content.id}
         initialProgress={progress?.positionSeconds ?? 0}
         poster={thumbnailUrl}
+        {cinemaMode}
+        oncinemachange={(v) => (cinemaMode = v)}
       />
     {:else if previewUrl && accessState.status === 'preview'}
       <svelte:boundary>
