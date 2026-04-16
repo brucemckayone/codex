@@ -75,7 +75,9 @@ async function getSessionFromCache(
   obs?: ObservabilityClient
 ): Promise<CachedSessionData | null> {
   try {
-    const keys = [`session:${sessionToken}`, sessionToken];
+    // Try raw token first (matches BetterAuth's secondary storage key format),
+    // then fall back to prefixed key for backward compatibility with older entries.
+    const keys = [sessionToken, `session:${sessionToken}`];
     for (const key of keys) {
       const cached = await kv.get(key, 'json');
       if (isCachedSessionData(cached)) {
@@ -105,7 +107,9 @@ async function cacheSessionInKV(
     const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
 
     if (ttl > 0) {
-      await kv.put(`session:${sessionToken}`, JSON.stringify(data), {
+      // Write with raw token key — aligned with BetterAuth's secondary storage format.
+      // All workers and BetterAuth now share the same key, maximizing cache hit rate.
+      await kv.put(sessionToken, JSON.stringify(data), {
         expirationTtl: ttl,
       });
     }
@@ -253,7 +257,7 @@ export function createSessionMiddleware(
             });
           } else {
             // Expired session in cache - clear it
-            kv.delete(`session:${splitToken}`).catch(() => {});
+            kv.delete(splitToken).catch(() => {});
           }
         }
       }

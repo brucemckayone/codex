@@ -52,6 +52,9 @@ export const CacheType = {
   /** User session data (complements BetterAuth KV cache) */
   USER_SESSION: 'user:session',
 
+  /** Organization membership (role, status per user per org) */
+  ORG_MEMBERSHIP: 'org:membership',
+
   // --- Collection version identifiers ---
   // These IDs are passed to cache.invalidate() to bump a collection version.
   // They do NOT store cached data — they store a version timestamp used for

@@ -5,6 +5,7 @@
  * Extracted to separate file to avoid circular dependencies.
  */
 
+import { CacheType, VersionedCache } from '@codex/cache';
 import { createDbClient, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
@@ -94,7 +95,9 @@ export async function extractOrganizationFromSubdomain(
 /**
  * Check if user is a member of an organization
  *
- * Queries organization_memberships table.
+ * Uses KV cache-aside (5min TTL) to avoid repeated Neon queries.
+ * ~46 routes across 5 workers use requireOrgMembership, so caching
+ * here eliminates ~200ms per request after the first cold miss.
  *
  * @param organizationId - Organization UUID
  * @param userId - User ID
@@ -108,17 +111,46 @@ export async function checkOrganizationMembership(
   env: Bindings,
   obs?: ObservabilityClient
 ): Promise<OrganizationMembership | null> {
-  // TODO: Add KV caching here for performance
-  // Cache key: `org:${organizationId}:member:${userId}`
-  // TTL: 5 minutes
+  const kv = env.CACHE_KV as
+    | import('@cloudflare/workers-types').KVNamespace
+    | undefined;
 
+  if (kv) {
+    try {
+      const cache = new VersionedCache({ kv, obs });
+      const cacheId = `org:${organizationId}:member:${userId}`;
+
+      return await cache.get<OrganizationMembership | null>(
+        cacheId,
+        CacheType.ORG_MEMBERSHIP,
+        () => fetchMembershipFromDB(organizationId, userId, env, obs),
+        { ttl: 300 } // 5 minutes
+      );
+    } catch {
+      // Graceful degradation — fall through to direct DB query
+    }
+  }
+
+  // No KV available (dev without binding) — direct DB query
+  return fetchMembershipFromDB(organizationId, userId, env, obs);
+}
+
+/**
+ * Fetch membership from database (extracted for cache-aside fetcher)
+ */
+async function fetchMembershipFromDB(
+  organizationId: string,
+  userId: string,
+  env: Bindings,
+  obs?: ObservabilityClient
+): Promise<OrganizationMembership | null> {
   try {
     const db = createDbClient(env);
     const membership = await db.query.organizationMemberships.findFirst({
       where: and(
         eq(schema.organizationMemberships.organizationId, organizationId),
         eq(schema.organizationMemberships.userId, userId),
-        eq(schema.organizationMemberships.status, 'active') // Only active memberships
+        eq(schema.organizationMemberships.status, 'active')
       ),
       columns: {
         role: true,
