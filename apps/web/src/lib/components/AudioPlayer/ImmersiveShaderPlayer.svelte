@@ -38,10 +38,15 @@
   let controlsVisible = $state(true);
   let controlsTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  // Audio state for UI
+  // Audio state for UI — synced from audioElement events.
+  // Initial values captured from prop; events keep them in sync thereafter.
+  // svelte-ignore state_referenced_locally
   let isPlaying = $state(!audioElement.paused);
+  // svelte-ignore state_referenced_locally
   let currentTime = $state(audioElement.currentTime);
+  // svelte-ignore state_referenced_locally
   let duration = $state(audioElement.duration || 0);
+  // svelte-ignore state_referenced_locally
   let isMuted = $state(audioElement.muted);
 
   const mouse: MouseState = { x: 0.5, y: 0.5, active: false, burstStrength: 0 };
@@ -246,6 +251,7 @@
   };
 </script>
 
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <div
   class="immersive"
   bind:this={overlayEl}
@@ -348,7 +354,7 @@
     position: fixed;
     inset: 0;
     z-index: var(--z-modal, 50);
-    background: #000;
+    background: var(--color-neutral-950, #000);
     cursor: none;
   }
 
@@ -386,30 +392,30 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-2);
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--color-player-overlay);
     border: none;
     border-radius: var(--radius-full);
-    color: #fff;
+    color: var(--color-player-text);
     cursor: pointer;
     backdrop-filter: blur(8px);
     transition: background 200ms ease;
   }
 
   .immersive__close:hover {
-    background: rgba(0, 0, 0, 0.8);
+    background: var(--color-player-overlay-heavy);
   }
 
   .immersive__bar {
     margin-top: auto;
-    background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+    background: linear-gradient(transparent, var(--color-player-overlay));
     padding: 0 var(--space-4) var(--space-4);
   }
 
   .immersive__seek {
     width: 100%;
     height: 6px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
+    background: var(--color-player-surface-hover);
+    border-radius: var(--radius-xs);
     cursor: pointer;
     margin-bottom: var(--space-3);
     position: relative;
@@ -417,8 +423,8 @@
 
   .immersive__seek-fill {
     height: 100%;
-    background: var(--color-primary-500, #6366f1);
-    border-radius: 3px;
+    background: var(--color-brand-primary, var(--color-primary-500));
+    border-radius: var(--radius-xs);
     transition: width 200ms linear;
   }
 
@@ -433,17 +439,17 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-2);
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--color-player-surface);
     border: none;
     border-radius: var(--radius-full);
-    color: #fff;
+    color: var(--color-player-text);
     cursor: pointer;
     backdrop-filter: blur(4px);
     transition: background 200ms ease;
   }
 
   .immersive__btn:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: var(--color-player-surface-active);
   }
 
   .immersive__btn--close {
@@ -455,7 +461,7 @@
 
   .immersive__time {
     font-size: var(--text-sm);
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--color-player-text-secondary);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }

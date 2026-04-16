@@ -263,8 +263,8 @@
   .preview-player__spinner {
     width: var(--space-10);
     height: var(--space-10);
-    border: var(--border-width-thick) solid color-mix(in srgb, white 20%, transparent);
-    border-top-color: color-mix(in srgb, white 80%, transparent);
+    border: var(--border-width-thick) solid var(--color-player-border);
+    border-top-color: var(--color-player-text-secondary);
     border-radius: 50%;
     animation: preview-spin 0.8s linear infinite;
   }
@@ -318,7 +318,7 @@
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
-    background: linear-gradient(to top, color-mix(in srgb, black 70%, transparent) 0%, transparent 100%);
+    background: linear-gradient(to top, var(--color-player-overlay) 0%, transparent 100%);
     z-index: 2;
   }
 
@@ -338,7 +338,7 @@
   }
 
   .preview-player__control-btn:hover {
-    background: color-mix(in srgb, white 15%, transparent);
+    background: var(--color-player-surface);
   }
 
   .preview-player__control-btn:focus-visible {
@@ -357,7 +357,7 @@
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
     color: var(--color-text-inverse);
-    background: color-mix(in srgb, black 60%, transparent);
+    background: var(--color-player-overlay);
     border-radius: var(--radius-sm);
     z-index: 2;
     pointer-events: none;
@@ -381,7 +381,7 @@
 
   .preview-player__overlay--visible {
     opacity: 1;
-    background: color-mix(in srgb, black 70%, transparent);
+    background: var(--color-player-overlay);
     pointer-events: auto;
   }
 
@@ -404,7 +404,7 @@
 
   .preview-player__cta-description {
     font-size: var(--text-sm);
-    color: color-mix(in srgb, white 80%, transparent);
+    color: var(--color-player-text-secondary);
     margin: 0;
     line-height: var(--leading-normal);
   }
@@ -457,6 +457,6 @@
 
   /* Dark mode */
   :global([data-theme='dark']) .preview-player__badge {
-    background: color-mix(in srgb, black 70%, transparent);
+    background: var(--color-player-overlay);
   }
 </style>

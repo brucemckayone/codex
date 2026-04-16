@@ -1,11 +1,19 @@
 /* VideoPlayer Styles — V2 Premium Controls
  *
  * Two-row layout:
- *   Row 2 (top): [time pill] [spacer] [config pill: speed | fullscreen]
+ *   Row 2 (top): [time pill] [spacer] [config pill: speed | cinema | fullscreen]
  *   Row 1 (bottom): [play] [progress bar] [volume pill]
  *
  * Controls slide up from bottom on hover.
  * All interactive groups use pill-shaped containers.
+ *
+ * Token usage:
+ *   Opacity  → --opacity-* scale + --media-* semantic tokens (opacity.css)
+ *   Spacing  → --space-* scale (spacing.css)
+ *   Motion   → --duration-* / --ease-* (motion.css)
+ *   Radius   → --radius-* (radius.css)
+ *   Borders  → --border-width-* (borders.css)
+ *   Type     → --text-* / --font-* / --leading-* / --tracking-* (typography.css)
  */
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -28,7 +36,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .video-player-wrapper--cinema {
-  border-radius: 0;
+  border-radius: var(--radius-none);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -48,10 +56,10 @@
 .video-player-loading-spinner {
   width: var(--space-12);
   height: var(--space-12);
-  border: 3px solid hsl(0 0% 100% / 0.15);
+  border: var(--border-width-thick) solid hsl(0 0% 100% / var(--media-loading-spinner-bg));
   border-top-color: var(--color-brand-primary, var(--color-primary-500));
   border-radius: var(--radius-full);
-  animation: vp-spin 0.8s linear infinite;
+  animation: vp-spin var(--duration-slower) linear infinite;
 }
 
 @keyframes vp-spin {
@@ -85,7 +93,7 @@
 
 .video-player-error-message {
   font-size: var(--text-sm);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   max-width: 30ch;
 }
 
@@ -93,11 +101,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: var(--space-9);
+  height: var(--space-10);
   padding-inline: var(--space-4);
   font-size: var(--text-sm);
-  font-weight: var(--font-medium, 500);
-  color: white;
+  font-weight: var(--font-medium);
+  color: var(--color-player-text);
   background-color: var(--color-brand-primary, var(--color-primary-500));
   border: none;
   border-radius: var(--radius-md);
@@ -110,8 +118,8 @@
 }
 
 .video-player-error-retry:focus-visible {
-  outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
-  outline-offset: 2px;
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -122,23 +130,23 @@ media-controller {
   --media-background-color: transparent;
   --media-control-background: transparent;
   --media-control-hover-background: transparent;
-  --media-primary-color: white;
-  --media-secondary-color: hsl(0 0% 100% / 0.7);
-  --media-text-color: white;
+  --media-primary-color: var(--color-player-text);
+  --media-secondary-color: var(--color-player-text-secondary);
+  --media-text-color: var(--color-player-text);
 
   /* Progress bar — no thumb, brand fill */
-  --media-range-track-background: hsl(0 0% 100% / 0.2);
-  --media-range-track-height: 4px;
+  --media-range-track-background: var(--color-player-surface-hover);
+  --media-range-track-height: var(--space-1);
   --media-range-track-border-radius: var(--radius-full);
   --media-range-bar-color: var(--color-brand-primary, var(--color-primary-500));
-  --media-time-range-buffered-color: hsl(0 0% 100% / 0.3);
+  --media-time-range-buffered-color: hsl(0 0% 100% / var(--media-range-buffered-opacity));
   --media-range-thumb-width: 0px;
   --media-range-thumb-height: 0px;
 
   /* Typography */
   --media-control-padding: 0;
   --media-font-size: var(--text-xs);
-  --media-font-family: var(--font-sans, system-ui, sans-serif);
+  --media-font-family: var(--font-sans);
 
   width: 100%;
   height: 100%;
@@ -165,9 +173,9 @@ media-controller video {
   padding: var(--space-2) var(--space-3) var(--space-3);
   background: linear-gradient(
     to top,
-    hsl(0 0% 0% / 0.8) 0%,
-    hsl(0 0% 0% / 0.5) 50%,
-    hsl(0 0% 0% / 0.15) 80%,
+    var(--color-player-gradient-bottom) 0%,
+    hsl(0 0% 0% / var(--media-overlay-mid-opacity)) 50%,
+    hsl(0 0% 0% / var(--opacity-10)) 80%,
     transparent 100%
   );
   transform: translateY(100%);
@@ -191,14 +199,6 @@ media-controller video {
   gap: var(--space-2);
 }
 
-.video-player-controls-row--top {
-  /* Time pill left, config pill right */
-}
-
-.video-player-controls-row--bottom {
-  /* Play + progress + volume */
-}
-
 .video-player-spacer {
   flex: 1;
 }
@@ -211,20 +211,20 @@ media-controller video {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  background: hsl(0 0% 100% / 0.1);
+  background: var(--color-player-surface);
   border-radius: var(--radius-full);
   padding: var(--space-1);
   transition: background var(--duration-fast) var(--ease-default);
 }
 
 .video-player-pill:hover {
-  background: hsl(0 0% 100% / 0.15);
+  background: var(--color-player-surface-hover);
 }
 
 .video-player-pill-divider {
-  width: 1px;
+  width: var(--border-width);
   height: var(--space-4);
-  background: hsl(0 0% 100% / 0.15);
+  background: var(--color-player-surface-hover);
   flex-shrink: 0;
 }
 
@@ -242,7 +242,7 @@ media-controller video {
   border: none;
   border-radius: var(--radius-full);
   background: transparent;
-  color: white;
+  color: var(--color-player-text);
   cursor: pointer;
   flex-shrink: 0;
   transition: transform var(--duration-normal) var(--ease-bounce);
@@ -260,8 +260,8 @@ media-controller video {
 }
 
 .video-player-play-btn:focus-visible {
-  outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
-  outline-offset: 2px;
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
 }
 
 /* Play icon — slight rotation gives organic feel */
@@ -284,7 +284,7 @@ media-controller video {
 }
 
 .video-player-time-range:hover {
-  --media-range-track-height: 6px;
+  --media-range-track-height: var(--space-1-5, 6px);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -292,7 +292,26 @@ media-controller video {
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .video-player-volume-pill {
-  transition: background var(--duration-fast) var(--ease-default);
+  overflow: hidden;
+  transition:
+    background var(--duration-slow) var(--ease-bounce),
+    padding var(--duration-slow) var(--ease-bounce),
+    gap var(--duration-slow) var(--ease-bounce);
+}
+
+/* Desktop: collapse pill to bare icon, spring into full pill on hover */
+@media (pointer: fine) {
+  .video-player-volume-pill {
+    background: transparent;
+    padding: 0;
+    gap: 0;
+  }
+
+  .video-player-volume-pill:hover {
+    background: var(--color-player-surface-hover);
+    padding: 0 var(--space-0-5);
+    gap: 0;
+  }
 }
 
 /* ─── Animated mute button ─── */
@@ -301,13 +320,13 @@ media-controller video {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-8);
-  height: var(--space-8);
+  width: var(--space-7);
+  height: var(--space-7);
   padding: 0;
   border: none;
   border-radius: var(--radius-full);
   background: transparent;
-  color: white;
+  color: var(--color-player-text);
   cursor: pointer;
   flex-shrink: 0;
   transition: transform var(--duration-normal) var(--ease-bounce);
@@ -318,6 +337,13 @@ media-controller video {
   transform: scale(1.15);
 }
 
+/* Desktop collapsed state: mute btn acts as the pill trigger, subtler scale */
+@media (pointer: fine) {
+  .video-player-volume-pill:not(:hover) .video-player-mute-btn:hover {
+    transform: scale(1.08);
+  }
+}
+
 /* Disney: Squash — compress on click for tactile feel */
 .video-player-mute-btn:active {
   transform: scale(0.8) scaleY(0.88);
@@ -325,8 +351,8 @@ media-controller video {
 }
 
 .video-player-mute-btn:focus-visible {
-  outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
-  outline-offset: 2px;
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
 }
 
 /* ─── Volume icon animated parts ─── */
@@ -356,8 +382,8 @@ media-controller video {
   stroke-width: 2;
   stroke-linecap: round;
   transform-origin: 50% 50%;
-  opacity: 0;
-  transform: scaleX(0.3) translateX(-4px);
+  opacity: var(--opacity-0);
+  transform: scaleX(0.3) translateX(calc(var(--space-1) * -1));
   transition:
     opacity var(--duration-slow) var(--ease-out),
     transform var(--duration-slow) var(--ease-bounce);
@@ -370,7 +396,7 @@ media-controller video {
 
 /* Active waves — spring in with overshoot */
 .video-player-vol-wave--active {
-  opacity: 1;
+  opacity: var(--opacity-100);
   transform: scaleX(1) translateX(0);
 }
 
@@ -384,13 +410,13 @@ media-controller video {
 
 @keyframes vp-mute-x-in {
   from {
-    opacity: 0;
+    opacity: var(--opacity-0);
     stroke-dasharray: 10;
     stroke-dashoffset: 10;
     transform: scale(0.5) rotate(-15deg);
   }
   to {
-    opacity: 1;
+    opacity: var(--opacity-100);
     stroke-dasharray: 10;
     stroke-dashoffset: 0;
     transform: scale(1) rotate(0deg);
@@ -401,21 +427,30 @@ media-controller video {
 
 .video-player-volume-pill .video-player-volume-range {
   --media-range-bar-color: var(--color-brand-primary, var(--color-primary-500));
-  --media-range-track-height: 4px;
-  --media-range-track-background: hsl(0 0% 100% / 0.2);
-  --media-range-thumb-width: 12px;
-  --media-range-thumb-height: 12px;
-  --media-range-thumb-background: white;
-  --media-range-thumb-border-radius: var(--radius-full);
-  width: 60px;
-  height: 24px;
+  --media-range-track-height: var(--space-1);
+  --media-range-track-background: var(--color-player-surface-hover);
+  --media-range-thumb-width: 0px;
+  --media-range-thumb-height: 0px;
+  width: var(--space-16);
+  height: var(--space-6);
   flex-shrink: 0;
-  transition: width var(--duration-normal) var(--ease-out);
+  transition:
+    width var(--duration-slow) var(--ease-bounce),
+    opacity var(--duration-slow) var(--ease-bounce);
 }
 
-.video-player-volume-pill:hover .video-player-volume-range {
-  width: 80px;
-  --media-range-track-height: 6px;
+/* Desktop: slider hidden by default, springs open on pill hover */
+@media (pointer: fine) {
+  .video-player-volume-pill .video-player-volume-range {
+    width: 0;
+    opacity: var(--opacity-0);
+  }
+
+  .video-player-volume-pill:hover .video-player-volume-range {
+    width: calc(var(--space-16) + var(--space-3));
+    opacity: var(--opacity-100);
+    --media-range-track-height: var(--space-1-5, 6px);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -429,22 +464,22 @@ media-controller video {
 }
 
 .video-player-time-pill:hover {
-  background: hsl(0 0% 100% / 0.2);
+  background: var(--color-player-surface-hover);
 }
 
 .video-player-time-pill:focus-visible {
-  outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
-  outline-offset: 2px;
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
 }
 
 .video-player-time-pill media-time-display {
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tracking-tight);
   pointer-events: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Config pill (row 2, right) — speed | fullscreen
+ * Config pill (row 2, right) — speed | cinema | fullscreen
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .video-player-config-pill media-playback-rate-button {
@@ -453,7 +488,7 @@ media-controller video {
   justify-content: center;
   height: var(--space-7);
   font-variant-numeric: tabular-nums;
-  font-weight: var(--font-medium, 500);
+  font-weight: var(--font-medium);
   font-size: var(--text-xs);
   padding: 0 var(--space-2);
   border: none;
@@ -466,7 +501,7 @@ media-controller video {
 }
 
 .video-player-config-pill media-playback-rate-button:hover {
-  background: hsl(0 0% 100% / 0.1);
+  background: var(--color-player-surface);
 }
 
 .video-player-config-pill media-playback-rate-button:active {
@@ -484,7 +519,7 @@ media-controller video {
   border: none;
   border-radius: var(--radius-full);
   background: transparent;
-  color: white;
+  color: var(--color-player-text);
   cursor: pointer;
   transition:
     transform var(--duration-normal) var(--ease-bounce),
@@ -494,7 +529,7 @@ media-controller video {
 
 .video-player-cinema-btn:hover {
   transform: scale(1.1);
-  background: hsl(0 0% 100% / 0.1);
+  background: var(--color-player-surface);
 }
 
 .video-player-cinema-btn:active {
@@ -507,8 +542,8 @@ media-controller video {
 }
 
 .video-player-cinema-btn:focus-visible {
-  outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
-  outline-offset: 2px;
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
 }
 
 .video-player-config-pill media-fullscreen-button {
@@ -522,13 +557,16 @@ media-controller video {
   border-radius: var(--radius-full);
   vertical-align: middle;
   --media-control-padding: 0;
-  --media-button-icon-width: 18px;
-  --media-button-icon-height: 18px;
-  transition: transform var(--duration-normal) var(--ease-bounce);
+  --media-button-icon-width: var(--space-5);
+  --media-button-icon-height: var(--space-5);
+  transition:
+    transform var(--duration-normal) var(--ease-bounce),
+    background var(--duration-fast) var(--ease-default);
 }
 
 .video-player-config-pill media-fullscreen-button:hover {
   transform: scale(1.1);
+  background: var(--color-player-surface);
 }
 
 .video-player-config-pill media-fullscreen-button:active {
@@ -537,22 +575,22 @@ media-controller video {
 }
 
 .video-player-config-pill media-fullscreen-button:focus-visible {
-  outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
-  outline-offset: 2px;
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Mini progress bar — persistent 2px bar at bottom
+ * Mini progress bar — persistent thin bar at bottom
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .video-player-mini-progress {
-  --media-range-track-height: 2px;
-  --media-range-track-border-radius: 0;
+  --media-range-track-height: var(--space-0-5);
+  --media-range-track-border-radius: var(--radius-none);
   --media-range-bar-color: var(--color-brand-primary, var(--color-primary-500));
-  --media-range-track-background: hsl(0 0% 100% / 0.15);
+  --media-range-track-background: var(--color-player-surface-hover);
   --media-range-thumb-width: 0px;
   --media-range-thumb-height: 0px;
-  --media-time-range-buffered-color: hsl(0 0% 100% / 0.25);
+  --media-time-range-buffered-color: var(--color-player-surface-active);
 
   position: absolute;
   bottom: 0;
@@ -560,12 +598,12 @@ media-controller video {
   right: 0;
   z-index: 2;
   pointer-events: none;
-  opacity: 1;
-  transition: opacity var(--duration-normal) var(--ease-out);
+  opacity: var(--opacity-100);
+  transition: var(--transition-opacity);
 }
 
 .video-player-mini-progress--hidden {
-  opacity: 0;
+  opacity: var(--opacity-0);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -602,14 +640,14 @@ media-loading-indicator {
 
   /* Progress bar slightly thicker for touch */
   .video-player-time-range {
-    --media-range-track-height: 6px;
+    --media-range-track-height: var(--space-1-5, 6px);
   }
 }
 
 /* Narrower volume slider on touch devices */
 @media (pointer: coarse) {
   .video-player-volume-pill .video-player-volume-range {
-    width: 48px;
+    width: var(--space-12);
   }
 }
 
@@ -635,13 +673,13 @@ media-loading-indicator {
   top: 50%;
   transform: translateY(-50%);
   padding: var(--space-2) var(--space-4);
-  background: hsl(0 0% 0% / 0.6);
-  color: white;
+  background: var(--color-player-overlay);
+  color: var(--color-player-text);
   font-size: var(--text-sm);
-  font-weight: var(--font-medium, 500);
+  font-weight: var(--font-medium);
   font-variant-numeric: tabular-nums;
   border-radius: var(--radius-full);
-  animation: vp-seek-fade 0.6s var(--ease-out) forwards;
+  animation: vp-seek-fade var(--duration-slower) var(--ease-out) forwards;
   pointer-events: none;
 }
 
@@ -654,7 +692,7 @@ media-loading-indicator {
 }
 
 @keyframes vp-seek-fade {
-  0% { opacity: 1; transform: translateY(-50%) scale(1); }
-  70% { opacity: 1; transform: translateY(-50%) scale(1); }
-  100% { opacity: 0; transform: translateY(-50%) scale(0.8); }
+  0% { opacity: var(--opacity-100); transform: translateY(-50%) scale(1); }
+  70% { opacity: var(--opacity-100); transform: translateY(-50%) scale(1); }
+  100% { opacity: var(--opacity-0); transform: translateY(-50%) scale(0.8); }
 }

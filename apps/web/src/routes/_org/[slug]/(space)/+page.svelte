@@ -418,7 +418,7 @@
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
-    color: white;
+    color: var(--brand-hero-text, white);
   }
 
   /* Brand-tinted gradient — darkens the bottom 50% where text lives.
@@ -467,8 +467,8 @@
     font-weight: var(--font-bold);
     line-height: 0.95;
     letter-spacing: -0.03em;
-    color: white;
-    mix-blend-mode: difference;
+    color: var(--brand-hero-title-color, white);
+    mix-blend-mode: var(--brand-hero-title-blend, difference);
   }
 
   .hero__description {
@@ -476,7 +476,7 @@
     font-size: var(--text-xl);
     line-height: var(--leading-relaxed);
     max-width: 40ch;
-    color: color-mix(in srgb, white 80%, transparent);
+    color: color-mix(in srgb, var(--brand-hero-text, white) 80%, transparent);
   }
 
   /* ── Content type pills ── */
@@ -490,12 +490,12 @@
 
   .hero__pill {
     padding: var(--space-1) var(--space-3);
-    background: color-mix(in srgb, white 15%, transparent);
-    border: var(--border-width) solid color-mix(in srgb, white 20%, transparent);
+    background: color-mix(in srgb, var(--brand-hero-border-tint, white) 15%, transparent);
+    border: var(--border-width) solid color-mix(in srgb, var(--brand-hero-border-tint, white) 20%, transparent);
     border-radius: var(--radius-base);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: white;
+    color: var(--brand-hero-text, white);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
   }
@@ -505,14 +505,14 @@
     text-transform: none;
     font-weight: var(--font-normal);
     letter-spacing: normal;
-    color: color-mix(in srgb, white 75%, transparent);
-    border-color: color-mix(in srgb, white 15%, transparent);
+    color: color-mix(in srgb, var(--brand-hero-text-muted, white) 75%, transparent);
+    border-color: color-mix(in srgb, var(--brand-hero-border-tint, white) 15%, transparent);
     background: transparent;
     transition: color var(--duration-fast) var(--ease-default);
   }
 
   .hero__pill--category:hover {
-    color: white;
+    color: var(--brand-hero-text, white);
   }
 
   /* Separator dot between content pills and category pills */
@@ -520,7 +520,7 @@
     width: var(--space-1);
     height: var(--space-1);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, white 40%, transparent);
+    background: color-mix(in srgb, var(--brand-hero-border-tint, white) 40%, transparent);
   }
 
   /* ── CTAs ── */
@@ -552,9 +552,9 @@
   }
 
   .hero__cta--primary {
-    background: white;
+    background: var(--brand-hero-cta-bg, white);
     /* Mix brand with black to guarantee WCAG AA contrast on white background */
-    color: color-mix(in oklch, var(--color-brand-primary) 75%, black);
+    color: var(--brand-hero-cta-text, color-mix(in oklch, var(--color-brand-primary) 75%, black));
     box-shadow: var(--shadow-md);
   }
 
@@ -563,13 +563,13 @@
   }
 
   .hero__cta--glass {
-    background: color-mix(in srgb, white 12%, transparent);
-    color: white;
-    border: var(--border-width) solid color-mix(in srgb, white 25%, transparent);
+    background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 12%, transparent);
+    color: var(--brand-hero-glass-text, white);
+    border: var(--border-width) solid color-mix(in srgb, var(--brand-hero-glass-tint, white) 25%, transparent);
   }
 
   .hero__cta--glass:hover {
-    background: color-mix(in srgb, white 20%, transparent);
+    background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 20%, transparent);
     box-shadow: var(--shadow-md);
   }
 
@@ -578,8 +578,8 @@
   }
 
   .hero__follow--active {
-    background: color-mix(in srgb, white 25%, transparent);
-    border-color: color-mix(in srgb, white 40%, transparent);
+    background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 25%, transparent);
+    border-color: color-mix(in srgb, var(--brand-hero-glass-tint, white) 40%, transparent);
   }
 
   /* ── Centered play button (desktop only) ──
@@ -602,11 +602,11 @@
       width: var(--space-24);
       height: var(--space-24);
       border-radius: var(--radius-base);
-      background: color-mix(in srgb, white 12%, transparent);
-      border: var(--border-width) solid color-mix(in srgb, white 25%, transparent);
+      background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 12%, transparent);
+      border: var(--border-width) solid color-mix(in srgb, var(--brand-hero-glass-tint, white) 25%, transparent);
       backdrop-filter: blur(var(--blur-md));
       -webkit-backdrop-filter: blur(var(--blur-md));
-      color: white;
+      color: var(--brand-hero-glass-text, white);
       cursor: pointer;
       transition: transform var(--duration-normal) var(--ease-out),
         background var(--duration-fast) var(--ease-default),
@@ -616,8 +616,8 @@
 
     .hero__play-center:hover {
       transform: translate(-50%, -50%) scale(1.1);
-      background: color-mix(in srgb, white 20%, transparent);
-      box-shadow: 0 0 0 var(--space-3) color-mix(in srgb, white 8%, transparent);
+      background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 20%, transparent);
+      box-shadow: 0 0 0 var(--space-3) color-mix(in srgb, var(--brand-hero-glass-tint, white) 8%, transparent);
     }
 
     .hero__play-center:focus-visible {
@@ -637,8 +637,8 @@
   }
 
   @keyframes hero-play-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, white 15%, transparent); }
-    50% { box-shadow: 0 0 0 var(--space-4) color-mix(in srgb, white 0%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-hero-glass-tint, white) 15%, transparent); }
+    50% { box-shadow: 0 0 0 var(--space-4) color-mix(in srgb, var(--brand-hero-glass-tint, white) 0%, transparent); }
   }
 
   /* ── Hero video-playing state ──
@@ -680,7 +680,7 @@
     display: flex;
     gap: var(--space-10);
     padding-top: var(--space-6);
-    border-top: var(--border-width) solid color-mix(in srgb, white 25%, transparent);
+    border-top: var(--border-width) solid color-mix(in srgb, var(--brand-hero-border-tint, white) 25%, transparent);
     margin-top: var(--space-2);
   }
 
@@ -696,7 +696,7 @@
     font-weight: var(--font-bold);
     line-height: 1;
     letter-spacing: -0.02em;
-    color: white;
+    color: var(--brand-hero-text, white);
   }
 
   .hero__stat-label {
@@ -704,7 +704,7 @@
     font-weight: var(--font-medium);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: color-mix(in srgb, white 62%, transparent);
+    color: color-mix(in srgb, var(--brand-hero-text-muted, white) 62%, transparent);
   }
 
   /* ══════════════════════════════════════════
@@ -909,18 +909,6 @@
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-6);
-  }
-
-  .skeleton-content-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .skeleton-thumbnail {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    border-radius: var(--radius-lg);
   }
 
   @keyframes shimmer {
