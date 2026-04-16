@@ -32,6 +32,29 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 /**
+ * Invalidate KV-cached membership check for a specific user+org pair.
+ *
+ * The membership cache is keyed as `org:{orgId}:member:{userId}` (see
+ * `checkOrganizationMembership` in org-helpers.ts).  After any membership
+ * mutation we bump the version so the next request falls through to the DB.
+ */
+function invalidateMembershipCache(
+  ctx: {
+    env: { CACHE_KV?: unknown };
+    executionCtx: { waitUntil(p: Promise<unknown>): void };
+  },
+  orgId: string,
+  userId: string
+) {
+  if (!ctx.env.CACHE_KV) return;
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV as import('@cloudflare/workers-types').KVNamespace,
+  });
+  const cacheId = `org:${orgId}:member:${userId}`;
+  ctx.executionCtx.waitUntil(cache.invalidate(cacheId).catch(() => {}));
+}
+
+/**
  * Invalidate slug-keyed cache (public org info, stats, creators) after membership changes.
  * Resolves slug from orgId in fire-and-forget fashion.
  */
@@ -47,7 +70,9 @@ function invalidateOrgSlugCache(ctx: {
   ctx.executionCtx.waitUntil(
     (async () => {
       try {
-        const db = createDbClient(ctx.env as Parameters<typeof createDbClient>[0]);
+        const db = createDbClient(
+          ctx.env as Parameters<typeof createDbClient>[0]
+        );
         const org = await db.query.organizations.findFirst({
           where: eq(schema.organizations.id, ctx.input.params.id),
           columns: { slug: true },
@@ -114,7 +139,8 @@ app.post(
         ctx.user.id
       );
 
-      // Invalidate public creators cache (membership changed)
+      // Invalidate membership + public creators caches
+      invalidateMembershipCache(ctx, ctx.input.params.id, result.userId);
       invalidateOrgSlugCache(ctx);
 
       // Send invitation email (fire-and-forget)
@@ -158,6 +184,11 @@ app.patch(
         ctx.input.params.userId,
         ctx.input.body.role
       );
+      invalidateMembershipCache(
+        ctx,
+        ctx.input.params.id,
+        ctx.input.params.userId
+      );
       invalidateOrgSlugCache(ctx);
       return result;
     },
@@ -181,6 +212,11 @@ app.delete(
     successStatus: 204,
     handler: async (ctx) => {
       await ctx.services.organization.removeMember(
+        ctx.input.params.id,
+        ctx.input.params.userId
+      );
+      invalidateMembershipCache(
+        ctx,
         ctx.input.params.id,
         ctx.input.params.userId
       );

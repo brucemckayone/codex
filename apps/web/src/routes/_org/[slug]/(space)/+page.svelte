@@ -76,10 +76,11 @@
       .slice(0, 6)
   );
 
-  // Access context — subscription from server stream, following from client store
+  // Access context — tiers from server, subscription from client store (subscriptionCollection)
   const access = useAccessContext(() => ({
     subscriptionContext: data.subscriptionContext,
     isFollowing: followingStore.get(data.org.id),
+    orgId: data.org.id,
   }));
 
   // Follow toggle — reads from followingStore (localStorage-backed, reactive)

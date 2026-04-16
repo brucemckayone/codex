@@ -12,7 +12,6 @@ import { renderContentBody } from '$lib/editor/render';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
-  deriveContentSubscriptionContext,
   handlePurchaseAction,
   loadAccessAndProgress,
   loadSubscriptionContext,
@@ -110,22 +109,20 @@ export const load: PageServerLoad = async ({
       streamingUrl: null,
       progress: null,
     })),
-    subscriptionContext: Promise.resolve(parentData.subscriptionContext)
-      .then((layoutCtx) =>
-        deriveContentSubscriptionContext(
-          layoutCtx,
-          content.minimumTierId ?? null,
-          content.accessType
-        )
-      )
-      .catch(() => ({
-        requiresSubscription:
-          content.accessType === 'subscribers' || !!content.minimumTierId,
-        hasSubscription: false,
-        subscriptionCoversContent: false,
-        currentSubscription: null,
-        tiers: [],
-      })),
+    subscriptionContext: loadSubscriptionContext(
+      org.id,
+      content.minimumTierId ?? null,
+      platform,
+      cookies,
+      content.accessType
+    ).catch(() => ({
+      requiresSubscription:
+        content.accessType === 'subscribers' || !!content.minimumTierId,
+      hasSubscription: false,
+      subscriptionCoversContent: false,
+      currentSubscription: null,
+      tiers: [],
+    })),
     relatedContent: relatedPromise,
   };
 };

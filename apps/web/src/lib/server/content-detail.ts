@@ -132,55 +132,6 @@ export async function loadSubscriptionContext(
   };
 }
 
-/**
- * Derive subscription context from layout's already-fetched data.
- * Pure computation — no HTTP calls. Used by org content detail page
- * to avoid re-fetching what the parent layout already streamed.
- */
-export function deriveContentSubscriptionContext(
-  layoutCtx: { userTierSortOrder: number | null; tiers: SubscriptionTier[] },
-  contentMinimumTierId: string | null,
-  contentAccessType?: string
-): SubscriptionContext {
-  const isSubscriberContent =
-    contentAccessType === 'subscribers' || !!contentMinimumTierId;
-
-  if (!isSubscriberContent) {
-    return {
-      requiresSubscription: false,
-      hasSubscription: false,
-      subscriptionCoversContent: false,
-      currentSubscription: null,
-      tiers: layoutCtx.tiers,
-    };
-  }
-
-  const hasSubscription = layoutCtx.userTierSortOrder !== null;
-  let subscriptionCoversContent = false;
-
-  if (hasSubscription) {
-    if (!contentMinimumTierId) {
-      subscriptionCoversContent = true;
-    } else {
-      const contentTier = layoutCtx.tiers.find(
-        (t) => t.id === contentMinimumTierId
-      );
-      if (contentTier) {
-        subscriptionCoversContent =
-          layoutCtx.userTierSortOrder! >= contentTier.sortOrder;
-      }
-    }
-  }
-
-  return {
-    requiresSubscription: true,
-    hasSubscription,
-    subscriptionCoversContent,
-    currentSubscription: null,
-    tiers: layoutCtx.tiers,
-  };
-}
-
 interface PurchaseActionArgs {
   /** The incoming form request */
   request: Request;

@@ -73,23 +73,18 @@ export const load: LayoutServerLoad = async ({
       // Versions don't affect first paint — only used by $effect after hydration.
       const versions = readOrgVersions(platform, typedOrg.id, locals.user?.id);
 
-      // Stream subscription context for "Included" badges (non-blocking)
-      const subscriptionContext = locals.user
-        ? loadUserSubscriptionContext(api, typedOrg.id)
-        : Promise.resolve({
-            userTierSortOrder: null as number | null,
-            tiers: [] as SubscriptionTier[],
-          });
+      // Fetch tiers for "Included" badges (public, KV-cached ~10ms).
+      // User subscription data is loaded client-side via subscriptionCollection.
+      const tiers = loadOrgTiers(api, typedOrg.id);
 
       return {
         org: typedOrg,
         enableSubscriptions: typedOrg.enableSubscriptions ?? true,
         user: locals.user,
         versions,
-        subscriptionContext: subscriptionContext.catch(() => ({
-          userTierSortOrder: null as number | null,
-          tiers: [] as SubscriptionTier[],
-        })),
+        subscriptionContext: tiers
+          .then((t) => ({ tiers: t }))
+          .catch(() => ({ tiers: [] as SubscriptionTier[] })),
       };
     }
   } catch (err) {
@@ -113,13 +108,9 @@ export const load: LayoutServerLoad = async ({
 
       const versions = readOrgVersions(platform, org.id, locals.user?.id);
 
-      // Stream subscription context for "Included" badges (non-blocking)
-      const subscriptionContext = locals.user
-        ? loadUserSubscriptionContext(api, org.id)
-        : Promise.resolve({
-            userTierSortOrder: null as number | null,
-            tiers: [] as SubscriptionTier[],
-          });
+      // Fetch tiers for "Included" badges (public, KV-cached ~10ms).
+      // User subscription data is loaded client-side via subscriptionCollection.
+      const tiers = loadOrgTiers(api, org.id);
 
       return {
         org: {
@@ -139,10 +130,9 @@ export const load: LayoutServerLoad = async ({
         enableSubscriptions: true,
         user: locals.user,
         versions,
-        subscriptionContext: subscriptionContext.catch(() => ({
-          userTierSortOrder: null as number | null,
-          tiers: [] as SubscriptionTier[],
-        })),
+        subscriptionContext: tiers
+          .then((t) => ({ tiers: t }))
+          .catch(() => ({ tiers: [] as SubscriptionTier[] })),
       };
     }
   } catch (err) {
@@ -159,26 +149,17 @@ export const load: LayoutServerLoad = async ({
 };
 
 /**
- * Load subscription context for badge display.
+ * Load org tiers for badge display.
  *
- * Fetches the user's current subscription and org tiers in parallel.
- * Returns userTierSortOrder (null if no subscription) and the full tiers list
- * so child pages can compute "Included" badges per content item.
- *
- * Streamed (not awaited) to avoid blocking page load.
+ * Tiers are public and KV-cached (~10ms). User subscription data
+ * is now loaded client-side via subscriptionCollection (localStorage-backed),
+ * removing the ~567ms server-side subscription.getCurrent() call.
  */
-async function loadUserSubscriptionContext(
+async function loadOrgTiers(
   api: ReturnType<typeof createServerApi>,
   orgId: string
-): Promise<{ userTierSortOrder: number | null; tiers: SubscriptionTier[] }> {
-  const [currentSubscription, tiers] = await Promise.all([
-    api.subscription.getCurrent(orgId).catch(() => null),
-    api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]),
-  ]);
-
-  const userTierSortOrder = currentSubscription?.tier?.sortOrder ?? null;
-
-  return { userTierSortOrder, tiers };
+): Promise<SubscriptionTier[]> {
+  return api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]);
 }
 
 /**

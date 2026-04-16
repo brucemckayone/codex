@@ -30,10 +30,11 @@
 
   const { data }: { data: PageData } = $props();
 
-  // Access context — subscription from server stream, following from client store
+  // Access context — tiers from server, subscription from client store (subscriptionCollection)
   const access = useAccessContext(() => ({
     subscriptionContext: data.subscriptionContext,
     isFollowing: followingStore.get(data.org.id),
+    orgId: data.org.id,
   }));
 
   // Client-side filter state for instant type/category filtering
