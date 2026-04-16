@@ -2,13 +2,18 @@
   import { brandEditor, BRAND_PRESETS } from '$lib/brand-editor';
   import type { PresetCategory } from '$lib/brand-editor';
 
-  const categories: PresetCategory[] = ['Professional', 'Creative', 'Bold', 'Minimal'];
+  const categories: PresetCategory[] = [
+    'Professional', 'Creative', 'Bold', 'Minimal',
+    'Organic', 'Tech', 'Luxury', 'Playful', 'Atmospheric',
+  ];
 
   const presetsByCategory = $derived(
-    categories.map((cat) => ({
-      category: cat,
-      presets: BRAND_PRESETS.filter((p) => p.category === cat),
-    }))
+    categories
+      .map((cat) => ({
+        category: cat,
+        presets: BRAND_PRESETS.filter((p) => p.category === cat),
+      }))
+      .filter((group) => group.presets.length > 0)
   );
 </script>
 
@@ -32,8 +37,20 @@
                 <span class="presets-level__swatch" style:background={preset.values.accentColor}></span>
               {/if}
             </div>
+            {#if preset.values.backgroundColor}
+              <span
+                class="presets-level__bg-indicator"
+                style:background={preset.values.backgroundColor}
+                title="Background: {preset.values.backgroundColor}"
+              ></span>
+            {/if}
             <span class="presets-level__name">{preset.name}</span>
             <span class="presets-level__desc">{preset.description}</span>
+            {#if preset.tokenOverrides?.['shader-preset']}
+              <span class="presets-level__shader-badge">
+                {preset.tokenOverrides['shader-preset']}
+              </span>
+            {/if}
           </button>
         {/each}
       </div>
@@ -72,6 +89,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1-5);
+    position: relative;
     padding: var(--space-3);
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
     border-radius: var(--radius-md);
@@ -113,5 +131,24 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     line-height: var(--leading-tight);
+  }
+
+  .presets-level__bg-indicator {
+    width: var(--space-3);
+    height: var(--space-3);
+    border-radius: var(--radius-xs);
+    border: var(--border-width) solid var(--color-border);
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+  }
+
+  .presets-level__shader-badge {
+    font-size: calc(var(--text-xs) * 0.85);
+    color: var(--color-interactive);
+    background: var(--color-interactive-subtle);
+    padding: var(--space-0-5) var(--space-1-5);
+    border-radius: var(--radius-full);
+    width: fit-content;
   }
 </style>

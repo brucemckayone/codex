@@ -34,6 +34,8 @@ export interface BrandEditorState {
   tokenOverrides: Record<string, string | null>;
   /** Dark theme color overrides. null = auto-derive from light values. */
   darkOverrides: Partial<ThemeColors> | null;
+  /** Selected hero layout variant. */
+  heroLayout: string;
 }
 
 /** The subset of BrandEditorState that gets saved to the API. */
@@ -44,12 +46,16 @@ export type BrandEditorPayload = Omit<
 
 // ── Presets ───────────────────────────────────────────────────────────────
 
-/** A preset is a complete BrandEditorState without logoUrl or tokenOverrides. */
+/** A preset is a complete brand design system. */
 export interface BrandPreset {
   id: string;
   name: string;
   description: string;
   values: BrandEditorPayload;
+  /** Optional token overrides bundled with the preset (hero, player, glass, cards, etc.) */
+  tokenOverrides?: Record<string, string>;
+  /** Optional hero layout variant ('default' | 'centered' | 'logo-hero') */
+  heroLayout?: string;
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────
@@ -65,6 +71,7 @@ export type LevelId =
   | 'presets'
   | 'hero-effects'
   | 'intro-video'
+  | 'header-layout'
   | 'fine-tune-colors'
   | 'fine-tune-typography';
 

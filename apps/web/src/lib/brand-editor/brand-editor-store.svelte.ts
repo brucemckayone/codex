@@ -193,6 +193,8 @@ function updateField<K extends keyof BrandEditorState>(
 function applyPreset(preset: BrandPreset): void {
   if (!state.pending) return;
   const { values } = preset;
+
+  // Base values (existing behaviour)
   state.pending.primaryColor = values.primaryColor;
   state.pending.secondaryColor = values.secondaryColor;
   state.pending.accentColor = values.accentColor;
@@ -201,6 +203,20 @@ function applyPreset(preset: BrandPreset): void {
   state.pending.fontHeading = values.fontHeading;
   state.pending.radius = values.radius;
   state.pending.density = values.density;
+
+  // Dark overrides (presets can bundle dark theme colours)
+  state.pending.darkOverrides = values.darkOverrides ?? null;
+
+  // Token overrides (presets can bundle hero, player, glass, card tokens etc.)
+  // Clear existing overrides first for a clean slate, then apply preset's tokens
+  state.pending.tokenOverrides = preset.tokenOverrides
+    ? { ...preset.tokenOverrides }
+    : {};
+
+  // Hero layout (presets can set the hero layout variant)
+  if (preset.heroLayout) {
+    state.pending.heroLayout = preset.heroLayout;
+  }
 }
 
 function setThemePreview(theme: 'light' | 'dark'): void {
