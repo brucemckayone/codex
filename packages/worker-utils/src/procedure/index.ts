@@ -40,7 +40,8 @@ export {
 export * from './multipart-procedure';
 // org-helpers: dynamically imported in helpers.ts for code-splitting inside procedure().
 // Re-exported here for direct use by route handlers.
-export { checkOrganizationMembership } from './org-helpers';
+export { checkOrganizationMembership, membershipCacheKey } from './org-helpers';
+
 // Paginated result marker for list endpoints
 export { PaginatedResult } from './paginated-result';
 // Main procedure function

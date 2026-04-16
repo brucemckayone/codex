@@ -5,7 +5,6 @@
  * Extracted to separate file to avoid circular dependencies.
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
 import { createDbClient, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
@@ -93,11 +92,25 @@ export async function extractOrganizationFromSubdomain(
 }
 
 /**
+ * Build the KV key for a membership cache entry.
+ * Exported so mutation handlers can write-through or delete.
+ */
+export function membershipCacheKey(
+  organizationId: string,
+  userId: string
+): string {
+  return `membership:${organizationId}:${userId}`;
+}
+
+/**
  * Check if user is a member of an organization
  *
- * Uses KV cache-aside (5min TTL) to avoid repeated Neon queries.
+ * Write-through KV cache: mutation handlers write fresh data on
+ * invite/role-change and delete on removal, so entries never go stale.
+ * No TTL — data persists until explicitly updated or deleted.
+ *
  * ~46 routes across 5 workers use requireOrgMembership, so caching
- * here eliminates ~200ms per request after the first cold miss.
+ * here eliminates ~200ms per request (1 KV read vs 1 Neon query).
  *
  * @param organizationId - Organization UUID
  * @param userId - User ID
@@ -117,22 +130,49 @@ export async function checkOrganizationMembership(
 
   if (kv) {
     try {
-      const cache = new VersionedCache({ kv, obs });
-      const cacheId = `org:${organizationId}:member:${userId}`;
+      const key = membershipCacheKey(organizationId, userId);
+      const cached = await kv.get(key, 'json');
 
-      return await cache.get<OrganizationMembership | null>(
-        cacheId,
-        CacheType.ORG_MEMBERSHIP,
-        () => fetchMembershipFromDB(organizationId, userId, env, obs),
-        { ttl: 300 } // 5 minutes
-      );
+      if (cached !== null) {
+        // Rehydrate Date from ISO string
+        const data = cached as {
+          role: string;
+          status: string;
+          joinedAt: string;
+        };
+        return {
+          role: data.role,
+          status: data.status,
+          joinedAt: new Date(data.joinedAt),
+        };
+      }
     } catch {
-      // Graceful degradation — fall through to direct DB query
+      // KV read failed — fall through to DB
     }
   }
 
-  // No KV available (dev without binding) — direct DB query
-  return fetchMembershipFromDB(organizationId, userId, env, obs);
+  // KV miss or no KV — fetch from DB and write-through
+  const membership = await fetchMembershipFromDB(
+    organizationId,
+    userId,
+    env,
+    obs
+  );
+
+  if (kv && membership) {
+    // Write-through: warm the cache for next read (fire-and-forget)
+    const key = membershipCacheKey(organizationId, userId);
+    kv.put(
+      key,
+      JSON.stringify({
+        role: membership.role,
+        status: membership.status,
+        joinedAt: membership.joinedAt.toISOString(),
+      })
+    ).catch(() => {});
+  }
+
+  return membership;
 }
 
 /**

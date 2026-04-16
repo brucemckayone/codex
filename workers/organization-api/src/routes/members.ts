@@ -31,27 +31,55 @@ import {
 import { Hono } from 'hono';
 import { z } from 'zod';
 
+/** Build membership cache key — matches org-helpers.ts memberCacheKey() */
+function memberCacheKey(orgId: string, userId: string): string {
+  return `membership:${orgId}:${userId}`;
+}
+
+/** Context shape shared by write-through helpers */
+interface CacheCtx {
+  env: { CACHE_KV?: unknown };
+  executionCtx: { waitUntil(p: Promise<unknown>): void };
+}
+
 /**
- * Invalidate KV-cached membership check for a specific user+org pair.
- *
- * The membership cache is keyed as `org:{orgId}:member:{userId}` (see
- * `checkOrganizationMembership` in org-helpers.ts).  After any membership
- * mutation we bump the version so the next request falls through to the DB.
+ * Write-through: write fresh membership data to KV after a mutation.
+ * No TTL — entry persists until the next mutation overwrites or deletes it.
  */
-function invalidateMembershipCache(
-  ctx: {
-    env: { CACHE_KV?: unknown };
-    executionCtx: { waitUntil(p: Promise<unknown>): void };
-  },
+function writeMembershipCache(
+  ctx: CacheCtx,
   orgId: string,
-  userId: string
+  userId: string,
+  role: string
 ) {
   if (!ctx.env.CACHE_KV) return;
-  const cache = new VersionedCache({
-    kv: ctx.env.CACHE_KV as import('@cloudflare/workers-types').KVNamespace,
-  });
-  const cacheId = `org:${orgId}:member:${userId}`;
-  ctx.executionCtx.waitUntil(cache.invalidate(cacheId).catch(() => {}));
+  const kv = ctx.env
+    .CACHE_KV as import('@cloudflare/workers-types').KVNamespace;
+  const key = memberCacheKey(orgId, userId);
+  ctx.executionCtx.waitUntil(
+    kv
+      .put(
+        key,
+        JSON.stringify({
+          role,
+          status: 'active',
+          joinedAt: new Date().toISOString(),
+        })
+      )
+      .catch(() => {})
+  );
+}
+
+/**
+ * Delete membership cache entry (on member removal).
+ */
+function deleteMembershipCache(ctx: CacheCtx, orgId: string, userId: string) {
+  if (!ctx.env.CACHE_KV) return;
+  const kv = ctx.env
+    .CACHE_KV as import('@cloudflare/workers-types').KVNamespace;
+  ctx.executionCtx.waitUntil(
+    kv.delete(memberCacheKey(orgId, userId)).catch(() => {})
+  );
 }
 
 /**
@@ -139,8 +167,13 @@ app.post(
         ctx.user.id
       );
 
-      // Invalidate membership + public creators caches
-      invalidateMembershipCache(ctx, ctx.input.params.id, result.userId);
+      // Write-through membership cache + invalidate public creators
+      writeMembershipCache(
+        ctx,
+        ctx.input.params.id,
+        result.userId,
+        ctx.input.body.role
+      );
       invalidateOrgSlugCache(ctx);
 
       // Send invitation email (fire-and-forget)
@@ -184,10 +217,11 @@ app.patch(
         ctx.input.params.userId,
         ctx.input.body.role
       );
-      invalidateMembershipCache(
+      writeMembershipCache(
         ctx,
         ctx.input.params.id,
-        ctx.input.params.userId
+        ctx.input.params.userId,
+        ctx.input.body.role
       );
       invalidateOrgSlugCache(ctx);
       return result;
@@ -215,11 +249,7 @@ app.delete(
         ctx.input.params.id,
         ctx.input.params.userId
       );
-      invalidateMembershipCache(
-        ctx,
-        ctx.input.params.id,
-        ctx.input.params.userId
-      );
+      deleteMembershipCache(ctx, ctx.input.params.id, ctx.input.params.userId);
       invalidateOrgSlugCache(ctx);
       return null;
     },

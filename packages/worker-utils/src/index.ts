@@ -81,6 +81,7 @@ export {
   type MissingFileError,
   type MultipartProcedureConfig,
   type MultipartProcedureContext,
+  membershipCacheKey,
   multipartProcedure,
   type OrganizationMembership,
   PaginatedResult,
