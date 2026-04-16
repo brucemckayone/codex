@@ -26,12 +26,12 @@
 
   const { src, active, originX = 50, originY = 38, onclose }: Props = $props();
 
-  let videoEl: HTMLVideoElement;
+  let videoEl = $state<HTMLVideoElement | undefined>(undefined);
   let hlsInstance: Hls | null = null;
   let playing = $state(false);
   let muted = $state(true);
   let error = $state<string | null>(null);
-  let closeBtn: HTMLButtonElement;
+  let closeBtn = $state<HTMLButtonElement | undefined>(undefined);
 
   const prefersReducedMotion = browser
     ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -212,8 +212,8 @@
 
     /* Scale from the play button's position (transform-origin set via inline style).
        Starts tiny and expands to fill the hero. */
-    animation: inline-video-expand 800ms var(--ease-out) both;
-    animation-delay: 700ms;
+    animation: inline-video-expand calc(var(--duration-slower) * 1.6) var(--ease-out) both;
+    animation-delay: calc(var(--duration-slower) * 1.4);
   }
 
   .hero-inline-video--no-motion {
@@ -255,7 +255,7 @@
     height: 100%;
     object-fit: cover;
     cursor: pointer;
-    background: black;
+    background: var(--color-neutral-950, black);
   }
 
   /* ── Play/pause overlay ── */
@@ -265,14 +265,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: color-mix(in srgb, black 20%, transparent);
+    background: var(--color-player-surface);
     border: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-default);
   }
 
   .hero-inline-video__play-overlay:hover {
-    background: color-mix(in srgb, black 30%, transparent);
+    background: var(--color-player-surface-active);
   }
 
   /* ── Close button ── */
@@ -286,15 +286,15 @@
     width: var(--space-10);
     height: var(--space-10);
     border-radius: var(--radius-base);
-    background: color-mix(in srgb, black 40%, transparent);
-    color: white;
+    background: var(--color-player-overlay);
+    color: var(--color-player-text);
     border: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-default);
   }
 
   .hero-inline-video__close:hover {
-    background: color-mix(in srgb, black 60%, transparent);
+    background: var(--color-player-overlay);
   }
 
   .hero-inline-video__close:focus-visible {
@@ -313,15 +313,15 @@
     width: var(--space-9);
     height: var(--space-9);
     border-radius: var(--radius-base);
-    background: color-mix(in srgb, black 50%, transparent);
-    color: white;
+    background: var(--color-player-overlay);
+    color: var(--color-player-text);
     border: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-default);
   }
 
   .hero-inline-video__mute:hover {
-    background: color-mix(in srgb, black 70%, transparent);
+    background: var(--color-player-overlay-heavy);
   }
 
   /* ── Error message ── */

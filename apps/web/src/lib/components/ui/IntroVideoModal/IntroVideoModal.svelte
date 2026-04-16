@@ -22,11 +22,12 @@
 
   const { open, src, onclose }: Props = $props();
 
-  let videoEl: HTMLVideoElement;
+  let videoEl = $state<HTMLVideoElement | undefined>(undefined);
   let hlsInstance: Hls | null = null;
   let playing = $state(false);
   let muted = $state(true);
   let error = $state<string | null>(null);
+  // svelte-ignore non_reactive_update
   let dialogEl: HTMLDivElement;
 
   const prefersReducedMotion = browser
@@ -111,7 +112,7 @@
   }
 
   // Focus trap: focus close button when modal opens
-  let closeBtn: HTMLButtonElement;
+  let closeBtn = $state<HTMLButtonElement | undefined>(undefined);
   $effect(() => {
     if (open && closeBtn) {
       // Delay to allow transition
@@ -128,6 +129,7 @@
     class="intro-modal"
     class:intro-modal--no-motion={prefersReducedMotion}
     role="dialog"
+    tabindex="-1"
     aria-modal="true"
     aria-label="Intro video"
     bind:this={dialogEl}
@@ -201,7 +203,7 @@
     justify-content: center;
     backdrop-filter: blur(var(--blur-2xl));
     -webkit-backdrop-filter: blur(var(--blur-2xl));
-    background: color-mix(in srgb, black 30%, transparent);
+    background: var(--color-player-surface-active);
     animation: modal-fade-in var(--duration-slow) var(--ease-out) both;
   }
 
@@ -225,15 +227,15 @@
     width: var(--space-10);
     height: var(--space-10);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, black 40%, transparent);
-    color: white;
+    background: var(--color-player-overlay);
+    color: var(--color-player-text);
     border: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-default);
   }
 
   .intro-modal__close:hover {
-    background: color-mix(in srgb, black 60%, transparent);
+    background: var(--color-player-overlay);
   }
 
   .intro-modal__close:focus-visible {
@@ -249,7 +251,7 @@
     border-radius: var(--radius-xl);
     overflow: hidden;
     animation: modal-scale-in var(--duration-slow) var(--ease-out) both;
-    animation-delay: 50ms;
+    animation-delay: calc(var(--duration-fast) * 0.5);
     /* Feathered edges — video dissolves into the blurred backdrop */
     mask-image: radial-gradient(ellipse 92% 92% at center, black 60%, transparent 100%);
     -webkit-mask-image: radial-gradient(ellipse 92% 92% at center, black 60%, transparent 100%);
@@ -269,7 +271,7 @@
     height: 100%;
     object-fit: cover;
     cursor: pointer;
-    background: black;
+    background: var(--color-neutral-950, black);
   }
 
   .intro-modal__play-overlay {
@@ -278,14 +280,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: color-mix(in srgb, black 20%, transparent);
+    background: var(--color-player-surface-hover);
     border: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-default);
   }
 
   .intro-modal__play-overlay:hover {
-    background: color-mix(in srgb, black 30%, transparent);
+    background: var(--color-player-surface-active);
   }
 
   .intro-modal__mute {
@@ -298,15 +300,15 @@
     width: var(--space-9);
     height: var(--space-9);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, black 50%, transparent);
-    color: white;
+    background: var(--color-player-overlay);
+    color: var(--color-player-text);
     border: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-default);
   }
 
   .intro-modal__mute:hover {
-    background: color-mix(in srgb, black 70%, transparent);
+    background: var(--color-player-overlay-heavy);
   }
 
   .intro-modal__error {

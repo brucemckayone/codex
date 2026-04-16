@@ -443,11 +443,11 @@
   }
 
   .drawer-hero__initial {
-    font-size: 6rem;
+    font-size: clamp(3rem, 8vw, 6rem);
     font-weight: var(--font-bold);
     color: var(--color-text-muted);
     user-select: none;
-    opacity: var(--opacity-40, 0.4);
+    opacity: var(--opacity-40);
   }
 
   /* Gradient overlay — fades from transparent to dark at bottom */
@@ -459,24 +459,24 @@
     padding: var(--space-16) var(--space-6) var(--space-6);
     background: linear-gradient(
       to top,
-      oklch(0 0 0 / 0.7) 0%,
-      oklch(0 0 0 / 0.4) 50%,
-      oklch(0 0 0 / 0) 100%
+      var(--color-player-overlay) 0%,
+      var(--color-player-overlay) 50%,
+      transparent 100%
     );
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
     animation: drawer-content-fade-up var(--duration-slower) var(--ease-out) both;
-    animation-delay: 200ms;
+    animation-delay: var(--duration-normal);
   }
 
   .drawer-hero__name {
     margin: 0;
     font-size: var(--text-3xl);
     font-weight: var(--font-bold);
-    color: white;
+    color: var(--color-text-inverse);
     line-height: var(--leading-tight);
-    text-shadow: 0 1px 3px oklch(0 0 0 / 0.3);
+    text-shadow: 0 1px 3px var(--color-player-overlay);
   }
 
   .drawer-hero__meta {
@@ -487,8 +487,8 @@
 
   .drawer-hero__username {
     font-size: var(--text-sm);
-    color: oklch(1 0 0 / 0.8);
-    text-shadow: 0 1px 2px oklch(0 0 0 / 0.3);
+    color: var(--color-player-text-secondary);
+    text-shadow: 0 1px 2px var(--color-player-overlay);
   }
 
   /* ═══════════════════════════════════════════════════════════
@@ -500,7 +500,7 @@
     gap: var(--space-5);
     padding: var(--space-6);
     animation: drawer-content-fade-up var(--duration-slower) var(--ease-out) both;
-    animation-delay: 350ms;
+    animation-delay: calc(var(--duration-slow) * 1.17);
   }
 
   @media (max-width: 40rem) {
@@ -600,7 +600,7 @@
 
   .drawer-orgs__item:hover {
     border-color: var(--color-brand-primary-subtle, var(--color-border-hover));
-    transform: scale(1.08);
+    transform: scale(var(--card-image-hover-scale, 1.08));
   }
 
   .drawer-orgs__logo {
