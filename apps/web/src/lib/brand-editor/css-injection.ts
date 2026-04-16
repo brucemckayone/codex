@@ -26,6 +26,37 @@ const BRAND_PREFIX_KEYS = new Set([
   'body-weight',
   'shadow-scale',
   'shadow-color',
+  // Heading color — consumed by org-brand.css heading selector
+  'heading-color',
+  // Hero layout — logo scale consumed by hero CSS via var()
+  'hero-logo-scale',
+  // Hero text and color tokens (WP-02)
+  'hero-text',
+  'hero-text-muted',
+  'hero-title-color',
+  'hero-title-blend',
+  'hero-cta-bg',
+  'hero-cta-text',
+  'hero-glass-tint',
+  'hero-glass-text',
+  'hero-border-tint',
+  // Player chrome tokens (WP-03)
+  'player-text',
+  'player-text-secondary',
+  'player-text-muted',
+  'player-surface',
+  'player-surface-hover',
+  'player-surface-active',
+  'player-border',
+  'player-overlay',
+  'player-overlay-heavy',
+  // Glass morphism
+  'glass-tint',
+  // Card interaction (WP-05)
+  'card-hover-scale',
+  'card-image-hover-scale',
+  // Typography style
+  'text-transform-label',
   // Shader hero configuration — consumed by ShaderHero component via getComputedStyle
   'shader-preset',
   'shader-intensity',
@@ -266,6 +297,26 @@ const BRAND_PREFIX_KEYS = new Set([
   'shader-tunnel-radius',
   'shader-tunnel-brightness',
   'shader-tunnel-twist',
+  // Plasma
+  'shader-plasma-speed',
+  'shader-plasma-bands',
+  'shader-plasma-pressure',
+  'shader-plasma-turn',
+  'shader-plasma-diffusion',
+  // Flow
+  'shader-flow-curl',
+  'shader-flow-advection',
+  'shader-flow-smoothing',
+  'shader-flow-contrast',
+  'shader-flow-field-speed',
+  // Spore
+  'shader-spore-sensor-angle',
+  'shader-spore-sensor-offset',
+  'shader-spore-step-size',
+  'shader-spore-rotation',
+  'shader-spore-decay',
+  // Logo SDF
+  'shader-logo-url',
 ]);
 
 /** The CSS variable mappings from editor state to --brand-* properties. */
@@ -316,9 +367,41 @@ const DARK_VAR_PROPS = new Set([
 ]);
 
 /** Find the org layout element that holds the brand CSS variables. */
-function getOrgLayoutElement(): HTMLElement | null {
+export function getOrgLayoutElement(): HTMLElement | null {
   if (!browser) return null;
   return document.querySelector('.org-layout');
+}
+
+/**
+ * Temporarily preview a font on the live page.
+ * Bypasses the brand editor store (no isDirty, no sessionStorage write).
+ */
+export function previewFont(mode: 'body' | 'heading', family: string): void {
+  const el = getOrgLayoutElement();
+  if (!el) return;
+  const prop =
+    mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
+  el.style.setProperty(prop, `'${family}'`);
+  loadGoogleFont(family);
+}
+
+/**
+ * Revert a transient font preview to the store's current value.
+ * Call on dropdown close or mouse leave.
+ */
+export function revertFontPreview(
+  mode: 'body' | 'heading',
+  currentValue: string | null
+): void {
+  const el = getOrgLayoutElement();
+  if (!el) return;
+  const prop =
+    mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
+  if (currentValue) {
+    el.style.setProperty(prop, `'${currentValue}'`);
+  } else {
+    el.style.removeProperty(prop);
+  }
 }
 
 /**

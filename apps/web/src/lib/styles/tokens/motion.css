@@ -20,6 +20,10 @@
   --transition-transform: transform var(--duration-normal) var(--ease-out);
   --transition-opacity: opacity var(--duration-normal) var(--ease-default);
   --transition-shadow: box-shadow var(--duration-normal) var(--ease-default);
+
+  /* Extended Easings */
+  --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
 /* Reduced Motion Support */

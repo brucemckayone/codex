@@ -29,10 +29,15 @@
   --leading-relaxed: 1.75;
 
   /* Letter Spacing */
+  --tracking-tighter: -0.03em;
   --tracking-tight: -0.025em;
   --tracking-normal: 0;
   --tracking-wide: 0.025em;
   --tracking-wider: 0.05em;
+
+  /* Text Transform (brandable via org-brand.css) */
+  --text-transform-label: uppercase;
+  --text-transform-meta: capitalize;
 }
 
 /* Size-Adjusted Fallback Font (CLS Prevention) */

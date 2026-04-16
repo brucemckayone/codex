@@ -168,7 +168,7 @@
 		border-right: var(--border-width) var(--border-style) var(--color-border);
 
 		transition:
-			width var(--duration-slow) cubic-bezier(0.22, 1.2, 0.36, 1),
+			width var(--duration-slow) var(--ease-spring),
 			background-color var(--duration-normal) var(--ease-default),
 			box-shadow var(--duration-normal) var(--ease-default),
 			border-radius var(--duration-normal) var(--ease-default);

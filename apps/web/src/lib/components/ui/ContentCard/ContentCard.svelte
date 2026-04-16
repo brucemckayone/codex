@@ -65,6 +65,12 @@
     accessType?: 'purchased' | 'subscription' | 'membership' | null;
     /** Content-level access strategy from DB (forwarded to PriceBadge) */
     contentAccessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
+    /** Whether the user follows this org (contextualizes followers badge) */
+    isFollower?: boolean;
+    /** Resolved tier name for subscriber-gated content */
+    tierName?: string | null;
+    /** Content category (shown as overlay tag on thumbnail) */
+    category?: string | null;
   }
 
   const {
@@ -85,6 +91,9 @@
     included = false,
     accessType = null,
     contentAccessType = null,
+    isFollower = false,
+    tierName = null,
+    category = null,
     class: className,
     ...rest
   }: Props = $props();
@@ -123,7 +132,7 @@
   });
 
   const showCreator = $derived(variant === 'grid' || variant === 'featured');
-  const showDescription = $derived(variant === 'featured' && description);
+  const showDescription = $derived((variant === 'featured' || variant === 'grid') && !!description);
   const showMetadata = $derived(variant !== 'resume');
   const showPriceBadge = $derived(
     accessType == null &&
@@ -199,7 +208,7 @@
 
       <!-- Type icon (bottom-left) -->
       {#if variant !== 'compact' && variant !== 'resume'}
-        <span class="cc__type-icon" aria-label={contentTypeLabel}>
+        <span class="cc__type-icon" role="img" aria-label={contentTypeLabel}>
           {#if contentType === 'video'}
             <PlayIcon size={14} />
           {:else if contentType === 'audio'}
@@ -210,6 +219,11 @@
         </span>
       {/if}
 
+      <!-- Category tag (top-left) -->
+      {#if category && variant !== 'compact' && variant !== 'resume'}
+        <span class="cc__category-tag">{category}</span>
+      {/if}
+
       <!-- Price badge (top-right) -->
       {#if showPriceBadge}
         <PriceBadge
@@ -218,6 +232,8 @@
           {purchased}
           {included}
           accessType={contentAccessType}
+          {isFollower}
+          {tierName}
           class="cc__price-badge"
         />
       {/if}
@@ -322,21 +338,26 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    background: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-lg);
+    /* Card surface — slightly translucent for depth against blurred backgrounds.
+       backdrop-filter removed: parent .content-area already blurs the shader,
+       so per-card blur was redundant GPU work (6+ blur layers on landing page). */
+    background: color-mix(in srgb, var(--color-surface-card) 96%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 50%, transparent);
+    border-radius: var(--radius-xl);
+    /* Padding around the thumbnail — creates soft inset image */
+    padding: var(--space-2);
     overflow: hidden;
     transition:
-      transform 300ms cubic-bezier(0.2, 0, 0, 1),
-      box-shadow 300ms cubic-bezier(0.2, 0, 0, 1),
+      transform var(--duration-slow) var(--ease-smooth),
+      box-shadow var(--duration-slow) var(--ease-smooth),
       border-color var(--duration-fast) var(--ease-default);
   }
 
   .cc:hover,
   .cc:focus-within:has(:focus-visible) {
-    border-color: var(--color-border-hover);
+    border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
     box-shadow: var(--shadow-lg);
-    transform: translateY(calc(-1 * var(--space-0-5))) scale(1.02);
+    transform: translateY(calc(-1 * var(--space-0-5))) scale(var(--card-hover-scale, 1.02));
     z-index: 2;
   }
 
@@ -366,22 +387,25 @@
     background: var(--color-surface-secondary);
     overflow: hidden;
     flex-shrink: 0;
+    /* Rounded corners on the image — soft inset look */
+    border-radius: var(--radius-lg);
   }
 
   .cc__thumb--skeleton {
     background: var(--color-surface);
+    border-radius: var(--radius-lg);
   }
 
   .cc__image {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 500ms cubic-bezier(0.2, 0, 0, 1);
+    transition: transform var(--duration-slower) var(--ease-smooth);
   }
 
-  /* Inner image zoom on card hover (creates depth, Netflix-style) */
+  /* Inner image zoom on card hover */
   .cc:hover .cc__image {
-    transform: scale(1.05);
+    transform: scale(var(--card-image-hover-scale, 1.05));
   }
 
   .hidden {
@@ -404,11 +428,11 @@
     bottom: var(--space-2);
     right: var(--space-2);
     padding: var(--space-0-5) var(--space-2);
-    background: var(--color-overlay);
-    color: var(--color-text-inverse);
+    background: var(--color-neutral-900);
+    color: var(--color-neutral-50);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-full);
     line-height: var(--leading-tight);
   }
 
@@ -420,11 +444,27 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-0-5);
-    background: var(--color-overlay);
-    color: var(--color-text-inverse);
-    border-radius: var(--radius-sm);
+    width: var(--space-7);
+    height: var(--space-7);
+    background: var(--color-neutral-900);
+    color: var(--color-neutral-50);
+    border-radius: var(--radius-full);
     line-height: 0;
+  }
+
+  /* Category tag (top-left overlay) */
+  .cc__category-tag {
+    position: absolute;
+    top: var(--space-2);
+    left: var(--space-2);
+    z-index: 1;
+    padding: var(--space-0-5) var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-neutral-50);
+    background: var(--color-neutral-900);
+    border-radius: var(--radius-full);
+    line-height: var(--leading-tight);
   }
 
   /* PriceBadge position */
@@ -433,8 +473,6 @@
     top: var(--space-2);
     right: var(--space-2);
     z-index: 1;
-    backdrop-filter: blur(var(--blur-sm));
-    -webkit-backdrop-filter: blur(var(--blur-sm));
   }
 
   /* ═══════════════════════════════════════════
@@ -509,7 +547,8 @@
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
     line-height: var(--leading-normal);
-    display: -webkit-box;
+    /* Hidden by default in grid cards — container query reveals when card is wide enough */
+    display: none;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
@@ -540,8 +579,8 @@
     font-weight: var(--font-semibold);
     line-height: 1;
     border-radius: var(--radius-full);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: var(--text-transform-label, uppercase);
+    letter-spacing: var(--tracking-wider);
     white-space: nowrap;
   }
 
@@ -651,6 +690,7 @@
   .cc[data-variant='list'] .cc__thumb {
     width: 180px;
     min-width: 180px;
+    aspect-ratio: auto;
   }
 
   .cc[data-variant='list'] .cc__body {
@@ -673,10 +713,54 @@
 
   /* ═══════════════════════════════════════════
      VARIANT: FEATURED
+     Image-dominant card with glass overlay body.
+     The image fills the full card height; body
+     overlays the bottom with frosted glass.
      ═══════════════════════════════════════════ */
 
+  .cc[data-variant='featured'] {
+    /* Image fills card — body overlays at bottom */
+    display: grid;
+    grid-template-rows: 1fr;
+    min-height: 360px;
+  }
+
+  .cc[data-variant='featured'] .cc__link {
+    z-index: 3;
+  }
+
+  .cc[data-variant='featured'] .cc__thumb {
+    grid-row: 1 / -1;
+    grid-column: 1;
+    aspect-ratio: auto;
+    height: 100%;
+  }
+
+  .cc[data-variant='featured'] .cc__body {
+    grid-row: 1 / -1;
+    grid-column: 1;
+    align-self: end;
+    padding: var(--space-5);
+    gap: var(--space-2);
+    margin: var(--space-2);
+    /* Frosted glass overlay */
+    background: color-mix(in srgb, var(--color-surface-card) 75%, transparent);
+    backdrop-filter: blur(var(--blur-xl));
+    -webkit-backdrop-filter: blur(var(--blur-xl));
+    border-radius: var(--radius-lg);
+  }
+
   .cc[data-variant='featured'] .cc__title {
-    font-size: var(--text-lg);
+    font-size: var(--text-xl);
+    -webkit-line-clamp: 2;
+  }
+
+  .cc[data-variant='featured'] .cc__description {
+    display: -webkit-box;
+  }
+
+  .cc[data-variant='featured'] .cc__meta {
+    font-size: var(--text-sm);
   }
 
   /* ═══════════════════════════════════════════
@@ -685,8 +769,10 @@
 
   .cc[data-variant='compact'] {
     flex-direction: row;
+    padding: 0;
     border: none;
     background: transparent;
+    backdrop-filter: none;
     box-shadow: none;
     gap: var(--space-3);
   }
@@ -731,5 +817,32 @@
 
   .cc[data-variant='resume'] .cc__body {
     gap: var(--space-1);
+  }
+
+  /* ═══════════════════════════════════════════
+     CONTAINER QUERY RESPONSIVE
+     Card adapts to its grid cell size, not viewport.
+     Featured 2x2 cards automatically get larger
+     text and show description.
+     ═══════════════════════════════════════════ */
+
+  @container (min-width: 400px) {
+    .cc__title {
+      font-size: var(--text-lg);
+    }
+
+    .cc__description {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+  }
+
+  @container (min-width: 500px) {
+    .cc__body {
+      padding: var(--space-4);
+      gap: var(--space-2);
+    }
   }
 </style>

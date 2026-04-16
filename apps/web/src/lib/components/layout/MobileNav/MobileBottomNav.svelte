@@ -39,7 +39,7 @@
 			class:bottom-nav__tab--active={isActive(item.href)}
 			aria-current={isActive(item.href) ? 'page' : undefined}
 		>
-			<svelte:component this={IconComponent} size={22} />
+			<IconComponent size={22} />
 			<span class="bottom-nav__label">{item.label}</span>
 		</a>
 	{/each}
@@ -63,7 +63,7 @@
 			class:bottom-nav__tab--active={isActive(item.href)}
 			aria-current={isActive(item.href) ? 'page' : undefined}
 		>
-			<svelte:component this={IconComponent} size={22} />
+			<IconComponent size={22} />
 			<span class="bottom-nav__label">{item.label}</span>
 		</a>
 	{/each}
@@ -154,7 +154,7 @@
 		background: linear-gradient(
 			135deg,
 			var(--color-interactive) 0%,
-			color-mix(in oklch, var(--color-interactive) 80%, black) 100%
+			color-mix(in oklch, var(--color-interactive) 80%, var(--color-neutral-900)) 100%
 		);
 		display: flex;
 		align-items: center;
@@ -162,7 +162,7 @@
 		color: var(--color-text-inverse);
 		box-shadow: var(--shadow-lg),
 			0 0 0 var(--space-1) color-mix(in oklch, var(--color-interactive) 20%, transparent);
-		transition: transform var(--duration-normal) cubic-bezier(0.22, 1.2, 0.36, 1),
+		transition: transform var(--duration-normal) var(--ease-spring),
 			box-shadow var(--duration-normal) var(--ease-default);
 	}
 

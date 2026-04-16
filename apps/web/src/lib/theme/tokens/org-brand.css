@@ -120,6 +120,38 @@
   /* ─── SHADOW OVERRIDES (from brand editor fine-tune) ───────────────── */
   --shadow-strength: calc(1% * var(--brand-shadow-scale, 1));
   --shadow-color: var(--brand-shadow-color, 220 3% 15%);
+
+  /* ─── BLIND SPOT FIXES ─────────────────────────────────────────── */
+  /* These tokens were NOT re-derived from brand inputs. They stayed
+     hardcoded neutral-gray regardless of org branding. */
+  --color-text-tertiary: oklch(from var(--brand-color, var(--color-primary-500)) calc(l * 0.6 + 0.2) calc(c * 0.1) h);
+  --color-text-disabled: oklch(from var(--brand-bg, white) clamp(0.4, abs(0.45 - l) + 0.4, 0.7) calc(c * 0.05) h);
+  --color-border-hover: oklch(from var(--brand-bg, white) calc(l - 0.15) calc(c * 0.3) h);
+  --color-surface-variant: oklch(from var(--brand-bg, white) calc(l - 0.04) calc(c * 0.4) h);
+
+  /* ─── HEADING COLOR ─────────────────────────────────────────────── */
+  --color-heading: var(--brand-heading-color, var(--color-text-primary));
+
+  /* ─── PLAYER CHROME ─────────────────────────────────────────────── */
+  --color-player-text: var(--brand-player-text, white);
+  --color-player-text-secondary: var(--brand-player-text-secondary, hsl(0 0% 100% / var(--opacity-80, 0.8)));
+  --color-player-text-muted: var(--brand-player-text-muted, hsl(0 0% 100% / var(--opacity-60, 0.6)));
+  --color-player-surface: var(--brand-player-surface, hsl(0 0% 100% / var(--opacity-10, 0.1)));
+  --color-player-surface-hover: var(--brand-player-surface-hover, hsl(0 0% 100% / var(--opacity-20, 0.2)));
+  --color-player-surface-active: var(--brand-player-surface-active, hsl(0 0% 100% / var(--opacity-30, 0.3)));
+  --color-player-border: var(--brand-player-border, hsl(0 0% 100% / var(--opacity-20, 0.2)));
+  --color-player-overlay: var(--brand-player-overlay, hsl(0 0% 0% / var(--opacity-60, 0.6)));
+  --color-player-overlay-heavy: var(--brand-player-overlay-heavy, hsl(0 0% 0% / var(--opacity-80, 0.8)));
+
+  /* ─── GLASS TINT ────────────────────────────────────────────────── */
+  --color-glass-tint: var(--brand-glass-tint, white);
+
+  /* ─── TEXT TRANSFORM ────────────────────────────────────────────── */
+  --text-transform-label: var(--brand-text-transform-label, uppercase);
+
+  /* ─── CARD INTERACTION ──────────────────────────────────────────── */
+  --card-hover-scale: var(--brand-card-hover-scale, 1.02);
+  --card-image-hover-scale: var(--brand-card-image-hover-scale, 1.05);
 }
 
 /* Typography weight overrides — re-declare the weight tokens at org scope
@@ -128,6 +160,10 @@
 [data-org-brand] {
   --font-bold: var(--heading-weight, 700);
   --font-normal: var(--body-weight, 400);
+}
+
+[data-org-brand] :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-heading);
 }
 
 /* Apply baseline shadows to content cards so shadow controls have visible effect */
@@ -149,6 +185,7 @@
   --color-surface-secondary: oklch(from var(--brand-bg, white) calc(l - 0.03) calc(c * 0.5) h);
   --color-surface-tertiary: oklch(from var(--brand-bg, white) calc(l - 0.06) calc(c * 0.5) h);
   --color-surface-elevated: oklch(from var(--brand-bg, white) calc(l + 0.02) calc(c * 0.3) h);
+  --color-surface-card: oklch(from var(--brand-bg, white) calc(l + 0.05) calc(c * 0.2) h);
 
   --color-text: oklch(from var(--brand-bg, white) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --color-text-primary: oklch(from var(--brand-bg, white) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
@@ -158,6 +195,14 @@
   --color-border: oklch(from var(--brand-bg, white) calc(l - 0.12) calc(c * 0.3) h);
   --color-border-strong: oklch(from var(--brand-bg, white) calc(l - 0.18) calc(c * 0.3) h);
   --color-border-subtle: oklch(from var(--brand-bg, white) calc(l - 0.06) calc(c * 0.2) h);
+
+  /* ─── BLIND SPOT FIXES (BG-DERIVED) ────────────────────────────── */
+  --color-text-tertiary: oklch(from var(--brand-bg, white) clamp(0.35, abs(0.5 - l) + 0.35, 0.6) 0 0);
+  --color-text-disabled: oklch(from var(--brand-bg, white) clamp(0.4, abs(0.45 - l) + 0.4, 0.65) 0 0);
+  --color-text-inverse: oklch(from var(--brand-bg, white) clamp(0, (l - 0.5) * 1000, 1) 0 0);
+  --color-border-hover: oklch(from var(--brand-bg, white) calc(l - 0.15) calc(c * 0.3) h);
+  --color-surface-overlay: oklch(from var(--brand-bg, white) clamp(0, (0.5 - l) * 2, 0.15) 0 0 / 0.6);
+  --color-surface-variant: oklch(from var(--brand-bg, white) calc(l - 0.04) calc(c * 0.4) h);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -185,6 +230,12 @@
   /* Dark secondary/accent overrides */
   --color-brand-secondary: var(--brand-secondary-dark, var(--brand-secondary, var(--color-neutral-400)));
   --color-brand-accent: var(--brand-accent-dark, var(--brand-accent, var(--color-warning)));
+
+  /* ─── BLIND SPOT FIXES (DARK) ──────────────────────────────────── */
+  --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l * 0.5 + 0.3) calc(c * 0.1) h);
+  --color-text-disabled: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.3, abs(0.5 - l) + 0.3, 0.5) 0 0);
+  --color-border-hover: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.15) calc(c * 0.3) h);
+  --color-surface-variant: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.4) h);
 }
 
 .dark [data-org-bg],
@@ -194,7 +245,22 @@
   --color-surface-secondary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.04) calc(c * 0.5) h);
   --color-surface-tertiary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.08) calc(c * 0.5) h);
   --color-surface-elevated: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.3) h);
+  --color-surface-card: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.07) calc(c * 0.2) h);
+
+  --color-text: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --color-text-primary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --color-text-secondary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.25, abs(0.55 - l) + 0.25, 0.65) 0 0);
+  --color-text-muted: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.3, abs(0.5 - l) + 0.3, 0.55) 0 0);
+
   --color-border: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.12) calc(c * 0.3) h);
   --color-border-strong: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.18) calc(c * 0.3) h);
   --color-border-subtle: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.2) h);
+
+  /* ─── BLIND SPOT FIXES (DARK BG-DERIVED) ───────────────────────── */
+  --color-text-tertiary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.35, abs(0.5 - l) + 0.35, 0.6) 0 0);
+  --color-text-disabled: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.4, abs(0.45 - l) + 0.4, 0.65) 0 0);
+  --color-text-inverse: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0, (l - 0.5) * 1000, 1) 0 0);
+  --color-border-hover: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.15) calc(c * 0.3) h);
+  --color-surface-overlay: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0, (0.5 - l) * 2, 0.15) 0 0 / 0.75);
+  --color-surface-variant: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.4) h);
 }

@@ -176,6 +176,7 @@
   <div
     class="palette"
     role="dialog"
+    tabindex="-1"
     aria-label={m.command_palette_label()}
     onkeydown={handleKeydown}
   >
@@ -306,7 +307,7 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     color: var(--color-text-muted);
-    text-transform: uppercase;
+    text-transform: var(--text-transform-label, uppercase);
     letter-spacing: var(--tracking-wide);
   }
 

@@ -52,6 +52,10 @@
   --color-info-200: #bfdbfe;
   --color-info-600: #2563eb;
   --color-info-700: #1d4ed8;
+
+  /* Glass tint base colors (overridden per-org via org-brand.css) */
+  --color-glass-tint: white;
+  --color-glass-tint-dark: black;
 }
 
 /* Organization brand overrides are handled by org-brand.css

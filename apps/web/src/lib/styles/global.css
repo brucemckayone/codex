@@ -15,6 +15,7 @@
 @import './tokens/motion.css';
 @import './tokens/layout.css';
 @import './tokens/opacity.css';
+@import './tokens/player.css';
 
 /* Themes */
 @import './themes/light.css';

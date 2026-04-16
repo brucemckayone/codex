@@ -1,0 +1,16 @@
+/* player.css — Semantic tokens for video/audio player chrome.
+ * Inverse color scheme: light content on dark background.
+ * Overridable per-org via [data-org-brand] in org-brand.css. */
+
+:root {
+  --color-player-text: white;
+  --color-player-text-secondary: hsl(0 0% 100% / var(--opacity-80, 0.8));
+  --color-player-text-muted: hsl(0 0% 100% / var(--opacity-60, 0.6));
+  --color-player-surface: hsl(0 0% 100% / var(--opacity-10, 0.1));
+  --color-player-surface-hover: hsl(0 0% 100% / var(--opacity-20, 0.2));
+  --color-player-surface-active: hsl(0 0% 100% / var(--opacity-30, 0.3));
+  --color-player-border: hsl(0 0% 100% / var(--opacity-20, 0.2));
+  --color-player-overlay: hsl(0 0% 0% / var(--opacity-60, 0.6));
+  --color-player-overlay-heavy: hsl(0 0% 0% / var(--opacity-80, 0.8));
+  --color-player-gradient-bottom: hsl(0 0% 0% / var(--media-overlay-bottom-opacity, 0.7));
+}
