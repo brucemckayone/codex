@@ -81,14 +81,6 @@ export const load: LayoutServerLoad = async ({
             tiers: [] as SubscriptionTier[],
           });
 
-      // Stream follower status for contextual badge labels (non-blocking)
-      const isFollowing = locals.user
-        ? api.org
-            .isFollowing(typedOrg.id)
-            .then((r) => r.following)
-            .catch(() => false)
-        : Promise.resolve(false);
-
       return {
         org: typedOrg,
         enableSubscriptions: typedOrg.enableSubscriptions ?? true,
@@ -98,7 +90,6 @@ export const load: LayoutServerLoad = async ({
           userTierSortOrder: null as number | null,
           tiers: [] as SubscriptionTier[],
         })),
-        isFollowing,
       };
     }
   } catch (err) {
@@ -130,14 +121,6 @@ export const load: LayoutServerLoad = async ({
             tiers: [] as SubscriptionTier[],
           });
 
-      // Stream follower status for contextual badge labels (non-blocking)
-      const isFollowing = locals.user
-        ? api.org
-            .isFollowing(org.id)
-            .then((r) => r.following)
-            .catch(() => false)
-        : Promise.resolve(false);
-
       return {
         org: {
           id: org.id,
@@ -160,7 +143,6 @@ export const load: LayoutServerLoad = async ({
           userTierSortOrder: null as number | null,
           tiers: [] as SubscriptionTier[],
         })),
-        isFollowing,
       };
     }
   } catch (err) {

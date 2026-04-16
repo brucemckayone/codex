@@ -16,9 +16,11 @@
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
-  import { hydrateIfNeeded } from '$lib/collections';
+  import { getThumbnailUrl } from '$lib/utils/image';
+  import { hydrateIfNeeded, libraryCollection, useLiveQuery, type LibraryItem } from '$lib/collections';
+  import { followingStore } from '$lib/client/following.svelte';
   import { followOrganization, unfollowOrganization } from '$lib/remote/org.remote';
-  import type { SubscriptionTier } from '$lib/types';
+  import { useAccessContext } from '$lib/utils/access-context.svelte';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -51,8 +53,37 @@
   const user = $derived(data.user);
   const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
 
-  // Follow state
-  let isFollowing = $state(data.isFollowing ?? false);
+  // Continue watching — live query over localStorage-backed libraryCollection.
+  // On return visits: instant from localStorage. On first visit: empty until staleness detection loads data.
+  const libraryQuery = useLiveQuery(
+    (q) =>
+      q
+        .from({ item: libraryCollection })
+        .orderBy(({ item }) => item.progress?.updatedAt ?? '', 'desc'),
+    undefined,
+    { ssrData: [] as LibraryItem[] }
+  );
+
+  const continueWatching = $derived(
+    ((libraryQuery.data ?? []) as LibraryItem[])
+      .filter(
+        (item) =>
+          item.content?.organizationSlug === data.org.slug &&
+          item.progress &&
+          !item.progress.completed &&
+          item.progress.positionSeconds > 0
+      )
+      .slice(0, 6)
+  );
+
+  // Access context — subscription from server stream, following from client store
+  const access = useAccessContext(() => ({
+    subscriptionContext: data.subscriptionContext,
+    isFollowing: followingStore.get(data.org.id),
+  }));
+
+  // Follow toggle — reads from followingStore (localStorage-backed, reactive)
+  const isFollowing = $derived(followingStore.get(data.org.id));
   let followLoading = $state(false);
 
   async function handleFollowToggle() {
@@ -64,39 +95,16 @@
     try {
       if (isFollowing) {
         await unfollowOrganization(data.org.id);
-        isFollowing = false;
+        followingStore.set(data.org.id, false);
       } else {
         await followOrganization(data.org.id);
-        isFollowing = true;
+        followingStore.set(data.org.id, true);
       }
     } catch {
-      // Silently fail — optimistic UI can retry
+      // Silently fail — store retains previous state
     } finally {
       followLoading = false;
     }
-  }
-
-  // Subscription context for "Included" badges — streamed from layout
-  let resolvedSubCtx = $state<{ userTierSortOrder: number | null; tiers: SubscriptionTier[] } | null>(null);
-  $effect(() => {
-    if (data.subscriptionContext) {
-      // data.subscriptionContext may be a promise (streamed) or already resolved
-      Promise.resolve(data.subscriptionContext)
-        .then((ctx) => { resolvedSubCtx = ctx; })
-        .catch(() => { resolvedSubCtx = null; });
-    }
-  });
-
-  /**
-   * Determine if a content item is covered by the user's subscription.
-   * Returns true only for subscriber-gated content that the user's tier covers.
-   */
-  function isIncluded(item: { accessType: string; minimumTierId: string | null }): boolean {
-    if (!resolvedSubCtx?.userTierSortOrder) return false;
-    if (item.accessType !== 'subscribers') return false;
-    if (!item.minimumTierId) return true; // Any tier covers it
-    const minTier = resolvedSubCtx.tiers.find((t) => t.id === item.minimumTierId);
-    return minTier ? resolvedSubCtx.userTierSortOrder >= minTier.sortOrder : false;
   }
   let videoOriginX = $state(50);
   let videoOriginY = $state(38);
@@ -262,53 +270,36 @@
   </section>
 
   <div class="content-area">
-  <!-- Continue Watching -->
-  {#await data.continueWatching}
+  <!-- Continue Watching — client-side from localStorage libraryCollection -->
+  {#if continueWatching.length > 0}
     <section class="section">
       <div class="section__header">
-        <div class="skeleton" style="width: 220px; height: var(--text-2xl);"></div>
+        <h2 class="section__title">{m.org_continue_watching_title()}</h2>
+        <a href="/library" class="section__view-all">
+          {m.org_continue_watching_view_library()} &rarr;
+        </a>
       </div>
       <div class="content-grid">
-        {#each Array(3) as _}
-          <div class="skeleton-content-card">
-            <div class="skeleton skeleton-thumbnail"></div>
-            <div class="skeleton" style="width: 80%; height: var(--text-base);"></div>
-            <div class="skeleton" style="width: 50%; height: var(--text-sm);"></div>
-          </div>
+        {#each continueWatching as item (item.content.id)}
+          <ContentCard
+            id={item.content.id}
+            title={item.content.title}
+            thumbnail={item.content.thumbnailUrl}
+            description={item.content.description}
+            contentType={item.content.contentType === 'written' ? 'article' : item.content.contentType}
+            duration={item.content.durationSeconds ?? null}
+            href={buildContentUrl(page.url, { slug: item.content.slug, id: item.content.id })}
+            progress={item.progress ? {
+              positionSeconds: item.progress.positionSeconds,
+              durationSeconds: item.progress.durationSeconds,
+              completed: item.progress.completed,
+              percentComplete: item.progress.percentComplete,
+            } : null}
+          />
         {/each}
       </div>
     </section>
-  {:then continueWatching}
-    {#if continueWatching && continueWatching.length > 0}
-      <section class="section">
-        <div class="section__header">
-          <h2 class="section__title">{m.org_continue_watching_title()}</h2>
-          <a href="/library" class="section__view-all">
-            {m.org_continue_watching_view_library()} &rarr;
-          </a>
-        </div>
-        <div class="content-grid">
-          {#each continueWatching as item (item.content.id)}
-            <ContentCard
-              id={item.content.id}
-              title={item.content.title}
-              thumbnail={item.content.thumbnailUrl}
-              description={item.content.description}
-              contentType={item.content.contentType === 'written' ? 'article' : item.content.contentType}
-              duration={item.content.durationSeconds ?? null}
-              href={buildContentUrl(page.url, { slug: item.content.slug, id: item.content.id })}
-              progress={item.progress ? {
-                positionSeconds: item.progress.positionSeconds,
-                durationSeconds: item.progress.durationSeconds,
-                completed: item.progress.completed,
-                percentComplete: item.progress.percentComplete,
-              } : null}
-            />
-          {/each}
-        </div>
-      </section>
-    {/if}
-  {/await}
+  {/if}
 
   <!-- New Releases -->
   <section class="section">
@@ -321,9 +312,10 @@
       {/if}
     </div>
     {#if newReleases.length > 0}
-      <div class="content-grid">
-        {#each newReleases as item (item.id)}
+      <div class="content-grid content-grid--featured">
+        {#each newReleases as item, i (item.id)}
           <ContentCard
+            variant={i === 0 ? 'featured' : 'grid'}
             id={item.id}
             title={item.title}
             thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
@@ -340,7 +332,10 @@
               currency: 'GBP',
             } : null}
             contentAccessType={item.accessType}
-            included={isIncluded(item)}
+            included={access.isIncluded(item)}
+            isFollower={access.isFollowing}
+            tierName={access.getTierName(item)}
+            category={item.category ?? null}
           />
         {/each}
       </div>
@@ -382,7 +377,7 @@
           {#each creators.items as creator (creator.name)}
             <div class="creator-card">
               <Avatar class="creator-card__avatar">
-                <AvatarImage src={creator.avatarUrl} alt={creator.name} />
+                <AvatarImage src={creator.avatarUrl ? getThumbnailUrl(creator.avatarUrl, 'sm') : undefined} alt={creator.name} />
                 <AvatarFallback>{creator.name.charAt(0).toUpperCase()}</AvatarFallback>
               </Avatar>
               <span class="creator-card__name">{creator.name}</span>
@@ -431,25 +426,12 @@
      so the title above stays clear for mix-blend-mode: difference to
      composite against the shader canvas. */
   .hero::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    background: linear-gradient(
-      to top,
-      color-mix(in srgb, var(--color-brand-primary, black) 30%, black) 0%,
-      color-mix(in srgb, var(--color-brand-primary, black) 50%, black) 15%,
-      color-mix(in srgb, var(--color-brand-primary, black) 70%, black) 28%,
-      color-mix(in srgb, var(--color-brand-primary, black) 8%, transparent) 40%,
-      transparent 50%
-    );
-    pointer-events: none;
-    transition: opacity var(--duration-slow) var(--ease-out);
+    display: none;
   }
 
   .hero__content {
     position: relative;
-    z-index: 1;
+    z-index: 3;
     width: 100%;
     max-width: var(--container-max);
     margin: 0 auto;
@@ -464,12 +446,9 @@
   }
 
   .hero__logo {
-    width: var(--space-14);
-    height: var(--space-14);
-    border-radius: var(--radius-full);
-    object-fit: cover;
-    border: var(--border-width-thick) solid color-mix(in srgb, white 30%, transparent);
-    box-shadow: var(--shadow-lg);
+    --_logo-base: var(--space-14);
+    height: calc(var(--_logo-base) * var(--brand-hero-logo-scale, 1));
+    width: auto;
   }
 
   .hero__title {
@@ -573,7 +552,8 @@
 
   .hero__cta--primary {
     background: white;
-    color: var(--color-brand-primary);
+    /* Mix brand with black to guarantee WCAG AA contrast on white background */
+    color: color-mix(in oklch, var(--color-brand-primary) 75%, black);
     box-shadow: var(--shadow-md);
   }
 
@@ -728,33 +708,33 @@
 
   /* ══════════════════════════════════════════
      CONTENT AREA
+     Overlaps hero via negative margin. Gradient background
+     fades from transparent (blurred shader visible) to opaque.
+     Mask fades the element in over the overlap zone so there
+     is no hard edge at the hero/content boundary.
      ══════════════════════════════════════════ */
   .content-area {
     position: relative;
-    /* Blur handled by fixed overlay — only tint here */
-    background: color-mix(in srgb, var(--color-background) 80%, transparent);
-  }
-
-  /* Transition gradient — blends from the hero's brand-tinted dark base
-     into the content area's frosted background. 600px tall for a very
-     gradual fade with no hard edge. */
-  .content-area::before {
-    content: '';
-    position: absolute;
-    top: -600px;
-    left: 0;
-    right: 0;
-    height: 600px;
+    z-index: 1;
+    /* Pull up into hero for seamless overlap */
+    margin-top: -250px;
+    padding-top: 250px;
+    /* Blur the fixed shader behind for frosted-glass effect */
+    backdrop-filter: blur(var(--blur-2xl));
+    -webkit-backdrop-filter: blur(var(--blur-2xl));
+    /* Gradient: transparent at top (blurred shader shows through),
+       gradually becomes opaque for readable content below */
     background: linear-gradient(
       to bottom,
-      transparent 0%,
-      color-mix(in srgb, var(--color-brand-primary, black) 15%, transparent) 25%,
-      color-mix(in srgb, var(--color-brand-primary, black) 20%, transparent) 45%,
-      color-mix(in srgb, var(--color-background) 40%, transparent) 65%,
-      color-mix(in srgb, var(--color-background) 65%, transparent) 85%,
-      color-mix(in srgb, var(--color-background) 80%, transparent) 100%
+      color-mix(in srgb, var(--color-brand-primary) 12%, transparent) 0%,
+      color-mix(in srgb, var(--color-brand-primary) 8%, color-mix(in srgb, var(--color-background) 10%, transparent)) 300px,
+      color-mix(in srgb, var(--color-background) 20%, transparent) 600px,
+      color-mix(in srgb, var(--color-background) 35%, transparent) 900px,
+      color-mix(in srgb, var(--color-background) 50%, transparent) 1200px
     );
-    pointer-events: none;
+    /* Mask fades entire element in over the overlap zone */
+    mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
   }
 
   .section {
@@ -843,13 +823,27 @@
 
   .creator-card__count {
     font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+    color: var(--color-text-tertiary);
   }
 
   /* ══════════════════════════════════════════
      RESPONSIVE
      ══════════════════════════════════════════ */
   @media (--below-md) {
+    /* Replace expensive backdrop-filter blur with higher-opacity background
+       on mobile — avoids per-frame GPU blur during scroll over WebGL canvas */
+    .content-area {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background: linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--color-brand-primary) 30%, color-mix(in srgb, var(--color-background) 50%, transparent)) 0%,
+        color-mix(in srgb, var(--color-background) 70%, transparent) 300px,
+        color-mix(in srgb, var(--color-background) 85%, transparent) 600px,
+        var(--color-background) 900px
+      );
+    }
+
     .hero__content {
       padding: var(--space-6) var(--space-5) var(--space-8);
     }
@@ -881,8 +875,7 @@
     }
 
     .hero__logo {
-      width: var(--space-11);
-      height: var(--space-11);
+      --_logo-base: var(--space-11);
     }
 
     .hero__stats {
@@ -932,5 +925,162 @@
   @keyframes shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+  }
+
+  /* ══════════════════════════════════════════
+     HERO LAYOUT VARIANTS
+     Driven by data-hero-layout attribute on
+     .org-layout (set by the org layout component).
+     Layouts control POSITIONING only — element
+     visibility is controlled separately via
+     data-hero-hide-* attributes.
+     ══════════════════════════════════════════ */
+
+  /* ── Centered ── */
+  :global([data-hero-layout="centered"]) .hero {
+    justify-content: center;
+    align-items: center;
+  }
+
+  :global([data-hero-layout="centered"]) .hero__title {
+    text-align: center;
+  }
+
+  :global([data-hero-layout="centered"]) .hero__content {
+    align-items: center;
+    text-align: center;
+  }
+
+  :global([data-hero-layout="centered"]) .hero__description {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  :global([data-hero-layout="centered"]) .hero__pills {
+    justify-content: center;
+  }
+
+  :global([data-hero-layout="centered"]) .hero__actions {
+    justify-content: center;
+  }
+
+  :global([data-hero-layout="centered"]) .hero__stats {
+    justify-content: center;
+  }
+
+  /* ── Logo Hero ── positioning: centered, enlarged logo */
+  :global([data-hero-layout="logo-hero"]) .hero {
+    justify-content: center;
+    align-items: center;
+  }
+
+  :global([data-hero-layout="logo-hero"]) .hero__content {
+    align-items: center;
+    text-align: center;
+  }
+
+  :global([data-hero-layout="logo-hero"]) .hero__logo {
+    --_logo-base: var(--space-48);
+  }
+
+  :global([data-hero-layout="logo-hero"]) .hero__description {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  :global([data-hero-layout="logo-hero"]) .hero__pills {
+    justify-content: center;
+  }
+
+  :global([data-hero-layout="logo-hero"]) .hero__actions {
+    justify-content: center;
+  }
+
+  :global([data-hero-layout="logo-hero"]) .hero__stats {
+    justify-content: center;
+  }
+
+  /* ── Minimal ── positioning: title centered large, CTAs at bottom */
+  :global([data-hero-layout="minimal"]) .hero {
+    justify-content: center;
+    align-items: center;
+  }
+
+  :global([data-hero-layout="minimal"]) .hero__title {
+    text-align: center;
+    font-size: clamp(4rem, 10vw, 10rem);
+  }
+
+  :global([data-hero-layout="minimal"]) .hero__content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-width: var(--container-max);
+    margin: 0 auto;
+    padding: var(--space-8);
+    align-items: center;
+  }
+
+  :global([data-hero-layout="minimal"]) .hero__pills {
+    justify-content: center;
+  }
+
+  :global([data-hero-layout="minimal"]) .hero__actions {
+    justify-content: center;
+  }
+
+  :global([data-hero-layout="minimal"]) .hero__stats {
+    justify-content: center;
+  }
+
+  /* ── Layout mobile overrides ── */
+  @media (--below-md) {
+    :global([data-hero-layout="centered"]) .hero__actions,
+    :global([data-hero-layout="logo-hero"]) .hero__actions,
+    :global([data-hero-layout="minimal"]) .hero__actions {
+      flex-direction: column;
+      width: 100%;
+    }
+
+    :global([data-hero-layout="logo-hero"]) .hero__logo {
+      --_logo-base: var(--space-32);
+    }
+  }
+
+  /* ══════════════════════════════════════════
+     HERO ELEMENT VISIBILITY
+     Individual element toggles — independent of
+     layout. Driven by data-hero-hide-* attributes
+     on .org-layout.
+     ══════════════════════════════════════════ */
+
+  :global([data-hero-hide-stats]) .hero__stats {
+    display: none;
+  }
+
+  :global([data-hero-hide-pills]) .hero__pills {
+    display: none;
+  }
+
+  :global([data-hero-hide-description]) .hero__description {
+    display: none;
+  }
+
+  :global([data-hero-hide-logo]) .hero__logo-wrap {
+    display: none;
+  }
+
+  /* Title sr-only: visually hidden but stays in DOM for SEO/a11y */
+  :global([data-hero-hide-title]) .hero__title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
   }
 </style>

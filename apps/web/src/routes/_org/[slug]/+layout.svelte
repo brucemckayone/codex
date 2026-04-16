@@ -44,6 +44,7 @@
   import { invalidateCollection, loadSubscriptionFromServer } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
   import { followingStore } from '$lib/client/following.svelte';
+  import { getFollowingStatus } from '$lib/remote/org.remote';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -237,11 +238,14 @@
       }
     }, VERSION_POLL_INTERVAL_MS);
 
-    // Hydrate following store from layout's streamed server data.
-    // No-op if org is already in localStorage (return visit or optimistic update).
-    void Promise.resolve(data.isFollowing).then((following) => {
-      followingStore.hydrate(data.org.id, following);
-    });
+    // Fetch following status client-side and hydrate the store.
+    // On return visits, localStorage has the value (instant); hydrate() is a no-op.
+    // On first visit, background fetch populates the store reactively.
+    if (data.user) {
+      getFollowingStatus(data.org.id)
+        .then((following) => { followingStore.hydrate(data.org.id, following); })
+        .catch(() => { /* Graceful — store keeps localStorage value or defaults to false */ });
+    }
 
     // Hydrate subscription collection from server on first visit.
     // Populates localStorage with full subscription details so subsequent

@@ -1,62 +1,46 @@
 /**
  * Organization landing page - server load
  *
- * Fetches new releases, creators, and (for auth'd users) continue-watching
- * data in parallel. Each fetch is independently error-handled so one failure
+ * Fetches new releases, creators, and stats in parallel.
+ * Continue watching is client-side via libraryCollection (localStorage).
+ * Each fetch is independently error-handled so one failure
  * does not break the page.
  */
 
-import type { UserLibraryResponse } from '@codex/access';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators, getPublicStats } from '$lib/remote/org.remote';
-import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
-  platform,
-  cookies,
+  params: routeParams,
   locals,
   setHeaders,
   parent,
 }) => {
+  // Fire stats + creators BEFORE awaiting parent — they only need the slug
+  // which is already in URL params. This overlaps with the layout's org fetch.
+  const statsPromise = getPublicStats(routeParams.slug);
+
+  const creatorsPromise = getPublicCreators({
+    slug: routeParams.slug,
+    limit: 3,
+  });
+
+  // Now wait for layout (needed for orgId → content fetch)
   const { org } = await parent();
 
-  // Downgrade cache to PRIVATE when user is logged in (response includes personal library data)
+  // Cache headers — layout still streams subscriptionContext (user-specific)
   setHeaders(
     locals.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
   );
 
-  // Build parallel fetch promises
+  // Content needs orgId — must wait for parent()
   const contentPromise = getPublicContent({
     orgId: org.id,
     limit: 6,
     sort: 'newest',
   });
-
-  const creatorsPromise = getPublicCreators({
-    slug: org.slug,
-    limit: 3,
-  });
-
-  const statsPromise = getPublicStats(org.slug);
-
-  // Continue watching + follow status: only for authenticated users
-  let continueWatchingPromise: Promise<UserLibraryResponse> | null = null;
-  let isFollowingPromise: Promise<boolean> | null = null;
-  if (locals.user) {
-    const api = createServerApi(platform, cookies);
-    const params = new URLSearchParams();
-    params.set('organizationId', org.id);
-    params.set('filter', 'in_progress');
-    params.set('limit', '6');
-    params.set('sortBy', 'recent');
-    continueWatchingPromise = api.access.getUserLibrary(params);
-    isFollowingPromise = api.org
-      .isFollowing(org.id)
-      .then((r) => r.following)
-      .catch(() => false);
-  }
 
   // Await only what's critical for first paint (hero + new releases + stats)
   const [contentResult, statsResult] = await Promise.all([
@@ -75,10 +59,5 @@ export const load: PageServerLoad = async ({
         total: r?.pagination?.total ?? 0,
       }))
       .catch(() => ({ items: [], total: 0 })),
-    continueWatching:
-      continueWatchingPromise
-        ?.then((r) => r?.items ?? undefined)
-        ?.catch(() => undefined) ?? Promise.resolve(undefined),
-    isFollowing: isFollowingPromise ? await isFollowingPromise : false,
   };
 };

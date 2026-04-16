@@ -10,7 +10,6 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fly } from 'svelte/transition';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -18,19 +17,29 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
   import { contentCollection, hydrateCollection, hydrateIfNeeded, useLiveQuery } from '$lib/collections';
+  import { followingStore } from '$lib/client/following.svelte';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { SearchIcon, SearchXIcon, FileIcon, XIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
   import { BackToTop } from '$lib/components/ui/BackToTop';
   import { useViewMode } from '$lib/utils/view-mode.svelte';
+  import { useAccessContext } from '$lib/utils/access-context.svelte';
   import type { PageData } from './$types';
 
 
   const { data }: { data: PageData } = $props();
 
+  // Access context — subscription from server stream, following from client store
+  const access = useAccessContext(() => ({
+    subscriptionContext: data.subscriptionContext,
+    isFollowing: followingStore.get(data.org.id),
+  }));
+
   // Client-side filter state for instant type/category filtering
+  // svelte-ignore state_referenced_locally — user-controlled filters, reset explicitly on server data change
   let localType = $state(data.filters.type || '');
+  // svelte-ignore state_referenced_locally
   let localCategory = $state(data.filters.category || '');
 
   // Hydrate collection on mount; re-hydrate when server data changes (search/sort navigation)
@@ -40,8 +49,10 @@
     }
   });
 
-  // When server data changes (search/sort/page navigation), re-hydrate the collection
-  // and reset client-side filters since the server result set has changed
+  // Re-hydrate collection when server data changes (search/sort/page navigation).
+  // Plain variable (not $state) — only used for reference comparison inside the effect,
+  // never in the template. Using $state() would wrap the array in a Proxy, making
+  // reference equality checks always fail (raw !== proxy → infinite loop).
   let prevServerItems = data.content?.items;
   $effect(() => {
     const currentItems = data.content?.items;
@@ -58,6 +69,7 @@
   const contentQuery = useLiveQuery(
     (q) => q.from({ item: contentCollection }),
     undefined,
+    // svelte-ignore state_referenced_locally — ssrData is only used for initial SSR render
     { ssrData: data.content?.items ?? [] }
   );
 
@@ -290,7 +302,7 @@
   {#if hasActiveFilters}
     <div class="explore__chips" aria-label="Active filters">
       {#each activeFilterChips as chip (chip.key)}
-        <span class="explore__chip" transition:fly={{ x: -8, duration: 150 }}>
+        <span class="explore__chip">
           {chip.label}
           <button
             class="explore__chip-remove"
@@ -330,6 +342,10 @@
             currency: 'GBP',
           } : null}
           contentAccessType={item.accessType}
+          included={access.isIncluded(item as { accessType: string; minimumTierId: string | null })}
+          isFollower={access.isFollowing}
+          tierName={access.getTierName(item as { accessType: string; minimumTierId: string | null })}
+          category={item.category ?? null}
         />
       {/each}
     </div>
@@ -549,6 +565,14 @@
     border: var(--border-width) var(--border-style) var(--color-interactive);
     border-radius: var(--radius-full);
     white-space: nowrap;
+    animation: chip-in var(--duration-fast) var(--ease-default);
+  }
+
+  @keyframes chip-in {
+    from {
+      opacity: 0;
+      transform: translateX(calc(-1 * var(--space-2)));
+    }
   }
 
   .explore__chip-remove {

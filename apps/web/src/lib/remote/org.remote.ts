@@ -346,6 +346,17 @@ export const unfollowOrganization = command(
 );
 
 /**
+ * Check if the authenticated user is following an organization.
+ * Returns false when unauthenticated or on error.
+ */
+export const getFollowingStatus = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  const result = await api.org.isFollowing(orgId);
+  return result.following;
+});
+
+/**
  * Get follower count for an organization (public).
  */
 export const getFollowerCount = query(z.string().uuid(), async (orgId) => {
